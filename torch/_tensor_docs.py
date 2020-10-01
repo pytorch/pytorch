@@ -3008,13 +3008,8 @@ dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``.
 
 Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
-
+    When using the CUDA backend, this operation may induce nondeterministic behavior
+    that cannot be switched off.
 Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter and add,

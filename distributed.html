@@ -1,0 +1,2064 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Distributed communication package - torch.distributed &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/distributed.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Probability distributions - torch.distributions" href="distributions.html" />
+    <link rel="prev" title="torch.backends" href="backends.html" /> 
+
+  
+  <script src="_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/distributed.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="notes/amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backends.html">torch.backends</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+      <li>Distributed communication package - torch.distributed</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+            
+            <a href="_sources/distributed.rst.txt" rel="nofollow"><img src="_static/images/view-page-source-icon.svg"></a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <div class="section" id="distributed-communication-package-torch-distributed">
+<h1>Distributed communication package - torch.distributed<a class="headerlink" href="#distributed-communication-package-torch-distributed" title="Permalink to this headline">¶</a></h1>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Please refer to <a class="reference external" href="https://pytorch.org/tutorials/beginner/dist_overview.html">PyTorch Distributed Overview</a>
+for a brief introduction to all features related to distributed training.</p>
+</div>
+<span class="target" id="module-torch.distributed"></span><div class="section" id="backends">
+<h2>Backends<a class="headerlink" href="#backends" title="Permalink to this headline">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">torch.distributed</span></code> supports three built-in backends, each with
+different capabilities. The table below shows which functions are available
+for use with CPU / CUDA tensors.
+MPI supports CUDA only if the implementation used to build PyTorch supports it.</p>
+<table class="docutils colwidths-auto align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Backend</p></th>
+<th class="head" colspan="2"><p><code class="docutils literal notranslate"><span class="pre">gloo</span></code></p></th>
+<th class="head" colspan="2"><p><code class="docutils literal notranslate"><span class="pre">mpi</span></code></p></th>
+<th class="head" colspan="2"><p><code class="docutils literal notranslate"><span class="pre">nccl</span></code></p></th>
+</tr>
+<tr class="row-even"><th class="head"><p>Device</p></th>
+<th class="head"><p>CPU</p></th>
+<th class="head"><p>GPU</p></th>
+<th class="head"><p>CPU</p></th>
+<th class="head"><p>GPU</p></th>
+<th class="head"><p>CPU</p></th>
+<th class="head"><p>GPU</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-odd"><td><p>send</p></td>
+<td><p>✓</p></td>
+<td><p>✘</p></td>
+<td><p>✓</p></td>
+<td><p>?</p></td>
+<td><p>✘</p></td>
+<td><p>✘</p></td>
+</tr>
+<tr class="row-even"><td><p>recv</p></td>
+<td><p>✓</p></td>
+<td><p>✘</p></td>
+<td><p>✓</p></td>
+<td><p>?</p></td>
+<td><p>✘</p></td>
+<td><p>✘</p></td>
+</tr>
+<tr class="row-odd"><td><p>broadcast</p></td>
+<td><p>✓</p></td>
+<td><p>✓</p></td>
+<td><p>✓</p></td>
+<td><p>?</p></td>
+<td><p>✘</p></td>
+<td><p>✓</p></td>
+</tr>
+<tr class="row-even"><td><p>all_reduce</p></td>
+<td><p>✓</p></td>
+<td><p>✓</p></td>
+<td><p>✓</p></td>
+<td><p>?</p></td>
+<td><p>✘</p></td>
+<td><p>✓</p></td>
+</tr>
+<tr class="row-odd"><td><p>reduce</p></td>
+<td><p>✓</p></td>
+<td><p>✘</p></td>
+<td><p>✓</p></td>
+<td><p>?</p></td>
+<td><p>✘</p></td>
+<td><p>✓</p></td>
+</tr>
+<tr class="row-even"><td><p>all_gather</p></td>
+<td><p>✓</p></td>
+<td><p>✘</p></td>
+<td><p>✓</p></td>
+<td><p>?</p></td>
+<td><p>✘</p></td>
+<td><p>✓</p></td>
+</tr>
+<tr class="row-odd"><td><p>gather</p></td>
+<td><p>✓</p></td>
+<td><p>✘</p></td>
+<td><p>✓</p></td>
+<td><p>?</p></td>
+<td><p>✘</p></td>
+<td><p>✘</p></td>
+</tr>
+<tr class="row-even"><td><p>scatter</p></td>
+<td><p>✓</p></td>
+<td><p>✘</p></td>
+<td><p>✓</p></td>
+<td><p>?</p></td>
+<td><p>✘</p></td>
+<td><p>✘</p></td>
+</tr>
+<tr class="row-odd"><td><p>reduce_scatter</p></td>
+<td><p>✘</p></td>
+<td><p>✘</p></td>
+<td><p>✘</p></td>
+<td><p>✘</p></td>
+<td><p>✘</p></td>
+<td><p>✓</p></td>
+</tr>
+<tr class="row-even"><td><p>all_to_all</p></td>
+<td><p>✘</p></td>
+<td><p>✘</p></td>
+<td><p>✓</p></td>
+<td><p>?</p></td>
+<td><p>✘</p></td>
+<td><p>✘</p></td>
+</tr>
+<tr class="row-odd"><td><p>barrier</p></td>
+<td><p>✓</p></td>
+<td><p>✘</p></td>
+<td><p>✓</p></td>
+<td><p>?</p></td>
+<td><p>✘</p></td>
+<td><p>✓</p></td>
+</tr>
+</tbody>
+</table>
+<div class="section" id="backends-that-come-with-pytorch">
+<h3>Backends that come with PyTorch<a class="headerlink" href="#backends-that-come-with-pytorch" title="Permalink to this headline">¶</a></h3>
+<p>PyTorch distributed package supports Linux (stable), MacOS (stable), and Windows (prototype).
+By default for Linux, the Gloo and NCCL backends are built and included in PyTorch
+distributed (NCCL only when building with CUDA). MPI is an optional backend that can only be
+included if you build PyTorch from source. (e.g.building PyTorch on a host that has MPI
+installed.)</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>As of PyTorch v1.7, Windows support for the distributed package only covers collective
+communications with Gloo backend, <cite>FileStore</cite>, and <cite>DistributedDataParallel</cite>. Therefore,
+the <cite>init_method</cite> argument in <a class="reference internal" href="#torch.distributed.init_process_group" title="torch.distributed.init_process_group"><code class="xref py py-func docutils literal notranslate"><span class="pre">init_process_group()</span></code></a> must point to a file. This works
+for both local and shared file systems:</p>
+<ul class="simple">
+<li><p>Local file system, <code class="docutils literal notranslate"><span class="pre">init_method=&quot;file:///d:/tmp/some_file&quot;</span></code></p></li>
+<li><p>Shared file system, <code class="docutils literal notranslate"><span class="pre">init_method=&quot;file://////{machine_name}/{share_folder_name}/some_file&quot;</span></code></p></li>
+</ul>
+<p>Similarly, if you directly pass in a <cite>store</cite> argument, it must be a <code class="docutils literal notranslate"><span class="pre">FileStore</span></code> instance.</p>
+</div>
+</div>
+<div class="section" id="which-backend-to-use">
+<h3>Which backend to use?<a class="headerlink" href="#which-backend-to-use" title="Permalink to this headline">¶</a></h3>
+<p>In the past, we were often asked: “which backend should I use?”.</p>
+<ul class="simple">
+<li><p>Rule of thumb</p>
+<ul>
+<li><p>Use the NCCL backend for distributed <strong>GPU</strong> training</p></li>
+<li><p>Use the Gloo backend for distributed <strong>CPU</strong> training.</p></li>
+</ul>
+</li>
+<li><p>GPU hosts with InfiniBand interconnect</p>
+<ul>
+<li><p>Use NCCL, since it’s the only backend that currently supports
+InfiniBand and GPUDirect.</p></li>
+</ul>
+</li>
+<li><p>GPU hosts with Ethernet interconnect</p>
+<ul>
+<li><p>Use NCCL, since it currently provides the best distributed GPU
+training performance, especially for multiprocess single-node or
+multi-node distributed training. If you encounter any problem with
+NCCL, use Gloo as the fallback option. (Note that Gloo currently
+runs slower than NCCL for GPUs.)</p></li>
+</ul>
+</li>
+<li><p>CPU hosts with InfiniBand interconnect</p>
+<ul>
+<li><p>If your InfiniBand has enabled IP over IB, use Gloo, otherwise,
+use MPI instead. We are planning on adding InfiniBand support for
+Gloo in the upcoming releases.</p></li>
+</ul>
+</li>
+<li><p>CPU hosts with Ethernet interconnect</p>
+<ul>
+<li><p>Use Gloo, unless you have specific reasons to use MPI.</p></li>
+</ul>
+</li>
+</ul>
+</div>
+<div class="section" id="common-environment-variables">
+<h3>Common environment variables<a class="headerlink" href="#common-environment-variables" title="Permalink to this headline">¶</a></h3>
+<div class="section" id="choosing-the-network-interface-to-use">
+<h4>Choosing the network interface to use<a class="headerlink" href="#choosing-the-network-interface-to-use" title="Permalink to this headline">¶</a></h4>
+<p>By default, both the NCCL and Gloo backends will try to find the right network interface to use.
+If the automatically detected interface is not correct, you can override it using the following
+environment variables (applicable to the respective backend):</p>
+<ul class="simple">
+<li><p><strong>NCCL_SOCKET_IFNAME</strong>, for example <code class="docutils literal notranslate"><span class="pre">export</span> <span class="pre">NCCL_SOCKET_IFNAME=eth0</span></code></p></li>
+<li><p><strong>GLOO_SOCKET_IFNAME</strong>, for example <code class="docutils literal notranslate"><span class="pre">export</span> <span class="pre">GLOO_SOCKET_IFNAME=eth0</span></code></p></li>
+</ul>
+<p>If you’re using the Gloo backend, you can specify multiple interfaces by separating
+them by a comma, like this: <code class="docutils literal notranslate"><span class="pre">export</span> <span class="pre">GLOO_SOCKET_IFNAME=eth0,eth1,eth2,eth3</span></code>.
+The backend will dispatch operations in a round-robin fashion across these interfaces.
+It is imperative that all processes specify the same number of interfaces in this variable.</p>
+</div>
+<div class="section" id="other-nccl-environment-variables">
+<h4>Other NCCL environment variables<a class="headerlink" href="#other-nccl-environment-variables" title="Permalink to this headline">¶</a></h4>
+<p>NCCL has also provided a number of environment variables for fine-tuning purposes.</p>
+<p>Commonly used ones include the following for debugging purposes:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">export</span> <span class="pre">NCCL_DEBUG=INFO</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">export</span> <span class="pre">NCCL_DEBUG_SUBSYS=ALL</span></code></p></li>
+</ul>
+<p>For the full list of NCCL environment variables, please refer to
+<a class="reference external" href="https://docs.nvidia.com/deeplearning/sdk/nccl-developer-guide/docs/env.html">NVIDIA NCCL’s official documentation</a></p>
+</div>
+</div>
+</div>
+<div class="section" id="basics">
+<span id="distributed-basics"></span><h2>Basics<a class="headerlink" href="#basics" title="Permalink to this headline">¶</a></h2>
+<p>The <cite>torch.distributed</cite> package provides PyTorch support and communication primitives
+for multiprocess parallelism across several computation nodes running on one or more
+machines. The class <a class="reference internal" href="generated/torch.nn.parallel.DistributedDataParallel.html#torch.nn.parallel.DistributedDataParallel" title="torch.nn.parallel.DistributedDataParallel"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.nn.parallel.DistributedDataParallel()</span></code></a> builds on this
+functionality to provide synchronous distributed training as a wrapper around any
+PyTorch model. This differs from the kinds of parallelism provided by
+<a class="reference internal" href="multiprocessing.html"><span class="doc">Multiprocessing package - torch.multiprocessing</span></a> and <a class="reference internal" href="generated/torch.nn.DataParallel.html#torch.nn.DataParallel" title="torch.nn.DataParallel"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.nn.DataParallel()</span></code></a> in that it supports
+multiple network-connected machines and in that the user must explicitly launch a separate
+copy of the main training script for each process.</p>
+<p>In the single-machine synchronous case, <cite>torch.distributed</cite> or the
+<a class="reference internal" href="generated/torch.nn.parallel.DistributedDataParallel.html#torch.nn.parallel.DistributedDataParallel" title="torch.nn.parallel.DistributedDataParallel"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.nn.parallel.DistributedDataParallel()</span></code></a> wrapper may still have advantages over other
+approaches to data-parallelism, including <a class="reference internal" href="generated/torch.nn.DataParallel.html#torch.nn.DataParallel" title="torch.nn.DataParallel"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.nn.DataParallel()</span></code></a>:</p>
+<ul class="simple">
+<li><p>Each process maintains its own optimizer and performs a complete optimization step with each
+iteration. While this may appear redundant, since the gradients have already been gathered
+together and averaged across processes and are thus the same for every process, this means
+that no parameter broadcast step is needed, reducing time spent transferring tensors between
+nodes.</p></li>
+<li><p>Each process contains an independent Python interpreter, eliminating the extra interpreter
+overhead and “GIL-thrashing” that comes from driving several execution threads, model
+replicas, or GPUs from a single Python process. This is especially important for models that
+make heavy use of the Python runtime, including models with recurrent layers or many small
+components.</p></li>
+</ul>
+</div>
+<div class="section" id="initialization">
+<h2>Initialization<a class="headerlink" href="#initialization" title="Permalink to this headline">¶</a></h2>
+<p>The package needs to be initialized using the <a class="reference internal" href="#torch.distributed.init_process_group" title="torch.distributed.init_process_group"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.distributed.init_process_group()</span></code></a>
+function before calling any other methods. This blocks until all processes have
+joined.</p>
+<dl class="function">
+<dt id="torch.distributed.is_available">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">is_available</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed.html#is_available"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.is_available" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns <code class="docutils literal notranslate"><span class="pre">True</span></code> if the distributed package is available. Otherwise,
+<code class="docutils literal notranslate"><span class="pre">torch.distributed</span></code> does not expose any other APIs. Currently,
+<code class="docutils literal notranslate"><span class="pre">torch.distributed</span></code> is available on Linux, MacOS and Windows. Set
+<code class="docutils literal notranslate"><span class="pre">USE_DISTRIBUTED=1</span></code> to enable it when building PyTorch from source.
+Currently, the default value is <code class="docutils literal notranslate"><span class="pre">USE_DISTRIBUTED=1</span></code> for Linux and Windows,
+<code class="docutils literal notranslate"><span class="pre">USE_DISTRIBUTED=0</span></code> for MacOS.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.init_process_group">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">init_process_group</code><span class="sig-paren">(</span><em class="sig-param">backend</em>, <em class="sig-param">init_method=None</em>, <em class="sig-param">timeout=datetime.timedelta(seconds=1800)</em>, <em class="sig-param">world_size=-1</em>, <em class="sig-param">rank=-1</em>, <em class="sig-param">store=None</em>, <em class="sig-param">group_name=''</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#init_process_group"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.init_process_group" title="Permalink to this definition">¶</a></dt>
+<dd><p>Initializes the default distributed process group, and this will also
+initialize the distributed package.</p>
+<dl class="simple">
+<dt>There are 2 main ways to initialize a process group:</dt><dd><ol class="arabic simple">
+<li><p>Specify <code class="docutils literal notranslate"><span class="pre">store</span></code>, <code class="docutils literal notranslate"><span class="pre">rank</span></code>, and <code class="docutils literal notranslate"><span class="pre">world_size</span></code> explicitly.</p></li>
+<li><p>Specify <code class="docutils literal notranslate"><span class="pre">init_method</span></code> (a URL string) which indicates where/how
+to discover peers. Optionally specify <code class="docutils literal notranslate"><span class="pre">rank</span></code> and <code class="docutils literal notranslate"><span class="pre">world_size</span></code>,
+or encode all required parameters in the URL and omit them.</p></li>
+</ol>
+</dd>
+</dl>
+<p>If neither is specified, <code class="docutils literal notranslate"><span class="pre">init_method</span></code> is assumed to be “env://”.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>backend</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.8)"><em>str</em></a><em> or </em><a class="reference internal" href="#torch.distributed.Backend" title="torch.distributed.Backend"><em>Backend</em></a>) – The backend to use. Depending on
+build-time configurations, valid values include <code class="docutils literal notranslate"><span class="pre">mpi</span></code>, <code class="docutils literal notranslate"><span class="pre">gloo</span></code>,
+and <code class="docutils literal notranslate"><span class="pre">nccl</span></code>. This field should be given as a lowercase string
+(e.g., <code class="docutils literal notranslate"><span class="pre">&quot;gloo&quot;</span></code>), which can also be accessed via
+<a class="reference internal" href="#torch.distributed.Backend" title="torch.distributed.Backend"><code class="xref py py-class docutils literal notranslate"><span class="pre">Backend</span></code></a> attributes (e.g., <code class="docutils literal notranslate"><span class="pre">Backend.GLOO</span></code>). If using
+multiple processes per machine with <code class="docutils literal notranslate"><span class="pre">nccl</span></code> backend, each process
+must have exclusive access to every GPU it uses, as sharing GPUs
+between processes can result in deadlocks.</p></li>
+<li><p><strong>init_method</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.8)"><em>str</em></a><em>, </em><em>optional</em>) – URL specifying how to initialize the
+process group. Default is “env://” if no
+<code class="docutils literal notranslate"><span class="pre">init_method</span></code> or <code class="docutils literal notranslate"><span class="pre">store</span></code> is specified.
+Mutually exclusive with <code class="docutils literal notranslate"><span class="pre">store</span></code>.</p></li>
+<li><p><strong>world_size</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em>, </em><em>optional</em>) – Number of processes participating in
+the job. Required if <code class="docutils literal notranslate"><span class="pre">store</span></code> is specified.</p></li>
+<li><p><strong>rank</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em>, </em><em>optional</em>) – Rank of the current process.
+Required if <code class="docutils literal notranslate"><span class="pre">store</span></code> is specified.</p></li>
+<li><p><strong>store</strong> (<em>Store</em><em>, </em><em>optional</em>) – Key/value store accessible to all workers, used
+to exchange connection/address information.
+Mutually exclusive with <code class="docutils literal notranslate"><span class="pre">init_method</span></code>.</p></li>
+<li><p><strong>timeout</strong> (<em>timedelta</em><em>, </em><em>optional</em>) – Timeout for operations executed against
+the process group. Default value equals 30 minutes.
+This is applicable for the <code class="docutils literal notranslate"><span class="pre">gloo</span></code> backend. For <code class="docutils literal notranslate"><span class="pre">nccl</span></code>, this is
+applicable only if the environment variable <code class="docutils literal notranslate"><span class="pre">NCCL_BLOCKING_WAIT</span></code>
+is set to 1.</p></li>
+<li><p><strong>group_name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.8)"><em>str</em></a><em>, </em><em>optional</em><em>, </em><em>deprecated</em>) – Group name.</p></li>
+</ul>
+</dd>
+</dl>
+<p>To enable <code class="docutils literal notranslate"><span class="pre">backend</span> <span class="pre">==</span> <span class="pre">Backend.MPI</span></code>, PyTorch needs to be built from source
+on a system that supports MPI.</p>
+</dd></dl>
+
+<dl class="class">
+<dt id="torch.distributed.Backend">
+<em class="property">class </em><code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">Backend</code><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#Backend"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.Backend" title="Permalink to this definition">¶</a></dt>
+<dd><p>An enum-like class of available backends: GLOO, NCCL, MPI, and other registered
+backends.</p>
+<p>The values of this class are lowercase strings, e.g., <code class="docutils literal notranslate"><span class="pre">&quot;gloo&quot;</span></code>. They can
+be accessed as attributes, e.g., <code class="docutils literal notranslate"><span class="pre">Backend.NCCL</span></code>.</p>
+<p>This class can be directly called to parse the string, e.g.,
+<code class="docutils literal notranslate"><span class="pre">Backend(backend_str)</span></code> will check if <code class="docutils literal notranslate"><span class="pre">backend_str</span></code> is valid, and
+return the parsed lowercase string if so. It also accepts uppercase strings,
+e.g., <code class="docutils literal notranslate"><span class="pre">Backend(&quot;GLOO&quot;)</span></code> returns <code class="docutils literal notranslate"><span class="pre">&quot;gloo&quot;</span></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The entry <code class="docutils literal notranslate"><span class="pre">Backend.UNDEFINED</span></code> is present but only used as
+initial value of some fields. Users should neither use it directly
+nor assume its existence.</p>
+</div>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.get_backend">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">get_backend</code><span class="sig-paren">(</span><em class="sig-param">group=&lt;object object&gt;</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#get_backend"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.get_backend" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the backend of the given process group.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on. The
+default is the general main process group. If another specific group
+is specified, the calling process must be part of <code class="xref py py-attr docutils literal notranslate"><span class="pre">group</span></code>.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>The backend of the given process group as a lower case string.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.get_rank">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">get_rank</code><span class="sig-paren">(</span><em class="sig-param">group=&lt;object object&gt;</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#get_rank"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.get_rank" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the rank of current process group</p>
+<p>Rank is a unique identifier assigned to each process within a distributed
+process group. They are always consecutive integers ranging from 0 to
+<code class="docutils literal notranslate"><span class="pre">world_size</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>The rank of the process group
+-1, if not part of the group</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.get_world_size">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">get_world_size</code><span class="sig-paren">(</span><em class="sig-param">group=&lt;object object&gt;</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#get_world_size"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.get_world_size" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the number of processes in the current process group</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>The world size of the process group
+-1, if not part of the group</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.is_initialized">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">is_initialized</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#is_initialized"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.is_initialized" title="Permalink to this definition">¶</a></dt>
+<dd><p>Checking if the default process group has been initialized</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.is_mpi_available">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">is_mpi_available</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#is_mpi_available"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.is_mpi_available" title="Permalink to this definition">¶</a></dt>
+<dd><p>Checks if the MPI backend is available.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.is_nccl_available">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">is_nccl_available</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#is_nccl_available"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.is_nccl_available" title="Permalink to this definition">¶</a></dt>
+<dd><p>Checks if the NCCL backend is available.</p>
+</dd></dl>
+
+<hr class="docutils" />
+<p>Currently three initialization methods are supported:</p>
+<div class="section" id="tcp-initialization">
+<h3>TCP initialization<a class="headerlink" href="#tcp-initialization" title="Permalink to this headline">¶</a></h3>
+<p>There are two ways to initialize using TCP, both requiring a network address
+reachable from all processes and a desired <code class="docutils literal notranslate"><span class="pre">world_size</span></code>. The first way
+requires specifying an address that belongs to the rank 0 process. This
+initialization method requires that all processes have manually specified ranks.</p>
+<p>Note that multicast address is not supported anymore in the latest distributed
+package. <code class="docutils literal notranslate"><span class="pre">group_name</span></code> is deprecated as well.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">torch.distributed</span> <span class="k">as</span> <span class="nn">dist</span>
+
+<span class="c1"># Use address of one of the machines</span>
+<span class="n">dist</span><span class="o">.</span><span class="n">init_process_group</span><span class="p">(</span><span class="n">backend</span><span class="p">,</span> <span class="n">init_method</span><span class="o">=</span><span class="s1">&#39;tcp://10.1.1.20:23456&#39;</span><span class="p">,</span>
+                        <span class="n">rank</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">rank</span><span class="p">,</span> <span class="n">world_size</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="shared-file-system-initialization">
+<h3>Shared file-system initialization<a class="headerlink" href="#shared-file-system-initialization" title="Permalink to this headline">¶</a></h3>
+<p>Another initialization method makes use of a file system that is shared and
+visible from all machines in a group, along with a desired <code class="docutils literal notranslate"><span class="pre">world_size</span></code>. The URL should start
+with <code class="docutils literal notranslate"><span class="pre">file://</span></code> and contain a path to a non-existent file (in an existing
+directory) on a shared file system. File-system initialization will automatically
+create that file if it doesn’t exist, but will not delete the file. Therefore, it
+is your responsibility to make sure that the file is cleaned up before the next
+<a class="reference internal" href="#torch.distributed.init_process_group" title="torch.distributed.init_process_group"><code class="xref py py-func docutils literal notranslate"><span class="pre">init_process_group()</span></code></a> call on the same file path/name.</p>
+<p>Note that automatic rank assignment is not supported anymore in the latest
+distributed package and <code class="docutils literal notranslate"><span class="pre">group_name</span></code> is deprecated as well.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>This method assumes that the file system supports locking using <code class="docutils literal notranslate"><span class="pre">fcntl</span></code> - most
+local systems and NFS support it.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>This method will always create the file and try its best to clean up and remove
+the file at the end of the program. In other words, each initialization with
+the file init method will need a brand new empty file in order for the initialization
+to succeed. If the same file used by the previous initialization (which happens not
+to get cleaned up) is used again, this is unexpected behavior and can often cause
+deadlocks and failures. Therefore, even though this method will try its best to clean up
+the file, if the auto-delete happens to be unsuccessful, it is your responsibility
+to ensure that the file is removed at the end of the training to prevent the same
+file to be reused again during the next time. This is especially important
+if you plan to call <a class="reference internal" href="#torch.distributed.init_process_group" title="torch.distributed.init_process_group"><code class="xref py py-func docutils literal notranslate"><span class="pre">init_process_group()</span></code></a> multiple times on the same file name.
+In other words, if the file is not removed/cleaned up and you call
+<a class="reference internal" href="#torch.distributed.init_process_group" title="torch.distributed.init_process_group"><code class="xref py py-func docutils literal notranslate"><span class="pre">init_process_group()</span></code></a> again on that file, failures are expected.
+The rule of thumb here is that, make sure that the file is non-existent or
+empty every time <a class="reference internal" href="#torch.distributed.init_process_group" title="torch.distributed.init_process_group"><code class="xref py py-func docutils literal notranslate"><span class="pre">init_process_group()</span></code></a> is called.</p>
+</div>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">torch.distributed</span> <span class="k">as</span> <span class="nn">dist</span>
+
+<span class="c1"># rank should always be specified</span>
+<span class="n">dist</span><span class="o">.</span><span class="n">init_process_group</span><span class="p">(</span><span class="n">backend</span><span class="p">,</span> <span class="n">init_method</span><span class="o">=</span><span class="s1">&#39;file:///mnt/nfs/sharedfile&#39;</span><span class="p">,</span>
+                        <span class="n">world_size</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">rank</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">rank</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="environment-variable-initialization">
+<h3>Environment variable initialization<a class="headerlink" href="#environment-variable-initialization" title="Permalink to this headline">¶</a></h3>
+<p>This method will read the configuration from environment variables, allowing
+one to fully customize how the information is obtained. The variables to be set
+are:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">MASTER_PORT</span></code> - required; has to be a free port on machine with rank 0</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">MASTER_ADDR</span></code> - required (except for rank 0); address of rank 0 node</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">WORLD_SIZE</span></code> - required; can be set either here, or in a call to init function</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">RANK</span></code> - required; can be set either here, or in a call to init function</p></li>
+</ul>
+<p>The machine with rank 0 will be used to set up all connections.</p>
+<p>This is the default method, meaning that <code class="docutils literal notranslate"><span class="pre">init_method</span></code> does not have to be specified (or
+can be <code class="docutils literal notranslate"><span class="pre">env://</span></code>).</p>
+</div>
+</div>
+<div class="section" id="groups">
+<h2>Groups<a class="headerlink" href="#groups" title="Permalink to this headline">¶</a></h2>
+<p>By default collectives operate on the default group (also called the world) and
+require all processes to enter the distributed function call. However, some workloads can benefit
+from more fine-grained communication. This is where distributed groups come
+into play. <a class="reference internal" href="#torch.distributed.new_group" title="torch.distributed.new_group"><code class="xref py py-func docutils literal notranslate"><span class="pre">new_group()</span></code></a> function can be
+used to create new groups, with arbitrary subsets of all processes. It returns
+an opaque group handle that can be given as a <code class="docutils literal notranslate"><span class="pre">group</span></code> argument to all collectives
+(collectives are distributed functions to exchange information in certain well-known programming patterns).</p>
+<dl class="function">
+<dt id="torch.distributed.new_group">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">new_group</code><span class="sig-paren">(</span><em class="sig-param">ranks=None</em>, <em class="sig-param">timeout=datetime.timedelta(seconds=1800)</em>, <em class="sig-param">backend=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#new_group"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.new_group" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new distributed group.</p>
+<p>This function requires that all processes in the main group (i.e. all
+processes that are part of the distributed job) enter this function, even
+if they are not going to be members of the group. Additionally, groups
+should be created in the same order in all processes.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ranks</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><em>list</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em>]</em>) – List of ranks of group members. If <code class="docutils literal notranslate"><span class="pre">None</span></code>, will be
+set to all ranks. Default is <code class="docutils literal notranslate"><span class="pre">None</span></code>.</p></li>
+<li><p><strong>timeout</strong> (<em>timedelta</em><em>, </em><em>optional</em>) – Timeout for operations executed against
+the process group. Default value equals 30 minutes.
+This is only applicable for the <code class="docutils literal notranslate"><span class="pre">gloo</span></code> backend.</p></li>
+<li><p><strong>backend</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.8)"><em>str</em></a><em> or </em><a class="reference internal" href="#torch.distributed.Backend" title="torch.distributed.Backend"><em>Backend</em></a><em>, </em><em>optional</em>) – The backend to use. Depending on
+build-time configurations, valid values are <code class="docutils literal notranslate"><span class="pre">gloo</span></code> and <code class="docutils literal notranslate"><span class="pre">nccl</span></code>.
+By default uses the same backend as the global group. This field
+should be given as a lowercase string (e.g., <code class="docutils literal notranslate"><span class="pre">&quot;gloo&quot;</span></code>), which can
+also be accessed via <a class="reference internal" href="#torch.distributed.Backend" title="torch.distributed.Backend"><code class="xref py py-class docutils literal notranslate"><span class="pre">Backend</span></code></a> attributes (e.g.,
+<code class="docutils literal notranslate"><span class="pre">Backend.GLOO</span></code>).</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>A handle of distributed group that can be given to collective calls.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="point-to-point-communication">
+<h2>Point-to-point communication<a class="headerlink" href="#point-to-point-communication" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="torch.distributed.send">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">send</code><span class="sig-paren">(</span><em class="sig-param">tensor</em>, <em class="sig-param">dst</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">tag=0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#send"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.send" title="Permalink to this definition">¶</a></dt>
+<dd><p>Sends a tensor synchronously.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tensor</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a>) – Tensor to send.</p></li>
+<li><p><strong>dst</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a>) – Destination rank.</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+<li><p><strong>tag</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em>, </em><em>optional</em>) – Tag to match send with remote recv</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.recv">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">recv</code><span class="sig-paren">(</span><em class="sig-param">tensor</em>, <em class="sig-param">src=None</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">tag=0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#recv"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.recv" title="Permalink to this definition">¶</a></dt>
+<dd><p>Receives a tensor synchronously.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tensor</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a>) – Tensor to fill with received data.</p></li>
+<li><p><strong>src</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em>, </em><em>optional</em>) – Source rank. Will receive from any
+process if unspecified.</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+<li><p><strong>tag</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em>, </em><em>optional</em>) – Tag to match recv with remote send</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Sender rank
+-1, if not part of the group</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p><a class="reference internal" href="#torch.distributed.isend" title="torch.distributed.isend"><code class="xref py py-func docutils literal notranslate"><span class="pre">isend()</span></code></a> and <a class="reference internal" href="#torch.distributed.irecv" title="torch.distributed.irecv"><code class="xref py py-func docutils literal notranslate"><span class="pre">irecv()</span></code></a>
+return distributed request objects when used. In general, the type of this object is unspecified
+as they should never be created manually, but they are guaranteed to support two methods:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">is_completed()</span></code> - returns True if the operation has finished</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">wait()</span></code> - will block the process until the operation is finished.
+<code class="docutils literal notranslate"><span class="pre">is_completed()</span></code> is guaranteed to return True once it returns.</p></li>
+</ul>
+<dl class="function">
+<dt id="torch.distributed.isend">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">isend</code><span class="sig-paren">(</span><em class="sig-param">tensor</em>, <em class="sig-param">dst</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">tag=0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#isend"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.isend" title="Permalink to this definition">¶</a></dt>
+<dd><p>Sends a tensor asynchronously.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tensor</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a>) – Tensor to send.</p></li>
+<li><p><strong>dst</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a>) – Destination rank.</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+<li><p><strong>tag</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em>, </em><em>optional</em>) – Tag to match send with remote recv</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>A distributed request object.
+None, if not part of the group</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.irecv">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">irecv</code><span class="sig-paren">(</span><em class="sig-param">tensor</em>, <em class="sig-param">src</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">tag=0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#irecv"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.irecv" title="Permalink to this definition">¶</a></dt>
+<dd><p>Receives a tensor asynchronously.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tensor</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a>) – Tensor to fill with received data.</p></li>
+<li><p><strong>src</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a>) – Source rank.</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+<li><p><strong>tag</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em>, </em><em>optional</em>) – Tag to match recv with remote send</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>A distributed request object.
+None, if not part of the group</p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="synchronous-and-asynchronous-collective-operations">
+<h2>Synchronous and asynchronous collective operations<a class="headerlink" href="#synchronous-and-asynchronous-collective-operations" title="Permalink to this headline">¶</a></h2>
+<p>Every collective operation function supports the following two kinds of operations:</p>
+<p>synchronous operation - the default mode, when <code class="docutils literal notranslate"><span class="pre">async_op</span></code> is set to False.
+when the function returns, it is guaranteed that
+the collective operation is performed (not necessarily completed if it’s a CUDA op since all
+CUDA ops are asynchronous), and any further function calls depending on the data of the
+collective operation can be called. In the synchronous mode, the collective function does not
+return anything</p>
+<p>asynchronous operation - when <code class="docutils literal notranslate"><span class="pre">async_op</span></code> is set to True. The collective operation function
+returns a distributed request object. In general, you don’t need to create it manually and it
+is guaranteed to support two methods:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">is_completed()</span></code> - returns True if the operation has finished</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">wait()</span></code> - will block the process until the operation is finished.</p></li>
+</ul>
+</div>
+<div class="section" id="collective-functions">
+<h2>Collective functions<a class="headerlink" href="#collective-functions" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="torch.distributed.broadcast">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">broadcast</code><span class="sig-paren">(</span><em class="sig-param">tensor</em>, <em class="sig-param">src</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">async_op=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#broadcast"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.broadcast" title="Permalink to this definition">¶</a></dt>
+<dd><p>Broadcasts the tensor to the whole group.</p>
+<p><code class="docutils literal notranslate"><span class="pre">tensor</span></code> must have the same number of elements in all processes
+participating in the collective.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tensor</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a>) – Data to be sent if <code class="docutils literal notranslate"><span class="pre">src</span></code> is the rank of current
+process, and tensor to be used to save received data otherwise.</p></li>
+<li><p><strong>src</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a>) – Source rank.</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+<li><p><strong>async_op</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether this op should be an async op</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Async work handle, if async_op is set to True.
+None, if not async_op or if not part of the group</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.broadcast_object_list">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">broadcast_object_list</code><span class="sig-paren">(</span><em class="sig-param">object_list</em>, <em class="sig-param">src</em>, <em class="sig-param">group=&lt;object object&gt;</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#broadcast_object_list"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.broadcast_object_list" title="Permalink to this definition">¶</a></dt>
+<dd><p>Broadcasts picklable objects in <code class="docutils literal notranslate"><span class="pre">object_list</span></code> to the whole group. Similar
+to <a class="reference internal" href="#torch.distributed.broadcast" title="torch.distributed.broadcast"><code class="xref py py-func docutils literal notranslate"><span class="pre">broadcast()</span></code></a>, but Python objects can be passed in.
+Note that all objects in <code class="docutils literal notranslate"><span class="pre">object_list</span></code> must be picklable in order to be
+broadcasted.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>object_list</strong> (<em>List</em><em>[</em><em>Any</em><em>]</em>) – List of input objects to broadcast.
+Each object must be picklable. Only objects on the <code class="docutils literal notranslate"><span class="pre">src</span></code> rank will
+be broadcast, but each rank must provide lists of equal sizes.</p></li>
+<li><p><strong>src</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a>) – Source rank from which to broadcast <code class="docutils literal notranslate"><span class="pre">object_list</span></code>.</p></li>
+<li><p><strong>group</strong> – (ProcessGroup, optional): The process group to work on.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><code class="docutils literal notranslate"><span class="pre">None</span></code>. If rank is part of the group, <code class="docutils literal notranslate"><span class="pre">object_list</span></code> will contain the
+broadcasted objects from <code class="docutils literal notranslate"><span class="pre">src</span></code> rank.</p>
+</dd>
+</dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Note that this API differs slightly from the broadcast collective
+since it does not provide an <code class="docutils literal notranslate"><span class="pre">async_op</span></code> handle and thus will be a
+blocking call.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p><a class="reference internal" href="#torch.distributed.broadcast_object_list" title="torch.distributed.broadcast_object_list"><code class="xref py py-func docutils literal notranslate"><span class="pre">broadcast_object_list()</span></code></a> uses <code class="docutils literal notranslate"><span class="pre">pickle</span></code> module implicitly, which
+is known to be insecure. It is possible to construct malicious pickle
+data which will execute arbitrary code during unpickling. Only call this
+function with data you trust.</p>
+</div>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.all_reduce">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">all_reduce</code><span class="sig-paren">(</span><em class="sig-param">tensor</em>, <em class="sig-param">op=ReduceOp.SUM</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">async_op=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#all_reduce"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.all_reduce" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reduces the tensor data across all machines in such a way that all get
+the final result.</p>
+<p>After the call <code class="docutils literal notranslate"><span class="pre">tensor</span></code> is going to be bitwise identical in all processes.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tensor</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a>) – Input and output of the collective. The function
+operates in-place.</p></li>
+<li><p><strong>op</strong> (<em>optional</em>) – One of the values from
+<code class="docutils literal notranslate"><span class="pre">torch.distributed.ReduceOp</span></code>
+enum.  Specifies an operation used for element-wise reductions.</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+<li><p><strong>async_op</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether this op should be an async op</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Async work handle, if async_op is set to True.
+None, if not async_op or if not part of the group</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.reduce">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">reduce</code><span class="sig-paren">(</span><em class="sig-param">tensor</em>, <em class="sig-param">dst</em>, <em class="sig-param">op=ReduceOp.SUM</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">async_op=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#reduce"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.reduce" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reduces the tensor data across all machines.</p>
+<p>Only the process with rank <code class="docutils literal notranslate"><span class="pre">dst</span></code> is going to receive the final result.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tensor</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a>) – Input and output of the collective. The function
+operates in-place.</p></li>
+<li><p><strong>dst</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a>) – Destination rank</p></li>
+<li><p><strong>op</strong> (<em>optional</em>) – One of the values from
+<code class="docutils literal notranslate"><span class="pre">torch.distributed.ReduceOp</span></code>
+enum.  Specifies an operation used for element-wise reductions.</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+<li><p><strong>async_op</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether this op should be an async op</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Async work handle, if async_op is set to True.
+None, if not async_op or if not part of the group</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.all_gather">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">all_gather</code><span class="sig-paren">(</span><em class="sig-param">tensor_list</em>, <em class="sig-param">tensor</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">async_op=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#all_gather"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.all_gather" title="Permalink to this definition">¶</a></dt>
+<dd><p>Gathers tensors from the whole group in a list.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tensor_list</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><em>list</em></a><em>[</em><a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a><em>]</em>) – Output list. It should contain
+correctly-sized tensors to be used for output of the collective.</p></li>
+<li><p><strong>tensor</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a>) – Tensor to be broadcast from current process.</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+<li><p><strong>async_op</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether this op should be an async op</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Async work handle, if async_op is set to True.
+None, if not async_op or if not part of the group</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.all_gather_object">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">all_gather_object</code><span class="sig-paren">(</span><em class="sig-param">object_list</em>, <em class="sig-param">obj</em>, <em class="sig-param">group=&lt;object object&gt;</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#all_gather_object"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.all_gather_object" title="Permalink to this definition">¶</a></dt>
+<dd><p>Gathers picklable objects from the whole group into a list. Similar to
+<a class="reference internal" href="#torch.distributed.all_gather" title="torch.distributed.all_gather"><code class="xref py py-func docutils literal notranslate"><span class="pre">all_gather()</span></code></a>, but Python objects can be passed in. Note that the object
+must be picklable in order to be gathered.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>object_list</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><em>list</em></a><em>[</em><em>Any</em><em>]</em>) – Output list. It should be correctly sized as the
+size of the group for this collective and will contain the output.</p></li>
+<li><p><strong>object</strong> (<em>Any</em>) – Pickable Python object to be broadcast from current process.</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>None. If the calling rank is part of this group, the output of the
+collective will be populated into the input <code class="docutils literal notranslate"><span class="pre">object_list</span></code>. If the
+calling rank is not part of the group, the passed in <code class="docutils literal notranslate"><span class="pre">object_list</span></code> will
+be unmodified.</p>
+</dd>
+</dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Note that this API differs slightly from the <a class="reference internal" href="#torch.distributed.all_gather" title="torch.distributed.all_gather"><code class="xref py py-func docutils literal notranslate"><span class="pre">all_gather()</span></code></a>
+collective since it does not provide an <code class="docutils literal notranslate"><span class="pre">async_op</span></code> handle and thus
+will be a blocking call.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p><a class="reference internal" href="#torch.distributed.all_gather_object" title="torch.distributed.all_gather_object"><code class="xref py py-func docutils literal notranslate"><span class="pre">all_gather_object()</span></code></a> uses <code class="docutils literal notranslate"><span class="pre">pickle</span></code> module implicitly, which is
+known to be insecure. It is possible to construct malicious pickle data
+which will execute arbitrary code during unpickling. Only call this
+function with data you trust.</p>
+</div>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.gather">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">gather</code><span class="sig-paren">(</span><em class="sig-param">tensor</em>, <em class="sig-param">gather_list=None</em>, <em class="sig-param">dst=0</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">async_op=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#gather"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.gather" title="Permalink to this definition">¶</a></dt>
+<dd><p>Gathers a list of tensors in a single process.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tensor</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a>) – Input tensor.</p></li>
+<li><p><strong>gather_list</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><em>list</em></a><em>[</em><a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a><em>]</em><em>, </em><em>optional</em>) – List of appropriately-sized
+tensors to use for gathered data (default is None, must be specified
+on the destination rank)</p></li>
+<li><p><strong>dst</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em>, </em><em>optional</em>) – Destination rank (default is 0)</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+<li><p><strong>async_op</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether this op should be an async op</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Async work handle, if async_op is set to True.
+None, if not async_op or if not part of the group</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.gather_object">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">gather_object</code><span class="sig-paren">(</span><em class="sig-param">obj</em>, <em class="sig-param">object_gather_list=None</em>, <em class="sig-param">dst=0</em>, <em class="sig-param">group=&lt;object object&gt;</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#gather_object"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.gather_object" title="Permalink to this definition">¶</a></dt>
+<dd><p>Gathers picklable objects from the whole group in a single process.
+Similar to <a class="reference internal" href="#torch.distributed.gather" title="torch.distributed.gather"><code class="xref py py-func docutils literal notranslate"><span class="pre">gather()</span></code></a>, but Python objects can be passed in. Note that the
+object must be picklable in order to be gathered.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>obj</strong> (<em>Any</em>) – Input object. Must be picklable.</p></li>
+<li><p><strong>object_gather_list</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><em>list</em></a><em>[</em><em>Any</em><em>]</em>) – Output list. On the <code class="docutils literal notranslate"><span class="pre">dst</span></code> rank, it
+should be correctly sized as the size of the group for this
+collective and will contain the output. Must be <code class="docutils literal notranslate"><span class="pre">None</span></code> on non-dst
+ranks. (default is <code class="docutils literal notranslate"><span class="pre">None</span></code>)</p></li>
+<li><p><strong>dst</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em>, </em><em>optional</em>) – Destination rank. (default is 0)</p></li>
+<li><p><strong>group</strong> – (ProcessGroup, optional): The process group to work on.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>None. On the <code class="docutils literal notranslate"><span class="pre">dst</span></code> rank, <code class="docutils literal notranslate"><span class="pre">object_gather_list</span></code> will contain the
+output of the collective.</p>
+</dd>
+</dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Note that this API differs slightly from the gather collective
+since it does not provide an async_op handle and thus will be a blocking
+call.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Note that this API is not supported when using the NCCL backend.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p><a class="reference internal" href="#torch.distributed.gather_object" title="torch.distributed.gather_object"><code class="xref py py-func docutils literal notranslate"><span class="pre">gather_object()</span></code></a> uses <code class="docutils literal notranslate"><span class="pre">pickle</span></code> module implicitly, which is
+known to be insecure. It is possible to construct malicious pickle data
+which will execute arbitrary code during unpickling. Only call this
+function with data you trust.</p>
+</div>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.scatter">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">scatter</code><span class="sig-paren">(</span><em class="sig-param">tensor</em>, <em class="sig-param">scatter_list=None</em>, <em class="sig-param">src=0</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">async_op=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#scatter"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.scatter" title="Permalink to this definition">¶</a></dt>
+<dd><p>Scatters a list of tensors to all processes in a group.</p>
+<p>Each process will receive exactly one tensor and store its data in the
+<code class="docutils literal notranslate"><span class="pre">tensor</span></code> argument.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tensor</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a>) – Output tensor.</p></li>
+<li><p><strong>scatter_list</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><em>list</em></a><em>[</em><a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a><em>]</em>) – List of tensors to scatter (default is
+None, must be specified on the source rank)</p></li>
+<li><p><strong>src</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a>) – Source rank (default is 0)</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+<li><p><strong>async_op</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether this op should be an async op</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Async work handle, if async_op is set to True.
+None, if not async_op or if not part of the group</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.reduce_scatter">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">reduce_scatter</code><span class="sig-paren">(</span><em class="sig-param">output</em>, <em class="sig-param">input_list</em>, <em class="sig-param">op=ReduceOp.SUM</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">async_op=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#reduce_scatter"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.reduce_scatter" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reduces, then scatters a list of tensors to all processes in a group.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>output</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a>) – Output tensor.</p></li>
+<li><p><strong>input_list</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><em>list</em></a><em>[</em><a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a><em>]</em>) – List of tensors to reduce and scatter.</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on.</p></li>
+<li><p><strong>async_op</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether this op should be an async op.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Async work handle, if async_op is set to True.
+None, if not async_op or if not part of the group.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.all_to_all">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">all_to_all</code><span class="sig-paren">(</span><em class="sig-param">output_tensor_list</em>, <em class="sig-param">input_tensor_list</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">async_op=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#all_to_all"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.all_to_all" title="Permalink to this definition">¶</a></dt>
+<dd><p>Each process scatters list of input tensors to all processes in a group and
+return gathered list of tensors in output list.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>output_tensor_list</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><em>list</em></a><em>[</em><a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a><em>]</em>) – List of tensors to be gathered one
+per rank.</p></li>
+<li><p><strong>input_tensor_list</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><em>list</em></a><em>[</em><a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a><em>]</em>) – List of tensors to scatter one per rank.</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on.</p></li>
+<li><p><strong>async_op</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether this op should be an async op.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Async work handle, if async_op is set to True.
+None, if not async_op or if not part of the group.</p>
+</dd>
+</dl>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p><cite>all_to_all</cite> is experimental and subject to change.</p>
+</div>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="nb">input</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span> <span class="o">+</span> <span class="n">rank</span> <span class="o">*</span> <span class="mi">4</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">input</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">input</span><span class="o">.</span><span class="n">chunk</span><span class="p">(</span><span class="mi">4</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">input</span>
+<span class="go">[tensor([0]), tensor([1]), tensor([2]), tensor([3])]     # Rank 0</span>
+<span class="go">[tensor([4]), tensor([5]), tensor([6]), tensor([7])]     # Rank 1</span>
+<span class="go">[tensor([8]), tensor([9]), tensor([10]), tensor([11])]   # Rank 2</span>
+<span class="go">[tensor([12]), tensor([13]), tensor([14]), tensor([15])] # Rank 3</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">output</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">([</span><span class="mi">4</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span><span class="o">.</span><span class="n">chunk</span><span class="p">(</span><span class="mi">4</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">dist</span><span class="o">.</span><span class="n">all_to_all</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="nb">input</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">output</span>
+<span class="go">[tensor([0]), tensor([4]), tensor([8]), tensor([12])]    # Rank 0</span>
+<span class="go">[tensor([1]), tensor([5]), tensor([9]), tensor([13])]    # Rank 1</span>
+<span class="go">[tensor([2]), tensor([6]), tensor([10]), tensor([14])]   # Rank 2</span>
+<span class="go">[tensor([3]), tensor([7]), tensor([11]), tensor([15])]   # Rank 3</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># Essentially, it is similar to following operation:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">scatter_list</span> <span class="o">=</span> <span class="nb">input</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">gather_list</span>  <span class="o">=</span> <span class="n">output</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">world_size</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="n">dist</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">gather_list</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">scatter_list</span> <span class="k">if</span> <span class="n">i</span> <span class="o">==</span> <span class="n">rank</span> <span class="k">else</span> <span class="p">[],</span> <span class="n">src</span> <span class="o">=</span> <span class="n">i</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="nb">input</span>
+<span class="go">tensor([0, 1, 2, 3, 4, 5])                                       # Rank 0</span>
+<span class="go">tensor([10, 11, 12, 13, 14, 15, 16, 17, 18])                     # Rank 1</span>
+<span class="go">tensor([20, 21, 22, 23, 24])                                     # Rank 2</span>
+<span class="go">tensor([30, 31, 32, 33, 34, 35, 36])                             # Rank 3</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">input_splits</span>
+<span class="go">[2, 2, 1, 1]                                                     # Rank 0</span>
+<span class="go">[3, 2, 2, 2]                                                     # Rank 1</span>
+<span class="go">[2, 1, 1, 1]                                                     # Rank 2</span>
+<span class="go">[2, 2, 2, 1]                                                     # Rank 3</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">output_splits</span>
+<span class="go">[2, 3, 2, 2]                                                     # Rank 0</span>
+<span class="go">[2, 2, 1, 2]                                                     # Rank 1</span>
+<span class="go">[1, 2, 1, 2]                                                     # Rank 2</span>
+<span class="go">[1, 2, 1, 1]                                                     # Rank 3</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">input</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">input</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">input_splits</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">input</span>
+<span class="go">[tensor([0, 1]), tensor([2, 3]), tensor([4]), tensor([5])]                   # Rank 0</span>
+<span class="go">[tensor([10, 11, 12]), tensor([13, 14]), tensor([15, 16]), tensor([17, 18])] # Rank 1</span>
+<span class="go">[tensor([20, 21]), tensor([22]), tensor([23]), tensor([24])]                 # Rank 2</span>
+<span class="go">[tensor([30, 31]), tensor([32, 33]), tensor([34, 35]), tensor([36])]         # Rank 3</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">output</span> <span class="o">=</span> <span class="o">...</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">dist</span><span class="o">.</span><span class="n">all_to_all</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="nb">input</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">output</span>
+<span class="go">[tensor([0, 1]), tensor([10, 11, 12]), tensor([20, 21]), tensor([30, 31])]   # Rank 0</span>
+<span class="go">[tensor([2, 3]), tensor([13, 14]), tensor([22]), tensor([32, 33])]           # Rank 1</span>
+<span class="go">[tensor([4]), tensor([15, 16]), tensor([23]), tensor([34, 35])]              # Rank 2</span>
+<span class="go">[tensor([5]), tensor([17, 18]), tensor([24]), tensor([36])]                  # Rank 3</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.barrier">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">barrier</code><span class="sig-paren">(</span><em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">async_op=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#barrier"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.barrier" title="Permalink to this definition">¶</a></dt>
+<dd><p>Synchronizes all processes.</p>
+<p>This collective blocks processes until the whole group enters this function,
+if async_op is False, or if async work handle is called on wait().</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+<li><p><strong>async_op</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether this op should be an async op</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Async work handle, if async_op is set to True.
+None, if not async_op or if not part of the group</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="class">
+<dt id="torch.distributed.ReduceOp">
+<em class="property">class </em><code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">ReduceOp</code><a class="headerlink" href="#torch.distributed.ReduceOp" title="Permalink to this definition">¶</a></dt>
+<dd><p>An enum-like class for available reduction operations: <code class="docutils literal notranslate"><span class="pre">SUM</span></code>, <code class="docutils literal notranslate"><span class="pre">PRODUCT</span></code>,
+<code class="docutils literal notranslate"><span class="pre">MIN</span></code>, <code class="docutils literal notranslate"><span class="pre">MAX</span></code>, <code class="docutils literal notranslate"><span class="pre">BAND</span></code>, <code class="docutils literal notranslate"><span class="pre">BOR</span></code>, and <code class="docutils literal notranslate"><span class="pre">BXOR</span></code>.</p>
+<p>Note that <code class="docutils literal notranslate"><span class="pre">BAND</span></code>, <code class="docutils literal notranslate"><span class="pre">BOR</span></code>, and <code class="docutils literal notranslate"><span class="pre">BXOR</span></code> reductions are not available when
+using the <code class="docutils literal notranslate"><span class="pre">NCCL</span></code> backend.</p>
+<p>The values of this class can be accessed as attributes, e.g., <code class="docutils literal notranslate"><span class="pre">ReduceOp.SUM</span></code>.
+They are used in specifying strategies for reduction collectives, e.g.,
+<a class="reference internal" href="#torch.distributed.reduce" title="torch.distributed.reduce"><code class="xref py py-func docutils literal notranslate"><span class="pre">reduce()</span></code></a>, <a class="reference internal" href="#torch.distributed.all_reduce_multigpu" title="torch.distributed.all_reduce_multigpu"><code class="xref py py-func docutils literal notranslate"><span class="pre">all_reduce_multigpu()</span></code></a>, etc.</p>
+<p>Members:</p>
+<blockquote>
+<div><p>SUM</p>
+<p>PRODUCT</p>
+<p>MIN</p>
+<p>MAX</p>
+<p>BAND</p>
+<p>BOR</p>
+<p>BXOR</p>
+</div></blockquote>
+</dd></dl>
+
+<dl class="class">
+<dt id="torch.distributed.reduce_op">
+<em class="property">class </em><code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">reduce_op</code><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#reduce_op"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.reduce_op" title="Permalink to this definition">¶</a></dt>
+<dd><p>Deprecated enum-like class for reduction operations: <code class="docutils literal notranslate"><span class="pre">SUM</span></code>, <code class="docutils literal notranslate"><span class="pre">PRODUCT</span></code>,
+<code class="docutils literal notranslate"><span class="pre">MIN</span></code>, and <code class="docutils literal notranslate"><span class="pre">MAX</span></code>.</p>
+<p><a class="reference internal" href="#torch.distributed.ReduceOp" title="torch.distributed.ReduceOp"><code class="xref py py-class docutils literal notranslate"><span class="pre">ReduceOp</span></code></a> is recommended to use instead.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="multi-gpu-collective-functions">
+<h2>Multi-GPU collective functions<a class="headerlink" href="#multi-gpu-collective-functions" title="Permalink to this headline">¶</a></h2>
+<p>If you have more than one GPU on each node, when using the NCCL and Gloo backend,
+<a class="reference internal" href="#torch.distributed.broadcast_multigpu" title="torch.distributed.broadcast_multigpu"><code class="xref py py-func docutils literal notranslate"><span class="pre">broadcast_multigpu()</span></code></a>
+<a class="reference internal" href="#torch.distributed.all_reduce_multigpu" title="torch.distributed.all_reduce_multigpu"><code class="xref py py-func docutils literal notranslate"><span class="pre">all_reduce_multigpu()</span></code></a>
+<a class="reference internal" href="#torch.distributed.reduce_multigpu" title="torch.distributed.reduce_multigpu"><code class="xref py py-func docutils literal notranslate"><span class="pre">reduce_multigpu()</span></code></a>
+<a class="reference internal" href="#torch.distributed.all_gather_multigpu" title="torch.distributed.all_gather_multigpu"><code class="xref py py-func docutils literal notranslate"><span class="pre">all_gather_multigpu()</span></code></a> and
+<a class="reference internal" href="#torch.distributed.reduce_scatter_multigpu" title="torch.distributed.reduce_scatter_multigpu"><code class="xref py py-func docutils literal notranslate"><span class="pre">reduce_scatter_multigpu()</span></code></a> support distributed collective
+operations among multiple GPUs within each node. These functions can potentially
+improve the overall distributed training performance and be easily used by
+passing a list of tensors. Each Tensor in the passed tensor list needs
+to be on a separate GPU device of the host where the function is called. Note
+that the length of the tensor list needs to be identical among all the
+distributed processes. Also note that currently the multi-GPU collective
+functions are only supported by the NCCL backend.</p>
+<p>For example, if the system we use for distributed training has 2 nodes, each
+of which has 8 GPUs. On each of the 16 GPUs, there is a tensor that we would
+like to all-reduce. The following code can serve as a reference:</p>
+<p>Code running on Node 0</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">import</span> <span class="nn">torch.distributed</span> <span class="k">as</span> <span class="nn">dist</span>
+
+<span class="n">dist</span><span class="o">.</span><span class="n">init_process_group</span><span class="p">(</span><span class="n">backend</span><span class="o">=</span><span class="s2">&quot;nccl&quot;</span><span class="p">,</span>
+                        <span class="n">init_method</span><span class="o">=</span><span class="s2">&quot;file:///distributed_test&quot;</span><span class="p">,</span>
+                        <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+                        <span class="n">rank</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">tensor_list</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="k">for</span> <span class="n">dev_idx</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">device_count</span><span class="p">()):</span>
+    <span class="n">tensor_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">FloatTensor</span><span class="p">([</span><span class="mi">1</span><span class="p">])</span><span class="o">.</span><span class="n">cuda</span><span class="p">(</span><span class="n">dev_idx</span><span class="p">))</span>
+
+<span class="n">dist</span><span class="o">.</span><span class="n">all_reduce_multigpu</span><span class="p">(</span><span class="n">tensor_list</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Code running on Node 1</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">import</span> <span class="nn">torch.distributed</span> <span class="k">as</span> <span class="nn">dist</span>
+
+<span class="n">dist</span><span class="o">.</span><span class="n">init_process_group</span><span class="p">(</span><span class="n">backend</span><span class="o">=</span><span class="s2">&quot;nccl&quot;</span><span class="p">,</span>
+                        <span class="n">init_method</span><span class="o">=</span><span class="s2">&quot;file:///distributed_test&quot;</span><span class="p">,</span>
+                        <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+                        <span class="n">rank</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">tensor_list</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="k">for</span> <span class="n">dev_idx</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">device_count</span><span class="p">()):</span>
+    <span class="n">tensor_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">FloatTensor</span><span class="p">([</span><span class="mi">1</span><span class="p">])</span><span class="o">.</span><span class="n">cuda</span><span class="p">(</span><span class="n">dev_idx</span><span class="p">))</span>
+
+<span class="n">dist</span><span class="o">.</span><span class="n">all_reduce_multigpu</span><span class="p">(</span><span class="n">tensor_list</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>After the call, all 16 tensors on the two nodes will have the all-reduced value
+of 16</p>
+<dl class="function">
+<dt id="torch.distributed.broadcast_multigpu">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">broadcast_multigpu</code><span class="sig-paren">(</span><em class="sig-param">tensor_list</em>, <em class="sig-param">src</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">async_op=False</em>, <em class="sig-param">src_tensor=0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#broadcast_multigpu"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.broadcast_multigpu" title="Permalink to this definition">¶</a></dt>
+<dd><p>Broadcasts the tensor to the whole group with multiple GPU tensors
+per node.</p>
+<p><code class="docutils literal notranslate"><span class="pre">tensor</span></code> must have the same number of elements in all the GPUs from
+all processes participating in the collective. each tensor in the list must
+be on a different GPU</p>
+<p>Only nccl and gloo backend are currently supported
+tensors should only be GPU tensors</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tensor_list</strong> (<em>List</em><em>[</em><a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a><em>]</em>) – Tensors that participate in the collective
+operation. If <code class="docutils literal notranslate"><span class="pre">src</span></code> is the rank, then the specified <code class="docutils literal notranslate"><span class="pre">src_tensor</span></code>
+element of <code class="docutils literal notranslate"><span class="pre">tensor_list</span></code> (<code class="docutils literal notranslate"><span class="pre">tensor_list[src_tensor]</span></code>) will be
+broadcast to all other tensors (on different GPUs) in the src process
+and all tensors in <code class="docutils literal notranslate"><span class="pre">tensor_list</span></code> of other non-src processes.
+You also need to make sure that <code class="docutils literal notranslate"><span class="pre">len(tensor_list)</span></code> is the same
+for all the distributed processes calling this function.</p></li>
+<li><p><strong>src</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a>) – Source rank.</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+<li><p><strong>async_op</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether this op should be an async op</p></li>
+<li><p><strong>src_tensor</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em>, </em><em>optional</em>) – Source tensor rank within <code class="docutils literal notranslate"><span class="pre">tensor_list</span></code></p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Async work handle, if async_op is set to True.
+None, if not async_op or if not part of the group</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.all_reduce_multigpu">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">all_reduce_multigpu</code><span class="sig-paren">(</span><em class="sig-param">tensor_list</em>, <em class="sig-param">op=ReduceOp.SUM</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">async_op=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#all_reduce_multigpu"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.all_reduce_multigpu" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reduces the tensor data across all machines in such a way that all get
+the final result. This function reduces a number of tensors on every node,
+while each tensor resides on different GPUs.
+Therefore, the input tensor in the tensor list needs to be GPU tensors.
+Also, each tensor in the tensor list needs to reside on a different GPU.</p>
+<p>After the call, all <code class="docutils literal notranslate"><span class="pre">tensor</span></code> in <code class="docutils literal notranslate"><span class="pre">tensor_list</span></code> is going to be bitwise
+identical in all processes.</p>
+<p>Only nccl and gloo backend is currently supported
+tensors should only be GPU tensors</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>list</strong> (<em>tensor</em>) – List of input and output tensors of
+the collective. The function operates in-place and requires that
+each tensor to be a GPU tensor on different GPUs.
+You also need to make sure that <code class="docutils literal notranslate"><span class="pre">len(tensor_list)</span></code> is the same for
+all the distributed processes calling this function.</p></li>
+<li><p><strong>op</strong> (<em>optional</em>) – One of the values from
+<code class="docutils literal notranslate"><span class="pre">torch.distributed.ReduceOp</span></code>
+enum.  Specifies an operation used for element-wise reductions.</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+<li><p><strong>async_op</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether this op should be an async op</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Async work handle, if async_op is set to True.
+None, if not async_op or if not part of the group</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.reduce_multigpu">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">reduce_multigpu</code><span class="sig-paren">(</span><em class="sig-param">tensor_list</em>, <em class="sig-param">dst</em>, <em class="sig-param">op=ReduceOp.SUM</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">async_op=False</em>, <em class="sig-param">dst_tensor=0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#reduce_multigpu"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.reduce_multigpu" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reduces the tensor data on multiple GPUs across all machines. Each tensor
+in <code class="docutils literal notranslate"><span class="pre">tensor_list</span></code> should reside on a separate GPU</p>
+<p>Only the GPU of <code class="docutils literal notranslate"><span class="pre">tensor_list[dst_tensor]</span></code> on the process with rank <code class="docutils literal notranslate"><span class="pre">dst</span></code>
+is going to receive the final result.</p>
+<p>Only nccl backend is currently supported
+tensors should only be GPU tensors</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tensor_list</strong> (<em>List</em><em>[</em><a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a><em>]</em>) – Input and output GPU tensors of the
+collective. The function operates in-place.
+You also need to make sure that <code class="docutils literal notranslate"><span class="pre">len(tensor_list)</span></code> is the same for
+all the distributed processes calling this function.</p></li>
+<li><p><strong>dst</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a>) – Destination rank</p></li>
+<li><p><strong>op</strong> (<em>optional</em>) – One of the values from
+<code class="docutils literal notranslate"><span class="pre">torch.distributed.ReduceOp</span></code>
+enum.  Specifies an operation used for element-wise reductions.</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+<li><p><strong>async_op</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether this op should be an async op</p></li>
+<li><p><strong>dst_tensor</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em>, </em><em>optional</em>) – Destination tensor rank within
+<code class="docutils literal notranslate"><span class="pre">tensor_list</span></code></p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Async work handle, if async_op is set to True.
+None, otherwise</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.all_gather_multigpu">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">all_gather_multigpu</code><span class="sig-paren">(</span><em class="sig-param">output_tensor_lists</em>, <em class="sig-param">input_tensor_list</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">async_op=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#all_gather_multigpu"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.all_gather_multigpu" title="Permalink to this definition">¶</a></dt>
+<dd><p>Gathers tensors from the whole group in a list.
+Each tensor in <code class="docutils literal notranslate"><span class="pre">tensor_list</span></code> should reside on a separate GPU</p>
+<p>Only nccl backend is currently supported
+tensors should only be GPU tensors</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>output_tensor_lists</strong> (<em>List</em><em>[</em><em>List</em><em>[</em><a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a><em>]</em><em>]</em>) – <p>Output lists. It should
+contain correctly-sized tensors on each GPU to be used for output
+of the collective, e.g. <code class="docutils literal notranslate"><span class="pre">output_tensor_lists[i]</span></code> contains the
+all_gather result that resides on the GPU of
+<code class="docutils literal notranslate"><span class="pre">input_tensor_list[i]</span></code>.</p>
+<p>Note that each element of <code class="docutils literal notranslate"><span class="pre">output_tensor_lists</span></code> has the size of
+<code class="docutils literal notranslate"><span class="pre">world_size</span> <span class="pre">*</span> <span class="pre">len(input_tensor_list)</span></code>, since the function all
+gathers the result from every single GPU in the group. To interpret
+each element of <code class="docutils literal notranslate"><span class="pre">output_tensor_lists[i]</span></code>, note that
+<code class="docutils literal notranslate"><span class="pre">input_tensor_list[j]</span></code> of rank k will be appear in
+<code class="docutils literal notranslate"><span class="pre">output_tensor_lists[i][k</span> <span class="pre">*</span> <span class="pre">world_size</span> <span class="pre">+</span> <span class="pre">j]</span></code></p>
+<p>Also note that <code class="docutils literal notranslate"><span class="pre">len(output_tensor_lists)</span></code>, and the size of each
+element in <code class="docutils literal notranslate"><span class="pre">output_tensor_lists</span></code> (each element is a list,
+therefore <code class="docutils literal notranslate"><span class="pre">len(output_tensor_lists[i])</span></code>) need to be the same
+for all the distributed processes calling this function.</p>
+</p></li>
+<li><p><strong>input_tensor_list</strong> (<em>List</em><em>[</em><a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a><em>]</em>) – List of tensors(on different GPUs) to
+be broadcast from current process.
+Note that <code class="docutils literal notranslate"><span class="pre">len(input_tensor_list)</span></code> needs to be the same for
+all the distributed processes calling this function.</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on</p></li>
+<li><p><strong>async_op</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether this op should be an async op</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Async work handle, if async_op is set to True.
+None, if not async_op or if not part of the group</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.reduce_scatter_multigpu">
+<code class="sig-prename descclassname">torch.distributed.</code><code class="sig-name descname">reduce_scatter_multigpu</code><span class="sig-paren">(</span><em class="sig-param">output_tensor_list</em>, <em class="sig-param">input_tensor_lists</em>, <em class="sig-param">op=ReduceOp.SUM</em>, <em class="sig-param">group=&lt;object object&gt;</em>, <em class="sig-param">async_op=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/distributed_c10d.html#reduce_scatter_multigpu"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.reduce_scatter_multigpu" title="Permalink to this definition">¶</a></dt>
+<dd><p>Reduce and scatter a list of tensors to the whole group.  Only nccl backend
+is currently supported.</p>
+<p>Each tensor in <code class="docutils literal notranslate"><span class="pre">output_tensor_list</span></code> should reside on a separate GPU, as
+should each list of tensors in <code class="docutils literal notranslate"><span class="pre">input_tensor_lists</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>output_tensor_list</strong> (<em>List</em><em>[</em><a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a><em>]</em>) – <p>Output tensors (on different GPUs)
+to receive the result of the operation.</p>
+<p>Note that <code class="docutils literal notranslate"><span class="pre">len(output_tensor_list)</span></code> needs to be the same for all
+the distributed processes calling this function.</p>
+</p></li>
+<li><p><strong>input_tensor_lists</strong> (<em>List</em><em>[</em><em>List</em><em>[</em><a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a><em>]</em><em>]</em>) – <p>Input lists.  It should
+contain correctly-sized tensors on each GPU to be used for input of
+the collective, e.g. <code class="docutils literal notranslate"><span class="pre">input_tensor_lists[i]</span></code> contains the
+reduce_scatter input that resides on the GPU of
+<code class="docutils literal notranslate"><span class="pre">output_tensor_list[i]</span></code>.</p>
+<p>Note that each element of <code class="docutils literal notranslate"><span class="pre">input_tensor_lists</span></code> has the size of
+<code class="docutils literal notranslate"><span class="pre">world_size</span> <span class="pre">*</span> <span class="pre">len(output_tensor_list)</span></code>, since the function
+scatters the result from every single GPU in the group.  To
+interpret each element of <code class="docutils literal notranslate"><span class="pre">input_tensor_lists[i]</span></code>, note that
+<code class="docutils literal notranslate"><span class="pre">output_tensor_list[j]</span></code> of rank k receives the reduce-scattered
+result from <code class="docutils literal notranslate"><span class="pre">input_tensor_lists[i][k</span> <span class="pre">*</span> <span class="pre">world_size</span> <span class="pre">+</span> <span class="pre">j]</span></code></p>
+<p>Also note that <code class="docutils literal notranslate"><span class="pre">len(input_tensor_lists)</span></code>, and the size of each
+element in <code class="docutils literal notranslate"><span class="pre">input_tensor_lists</span></code> (each element is a list,
+therefore <code class="docutils literal notranslate"><span class="pre">len(input_tensor_lists[i])</span></code>) need to be the same for
+all the distributed processes calling this function.</p>
+</p></li>
+<li><p><strong>group</strong> (<em>ProcessGroup</em><em>, </em><em>optional</em>) – The process group to work on.</p></li>
+<li><p><strong>async_op</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – Whether this op should be an async op.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Async work handle, if async_op is set to True.
+None, if not async_op or if not part of the group.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="third-party-backends">
+<span id="distributed-launch"></span><h2>Third-party backends<a class="headerlink" href="#third-party-backends" title="Permalink to this headline">¶</a></h2>
+<p>Besides the GLOO/MPI/NCCL backends, PyTorch distributed supports third-party backends
+through a run-time register mechanism.
+For references on how to develop a third-party backend through C++ Extension,
+please refer to <a class="reference external" href="https://pytorch.org/tutorials/advanced/cpp_extension.html">Tutorials - Custom C++ and CUDA Extensions</a> and <cite>test/cpp_extensions/cpp_c10d_extension.cpp</cite>.
+The capability of third-party backends are decided by their own implementations.</p>
+<p>The new backend derives from <cite>c10d.ProcessGroup</cite> and registers the backend name and the
+instantiating interface through <code class="xref py py-func docutils literal notranslate"><span class="pre">torch.distributed.Backend.register_backend()</span></code> when
+imported.</p>
+<p>When manually importing this backend and invoking <a class="reference internal" href="#torch.distributed.init_process_group" title="torch.distributed.init_process_group"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.distributed.init_process_group()</span></code></a>
+with the corresponding backend name, the <cite>torch.distributed</cite> package runs on the new backend.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>The support of third-party backend is experimental and subject to change.</p>
+</div>
+</div>
+<div class="section" id="launch-utility">
+<h2>Launch utility<a class="headerlink" href="#launch-utility" title="Permalink to this headline">¶</a></h2>
+<p>The <cite>torch.distributed</cite> package also provides a launch utility in
+<cite>torch.distributed.launch</cite>. This helper utility can be used to launch
+multiple processes per node for distributed training.</p>
+<span class="target" id="module-torch.distributed.launch"></span><p><cite>torch.distributed.launch</cite> is a module that spawns up multiple distributed
+training processes on each of the training nodes.</p>
+<p>The utility can be used for single-node distributed training, in which one or
+more processes per node will be spawned. The utility can be used for either
+CPU training or GPU training. If the utility is used for GPU training,
+each distributed process will be operating on a single GPU. This can achieve
+well-improved single-node training performance. It can also be used in
+multi-node distributed training, by spawning up multiple processes on each node
+for well-improved multi-node distributed training performance as well.
+This will especially be benefitial for systems with multiple Infiniband
+interfaces that have direct-GPU support, since all of them can be utilized for
+aggregated communication bandwidth.</p>
+<p>In both cases of single-node distributed training or multi-node distributed
+training, this utility will launch the given number of processes per node
+(<code class="docutils literal notranslate"><span class="pre">--nproc_per_node</span></code>). If used for GPU training, this number needs to be less
+or equal to the number of GPUs on the current system (<code class="docutils literal notranslate"><span class="pre">nproc_per_node</span></code>),
+and each process will be operating on a single GPU from <em>GPU 0 to
+GPU (nproc_per_node - 1)</em>.</p>
+<p><strong>How to use this module:</strong></p>
+<ol class="arabic simple">
+<li><p>Single-Node multi-process distributed training</p></li>
+</ol>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">python</span> <span class="o">-</span><span class="n">m</span> <span class="n">torch</span><span class="o">.</span><span class="n">distributed</span><span class="o">.</span><span class="n">launch</span> <span class="o">--</span><span class="n">nproc_per_node</span><span class="o">=</span><span class="n">NUM_GPUS_YOU_HAVE</span>
+<span class="go">           YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3 and all other</span>
+<span class="go">           arguments of your training script)</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p>Multi-Node multi-process distributed training: (e.g. two nodes)</p></li>
+</ol>
+<p>Node 1: <em>(IP: 192.168.1.1, and has a free port: 1234)</em></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">python</span> <span class="o">-</span><span class="n">m</span> <span class="n">torch</span><span class="o">.</span><span class="n">distributed</span><span class="o">.</span><span class="n">launch</span> <span class="o">--</span><span class="n">nproc_per_node</span><span class="o">=</span><span class="n">NUM_GPUS_YOU_HAVE</span>
+<span class="go">           --nnodes=2 --node_rank=0 --master_addr=&quot;192.168.1.1&quot;</span>
+<span class="go">           --master_port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3</span>
+<span class="go">           and all other arguments of your training script)</span>
+</pre></div>
+</div>
+<p>Node 2:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">python</span> <span class="o">-</span><span class="n">m</span> <span class="n">torch</span><span class="o">.</span><span class="n">distributed</span><span class="o">.</span><span class="n">launch</span> <span class="o">--</span><span class="n">nproc_per_node</span><span class="o">=</span><span class="n">NUM_GPUS_YOU_HAVE</span>
+<span class="go">           --nnodes=2 --node_rank=1 --master_addr=&quot;192.168.1.1&quot;</span>
+<span class="go">           --master_port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3</span>
+<span class="go">           and all other arguments of your training script)</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="3">
+<li><p>To look up what optional arguments this module offers:</p></li>
+</ol>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">python</span> <span class="o">-</span><span class="n">m</span> <span class="n">torch</span><span class="o">.</span><span class="n">distributed</span><span class="o">.</span><span class="n">launch</span> <span class="o">--</span><span class="n">help</span>
+</pre></div>
+</div>
+<p><strong>Important Notices:</strong></p>
+<p>1. This utility and multi-process distributed (single-node or
+multi-node) GPU training currently only achieves the best performance using
+the NCCL distributed backend. Thus NCCL backend is the recommended backend to
+use for GPU training.</p>
+<p>2. In your training program, you must parse the command-line argument:
+<code class="docutils literal notranslate"><span class="pre">--local_rank=LOCAL_PROCESS_RANK</span></code>, which will be provided by this module.
+If your training program uses GPUs, you should ensure that your code only
+runs on the GPU device of LOCAL_PROCESS_RANK. This can be done by:</p>
+<p>Parsing the local_rank argument</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">argparse</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--local_rank&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Set your device to local rank using either</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">set_device</span><span class="p">(</span><span class="n">arg</span><span class="o">.</span><span class="n">local_rank</span><span class="p">)</span>  <span class="c1"># before your code runs</span>
+</pre></div>
+</div>
+<p>or</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="n">arg</span><span class="o">.</span><span class="n">local_rank</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span>   <span class="c1"># your code to run</span>
+</pre></div>
+</div>
+<p>3. In your training program, you are supposed to call the following function
+at the beginning to start the distributed backend. You need to make sure that
+the init_method uses <code class="docutils literal notranslate"><span class="pre">env://</span></code>, which is the only supported <code class="docutils literal notranslate"><span class="pre">init_method</span></code>
+by this module.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">torch</span><span class="o">.</span><span class="n">distributed</span><span class="o">.</span><span class="n">init_process_group</span><span class="p">(</span><span class="n">backend</span><span class="o">=</span><span class="s1">&#39;YOUR BACKEND&#39;</span><span class="p">,</span>
+                                     <span class="n">init_method</span><span class="o">=</span><span class="s1">&#39;env://&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>4. In your training program, you can either use regular distributed functions
+or use <a class="reference internal" href="generated/torch.nn.parallel.DistributedDataParallel.html#torch.nn.parallel.DistributedDataParallel" title="torch.nn.parallel.DistributedDataParallel"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.nn.parallel.DistributedDataParallel()</span></code></a> module. If your
+training program uses GPUs for training and you would like to use
+<a class="reference internal" href="generated/torch.nn.parallel.DistributedDataParallel.html#torch.nn.parallel.DistributedDataParallel" title="torch.nn.parallel.DistributedDataParallel"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.nn.parallel.DistributedDataParallel()</span></code></a> module,
+here is how to configure it.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">model</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">parallel</span><span class="o">.</span><span class="n">DistributedDataParallel</span><span class="p">(</span><span class="n">model</span><span class="p">,</span>
+                                                  <span class="n">device_ids</span><span class="o">=</span><span class="p">[</span><span class="n">arg</span><span class="o">.</span><span class="n">local_rank</span><span class="p">],</span>
+                                                  <span class="n">output_device</span><span class="o">=</span><span class="n">arg</span><span class="o">.</span><span class="n">local_rank</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Please ensure that <code class="docutils literal notranslate"><span class="pre">device_ids</span></code> argument is set to be the only GPU device id
+that your code will be operating on. This is generally the local rank of the
+process. In other words, the <code class="docutils literal notranslate"><span class="pre">device_ids</span></code> needs to be <code class="docutils literal notranslate"><span class="pre">[args.local_rank]</span></code>,
+and <code class="docutils literal notranslate"><span class="pre">output_device</span></code> needs to be <code class="docutils literal notranslate"><span class="pre">args.local_rank</span></code> in order to use this
+utility</p>
+<p>5. Another way to pass <code class="docutils literal notranslate"><span class="pre">local_rank</span></code> to the subprocesses via environment variable
+<code class="docutils literal notranslate"><span class="pre">LOCAL_RANK</span></code>. This behavior is enabled when you launch the script with
+<code class="docutils literal notranslate"><span class="pre">--use_env=True</span></code>. You must adjust the subprocess example above to replace
+<code class="docutils literal notranslate"><span class="pre">args.local_rank</span></code> with <code class="docutils literal notranslate"><span class="pre">os.environ['LOCAL_RANK']</span></code>; the launcher
+will not pass <code class="docutils literal notranslate"><span class="pre">--local_rank</span></code> when you specify this flag.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p><code class="docutils literal notranslate"><span class="pre">local_rank</span></code> is NOT globally unique: it is only unique per process
+on a machine.  Thus, don’t use it to decide if you should, e.g.,
+write to a networked filesystem.  See
+<a class="reference external" href="https://github.com/pytorch/pytorch/issues/12042">https://github.com/pytorch/pytorch/issues/12042</a> for an example of
+how things can go wrong if you don’t do this correctly.</p>
+</div>
+</div>
+<div class="section" id="spawn-utility">
+<h2>Spawn utility<a class="headerlink" href="#spawn-utility" title="Permalink to this headline">¶</a></h2>
+<p>The <a class="reference internal" href="multiprocessing.html#multiprocessing-doc"><span class="std std-ref">Multiprocessing package - torch.multiprocessing</span></a> package also provides a <code class="docutils literal notranslate"><span class="pre">spawn</span></code>
+function in <a class="reference internal" href="multiprocessing.html#torch.multiprocessing.spawn" title="torch.multiprocessing.spawn"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.multiprocessing.spawn()</span></code></a>. This helper function
+can be used to spawn multiple processes. It works by passing in the
+function that you want to run and spawns N processes to run it. This
+can be used for multiprocess distributed training as well.</p>
+<p>For references on how to use it, please refer to <a class="reference external" href="https://github.com/pytorch/examples/tree/master/imagenet">PyTorch example - ImageNet
+implementation</a></p>
+<p>Note that this function requires Python 3.4 or higher.</p>
+</div>
+</div>
+
+
+             </article>
+             
+            </div>
+            <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="distributions.html" class="btn btn-neutral float-right" title="Probability distributions - torch.distributions" accesskey="n" rel="next">Next <img src="_static/images/chevron-right-orange.svg" class="next-page"></a>
+      
+      
+        <a href="backends.html" class="btn btn-neutral" title="torch.backends" accesskey="p" rel="prev"><img src="_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
+      
+    </div>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              <ul>
+<li><a class="reference internal" href="#">Distributed communication package - torch.distributed</a><ul>
+<li><a class="reference internal" href="#backends">Backends</a><ul>
+<li><a class="reference internal" href="#backends-that-come-with-pytorch">Backends that come with PyTorch</a></li>
+<li><a class="reference internal" href="#which-backend-to-use">Which backend to use?</a></li>
+<li><a class="reference internal" href="#common-environment-variables">Common environment variables</a><ul>
+<li><a class="reference internal" href="#choosing-the-network-interface-to-use">Choosing the network interface to use</a></li>
+<li><a class="reference internal" href="#other-nccl-environment-variables">Other NCCL environment variables</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#basics">Basics</a></li>
+<li><a class="reference internal" href="#initialization">Initialization</a><ul>
+<li><a class="reference internal" href="#tcp-initialization">TCP initialization</a></li>
+<li><a class="reference internal" href="#shared-file-system-initialization">Shared file-system initialization</a></li>
+<li><a class="reference internal" href="#environment-variable-initialization">Environment variable initialization</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#groups">Groups</a></li>
+<li><a class="reference internal" href="#point-to-point-communication">Point-to-point communication</a></li>
+<li><a class="reference internal" href="#synchronous-and-asynchronous-collective-operations">Synchronous and asynchronous collective operations</a></li>
+<li><a class="reference internal" href="#collective-functions">Collective functions</a></li>
+<li><a class="reference internal" href="#multi-gpu-collective-functions">Multi-GPU collective functions</a></li>
+<li><a class="reference internal" href="#third-party-backends">Third-party backends</a></li>
+<li><a class="reference internal" href="#launch-utility">Launch utility</a></li>
+<li><a class="reference internal" href="#spawn-utility">Spawn utility</a></li>
+</ul>
+</li>
+</ul>
+
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+         <script src="_static/jquery.js"></script>
+         <script src="_static/underscore.js"></script>
+         <script src="_static/doctools.js"></script>
+         <script src="_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>

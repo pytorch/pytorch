@@ -1,0 +1,6 @@
+torch.Assert
+============
+
+.. currentmodule:: torch
+
+.. autofunction:: Assert

@@ -1,0 +1,1831 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>torch.utils.data.dataloader &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/_modules/torch/utils/data/dataloader.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="../../../../_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="../../../../_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../../../_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../../../_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+
+  
+  <script src="../../../../_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/_modules/torch/utils/data/dataloader.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="../../../../index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+          <li><a href="../../../index.html">Module code</a> &gt;</li>
+        
+          <li><a href="../../../torch.html">torch</a> &gt;</li>
+        
+      <li>torch.utils.data.dataloader</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <h1>Source code for torch.utils.data.dataloader</h1><div class="highlight"><pre>
+<span></span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Definition of the DataLoader and associated iterators that subclass _BaseDataLoaderIter</span>
+
+<span class="sd">To support these two classes, in `./_utils` we define many utility methods and</span>
+<span class="sd">functions to be run in multiprocessing. E.g., the data loading worker loop is</span>
+<span class="sd">in `./_utils/worker.py`.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span> <span class="nn">threading</span>
+<span class="kn">import</span> <span class="nn">itertools</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">TypeVar</span><span class="p">,</span> <span class="n">Generic</span><span class="p">,</span> <span class="n">Sequence</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span>
+
+<span class="kn">import</span> <span class="nn">multiprocessing</span> <span class="k">as</span> <span class="nn">python_multiprocessing</span>
+<span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">import</span> <span class="nn">torch.multiprocessing</span> <span class="k">as</span> <span class="nn">multiprocessing</span>
+<span class="kn">from</span> <span class="nn">torch._utils</span> <span class="kn">import</span> <span class="n">ExceptionWrapper</span>
+<span class="kn">from</span> <span class="nn">torch._six</span> <span class="kn">import</span> <span class="n">queue</span><span class="p">,</span> <span class="n">string_classes</span>
+
+<span class="kn">from</span> <span class="nn">.</span> <span class="kn">import</span> <span class="n">IterableDataset</span><span class="p">,</span> <span class="n">Sampler</span><span class="p">,</span> <span class="n">SequentialSampler</span><span class="p">,</span> <span class="n">RandomSampler</span><span class="p">,</span> <span class="n">BatchSampler</span><span class="p">,</span> <span class="n">Dataset</span>
+<span class="kn">from</span> <span class="nn">.</span> <span class="kn">import</span> <span class="n">_utils</span>
+
+<span class="n">T_co</span> <span class="o">=</span> <span class="n">TypeVar</span><span class="p">(</span><span class="s1">&#39;T_co&#39;</span><span class="p">,</span> <span class="n">covariant</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">T</span> <span class="o">=</span> <span class="n">TypeVar</span><span class="p">(</span><span class="s1">&#39;T&#39;</span><span class="p">)</span>
+<span class="n">_worker_init_fn_t</span> <span class="o">=</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">int</span><span class="p">],</span> <span class="kc">None</span><span class="p">]</span>
+
+<span class="c1"># Ideally we would parameterize `DataLoader` by the return type of `collate_fn`, but there is currently no way to have that</span>
+<span class="c1"># type parameter set to a default value if the user doesn&#39;t pass in a custom &#39;collate_fn&#39;.</span>
+<span class="c1"># See https://github.com/python/mypy/issues/3737.</span>
+<span class="n">_collate_fn_t</span> <span class="o">=</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">List</span><span class="p">[</span><span class="n">T</span><span class="p">]],</span> <span class="n">Any</span><span class="p">]</span>
+
+
+<span class="c1"># This function used to be defined in this file. However, it was moved to</span>
+<span class="c1"># _utils/collate.py. Although it is rather hard to access this from user land</span>
+<span class="c1"># (one has to explicitly directly `import torch.utils.data.dataloader`), there</span>
+<span class="c1"># probably is user code out there using it. This aliasing maintains BC in this</span>
+<span class="c1"># aspect.</span>
+<span class="n">default_collate</span><span class="p">:</span> <span class="n">_collate_fn_t</span> <span class="o">=</span> <span class="n">_utils</span><span class="o">.</span><span class="n">collate</span><span class="o">.</span><span class="n">default_collate</span>
+
+<span class="n">get_worker_info</span> <span class="o">=</span> <span class="n">_utils</span><span class="o">.</span><span class="n">worker</span><span class="o">.</span><span class="n">get_worker_info</span>
+
+<span class="k">class</span> <span class="nc">_DatasetKind</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="n">Map</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">Iterable</span> <span class="o">=</span> <span class="mi">1</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">create_fetcher</span><span class="p">(</span><span class="n">kind</span><span class="p">,</span> <span class="n">dataset</span><span class="p">,</span> <span class="n">auto_collation</span><span class="p">,</span> <span class="n">collate_fn</span><span class="p">,</span> <span class="n">drop_last</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">kind</span> <span class="o">==</span> <span class="n">_DatasetKind</span><span class="o">.</span><span class="n">Map</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">_utils</span><span class="o">.</span><span class="n">fetch</span><span class="o">.</span><span class="n">_MapDatasetFetcher</span><span class="p">(</span><span class="n">dataset</span><span class="p">,</span> <span class="n">auto_collation</span><span class="p">,</span> <span class="n">collate_fn</span><span class="p">,</span> <span class="n">drop_last</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">_utils</span><span class="o">.</span><span class="n">fetch</span><span class="o">.</span><span class="n">_IterableDatasetFetcher</span><span class="p">(</span><span class="n">dataset</span><span class="p">,</span> <span class="n">auto_collation</span><span class="p">,</span> <span class="n">collate_fn</span><span class="p">,</span> <span class="n">drop_last</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">_InfiniteConstantSampler</span><span class="p">(</span><span class="n">Sampler</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Analogous to ``itertools.repeat(None, None)``.</span>
+<span class="sd">    Used as sampler for :class:`~torch.utils.data.IterableDataset`.</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        data_source (Dataset): dataset to sample from</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">_InfiniteConstantSampler</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="fm">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="k">yield</span> <span class="kc">None</span>
+
+
+<div class="viewcode-block" id="DataLoader"><a class="viewcode-back" href="../../../../data.html#torch.utils.data.DataLoader">[docs]</a><span class="k">class</span> <span class="nc">DataLoader</span><span class="p">(</span><span class="n">Generic</span><span class="p">[</span><span class="n">T_co</span><span class="p">]):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Data loader. Combines a dataset and a sampler, and provides an iterable over</span>
+<span class="sd">    the given dataset.</span>
+
+<span class="sd">    The :class:`~torch.utils.data.DataLoader` supports both map-style and</span>
+<span class="sd">    iterable-style datasets with single- or multi-process loading, customizing</span>
+<span class="sd">    loading order and optional automatic batching (collation) and memory pinning.</span>
+
+<span class="sd">    See :py:mod:`torch.utils.data` documentation page for more details.</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        dataset (Dataset): dataset from which to load the data.</span>
+<span class="sd">        batch_size (int, optional): how many samples per batch to load</span>
+<span class="sd">            (default: ``1``).</span>
+<span class="sd">        shuffle (bool, optional): set to ``True`` to have the data reshuffled</span>
+<span class="sd">            at every epoch (default: ``False``).</span>
+<span class="sd">        sampler (Sampler or Iterable, optional): defines the strategy to draw</span>
+<span class="sd">            samples from the dataset. Can be any ``Iterable`` with ``__len__``</span>
+<span class="sd">            implemented. If specified, :attr:`shuffle` must not be specified.</span>
+<span class="sd">        batch_sampler (Sampler or Iterable, optional): like :attr:`sampler`, but</span>
+<span class="sd">            returns a batch of indices at a time. Mutually exclusive with</span>
+<span class="sd">            :attr:`batch_size`, :attr:`shuffle`, :attr:`sampler`,</span>
+<span class="sd">            and :attr:`drop_last`.</span>
+<span class="sd">        num_workers (int, optional): how many subprocesses to use for data</span>
+<span class="sd">            loading. ``0`` means that the data will be loaded in the main process.</span>
+<span class="sd">            (default: ``0``)</span>
+<span class="sd">        collate_fn (callable, optional): merges a list of samples to form a</span>
+<span class="sd">            mini-batch of Tensor(s).  Used when using batched loading from a</span>
+<span class="sd">            map-style dataset.</span>
+<span class="sd">        pin_memory (bool, optional): If ``True``, the data loader will copy Tensors</span>
+<span class="sd">            into CUDA pinned memory before returning them.  If your data elements</span>
+<span class="sd">            are a custom type, or your :attr:`collate_fn` returns a batch that is a custom type,</span>
+<span class="sd">            see the example below.</span>
+<span class="sd">        drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,</span>
+<span class="sd">            if the dataset size is not divisible by the batch size. If ``False`` and</span>
+<span class="sd">            the size of dataset is not divisible by the batch size, then the last batch</span>
+<span class="sd">            will be smaller. (default: ``False``)</span>
+<span class="sd">        timeout (numeric, optional): if positive, the timeout value for collecting a batch</span>
+<span class="sd">            from workers. Should always be non-negative. (default: ``0``)</span>
+<span class="sd">        worker_init_fn (callable, optional): If not ``None``, this will be called on each</span>
+<span class="sd">            worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as</span>
+<span class="sd">            input, after seeding and before data loading. (default: ``None``)</span>
+<span class="sd">        prefetch_factor (int, optional, keyword-only arg): Number of sample loaded</span>
+<span class="sd">            in advance by each worker. ``2`` means there will be a total of</span>
+<span class="sd">            2 * num_workers samples prefetched across all workers. (default: ``2``)</span>
+<span class="sd">        persistent_workers (bool, optional): If ``True``, the data loader will not shutdown</span>
+<span class="sd">            the worker processes after a dataset has been consumed once. This allows to </span>
+<span class="sd">            maintain the workers `Dataset` instances alive. (default: ``False``)</span>
+
+
+<span class="sd">    .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`</span>
+<span class="sd">                 cannot be an unpicklable object, e.g., a lambda function. See</span>
+<span class="sd">                 :ref:`multiprocessing-best-practices` on more details related</span>
+<span class="sd">                 to multiprocessing in PyTorch.</span>
+
+<span class="sd">    .. warning:: ``len(dataloader)`` heuristic is based on the length of the sampler used.</span>
+<span class="sd">                 When :attr:`dataset` is an :class:`~torch.utils.data.IterableDataset`,</span>
+<span class="sd">                 it instead returns an estimate based on ``len(dataset) / batch_size``, with proper</span>
+<span class="sd">                 rounding depending on :attr:`drop_last`, regardless of multi-process loading</span>
+<span class="sd">                 configurations. This represents the best guess PyTorch can make because PyTorch</span>
+<span class="sd">                 trusts user :attr:`dataset` code in correctly handling multi-process</span>
+<span class="sd">                 loading to avoid duplicate data.</span>
+
+<span class="sd">                 However, if sharding results in multiple workers having incomplete last batches,</span>
+<span class="sd">                 this estimate can still be inaccurate, because (1) an otherwise complete batch can</span>
+<span class="sd">                 be broken into multiple ones and (2) more than one batch worth of samples can be</span>
+<span class="sd">                 dropped when :attr:`drop_last` is set. Unfortunately, PyTorch can not detect such</span>
+<span class="sd">                 cases in general.</span>
+
+<span class="sd">                 See `Dataset Types`_ for more details on these two types of datasets and how</span>
+<span class="sd">                 :class:`~torch.utils.data.IterableDataset` interacts with</span>
+<span class="sd">                 `Multi-process data loading`_.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">dataset</span><span class="p">:</span> <span class="n">Dataset</span><span class="p">[</span><span class="n">T_co</span><span class="p">]</span>
+    <span class="n">batch_size</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span>
+    <span class="n">num_workers</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">pin_memory</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">drop_last</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">timeout</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">sampler</span><span class="p">:</span> <span class="n">Sampler</span>
+    <span class="n">prefetch_factor</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">_iterator</span> <span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="s1">&#39;_BaseDataLoaderIter&#39;</span><span class="p">]</span>
+    <span class="n">__initialized</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dataset</span><span class="p">:</span> <span class="n">Dataset</span><span class="p">[</span><span class="n">T_co</span><span class="p">],</span> <span class="n">batch_size</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
+                 <span class="n">shuffle</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">sampler</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Sampler</span><span class="p">[</span><span class="nb">int</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">batch_sampler</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Sampler</span><span class="p">[</span><span class="n">Sequence</span><span class="p">[</span><span class="nb">int</span><span class="p">]]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">num_workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">collate_fn</span><span class="p">:</span> <span class="n">_collate_fn_t</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">pin_memory</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">drop_last</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+                 <span class="n">timeout</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">worker_init_fn</span><span class="p">:</span> <span class="n">_worker_init_fn_t</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                 <span class="n">multiprocessing_context</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">generator</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="o">*</span><span class="p">,</span> <span class="n">prefetch_factor</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2</span><span class="p">,</span>
+                 <span class="n">persistent_workers</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">):</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;python.data_loader&quot;</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
+
+        <span class="k">if</span> <span class="n">num_workers</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;num_workers option should be non-negative; &#39;</span>
+                             <span class="s1">&#39;use num_workers=0 to disable multiprocessing.&#39;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">timeout</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;timeout option should be non-negative&#39;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">num_workers</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">prefetch_factor</span> <span class="o">!=</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;prefetch_factor option could only be specified in multiprocessing.&#39;</span>
+                             <span class="s1">&#39;let num_workers &gt; 0 to enable multiprocessing.&#39;</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="n">prefetch_factor</span> <span class="o">&gt;</span> <span class="mi">0</span>
+
+        <span class="k">if</span> <span class="n">persistent_workers</span> <span class="ow">and</span> <span class="n">num_workers</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;persistent_workers option needs num_workers &gt; 0&#39;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">dataset</span> <span class="o">=</span> <span class="n">dataset</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_workers</span> <span class="o">=</span> <span class="n">num_workers</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">prefetch_factor</span> <span class="o">=</span> <span class="n">prefetch_factor</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pin_memory</span> <span class="o">=</span> <span class="n">pin_memory</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">timeout</span> <span class="o">=</span> <span class="n">timeout</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">worker_init_fn</span> <span class="o">=</span> <span class="n">worker_init_fn</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">multiprocessing_context</span> <span class="o">=</span> <span class="n">multiprocessing_context</span>
+
+        <span class="c1"># Arg-check dataset related before checking samplers because we want to</span>
+        <span class="c1"># tell users that iterable-style datasets are incompatible with custom</span>
+        <span class="c1"># samplers first, so that they don&#39;t learn that this combo doesn&#39;t work</span>
+        <span class="c1"># after spending time fixing the custom sampler errors.</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">dataset</span><span class="p">,</span> <span class="n">IterableDataset</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_dataset_kind</span> <span class="o">=</span> <span class="n">_DatasetKind</span><span class="o">.</span><span class="n">Iterable</span>
+            <span class="c1"># NOTE [ Custom Samplers and IterableDataset ]</span>
+            <span class="c1">#</span>
+            <span class="c1"># `IterableDataset` does not support custom `batch_sampler` or</span>
+            <span class="c1"># `sampler` since the key is irrelevant (unless we support</span>
+            <span class="c1"># generator-style dataset one day...).</span>
+            <span class="c1">#</span>
+            <span class="c1"># For `sampler`, we always create a dummy sampler. This is an</span>
+            <span class="c1"># infinite sampler even when the dataset may have an implemented</span>
+            <span class="c1"># finite `__len__` because in multi-process data loading, naive</span>
+            <span class="c1"># settings will return duplicated data (which may be desired), and</span>
+            <span class="c1"># thus using a sampler with length matching that of dataset will</span>
+            <span class="c1"># cause data lost (you may have duplicates of the first couple</span>
+            <span class="c1"># batches, but never see anything afterwards). Therefore,</span>
+            <span class="c1"># `Iterabledataset` always uses an infinite sampler, an instance of</span>
+            <span class="c1"># `_InfiniteConstantSampler` defined above.</span>
+            <span class="c1">#</span>
+            <span class="c1"># A custom `batch_sampler` essentially only controls the batch size.</span>
+            <span class="c1"># However, it is unclear how useful it would be since an iterable-style</span>
+            <span class="c1"># dataset can handle that within itself. Moreover, it is pointless</span>
+            <span class="c1"># in multi-process data loading as the assignment order of batches</span>
+            <span class="c1"># to workers is an implementation detail so users can not control</span>
+            <span class="c1"># how to batchify each worker&#39;s iterable. Thus, we disable this</span>
+            <span class="c1"># option. If this turns out to be useful in future, we can re-enable</span>
+            <span class="c1"># this, and support custom samplers that specify the assignments to</span>
+            <span class="c1"># specific workers.</span>
+            <span class="k">if</span> <span class="n">shuffle</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">False</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="s2">&quot;DataLoader with IterableDataset: expected unspecified &quot;</span>
+                    <span class="s2">&quot;shuffle option, but got shuffle=</span><span class="si">{}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">shuffle</span><span class="p">))</span>
+            <span class="k">elif</span> <span class="n">sampler</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="c1"># See NOTE [ Custom Samplers and IterableDataset ]</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="s2">&quot;DataLoader with IterableDataset: expected unspecified &quot;</span>
+                    <span class="s2">&quot;sampler option, but got sampler=</span><span class="si">{}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">sampler</span><span class="p">))</span>
+            <span class="k">elif</span> <span class="n">batch_sampler</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="c1"># See NOTE [ Custom Samplers and IterableDataset ]</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="s2">&quot;DataLoader with IterableDataset: expected unspecified &quot;</span>
+                    <span class="s2">&quot;batch_sampler option, but got batch_sampler=</span><span class="si">{}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">batch_sampler</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_dataset_kind</span> <span class="o">=</span> <span class="n">_DatasetKind</span><span class="o">.</span><span class="n">Map</span>
+
+        <span class="k">if</span> <span class="n">sampler</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">shuffle</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;sampler option is mutually exclusive with &#39;</span>
+                             <span class="s1">&#39;shuffle&#39;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">batch_sampler</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># auto_collation with custom batch_sampler</span>
+            <span class="k">if</span> <span class="n">batch_size</span> <span class="o">!=</span> <span class="mi">1</span> <span class="ow">or</span> <span class="n">shuffle</span> <span class="ow">or</span> <span class="n">sampler</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">drop_last</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;batch_sampler option is mutually exclusive &#39;</span>
+                                 <span class="s1">&#39;with batch_size, shuffle, sampler, and &#39;</span>
+                                 <span class="s1">&#39;drop_last&#39;</span><span class="p">)</span>
+            <span class="n">batch_size</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">drop_last</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">elif</span> <span class="n">batch_size</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># no auto_collation</span>
+            <span class="k">if</span> <span class="n">drop_last</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;batch_size=None option disables auto-batching &#39;</span>
+                                 <span class="s1">&#39;and is mutually exclusive with drop_last&#39;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">sampler</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>  <span class="c1"># give default samplers</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dataset_kind</span> <span class="o">==</span> <span class="n">_DatasetKind</span><span class="o">.</span><span class="n">Iterable</span><span class="p">:</span>
+                <span class="c1"># See NOTE [ Custom Samplers and IterableDataset ]</span>
+                <span class="n">sampler</span> <span class="o">=</span> <span class="n">_InfiniteConstantSampler</span><span class="p">()</span>
+            <span class="k">else</span><span class="p">:</span>  <span class="c1"># map-style</span>
+                <span class="k">if</span> <span class="n">shuffle</span><span class="p">:</span>
+                    <span class="c1"># Cannot statically verify that dataset is Sized</span>
+                    <span class="c1"># Somewhat related: see NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]</span>
+                    <span class="n">sampler</span> <span class="o">=</span> <span class="n">RandomSampler</span><span class="p">(</span><span class="n">dataset</span><span class="p">,</span> <span class="n">generator</span><span class="o">=</span><span class="n">generator</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">sampler</span> <span class="o">=</span> <span class="n">SequentialSampler</span><span class="p">(</span><span class="n">dataset</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">batch_size</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">batch_sampler</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># auto_collation without custom batch_sampler</span>
+            <span class="n">batch_sampler</span> <span class="o">=</span> <span class="n">BatchSampler</span><span class="p">(</span><span class="n">sampler</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">,</span> <span class="n">drop_last</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">batch_size</span> <span class="o">=</span> <span class="n">batch_size</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">drop_last</span> <span class="o">=</span> <span class="n">drop_last</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sampler</span> <span class="o">=</span> <span class="n">sampler</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">batch_sampler</span> <span class="o">=</span> <span class="n">batch_sampler</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">generator</span> <span class="o">=</span> <span class="n">generator</span>
+
+        <span class="k">if</span> <span class="n">collate_fn</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_auto_collation</span><span class="p">:</span>
+                <span class="n">collate_fn</span> <span class="o">=</span> <span class="n">_utils</span><span class="o">.</span><span class="n">collate</span><span class="o">.</span><span class="n">default_collate</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">collate_fn</span> <span class="o">=</span> <span class="n">_utils</span><span class="o">.</span><span class="n">collate</span><span class="o">.</span><span class="n">default_convert</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">collate_fn</span> <span class="o">=</span> <span class="n">collate_fn</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">persistent_workers</span> <span class="o">=</span> <span class="n">persistent_workers</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">__initialized</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_IterableDataset_len_called</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># See NOTE [ IterableDataset and __len__ ]</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_iterator</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">_get_iterator</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s1">&#39;_BaseDataLoaderIter&#39;</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_workers</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">_SingleProcessDataLoaderIter</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">_MultiProcessingDataLoaderIter</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">multiprocessing_context</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__multiprocessing_context</span>
+
+    <span class="nd">@multiprocessing_context</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span> <span class="nf">multiprocessing_context</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">multiprocessing_context</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">multiprocessing_context</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_workers</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">_supports_context</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;multiprocessing_context relies on Python &gt;= 3.4, with &#39;</span>
+                                     <span class="s1">&#39;support for different start methods&#39;</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">multiprocessing_context</span><span class="p">,</span> <span class="n">string_classes</span><span class="p">):</span>
+                    <span class="n">valid_start_methods</span> <span class="o">=</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">get_all_start_methods</span><span class="p">()</span>
+                    <span class="k">if</span> <span class="n">multiprocessing_context</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">valid_start_methods</span><span class="p">:</span>
+                        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                            <span class="p">(</span><span class="s1">&#39;multiprocessing_context option &#39;</span>
+                             <span class="s1">&#39;should specify a valid start method in </span><span class="si">{!r}</span><span class="s1">, but got &#39;</span>
+                             <span class="s1">&#39;multiprocessing_context=</span><span class="si">{!r}</span><span class="s1">&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">valid_start_methods</span><span class="p">,</span> <span class="n">multiprocessing_context</span><span class="p">))</span>
+                    <span class="c1"># error: Argument 1 to &quot;get_context&quot; has incompatible type &quot;Union[str, bytes]&quot;; expected &quot;str&quot;  [arg-type]</span>
+                    <span class="n">multiprocessing_context</span> <span class="o">=</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">get_context</span><span class="p">(</span><span class="n">multiprocessing_context</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
+
+                <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">multiprocessing_context</span><span class="p">,</span> <span class="n">python_multiprocessing</span><span class="o">.</span><span class="n">context</span><span class="o">.</span><span class="n">BaseContext</span><span class="p">):</span>
+                    <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">((</span><span class="s1">&#39;multiprocessing_context option should be a valid context &#39;</span>
+                                     <span class="s1">&#39;object or a string specifying the start method, but got &#39;</span>
+                                     <span class="s1">&#39;multiprocessing_context=</span><span class="si">{}</span><span class="s1">&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">multiprocessing_context</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">((</span><span class="s1">&#39;multiprocessing_context can only be used with &#39;</span>
+                                  <span class="s1">&#39;multi-process loading (num_workers &gt; 0), but got &#39;</span>
+                                  <span class="s1">&#39;num_workers=</span><span class="si">{}</span><span class="s1">&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_workers</span><span class="p">))</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">__multiprocessing_context</span> <span class="o">=</span> <span class="n">multiprocessing_context</span>
+
+    <span class="k">def</span> <span class="fm">__setattr__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attr</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">__initialized</span> <span class="ow">and</span> <span class="n">attr</span> <span class="ow">in</span> <span class="p">(</span>
+                <span class="s1">&#39;batch_size&#39;</span><span class="p">,</span> <span class="s1">&#39;batch_sampler&#39;</span><span class="p">,</span> <span class="s1">&#39;sampler&#39;</span><span class="p">,</span> <span class="s1">&#39;drop_last&#39;</span><span class="p">,</span> <span class="s1">&#39;dataset&#39;</span><span class="p">,</span> <span class="s1">&#39;persistent_workers&#39;</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;</span><span class="si">{}</span><span class="s1"> attribute should not be set after </span><span class="si">{}</span><span class="s1"> is &#39;</span>
+                             <span class="s1">&#39;initialized&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">attr</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span><span class="p">))</span>
+
+        <span class="nb">super</span><span class="p">(</span><span class="n">DataLoader</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__setattr__</span><span class="p">(</span><span class="n">attr</span><span class="p">,</span> <span class="n">val</span><span class="p">)</span>
+
+    <span class="c1"># We quote &#39;_BaseDataLoaderIter&#39; since it isn&#39;t defined yet and the definition can&#39;t be moved up</span>
+    <span class="c1"># since &#39;_BaseDataLoaderIter&#39; references &#39;DataLoader&#39;.</span>
+    <span class="k">def</span> <span class="fm">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s1">&#39;_BaseDataLoaderIter&#39;</span><span class="p">:</span>
+        <span class="c1"># When using a single worker the returned iterator should be</span>
+        <span class="c1"># created everytime to avoid reseting its state</span>
+        <span class="c1"># However, in the case of a multiple workers iterator</span>
+        <span class="c1"># the iterator is only created once in the lifetime of the</span>
+        <span class="c1"># DataLoader object so that workers can be reused</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">persistent_workers</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_workers</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_iterator</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_iterator</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_iterator</span><span class="p">()</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_iterator</span><span class="o">.</span><span class="n">_reset</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_iterator</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_iterator</span><span class="p">()</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">_auto_collation</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">batch_sampler</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">_index_sampler</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># The actual sampler used for generating indices for `_DatasetFetcher`</span>
+        <span class="c1"># (see _utils/fetch.py) to read data at each time. This would be</span>
+        <span class="c1"># `.batch_sampler` if in auto-collation mode, and `.sampler` otherwise.</span>
+        <span class="c1"># We can&#39;t change `.sampler` and `.batch_sampler` attributes for BC</span>
+        <span class="c1"># reasons.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_auto_collation</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">batch_sampler</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">sampler</span>
+
+    <span class="k">def</span> <span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dataset_kind</span> <span class="o">==</span> <span class="n">_DatasetKind</span><span class="o">.</span><span class="n">Iterable</span><span class="p">:</span>
+            <span class="c1"># NOTE [ IterableDataset and __len__ ]</span>
+            <span class="c1">#</span>
+            <span class="c1"># For `IterableDataset`, `__len__` could be inaccurate when one naively</span>
+            <span class="c1"># does multi-processing data loading, since the samples will be duplicated.</span>
+            <span class="c1"># However, no real use case should be actually using that behavior, so</span>
+            <span class="c1"># it should count as a user error. We should generally trust user</span>
+            <span class="c1"># code to do the proper thing (e.g., configure each replica differently</span>
+            <span class="c1"># in `__iter__`), and give us the correct `__len__` if they choose to</span>
+            <span class="c1"># implement it (this will still throw if the dataset does not implement</span>
+            <span class="c1"># a `__len__`).</span>
+            <span class="c1">#</span>
+            <span class="c1"># To provide a further warning, we track if `__len__` was called on the</span>
+            <span class="c1"># `DataLoader`, save the returned value in `self._len_called`, and warn</span>
+            <span class="c1"># if the iterator ends up yielding more than this number of samples.</span>
+
+            <span class="c1"># Cannot statically verify that dataset is Sized</span>
+            <span class="n">length</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_IterableDataset_len_called</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dataset</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">batch_size</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>  <span class="c1"># IterableDataset doesn&#39;t allow custom sampler or batch_sampler</span>
+                <span class="kn">from</span> <span class="nn">math</span> <span class="kn">import</span> <span class="n">ceil</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">drop_last</span><span class="p">:</span>
+                    <span class="n">length</span> <span class="o">=</span> <span class="n">length</span> <span class="o">//</span> <span class="bp">self</span><span class="o">.</span><span class="n">batch_size</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">length</span> <span class="o">=</span> <span class="n">ceil</span><span class="p">(</span><span class="n">length</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">batch_size</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">length</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_index_sampler</span><span class="p">)</span></div>
+
+
+<span class="k">class</span> <span class="nc">_BaseDataLoaderIter</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">loader</span><span class="p">:</span> <span class="n">DataLoader</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dataset</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">dataset</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dataset_kind</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">_dataset_kind</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_IterableDataset_len_called</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">_IterableDataset_len_called</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_auto_collation</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">_auto_collation</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_drop_last</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">drop_last</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_index_sampler</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">_index_sampler</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_num_workers</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">num_workers</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_prefetch_factor</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">prefetch_factor</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_pin_memory</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">pin_memory</span> <span class="ow">and</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_timeout</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">timeout</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_collate_fn</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">collate_fn</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_sampler_iter</span> <span class="o">=</span> <span class="nb">iter</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_index_sampler</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_base_seed</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">((),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span><span class="o">.</span><span class="n">random_</span><span class="p">(</span><span class="n">generator</span><span class="o">=</span><span class="n">loader</span><span class="o">.</span><span class="n">generator</span><span class="p">)</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_persistent_workers</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">persistent_workers</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_num_yielded</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="k">def</span> <span class="fm">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s1">&#39;_BaseDataLoaderIter&#39;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span>
+
+    <span class="k">def</span> <span class="nf">_reset</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">loader</span><span class="p">,</span> <span class="n">first_iter</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_sampler_iter</span> <span class="o">=</span> <span class="nb">iter</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_index_sampler</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_num_yielded</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_IterableDataset_len_called</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">_IterableDataset_len_called</span>
+
+    <span class="k">def</span> <span class="nf">_next_index</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_sampler_iter</span><span class="p">)</span>  <span class="c1"># may raise StopIteration</span>
+
+    <span class="k">def</span> <span class="nf">_next_data</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span>
+
+    <span class="k">def</span> <span class="fm">__next__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sampler_iter</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_reset</span><span class="p">()</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_next_data</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_num_yielded</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dataset_kind</span> <span class="o">==</span> <span class="n">_DatasetKind</span><span class="o">.</span><span class="n">Iterable</span> <span class="ow">and</span> \
+                <span class="bp">self</span><span class="o">.</span><span class="n">_IterableDataset_len_called</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> \
+                <span class="bp">self</span><span class="o">.</span><span class="n">_num_yielded</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_IterableDataset_len_called</span><span class="p">:</span>
+            <span class="n">warn_msg</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;Length of IterableDataset </span><span class="si">{}</span><span class="s2"> was reported to be </span><span class="si">{}</span><span class="s2"> (when accessing len(dataloader)), but </span><span class="si">{}</span><span class="s2"> &quot;</span>
+                        <span class="s2">&quot;samples have been fetched. &quot;</span><span class="p">)</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_dataset</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_IterableDataset_len_called</span><span class="p">,</span>
+                                                              <span class="bp">self</span><span class="o">.</span><span class="n">_num_yielded</span><span class="p">)</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_workers</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">warn_msg</span> <span class="o">+=</span> <span class="p">(</span><span class="s2">&quot;For multiprocessing data-loading, this could be caused by not properly configuring the &quot;</span>
+                             <span class="s2">&quot;IterableDataset replica at each worker. Please see &quot;</span>
+                             <span class="s2">&quot;https://pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset for examples.&quot;</span><span class="p">)</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="n">warn_msg</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">data</span>
+
+    <span class="nb">next</span> <span class="o">=</span> <span class="fm">__next__</span>  <span class="c1"># Python 2 compatibility</span>
+
+    <span class="k">def</span> <span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_index_sampler</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__getstate__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># TODO: add limited pickling support for sharing an iterator</span>
+        <span class="c1"># across multiple threads for HOGWILD.</span>
+        <span class="c1"># Probably the best way to do this is by moving the sample pushing</span>
+        <span class="c1"># to a separate thread and then just sharing the data queue</span>
+        <span class="c1"># but signalling the end is tricky without a non-blocking API</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">{}</span><span class="s2"> cannot be pickled&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">_SingleProcessDataLoaderIter</span><span class="p">(</span><span class="n">_BaseDataLoaderIter</span><span class="p">):</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">loader</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">_SingleProcessDataLoaderIter</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">loader</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_timeout</span> <span class="o">==</span> <span class="mi">0</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_workers</span> <span class="o">==</span> <span class="mi">0</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_dataset_fetcher</span> <span class="o">=</span> <span class="n">_DatasetKind</span><span class="o">.</span><span class="n">create_fetcher</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_dataset_kind</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dataset</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_auto_collation</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_collate_fn</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_drop_last</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_next_data</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_next_index</span><span class="p">()</span>  <span class="c1"># may raise StopIteration</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dataset_fetcher</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="n">index</span><span class="p">)</span>  <span class="c1"># may raise StopIteration</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pin_memory</span><span class="p">:</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="n">_utils</span><span class="o">.</span><span class="n">pin_memory</span><span class="o">.</span><span class="n">pin_memory</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">data</span>
+
+
+<span class="k">class</span> <span class="nc">_MultiProcessingDataLoaderIter</span><span class="p">(</span><span class="n">_BaseDataLoaderIter</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Iterates once over the DataLoader&#39;s dataset, as specified by the sampler&quot;&quot;&quot;</span>
+
+    <span class="c1"># NOTE [ Data Loader Multiprocessing Shutdown Logic ]</span>
+    <span class="c1">#</span>
+    <span class="c1"># Preliminary:</span>
+    <span class="c1">#</span>
+    <span class="c1"># Our data model looks like this (queues are indicated with curly brackets):</span>
+    <span class="c1">#</span>
+    <span class="c1">#                main process                              ||</span>
+    <span class="c1">#                     |                                    ||</span>
+    <span class="c1">#               {index_queue}                              ||</span>
+    <span class="c1">#                     |                                    ||</span>
+    <span class="c1">#              worker processes                            ||     DATA</span>
+    <span class="c1">#                     |                                    ||</span>
+    <span class="c1">#            {worker_result_queue}                         ||     FLOW</span>
+    <span class="c1">#                     |                                    ||</span>
+    <span class="c1">#      pin_memory_thread of main process                   ||   DIRECTION</span>
+    <span class="c1">#                     |                                    ||</span>
+    <span class="c1">#               {data_queue}                               ||</span>
+    <span class="c1">#                     |                                    ||</span>
+    <span class="c1">#                data output                               \/</span>
+    <span class="c1">#</span>
+    <span class="c1"># P.S. `worker_result_queue` and `pin_memory_thread` part may be omitted if</span>
+    <span class="c1">#      `pin_memory=False`.</span>
+    <span class="c1">#</span>
+    <span class="c1">#</span>
+    <span class="c1"># Terminating multiprocessing logic requires very careful design. In</span>
+    <span class="c1"># particular, we need to make sure that</span>
+    <span class="c1">#</span>
+    <span class="c1">#   1. The iterator gracefully exits the workers when its last reference is</span>
+    <span class="c1">#      gone or it is depleted.</span>
+    <span class="c1">#</span>
+    <span class="c1">#      In this case, the workers should be gracefully exited because the</span>
+    <span class="c1">#      main process may still need to continue to run, and we want cleaning</span>
+    <span class="c1">#      up code in the workers to be executed (e.g., releasing GPU memory).</span>
+    <span class="c1">#      Naturally, we implement the shutdown logic in `__del__` of</span>
+    <span class="c1">#      DataLoaderIterator.</span>
+    <span class="c1">#</span>
+    <span class="c1">#      We delay the discussion on the logic in this case until later.</span>
+    <span class="c1">#</span>
+    <span class="c1">#   2. The iterator exits the workers when the loader process and/or worker</span>
+    <span class="c1">#      processes exits normally or with error.</span>
+    <span class="c1">#</span>
+    <span class="c1">#      We set all workers and `pin_memory_thread` to have `daemon=True`.</span>
+    <span class="c1">#</span>
+    <span class="c1">#      You may ask, why can&#39;t we make the workers non-daemonic, and</span>
+    <span class="c1">#      gracefully exit using the same logic as we have in `__del__` when the</span>
+    <span class="c1">#      iterator gets deleted (see 1 above)?</span>
+    <span class="c1">#</span>
+    <span class="c1">#      First of all, `__del__` is **not** guaranteed to be called when</span>
+    <span class="c1">#      interpreter exits. Even if it is called, by the time it executes,</span>
+    <span class="c1">#      many Python core library resources may alreay be freed, and even</span>
+    <span class="c1">#      simple things like acquiring an internal lock of a queue may hang.</span>
+    <span class="c1">#      Therefore, in this case, we actually need to prevent `__del__` from</span>
+    <span class="c1">#      being executed, and rely on the automatic termination of daemonic</span>
+    <span class="c1">#      children. Thus, we register an `atexit` hook that sets a global flag</span>
+    <span class="c1">#      `_utils.python_exit_status`. Since `atexit` hooks are executed in the</span>
+    <span class="c1">#      reverse order of registration, we are guaranteed that this flag is</span>
+    <span class="c1">#      set before library resources we use are freed. (Hooks freeing those</span>
+    <span class="c1">#      resources are registered at importing the Python core libraries at</span>
+    <span class="c1">#      the top of this file.) So in `__del__`, we check if</span>
+    <span class="c1">#      `_utils.python_exit_status` is set or `None` (freed), and perform</span>
+    <span class="c1">#      no-op if so.</span>
+    <span class="c1">#</span>
+    <span class="c1">#      Another problem with `__del__` is also related to the library cleanup</span>
+    <span class="c1">#      calls. When a process ends, it shuts the all its daemonic children</span>
+    <span class="c1">#      down with a SIGTERM (instead of joining them without a timeout).</span>
+    <span class="c1">#      Simiarly for threads, but by a different mechanism. This fact,</span>
+    <span class="c1">#      together with a few implementation details of multiprocessing, forces</span>
+    <span class="c1">#      us to make workers daemonic. All of our problems arise when a</span>
+    <span class="c1">#      DataLoader is used in a subprocess, and are caused by multiprocessing</span>
+    <span class="c1">#      code which looks more or less like this:</span>
+    <span class="c1">#</span>
+    <span class="c1">#          try:</span>
+    <span class="c1">#              your_function_using_a_dataloader()</span>
+    <span class="c1">#          finally:</span>
+    <span class="c1">#              multiprocessing.util._exit_function()</span>
+    <span class="c1">#</span>
+    <span class="c1">#      The joining/termination mentioned above happens inside</span>
+    <span class="c1">#      `_exit_function()`. Now, if `your_function_using_a_dataloader()`</span>
+    <span class="c1">#      throws, the stack trace stored in the exception will prevent the</span>
+    <span class="c1">#      frame which uses `DataLoaderIter` to be freed. If the frame has any</span>
+    <span class="c1">#      reference to the `DataLoaderIter` (e.g., in a method of the iter),</span>
+    <span class="c1">#      its  `__del__`, which starts the shutdown procedure, will not be</span>
+    <span class="c1">#      called. That, in turn, means that workers aren&#39;t notified. Attempting</span>
+    <span class="c1">#      to join in `_exit_function` will then result in a hang.</span>
+    <span class="c1">#</span>
+    <span class="c1">#      For context, `_exit_function` is also registered as an `atexit` call.</span>
+    <span class="c1">#      So it is unclear to me (@ssnl) why this is needed in a finally block.</span>
+    <span class="c1">#      The code dates back to 2008 and there is no comment on the original</span>
+    <span class="c1">#      PEP 371 or patch https://bugs.python.org/issue3050 (containing both</span>
+    <span class="c1">#      the finally block and the `atexit` registration) that explains this.</span>
+    <span class="c1">#</span>
+    <span class="c1">#      Another choice is to just shutdown workers with logic in 1 above</span>
+    <span class="c1">#      whenever we see an error in `next`. This isn&#39;t ideal because</span>
+    <span class="c1">#        a. It prevents users from using try-catch to resume data loading.</span>
+    <span class="c1">#        b. It doesn&#39;t prevent hanging if users have references to the</span>
+    <span class="c1">#           iterator.</span>
+    <span class="c1">#</span>
+    <span class="c1">#   3. All processes exit if any of them die unexpectedly by fatal signals.</span>
+    <span class="c1">#</span>
+    <span class="c1">#      As shown above, the workers are set as daemonic children of the main</span>
+    <span class="c1">#      process. However, automatic cleaning-up of such child processes only</span>
+    <span class="c1">#      happens if the parent process exits gracefully (e.g., not via fatal</span>
+    <span class="c1">#      signals like SIGKILL). So we must ensure that each process will exit</span>
+    <span class="c1">#      even the process that should send/receive data to/from it were</span>
+    <span class="c1">#      killed, i.e.,</span>
+    <span class="c1">#</span>
+    <span class="c1">#        a. A process won&#39;t hang when getting from a queue.</span>
+    <span class="c1">#</span>
+    <span class="c1">#           Even with carefully designed data dependencies (i.e., a `put()`</span>
+    <span class="c1">#           always corresponding to a `get()`), hanging on `get()` can still</span>
+    <span class="c1">#           happen when data in queue is corrupted (e.g., due to</span>
+    <span class="c1">#           `cancel_join_thread` or unexpected exit).</span>
+    <span class="c1">#</span>
+    <span class="c1">#           For child exit, we set a timeout whenever we try to get data</span>
+    <span class="c1">#           from `data_queue`, and check the workers&#39; status on each timeout</span>
+    <span class="c1">#           and error.</span>
+    <span class="c1">#           See `_DataLoaderiter._get_batch()` and</span>
+    <span class="c1">#           `_DataLoaderiter._try_get_data()` for details.</span>
+    <span class="c1">#</span>
+    <span class="c1">#           Additionally, for child exit on non-Windows platforms, we also</span>
+    <span class="c1">#           register a SIGCHLD handler (which is supported on Windows) on</span>
+    <span class="c1">#           the main process, which checks if any of the workers fail in the</span>
+    <span class="c1">#           (Python) handler. This is more efficient and faster in detecting</span>
+    <span class="c1">#           worker failures, compared to only using the above mechanism.</span>
+    <span class="c1">#           See `DataLoader.cpp` and `_utils/signal_handling.py` for details.</span>
+    <span class="c1">#</span>
+    <span class="c1">#           For `.get()` calls where the sender(s) is not the workers, we</span>
+    <span class="c1">#           guard them with timeouts, and check the status of the sender</span>
+    <span class="c1">#           when timeout happens:</span>
+    <span class="c1">#             + in the workers, the `_utils.worker.ManagerWatchdog` class</span>
+    <span class="c1">#               checks the status of the main process.</span>
+    <span class="c1">#             + if `pin_memory=True`, when getting from `pin_memory_thread`,</span>
+    <span class="c1">#               check `pin_memory_thread` status periodically until `.get()`</span>
+    <span class="c1">#               returns or see that `pin_memory_thread` died.</span>
+    <span class="c1">#</span>
+    <span class="c1">#        b. A process won&#39;t hang when putting into a queue;</span>
+    <span class="c1">#</span>
+    <span class="c1">#           We use `mp.Queue` which has a separate background thread to put</span>
+    <span class="c1">#           objects from an unbounded buffer array. The background thread is</span>
+    <span class="c1">#           daemonic and usually automatically joined when the process</span>
+    <span class="c1">#           exits.</span>
+    <span class="c1">#</span>
+    <span class="c1">#           However, in case that the receiver has ended abruptly while</span>
+    <span class="c1">#           reading from the pipe, the join will hang forever. Therefore,</span>
+    <span class="c1">#           for both `worker_result_queue` (worker -&gt; main process/pin_memory_thread)</span>
+    <span class="c1">#           and each `index_queue` (main process -&gt; worker), we use</span>
+    <span class="c1">#           `q.cancel_join_thread()` in sender process before any `q.put` to</span>
+    <span class="c1">#           prevent this automatic join.</span>
+    <span class="c1">#</span>
+    <span class="c1">#           Moreover, having all queues called `cancel_join_thread` makes</span>
+    <span class="c1">#           implementing graceful shutdown logic in `__del__` much easier.</span>
+    <span class="c1">#           It won&#39;t need to get from any queue, which would also need to be</span>
+    <span class="c1">#           guarded by periodic status checks.</span>
+    <span class="c1">#</span>
+    <span class="c1">#           Nonetheless, `cancel_join_thread` must only be called when the</span>
+    <span class="c1">#           queue is **not** going to be read from or write into by another</span>
+    <span class="c1">#           process, because it may hold onto a lock or leave corrupted data</span>
+    <span class="c1">#           in the queue, leading other readers/writers to hang.</span>
+    <span class="c1">#</span>
+    <span class="c1">#           `pin_memory_thread`&#39;s `data_queue` is a `queue.Queue` that does</span>
+    <span class="c1">#           a blocking `put` if the queue is full. So there is no above</span>
+    <span class="c1">#           problem, but we do need to wrap the `put` in a loop that breaks</span>
+    <span class="c1">#           not only upon success, but also when the main process stops</span>
+    <span class="c1">#           reading, i.e., is shutting down.</span>
+    <span class="c1">#</span>
+    <span class="c1">#</span>
+    <span class="c1"># Now let&#39;s get back to 1:</span>
+    <span class="c1">#   how we gracefully exit the workers when the last reference to the</span>
+    <span class="c1">#   iterator is gone.</span>
+    <span class="c1">#</span>
+    <span class="c1"># To achieve this, we implement the following logic along with the design</span>
+    <span class="c1"># choices mentioned above:</span>
+    <span class="c1">#</span>
+    <span class="c1"># `workers_done_event`:</span>
+    <span class="c1">#   A `multiprocessing.Event` shared among the main process and all worker</span>
+    <span class="c1">#   processes. This is used to signal the workers that the iterator is</span>
+    <span class="c1">#   shutting down. After it is set, they will not send processed data to</span>
+    <span class="c1">#   queues anymore, and only wait for the final `None` before exiting.</span>
+    <span class="c1">#   `done_event` isn&#39;t strictly needed. I.e., we can just check for `None`</span>
+    <span class="c1">#   from the input queue, but it allows us to skip wasting resources</span>
+    <span class="c1">#   processing data if we are already shutting down.</span>
+    <span class="c1">#</span>
+    <span class="c1"># `pin_memory_thread_done_event`:</span>
+    <span class="c1">#   A `threading.Event` for a similar purpose to that of</span>
+    <span class="c1">#   `workers_done_event`, but is for the `pin_memory_thread`. The reason</span>
+    <span class="c1">#   that separate events are needed is that `pin_memory_thread` reads from</span>
+    <span class="c1">#   the output queue of the workers. But the workers, upon seeing that</span>
+    <span class="c1">#   `workers_done_event` is set, only wants to see the final `None`, and is</span>
+    <span class="c1">#   not required to flush all data in the output queue (e.g., it may call</span>
+    <span class="c1">#   `cancel_join_thread` on that queue if its `IterableDataset` iterator</span>
+    <span class="c1">#   happens to exhaust coincidentally, which is out of the control of the</span>
+    <span class="c1">#   main process). Thus, since we will exit `pin_memory_thread` before the</span>
+    <span class="c1">#   workers (see below), two separete events are used.</span>
+    <span class="c1">#</span>
+    <span class="c1"># NOTE: In short, the protocol is that the main process will set these</span>
+    <span class="c1">#       `done_event`s and then the corresponding processes/threads a `None`,</span>
+    <span class="c1">#       and that they may exit at any time after receiving the `None`.</span>
+    <span class="c1">#</span>
+    <span class="c1"># NOTE: Using `None` as the final signal is valid, since normal data will</span>
+    <span class="c1">#       always be a 2-tuple with the 1st element being the index of the data</span>
+    <span class="c1">#       transferred (different from dataset index/key), and the 2nd being</span>
+    <span class="c1">#       either the dataset key or the data sample (depending on which part</span>
+    <span class="c1">#       of the data model the queue is at).</span>
+    <span class="c1">#</span>
+    <span class="c1"># [ worker processes ]</span>
+    <span class="c1">#   While loader process is alive:</span>
+    <span class="c1">#     Get from `index_queue`.</span>
+    <span class="c1">#       If get anything else,</span>
+    <span class="c1">#          Check `workers_done_event`.</span>
+    <span class="c1">#            If set, continue to next iteration</span>
+    <span class="c1">#                    i.e., keep getting until see the `None`, then exit.</span>
+    <span class="c1">#            Otherwise, process data:</span>
+    <span class="c1">#                If is fetching from an `IterableDataset` and the iterator</span>
+    <span class="c1">#                    is exhausted, send an `_IterableDatasetStopIteration`</span>
+    <span class="c1">#                    object to signal iteration end. The main process, upon</span>
+    <span class="c1">#                    receiving such an object, will send `None` to this</span>
+    <span class="c1">#                    worker and not use the corresponding `index_queue`</span>
+    <span class="c1">#                    anymore.</span>
+    <span class="c1">#       If timed out,</span>
+    <span class="c1">#          No matter `workers_done_event` is set (still need to see `None`)</span>
+    <span class="c1">#          or not, must continue to next iteration.</span>
+    <span class="c1">#   (outside loop)</span>
+    <span class="c1">#   If `workers_done_event` is set,  (this can be False with `IterableDataset`)</span>
+    <span class="c1">#     `data_queue.cancel_join_thread()`.  (Everything is ending here:</span>
+    <span class="c1">#                                          main process won&#39;t read from it;</span>
+    <span class="c1">#                                          other workers will also call</span>
+    <span class="c1">#                                          `cancel_join_thread`.)</span>
+    <span class="c1">#</span>
+    <span class="c1"># [ pin_memory_thread ]</span>
+    <span class="c1">#   # No need to check main thread. If this thread is alive, the main loader</span>
+    <span class="c1">#   # thread must be alive, because this thread is set as daemonic.</span>
+    <span class="c1">#   While `pin_memory_thread_done_event` is not set:</span>
+    <span class="c1">#     Get from `index_queue`.</span>
+    <span class="c1">#       If timed out, continue to get in the next iteration.</span>
+    <span class="c1">#       Otherwise, process data.</span>
+    <span class="c1">#       While `pin_memory_thread_done_event` is not set:</span>
+    <span class="c1">#         Put processed data to `data_queue` (a `queue.Queue` with blocking put)</span>
+    <span class="c1">#         If timed out, continue to put in the next iteration.</span>
+    <span class="c1">#         Otherwise, break, i.e., continuing to the out loop.</span>
+    <span class="c1">#</span>
+    <span class="c1">#   NOTE: we don&#39;t check the status of the main thread because</span>
+    <span class="c1">#           1. if the process is killed by fatal signal, `pin_memory_thread`</span>
+    <span class="c1">#              ends.</span>
+    <span class="c1">#           2. in other cases, either the cleaning-up in __del__ or the</span>
+    <span class="c1">#              automatic exit of daemonic thread will take care of it.</span>
+    <span class="c1">#              This won&#39;t busy-wait either because `.get(timeout)` does not</span>
+    <span class="c1">#              busy-wait.</span>
+    <span class="c1">#</span>
+    <span class="c1"># [ main process ]</span>
+    <span class="c1">#   In the DataLoader Iter&#39;s `__del__`</span>
+    <span class="c1">#     b. Exit `pin_memory_thread`</span>
+    <span class="c1">#          i.   Set `pin_memory_thread_done_event`.</span>
+    <span class="c1">#          ii   Put `None` in `worker_result_queue`.</span>
+    <span class="c1">#          iii. Join the `pin_memory_thread`.</span>
+    <span class="c1">#          iv.  `worker_result_queue.cancel_join_thread()`.</span>
+    <span class="c1">#</span>
+    <span class="c1">#     c. Exit the workers.</span>
+    <span class="c1">#          i.   Set `workers_done_event`.</span>
+    <span class="c1">#          ii.  Put `None` in each worker&#39;s `index_queue`.</span>
+    <span class="c1">#          iii. Join the workers.</span>
+    <span class="c1">#          iv.  Call `.cancel_join_thread()` on each worker&#39;s `index_queue`.</span>
+    <span class="c1">#</span>
+    <span class="c1">#        NOTE: (c) is better placed after (b) because it may leave corrupted</span>
+    <span class="c1">#              data in `worker_result_queue`, which `pin_memory_thread`</span>
+    <span class="c1">#              reads from, in which case the `pin_memory_thread` can only</span>
+    <span class="c1">#              happen at timeing out, which is slow. Nonetheless, same thing</span>
+    <span class="c1">#              happens if a worker is killed by signal at unfortunate times,</span>
+    <span class="c1">#              but in other cases, we are better off having a non-corrupted</span>
+    <span class="c1">#              `worker_result_queue` for `pin_memory_thread`.</span>
+    <span class="c1">#</span>
+    <span class="c1">#   NOTE: If `pin_memory=False`, there is no `pin_memory_thread` and (b)</span>
+    <span class="c1">#         can be omitted</span>
+    <span class="c1">#</span>
+    <span class="c1"># NB: `done_event`s isn&#39;t strictly needed. E.g., we can just check for</span>
+    <span class="c1">#     `None` from `index_queue`, but it allows us to skip wasting resources</span>
+    <span class="c1">#     processing indices already in `index_queue` if we are already shutting</span>
+    <span class="c1">#     down.</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">loader</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">_MultiProcessingDataLoaderIter</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">loader</span><span class="p">)</span>
+
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_workers</span> <span class="o">&gt;</span> <span class="mi">0</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prefetch_factor</span> <span class="o">&gt;</span> <span class="mi">0</span>
+
+        <span class="k">if</span> <span class="n">loader</span><span class="o">.</span><span class="n">multiprocessing_context</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">multiprocessing_context</span> <span class="o">=</span> <span class="n">multiprocessing</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">multiprocessing_context</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">multiprocessing_context</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_worker_init_fn</span> <span class="o">=</span> <span class="n">loader</span><span class="o">.</span><span class="n">worker_init_fn</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_worker_queue_idx_cycle</span> <span class="o">=</span> <span class="n">itertools</span><span class="o">.</span><span class="n">cycle</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_num_workers</span><span class="p">))</span>
+        <span class="c1"># No certainty which module multiprocessing_context is</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_worker_result_queue</span> <span class="o">=</span> <span class="n">multiprocessing_context</span><span class="o">.</span><span class="n">Queue</span><span class="p">()</span>  <span class="c1"># type: ignore</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_worker_pids_set</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_shutdown</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_workers_done_event</span> <span class="o">=</span> <span class="n">multiprocessing_context</span><span class="o">.</span><span class="n">Event</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_index_queues</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_workers</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_num_workers</span><span class="p">):</span>
+            <span class="c1"># No certainty which module multiprocessing_context is</span>
+            <span class="n">index_queue</span> <span class="o">=</span> <span class="n">multiprocessing_context</span><span class="o">.</span><span class="n">Queue</span><span class="p">()</span>  <span class="c1"># type: ignore</span>
+            <span class="c1"># index_queue.cancel_join_thread()</span>
+            <span class="n">w</span> <span class="o">=</span> <span class="n">multiprocessing_context</span><span class="o">.</span><span class="n">Process</span><span class="p">(</span>
+                <span class="n">target</span><span class="o">=</span><span class="n">_utils</span><span class="o">.</span><span class="n">worker</span><span class="o">.</span><span class="n">_worker_loop</span><span class="p">,</span>
+                <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_dataset_kind</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dataset</span><span class="p">,</span> <span class="n">index_queue</span><span class="p">,</span>
+                      <span class="bp">self</span><span class="o">.</span><span class="n">_worker_result_queue</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_workers_done_event</span><span class="p">,</span>
+                      <span class="bp">self</span><span class="o">.</span><span class="n">_auto_collation</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_collate_fn</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_drop_last</span><span class="p">,</span>
+                      <span class="bp">self</span><span class="o">.</span><span class="n">_base_seed</span> <span class="o">+</span> <span class="n">i</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_worker_init_fn</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_workers</span><span class="p">,</span>
+                      <span class="bp">self</span><span class="o">.</span><span class="n">_persistent_workers</span><span class="p">))</span>
+            <span class="n">w</span><span class="o">.</span><span class="n">daemon</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="c1"># NB: Process.start() actually take some time as it needs to</span>
+            <span class="c1">#     start a process and pass the arguments over via a pipe.</span>
+            <span class="c1">#     Therefore, we only add a worker to self._workers list after</span>
+            <span class="c1">#     it started, so that we do not call .join() if program dies</span>
+            <span class="c1">#     before it starts, and __del__ tries to join but will get:</span>
+            <span class="c1">#     AssertionError: can only join a started process.</span>
+            <span class="n">w</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_index_queues</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">index_queue</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_workers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">w</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pin_memory</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pin_memory_thread_done_event</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Event</span><span class="p">()</span>
+
+            <span class="c1"># Queue is not type-annotated</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_data_queue</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">Queue</span><span class="p">()</span>  <span class="c1"># type: ignore</span>
+            <span class="n">pin_memory_thread</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span>
+                <span class="n">target</span><span class="o">=</span><span class="n">_utils</span><span class="o">.</span><span class="n">pin_memory</span><span class="o">.</span><span class="n">_pin_memory_loop</span><span class="p">,</span>
+                <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_worker_result_queue</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_data_queue</span><span class="p">,</span>
+                      <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">current_device</span><span class="p">(),</span>
+                      <span class="bp">self</span><span class="o">.</span><span class="n">_pin_memory_thread_done_event</span><span class="p">))</span>
+            <span class="n">pin_memory_thread</span><span class="o">.</span><span class="n">daemon</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="n">pin_memory_thread</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+            <span class="c1"># Similar to workers (see comment above), we only register</span>
+            <span class="c1"># pin_memory_thread once it is started.</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_pin_memory_thread</span> <span class="o">=</span> <span class="n">pin_memory_thread</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_data_queue</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_worker_result_queue</span>
+
+        <span class="c1"># .pid can be None only before process is spawned (not the case, so ignore)</span>
+        <span class="n">_utils</span><span class="o">.</span><span class="n">signal_handling</span><span class="o">.</span><span class="n">_set_worker_pids</span><span class="p">(</span><span class="nb">id</span><span class="p">(</span><span class="bp">self</span><span class="p">),</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">pid</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_workers</span><span class="p">))</span>  <span class="c1"># type: ignore</span>
+        <span class="n">_utils</span><span class="o">.</span><span class="n">signal_handling</span><span class="o">.</span><span class="n">_set_SIGCHLD_handler</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_worker_pids_set</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_reset</span><span class="p">(</span><span class="n">loader</span><span class="p">,</span> <span class="n">first_iter</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_reset</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">loader</span><span class="p">,</span> <span class="n">first_iter</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">_reset</span><span class="p">(</span><span class="n">loader</span><span class="p">,</span> <span class="n">first_iter</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_send_idx</span> <span class="o">=</span> <span class="mi">0</span>  <span class="c1"># idx of the next task to be sent to workers</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_rcvd_idx</span> <span class="o">=</span> <span class="mi">0</span>  <span class="c1"># idx of the next task to be returned in __next__</span>
+        <span class="c1"># information about data not yet yielded, i.e., tasks w/ indices in range [rcvd_idx, send_idx).</span>
+        <span class="c1"># map: task idx =&gt; - (worker_id,)        if data isn&#39;t fetched (outstanding)</span>
+        <span class="c1">#                  \ (worker_id, data)   if data is already fetched (out-of-order)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_task_info</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_tasks_outstanding</span> <span class="o">=</span> <span class="mi">0</span>  <span class="c1"># always equal to count(v for v in task_info.values() if len(v) == 1)</span>
+        <span class="c1"># A list of booleans representing whether each worker still has work to</span>
+        <span class="c1"># do, i.e., not having exhausted its iterable dataset object. It always</span>
+        <span class="c1"># contains all `True`s if not using an iterable-style dataset</span>
+        <span class="c1"># (i.e., if kind != Iterable).</span>
+        <span class="c1"># Not that this indicates that a worker still has work to do *for this epoch*.</span>
+        <span class="c1"># It does not mean that a worker is dead. In case of `_persistent_workers`, </span>
+        <span class="c1"># the worker will be reset to available in the next epoch.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_workers_status</span> <span class="o">=</span> <span class="p">[</span><span class="kc">True</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_num_workers</span><span class="p">)]</span>
+        <span class="c1"># We resume the prefetching in case it was enabled</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">first_iter</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">idx</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_num_workers</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_index_queues</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">_utils</span><span class="o">.</span><span class="n">worker</span><span class="o">.</span><span class="n">_ResumeIteration</span><span class="p">())</span>
+            <span class="n">resume_iteration_cnt</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_workers</span>
+            <span class="k">while</span> <span class="n">resume_iteration_cnt</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_data</span><span class="p">()</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">_utils</span><span class="o">.</span><span class="n">worker</span><span class="o">.</span><span class="n">_ResumeIteration</span><span class="p">):</span>
+                    <span class="n">resume_iteration_cnt</span> <span class="o">-=</span> <span class="mi">1</span>
+        <span class="c1"># prime the prefetch loop</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_prefetch_factor</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_workers</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_try_put_index</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">_try_get_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="n">_utils</span><span class="o">.</span><span class="n">MP_STATUS_CHECK_INTERVAL</span><span class="p">):</span>
+        <span class="c1"># Tries to fetch data from `self._data_queue` once for a given timeout.</span>
+        <span class="c1"># This can also be used as inner loop of fetching without timeout, with</span>
+        <span class="c1"># the sender status as the loop condition.</span>
+        <span class="c1">#</span>
+        <span class="c1"># This raises a `RuntimeError` if any worker died expectedly. This error</span>
+        <span class="c1"># can come from either the SIGCHLD handler in `_utils/signal_handling.py`</span>
+        <span class="c1"># (only for non-Windows platforms), or the manual check below on errors</span>
+        <span class="c1"># and timeouts.</span>
+        <span class="c1">#</span>
+        <span class="c1"># Returns a 2-tuple:</span>
+        <span class="c1">#   (bool: whether successfully get data, any: data if successful else None)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_data_queue</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="c1"># At timeout and error, we manually check whether any worker has</span>
+            <span class="c1"># failed. Note that this is the only mechanism for Windows to detect</span>
+            <span class="c1"># worker failures.</span>
+            <span class="n">failed_workers</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">worker_id</span><span class="p">,</span> <span class="n">w</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_workers</span><span class="p">):</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_workers_status</span><span class="p">[</span><span class="n">worker_id</span><span class="p">]</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">w</span><span class="o">.</span><span class="n">is_alive</span><span class="p">():</span>
+                    <span class="n">failed_workers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">w</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_mark_worker_as_unavailable</span><span class="p">(</span><span class="n">worker_id</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">failed_workers</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">pids_str</span> <span class="o">=</span> <span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">w</span><span class="o">.</span><span class="n">pid</span><span class="p">)</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">failed_workers</span><span class="p">)</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;DataLoader worker (pid(s) </span><span class="si">{}</span><span class="s1">) exited unexpectedly&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">pids_str</span><span class="p">))</span> <span class="kn">from</span> <span class="nn">e</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">e</span><span class="p">,</span> <span class="n">queue</span><span class="o">.</span><span class="n">Empty</span><span class="p">):</span>
+                <span class="k">return</span> <span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+            <span class="kn">import</span> <span class="nn">tempfile</span>
+            <span class="kn">import</span> <span class="nn">errno</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="c1"># Raise an exception if we are this close to the FDs limit.</span>
+                <span class="c1"># Apparently, trying to open only one file is not a sufficient</span>
+                <span class="c1"># test.</span>
+                <span class="c1"># See NOTE [ DataLoader on Linux and open files limit ]</span>
+                <span class="n">fds_limit_margin</span> <span class="o">=</span> <span class="mi">10</span>
+                <span class="n">fs</span> <span class="o">=</span> <span class="p">[</span><span class="n">tempfile</span><span class="o">.</span><span class="n">NamedTemporaryFile</span><span class="p">()</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">fds_limit_margin</span><span class="p">)]</span>
+            <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">e</span><span class="o">.</span><span class="n">errno</span> <span class="o">==</span> <span class="n">errno</span><span class="o">.</span><span class="n">EMFILE</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                        <span class="s2">&quot;Too many open files. Communication with the&quot;</span>
+                        <span class="s2">&quot; workers is no longer possible. Please increase the&quot;</span>
+                        <span class="s2">&quot; limit using `ulimit -n` in the shell or change the&quot;</span>
+                        <span class="s2">&quot; sharing strategy by calling&quot;</span>
+                        <span class="s2">&quot; `torch.multiprocessing.set_sharing_strategy(&#39;file_system&#39;)`&quot;</span>
+                        <span class="s2">&quot; at the beginning of your code&quot;</span><span class="p">)</span> <span class="kn">from</span> <span class="bp">None</span>
+            <span class="k">raise</span>
+
+<span class="c1"># NOTE [ DataLoader on Linux and open files limit ]</span>
+<span class="c1">#</span>
+<span class="c1"># On Linux when DataLoader is used with multiprocessing we pass the data between</span>
+<span class="c1"># the root process and the workers through SHM files. We remove those files from</span>
+<span class="c1"># the filesystem as soon as they are created and keep them alive by</span>
+<span class="c1"># passing around their file descriptors through AF_UNIX sockets. (See</span>
+<span class="c1"># docs/source/multiprocessing.rst and &#39;Multiprocessing Technical Notes` in</span>
+<span class="c1"># the wiki (https://github.com/pytorch/pytorch/wiki).)</span>
+<span class="c1">#</span>
+<span class="c1"># This sometimes leads us to exceeding the open files limit. When that happens,</span>
+<span class="c1"># and the offending file descriptor is coming over a socket, the `socket` Python</span>
+<span class="c1"># package silently strips the file descriptor from the message, setting only the</span>
+<span class="c1"># `MSG_CTRUNC` flag (which might be a bit misleading since the manpage says that</span>
+<span class="c1"># it _indicates that some control data were discarded due to lack of space in</span>
+<span class="c1"># the buffer for ancillary data_). This might reflect the C implementation of</span>
+<span class="c1"># AF_UNIX sockets.</span>
+<span class="c1">#</span>
+<span class="c1"># This behaviour can be reproduced with the script and instructions at the</span>
+<span class="c1"># bottom of this note.</span>
+<span class="c1">#</span>
+<span class="c1"># When that happens, the standard Python `multiprocessing` (and not</span>
+<span class="c1"># `torch.multiprocessing`) raises a `RuntimeError: received 0 items of ancdata`</span>
+<span class="c1">#</span>
+<span class="c1"># Sometimes, instead of the FD being stripped, you may get an `OSError:</span>
+<span class="c1"># Too many open files`, both in the script below and in DataLoader. However,</span>
+<span class="c1"># this is rare and seems to be nondeterministic.</span>
+<span class="c1">#</span>
+<span class="c1">#</span>
+<span class="c1">#   #!/usr/bin/env python3</span>
+<span class="c1">#   import sys</span>
+<span class="c1">#   import socket</span>
+<span class="c1">#   import os</span>
+<span class="c1">#   import array</span>
+<span class="c1">#   import shutil</span>
+<span class="c1">#   import socket</span>
+<span class="c1">#</span>
+<span class="c1">#</span>
+<span class="c1">#   if len(sys.argv) != 4:</span>
+<span class="c1">#       print(&quot;Usage: &quot;, sys.argv[0], &quot; tmp_dirname iteration (send|recv)&quot;)</span>
+<span class="c1">#       sys.exit(1)</span>
+<span class="c1">#</span>
+<span class="c1">#   if __name__ == &#39;__main__&#39;:</span>
+<span class="c1">#       dirname = sys.argv[1]</span>
+<span class="c1">#       sock_path = dirname + &quot;/sock&quot;</span>
+<span class="c1">#       iterations = int(sys.argv[2])</span>
+<span class="c1">#       def dummy_path(i):</span>
+<span class="c1">#           return dirname + &quot;/&quot; + str(i) + &quot;.dummy&quot;</span>
+<span class="c1">#</span>
+<span class="c1">#</span>
+<span class="c1">#       if sys.argv[3] == &#39;send&#39;:</span>
+<span class="c1">#           while not os.path.exists(sock_path):</span>
+<span class="c1">#               pass</span>
+<span class="c1">#           client = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)</span>
+<span class="c1">#           client.connect(sock_path)</span>
+<span class="c1">#           for i in range(iterations):</span>
+<span class="c1">#               fd = os.open(dummy_path(i), os.O_WRONLY | os.O_CREAT)</span>
+<span class="c1">#               ancdata = array.array(&#39;i&#39;, [fd])</span>
+<span class="c1">#               msg = bytes([i % 256])</span>
+<span class="c1">#               print(&quot;Sending fd &quot;, fd, &quot; (iteration #&quot;, i, &quot;)&quot;)</span>
+<span class="c1">#               client.sendmsg([msg], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, ancdata)])</span>
+<span class="c1">#</span>
+<span class="c1">#</span>
+<span class="c1">#       else:</span>
+<span class="c1">#           assert sys.argv[3] == &#39;recv&#39;</span>
+<span class="c1">#</span>
+<span class="c1">#           if os.path.exists(dirname):</span>
+<span class="c1">#               raise Exception(&quot;Directory exists&quot;)</span>
+<span class="c1">#</span>
+<span class="c1">#           os.mkdir(dirname)</span>
+<span class="c1">#</span>
+<span class="c1">#           print(&quot;Opening socket...&quot;)</span>
+<span class="c1">#           server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)</span>
+<span class="c1">#           server.bind(sock_path)</span>
+<span class="c1">#</span>
+<span class="c1">#           print(&quot;Listening...&quot;)</span>
+<span class="c1">#           for i in range(iterations):</span>
+<span class="c1">#               a = array.array(&#39;i&#39;)</span>
+<span class="c1">#               msg, ancdata, flags, addr = server.recvmsg(1, socket.CMSG_SPACE(a.itemsize))</span>
+<span class="c1">#               assert(len(ancdata) == 1)</span>
+<span class="c1">#               cmsg_level, cmsg_type, cmsg_data = ancdata[0]</span>
+<span class="c1">#               a.frombytes(cmsg_data)</span>
+<span class="c1">#               print(&quot;Received fd &quot;, a[0], &quot; (iteration #&quot;, i, &quot;)&quot;)</span>
+<span class="c1">#</span>
+<span class="c1">#           shutil.rmtree(dirname)</span>
+<span class="c1">#</span>
+<span class="c1"># Steps to reproduce:</span>
+<span class="c1">#</span>
+<span class="c1"># 1. Run two shells and set lower file descriptor limit in the receiving one:</span>
+<span class="c1"># (shell1) ulimit -n 1020</span>
+<span class="c1"># (shell2) ulimit -n 1022</span>
+<span class="c1">#</span>
+<span class="c1"># 2. Run the script above with the `recv` option in the first shell</span>
+<span class="c1"># (shell1) ./test_socket.py sock_tmp 1017 recv</span>
+<span class="c1">#</span>
+<span class="c1"># 3. Run the script with the `send` option in the second shell:</span>
+<span class="c1"># (shell2) ./test_socket.py sock_tmp 1017 send</span>
+
+    <span class="k">def</span> <span class="nf">_get_data</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Fetches data from `self._data_queue`.</span>
+        <span class="c1">#</span>
+        <span class="c1"># We check workers&#39; status every `MP_STATUS_CHECK_INTERVAL` seconds,</span>
+        <span class="c1"># which we achieve by running `self._try_get_data(timeout=MP_STATUS_CHECK_INTERVAL)`</span>
+        <span class="c1"># in a loop. This is the only mechanism to detect worker failures for</span>
+        <span class="c1"># Windows. For other platforms, a SIGCHLD handler is also used for</span>
+        <span class="c1"># worker failure detection.</span>
+        <span class="c1">#</span>
+        <span class="c1"># If `pin_memory=True`, we also need check if `pin_memory_thread` had</span>
+        <span class="c1"># died at timeouts.</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_timeout</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">success</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_try_get_data</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_timeout</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">success</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">data</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;DataLoader timed out after </span><span class="si">{}</span><span class="s1"> seconds&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_timeout</span><span class="p">))</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pin_memory</span><span class="p">:</span>
+            <span class="k">while</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pin_memory_thread</span><span class="o">.</span><span class="n">is_alive</span><span class="p">():</span>
+                <span class="n">success</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_try_get_data</span><span class="p">()</span>
+                <span class="k">if</span> <span class="n">success</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="n">data</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># while condition is false, i.e., pin_memory_thread died.</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;Pin memory thread exited unexpectedly&#39;</span><span class="p">)</span>
+            <span class="c1"># In this case, `self._data_queue` is a `queue.Queue`,. But we don&#39;t</span>
+            <span class="c1"># need to call `.task_done()` because we don&#39;t use `.join()`.</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+                <span class="n">success</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_try_get_data</span><span class="p">()</span>
+                <span class="k">if</span> <span class="n">success</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="n">data</span>
+
+    <span class="k">def</span> <span class="nf">_next_data</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="c1"># If the worker responsible for `self._rcvd_idx` has already ended</span>
+            <span class="c1"># and was unable to fulfill this task (due to exhausting an `IterableDataset`),</span>
+            <span class="c1"># we try to advance `self._rcvd_idx` to find the next valid index.</span>
+            <span class="c1">#</span>
+            <span class="c1"># This part needs to run in the loop because both the `self._get_data()`</span>
+            <span class="c1"># call and `_IterableDatasetStopIteration` check below can mark</span>
+            <span class="c1"># extra worker(s) as dead.</span>
+            <span class="k">while</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rcvd_idx</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_send_idx</span><span class="p">:</span>
+                <span class="n">info</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_task_info</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_rcvd_idx</span><span class="p">]</span>
+                <span class="n">worker_id</span> <span class="o">=</span> <span class="n">info</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">info</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_workers_status</span><span class="p">[</span><span class="n">worker_id</span><span class="p">]:</span>  <span class="c1"># has data or is still active</span>
+                    <span class="k">break</span>
+                <span class="k">del</span> <span class="bp">self</span><span class="o">.</span><span class="n">_task_info</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_rcvd_idx</span><span class="p">]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_rcvd_idx</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># no valid `self._rcvd_idx` is found (i.e., didn&#39;t break)</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_persistent_workers</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_shutdown_workers</span><span class="p">()</span>
+                <span class="k">raise</span> <span class="ne">StopIteration</span>
+
+            <span class="c1"># Now `self._rcvd_idx` is the batch index we want to fetch</span>
+
+            <span class="c1"># Check if the next sample has already been generated</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_task_info</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_rcvd_idx</span><span class="p">])</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_task_info</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_rcvd_idx</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process_data</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+
+            <span class="k">assert</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_shutdown</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tasks_outstanding</span> <span class="o">&gt;</span> <span class="mi">0</span>
+            <span class="n">idx</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_data</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_tasks_outstanding</span> <span class="o">-=</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_dataset_kind</span> <span class="o">==</span> <span class="n">_DatasetKind</span><span class="o">.</span><span class="n">Iterable</span><span class="p">:</span>
+                <span class="c1"># Check for _IterableDatasetStopIteration</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">_utils</span><span class="o">.</span><span class="n">worker</span><span class="o">.</span><span class="n">_IterableDatasetStopIteration</span><span class="p">):</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_persistent_workers</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_workers_status</span><span class="p">[</span><span class="n">data</span><span class="o">.</span><span class="n">worker_id</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_mark_worker_as_unavailable</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">worker_id</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_try_put_index</span><span class="p">()</span>
+                    <span class="k">continue</span>
+
+            <span class="k">if</span> <span class="n">idx</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_rcvd_idx</span><span class="p">:</span>
+                <span class="c1"># store out-of-order samples</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_task_info</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span> <span class="o">+=</span> <span class="p">(</span><span class="n">data</span><span class="p">,)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">del</span> <span class="bp">self</span><span class="o">.</span><span class="n">_task_info</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span>
+                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process_data</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_try_put_index</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_tasks_outstanding</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prefetch_factor</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_num_workers</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_next_index</span><span class="p">()</span>
+        <span class="k">except</span> <span class="ne">StopIteration</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_num_workers</span><span class="p">):</span>  <span class="c1"># find the next active worker, if any</span>
+            <span class="n">worker_queue_idx</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_worker_queue_idx_cycle</span><span class="p">)</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_workers_status</span><span class="p">[</span><span class="n">worker_queue_idx</span><span class="p">]:</span>
+                <span class="k">break</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># not found (i.e., didn&#39;t break)</span>
+            <span class="k">return</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_index_queues</span><span class="p">[</span><span class="n">worker_queue_idx</span><span class="p">]</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">_send_idx</span><span class="p">,</span> <span class="n">index</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_task_info</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_send_idx</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">worker_queue_idx</span><span class="p">,)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_tasks_outstanding</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_send_idx</span> <span class="o">+=</span> <span class="mi">1</span>
+
+    <span class="k">def</span> <span class="nf">_process_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_rcvd_idx</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_try_put_index</span><span class="p">()</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">ExceptionWrapper</span><span class="p">):</span>
+            <span class="n">data</span><span class="o">.</span><span class="n">reraise</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">data</span>
+
+    <span class="k">def</span> <span class="nf">_mark_worker_as_unavailable</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">worker_id</span><span class="p">,</span> <span class="n">shutdown</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="c1"># Mark a worker as having finished its work e.g., due to</span>
+        <span class="c1"># exhausting an `IterableDataset`. This should be used only when this</span>
+        <span class="c1"># `_MultiProcessingDataLoaderIter` is going to continue running.</span>
+
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_workers_status</span><span class="p">[</span><span class="n">worker_id</span><span class="p">]</span> <span class="ow">or</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_persistent_workers</span> <span class="ow">and</span> <span class="n">shutdown</span><span class="p">)</span>
+
+        <span class="c1"># Signal termination to that specific worker.</span>
+        <span class="n">q</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_index_queues</span><span class="p">[</span><span class="n">worker_id</span><span class="p">]</span>
+        <span class="c1"># Indicate that no more data will be put on this queue by the current</span>
+        <span class="c1"># process.</span>
+        <span class="n">q</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span>
+
+        <span class="c1"># Note that we don&#39;t actually join the worker here, nor do we remove the</span>
+        <span class="c1"># worker&#39;s pid from C side struct because (1) joining may be slow, and</span>
+        <span class="c1"># (2) since we don&#39;t join, the worker may still raise error, and we</span>
+        <span class="c1"># prefer capturing those, rather than ignoring them, even though they</span>
+        <span class="c1"># are raised after the worker has finished its job.</span>
+        <span class="c1"># Joinning is deferred to `_shutdown_workers`, which it is called when</span>
+        <span class="c1"># all workers finish their jobs (e.g., `IterableDataset` replicas) or</span>
+        <span class="c1"># when this iterator is garbage collected.</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_workers_status</span><span class="p">[</span><span class="n">worker_id</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_workers_done_event</span><span class="o">.</span><span class="n">is_set</span><span class="p">()</span> <span class="o">==</span> <span class="n">shutdown</span>
+
+    <span class="k">def</span> <span class="nf">_shutdown_workers</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># Called when shutting down this `_MultiProcessingDataLoaderIter`.</span>
+        <span class="c1"># See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on</span>
+        <span class="c1"># the logic of this function.</span>
+        <span class="n">python_exit_status</span> <span class="o">=</span> <span class="n">_utils</span><span class="o">.</span><span class="n">python_exit_status</span>
+        <span class="k">if</span> <span class="n">python_exit_status</span> <span class="ow">is</span> <span class="kc">True</span> <span class="ow">or</span> <span class="n">python_exit_status</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># See (2) of the note. If Python is shutting down, do no-op.</span>
+            <span class="k">return</span>
+        <span class="c1"># Normal exit when last reference is gone / iterator is depleted.</span>
+        <span class="c1"># See (1) and the second half of the note.</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_shutdown</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_shutdown</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="c1"># Exit `pin_memory_thread` first because exiting workers may leave</span>
+                <span class="c1"># corrupted data in `worker_result_queue` which `pin_memory_thread`</span>
+                <span class="c1"># reads from.</span>
+                <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s1">&#39;_pin_memory_thread&#39;</span><span class="p">):</span>
+                    <span class="c1"># Use hasattr in case error happens before we set the attribute.</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_pin_memory_thread_done_event</span><span class="o">.</span><span class="n">set</span><span class="p">()</span>
+                    <span class="c1"># Send something to pin_memory_thread in case it is waiting</span>
+                    <span class="c1"># so that it can wake up and check `pin_memory_thread_done_event`</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_worker_result_queue</span><span class="o">.</span><span class="n">put</span><span class="p">((</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">))</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_pin_memory_thread</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_worker_result_queue</span><span class="o">.</span><span class="n">cancel_join_thread</span><span class="p">()</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_worker_result_queue</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+                <span class="c1"># Exit workers now.</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_workers_done_event</span><span class="o">.</span><span class="n">set</span><span class="p">()</span>
+                <span class="k">for</span> <span class="n">worker_id</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_workers</span><span class="p">)):</span>
+                    <span class="c1"># Get number of workers from `len(self._workers)` instead of</span>
+                    <span class="c1"># `self._num_workers` in case we error before starting all</span>
+                    <span class="c1"># workers.</span>
+                    <span class="c1"># If we are using workers_status with persistent_workers</span>
+                    <span class="c1"># we have to shut it down because the worker is paused</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_persistent_workers</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_workers_status</span><span class="p">[</span><span class="n">worker_id</span><span class="p">]:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_mark_worker_as_unavailable</span><span class="p">(</span><span class="n">worker_id</span><span class="p">,</span> <span class="n">shutdown</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_workers</span><span class="p">:</span>
+                    <span class="n">w</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="n">_utils</span><span class="o">.</span><span class="n">MP_STATUS_CHECK_INTERVAL</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">w</span><span class="o">.</span><span class="n">is_alive</span><span class="p">():</span>
+                        <span class="c1"># Existing mechanisms try to make the workers exit</span>
+                        <span class="c1"># peacefully, but in case that we unfortunately reach</span>
+                        <span class="c1"># here, which we shouldn&#39;t, (e.g., pytorch/pytorch#39570),</span>
+                        <span class="c1"># we kill the worker.</span>
+                        <span class="n">w</span><span class="o">.</span><span class="n">terminate</span><span class="p">()</span>
+                <span class="k">for</span> <span class="n">q</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_index_queues</span><span class="p">:</span>
+                    <span class="n">q</span><span class="o">.</span><span class="n">cancel_join_thread</span><span class="p">()</span>
+                    <span class="n">q</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+            <span class="k">finally</span><span class="p">:</span>
+                <span class="c1"># Even though all this function does is putting into queues that</span>
+                <span class="c1"># we have called `cancel_join_thread` on, weird things can</span>
+                <span class="c1"># happen when a worker is killed by a signal, e.g., hanging in</span>
+                <span class="c1"># `Event.set()`. So we need to guard this with SIGCHLD handler,</span>
+                <span class="c1"># and remove pids from the C side data structure only at the</span>
+                <span class="c1"># end.</span>
+                <span class="c1">#</span>
+                <span class="c1"># FIXME: Unfortunately, for Windows, we are missing a worker</span>
+                <span class="c1">#        error detection mechanism here in this function, as it</span>
+                <span class="c1">#        doesn&#39;t provide a SIGCHLD handler.</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_worker_pids_set</span><span class="p">:</span>
+                    <span class="n">_utils</span><span class="o">.</span><span class="n">signal_handling</span><span class="o">.</span><span class="n">_remove_worker_pids</span><span class="p">(</span><span class="nb">id</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_worker_pids_set</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="k">def</span> <span class="fm">__del__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_shutdown_workers</span><span class="p">()</span>
+</pre></div>
+
+             </article>
+             
+            </div>
+            <footer>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="../../../../" src="../../../../_static/documentation_options.js"></script>
+         <script src="../../../../_static/jquery.js"></script>
+         <script src="../../../../_static/underscore.js"></script>
+         <script src="../../../../_static/doctools.js"></script>
+         <script src="../../../../_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="../../../../_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="../../../../_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="../../../../_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="../../../../_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="../../../../_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>

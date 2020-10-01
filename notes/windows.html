@@ -1,0 +1,912 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Windows FAQ &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/notes/windows.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="../_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="C++" href="../cpp_index.html" />
+    <link rel="prev" title="Serialization semantics" href="serialization.html" /> 
+
+  
+  <script src="../_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="../_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/notes/windows.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="../index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+      <li>Windows FAQ</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+            
+            <a href="../_sources/notes/windows.rst.txt" rel="nofollow"><img src="../_static/images/view-page-source-icon.svg"></a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <div class="section" id="windows-faq">
+<h1>Windows FAQ<a class="headerlink" href="#windows-faq" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="building-from-source">
+<h2>Building from source<a class="headerlink" href="#building-from-source" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="include-optional-components">
+<h3>Include optional components<a class="headerlink" href="#include-optional-components" title="Permalink to this headline">¶</a></h3>
+<p>There are two supported components for Windows PyTorch:
+MKL and MAGMA. Here are the steps to build with them.</p>
+<div class="highlight-bat notranslate"><div class="highlight"><pre><span></span><span class="c1">REM Make sure you have 7z and curl installed.</span>
+
+<span class="c1">REM Download MKL files</span>
+curl https://s3.amazonaws.com/ossci-windows/mkl_2020.0.166.7z -k -O
+7z x -aoa mkl_2020.0.166.7z -omkl
+
+<span class="c1">REM Download MAGMA files</span>
+<span class="c1">REM version available:</span>
+<span class="c1">REM 2.5.3 (CUDA 10.1 10.2 11.0) x (Debug Release)</span>
+<span class="c1">REM 2.5.2 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)</span>
+<span class="c1">REM 2.5.1 (CUDA 9.2 10.0 10.1 10.2) x (Debug Release)</span>
+<span class="c1">REM 2.5.0 (CUDA 9.0 9.2 10.0 10.1) x (Debug Release)</span>
+<span class="c1">REM 2.4.0 (CUDA 8.0 9.2) x (Release)</span>
+<span class="k">set</span> <span class="nv">CUDA_PREFIX</span><span class="p">=</span>cuda92
+<span class="k">set</span> <span class="nv">CONFIG</span><span class="p">=</span>release
+curl -k https://s3.amazonaws.com/ossci-windows/magma_2.5.1_<span class="nv">%CUDA_PREFIX%</span>_<span class="nv">%CONFIG%</span>.7z -o magma.7z
+7z x -aoa magma.7z -omagma
+
+<span class="c1">REM Setting essential environment variables</span>
+<span class="k">set</span> <span class="s2">&quot;CMAKE_INCLUDE_PATH=</span><span class="nv">%cd%</span><span class="s2">\mkl\include&quot;</span>
+<span class="k">set</span> <span class="s2">&quot;LIB=</span><span class="nv">%cd%</span><span class="s2">\mkl\lib;</span><span class="nv">%LIB%</span><span class="s2">&quot;</span>
+<span class="k">set</span> <span class="s2">&quot;MAGMA_HOME=</span><span class="nv">%cd%</span><span class="s2">\magma&quot;</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="speeding-cuda-build-for-windows">
+<h3>Speeding CUDA build for Windows<a class="headerlink" href="#speeding-cuda-build-for-windows" title="Permalink to this headline">¶</a></h3>
+<p>Visual Studio doesn’t support parallel custom task currently.
+As an alternative, we can use <code class="docutils literal notranslate"><span class="pre">Ninja</span></code> to parallelize CUDA
+build tasks. It can be used by typing only a few lines of code.</p>
+<div class="highlight-bat notranslate"><div class="highlight"><pre><span></span><span class="c1">REM Let&#39;s install ninja first.</span>
+pip install ninja
+
+<span class="c1">REM Set it as the cmake generator</span>
+<span class="k">set</span> <span class="nv">CMAKE_GENERATOR</span><span class="p">=</span>Ninja
+</pre></div>
+</div>
+</div>
+<div class="section" id="one-key-install-script">
+<h3>One key install script<a class="headerlink" href="#one-key-install-script" title="Permalink to this headline">¶</a></h3>
+<p>You can take a look at <a class="reference external" href="https://github.com/peterjc123/pytorch-scripts">this set of scripts</a>.
+It will lead the way for you.</p>
+</div>
+</div>
+<div class="section" id="extension">
+<h2>Extension<a class="headerlink" href="#extension" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="cffi-extension">
+<h3>CFFI Extension<a class="headerlink" href="#cffi-extension" title="Permalink to this headline">¶</a></h3>
+<p>The support for CFFI Extension is very experimental. There’re
+generally two steps to enable it under Windows.</p>
+<p>First, specify additional <code class="docutils literal notranslate"><span class="pre">libraries</span></code> in <code class="docutils literal notranslate"><span class="pre">Extension</span></code>
+object to make it build on Windows.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">ffi</span> <span class="o">=</span> <span class="n">create_extension</span><span class="p">(</span>
+    <span class="s1">&#39;_ext.my_lib&#39;</span><span class="p">,</span>
+    <span class="n">headers</span><span class="o">=</span><span class="n">headers</span><span class="p">,</span>
+    <span class="n">sources</span><span class="o">=</span><span class="n">sources</span><span class="p">,</span>
+    <span class="n">define_macros</span><span class="o">=</span><span class="n">defines</span><span class="p">,</span>
+    <span class="n">relative_to</span><span class="o">=</span><span class="vm">__file__</span><span class="p">,</span>
+    <span class="n">with_cuda</span><span class="o">=</span><span class="n">with_cuda</span><span class="p">,</span>
+    <span class="n">extra_compile_args</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;-std=c99&quot;</span><span class="p">],</span>
+    <span class="n">libraries</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;ATen&#39;</span><span class="p">,</span> <span class="s1">&#39;_C&#39;</span><span class="p">]</span> <span class="c1"># Append cuda libraries when necessary, like cudart</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>Second, here is a workground for “unresolved external symbol
+state caused by <code class="docutils literal notranslate"><span class="pre">extern</span> <span class="pre">THCState</span> <span class="pre">*state;</span></code>”</p>
+<p>Change the source code from C to C++. An example is listed below.</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span> <span class="cpf">&lt;THC/THC.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span> <span class="cpf">&lt;ATen/ATen.h&gt;</span><span class="cp"></span>
+
+<span class="n">THCState</span> <span class="o">*</span><span class="n">state</span> <span class="o">=</span> <span class="n">at</span><span class="o">::</span><span class="n">globalContext</span><span class="p">().</span><span class="n">thc_state</span><span class="p">;</span>
+
+<span class="k">extern</span> <span class="s">&quot;C&quot;</span> <span class="kt">int</span> <span class="n">my_lib_add_forward_cuda</span><span class="p">(</span><span class="n">THCudaTensor</span> <span class="o">*</span><span class="n">input1</span><span class="p">,</span> <span class="n">THCudaTensor</span> <span class="o">*</span><span class="n">input2</span><span class="p">,</span>
+                                        <span class="n">THCudaTensor</span> <span class="o">*</span><span class="n">output</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">THCudaTensor_isSameSizeAs</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">input1</span><span class="p">,</span> <span class="n">input2</span><span class="p">))</span>
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="n">THCudaTensor_resizeAs</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">output</span><span class="p">,</span> <span class="n">input1</span><span class="p">);</span>
+    <span class="n">THCudaTensor_cadd</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">output</span><span class="p">,</span> <span class="n">input1</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">input2</span><span class="p">);</span>
+    <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="k">extern</span> <span class="s">&quot;C&quot;</span> <span class="kt">int</span> <span class="n">my_lib_add_backward_cuda</span><span class="p">(</span><span class="n">THCudaTensor</span> <span class="o">*</span><span class="n">grad_output</span><span class="p">,</span> <span class="n">THCudaTensor</span> <span class="o">*</span><span class="n">grad_input</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="n">THCudaTensor_resizeAs</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">grad_input</span><span class="p">,</span> <span class="n">grad_output</span><span class="p">);</span>
+    <span class="n">THCudaTensor_fill</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">grad_input</span><span class="p">,</span> <span class="mi">1</span><span class="p">);</span>
+    <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="cpp-extension">
+<h3>Cpp Extension<a class="headerlink" href="#cpp-extension" title="Permalink to this headline">¶</a></h3>
+<p>This type of extension has better support compared with
+the previous one. However, it still needs some manual
+configuration. First, you should open the
+<strong>x86_x64 Cross Tools Command Prompt for VS 2017</strong>.
+And then, you can start your compiling process.</p>
+</div>
+</div>
+<div class="section" id="installation">
+<h2>Installation<a class="headerlink" href="#installation" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="package-not-found-in-win-32-channel">
+<h3>Package not found in win-32 channel.<a class="headerlink" href="#package-not-found-in-win-32-channel" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-bat notranslate"><div class="highlight"><pre><span></span>Solving environment: failed
+
+PackagesNotFoundError: The following packages are not available from current channels:
+
+- pytorch
+
+Current channels:
+- https://conda.anaconda.org/pytorch/win-32
+- https://conda.anaconda.org/pytorch/noarch
+- https://repo.continuum.io/pkgs/main/win-32
+- https://repo.continuum.io/pkgs/main/noarch
+- https://repo.continuum.io/pkgs/free/win-32
+- https://repo.continuum.io/pkgs/free/noarch
+- https://repo.continuum.io/pkgs/r/win-32
+- https://repo.continuum.io/pkgs/r/noarch
+- https://repo.continuum.io/pkgs/pro/win-32
+- https://repo.continuum.io/pkgs/pro/noarch
+- https://repo.continuum.io/pkgs/msys2/win-32
+- https://repo.continuum.io/pkgs/msys2/noarch
+</pre></div>
+</div>
+<p>PyTorch doesn’t work on 32-bit system. Please use Windows and
+Python 64-bit version.</p>
+</div>
+<div class="section" id="import-error">
+<h3>Import error<a class="headerlink" href="#import-error" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">torch._C</span> <span class="kn">import</span> <span class="o">*</span>
+
+<span class="ne">ImportError</span><span class="p">:</span> <span class="n">DLL</span> <span class="n">load</span> <span class="n">failed</span><span class="p">:</span> <span class="n">The</span> <span class="n">specified</span> <span class="n">module</span> <span class="n">could</span> <span class="ow">not</span> <span class="n">be</span> <span class="n">found</span><span class="o">.</span>
+</pre></div>
+</div>
+<p>The problem is caused by the missing of the essential files. Actually,
+we include almost all the essential files that PyTorch need for the conda
+package except VC2017 redistributable and some mkl libraries.
+You can resolve this by typing the following command.</p>
+<div class="highlight-bat notranslate"><div class="highlight"><pre><span></span>conda install -c peterjc123 vc vs2017_runtime
+conda install mkl_fft intel_openmp numpy mkl
+</pre></div>
+</div>
+<p>As for the wheels package, since we didn’t pack some libraries and VS2017
+redistributable files in, please make sure you install them manually.
+The <a class="reference external" href="https://aka.ms/vs/15/release/VC_redist.x64.exe">VS 2017 redistributable installer</a> can be downloaded.
+And you should also pay attention to your installation of Numpy. Make sure it
+uses MKL instead of OpenBLAS. You may type in the following command.</p>
+<div class="highlight-bat notranslate"><div class="highlight"><pre><span></span>pip install numpy mkl intel-openmp mkl_fft
+</pre></div>
+</div>
+<p>Another possible cause may be you are using GPU version without NVIDIA
+graphics cards. Please replace your GPU package with the CPU one.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">torch._C</span> <span class="kn">import</span> <span class="o">*</span>
+
+<span class="ne">ImportError</span><span class="p">:</span> <span class="n">DLL</span> <span class="n">load</span> <span class="n">failed</span><span class="p">:</span> <span class="n">The</span> <span class="n">operating</span> <span class="n">system</span> <span class="n">cannot</span> <span class="n">run</span> <span class="o">%</span><span class="mf">1.</span>
+</pre></div>
+</div>
+<p>This is actually an upstream issue of Anaconda. When you initialize your
+environment with conda-forge channel, this issue will emerge. You may fix
+the intel-openmp libraries through this command.</p>
+<div class="highlight-bat notranslate"><div class="highlight"><pre><span></span>conda install -c defaults intel-openmp -f
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="usage-multiprocessing">
+<h2>Usage (multiprocessing)<a class="headerlink" href="#usage-multiprocessing" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="multiprocessing-error-without-if-clause-protection">
+<h3>Multiprocessing error without if-clause protection<a class="headerlink" href="#multiprocessing-error-without-if-clause-protection" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="ne">RuntimeError</span><span class="p">:</span>
+       <span class="n">An</span> <span class="n">attempt</span> <span class="n">has</span> <span class="n">been</span> <span class="n">made</span> <span class="n">to</span> <span class="n">start</span> <span class="n">a</span> <span class="n">new</span> <span class="n">process</span> <span class="n">before</span> <span class="n">the</span>
+       <span class="n">current</span> <span class="n">process</span> <span class="n">has</span> <span class="n">finished</span> <span class="n">its</span> <span class="n">bootstrapping</span> <span class="n">phase</span><span class="o">.</span>
+
+   <span class="n">This</span> <span class="n">probably</span> <span class="n">means</span> <span class="n">that</span> <span class="n">you</span> <span class="n">are</span> <span class="ow">not</span> <span class="n">using</span> <span class="n">fork</span> <span class="n">to</span> <span class="n">start</span> <span class="n">your</span>
+   <span class="n">child</span> <span class="n">processes</span> <span class="ow">and</span> <span class="n">you</span> <span class="n">have</span> <span class="n">forgotten</span> <span class="n">to</span> <span class="n">use</span> <span class="n">the</span> <span class="n">proper</span> <span class="n">idiom</span>
+   <span class="ow">in</span> <span class="n">the</span> <span class="n">main</span> <span class="n">module</span><span class="p">:</span>
+
+       <span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+           <span class="n">freeze_support</span><span class="p">()</span>
+           <span class="o">...</span>
+
+   <span class="n">The</span> <span class="s2">&quot;freeze_support()&quot;</span> <span class="n">line</span> <span class="n">can</span> <span class="n">be</span> <span class="n">omitted</span> <span class="k">if</span> <span class="n">the</span> <span class="n">program</span>
+   <span class="ow">is</span> <span class="ow">not</span> <span class="n">going</span> <span class="n">to</span> <span class="n">be</span> <span class="n">frozen</span> <span class="n">to</span> <span class="n">produce</span> <span class="n">an</span> <span class="n">executable</span><span class="o">.</span>
+</pre></div>
+</div>
+<p>The implementation of <code class="docutils literal notranslate"><span class="pre">multiprocessing</span></code> is different on Windows, which
+uses <code class="docutils literal notranslate"><span class="pre">spawn</span></code> instead of <code class="docutils literal notranslate"><span class="pre">fork</span></code>. So we have to wrap the code with an
+if-clause to protect the code from executing multiple times. Refactor
+your code into the following structure.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">torch</span>
+
+<span class="k">def</span> <span class="nf">main</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">data</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">dataloader</span><span class="p">):</span>
+        <span class="c1"># do something here</span>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="multiprocessing-error-broken-pipe">
+<h3>Multiprocessing error “Broken pipe”<a class="headerlink" href="#multiprocessing-error-broken-pipe" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">ForkingPickler</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">protocol</span><span class="p">)</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span>
+
+<span class="ne">BrokenPipeError</span><span class="p">:</span> <span class="p">[</span><span class="n">Errno</span> <span class="mi">32</span><span class="p">]</span> <span class="n">Broken</span> <span class="n">pipe</span>
+</pre></div>
+</div>
+<p>This issue happens when the child process ends before the parent process
+finishes sending data. There may be something wrong with your code. You
+can debug your code by reducing the <code class="docutils literal notranslate"><span class="pre">num_worker</span></code> of
+<a class="reference internal" href="../data.html#torch.utils.data.DataLoader" title="torch.utils.data.DataLoader"><code class="xref py py-class docutils literal notranslate"><span class="pre">DataLoader</span></code></a> to zero and see if the issue persists.</p>
+</div>
+<div class="section" id="multiprocessing-error-driver-shut-down">
+<h3>Multiprocessing error “driver shut down”<a class="headerlink" href="#multiprocessing-error-driver-shut-down" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>Couldn’t open shared file mapping: &lt;torch_14808_1591070686&gt;, error code: &lt;1455&gt; at torch\lib\TH\THAllocator.c:154
+
+[windows] driver shut down
+</pre></div>
+</div>
+<p>Please update your graphics driver. If this persists, this may be that your
+graphics card is too old or the calculation is too heavy for your card. Please
+update the TDR settings according to this <a class="reference external" href="https://www.pugetsystems.com/labs/hpc/Working-around-TDR-in-Windows-for-a-better-GPU-computing-experience-777/">post</a>.</p>
+</div>
+<div class="section" id="cuda-ipc-operations">
+<h3>CUDA IPC operations<a class="headerlink" href="#cuda-ipc-operations" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">THCudaCheck</span> <span class="n">FAIL</span> <span class="n">file</span><span class="o">=</span><span class="n">torch</span>\<span class="n">csrc</span>\<span class="n">generic</span>\<span class="n">StorageSharing</span><span class="o">.</span><span class="n">cpp</span> <span class="n">line</span><span class="o">=</span><span class="mi">252</span> <span class="n">error</span><span class="o">=</span><span class="mi">63</span> <span class="p">:</span> <span class="n">OS</span> <span class="n">call</span> <span class="n">failed</span> <span class="ow">or</span> <span class="n">operation</span> <span class="ow">not</span> <span class="n">supported</span> <span class="n">on</span> <span class="n">this</span> <span class="n">OS</span>
+</pre></div>
+</div>
+<p>They are not supported on Windows. Something like doing multiprocessing on CUDA
+tensors cannot succeed, there are two alternatives for this.</p>
+<p>1. Don’t use <code class="docutils literal notranslate"><span class="pre">multiprocessing</span></code>. Set the <code class="docutils literal notranslate"><span class="pre">num_worker</span></code> of
+<a class="reference internal" href="../data.html#torch.utils.data.DataLoader" title="torch.utils.data.DataLoader"><code class="xref py py-class docutils literal notranslate"><span class="pre">DataLoader</span></code></a> to zero.</p>
+<p>2. Share CPU tensors instead. Make sure your custom
+<code class="xref py py-class docutils literal notranslate"><span class="pre">DataSet</span></code> returns CPU tensors.</p>
+</div>
+</div>
+</div>
+
+
+             </article>
+             
+            </div>
+            <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="../cpp_index.html" class="btn btn-neutral float-right" title="C++" accesskey="n" rel="next">Next <img src="../_static/images/chevron-right-orange.svg" class="next-page"></a>
+      
+      
+        <a href="serialization.html" class="btn btn-neutral" title="Serialization semantics" accesskey="p" rel="prev"><img src="../_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
+      
+    </div>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              <ul>
+<li><a class="reference internal" href="#">Windows FAQ</a><ul>
+<li><a class="reference internal" href="#building-from-source">Building from source</a><ul>
+<li><a class="reference internal" href="#include-optional-components">Include optional components</a></li>
+<li><a class="reference internal" href="#speeding-cuda-build-for-windows">Speeding CUDA build for Windows</a></li>
+<li><a class="reference internal" href="#one-key-install-script">One key install script</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#extension">Extension</a><ul>
+<li><a class="reference internal" href="#cffi-extension">CFFI Extension</a></li>
+<li><a class="reference internal" href="#cpp-extension">Cpp Extension</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#installation">Installation</a><ul>
+<li><a class="reference internal" href="#package-not-found-in-win-32-channel">Package not found in win-32 channel.</a></li>
+<li><a class="reference internal" href="#import-error">Import error</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#usage-multiprocessing">Usage (multiprocessing)</a><ul>
+<li><a class="reference internal" href="#multiprocessing-error-without-if-clause-protection">Multiprocessing error without if-clause protection</a></li>
+<li><a class="reference internal" href="#multiprocessing-error-broken-pipe">Multiprocessing error “Broken pipe”</a></li>
+<li><a class="reference internal" href="#multiprocessing-error-driver-shut-down">Multiprocessing error “driver shut down”</a></li>
+<li><a class="reference internal" href="#cuda-ipc-operations">CUDA IPC operations</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+         <script src="../_static/jquery.js"></script>
+         <script src="../_static/underscore.js"></script>
+         <script src="../_static/doctools.js"></script>
+         <script src="../_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="../_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="../_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="../_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="../_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="../_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>

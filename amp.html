@@ -1,0 +1,1177 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Automatic Mixed Precision package - torch.cuda.amp &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/amp.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="torch.backends" href="backends.html" />
+    <link rel="prev" title="torch.cuda" href="cuda.html" /> 
+
+  
+  <script src="_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/amp.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="notes/amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cuda.html">torch.cuda</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+      <li>Automatic Mixed Precision package - torch.cuda.amp</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+            
+            <a href="_sources/amp.rst.txt" rel="nofollow"><img src="_static/images/view-page-source-icon.svg"></a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <div class="section" id="module-torch.cuda.amp">
+<span id="automatic-mixed-precision-package-torch-cuda-amp"></span><h1>Automatic Mixed Precision package - torch.cuda.amp<a class="headerlink" href="#module-torch.cuda.amp" title="Permalink to this headline">¶</a></h1>
+<p><code class="docutils literal notranslate"><span class="pre">torch.cuda.amp</span></code> provides convenience methods for mixed precision,
+where some operations use the <code class="docutils literal notranslate"><span class="pre">torch.float32</span></code> (<code class="docutils literal notranslate"><span class="pre">float</span></code>) datatype and other operations
+use <code class="docutils literal notranslate"><span class="pre">torch.float16</span></code> (<code class="docutils literal notranslate"><span class="pre">half</span></code>). Some ops, like linear layers and convolutions,
+are much faster in <code class="docutils literal notranslate"><span class="pre">float16</span></code>. Other ops, like reductions, often require the dynamic
+range of <code class="docutils literal notranslate"><span class="pre">float32</span></code>.  Mixed precision tries to match each op to its appropriate datatype.</p>
+<p>Ordinarily, “automatic mixed precision training” uses <a class="reference internal" href="#torch.cuda.amp.autocast" title="torch.cuda.amp.autocast"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.cuda.amp.autocast</span></code></a> and
+<a class="reference internal" href="#torch.cuda.amp.GradScaler" title="torch.cuda.amp.GradScaler"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.cuda.amp.GradScaler</span></code></a> together, as shown in the <a class="reference internal" href="notes/amp_examples.html#amp-examples"><span class="std std-ref">Automatic Mixed Precision examples</span></a>
+and <a class="reference external" href="https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html">Automatic Mixed Precision recipe</a>.
+However, <a class="reference internal" href="#torch.cuda.amp.autocast" title="torch.cuda.amp.autocast"><code class="xref py py-class docutils literal notranslate"><span class="pre">autocast</span></code></a> and <a class="reference internal" href="#torch.cuda.amp.GradScaler" title="torch.cuda.amp.GradScaler"><code class="xref py py-class docutils literal notranslate"><span class="pre">GradScaler</span></code></a> are modular, and may be used separately if desired.</p>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><p><a class="reference internal" href="#autocasting" id="id4">Autocasting</a></p></li>
+<li><p><a class="reference internal" href="#gradient-scaling" id="id5">Gradient Scaling</a></p></li>
+<li><p><a class="reference internal" href="#autocast-op-reference" id="id6">Autocast Op Reference</a></p>
+<ul>
+<li><p><a class="reference internal" href="#op-eligibility" id="id7">Op Eligibility</a></p></li>
+<li><p><a class="reference internal" href="#op-specific-behavior" id="id8">Op-Specific Behavior</a></p>
+<ul>
+<li><p><a class="reference internal" href="#ops-that-can-autocast-to-float16" id="id9">Ops that can autocast to <code class="docutils literal notranslate"><span class="pre">float16</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ops-that-can-autocast-to-float32" id="id10">Ops that can autocast to <code class="docutils literal notranslate"><span class="pre">float32</span></code></a></p></li>
+<li><p><a class="reference internal" href="#ops-that-promote-to-the-widest-input-type" id="id11">Ops that promote to the widest input type</a></p></li>
+<li><p><a class="reference internal" href="#prefer-binary-cross-entropy-with-logits-over-binary-cross-entropy" id="id12">Prefer <code class="docutils literal notranslate"><span class="pre">binary_cross_entropy_with_logits</span></code> over <code class="docutils literal notranslate"><span class="pre">binary_cross_entropy</span></code></a></p></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+<div class="section" id="autocasting">
+<span id="id1"></span><h2><a class="toc-backref" href="#id4">Autocasting</a><a class="headerlink" href="#autocasting" title="Permalink to this headline">¶</a></h2>
+<dl class="class">
+<dt id="torch.cuda.amp.autocast">
+<em class="property">class </em><code class="sig-prename descclassname">torch.cuda.amp.</code><code class="sig-name descname">autocast</code><span class="sig-paren">(</span><em class="sig-param">enabled=True</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/autocast_mode.html#autocast"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.autocast" title="Permalink to this definition">¶</a></dt>
+<dd><p>Instances of <a class="reference internal" href="#torch.cuda.amp.autocast" title="torch.cuda.amp.autocast"><code class="xref py py-class docutils literal notranslate"><span class="pre">autocast</span></code></a> serve as context managers or decorators that
+allow regions of your script to run in mixed precision.</p>
+<p>In these regions, CUDA ops run in an op-specific dtype chosen by autocast
+to improve performance while maintaining accuracy.
+See the <a class="reference internal" href="#autocast-op-reference"><span class="std std-ref">Autocast Op Reference</span></a> for details.</p>
+<p>When entering an autocast-enabled region, Tensors may be any type.
+You should not call <code class="docutils literal notranslate"><span class="pre">.half()</span></code> on your model(s) or inputs when using autocasting.</p>
+<p><a class="reference internal" href="#torch.cuda.amp.autocast" title="torch.cuda.amp.autocast"><code class="xref py py-class docutils literal notranslate"><span class="pre">autocast</span></code></a> should wrap only the forward pass(es) of your network, including the loss
+computation(s).  Backward passes under autocast are not recommended.
+Backward ops run in the same type that autocast used for corresponding forward ops.</p>
+<p>Example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Creates model and optimizer in default precision</span>
+<span class="n">model</span> <span class="o">=</span> <span class="n">Net</span><span class="p">()</span><span class="o">.</span><span class="n">cuda</span><span class="p">()</span>
+<span class="n">optimizer</span> <span class="o">=</span> <span class="n">optim</span><span class="o">.</span><span class="n">SGD</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="o">...</span><span class="p">)</span>
+
+<span class="k">for</span> <span class="nb">input</span><span class="p">,</span> <span class="n">target</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+    <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+
+    <span class="c1"># Enables autocasting for the forward pass (model + loss)</span>
+    <span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_fn</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">target</span><span class="p">)</span>
+
+    <span class="c1"># Exits the context manager before backward()</span>
+    <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+    <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>See the <a class="reference internal" href="notes/amp_examples.html#amp-examples"><span class="std std-ref">Automatic Mixed Precision examples</span></a> for usage (along with gradient scaling)
+in more complex scenarios (e.g., gradient penalty, multiple models/losses, custom autograd functions).</p>
+<p><a class="reference internal" href="#torch.cuda.amp.autocast" title="torch.cuda.amp.autocast"><code class="xref py py-class docutils literal notranslate"><span class="pre">autocast</span></code></a> can also be used as a decorator, e.g., on the <code class="docutils literal notranslate"><span class="pre">forward</span></code> method of your model:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">AutocastModel</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="o">...</span>
+    <span class="nd">@autocast</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">):</span>
+        <span class="o">...</span>
+</pre></div>
+</div>
+<p>Floating-point Tensors produced in an autocast-enabled region may be <code class="docutils literal notranslate"><span class="pre">float16</span></code>.
+After returning to an autocast-disabled region, using them with floating-point
+Tensors of different dtypes may cause type mismatch errors.  If so, cast the Tensor(s)
+produced in the autocast region back to <code class="docutils literal notranslate"><span class="pre">float32</span></code> (or other dtype if desired).
+If a Tensor from the autocast region is already <code class="docutils literal notranslate"><span class="pre">float32</span></code>, the cast is a no-op,
+and incurs no additional overhead.  Example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Creates some tensors in default dtype (here assumed to be float32)</span>
+<span class="n">a_float32</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">((</span><span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">),</span> <span class="n">device</span><span class="o">=</span><span class="s2">&quot;cuda&quot;</span><span class="p">)</span>
+<span class="n">b_float32</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">((</span><span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">),</span> <span class="n">device</span><span class="o">=</span><span class="s2">&quot;cuda&quot;</span><span class="p">)</span>
+<span class="n">c_float32</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">((</span><span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">),</span> <span class="n">device</span><span class="o">=</span><span class="s2">&quot;cuda&quot;</span><span class="p">)</span>
+<span class="n">d_float32</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">((</span><span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">),</span> <span class="n">device</span><span class="o">=</span><span class="s2">&quot;cuda&quot;</span><span class="p">)</span>
+
+<span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+    <span class="c1"># torch.mm is on autocast&#39;s list of ops that should run in float16.</span>
+    <span class="c1"># Inputs are float32, but the op runs in float16 and produces float16 output.</span>
+    <span class="c1"># No manual casts are required.</span>
+    <span class="n">e_float16</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">mm</span><span class="p">(</span><span class="n">a_float32</span><span class="p">,</span> <span class="n">b_float32</span><span class="p">)</span>
+    <span class="c1"># Also handles mixed input types</span>
+    <span class="n">f_float16</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">mm</span><span class="p">(</span><span class="n">d_float32</span><span class="p">,</span> <span class="n">e_float16</span><span class="p">)</span>
+
+<span class="c1"># After exiting autocast, calls f_float16.float() to use with d_float32</span>
+<span class="n">g_float32</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">mm</span><span class="p">(</span><span class="n">d_float32</span><span class="p">,</span> <span class="n">f_float16</span><span class="o">.</span><span class="n">float</span><span class="p">())</span>
+</pre></div>
+</div>
+<p>Type mismatch errors <em>in</em> an autocast-enabled region are a bug; if this is what you observe,
+please file an issue.</p>
+<p><code class="docutils literal notranslate"><span class="pre">autocast(enabled=False)</span></code> subregions can be nested in autocast-enabled regions.
+Locally disabling autocast can be useful, for example, if you want to force a subregion
+to run in a particular <code class="docutils literal notranslate"><span class="pre">dtype</span></code>.  Disabling autocast gives you explicit control over
+the execution type.  In the subregion, inputs from the surrounding region
+should be cast to <code class="docutils literal notranslate"><span class="pre">dtype</span></code> before use:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Creates some tensors in default dtype (here assumed to be float32)</span>
+<span class="n">a_float32</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">((</span><span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">),</span> <span class="n">device</span><span class="o">=</span><span class="s2">&quot;cuda&quot;</span><span class="p">)</span>
+<span class="n">b_float32</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">((</span><span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">),</span> <span class="n">device</span><span class="o">=</span><span class="s2">&quot;cuda&quot;</span><span class="p">)</span>
+<span class="n">c_float32</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">((</span><span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">),</span> <span class="n">device</span><span class="o">=</span><span class="s2">&quot;cuda&quot;</span><span class="p">)</span>
+<span class="n">d_float32</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">((</span><span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">),</span> <span class="n">device</span><span class="o">=</span><span class="s2">&quot;cuda&quot;</span><span class="p">)</span>
+
+<span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+    <span class="n">e_float16</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">mm</span><span class="p">(</span><span class="n">a_float32</span><span class="p">,</span> <span class="n">b_float32</span><span class="p">)</span>
+
+    <span class="k">with</span> <span class="n">autocast</span><span class="p">(</span><span class="n">enabled</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="c1"># Calls e_float16.float() to ensure float32 execution</span>
+        <span class="c1"># (necessary because e_float16 was created in an autocasted region)</span>
+        <span class="n">f_float32</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">mm</span><span class="p">(</span><span class="n">c_float32</span><span class="p">,</span> <span class="n">e_float16</span><span class="o">.</span><span class="n">float</span><span class="p">())</span>
+
+    <span class="c1"># No manual casts are required when re-entering the autocast-enabled region.</span>
+    <span class="c1"># torch.mm again runs in float16 and produces float16 output, regardless of input types.</span>
+    <span class="n">g_float16</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">mm</span><span class="p">(</span><span class="n">d_float32</span><span class="p">,</span> <span class="n">f_float32</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>The autocast state is thread-local.  If you want it enabled in a new thread, the context manager or decorator
+must be invoked in that thread.  This affects <a class="reference internal" href="generated/torch.nn.DataParallel.html#torch.nn.DataParallel" title="torch.nn.DataParallel"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.nn.DataParallel</span></code></a> and
+<a class="reference internal" href="generated/torch.nn.parallel.DistributedDataParallel.html#torch.nn.parallel.DistributedDataParallel" title="torch.nn.parallel.DistributedDataParallel"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.nn.parallel.DistributedDataParallel</span></code></a> when used with more than one GPU per process
+(see <a class="reference internal" href="notes/amp_examples.html#amp-multigpu"><span class="std std-ref">Working with Multiple GPUs</span></a>).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>enabled</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em><em>, </em><em>default=True</em>) – Whether autocasting should be enabled in the region.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.cuda.amp.custom_fwd">
+<code class="sig-prename descclassname">torch.cuda.amp.</code><code class="sig-name descname">custom_fwd</code><span class="sig-paren">(</span><em class="sig-param">fwd=None</em>, <em class="sig-param">**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/autocast_mode.html#custom_fwd"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.custom_fwd" title="Permalink to this definition">¶</a></dt>
+<dd><p>Helper decorator for <code class="docutils literal notranslate"><span class="pre">forward</span></code> methods of custom autograd functions (subclasses of
+<a class="reference internal" href="autograd.html#torch.autograd.Function" title="torch.autograd.Function"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.autograd.Function</span></code></a>).  See the <a class="reference internal" href="notes/amp_examples.html#amp-custom-examples"><span class="std std-ref">example page</span></a> for more detail.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>cast_inputs</strong> (<code class="xref py py-class docutils literal notranslate"><span class="pre">torch.dtype</span></code> or None, optional, default=None) – If not <code class="docutils literal notranslate"><span class="pre">None</span></code>,
+when <code class="docutils literal notranslate"><span class="pre">forward</span></code> runs in an autocast-enabled region, casts incoming
+floating-point CUDA Tensors to the target dtype (non-floating-point Tensors are not affected),
+then executes <code class="docutils literal notranslate"><span class="pre">forward</span></code> with autocast disabled.
+If <code class="docutils literal notranslate"><span class="pre">None</span></code>, <code class="docutils literal notranslate"><span class="pre">forward</span></code>’s internal ops execute with the current autocast state.</p>
+</dd>
+</dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If the decorated <code class="docutils literal notranslate"><span class="pre">forward</span></code> is called outside an autocast-enabled region,
+<a class="reference internal" href="#torch.cuda.amp.custom_fwd" title="torch.cuda.amp.custom_fwd"><code class="xref py py-func docutils literal notranslate"><span class="pre">custom_fwd</span></code></a> is a no-op and <code class="docutils literal notranslate"><span class="pre">cast_inputs</span></code> has no effect.</p>
+</div>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.cuda.amp.custom_bwd">
+<code class="sig-prename descclassname">torch.cuda.amp.</code><code class="sig-name descname">custom_bwd</code><span class="sig-paren">(</span><em class="sig-param">bwd</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/autocast_mode.html#custom_bwd"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.custom_bwd" title="Permalink to this definition">¶</a></dt>
+<dd><p>Helper decorator for backward methods of custom autograd functions (subclasses of
+<a class="reference internal" href="autograd.html#torch.autograd.Function" title="torch.autograd.Function"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.autograd.Function</span></code></a>).
+Ensures that <code class="docutils literal notranslate"><span class="pre">backward</span></code> executes with the same autocast state as <code class="docutils literal notranslate"><span class="pre">forward</span></code>.
+See the <a class="reference internal" href="notes/amp_examples.html#amp-custom-examples"><span class="std std-ref">example page</span></a> for more detail.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="gradient-scaling">
+<span id="id2"></span><h2><a class="toc-backref" href="#id5">Gradient Scaling</a><a class="headerlink" href="#gradient-scaling" title="Permalink to this headline">¶</a></h2>
+<p>If the forward pass for a particular op has <code class="docutils literal notranslate"><span class="pre">float16</span></code> inputs, the backward pass for
+that op will produce <code class="docutils literal notranslate"><span class="pre">float16</span></code> gradients.
+Gradient values with small magnitudes may not be representable in <code class="docutils literal notranslate"><span class="pre">float16</span></code>.
+These values will flush to zero (“underflow”), so the update for the corresponding parameters will be lost.</p>
+<p>To prevent underflow, “gradient scaling” multiplies the network’s loss(es) by a scale factor and
+invokes a backward pass on the scaled loss(es).  Gradients flowing backward through the network are
+then scaled by the same factor.  In other words, gradient values have a larger magnitude,
+so they don’t flush to zero.</p>
+<p>Each parameter’s gradient (<code class="docutils literal notranslate"><span class="pre">.grad</span></code> attribute) should be unscaled before the optimizer
+updates the parameters, so the scale factor does not interfere with the learning rate.</p>
+<dl class="class">
+<dt id="torch.cuda.amp.GradScaler">
+<em class="property">class </em><code class="sig-prename descclassname">torch.cuda.amp.</code><code class="sig-name descname">GradScaler</code><span class="sig-paren">(</span><em class="sig-param">init_scale=65536.0</em>, <em class="sig-param">growth_factor=2.0</em>, <em class="sig-param">backoff_factor=0.5</em>, <em class="sig-param">growth_interval=2000</em>, <em class="sig-param">enabled=True</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/grad_scaler.html#GradScaler"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.GradScaler" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="method">
+<dt id="torch.cuda.amp.GradScaler.get_backoff_factor">
+<code class="sig-name descname">get_backoff_factor</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/grad_scaler.html#GradScaler.get_backoff_factor"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.GradScaler.get_backoff_factor" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a Python float containing the scale backoff factor.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.cuda.amp.GradScaler.get_growth_factor">
+<code class="sig-name descname">get_growth_factor</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/grad_scaler.html#GradScaler.get_growth_factor"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.GradScaler.get_growth_factor" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a Python float containing the scale growth factor.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.cuda.amp.GradScaler.get_growth_interval">
+<code class="sig-name descname">get_growth_interval</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/grad_scaler.html#GradScaler.get_growth_interval"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.GradScaler.get_growth_interval" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a Python int containing the growth interval.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.cuda.amp.GradScaler.get_scale">
+<code class="sig-name descname">get_scale</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/grad_scaler.html#GradScaler.get_scale"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.GradScaler.get_scale" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a Python float containing the current scale, or 1.0 if scaling is disabled.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p><a class="reference internal" href="#torch.cuda.amp.GradScaler.get_scale" title="torch.cuda.amp.GradScaler.get_scale"><code class="xref py py-meth docutils literal notranslate"><span class="pre">get_scale()</span></code></a> incurs a CPU-GPU sync.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.cuda.amp.GradScaler.is_enabled">
+<code class="sig-name descname">is_enabled</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/grad_scaler.html#GradScaler.is_enabled"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.GradScaler.is_enabled" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns a bool indicating whether this instance is enabled.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.cuda.amp.GradScaler.load_state_dict">
+<code class="sig-name descname">load_state_dict</code><span class="sig-paren">(</span><em class="sig-param">state_dict</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/grad_scaler.html#GradScaler.load_state_dict"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.GradScaler.load_state_dict" title="Permalink to this definition">¶</a></dt>
+<dd><p>Loads the scaler state.  If this instance is disabled, <a class="reference internal" href="#torch.cuda.amp.GradScaler.load_state_dict" title="torch.cuda.amp.GradScaler.load_state_dict"><code class="xref py py-meth docutils literal notranslate"><span class="pre">load_state_dict()</span></code></a> is a no-op.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>state_dict</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.8)"><em>dict</em></a>) – scaler state.  Should be an object returned from a call to <a class="reference internal" href="#torch.cuda.amp.GradScaler.state_dict" title="torch.cuda.amp.GradScaler.state_dict"><code class="xref py py-meth docutils literal notranslate"><span class="pre">state_dict()</span></code></a>.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.cuda.amp.GradScaler.scale">
+<code class="sig-name descname">scale</code><span class="sig-paren">(</span><em class="sig-param">outputs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/grad_scaler.html#GradScaler.scale"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.GradScaler.scale" title="Permalink to this definition">¶</a></dt>
+<dd><p>Multiplies (‘scales’) a tensor or list of tensors by the scale factor.</p>
+<p>Returns scaled outputs.  If this instance of <a class="reference internal" href="#torch.cuda.amp.GradScaler" title="torch.cuda.amp.GradScaler"><code class="xref py py-class docutils literal notranslate"><span class="pre">GradScaler</span></code></a> is not enabled, outputs are returned
+unmodified.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>outputs</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a><em> or </em><em>iterable of Tensors</em>) – Outputs to scale.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.cuda.amp.GradScaler.set_backoff_factor">
+<code class="sig-name descname">set_backoff_factor</code><span class="sig-paren">(</span><em class="sig-param">new_factor</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/grad_scaler.html#GradScaler.set_backoff_factor"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.GradScaler.set_backoff_factor" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>new_scale</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.8)"><em>float</em></a>) – Value to use as the new scale backoff factor.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.cuda.amp.GradScaler.set_growth_factor">
+<code class="sig-name descname">set_growth_factor</code><span class="sig-paren">(</span><em class="sig-param">new_factor</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/grad_scaler.html#GradScaler.set_growth_factor"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.GradScaler.set_growth_factor" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>new_scale</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.8)"><em>float</em></a>) – Value to use as the new scale growth factor.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.cuda.amp.GradScaler.set_growth_interval">
+<code class="sig-name descname">set_growth_interval</code><span class="sig-paren">(</span><em class="sig-param">new_interval</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/grad_scaler.html#GradScaler.set_growth_interval"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.GradScaler.set_growth_interval" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>new_interval</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a>) – Value to use as the new growth interval.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.cuda.amp.GradScaler.state_dict">
+<code class="sig-name descname">state_dict</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/grad_scaler.html#GradScaler.state_dict"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.GradScaler.state_dict" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the state of the scaler as a <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.8)"><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code></a>.  It contains five entries:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;scale&quot;</span></code> - a Python float containing the current scale</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;growth_factor&quot;</span></code> - a Python float containing the current growth factor</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;backoff_factor&quot;</span></code> - a Python float containing the current backoff factor</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;growth_interval&quot;</span></code> - a Python int containing the current growth interval</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;_growth_tracker&quot;</span></code> - a Python int containing the number of recent consecutive unskipped steps.</p></li>
+</ul>
+<p>If this instance is not enabled, returns an empty dict.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If you wish to checkpoint the scaler’s state after a particular iteration, <a class="reference internal" href="#torch.cuda.amp.GradScaler.state_dict" title="torch.cuda.amp.GradScaler.state_dict"><code class="xref py py-meth docutils literal notranslate"><span class="pre">state_dict()</span></code></a>
+should be called after <a class="reference internal" href="#torch.cuda.amp.GradScaler.update" title="torch.cuda.amp.GradScaler.update"><code class="xref py py-meth docutils literal notranslate"><span class="pre">update()</span></code></a>.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.cuda.amp.GradScaler.step">
+<code class="sig-name descname">step</code><span class="sig-paren">(</span><em class="sig-param">optimizer</em>, <em class="sig-param">*args</em>, <em class="sig-param">**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/grad_scaler.html#GradScaler.step"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.GradScaler.step" title="Permalink to this definition">¶</a></dt>
+<dd><p><a class="reference internal" href="#torch.cuda.amp.GradScaler.step" title="torch.cuda.amp.GradScaler.step"><code class="xref py py-meth docutils literal notranslate"><span class="pre">step()</span></code></a> carries out the following two operations:</p>
+<ol class="arabic simple">
+<li><p>Internally invokes <code class="docutils literal notranslate"><span class="pre">unscale_(optimizer)</span></code> (unless <a class="reference internal" href="#torch.cuda.amp.GradScaler.unscale_" title="torch.cuda.amp.GradScaler.unscale_"><code class="xref py py-meth docutils literal notranslate"><span class="pre">unscale_()</span></code></a> was explicitly called for <code class="docutils literal notranslate"><span class="pre">optimizer</span></code>
+earlier in the iteration).  As part of the <a class="reference internal" href="#torch.cuda.amp.GradScaler.unscale_" title="torch.cuda.amp.GradScaler.unscale_"><code class="xref py py-meth docutils literal notranslate"><span class="pre">unscale_()</span></code></a>, gradients are checked for infs/NaNs.</p></li>
+<li><p>If no inf/NaN gradients are found, invokes <code class="docutils literal notranslate"><span class="pre">optimizer.step()</span></code> using the unscaled
+gradients.  Otherwise, <code class="docutils literal notranslate"><span class="pre">optimizer.step()</span></code> is skipped to avoid corrupting the params.</p></li>
+</ol>
+<p><code class="docutils literal notranslate"><span class="pre">*args</span></code> and <code class="docutils literal notranslate"><span class="pre">**kwargs</span></code> are forwarded to <code class="docutils literal notranslate"><span class="pre">optimizer.step()</span></code>.</p>
+<p>Returns the return value of <code class="docutils literal notranslate"><span class="pre">optimizer.step(*args,</span> <span class="pre">**kwargs)</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>optimizer</strong> (<a class="reference internal" href="optim.html#torch.optim.Optimizer" title="torch.optim.Optimizer"><em>torch.optim.Optimizer</em></a>) – Optimizer that applies the gradients.</p></li>
+<li><p><strong>args</strong> – Any arguments.</p></li>
+<li><p><strong>kwargs</strong> – Any keyword arguments.</p></li>
+</ul>
+</dd>
+</dl>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Closure use is not currently supported.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.cuda.amp.GradScaler.unscale_">
+<code class="sig-name descname">unscale_</code><span class="sig-paren">(</span><em class="sig-param">optimizer</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/grad_scaler.html#GradScaler.unscale_"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.GradScaler.unscale_" title="Permalink to this definition">¶</a></dt>
+<dd><p>Divides (“unscales”) the optimizer’s gradient tensors by the scale factor.</p>
+<p><a class="reference internal" href="#torch.cuda.amp.GradScaler.unscale_" title="torch.cuda.amp.GradScaler.unscale_"><code class="xref py py-meth docutils literal notranslate"><span class="pre">unscale_()</span></code></a> is optional, serving cases where you need to
+<a class="reference internal" href="notes/amp_examples.html#working-with-unscaled-gradients"><span class="std std-ref">modify or inspect gradients</span></a>
+between the backward pass(es) and <a class="reference internal" href="#torch.cuda.amp.GradScaler.step" title="torch.cuda.amp.GradScaler.step"><code class="xref py py-meth docutils literal notranslate"><span class="pre">step()</span></code></a>.
+If <a class="reference internal" href="#torch.cuda.amp.GradScaler.unscale_" title="torch.cuda.amp.GradScaler.unscale_"><code class="xref py py-meth docutils literal notranslate"><span class="pre">unscale_()</span></code></a> is not called explicitly,  gradients will be unscaled  automatically during <a class="reference internal" href="#torch.cuda.amp.GradScaler.step" title="torch.cuda.amp.GradScaler.step"><code class="xref py py-meth docutils literal notranslate"><span class="pre">step()</span></code></a>.</p>
+<p>Simple example, using <a class="reference internal" href="#torch.cuda.amp.GradScaler.unscale_" title="torch.cuda.amp.GradScaler.unscale_"><code class="xref py py-meth docutils literal notranslate"><span class="pre">unscale_()</span></code></a> to enable clipping of unscaled gradients:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">...</span>
+<span class="n">scaler</span><span class="o">.</span><span class="n">scale</span><span class="p">(</span><span class="n">loss</span><span class="p">)</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+<span class="n">scaler</span><span class="o">.</span><span class="n">unscale_</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)</span>
+<span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">clip_grad_norm_</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">max_norm</span><span class="p">)</span>
+<span class="n">scaler</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)</span>
+<span class="n">scaler</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+</pre></div>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>optimizer</strong> (<a class="reference internal" href="optim.html#torch.optim.Optimizer" title="torch.optim.Optimizer"><em>torch.optim.Optimizer</em></a>) – Optimizer that owns the gradients to be unscaled.</p>
+</dd>
+</dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><a class="reference internal" href="#torch.cuda.amp.GradScaler.unscale_" title="torch.cuda.amp.GradScaler.unscale_"><code class="xref py py-meth docutils literal notranslate"><span class="pre">unscale_()</span></code></a> does not incur a CPU-GPU sync.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p><a class="reference internal" href="#torch.cuda.amp.GradScaler.unscale_" title="torch.cuda.amp.GradScaler.unscale_"><code class="xref py py-meth docutils literal notranslate"><span class="pre">unscale_()</span></code></a> should only be called once per optimizer per <a class="reference internal" href="#torch.cuda.amp.GradScaler.step" title="torch.cuda.amp.GradScaler.step"><code class="xref py py-meth docutils literal notranslate"><span class="pre">step()</span></code></a> call,
+and only after all gradients for that optimizer’s assigned parameters have been accumulated.
+Calling <a class="reference internal" href="#torch.cuda.amp.GradScaler.unscale_" title="torch.cuda.amp.GradScaler.unscale_"><code class="xref py py-meth docutils literal notranslate"><span class="pre">unscale_()</span></code></a> twice for a given optimizer between each <a class="reference internal" href="#torch.cuda.amp.GradScaler.step" title="torch.cuda.amp.GradScaler.step"><code class="xref py py-meth docutils literal notranslate"><span class="pre">step()</span></code></a> triggers a RuntimeError.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p><a class="reference internal" href="#torch.cuda.amp.GradScaler.unscale_" title="torch.cuda.amp.GradScaler.unscale_"><code class="xref py py-meth docutils literal notranslate"><span class="pre">unscale_()</span></code></a> may unscale sparse gradients out of place, replacing the <code class="docutils literal notranslate"><span class="pre">.grad</span></code> attribute.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.cuda.amp.GradScaler.update">
+<code class="sig-name descname">update</code><span class="sig-paren">(</span><em class="sig-param">new_scale=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/cuda/amp/grad_scaler.html#GradScaler.update"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.cuda.amp.GradScaler.update" title="Permalink to this definition">¶</a></dt>
+<dd><p>Updates the scale factor.</p>
+<p>If any optimizer steps were skipped the scale is multiplied by <code class="docutils literal notranslate"><span class="pre">backoff_factor</span></code>
+to reduce it. If <code class="docutils literal notranslate"><span class="pre">growth_interval</span></code> unskipped iterations occurred consecutively,
+the scale is multiplied by <code class="docutils literal notranslate"><span class="pre">growth_factor</span></code> to increase it.</p>
+<p>Passing <code class="docutils literal notranslate"><span class="pre">new_scale</span></code> sets the scale directly.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>new_scale</strong> (float or <code class="xref py py-class docutils literal notranslate"><span class="pre">torch.cuda.FloatTensor</span></code>, optional, default=None) – New scale factor.</p>
+</dd>
+</dl>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p><a class="reference internal" href="#torch.cuda.amp.GradScaler.update" title="torch.cuda.amp.GradScaler.update"><code class="xref py py-meth docutils literal notranslate"><span class="pre">update()</span></code></a> should only be called at the end of the iteration, after <code class="docutils literal notranslate"><span class="pre">scaler.step(optimizer)</span></code> has
+been invoked for all optimizers used this iteration.</p>
+</div>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+<div class="section" id="autocast-op-reference">
+<span id="id3"></span><h2><a class="toc-backref" href="#id6">Autocast Op Reference</a><a class="headerlink" href="#autocast-op-reference" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="op-eligibility">
+<span id="autocast-eligibility"></span><h3><a class="toc-backref" href="#id7">Op Eligibility</a><a class="headerlink" href="#op-eligibility" title="Permalink to this headline">¶</a></h3>
+<p>Only CUDA ops are eligible for autocasting.</p>
+<p>Ops that run in <code class="docutils literal notranslate"><span class="pre">float64</span></code> or non-floating-point dtypes are not eligible, and will
+run in these types whether or not autocast is enabled.</p>
+<p>Only out-of-place ops and Tensor methods are eligible.
+In-place variants and calls that explicitly supply an <code class="docutils literal notranslate"><span class="pre">out=...</span></code> Tensor
+are allowed in autocast-enabled regions, but won’t go through autocasting.
+For example, in an autocast-enabled region <code class="docutils literal notranslate"><span class="pre">a.addmm(b,</span> <span class="pre">c)</span></code> can autocast,
+but <code class="docutils literal notranslate"><span class="pre">a.addmm_(b,</span> <span class="pre">c)</span></code> and <code class="docutils literal notranslate"><span class="pre">a.addmm(b,</span> <span class="pre">c,</span> <span class="pre">out=d)</span></code> cannot.
+For best performance and stability, prefer out-of-place ops in autocast-enabled
+regions.</p>
+<p>Ops called with an explicit <code class="docutils literal notranslate"><span class="pre">dtype=...</span></code> argument are not eligible,
+and will produce output that respects the <code class="docutils literal notranslate"><span class="pre">dtype</span></code> argument.</p>
+</div>
+<div class="section" id="op-specific-behavior">
+<h3><a class="toc-backref" href="#id8">Op-Specific Behavior</a><a class="headerlink" href="#op-specific-behavior" title="Permalink to this headline">¶</a></h3>
+<p>The following lists describe the behavior of eligible ops in autocast-enabled regions.
+These ops always go through autocasting whether they are invoked as part of a <a class="reference internal" href="generated/torch.nn.Module.html#torch.nn.Module" title="torch.nn.Module"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.nn.Module</span></code></a>,
+as a function, or as a <a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.Tensor</span></code></a> method. If functions are exposed in multiple namespaces,
+they go through autocasting regardless of the namespace.</p>
+<p>Ops not listed below do not go through autocasting.  They run in the type
+defined by their inputs.  However, autocasting may still change the type
+in which unlisted ops run if they’re downstream from autocasted ops.</p>
+<p>If an op is unlisted, we assume it’s numerically stable in <code class="docutils literal notranslate"><span class="pre">float16</span></code>.
+If you believe an unlisted op is numerically unstable in <code class="docutils literal notranslate"><span class="pre">float16</span></code>,
+please file an issue.</p>
+<div class="section" id="ops-that-can-autocast-to-float16">
+<h4><a class="toc-backref" href="#id9">Ops that can autocast to <code class="docutils literal notranslate"><span class="pre">float16</span></code></a><a class="headerlink" href="#ops-that-can-autocast-to-float16" title="Permalink to this headline">¶</a></h4>
+<p><code class="docutils literal notranslate"><span class="pre">__matmul__</span></code>,
+<code class="docutils literal notranslate"><span class="pre">addbmm</span></code>,
+<code class="docutils literal notranslate"><span class="pre">addmm</span></code>,
+<code class="docutils literal notranslate"><span class="pre">addmv</span></code>,
+<code class="docutils literal notranslate"><span class="pre">addr</span></code>,
+<code class="docutils literal notranslate"><span class="pre">baddbmm</span></code>,
+<code class="docutils literal notranslate"><span class="pre">bmm</span></code>,
+<code class="docutils literal notranslate"><span class="pre">chain_matmul</span></code>,
+<code class="docutils literal notranslate"><span class="pre">conv1d</span></code>,
+<code class="docutils literal notranslate"><span class="pre">conv2d</span></code>,
+<code class="docutils literal notranslate"><span class="pre">conv3d</span></code>,
+<code class="docutils literal notranslate"><span class="pre">conv_transpose1d</span></code>,
+<code class="docutils literal notranslate"><span class="pre">conv_transpose2d</span></code>,
+<code class="docutils literal notranslate"><span class="pre">conv_transpose3d</span></code>,
+<code class="docutils literal notranslate"><span class="pre">GRUCell</span></code>,
+<code class="docutils literal notranslate"><span class="pre">linear</span></code>,
+<code class="docutils literal notranslate"><span class="pre">LSTMCell</span></code>,
+<code class="docutils literal notranslate"><span class="pre">matmul</span></code>,
+<code class="docutils literal notranslate"><span class="pre">mm</span></code>,
+<code class="docutils literal notranslate"><span class="pre">mv</span></code>,
+<code class="docutils literal notranslate"><span class="pre">prelu</span></code>,
+<code class="docutils literal notranslate"><span class="pre">RNNCell</span></code></p>
+</div>
+<div class="section" id="ops-that-can-autocast-to-float32">
+<h4><a class="toc-backref" href="#id10">Ops that can autocast to <code class="docutils literal notranslate"><span class="pre">float32</span></code></a><a class="headerlink" href="#ops-that-can-autocast-to-float32" title="Permalink to this headline">¶</a></h4>
+<p><code class="docutils literal notranslate"><span class="pre">__pow__</span></code>,
+<code class="docutils literal notranslate"><span class="pre">__rdiv__</span></code>,
+<code class="docutils literal notranslate"><span class="pre">__rpow__</span></code>,
+<code class="docutils literal notranslate"><span class="pre">__rtruediv__</span></code>,
+<code class="docutils literal notranslate"><span class="pre">acos</span></code>,
+<code class="docutils literal notranslate"><span class="pre">asin</span></code>,
+<code class="docutils literal notranslate"><span class="pre">binary_cross_entropy_with_logits</span></code>,
+<code class="docutils literal notranslate"><span class="pre">cosh</span></code>,
+<code class="docutils literal notranslate"><span class="pre">cosine_embedding_loss</span></code>,
+<code class="docutils literal notranslate"><span class="pre">cdist</span></code>,
+<code class="docutils literal notranslate"><span class="pre">cosine_similarity</span></code>,
+<code class="docutils literal notranslate"><span class="pre">cross_entropy</span></code>,
+<code class="docutils literal notranslate"><span class="pre">cumprod</span></code>,
+<code class="docutils literal notranslate"><span class="pre">cumsum</span></code>,
+<code class="docutils literal notranslate"><span class="pre">dist</span></code>,
+<code class="docutils literal notranslate"><span class="pre">erfinv</span></code>,
+<code class="docutils literal notranslate"><span class="pre">exp</span></code>,
+<code class="docutils literal notranslate"><span class="pre">expm1</span></code>,
+<code class="docutils literal notranslate"><span class="pre">gelu</span></code>,
+<code class="docutils literal notranslate"><span class="pre">group_norm</span></code>,
+<code class="docutils literal notranslate"><span class="pre">hinge_embedding_loss</span></code>,
+<code class="docutils literal notranslate"><span class="pre">kl_div</span></code>,
+<code class="docutils literal notranslate"><span class="pre">l1_loss</span></code>,
+<code class="docutils literal notranslate"><span class="pre">layer_norm</span></code>,
+<code class="docutils literal notranslate"><span class="pre">log</span></code>,
+<code class="docutils literal notranslate"><span class="pre">log_softmax</span></code>,
+<code class="docutils literal notranslate"><span class="pre">log10</span></code>,
+<code class="docutils literal notranslate"><span class="pre">log1p</span></code>,
+<code class="docutils literal notranslate"><span class="pre">log2</span></code>,
+<code class="docutils literal notranslate"><span class="pre">margin_ranking_loss</span></code>,
+<code class="docutils literal notranslate"><span class="pre">mse_loss</span></code>,
+<code class="docutils literal notranslate"><span class="pre">multilabel_margin_loss</span></code>,
+<code class="docutils literal notranslate"><span class="pre">multi_margin_loss</span></code>,
+<code class="docutils literal notranslate"><span class="pre">nll_loss</span></code>,
+<code class="docutils literal notranslate"><span class="pre">norm</span></code>,
+<code class="docutils literal notranslate"><span class="pre">normalize</span></code>,
+<code class="docutils literal notranslate"><span class="pre">pdist</span></code>,
+<code class="docutils literal notranslate"><span class="pre">poisson_nll_loss</span></code>,
+<code class="docutils literal notranslate"><span class="pre">pow</span></code>,
+<code class="docutils literal notranslate"><span class="pre">prod</span></code>,
+<code class="docutils literal notranslate"><span class="pre">reciprocal</span></code>,
+<code class="docutils literal notranslate"><span class="pre">rsqrt</span></code>,
+<code class="docutils literal notranslate"><span class="pre">sinh</span></code>,
+<code class="docutils literal notranslate"><span class="pre">smooth_l1_loss</span></code>,
+<code class="docutils literal notranslate"><span class="pre">soft_margin_loss</span></code>,
+<code class="docutils literal notranslate"><span class="pre">softmax</span></code>,
+<code class="docutils literal notranslate"><span class="pre">softmin</span></code>,
+<code class="docutils literal notranslate"><span class="pre">softplus</span></code>,
+<code class="docutils literal notranslate"><span class="pre">sum</span></code>,
+<code class="docutils literal notranslate"><span class="pre">renorm</span></code>,
+<code class="docutils literal notranslate"><span class="pre">tan</span></code>,
+<code class="docutils literal notranslate"><span class="pre">triplet_margin_loss</span></code></p>
+</div>
+<div class="section" id="ops-that-promote-to-the-widest-input-type">
+<h4><a class="toc-backref" href="#id11">Ops that promote to the widest input type</a><a class="headerlink" href="#ops-that-promote-to-the-widest-input-type" title="Permalink to this headline">¶</a></h4>
+<p>These ops don’t require a particular dtype for stability, but take multiple inputs
+and require that the inputs’ dtypes match.  If all of the inputs are
+<code class="docutils literal notranslate"><span class="pre">float16</span></code>, the op runs in <code class="docutils literal notranslate"><span class="pre">float16</span></code>.  If any of the inputs is <code class="docutils literal notranslate"><span class="pre">float32</span></code>,
+autocast casts all inputs to <code class="docutils literal notranslate"><span class="pre">float32</span></code> and runs the op in <code class="docutils literal notranslate"><span class="pre">float32</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">addcdiv</span></code>,
+<code class="docutils literal notranslate"><span class="pre">addcmul</span></code>,
+<code class="docutils literal notranslate"><span class="pre">atan2</span></code>,
+<code class="docutils literal notranslate"><span class="pre">bilinear</span></code>,
+<code class="docutils literal notranslate"><span class="pre">cat</span></code>,
+<code class="docutils literal notranslate"><span class="pre">cross</span></code>,
+<code class="docutils literal notranslate"><span class="pre">dot</span></code>,
+<code class="docutils literal notranslate"><span class="pre">equal</span></code>,
+<code class="docutils literal notranslate"><span class="pre">index_put</span></code>,
+<code class="docutils literal notranslate"><span class="pre">stack</span></code>,
+<code class="docutils literal notranslate"><span class="pre">tensordot</span></code></p>
+<p>Some ops not listed here (e.g., binary ops like <code class="docutils literal notranslate"><span class="pre">add</span></code>) natively promote
+inputs without autocasting’s intervention.  If inputs are a mixture of <code class="docutils literal notranslate"><span class="pre">float16</span></code>
+and <code class="docutils literal notranslate"><span class="pre">float32</span></code>, these ops run in <code class="docutils literal notranslate"><span class="pre">float32</span></code> and produce <code class="docutils literal notranslate"><span class="pre">float32</span></code> output,
+regardless of whether autocast is enabled.</p>
+</div>
+<div class="section" id="prefer-binary-cross-entropy-with-logits-over-binary-cross-entropy">
+<h4><a class="toc-backref" href="#id12">Prefer <code class="docutils literal notranslate"><span class="pre">binary_cross_entropy_with_logits</span></code> over <code class="docutils literal notranslate"><span class="pre">binary_cross_entropy</span></code></a><a class="headerlink" href="#prefer-binary-cross-entropy-with-logits-over-binary-cross-entropy" title="Permalink to this headline">¶</a></h4>
+<p>The backward passes of <a class="reference internal" href="nn.functional.html#torch.nn.functional.binary_cross_entropy" title="torch.nn.functional.binary_cross_entropy"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.nn.functional.binary_cross_entropy()</span></code></a> (and <a class="reference internal" href="generated/torch.nn.BCELoss.html#torch.nn.BCELoss" title="torch.nn.BCELoss"><code class="xref py py-mod docutils literal notranslate"><span class="pre">torch.nn.BCELoss</span></code></a>, which wraps it)
+can produce gradients that aren’t representable in <code class="docutils literal notranslate"><span class="pre">float16</span></code>.  In autocast-enabled regions, the forward input
+may be <code class="docutils literal notranslate"><span class="pre">float16</span></code>, which means the backward gradient must be representable in <code class="docutils literal notranslate"><span class="pre">float16</span></code> (autocasting <code class="docutils literal notranslate"><span class="pre">float16</span></code>
+forward inputs to <code class="docutils literal notranslate"><span class="pre">float32</span></code> doesn’t help, because that cast must be reversed in backward).
+Therefore, <code class="docutils literal notranslate"><span class="pre">binary_cross_entropy</span></code> and <code class="docutils literal notranslate"><span class="pre">BCELoss</span></code> raise an error in autocast-enabled regions.</p>
+<p>Many models use a sigmoid layer right before the binary cross entropy layer.
+In this case, combine the two layers using <a class="reference internal" href="nn.functional.html#torch.nn.functional.binary_cross_entropy_with_logits" title="torch.nn.functional.binary_cross_entropy_with_logits"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.nn.functional.binary_cross_entropy_with_logits()</span></code></a>
+or <a class="reference internal" href="generated/torch.nn.BCEWithLogitsLoss.html#torch.nn.BCEWithLogitsLoss" title="torch.nn.BCEWithLogitsLoss"><code class="xref py py-mod docutils literal notranslate"><span class="pre">torch.nn.BCEWithLogitsLoss</span></code></a>.  <code class="docutils literal notranslate"><span class="pre">binary_cross_entropy_with_logits</span></code> and <code class="docutils literal notranslate"><span class="pre">BCEWithLogits</span></code>
+are safe to autocast.</p>
+</div>
+</div>
+</div>
+</div>
+
+
+             </article>
+             
+            </div>
+            <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="backends.html" class="btn btn-neutral float-right" title="torch.backends" accesskey="n" rel="next">Next <img src="_static/images/chevron-right-orange.svg" class="next-page"></a>
+      
+      
+        <a href="cuda.html" class="btn btn-neutral" title="torch.cuda" accesskey="p" rel="prev"><img src="_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
+      
+    </div>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              <ul>
+<li><a class="reference internal" href="#">Automatic Mixed Precision package - torch.cuda.amp</a><ul>
+<li><a class="reference internal" href="#autocasting">Autocasting</a></li>
+<li><a class="reference internal" href="#gradient-scaling">Gradient Scaling</a></li>
+<li><a class="reference internal" href="#autocast-op-reference">Autocast Op Reference</a><ul>
+<li><a class="reference internal" href="#op-eligibility">Op Eligibility</a></li>
+<li><a class="reference internal" href="#op-specific-behavior">Op-Specific Behavior</a><ul>
+<li><a class="reference internal" href="#ops-that-can-autocast-to-float16">Ops that can autocast to <code class="docutils literal notranslate"><span class="pre">float16</span></code></a></li>
+<li><a class="reference internal" href="#ops-that-can-autocast-to-float32">Ops that can autocast to <code class="docutils literal notranslate"><span class="pre">float32</span></code></a></li>
+<li><a class="reference internal" href="#ops-that-promote-to-the-widest-input-type">Ops that promote to the widest input type</a></li>
+<li><a class="reference internal" href="#prefer-binary-cross-entropy-with-logits-over-binary-cross-entropy">Prefer <code class="docutils literal notranslate"><span class="pre">binary_cross_entropy_with_logits</span></code> over <code class="docutils literal notranslate"><span class="pre">binary_cross_entropy</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+         <script src="_static/jquery.js"></script>
+         <script src="_static/underscore.js"></script>
+         <script src="_static/doctools.js"></script>
+         <script src="_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>

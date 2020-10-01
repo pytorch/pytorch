@@ -1,0 +1,1252 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>torch &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/_modules/torch.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="../_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" /> 
+
+  
+  <script src="../_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="../_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/_modules/torch.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../notes/amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notes/ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="../index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+          <li><a href="index.html">Module code</a> &gt;</li>
+        
+      <li>torch</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <h1>Source code for torch</h1><div class="highlight"><pre>
+<span></span>
+<span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">The torch package contains data structures for multi-dimensional</span>
+<span class="sd">tensors and defines mathematical operations over these tensors.</span>
+<span class="sd">Additionally, it provides many utilities for efficient serializing of</span>
+<span class="sd">Tensors and arbitrary types, and other useful utilities.</span>
+
+<span class="sd">It has a CUDA counterpart, that enables you to run your tensor computations</span>
+<span class="sd">on an NVIDIA GPU with compute capability &gt;= 3.0.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">import</span> <span class="nn">platform</span>
+<span class="kn">import</span> <span class="nn">textwrap</span>
+<span class="kn">import</span> <span class="nn">ctypes</span>
+
+<span class="k">if</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span> <span class="o">&lt;</span> <span class="p">(</span><span class="mi">3</span><span class="p">,):</span>
+    <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Python 2 has reached end-of-life and is no longer supported by PyTorch.&quot;</span><span class="p">)</span>
+
+<span class="kn">from</span> <span class="nn">._utils</span> <span class="kn">import</span> <span class="n">_import_dotted_name</span>
+<span class="kn">from</span> <span class="nn">._utils_internal</span> <span class="kn">import</span> <span class="n">get_file_path</span><span class="p">,</span> <span class="n">prepare_multiprocessing_environment</span><span class="p">,</span> \
+    <span class="n">USE_RTLD_GLOBAL_WITH_LIBTORCH</span><span class="p">,</span> <span class="n">USE_GLOBAL_DEPS</span>
+<span class="kn">from</span> <span class="nn">.version</span> <span class="kn">import</span> <span class="n">__version__</span>
+<span class="kn">from</span> <span class="nn">._six</span> <span class="kn">import</span> <span class="n">string_classes</span> <span class="k">as</span> <span class="n">_string_classes</span>
+
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Set</span><span class="p">,</span> <span class="n">Type</span><span class="p">,</span> <span class="n">TYPE_CHECKING</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s1">&#39;typename&#39;</span><span class="p">,</span> <span class="s1">&#39;is_tensor&#39;</span><span class="p">,</span> <span class="s1">&#39;is_storage&#39;</span><span class="p">,</span> <span class="s1">&#39;set_default_tensor_type&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;set_rng_state&#39;</span><span class="p">,</span> <span class="s1">&#39;get_rng_state&#39;</span><span class="p">,</span> <span class="s1">&#39;manual_seed&#39;</span><span class="p">,</span> <span class="s1">&#39;initial_seed&#39;</span><span class="p">,</span> <span class="s1">&#39;seed&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;save&#39;</span><span class="p">,</span> <span class="s1">&#39;load&#39;</span><span class="p">,</span> <span class="s1">&#39;set_printoptions&#39;</span><span class="p">,</span> <span class="s1">&#39;chunk&#39;</span><span class="p">,</span> <span class="s1">&#39;split&#39;</span><span class="p">,</span> <span class="s1">&#39;stack&#39;</span><span class="p">,</span> <span class="s1">&#39;matmul&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;no_grad&#39;</span><span class="p">,</span> <span class="s1">&#39;enable_grad&#39;</span><span class="p">,</span> <span class="s1">&#39;rand&#39;</span><span class="p">,</span> <span class="s1">&#39;randn&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;DoubleStorage&#39;</span><span class="p">,</span> <span class="s1">&#39;FloatStorage&#39;</span><span class="p">,</span> <span class="s1">&#39;LongStorage&#39;</span><span class="p">,</span> <span class="s1">&#39;IntStorage&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;ShortStorage&#39;</span><span class="p">,</span> <span class="s1">&#39;CharStorage&#39;</span><span class="p">,</span> <span class="s1">&#39;ByteStorage&#39;</span><span class="p">,</span> <span class="s1">&#39;BoolStorage&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;DoubleTensor&#39;</span><span class="p">,</span> <span class="s1">&#39;FloatTensor&#39;</span><span class="p">,</span> <span class="s1">&#39;LongTensor&#39;</span><span class="p">,</span> <span class="s1">&#39;IntTensor&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;ShortTensor&#39;</span><span class="p">,</span> <span class="s1">&#39;CharTensor&#39;</span><span class="p">,</span> <span class="s1">&#39;ByteTensor&#39;</span><span class="p">,</span> <span class="s1">&#39;BoolTensor&#39;</span><span class="p">,</span> <span class="s1">&#39;Tensor&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;lobpcg&#39;</span><span class="p">,</span> <span class="s1">&#39;set_deterministic&#39;</span><span class="p">,</span> <span class="s1">&#39;is_deterministic&#39;</span>
+<span class="p">]</span>
+
+<span class="c1">################################################################################</span>
+<span class="c1"># Load the extension module</span>
+<span class="c1">################################################################################</span>
+
+<span class="k">if</span> <span class="n">sys</span><span class="o">.</span><span class="n">platform</span> <span class="o">==</span> <span class="s1">&#39;win32&#39;</span><span class="p">:</span>
+    <span class="n">pfiles_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s1">&#39;ProgramFiles&#39;</span><span class="p">,</span> <span class="s1">&#39;C:</span><span class="se">\\</span><span class="s1">Program Files&#39;</span><span class="p">)</span>
+    <span class="n">py_dll_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">exec_prefix</span><span class="p">,</span> <span class="s1">&#39;Library&#39;</span><span class="p">,</span> <span class="s1">&#39;bin&#39;</span><span class="p">)</span>
+    <span class="n">th_dll_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="vm">__file__</span><span class="p">),</span> <span class="s1">&#39;lib&#39;</span><span class="p">)</span>
+
+    <span class="c1"># When users create a virtualenv that inherits the base environment,</span>
+    <span class="c1"># we will need to add the corresponding library directory into</span>
+    <span class="c1"># DLL search directories. Otherwise, it will rely on `PATH` which</span>
+    <span class="c1"># is dependent on user settings.</span>
+    <span class="k">if</span> <span class="n">sys</span><span class="o">.</span><span class="n">exec_prefix</span> <span class="o">!=</span> <span class="n">sys</span><span class="o">.</span><span class="n">base_exec_prefix</span><span class="p">:</span>
+        <span class="n">base_py_dll_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">base_exec_prefix</span><span class="p">,</span> <span class="s1">&#39;Library&#39;</span><span class="p">,</span> <span class="s1">&#39;bin&#39;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">base_py_dll_path</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+
+    <span class="n">dll_paths</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">filter</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">,</span> <span class="p">[</span><span class="n">th_dll_path</span><span class="p">,</span> <span class="n">py_dll_path</span><span class="p">,</span> <span class="n">base_py_dll_path</span><span class="p">]))</span>
+
+    <span class="k">if</span> <span class="nb">all</span><span class="p">([</span><span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="s1">&#39;nvToolsExt64_1.dll&#39;</span><span class="p">))</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">dll_paths</span><span class="p">]):</span>
+        <span class="n">nvtoolsext_dll_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s1">&#39;NVTOOLSEXT_PATH&#39;</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">pfiles_path</span><span class="p">,</span> <span class="s1">&#39;NVIDIA Corporation&#39;</span><span class="p">,</span> <span class="s1">&#39;NvToolsExt&#39;</span><span class="p">)),</span> <span class="s1">&#39;bin&#39;</span><span class="p">,</span> <span class="s1">&#39;x64&#39;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">nvtoolsext_dll_path</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+
+    <span class="kn">from</span> <span class="nn">.version</span> <span class="kn">import</span> <span class="n">cuda</span> <span class="k">as</span> <span class="n">cuda_version</span>
+    <span class="kn">import</span> <span class="nn">glob</span>
+    <span class="k">if</span> <span class="n">cuda_version</span> <span class="ow">and</span> <span class="nb">all</span><span class="p">([</span><span class="ow">not</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="s1">&#39;cudart64*.dll&#39;</span><span class="p">))</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">dll_paths</span><span class="p">]):</span>
+        <span class="n">cuda_version_1</span> <span class="o">=</span> <span class="n">cuda_version</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">,</span> <span class="s1">&#39;_&#39;</span><span class="p">)</span>
+        <span class="n">cuda_path_var</span> <span class="o">=</span> <span class="s1">&#39;CUDA_PATH_V&#39;</span> <span class="o">+</span> <span class="n">cuda_version_1</span>
+        <span class="n">default_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">pfiles_path</span><span class="p">,</span> <span class="s1">&#39;NVIDIA GPU Computing Toolkit&#39;</span><span class="p">,</span> <span class="s1">&#39;CUDA&#39;</span><span class="p">,</span> <span class="s1">&#39;v&#39;</span> <span class="o">+</span> <span class="n">cuda_version</span><span class="p">)</span>
+        <span class="n">cuda_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="n">cuda_path_var</span><span class="p">,</span> <span class="n">default_path</span><span class="p">),</span> <span class="s1">&#39;bin&#39;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">cuda_path</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+
+    <span class="n">dll_paths</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="nb">filter</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">,</span> <span class="p">[</span><span class="n">nvtoolsext_dll_path</span><span class="p">,</span> <span class="n">cuda_path</span><span class="p">]))</span>
+
+    <span class="n">kernel32</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">WinDLL</span><span class="p">(</span><span class="s1">&#39;kernel32.dll&#39;</span><span class="p">,</span> <span class="n">use_last_error</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">with_load_library_flags</span> <span class="o">=</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">kernel32</span><span class="p">,</span> <span class="s1">&#39;AddDllDirectory&#39;</span><span class="p">)</span>
+    <span class="n">prev_error_mode</span> <span class="o">=</span> <span class="n">kernel32</span><span class="o">.</span><span class="n">SetErrorMode</span><span class="p">(</span><span class="mh">0x0001</span><span class="p">)</span>
+
+    <span class="n">kernel32</span><span class="o">.</span><span class="n">LoadLibraryW</span><span class="o">.</span><span class="n">restype</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_void_p</span>
+    <span class="k">if</span> <span class="n">with_load_library_flags</span><span class="p">:</span>
+        <span class="n">kernel32</span><span class="o">.</span><span class="n">AddDllDirectory</span><span class="o">.</span><span class="n">restype</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_void_p</span>
+        <span class="n">kernel32</span><span class="o">.</span><span class="n">LoadLibraryExW</span><span class="o">.</span><span class="n">restype</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">c_void_p</span>
+
+    <span class="k">for</span> <span class="n">dll_path</span> <span class="ow">in</span> <span class="n">dll_paths</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span> <span class="o">&gt;=</span> <span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">8</span><span class="p">):</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">add_dll_directory</span><span class="p">(</span><span class="n">dll_path</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">with_load_library_flags</span><span class="p">:</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="n">kernel32</span><span class="o">.</span><span class="n">AddDllDirectory</span><span class="p">(</span><span class="n">dll_path</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">res</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">err</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">WinError</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">get_last_error</span><span class="p">())</span>
+                <span class="n">err</span><span class="o">.</span><span class="n">strerror</span> <span class="o">+=</span> <span class="sa">f</span><span class="s1">&#39; Error adding &quot;</span><span class="si">{</span><span class="n">dll_path</span><span class="si">}</span><span class="s1">&quot; to the DLL directories.&#39;</span>
+                <span class="k">raise</span> <span class="n">err</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">ctypes</span><span class="o">.</span><span class="n">CDLL</span><span class="p">(</span><span class="s1">&#39;vcruntime140.dll&#39;</span><span class="p">)</span>
+        <span class="n">ctypes</span><span class="o">.</span><span class="n">CDLL</span><span class="p">(</span><span class="s1">&#39;msvcp140.dll&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">cuda_version</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;9.2&#39;</span><span class="p">,</span> <span class="s1">&#39;10.0&#39;</span><span class="p">):</span>
+            <span class="n">ctypes</span><span class="o">.</span><span class="n">CDLL</span><span class="p">(</span><span class="s1">&#39;vcruntime140_1.dll&#39;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.</span>
+<span class="s1">                 It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe&#39;&#39;&#39;</span><span class="p">)</span>
+
+    <span class="n">dlls</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">th_dll_path</span><span class="p">,</span> <span class="s1">&#39;*.dll&#39;</span><span class="p">))</span>
+    <span class="n">path_patched</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">for</span> <span class="n">dll</span> <span class="ow">in</span> <span class="n">dlls</span><span class="p">:</span>
+        <span class="n">is_loaded</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">if</span> <span class="n">with_load_library_flags</span><span class="p">:</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="n">kernel32</span><span class="o">.</span><span class="n">LoadLibraryExW</span><span class="p">(</span><span class="n">dll</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="mh">0x00001100</span><span class="p">)</span>
+            <span class="n">last_error</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">get_last_error</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">res</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">last_error</span> <span class="o">!=</span> <span class="mi">126</span><span class="p">:</span>
+                <span class="n">err</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">WinError</span><span class="p">(</span><span class="n">last_error</span><span class="p">)</span>
+                <span class="n">err</span><span class="o">.</span><span class="n">strerror</span> <span class="o">+=</span> <span class="sa">f</span><span class="s1">&#39; Error loading &quot;</span><span class="si">{</span><span class="n">dll</span><span class="si">}</span><span class="s1">&quot; or one of its dependencies.&#39;</span>
+                <span class="k">raise</span> <span class="n">err</span>
+            <span class="k">elif</span> <span class="n">res</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">is_loaded</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">is_loaded</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">path_patched</span><span class="p">:</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;PATH&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">dll_paths</span> <span class="o">+</span> <span class="p">[</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;PATH&#39;</span><span class="p">]])</span>
+                <span class="n">path_patched</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="n">kernel32</span><span class="o">.</span><span class="n">LoadLibraryW</span><span class="p">(</span><span class="n">dll</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">res</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">err</span> <span class="o">=</span> <span class="n">ctypes</span><span class="o">.</span><span class="n">WinError</span><span class="p">(</span><span class="n">ctypes</span><span class="o">.</span><span class="n">get_last_error</span><span class="p">())</span>
+                <span class="n">err</span><span class="o">.</span><span class="n">strerror</span> <span class="o">+=</span> <span class="sa">f</span><span class="s1">&#39; Error loading &quot;</span><span class="si">{</span><span class="n">dll</span><span class="si">}</span><span class="s1">&quot; or one of its dependencies.&#39;</span>
+                <span class="k">raise</span> <span class="n">err</span>
+
+    <span class="n">kernel32</span><span class="o">.</span><span class="n">SetErrorMode</span><span class="p">(</span><span class="n">prev_error_mode</span><span class="p">)</span>
+
+
+<span class="c1"># See Note [Global dependencies]</span>
+<span class="k">def</span> <span class="nf">_load_global_deps</span><span class="p">():</span>
+    <span class="k">if</span> <span class="n">platform</span><span class="o">.</span><span class="n">system</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;Windows&#39;</span><span class="p">:</span>
+        <span class="k">return</span>
+
+    <span class="n">lib_name</span> <span class="o">=</span> <span class="s1">&#39;libtorch_global_deps&#39;</span> <span class="o">+</span> <span class="p">(</span><span class="s1">&#39;.dylib&#39;</span> <span class="k">if</span> <span class="n">platform</span><span class="o">.</span><span class="n">system</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;Darwin&#39;</span> <span class="k">else</span> <span class="s1">&#39;.so&#39;</span><span class="p">)</span>
+    <span class="n">here</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span>
+    <span class="n">lib_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">here</span><span class="p">),</span> <span class="s1">&#39;lib&#39;</span><span class="p">,</span> <span class="n">lib_name</span><span class="p">)</span>
+
+    <span class="n">ctypes</span><span class="o">.</span><span class="n">CDLL</span><span class="p">(</span><span class="n">lib_path</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="n">ctypes</span><span class="o">.</span><span class="n">RTLD_GLOBAL</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="p">(</span><span class="n">USE_RTLD_GLOBAL_WITH_LIBTORCH</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s1">&#39;TORCH_USE_RTLD_GLOBAL&#39;</span><span class="p">))</span> <span class="ow">and</span> \
+        <span class="n">platform</span><span class="o">.</span><span class="n">system</span><span class="p">()</span> <span class="o">!=</span> <span class="s1">&#39;Windows&#39;</span><span class="p">:</span>
+    <span class="c1"># Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a</span>
+    <span class="c1"># few circumstances:</span>
+    <span class="c1">#</span>
+    <span class="c1">#   1. You&#39;re in a build environment (e.g., fbcode) where</span>
+    <span class="c1">#      libtorch_global_deps is not available, but you still need</span>
+    <span class="c1">#      to get mkl to link in with RTLD_GLOBAL or it will just</span>
+    <span class="c1">#      not work.</span>
+    <span class="c1">#</span>
+    <span class="c1">#   2. You&#39;re trying to run PyTorch under UBSAN and you need</span>
+    <span class="c1">#      to ensure that only one copy of libtorch is loaded, so</span>
+    <span class="c1">#      vptr checks work properly</span>
+    <span class="c1">#</span>
+    <span class="c1"># If you&#39;re using this setting, you must verify that all the libraries</span>
+    <span class="c1"># you load consistently use the same libstdc++, or you may have</span>
+    <span class="c1"># mysterious segfaults.</span>
+    <span class="c1">#</span>
+    <span class="kn">import</span> <span class="nn">os</span> <span class="k">as</span> <span class="nn">_dl_flags</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">_dl_flags</span><span class="p">,</span> <span class="s1">&#39;RTLD_GLOBAL&#39;</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">_dl_flags</span><span class="p">,</span> <span class="s1">&#39;RTLD_LAZY&#39;</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="c1"># next try if DLFCN exists</span>
+            <span class="kn">import</span> <span class="nn">DLFCN</span> <span class="k">as</span> <span class="nn">_dl_flags</span>  <span class="c1"># type: ignore</span>
+        <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+            <span class="c1"># as a last attempt, use compile-time constants</span>
+            <span class="kn">import</span> <span class="nn">torch._dl</span> <span class="k">as</span> <span class="nn">_dl_flags</span>  <span class="c1"># type: ignore</span>
+    <span class="n">old_flags</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">getdlopenflags</span><span class="p">()</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">setdlopenflags</span><span class="p">(</span><span class="n">_dl_flags</span><span class="o">.</span><span class="n">RTLD_GLOBAL</span> <span class="o">|</span> <span class="n">_dl_flags</span><span class="o">.</span><span class="n">RTLD_LAZY</span><span class="p">)</span>
+    <span class="kn">from</span> <span class="nn">torch._C</span> <span class="kn">import</span> <span class="o">*</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">setdlopenflags</span><span class="p">(</span><span class="n">old_flags</span><span class="p">)</span>
+    <span class="k">del</span> <span class="n">old_flags</span>
+    <span class="k">del</span> <span class="n">_dl_flags</span>
+
+<span class="k">else</span><span class="p">:</span>
+    <span class="c1"># Easy way.  You want this most of the time, because it will prevent</span>
+    <span class="c1"># C++ symbols from libtorch clobbering C++ symbols from other</span>
+    <span class="c1"># libraries, leading to mysterious segfaults.</span>
+    <span class="c1">#</span>
+    <span class="c1"># If building in an environment where libtorch_global_deps isn&#39;t available</span>
+    <span class="c1"># like parts of fbsource, but where RTLD_GLOBAL causes segfaults, you will</span>
+    <span class="c1"># want USE_RTLD_GLOBAL_WITH_LIBTORCH = False and USE_GLOBAL_DEPS = False</span>
+    <span class="c1">#</span>
+    <span class="c1"># See Note [Global dependencies]</span>
+    <span class="k">if</span> <span class="n">USE_GLOBAL_DEPS</span><span class="p">:</span>
+        <span class="n">_load_global_deps</span><span class="p">()</span>
+    <span class="kn">from</span> <span class="nn">torch._C</span> <span class="kn">import</span> <span class="o">*</span>
+
+<span class="c1"># Appease the type checker; ordinarily this binding is inserted by the</span>
+<span class="c1"># torch._C module initialization code in C</span>
+<span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">torch._C</span> <span class="k">as</span> <span class="nn">_C</span>
+
+<span class="c1"># Check to see if we can load C extensions, and if not provide some guidance</span>
+<span class="c1"># on what the problem might be.</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="c1"># _initExtension is chosen (arbitrarily) as a sentinel.</span>
+    <span class="kn">from</span> <span class="nn">torch._C</span> <span class="kn">import</span> <span class="n">_initExtension</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">torch._C</span> <span class="k">as</span> <span class="nn">_C_for_compiled_check</span>
+
+    <span class="c1"># The __file__ check only works for Python 3.7 and above.</span>
+    <span class="k">if</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span> <span class="o">&gt;=</span> <span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">7</span><span class="p">)</span> <span class="ow">and</span> <span class="n">_C_for_compiled_check</span><span class="o">.</span><span class="vm">__file__</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span><span class="n">textwrap</span><span class="o">.</span><span class="n">dedent</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">            Failed to load PyTorch C extensions:</span>
+<span class="s1">                It appears that PyTorch has loaded the `torch/_C` folder</span>
+<span class="s1">                of the PyTorch repository rather than the C extensions which</span>
+<span class="s1">                are expected in the `torch._C` namespace. This can occur when</span>
+<span class="s1">                using the `install` workflow. e.g.</span>
+<span class="s1">                    $ python setup.py install &amp;&amp; python -c &quot;import torch&quot;</span>
+
+<span class="s1">                This error can generally be solved using the `develop` workflow</span>
+<span class="s1">                    $ python setup.py develop &amp;&amp; python -c &quot;import torch&quot;  # This should succeed</span>
+<span class="s1">                or by running Python from a different directory.</span>
+<span class="s1">            &#39;&#39;&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span> <span class="kn">from</span> <span class="bp">None</span>
+    <span class="k">raise</span>  <span class="c1"># If __file__ is not None the cause is unknown, so just re-raise.</span>
+
+
+<span class="n">__all__</span> <span class="o">+=</span> <span class="p">[</span><span class="n">name</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="nb">dir</span><span class="p">(</span><span class="n">_C</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">name</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="s1">&#39;_&#39;</span> <span class="ow">and</span>
+            <span class="ow">not</span> <span class="n">name</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s1">&#39;Base&#39;</span><span class="p">)]</span>
+
+<span class="c1">################################################################################</span>
+<span class="c1"># Define basic utilities</span>
+<span class="c1">################################################################################</span>
+
+
+<span class="k">def</span> <span class="nf">typename</span><span class="p">(</span><span class="n">o</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">o</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">o</span><span class="o">.</span><span class="n">type</span><span class="p">()</span>
+
+    <span class="n">module</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+    <span class="n">class_name</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">o</span><span class="p">,</span> <span class="s1">&#39;__module__&#39;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">o</span><span class="o">.</span><span class="vm">__module__</span> <span class="o">!=</span> <span class="s1">&#39;builtins&#39;</span> \
+            <span class="ow">and</span> <span class="n">o</span><span class="o">.</span><span class="vm">__module__</span> <span class="o">!=</span> <span class="s1">&#39;__builtin__&#39;</span> <span class="ow">and</span> <span class="n">o</span><span class="o">.</span><span class="vm">__module__</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">module</span> <span class="o">=</span> <span class="n">o</span><span class="o">.</span><span class="vm">__module__</span> <span class="o">+</span> <span class="s1">&#39;.&#39;</span>
+
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">o</span><span class="p">,</span> <span class="s1">&#39;__qualname__&#39;</span><span class="p">):</span>
+        <span class="n">class_name</span> <span class="o">=</span> <span class="n">o</span><span class="o">.</span><span class="vm">__qualname__</span>
+    <span class="k">elif</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">o</span><span class="p">,</span> <span class="s1">&#39;__name__&#39;</span><span class="p">):</span>
+        <span class="n">class_name</span> <span class="o">=</span> <span class="n">o</span><span class="o">.</span><span class="vm">__name__</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">class_name</span> <span class="o">=</span> <span class="n">o</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span>
+
+    <span class="k">return</span> <span class="n">module</span> <span class="o">+</span> <span class="n">class_name</span>
+
+
+<span class="k">def</span> <span class="nf">is_tensor</span><span class="p">(</span><span class="n">obj</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Returns True if `obj` is a PyTorch tensor.</span>
+
+<span class="sd">    Note that this function is simply doing ``isinstance(obj, Tensor)``.</span>
+<span class="sd">    Using that ``isinstance`` check is better for typechecking with mypy,</span>
+<span class="sd">    and more explicit - so it&#39;s recommended to use that instead of</span>
+<span class="sd">    ``is_tensor``.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        obj (Object): Object to test</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">obj</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">is_storage</span><span class="p">(</span><span class="n">obj</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Returns True if `obj` is a PyTorch storage object.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        obj (Object): Object to test</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="nb">type</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span> <span class="ow">in</span> <span class="n">_storage_classes</span>
+
+
+<span class="k">def</span> <span class="nf">set_default_tensor_type</span><span class="p">(</span><span class="n">t</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Sets the default ``torch.Tensor`` type to floating point tensor type</span>
+<span class="sd">    ``t``. This type will also be used as default floating point type for</span>
+<span class="sd">    type inference in :func:`torch.tensor`.</span>
+
+<span class="sd">    The default floating point tensor type is initially ``torch.FloatTensor``.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        t (type or string): the floating point tensor type or its name</span>
+
+<span class="sd">    Example::</span>
+
+<span class="sd">        &gt;&gt;&gt; torch.tensor([1.2, 3]).dtype    # initial default for floating point is torch.float32</span>
+<span class="sd">        torch.float32</span>
+<span class="sd">        &gt;&gt;&gt; torch.set_default_tensor_type(torch.DoubleTensor)</span>
+<span class="sd">        &gt;&gt;&gt; torch.tensor([1.2, 3]).dtype    # a new floating point tensor</span>
+<span class="sd">        torch.float64</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">_string_classes</span><span class="p">):</span>
+        <span class="n">t</span> <span class="o">=</span> <span class="n">_import_dotted_name</span><span class="p">(</span><span class="n">t</span><span class="p">)</span>
+    <span class="n">_C</span><span class="o">.</span><span class="n">_set_default_tensor_type</span><span class="p">(</span><span class="n">t</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">set_default_dtype</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Sets the default floating point dtype to :attr:`d`.</span>
+<span class="sd">    This dtype is:</span>
+
+<span class="sd">    1. The inferred dtype for python floats in :func:`torch.tensor`.</span>
+<span class="sd">    2. Used to infer dtype for python complex numbers. The default complex dtype is set to</span>
+<span class="sd">       ``torch.complex128`` if default floating point dtype is ``torch.float64``,</span>
+<span class="sd">       otherwise it&#39;s set to ``torch.complex64``</span>
+
+<span class="sd">    The default floating point dtype is initially ``torch.float32``.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        d (:class:`torch.dtype`): the floating point dtype to make the default</span>
+
+<span class="sd">    Example:</span>
+<span class="sd">        &gt;&gt;&gt; # initial default for floating point is torch.float32</span>
+<span class="sd">        &gt;&gt;&gt; torch.tensor([1.2, 3]).dtype</span>
+<span class="sd">        torch.float32</span>
+<span class="sd">        &gt;&gt;&gt; # initial default for floating point is torch.complex64</span>
+<span class="sd">        &gt;&gt;&gt; torch.tensor([1.2, 3j]).dtype</span>
+<span class="sd">        torch.complex64</span>
+<span class="sd">        &gt;&gt;&gt; torch.set_default_dtype(torch.float64)</span>
+<span class="sd">        &gt;&gt;&gt; torch.tensor([1.2, 3]).dtype    # a new floating point tensor</span>
+<span class="sd">        torch.float64</span>
+<span class="sd">        &gt;&gt;&gt; torch.tensor([1.2, 3j]).dtype   # a new complex tensor</span>
+<span class="sd">        torch.complex128</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">_C</span><span class="o">.</span><span class="n">_set_default_dtype</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">set_deterministic</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot; Sets whether PyTorch operations must use &quot;deterministic&quot;</span>
+<span class="sd">    algorithms. That is, algorithms which, given the same input, and when</span>
+<span class="sd">    run on the same software and hardware, always produce the same output.</span>
+<span class="sd">    When True, operations will use deterministic algorithms when available,</span>
+<span class="sd">    and if only nondeterministic algorithms are available they will throw a</span>
+<span class="sd">    :class:RuntimeError when called.</span>
+
+<span class="sd">    .. warning::</span>
+<span class="sd">        This feature is in beta, and its design and implementation may change</span>
+<span class="sd">        in the future.</span>
+
+<span class="sd">    The following normally-nondeterministic operations will act</span>
+<span class="sd">    deterministically when `d=True`:</span>
+
+<span class="sd">        * :class:`torch.nn.Conv1d` when called on CUDA tensor</span>
+<span class="sd">        * :class:`torch.nn.Conv2d` when called on CUDA tensor</span>
+<span class="sd">        * :class:`torch.nn.Conv3d` when called on CUDA tensor</span>
+<span class="sd">        * :class:`torch.nn.ConvTranspose1d` when called on CUDA tensor</span>
+<span class="sd">        * :class:`torch.nn.ConvTranspose2d` when called on CUDA tensor</span>
+<span class="sd">        * :class:`torch.nn.ConvTranspose3d` when called on CUDA tensor</span>
+<span class="sd">        * :func:`torch.bmm` when called on sparse-dense CUDA tensors</span>
+
+<span class="sd">    The following normally-nondeterministic operations will throw a</span>
+<span class="sd">    :class:`RuntimeError` when `d=True`:</span>
+
+<span class="sd">        * :class:`torch.nn.AvgPool3d` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :class:`torch.nn.AdaptiveAvgPool2d` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :class:`torch.nn.AdaptiveAvgPool3d` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :class:`torch.nn.MaxPool3d` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :class:`torch.nn.AdaptiveMaxPool2d` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :class:`torch.nn.FractionalMaxPool2d` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :class:`torch.nn.FractionalMaxPool3d` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :func:`torch.nn.functional.interpolate` when called on a CUDA tensor that requires grad</span>
+<span class="sd">            and one of the following modes is used:</span>
+<span class="sd">            - `linear`</span>
+<span class="sd">            - `bilinear`</span>
+<span class="sd">            - `bicubic`</span>
+<span class="sd">            - `trilinear`</span>
+<span class="sd">        * :class:`torch.nn.ReflectionPad1d` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :class:`torch.nn.ReflectionPad2d` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :class:`torch.nn.ReplicationPad1d` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :class:`torch.nn.ReplicationPad2d` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :class:`torch.nn.ReplicationPad3d` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :class:`torch.nn.NLLLoss` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :class:`torch.nn.CTCLoss` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :class:`torch.nn.EmbeddingBag` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :func:`torch.scatter_add_` when called on a CUDA tensor</span>
+<span class="sd">        * :func:`torch.index_add_` when called on a CUDA tensor</span>
+<span class="sd">        * :func:`torch.index_select` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :func:`torch.repeat_interleave` when called on a CUDA tensor that requires grad</span>
+<span class="sd">        * :func:`torch.histc` when called on a CUDA tensor</span>
+<span class="sd">        * :func:`torch.bincount` when called on a CUDA tensor</span>
+
+<span class="sd">    A handful of CUDA operations are nondeterministic if the CUDA version is</span>
+<span class="sd">    10.2 or greater, unless the environment variable `CUBLAS_WORKSPACE_CONFIG=:4096:8`</span>
+<span class="sd">    or `CUBLAS_WORKSPACE_CONFIG=:16:8` is set. See the CUDA documentation for more</span>
+<span class="sd">    details: `&lt;https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility&gt;`_</span>
+<span class="sd">    If one of these environment variable configurations is not set, a :class:`RuntimeError`</span>
+<span class="sd">    will be raised from these operations when called with CUDA tensors:</span>
+
+<span class="sd">        * :func:`torch.mm`</span>
+<span class="sd">        * :func:`torch.mv`</span>
+<span class="sd">        * :func:`torch.bmm`</span>
+
+<span class="sd">    Note that deterministic operations tend to have worse performance than</span>
+<span class="sd">    non-deterministic operations.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        d (:class:`bool`): If True, force operations to be deterministic.</span>
+<span class="sd">                           If False, allow non-deterministic operations.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">_C</span><span class="o">.</span><span class="n">_set_deterministic</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+
+<div class="viewcode-block" id="is_deterministic"><a class="viewcode-back" href="../generated/torch.is_deterministic.html#torch.is_deterministic">[docs]</a><span class="k">def</span> <span class="nf">is_deterministic</span><span class="p">():</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Returns True if the global deterministic flag is turned on. Refer to</span>
+<span class="sd">    :func:`torch.set_deterministic` documentation for more details.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_C</span><span class="o">.</span><span class="n">_get_deterministic</span><span class="p">()</span></div>
+
+<span class="c1">################################################################################</span>
+<span class="c1"># Define Storage and Tensor classes</span>
+<span class="c1">################################################################################</span>
+
+<span class="kn">from</span> <span class="nn">.tensor</span> <span class="kn">import</span> <span class="n">Tensor</span>
+<span class="kn">from</span> <span class="nn">.storage</span> <span class="kn">import</span> <span class="n">_StorageBase</span>
+
+
+<span class="k">class</span> <span class="nc">DoubleStorage</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">DoubleStorageBase</span><span class="p">,</span> <span class="n">_StorageBase</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+
+<div class="viewcode-block" id="FloatStorage"><a class="viewcode-back" href="../storage.html#torch.FloatStorage">[docs]</a><span class="k">class</span> <span class="nc">FloatStorage</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">FloatStorageBase</span><span class="p">,</span> <span class="n">_StorageBase</span><span class="p">):</span>
+    <span class="k">pass</span></div>
+
+
+<span class="k">class</span> <span class="nc">HalfStorage</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">HalfStorageBase</span><span class="p">,</span> <span class="n">_StorageBase</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+
+<span class="k">class</span> <span class="nc">LongStorage</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">LongStorageBase</span><span class="p">,</span> <span class="n">_StorageBase</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+
+<span class="k">class</span> <span class="nc">IntStorage</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">IntStorageBase</span><span class="p">,</span> <span class="n">_StorageBase</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+
+<span class="k">class</span> <span class="nc">ShortStorage</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">ShortStorageBase</span><span class="p">,</span> <span class="n">_StorageBase</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+
+<span class="k">class</span> <span class="nc">CharStorage</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">CharStorageBase</span><span class="p">,</span> <span class="n">_StorageBase</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+
+<span class="k">class</span> <span class="nc">ByteStorage</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">ByteStorageBase</span><span class="p">,</span> <span class="n">_StorageBase</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+
+<span class="k">class</span> <span class="nc">BoolStorage</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">BoolStorageBase</span><span class="p">,</span> <span class="n">_StorageBase</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+
+<span class="k">class</span> <span class="nc">BFloat16Storage</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">BFloat16StorageBase</span><span class="p">,</span> <span class="n">_StorageBase</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+<span class="k">class</span> <span class="nc">ComplexDoubleStorage</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">ComplexDoubleStorageBase</span><span class="p">,</span> <span class="n">_StorageBase</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+<span class="k">class</span> <span class="nc">ComplexFloatStorage</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">ComplexFloatStorageBase</span><span class="p">,</span> <span class="n">_StorageBase</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+<span class="k">class</span> <span class="nc">QUInt8Storage</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">QUInt8StorageBase</span><span class="p">,</span> <span class="n">_StorageBase</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+<span class="k">class</span> <span class="nc">QInt8Storage</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">QInt8StorageBase</span><span class="p">,</span> <span class="n">_StorageBase</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+<span class="k">class</span> <span class="nc">QInt32Storage</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">QInt32StorageBase</span><span class="p">,</span> <span class="n">_StorageBase</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+
+<span class="n">_storage_classes</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="n">DoubleStorage</span><span class="p">,</span> <span class="n">FloatStorage</span><span class="p">,</span> <span class="n">LongStorage</span><span class="p">,</span> <span class="n">IntStorage</span><span class="p">,</span> <span class="n">ShortStorage</span><span class="p">,</span>
+    <span class="n">CharStorage</span><span class="p">,</span> <span class="n">ByteStorage</span><span class="p">,</span> <span class="n">HalfStorage</span><span class="p">,</span> <span class="n">BoolStorage</span><span class="p">,</span> <span class="n">QUInt8Storage</span><span class="p">,</span> <span class="n">QInt8Storage</span><span class="p">,</span>
+    <span class="n">QInt32Storage</span><span class="p">,</span> <span class="n">BFloat16Storage</span><span class="p">,</span> <span class="n">ComplexFloatStorage</span><span class="p">,</span> <span class="n">ComplexDoubleStorage</span>
+<span class="p">}</span>
+
+<span class="c1"># The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()</span>
+<span class="n">_tensor_classes</span><span class="p">:</span> <span class="n">Set</span><span class="p">[</span><span class="n">Type</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+
+<span class="c1"># If you edit these imports, please update torch/__init__.py.in as well</span>
+<span class="kn">from</span> <span class="nn">.random</span> <span class="kn">import</span> <span class="n">set_rng_state</span><span class="p">,</span> <span class="n">get_rng_state</span><span class="p">,</span> <span class="n">manual_seed</span><span class="p">,</span> <span class="n">initial_seed</span><span class="p">,</span> <span class="n">seed</span>
+<span class="kn">from</span> <span class="nn">.serialization</span> <span class="kn">import</span> <span class="n">save</span><span class="p">,</span> <span class="n">load</span>
+<span class="kn">from</span> <span class="nn">._tensor_str</span> <span class="kn">import</span> <span class="n">set_printoptions</span>
+
+<span class="c1">################################################################################</span>
+<span class="c1"># Initialize extension</span>
+<span class="c1">################################################################################</span>
+
+<span class="k">def</span> <span class="nf">manager_path</span><span class="p">():</span>
+    <span class="k">if</span> <span class="n">platform</span><span class="o">.</span><span class="n">system</span><span class="p">()</span> <span class="o">==</span> <span class="s1">&#39;Windows&#39;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sa">b</span><span class="s2">&quot;&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">get_file_path</span><span class="p">(</span><span class="s1">&#39;torch&#39;</span><span class="p">,</span> <span class="s1">&#39;bin&#39;</span><span class="p">,</span> <span class="s1">&#39;torch_shm_manager&#39;</span><span class="p">)</span>
+    <span class="n">prepare_multiprocessing_environment</span><span class="p">(</span><span class="n">get_file_path</span><span class="p">(</span><span class="s1">&#39;torch&#39;</span><span class="p">))</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Unable to find torch_shm_manager at &quot;</span> <span class="o">+</span> <span class="n">path</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">path</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span>
+
+
+<span class="c1"># Shared memory manager needs to know the exact location of manager executable</span>
+<span class="n">_C</span><span class="o">.</span><span class="n">_initExtension</span><span class="p">(</span><span class="n">manager_path</span><span class="p">())</span>
+<span class="k">del</span> <span class="n">manager_path</span>
+
+<span class="c1"># Appease the type checker: it can&#39;t deal with direct setting of globals().</span>
+<span class="c1"># Note that we will see &quot;too many&quot; functions when reexporting this way; there</span>
+<span class="c1"># is not a good way to fix this problem.  Perhaps, try to redesign VariableFunctions</span>
+<span class="c1"># so that this import is good enough</span>
+<span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
+    <span class="c1"># Some type signatures pulled in from _VariableFunctions here clash with</span>
+    <span class="c1"># signatures already imported. For now these clashes are ignored; see</span>
+    <span class="c1"># PR #43339 for details.</span>
+    <span class="kn">from</span> <span class="nn">torch._C._VariableFunctions</span> <span class="kn">import</span> <span class="o">*</span>  <span class="c1"># type: ignore</span>
+
+<span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="nb">dir</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">_VariableFunctions</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">name</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;__&#39;</span><span class="p">):</span>
+        <span class="k">continue</span>
+    <span class="nb">globals</span><span class="p">()[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">_C</span><span class="o">.</span><span class="n">_VariableFunctions</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
+    <span class="n">__all__</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+
+<span class="c1">################################################################################</span>
+<span class="c1"># Import interface functions defined in Python</span>
+<span class="c1">################################################################################</span>
+
+<span class="c1"># needs to be after the above ATen bindings so we can overwrite from Python side</span>
+<span class="kn">from</span> <span class="nn">.functional</span> <span class="kn">import</span> <span class="o">*</span>
+
+
+<span class="c1">################################################################################</span>
+<span class="c1"># Remove unnecessary members</span>
+<span class="c1">################################################################################</span>
+
+<span class="k">del</span> <span class="n">DoubleStorageBase</span>
+<span class="k">del</span> <span class="n">FloatStorageBase</span>
+<span class="k">del</span> <span class="n">LongStorageBase</span>
+<span class="k">del</span> <span class="n">IntStorageBase</span>
+<span class="k">del</span> <span class="n">ShortStorageBase</span>
+<span class="k">del</span> <span class="n">CharStorageBase</span>
+<span class="k">del</span> <span class="n">ByteStorageBase</span>
+<span class="k">del</span> <span class="n">BoolStorageBase</span>
+<span class="k">del</span> <span class="n">QUInt8StorageBase</span>
+<span class="k">del</span> <span class="n">BFloat16StorageBase</span>
+<span class="k">del</span> <span class="n">ComplexDoubleStorageBase</span>
+<span class="k">del</span> <span class="n">ComplexFloatStorageBase</span>
+
+<span class="c1">################################################################################</span>
+<span class="c1"># Import most common subpackages</span>
+<span class="c1">################################################################################</span>
+
+<span class="kn">import</span> <span class="nn">torch.cuda</span>
+<span class="kn">import</span> <span class="nn">torch.autograd</span>
+<span class="kn">from</span> <span class="nn">torch.autograd</span> <span class="kn">import</span> <span class="n">no_grad</span><span class="p">,</span> <span class="n">enable_grad</span><span class="p">,</span> <span class="n">set_grad_enabled</span>
+<span class="c1"># import torch.fft  # TODO: enable once torch.fft() is removed</span>
+<span class="kn">import</span> <span class="nn">torch.futures</span>
+<span class="kn">import</span> <span class="nn">torch.nn</span>
+<span class="kn">import</span> <span class="nn">torch.nn.intrinsic</span>
+<span class="kn">import</span> <span class="nn">torch.nn.quantized</span>
+<span class="kn">import</span> <span class="nn">torch.optim</span>
+<span class="kn">import</span> <span class="nn">torch.optim._multi_tensor</span>
+<span class="kn">import</span> <span class="nn">torch.multiprocessing</span>
+<span class="kn">import</span> <span class="nn">torch.sparse</span>
+<span class="kn">import</span> <span class="nn">torch.utils.backcompat</span>
+<span class="kn">import</span> <span class="nn">torch.onnx</span>
+<span class="kn">import</span> <span class="nn">torch.jit</span>
+<span class="kn">import</span> <span class="nn">torch.linalg</span>
+<span class="kn">import</span> <span class="nn">torch.hub</span>
+<span class="kn">import</span> <span class="nn">torch.random</span>
+<span class="kn">import</span> <span class="nn">torch.distributions</span>
+<span class="kn">import</span> <span class="nn">torch.testing</span>
+<span class="kn">import</span> <span class="nn">torch.backends.cuda</span>
+<span class="kn">import</span> <span class="nn">torch.backends.mkl</span>
+<span class="kn">import</span> <span class="nn">torch.backends.mkldnn</span>
+<span class="kn">import</span> <span class="nn">torch.backends.openmp</span>
+<span class="kn">import</span> <span class="nn">torch.backends.quantized</span>
+<span class="kn">import</span> <span class="nn">torch.quantization</span>
+<span class="kn">import</span> <span class="nn">torch.utils.data</span>
+<span class="kn">import</span> <span class="nn">torch.__config__</span>
+<span class="kn">import</span> <span class="nn">torch.__future__</span>
+
+<span class="n">_C</span><span class="o">.</span><span class="n">_init_names</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">_storage_classes</span><span class="p">))</span>
+
+<span class="c1"># attach docstrings to torch and tensor functions</span>
+<span class="kn">from</span> <span class="nn">.</span> <span class="kn">import</span> <span class="n">_torch_docs</span><span class="p">,</span> <span class="n">_tensor_docs</span><span class="p">,</span> <span class="n">_storage_docs</span>
+<span class="k">del</span> <span class="n">_torch_docs</span><span class="p">,</span> <span class="n">_tensor_docs</span><span class="p">,</span> <span class="n">_storage_docs</span>
+
+
+<span class="k">def</span> <span class="nf">compiled_with_cxx11_abi</span><span class="p">():</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Returns whether PyTorch was built with _GLIBCXX_USE_CXX11_ABI=1&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_C</span><span class="o">.</span><span class="n">_GLIBCXX_USE_CXX11_ABI</span>
+
+
+<span class="c1"># Import the ops &quot;namespace&quot;</span>
+<span class="kn">from</span> <span class="nn">torch._ops</span> <span class="kn">import</span> <span class="n">ops</span>
+<span class="kn">from</span> <span class="nn">torch._classes</span> <span class="kn">import</span> <span class="n">classes</span>
+
+<span class="c1"># Import the quasi random sampler</span>
+<span class="kn">import</span> <span class="nn">torch.quasirandom</span>
+
+<span class="c1"># If you are seeing this, it means that this call site was not checked if</span>
+<span class="c1"># the memory format could be preserved, and it was switched to old default</span>
+<span class="c1"># behaviour of contiguous</span>
+<span class="n">legacy_contiguous_format</span> <span class="o">=</span> <span class="n">contiguous_format</span>
+
+<span class="c1"># Register fork handler to initialize OpenMP in child processes (see gh-28389)</span>
+<span class="kn">from</span> <span class="nn">torch.multiprocessing._atfork</span> <span class="kn">import</span> <span class="n">register_after_fork</span>
+<span class="n">register_after_fork</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">get_num_threads</span><span class="p">)</span>
+<span class="k">del</span> <span class="n">register_after_fork</span>
+
+<span class="c1"># Import tools that require fully imported torch (for applying</span>
+<span class="c1"># torch.jit.script as a decorator, for instance):</span>
+<span class="kn">from</span> <span class="nn">._lobpcg</span> <span class="kn">import</span> <span class="n">lobpcg</span>
+
+<span class="kn">from</span> <span class="nn">._vmap_internals</span> <span class="kn">import</span> <span class="n">vmap</span>
+
+<span class="c1"># These were previously defined in native_functions.yaml and appeared on the</span>
+<span class="c1"># `torch` namespace, but we moved them to c10 dispatch to facilitate custom</span>
+<span class="c1"># class usage. We add these lines here to preserve backward compatbility.</span>
+<span class="n">quantized_lstm</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">ops</span><span class="o">.</span><span class="n">aten</span><span class="o">.</span><span class="n">quantized_lstm</span>
+<span class="n">quantized_gru</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">ops</span><span class="o">.</span><span class="n">aten</span><span class="o">.</span><span class="n">quantized_gru</span>
+
+<span class="kn">from</span> <span class="nn">.overrides</span> <span class="kn">import</span> <span class="n">has_torch_function</span><span class="p">,</span> <span class="n">handle_torch_function</span>
+
+<span class="k">def</span> <span class="nf">Assert</span><span class="p">(</span><span class="n">condition</span><span class="p">,</span> <span class="n">message</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;A wrapper around Python&#39;s assert which is symbolically traceable.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">type</span><span class="p">(</span><span class="n">condition</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="ow">and</span> <span class="n">has_torch_function</span><span class="p">((</span><span class="n">condition</span><span class="p">,)):</span>
+        <span class="k">return</span> <span class="n">handle_torch_function</span><span class="p">(</span><span class="n">Assert</span><span class="p">,</span> <span class="p">(</span><span class="n">condition</span><span class="p">,),</span> <span class="n">condition</span><span class="p">,</span> <span class="n">message</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">condition</span><span class="p">,</span> <span class="n">message</span>
+</pre></div>
+
+             </article>
+             
+            </div>
+            <footer>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+         <script src="../_static/jquery.js"></script>
+         <script src="../_static/underscore.js"></script>
+         <script src="../_static/doctools.js"></script>
+         <script src="../_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="../_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="../_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="../_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="../_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="../_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>
