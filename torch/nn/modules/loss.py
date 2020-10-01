@@ -780,7 +780,7 @@ class SmoothL1Loss(_Loss):
 
     beta is an optional parameter that defaults to 1.
 
-    Note: When beta is set to 0, this is equivalent to we call out directly to :class:`L1Loss`.
+    Note: When beta is set to 0, this is equivalent to :class:`L1Loss`.
     Passing a negative value in for beta will result in an exception.
 
     The division by :math:`n` can be avoided if sets ``reduction = 'sum'``.
