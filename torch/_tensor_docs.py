@@ -3008,11 +3008,8 @@ dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``.
 
 Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
+    scatter_add_ is non_deterministic. It is implemented natively
+    and setting backends.cudnn.deterministic does not affect it.
     Please see the notes on :doc:`/notes/randomness` for background.
 
 Args:
