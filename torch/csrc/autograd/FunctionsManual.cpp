@@ -208,15 +208,14 @@ Tensor pow_backward_self(Tensor grad, const Tensor & self, const Tensor & expone
 // d(a^b)/db = 0 for a > 0 and b -> +0.
 // Currently, tensorflow agrees with us.
 Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& exponent, Tensor result) {
-  auto cond = [](auto self, auto exp) {
-      if (exp.is_complex()) {
-        auto is_real_exp = at::logical_and(at::imag(exp) == 0, at::real(exp) >= 0);
-        return at::logical_and(self == 0, is_real_exp);
-      } else {
-        return at::logical_and(self == 0, exp >= 0);
-      }
-    };
-  auto out = grad * at::where(cond(self, exponent),
+  Tensor cond;
+  if (exponent.is_complex()) {
+    auto is_real_exp = at::logical_and(at::imag(exponent) == 0, at::real(exponent) >= 0);
+    cond = at::logical_and(self == 0, is_real_exp);
+  } else {
+    cond = at::logical_and(self == 0, exponent >= 0);
+  }
+  auto out = grad * at::where(cond,
                           at::zeros({}, grad.options()),
                           (result * self.log()).conj());
   return handle_r_to_c(exponent, out);
@@ -245,7 +244,8 @@ Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exp
 
 Tensor angle_backward(Tensor grad, const Tensor& self) {
   if (self.is_complex()) {
-    return grad * self / self.abs().pow(2) * Scalar(c10::complex<double>{0.0, 1.0});
+    return at::where(self == 0.0, at::zeros({}, self.options()),
+                     grad * self / self.abs().pow(2) * Scalar(c10::complex<double>{0.0, 1.0}));
   } else {
     return at::zeros_like(self, at::MemoryFormat::Preserve);
   }
