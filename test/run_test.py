@@ -37,7 +37,7 @@ TESTS = [
     'distributed/test_data_parallel',
     'distributed/test_distributed_fork',
     'distributed/test_distributed_spawn',
-    'distributions/test_constraints.py',
+    'distributions/test_constraints',
     'distributions/test_distributions',
     'test_expecttest',
     'test_foreach',
@@ -133,7 +133,7 @@ RUN_PARALLEL_BLOCKLIST = [
 # These tests use some specific pytest feature like parameterized testing or
 # fixtures that cannot be run by unittest
 PYTEST_TESTS = [
-    'distributions/test_constraints.py'
+    'distributions/test_constraints'
 ]
 
 # These tests are slow enough that it's worth calculating whether the patch
