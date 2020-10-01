@@ -433,9 +433,10 @@ class TestQuantizedTensor(TestCase):
         """ Tests the per channel quantization scheme for 4-bit qtensors.
         The scale and zero point for this have to be in floating point. """
         r = torch.rand(3, 2, dtype=torch.float) * 4
-        scales = torch.tensor([0.2, 0.03, 0.1], dtype=torch.float)
+        scales = torch.tensor([0.2, 0.3, 0.1], dtype=torch.float)
         zero_points = torch.tensor([0.1, 0.2, 0.3], dtype=torch.float)
         qr = torch.quantize_per_channel(r, scales, zero_points, 0, torch.quint4x2)
+        dequant_tensor = qr.dequantize()
 
         def _get_qranges(bit_width):
             if bit_width == 4:
@@ -464,6 +465,7 @@ class TestQuantizedTensor(TestCase):
 
         ref_res = _quantize_per_channel_sub_byte_ref(r, scales, zero_points, 0, 4)
         self.assertTrue(np.allclose(qr.int_repr(), ref_res))
+        self.assertTrue(np.allclose(r.numpy(), dequant_tensor.numpy(), atol=1 / np.min(scales.numpy())))
 
         # Check 4D tensor with non-zero axis.
         r = torch.rand(3, 2, 4, 5, dtype=torch.float) * 4
