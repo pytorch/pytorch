@@ -6,7 +6,7 @@ import torch.onnx.symbolic_helper as sym_help
 import warnings
 import numpy
 
-from torch.onnx.symbolic_helper import parse_args, _unimplemented
+from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list
 from torch.onnx.symbolic_opset9 import expand, unused
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
@@ -272,7 +272,7 @@ def masked_scatter(g, self, mask, source):
 
 
 def _len(g, self):
-    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()) or self.node().kind() == "onnx::SplitToSequence":
+    if _is_tensor_list(self) or self.node().kind() == "onnx::SplitToSequence":
         return g.op("SequenceLength", self)
     return g.op("Size", self)
 
