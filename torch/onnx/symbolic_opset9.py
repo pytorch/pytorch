@@ -121,6 +121,7 @@ def floor_divide(g, self, other):
     # - self is not fp and other is not fp, the output's type is self's output type
     # - the output type defaults to Float
     scalar_type = self.type().scalarType()
+
     if scalar_type is not None:
         if not sym_help._is_fp(self) and \
            other.type().scalarType() is not None and \

@@ -25,24 +25,28 @@ namespace jit {
 // file contents being the raw tensor data.
 using RawDataExportMap = std::unordered_map<std::string, at::Tensor>;
 
-TORCH_API std::
-    tuple<std::shared_ptr<::ONNX_NAMESPACE::ModelProto>, RawDataExportMap>
-    export_onnx(
-        const std::shared_ptr<Graph>& graph,
-        const std::map<std::string, at::Tensor>& initializers,
-        int64_t onnx_opset_version,
-        const std::unordered_map<
-            std::string,
-            std::unordered_map<int64_t, std::string>>& dynamic_axes,
-        bool defer_weight_export = false,
-        ::torch::onnx::OperatorExportTypes operator_export_type =
-            ::torch::onnx::OperatorExportTypes::ONNX,
-        bool strip_doc_string = true,
-        bool keep_initializers_as_inputs = true,
-        const std::map<std::string, int>& custom_opsets = {},
-        bool add_node_names = true,
-        bool use_external_data_format = false,
-        const std::string& onnx_file_path = std::string());
+using SymbolDimMap = std::map<c10::ShapeSymbol, std::string>;
+
+TORCH_API std::tuple<
+    std::shared_ptr<::ONNX_NAMESPACE::ModelProto>,
+    RawDataExportMap,
+    SymbolDimMap>
+export_onnx(
+    const std::shared_ptr<Graph>& graph,
+    const std::map<std::string, at::Tensor>& initializers,
+    int64_t onnx_opset_version,
+    const std::unordered_map<
+        std::string,
+        std::unordered_map<int64_t, std::string>>& dynamic_axes,
+    bool defer_weight_export = false,
+    ::torch::onnx::OperatorExportTypes operator_export_type =
+        ::torch::onnx::OperatorExportTypes::ONNX,
+    bool strip_doc_string = true,
+    bool keep_initializers_as_inputs = true,
+    const std::map<std::string, int>& custom_opsets = {},
+    bool add_node_names = true,
+    bool use_external_data_format = false,
+    const std::string& onnx_file_path = std::string());
 
 TORCH_API std::string serialize_model_proto_to_string(
     const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto);

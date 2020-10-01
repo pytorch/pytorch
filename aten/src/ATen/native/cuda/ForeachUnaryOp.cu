@@ -6,8 +6,9 @@ namespace at { namespace native {
 
 template <template<class> class Op>
 std::vector<Tensor> foreach_unary_op(TensorList tensors) {
-    std::vector<std::vector<at::Tensor>> tensor_lists; 
+    std::vector<std::vector<at::Tensor>> tensor_lists;
     std::vector<at::Tensor> vec_res;
+    vec_res.reserve(tensors.size());
     for (const auto& t: tensors) {
         vec_res.emplace_back(at::native::empty_like(t));
     }
@@ -16,18 +17,24 @@ std::vector<Tensor> foreach_unary_op(TensorList tensors) {
     tensor_lists.emplace_back(std::move(vec_res));
 
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half,  tensors[0].scalar_type(), "foreach_unary_op_cuda", [&]() {
-        multi_tensor_apply<2>(tensor_lists, UnaryOpFunctor<scalar_t, Op>());
+        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+        multi_tensor_apply<2>(tensor_lists,
+                              UnaryOpFunctor<scalar_t>(),
+                              Op<opmath_t>());
     });
     return tensor_lists[1];
 }
 
 template <template<class> class Op>
 void foreach_unary_op_(TensorList tensors) {
-    std::vector<std::vector<at::Tensor>> tensor_lists; 
+    std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(tensors.vec());
 
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, tensors[0].scalar_type(), "foreach_unary_op_cuda_", [&]() {
-        multi_tensor_apply<1>(tensor_lists, UnaryOpFunctor_<scalar_t, Op>());
+        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+        multi_tensor_apply<1>(tensor_lists,
+                              UnaryOpFunctor_<scalar_t>(),
+                              Op<opmath_t>());
     });
 }
 
