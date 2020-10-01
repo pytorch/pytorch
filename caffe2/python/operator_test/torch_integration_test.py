@@ -269,6 +269,69 @@ class TorchIntegration(hu.HypothesisTestCase):
             torch.testing.assert_allclose(o, o_ref)
 
     @given(
+        dim_1=st.integers(min_value=10, max_value=10),
+        dim_2=st.integers(min_value=3, max_value=3),
+        dim_3=st.integers(min_value=2, max_value=2),
+    )
+    def test_sparse_to_dense_mask(self, dim_1, dim_2, dim_3):
+        indices = np.array([i + 1 for i in range(dim_1)]).astype(np.int32)
+        values = np.random.rand(dim_1, dim_2, dim_3).astype(np.float32)
+        default_value = np.zeros((dim_2, dim_3)).astype(np.float32)
+        mask = [2, 4, 9]
+
+        def sparse_to_dense_mask_ref(return_presence_mask=False):
+            ref_op = core.CreateOperator(
+                "SparseToDenseMask",
+                ["indices", "values", "default_value"],
+                ["output", "presence_mask"],
+                mask=mask,
+                return_presence_mask=return_presence_mask,
+            )
+            workspace.FeedBlob("indices", indices)
+            workspace.FeedBlob("values", values)
+            workspace.FeedBlob("default_value", default_value)
+            workspace.RunOperatorOnce(ref_op)
+
+            if return_presence_mask:
+                return (
+                    workspace.FetchBlob("output"),
+                    workspace.FetchBlob("presence_mask"),
+                )
+
+            return workspace.FetchBlob("output")
+
+        # Testing return_presence_mask = False
+        output = sparse_to_dense_mask_ref()
+        output = torch.tensor(output)
+
+        a, _ = torch.ops._caffe2.SparseToDenseMask(
+            torch.tensor(indices),
+            torch.tensor(values),
+            torch.tensor(default_value),
+            None,
+            mask=mask,
+        )
+
+        torch.testing.assert_allclose(output, a)
+
+        # Testing return_presence_mask = True
+        output, presence_mask = sparse_to_dense_mask_ref(return_presence_mask=True)
+        output = torch.tensor(output)
+        presence_mask = torch.tensor(presence_mask)
+
+        a, b = torch.ops._caffe2.SparseToDenseMask(
+            torch.tensor(indices),
+            torch.tensor(values),
+            torch.tensor(default_value),
+            None,
+            mask=mask,
+            return_presence_mask=True,
+        )
+
+        torch.testing.assert_allclose(output, a)
+        torch.testing.assert_allclose(presence_mask, b)
+
+    @given(
         A=st.integers(min_value=4, max_value=4),
         H=st.integers(min_value=10, max_value=10),
         W=st.integers(min_value=8, max_value=8),
