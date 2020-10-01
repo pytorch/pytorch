@@ -105,7 +105,6 @@ class TestModels(TestCase):
         )
         self.exportTest(toC(alexnet()), toC(x))
 
-    @disableScriptTest()
     def test_mnist(self):
         x = Variable(torch.randn(BATCH_SIZE, 1, 28, 28).fill_(1.0))
         self.exportTest(toC(MNIST()), toC(x))
