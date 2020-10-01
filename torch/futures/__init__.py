@@ -81,6 +81,39 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         """
         return cast(Future[S], super().then(callback))
 
+    def add_done_callback(self, callback):  # type: (Callable[[None], None]) -> None
+        r"""
+        Add a callback to this ``Future``.
+        Multiple callbacks can be added to the same ``Future``, and all
+        added callbacks will be executed once the future completes.
+        If the future has already completed, the callback will be executed immediately.
+        The callback
+
+        Append the given callback function to this ``Future``, which will be run
+        when the ``Future`` is completed.  Multiple callbacks can be added to
+        the same ``Future``, and will be invoked in the same order as they were
+        added. The callback must take one argument, which is the reference to
+        this ``Future``. The callback function can use the ``Future.wait()`` API
+        to get the value.
+
+        Arguments:
+            callback(``None``): a ``Callable`` that takes in no arguments
+
+        Example::
+            >>> import torch
+            >>>
+            >>> def callback():
+            >>>     print(f"This will run after the future has finished.")
+            >>>
+            >>> fut = torch.futures.Future()
+            >>> fut.add_done_callback(callback)
+            >>> fut.set_result(5)
+            >>>
+            >>> # Outputs are:
+            >>> # This will run after the future has finished.
+        """
+        super().add_done_callback(callback)
+
     def set_result(self, result: T) -> None:
         r"""
         Set the result for this ``Future``, which will mark this ``Future`` as

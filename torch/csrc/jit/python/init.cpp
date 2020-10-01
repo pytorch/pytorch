@@ -1082,6 +1082,10 @@ void initJITBindings(PyObject* module) {
           &PythonFutureWrapper::then,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "add_done_callback",
+          &PythonFutureWrapper::add_done_callback,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "set_result",
           // Intentionally not releasing GIL
           &PythonFutureWrapper::markCompleted)

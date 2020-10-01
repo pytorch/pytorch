@@ -92,6 +92,39 @@ class TestFuture(TestCase):
         for i in range(len(futs)):
             self.assertEqual(futs[i].wait(), torch.ones(2, 2) + i + 1)
 
+    def test_add_done_callback_simple(self):
+        callback_result = False
+        def callback():
+            nonlocal callback_result
+            callback_result = True
+
+        fut = Future[torch.Tensor]()
+        fut.add_done_callback(callback)
+
+        self.assertFalse(callback_result)
+        fut.set_result(torch.ones(2, 2))
+        self.assertEqual(fut.wait(), torch.ones(2, 2))
+        self.assertTrue(callback_result)
+
+    def test_add_done_callback_maintains_callback_order(self):
+        callback_result = 0
+        def callback_mul0():
+            nonlocal callback_result
+            callback_result *= 0
+
+        def callback_add1():
+            nonlocal callback_result
+            callback_result += 1
+
+        fut = Future[torch.Tensor]()
+        fut.add_done_callback(callback_mul0)
+        fut.add_done_callback(callback_add1)
+
+        fut.set_result(torch.ones(2, 2))
+        self.assertEqual(fut.wait(), torch.ones(2, 2))
+        # mul0 called first: (0 * 0) + 1 == 1
+        self.assertEqual(callback_result, 1)
+
     def _test_error(self, cb, errMsg):
         fut = Future[int]()
         then_fut = fut.then(cb)

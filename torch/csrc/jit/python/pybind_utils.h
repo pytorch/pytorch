@@ -144,6 +144,10 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
         PyObjectType::get()));
   }
 
+  void add_done_callback(const std::function<void(void)> &cb) {
+    fut->addCallback(cb);
+  }
+
   void markCompleted(const py::object& pyValue) {
     DCHECK(PyGILState_Check());
     IValue value = toIValue(pyValue, PyObjectType::get());
