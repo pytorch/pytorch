@@ -8,6 +8,7 @@ from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
+from torch.fx.experimental.Partitioner import DAG, Partitioner
 
 from torch.fx.proxy import TraceError
 
@@ -771,6 +772,28 @@ class TestFX(JitTestCase):
         # Test shape propogation and make sure results match actual
         self.assertEqual(output_shape, ref_out.shape)
 
+    def test_find_single_partition(self):
+        class testModule(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+        m = testModule()
+        traced = symbolic_trace(m)
+        partitioner = Partitioner()
+        devices = [{"name": "dev_0", "available_mem": float('inf')}]
+        dag = partitioner.partition_graph(traced, devices)
+        for node in traced.graph.nodes:
+            assert node.partition_ids == [1]
+        nodes = traced.graph.nodes
+        res_dag = DAG()
+        res_dag.create_node(0, [], [1], [], [])
+        res_dag.create_node(1, [0], [], [nodes[0], nodes[1]], [nodes[2]])
+        for r, d in zip(res_dag.nodes, dag.nodes):
+            assert(r.partition_id == d.partition_id)
+            assert(r.parents == d.parents)
+            assert(r.children == d.children)
+            assert(r.input_nodes == d.input_nodes)
+            assert(r.output_nodes == d.output_nodes)
+
     @skipIfNoTorchVision
     def test_replace_uses(self):
         rn18 = resnet18()
@@ -872,7 +895,6 @@ class TestFX(JitTestCase):
         expected_ops = ['x', 'neg', 'tanh', 'relu']
         for node, expected in zip(graph.nodes, expected_ops):
             assert expected in node.name
-
 
 if __name__ == '__main__':
     run_tests()
