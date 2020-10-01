@@ -2367,7 +2367,6 @@ t2.start()
                 self.assertEqual(results[t].sum().item(), size * size)
 
     def _run_autocast_outofplace(self, op, args, run_as_type, out_type=None, module=torch, add_kwargs=None):
-        print(f"HEY _run_autocast_outofplace top op {op}", file=sys.stderr)
         # helper to cast args
         def cast(val, to_type):
             if isinstance(val, torch.Tensor):
@@ -2380,8 +2379,13 @@ t2.start()
         if add_kwargs is None:
             add_kwargs = {}
 
+        print(f"HEY _run_autocast_outofplace op {op} 0", file=sys.stderr)
         self.assertFalse(torch.is_autocast_enabled())
+
+        print(f"HEY _run_autocast_outofplace op {op} 1", file=sys.stderr)
         with torch.cuda.amp.autocast():
+
+            print(f"HEY _run_autocast_outofplace op {op} 2", file=sys.stderr)
             self.assertTrue(torch.is_autocast_enabled())
 
             out_type = out_type if out_type is not None else run_as_type
@@ -2389,8 +2393,10 @@ t2.start()
 
             # Try module.* variant, if requested:
             if module is not None and hasattr(module, op):
+
                 print(f"HEY module {module}", file=sys.stderr)
                 output = getattr(module, op)(*args, **add_kwargs)
+
                 print(f"HEY done module {module}", file=sys.stderr)
                 if isinstance(output, torch.Tensor):
                     self.assertTrue(out_type == output.dtype,
@@ -2399,8 +2405,10 @@ t2.start()
 
             # Try Tensor.* variant:
             if hasattr(torch.Tensor, op):
+
                 print(f"HEY Tensor", file=sys.stderr)
                 output_method = getattr(args[0], op)(*args[1:], **add_kwargs)
+
                 print(f"HEY done Tensor", file=sys.stderr)
                 if isinstance(output_method, torch.Tensor):
                     self.assertTrue(out_type == output_method.dtype,
@@ -2456,9 +2464,11 @@ t2.start()
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp16(self):
+        print(f"HEY test_autocast_torch_fp16 0", file=sys.stderr)
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op_with_args in self.autocast_lists.torch_fp16:
                 skip_test = False
+                print(f"HEY test_autocast_torch_fp16 op_with_args {op_with_args}", file=sys.stderr)
                 op, args = op_with_args[0], op_with_args[1]
                 if len(op_with_args) == 3:
                     skip_test = op_with_args[2]  # TEST_WITH_ROCM
