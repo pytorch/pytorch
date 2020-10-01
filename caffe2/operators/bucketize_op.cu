@@ -27,7 +27,7 @@ __global__ void BucketizeOpKernel(
 }
 
 template <>
-CAFFE2_API bool BucketizeOp<CUDAContext>::RunOnDevice() {
+C10_EXPORT bool BucketizeOp<CUDAContext>::RunOnDevice() {
   auto& input = Input(X);
   CAFFE_ENFORCE_GE(input.dim(), 1);
 

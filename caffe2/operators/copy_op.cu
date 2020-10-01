@@ -4,7 +4,7 @@
 namespace caffe2 {
 
 template <>
-CAFFE2_API class CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>
+C10_EXPORT class CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>
     : public Operator<CUDAContext> {
  public:
   template <class... Args>

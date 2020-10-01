@@ -3,7 +3,7 @@
 namespace caffe2 {
 
 template <>
-CAFFE2_API bool PercentileOp<CPUContext>::RunOnDevice() {
+C10_EXPORT bool PercentileOp<CPUContext>::RunOnDevice() {
   const auto& original_values = Input(X);
   CAFFE_ENFORCE_EQ(original_values.dim(), 2);
   const auto num_examples = original_values.size(0);
