@@ -220,7 +220,7 @@ class Module:
 
     training: bool
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
