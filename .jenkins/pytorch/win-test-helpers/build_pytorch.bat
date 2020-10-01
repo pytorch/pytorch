@@ -4,7 +4,7 @@ if "%DEBUG%" == "1" (
   set BUILD_TYPE=release
 )
 
-set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;%PATH%
+set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLIV2;%PATH%
 
 :: This inflates our log size slightly, but it is REALLY useful to be
 :: able to see what our cl.exe commands are (since you can actually
