@@ -25,18 +25,6 @@ def register_quant_pattern(pattern):
 def get_quant_patterns():
     return QUANTIZATION_PATTERNS
 
-DYNAMIC_QUANTIZATION_PATTERNS = OrderedDict()
-# Register pattern for dynamic quantization
-def register_dynamic_quant_pattern(pattern):
-    def insert(fn):
-        DYNAMIC_QUANTIZATION_PATTERNS[pattern] = fn
-        return fn
-    return insert
-
-# Get patterns for dynamic quantization
-def get_dynamic_quant_patterns():
-    return DYNAMIC_QUANTIZATION_PATTERNS
-
 # Example use of register pattern function:
 # @register_fusion_pattern(torch.nn.ReLU, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
 # class ConvBNReLUFusion():
