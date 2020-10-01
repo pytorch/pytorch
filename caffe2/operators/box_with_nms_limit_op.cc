@@ -5,7 +5,7 @@
 namespace caffe2 {
 
 template <>
-CAFFE2_API bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
+C10_EXPORT bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   const auto& tscores = Input(0);
   const auto& tboxes = Input(1);
 

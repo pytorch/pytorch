@@ -344,7 +344,7 @@ __global__ void InitializeDataKernel(
 } // namespace
 
 template <>
-CAFFE2_API bool GenerateProposalsOp<CUDAContext>::RunOnDevice() {
+C10_EXPORT bool GenerateProposalsOp<CUDAContext>::RunOnDevice() {
   const auto& scores = Input(0);
   const auto& bbox_deltas = Input(1);
   const auto& im_info_tensor = Input(2);

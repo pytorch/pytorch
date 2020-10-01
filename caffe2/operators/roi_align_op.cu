@@ -149,7 +149,7 @@ __global__ void RoIAlignForward(
 } // namespace
 
 template <>
-CAFFE2_API bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
                       // RoI pooled data

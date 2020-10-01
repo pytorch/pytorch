@@ -4,7 +4,7 @@ namespace caffe2 {
 
 template <>
 template <typename T>
-CAFFE2_API bool PackSegmentsOp<CPUContext>::DoRunWithType() {
+C10_EXPORT bool PackSegmentsOp<CPUContext>::DoRunWithType() {
   return DispatchHelper<
       TensorTypes2<char, int32_t, int64_t, float, std::string>,
       T>::call(this, Input(DATA));
@@ -12,7 +12,7 @@ CAFFE2_API bool PackSegmentsOp<CPUContext>::DoRunWithType() {
 
 template <>
 template <typename T, typename Data_T>
-CAFFE2_API bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
+C10_EXPORT bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto& data = Input(DATA);
   const auto& lengths = Input(LENGTHS);
 
@@ -120,7 +120,7 @@ CAFFE2_API bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
 
 template <>
 template <typename T>
-CAFFE2_API bool UnpackSegmentsOp<CPUContext>::DoRunWithType() {
+C10_EXPORT bool UnpackSegmentsOp<CPUContext>::DoRunWithType() {
   return DispatchHelper<
       TensorTypes2<char, int32_t, int64_t, float, std::string>,
       T>::call(this, Input(DATA));
@@ -128,7 +128,7 @@ CAFFE2_API bool UnpackSegmentsOp<CPUContext>::DoRunWithType() {
 
 template <>
 template <typename T, typename Data_T>
-CAFFE2_API bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
+C10_EXPORT bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto& data = Input(DATA);
   const auto& lengths = Input(LENGTHS);
   auto* output = Output(0);

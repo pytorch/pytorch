@@ -5,12 +5,12 @@
 namespace caffe2 {
 
 template <>
-CAFFE2_API bool WeightedSumOp<CPUContext>::RunOnDevice() {
+C10_EXPORT bool WeightedSumOp<CPUContext>::RunOnDevice() {
   return DoRunWithType<float>();
 }
 
 template <>
-CAFFE2_API bool WeightedSumGradientOp<CPUContext>::RunOnDevice() {
+C10_EXPORT bool WeightedSumGradientOp<CPUContext>::RunOnDevice() {
   return DoRunWithType<float>();
 }
 

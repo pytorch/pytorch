@@ -102,7 +102,7 @@ __global__ void PieceWiseLinearTransformBinaryKernel2(
 } // namespace
 
 template <>
-CAFFE2_API void PiecewiseLinearTransformOp<float, CUDAContext>::setUpTensors(
+C10_EXPORT void PiecewiseLinearTransformOp<float, CUDAContext>::setUpTensors(
     int64_t& num_func_per_group,
     int64_t& num_group,
     int64_t M) {
@@ -192,7 +192,7 @@ CAFFE2_API void PiecewiseLinearTransformOp<float, CUDAContext>::setUpTensors(
 }
 
 template <>
-CAFFE2_API bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformGeneral() {
+C10_EXPORT bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformGeneral() {
   auto& X = Input(0);
 
   CAFFE_ENFORCE_EQ(X.dim(), 2);
@@ -224,7 +224,7 @@ CAFFE2_API bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformGeneral
 }
 
 template <>
-CAFFE2_API bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
+C10_EXPORT bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
   auto& X = Input(0);
 
   CAFFE_ENFORCE(X.dim() == 1 || X.dim() == 2);
