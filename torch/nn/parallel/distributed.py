@@ -389,6 +389,10 @@ class DistributedDataParallel(Module):
         self.require_forward_param_sync = True
         self.ddp_join_enabled = False
         self.gradient_as_bucket_view = gradient_as_bucket_view
+        if hasattr(module, '_ddp_params_and_buffers_to_ignore'):
+            self.parameters_to_ignore = module._ddp_params_and_buffers_to_ignore
+        else:
+            self.parameters_to_ignore = []
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -412,7 +416,11 @@ class DistributedDataParallel(Module):
         self._ddp_init_helper()
 
     def _sync_params_and_buffers(self, authoritative_rank=0):
-        module_states = list(self.module.state_dict().values())
+        module_states = []
+        for name, param in self.module.state_dict().items():
+            if name not in self.parameters_to_ignore:
+                module_states.append(param)
+
         if len(module_states) > 0:
             self._distributed_broadcast_coalesced(
                 module_states,
@@ -478,17 +486,55 @@ class DistributedDataParallel(Module):
             self._module_copies = [self.module]
 
         self.modules_params = [list(parameters(m)) for m in self._module_copies]
-        self.modules_buffers = [list(m.buffers()) for m in self._module_copies]
-
-        # Build tuple of (module, parameter) for all parameters that require grads.
-        modules_and_parameters = [
+        # Collect buffers for modules, filtering out buffers that should be ignored.
+        named_module_buffers = [
+            [(buffer, buffer_name) for buffer_name, buffer in m.named_buffers()]
+            for m in self._module_copies
+        ]
+        self.modules_buffers = [
             [
-                (module, parameter)
-                for module in replica.modules()
-                for parameter in filter(
-                    lambda parameter: parameter.requires_grad,
-                    parameters(module, recurse=False))
-            ] for replica in self._module_copies]
+                buffer
+                for (buffer, buffer_name) in module_buffers
+                if buffer_name not in self.parameters_to_ignore
+            ]
+            for module_buffers in named_module_buffers
+        ]
+        # Build tuple of (module, parameter) for all parameters that require grads.
+        if self.device_ids and len(self.device_ids) > 1:
+            # Single-process multi-device mode,does not support self.parameters_to_ignore.
+            if self.parameters_to_ignore:
+                raise ValueError(
+                    "Single-Process multi-device mode does not "
+                    "support ignoring parameters upfront. Please consider "
+                    "using one DDP instance per device."
+                )
+
+            modules_and_parameters = [
+                [
+                    (module, parameter)
+                    for module in replica.modules()
+                    for parameter in filter(
+                        lambda parameter: parameter.requires_grad,
+                        parameters(module, recurse=False))
+                ] for replica in self._module_copies]
+        else:
+            modules_and_parameters = [
+                [
+                    (module, parameter)
+                    for module_name, module in replica.named_modules()
+                    for parameter in [
+                        param
+                        # Note that we access module.named_parameters instead of
+                        # parameters(module). parameters(module) is only needed in the
+                        # single-process multi device case, where it accesses replicated
+                        # parameters through _former_parameters.
+                        for param_name, param in module.named_parameters(recurse=False)
+                        if param.requires_grad
+                        and f"{module_name}.{param_name}" not in self.parameters_to_ignore
+                    ]
+                ]
+                for replica in self._module_copies
+            ]
 
         # Build list of parameters.
         parameters = [
@@ -1088,3 +1134,12 @@ class DistributedDataParallel(Module):
             raise ValueError(
                 "Communication hook: return annotation should be torch.futures.Future or torch._C.Future."
             )
+
+    @staticmethod
+    def _set_params_and_buffers_to_ignore_for_model(
+        module, params_and_buffers_to_ignore
+    ):
+        # This is a workaround to set parameters and buffers DDP should ignore
+        # during synchronization. It will be removed when the API is finalized
+        # as part of addressing https://github.com/pytorch/pytorch/issues/43690.
+        module._ddp_params_and_buffers_to_ignore = params_and_buffers_to_ignore
