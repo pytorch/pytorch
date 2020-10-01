@@ -1,5 +1,8 @@
 import torch
+import torch.fx
 from torch.fx.node import Node
+
+from typing import Dict
 
 class ShapeProp:
     def __init__(self, mod):
