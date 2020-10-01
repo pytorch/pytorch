@@ -16,6 +16,10 @@
 #include <type_traits>
 #include <unordered_map>
 
+#include <unistd.h>
+#include <sys/syscall.h>
+#define gettid() syscall(SYS_gettid)
+
 
 ncclComm_t* to_nccl_comm(torch::cuda::nccl::ncclComm_t* var) {
   return reinterpret_cast<ncclComm_t*>(var);
@@ -104,7 +108,9 @@ ncclRedOp_t to_nccl_red_op(int var) {
     NCCL_CHECK(from_nccl_result(ncclGroupStart()));      \
       fprintf(                                           \
           stdout,                                        \
-          "NCCL group start in: %s:%d\n",                \
+          "[%d:%d] NCCL group start in: %s:%d\n",        \
+          getpid(),                                      \
+          gettid(),                                      \
           __FILE__,                                      \
           __LINE__);                                     \
   } while (0)
@@ -115,7 +121,9 @@ ncclRedOp_t to_nccl_red_op(int var) {
     NCCL_CHECK(from_nccl_result(ncclGroupEnd()));        \
       fprintf(                                           \
           stdout,                                        \
-          "NCCL group end in: %s:%d\n",                  \
+          "[%d:%d] NCCL group end in: %s:%d\n",          \
+          getpid(),                                      \
+          gettid(),                                      \
           __FILE__,                                      \
           __LINE__);                                     \
   } while (0)
@@ -441,7 +449,7 @@ void broadcast(
         count_max,
         ")");
     ncclComm_t comm = comms[i];
-    std::cout << "issue input: " << i << "num_tensors:" << num_tensors <<  std::endl;
+    std::cout << "[" << getpid() << ":"<< gettid() << "]issue input: " << i << "num_tensors:" << num_tensors <<  std::endl;
     NCCL_CHECK(from_nccl_result(ncclBcast(
         tensors[i].data_ptr(), numel, data_type, 0, *(to_nccl_comm(&comm)), stream)));
   }
