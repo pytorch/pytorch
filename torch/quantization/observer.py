@@ -951,7 +951,8 @@ class HistogramObserver(_ObserverBase):
         orig_hist = orig_hist + interpolated_histogram.to(torch.float)
         return orig_hist
 
-    def forward(self, x_orig: torch.Tensor) -> torch.Tensor:
+    def forward(self, x_orig):
+        # type: (torch.Tensor) -> torch.Tensor
         x = x_orig.detach()
         min_val = self.min_val
         max_val = self.max_val
@@ -963,7 +964,7 @@ class HistogramObserver(_ObserverBase):
             self.min_val.copy_(min_val)
             self.max_val.resize_(max_val.shape)
             self.max_val.copy_(max_val)
-            assert min_val.shape.numel() == 1 and max_val.shape.numel() == 1, (
+            assert min_val.numel() == 1 and max_val.numel() == 1, (
                 "histogram min/max values must be scalar."
             )
             torch.histc(x, self.bins, min=int(min_val), max=int(max_val), out=self.histogram)
@@ -976,7 +977,7 @@ class HistogramObserver(_ObserverBase):
             # and then downsampling the histogram efficiently
             combined_min, combined_max, downsample_rate, start_idx = \
                 self._adjust_min_max(combined_min, combined_max, self.upsample_rate)
-            assert combined_min.shape.numel() == 1 and combined_max.shape.numel() == 1, (
+            assert combined_min.numel() == 1 and combined_max.numel() == 1, (
                 "histogram min/max values must be scalar."
             )
             combined_histogram = torch.histc(x, self.bins, min=int(combined_min), max=int(combined_max))
