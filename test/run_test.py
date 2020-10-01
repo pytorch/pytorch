@@ -2,6 +2,7 @@
 
 import argparse
 from datetime import datetime
+import importlib
 import modulefinder
 import os
 import shutil
@@ -558,9 +559,7 @@ def get_selected_tests(options):
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
     # exclude PYTEST_TESTS if pytest not installed.
-    try:
-        import pytest
-    except ImportError:
+    if importlib.util.find_spec('pytest') is None:
         selected_tests = exclude_tests(PYTEST_TESTS, selected_tests, 'PyTest not found.')
 
     if sys.platform == 'win32' and not options.ignore_win_blocklist:
