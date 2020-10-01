@@ -14,6 +14,7 @@ from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import *
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
+from tools.codegen.api.cpp import CppSignature
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.legacy_dispatcher as legacy_dispatcher
 import tools.codegen.local as local
@@ -300,6 +301,28 @@ def compute_type_method(
 
     return func
 
+# Return a string with a comma separated list of expressions that could be used
+# to call this operator. This can be used to generate code that wraps operators
+# and calls back into them. The process_tensoroptions argument determines how
+# tensor options should be treated. They can be
+# - PASS_THROUGH: Don't do anything, just handle them as regular arguments
+# - SCATTER: Expect a `TensorOptions options` in the scope and scatter it into `options.dtype, ...`
+# - GATHER: Expect `dtype, ...` in the scope and gather them into a TensorOptions for calling
+def exprs_str(signature: CppSignature,
+              process_tensoroptions: dispatcher.ProcessTensoroptions = dispatcher.ProcessTensoroptions.PASS_THROUGH,
+              exclude_this: bool = False,
+              ) -> str:
+    args = signature.cpp_arguments()
+    if exclude_this:
+        args = [a for a in args if not isinstance(a.argument, ThisArgument)]
+    exprs = dispatcher.cpparguments_exprs(args, process_tensoroptions=process_tensoroptions)
+    return ', '.join(map(lambda a: a.expr, exprs))
+
+def types_str(signature: CppSignature) -> str:
+    args = signature.cpp_arguments()
+    exprs = dispatcher.cpparguments_exprs(args, process_tensoroptions=dispatcher.ProcessTensoroptions.PASS_THROUGH)
+    return ', '.join(map(lambda a: a.type, exprs))
+
 # Generates Function.cpp and Function.h.  These files provide the
 # functional public C++ API, and the scaffolding to call into
 # the dispatcher from these functions.  See also compute_tensor_method.
@@ -343,8 +366,8 @@ CAFFE2_API {cpp_returns_type} {cpp_name}({signature_group.signature.cpp_argument
 {cpp_returns_type} {cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({signature_group.signature.types_str()})>();
-    return op.call({signature_group.signature.exprs_str()});
+        .typed<{dispatcher_returns_type} ({types_str(signature_group.signature)})>();
+    return op.call({exprs_str(signature_group.signature)});
 }}
 """
         elif local.use_c10_dispatcher() is UseC10Dispatcher.full:
@@ -355,11 +378,11 @@ CAFFE2_API {cpp_returns_type} {cpp_name}({signature_group.signature.cpp_argument
 {cpp_returns_type} {cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({signature_group.signature.types_str()})>();
-    return op.call({signature_group.signature.exprs_str()});
+        .typed<{dispatcher_returns_type} ({types_str(signature_group.signature)})>();
+    return op.call({exprs_str(signature_group.signature)});
 }}
 {cpp_returns_type} {cpp_name}({signature_group.gathered_signature.cpp_arguments_str(with_defaults=False)}) {{
-    return {cpp_name}({signature_group.gathered_signature.exprs_str(dispatcher.ProcessTensoroptions.SCATTER)});
+    return {cpp_name}({exprs_str(signature_group.gathered_signature, dispatcher.ProcessTensoroptions.SCATTER)});
 }}
 """
         else:
@@ -370,11 +393,11 @@ CAFFE2_API {cpp_returns_type} {cpp_name}({signature_group.signature.cpp_argument
 {cpp_returns_type} {cpp_name}({signature_group.gathered_signature.cpp_arguments_str(with_defaults=False)}) {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({signature_group.gathered_signature.types_str()})>();
-    return op.call({signature_group.gathered_signature.exprs_str()});
+        .typed<{dispatcher_returns_type} ({types_str(signature_group.gathered_signature)})>();
+    return op.call({exprs_str(signature_group.gathered_signature)});
 }}
 {cpp_returns_type} {cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) {{
-    return {cpp_name}({signature_group.gathered_signature.exprs_str(dispatcher.ProcessTensoroptions.GATHER)});
+    return {cpp_name}({exprs_str(signature_group.gathered_signature, dispatcher.ProcessTensoroptions.GATHER)});
 }}
 """
 
@@ -421,8 +444,8 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
 {cpp_returns_type} Tensor::{cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) const {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({signature_group.signature.types_str()})>();
-    return op.call({signature_group.signature.exprs_str()});
+        .typed<{dispatcher_returns_type} ({types_str(signature_group.signature)})>();
+    return op.call({exprs_str(signature_group.signature)});
 }}
 """
 
@@ -433,8 +456,8 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
 {cpp_returns_type} Tensor::{cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) const {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({signature_group.signature.types_str()})>();
-    return op.call({signature_group.signature.exprs_str()});
+        .typed<{dispatcher_returns_type} ({types_str(signature_group.signature)})>();
+    return op.call({exprs_str(signature_group.signature)});
 }}
 """
         elif local.use_c10_dispatcher() is UseC10Dispatcher.full:
@@ -445,11 +468,11 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
 {cpp_returns_type} Tensor::{cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) const {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({signature_group.signature.types_str()})>();
-    return op.call({signature_group.signature.exprs_str()});
+        .typed<{dispatcher_returns_type} ({types_str(signature_group.signature)})>();
+    return op.call({exprs_str(signature_group.signature)});
 }}
 {cpp_returns_type} Tensor::{cpp_name}({signature_group.gathered_signature.cpp_arguments_str(with_defaults=False)}) const {{
-    return {cpp_name}({signature_group.gathered_signature.exprs_str(dispatcher.ProcessTensoroptions.SCATTER, exclude_this=True)});
+    return {cpp_name}({exprs_str(signature_group.gathered_signature, dispatcher.ProcessTensoroptions.SCATTER, exclude_this=True)});
 }}
 """
         else:
@@ -460,11 +483,11 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
 {cpp_returns_type} Tensor::{cpp_name}({signature_group.gathered_signature.cpp_arguments_str(with_defaults=False)}) const {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({signature_group.gathered_signature.types_str()})>();
-    return op.call({signature_group.gathered_signature.exprs_str()});
+        .typed<{dispatcher_returns_type} ({types_str(signature_group.gathered_signature)})>();
+    return op.call({exprs_str(signature_group.gathered_signature)});
 }}
 {cpp_returns_type} Tensor::{cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) const {{
-    return {cpp_name}({signature_group.gathered_signature.exprs_str(dispatcher.ProcessTensoroptions.GATHER, exclude_this=True)});
+    return {cpp_name}({exprs_str(signature_group.gathered_signature, dispatcher.ProcessTensoroptions.GATHER, exclude_this=True)});
 }}
 """
 

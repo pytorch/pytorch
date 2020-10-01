@@ -1,7 +1,6 @@
 from tools.codegen.model import *
 from tools.codegen.api.types import TensorOptionsArguments, CppArgument, ThisArgument
 import tools.codegen.local as local
-from tools.codegen.api import dispatcher
 from typing import Optional, Sequence, Union, Callable, List
 import copy
 
@@ -196,8 +195,8 @@ def argument(a: Union[Argument, TensorOptionsArguments, ThisArgument]) -> CppArg
 
 @dataclass(frozen=True)
 class CppSignature:
-    returns: Sequence[Return]
-    arguments: Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]]
+    returns: Tuple[Return, ...]
+    arguments: Tuple[Union[Argument, TensorOptionsArguments, ThisArgument], ...]
 
     def cpp_arguments(self) -> Sequence[CppArgument]:
         return list(map(argument, self.arguments))
@@ -210,29 +209,6 @@ class CppSignature:
             return ', '.join(map(str, args_without_this))
         else:
             return ', '.join(map(lambda s: s.str_no_default(), args_without_this))
-
-    # Return a string with a comma separated list of expressions that could be used
-    # to call this operator. This can be used to generate code that wraps operators
-    # and calls back into them. The process_tensoroptions argument determines how
-    # tensor options should be treated. They can be
-    # - PASS_THROUGH: Don't do anything, just handle them as regular arguments
-    # - SCATTER: Expect a `TensorOptions options` in the scope and scatter it into `options.dtype, ...`
-    # - GATHER: Expect `dtype, ...` in the scope and gather them into a TensorOptions for calling
-    def exprs_str(self,
-                  process_tensoroptions: dispatcher.ProcessTensoroptions = dispatcher.ProcessTensoroptions.PASS_THROUGH,
-                  exclude_this: bool = False,
-                  ) -> str:
-        args = self.arguments
-        if exclude_this:
-            args = [a for a in args if not isinstance(a, ThisArgument)]
-        cpp_args = list(map(argument, args))
-        exprs = dispatcher.cpparguments_exprs(cpp_args, process_tensoroptions=process_tensoroptions)
-        return ', '.join(map(lambda a: a.expr, exprs))
-
-    def types_str(self) -> str:
-        args = self.cpp_arguments()
-        exprs = dispatcher.cpparguments_exprs(args, process_tensoroptions=dispatcher.ProcessTensoroptions.PASS_THROUGH)
-        return ', '.join(map(lambda a: a.type, exprs))
 
 
 @dataclass(frozen=True)
@@ -305,12 +281,12 @@ def signature_group(
 
     if has_tensoroptions_argument:
         return CppSignatureGroup(
-            signature=CppSignature(arguments=args, returns=func.returns),
-            gathered_signature=CppSignature(arguments=gathered_args, returns=func.returns),
+            signature=CppSignature(arguments=tuple(args), returns=tuple(func.returns)),
+            gathered_signature=CppSignature(arguments=tuple(gathered_args), returns=tuple(func.returns)),
         )
     else:
         assert gathered_args == args
         return CppSignatureGroup(
-            signature=CppSignature(arguments=args, returns=func.returns),
+            signature=CppSignature(arguments=tuple(args), returns=tuple(func.returns)),
             gathered_signature=None,
         )
