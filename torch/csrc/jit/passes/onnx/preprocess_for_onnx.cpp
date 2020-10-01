@@ -199,17 +199,9 @@ static void ReplaceIndexPutWithMaskedScatter(Block* b) {
     }
     if (it->kind() == aten::index_put_) {
       auto* lc_node = it->input(1)->node();
-      if (!(lc_node->input(0)->type()->cast<TensorType>()) ||
-          !(lc_node->input(0)
-                ->type()
-                ->cast<TensorType>()
-                ->scalarType()
-                .has_value()) ||
-          (lc_node->input(0)
-               ->type()
-               ->cast<TensorType>()
-               ->scalarType()
-               .value()) != c10::ScalarType::Bool) {
+      TensorTypePtr mask_tensor = lc_node->input(0)->type()->cast<TensorType>();
+      if (!(mask_tensor) || !(mask_tensor->scalarType().has_value()) ||
+          (mask_tensor->scalarType().value()) != c10::ScalarType::Bool) {
         continue;
       }
 
@@ -221,19 +213,9 @@ static void ReplaceIndexPutWithMaskedScatter(Block* b) {
       // and if value is a tensor of appropriate size, we convert to
       // masked_scatter.
       Node* masked_node;
-      if (it->input(2)->type()->cast<TensorType>() &&
-          (it->input(2)
-               ->type()
-               ->cast<TensorType>()
-               ->sizes()
-               .size()
-               .has_value())) {
-        if ((it->input(2)
-                 ->type()
-                 ->cast<TensorType>()
-                 ->sizes()
-                 .size()
-                 .value()) == 0) {
+      TensorTypePtr val_tensor = it->input(2)->type()->cast<TensorType>();
+      if ((val_tensor) && (val_tensor->sizes().size().has_value())) {
+        if ((val_tensor->sizes().size().value()) == 0) {
           masked_node = b->owningGraph()->create(aten::masked_fill, 1);
         } else {
           masked_node = b->owningGraph()->create(aten::masked_scatter, 1);
