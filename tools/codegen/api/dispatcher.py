@@ -5,7 +5,7 @@ from tools.codegen.api.types import CppArgument, DispatcherExpr, TensorOptionsAr
 from tools.codegen.api import cpp
 import tools.codegen.api.legacy_dispatcher as legacy_dispatcher
 import tools.codegen.local as local
-
+from enum import Enum
 import itertools
 from typing import Sequence, Optional
 
