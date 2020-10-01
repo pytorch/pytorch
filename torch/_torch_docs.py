@@ -5665,7 +5665,7 @@ Args:
 
 add_docstr(torch.poisson,
            r"""
-poisson(input *, generator=None) -> Tensor
+poisson(input, generator=None) -> Tensor
 
 Returns a tensor of the same size as :attr:`input` with each element
 sampled from a Poisson distribution with rate parameter given by the corresponding
