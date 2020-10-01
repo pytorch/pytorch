@@ -963,8 +963,10 @@ class HistogramObserver(_ObserverBase):
             self.min_val.copy_(min_val)
             self.max_val.resize_(max_val.shape)
             self.max_val.copy_(max_val)
-            # TODO torch.histc actually doesn't have a signature accepts Tensor as min/max
-            torch.histc(x, self.bins, min=min_val, max=max_val, out=self.histogram)  # type: ignore[arg-type]
+            assert min_val.shape.numel() == 1 and max_val.shape.numel() == 1, (
+                "histogram min/max values must be scalar."
+            )
+            torch.histc(x, self.bins, min=int(min_val), max=int(max_val), out=self.histogram)
         else:
             new_min, new_max = torch._aminmax(x)
             combined_min = torch.min(new_min, min_val)
@@ -974,8 +976,10 @@ class HistogramObserver(_ObserverBase):
             # and then downsampling the histogram efficiently
             combined_min, combined_max, downsample_rate, start_idx = \
                 self._adjust_min_max(combined_min, combined_max, self.upsample_rate)
-            # TODO torch.histc actually doesn't have a signature accepts Tensor as min/max
-            combined_histogram = torch.histc(x, self.bins, min=combined_min, max=combined_max)  # type: ignore[arg-type]
+            assert combined_min.shape.numel() == 1 and combined_max.shape.numel() == 1, (
+                "histogram min/max values must be scalar."
+            )
+            combined_histogram = torch.histc(x, self.bins, min=int(combined_min), max=int(combined_max))
             if combined_min == min_val and combined_max == max_val:
                 combined_histogram += self.histogram
             else:
@@ -1161,7 +1165,6 @@ def get_observer_state_dict(mod):
         for k, v in mod.state_dict().items():
             if 'activation_post_process' in k:
                 od[k] = v
-    # TODO _metadata is not exposed in model.state_dict() explicitly 
     od._metadata = mod.state_dict()._metadata  # type: ignore[attr-defined]
     return od
 
