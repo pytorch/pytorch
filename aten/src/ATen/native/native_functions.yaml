@@ -4437,7 +4437,7 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: choose_qparams_optimized(Tensor input, int numel, int n_bins, float ratio, int bit_width) -> (float, float)
+- func: choose_qparams_optimized(Tensor input, int numel, int n_bins, float ratio, int bit_width) -> (Tensor, Tensor)
   use_c10_dispatcher: full
   variants: function
 
