@@ -2,7 +2,6 @@
 import collections
 from datetime import timedelta
 import enum
-import torch
 import torch.distributed as dist
 
 from . import constants as rpc_constants
