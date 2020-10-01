@@ -26,7 +26,6 @@ if is_available():
     from .distributed_c10d import _backend
     from torch._C._distributed_c10d import (
         FileStore,
-        TCPStore,
         _GradBucket,
         Reducer,
         _register_comm_hook,
@@ -36,3 +35,5 @@ if is_available():
         _test_python_store,
         _round_robin_process_groups,
     )
+    if sys.platform != 'win32':
+        from torch._C._distributed_c10d import TCPStore
