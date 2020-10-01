@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <list>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -272,12 +271,6 @@ class TORCH_API Store : public StmtNode<Store> {
   }
 
   static Store* make(
-      const Placeholder& buffer,
-      const std::vector<ExprHandle>& indices,
-      const ExprHandle& value,
-      const ExprHandle& mask);
-
-  static Store* make(
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& value,
@@ -287,13 +280,6 @@ class TORCH_API Store : public StmtNode<Store> {
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& value);
-
-  // TODO: merge this with Load.
-  Store(
-      const Placeholder& buffer,
-      const std::vector<const Expr*>& indices,
-      const Expr* value,
-      const Expr* mask);
 
   Store(
       const Buf* buf,

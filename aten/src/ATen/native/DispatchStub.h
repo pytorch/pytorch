@@ -3,9 +3,7 @@
 #include <c10/core/Backend.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
-
 #include <type_traits>
-#include <atomic>
 
 // Implements instruction set specific function dispatch.
 //

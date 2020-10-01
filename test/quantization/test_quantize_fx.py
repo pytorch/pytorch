@@ -9,6 +9,8 @@ import torch.multiprocessing as mp
 # symbolic trace
 from torch.fx import symbolic_trace
 
+from torch.fx.symbolic_trace import Tracer
+
 # graph mode quantization based on fx
 from torch.quantization import (
     QuantType,
@@ -321,6 +323,96 @@ class TestQuantizeFx(QuantizationTestCase):
         m(dict_input)
         m = convert_static_fx(m)
         m(dict_input)
+
+    def test_standalone_module_class(self):
+        class StandaloneModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        class CustomTracer(Tracer):
+            def is_leaf_module(self, m, module_qualified_name):
+                return (m.__module__.startswith('torch.nn') and
+                        not isinstance(m, torch.nn.Sequential)) or \
+                    isinstance(m, StandaloneModule)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.standalone = StandaloneModule()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.standalone(x)
+                return x
+
+        class RefM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.conv2(x)
+                return x
+
+        data = torch.randn(1, 1, 1, 1)
+        # instantiate M and RefM and align the parameters
+        original_m = M()
+        original_ref_m = RefM()
+        original_ref_m.conv1.weight = torch.nn.Parameter(original_m.conv.weight.detach())
+        original_ref_m.conv1.bias = torch.nn.Parameter(original_m.conv.bias.detach())
+        original_ref_m.conv2.weight = torch.nn.Parameter(original_m.standalone.conv.weight.detach())
+        original_ref_m.conv2.bias = torch.nn.Parameter(original_m.standalone.conv.bias.detach())
+
+        m = CustomTracer().trace(original_m).eval()
+        qconfig_dict = {'': default_qconfig, 'standalone_module_name': ['standalone']}
+        # check prepared model
+        m = prepare_fx(m, qconfig_dict)
+        # calibration
+        m(data)
+        # input and output of first conv, observer for standalone module
+        # will be inserted in the standalone module itself
+        count_check = {
+            ns.call_module(torch.quantization.MinMaxObserver): 2
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
+        # for output of conv in the standalone module
+        count_check = {
+            ns.call_module(torch.quantization.MinMaxObserver): 1
+        }
+        self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
+
+        # check converted/quantized model
+        m = convert_fx(m)
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor) : 1,
+            ns.call_module(nnq.Conv2d) : 1,
+            ns.call_method('dequantize') : 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
+        count_check = {
+            # quantization of input happens in parent module
+            # quantization of output happens in the quantized conv module
+            ns.call_function(torch.quantize_per_tensor) : 0,
+            # dequantization for output happens in parent module
+            ns.call_method('dequantize') : 0,
+        }
+        self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=count_check)
+        res = m(data)
+
+        # quantize the reference model
+        ref_m = symbolic_trace(original_ref_m).eval()
+        ref_m = prepare_fx(ref_m, qconfig_dict)
+        ref_m(data)
+        ref_m = convert_fx(ref_m)
+        ref_res = ref_m(data)
+        self.assertEqual(res, ref_res)
 
     @skipIfNoFBGEMM
     def test_qconfig_none(self):

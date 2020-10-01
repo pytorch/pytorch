@@ -8,7 +8,6 @@
 #include <TH/THStorageFunctions.h>
 
 #include <c10/core/ScalarType.h>
-#include <c10/core/ScalarTypeToTypeMeta.h>
 
 // Note [Weak references for intrusive refcounting]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

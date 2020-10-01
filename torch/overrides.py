@@ -156,6 +156,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.is_deterministic,
         torch.set_deterministic,
         torch.unify_type_list,
+        torch.valgrind_supported_platform,
+        torch.valgrind_toggle,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,

@@ -65,6 +65,11 @@ class ProcessGroupNCCL : public ProcessGroup {
    public:
     // Constructor takes a list of CUDA devices
     WorkNCCL(const std::vector<at::Device>& devices);
+    // Copy constructor doing partial copy without outputs_. Cleanup thread
+    // monitors and removes finished works. However it will deadlock when
+    // destructs outputs_ tensors who are view tensors in autograd graph.
+    WorkNCCL(const WorkNCCL& w);
+
     virtual ~WorkNCCL();
 
     // Checks if request has completed. In this specific case of NCCL, it checks
@@ -563,14 +568,14 @@ class ProcessGroupNCCL : public ProcessGroup {
   // Thread that removes NCCL Work upon timeout
   std::thread workCleanupThread_;
 
-  // Mutex to Guard workList_
-  std::mutex workListMutex_;
+  // Mutex to Guard workMetaList_
+  std::mutex workMetaListMutex_;
 
   // Condition Variable for timeout thread sleep
-  std::condition_variable workListCV_;
+  std::condition_variable workMetaListCV_;
 
   // Vector to Store WorkNCCL pointers
-  std::list<std::shared_ptr<ProcessGroupNCCL::WorkNCCL>> workList_;
+  std::list<ProcessGroupNCCL::WorkNCCL> workMetaList_;
 
   // Add Work Pointer to workVector
   void workEnqueue(std::shared_ptr<ProcessGroupNCCL::WorkNCCL>);
