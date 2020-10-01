@@ -74,11 +74,13 @@ class MobileModuleObserver {
       const std::string&) {}
   virtual void onExitRunMethod(const int32_t) {}
   virtual void onFailRunMethod(const int32_t, const char*) {}
-  virtual void onEnterLoadModel() {}
+  virtual void onEnterLoadModel(const int32_t) {}
   virtual void onExitLoadModel(
+      const int32_t,
       const std::unordered_map<std::string, std::string>&) {}
-  virtual void onFailLoadModel(const char*) {}
+  virtual void onFailLoadModel(const int32_t, const char*) {}
   virtual void onFailLoadModel(
+      const int32_t,
       const char*,
       const std::unordered_map<std::string, std::string>&) {}
 };
