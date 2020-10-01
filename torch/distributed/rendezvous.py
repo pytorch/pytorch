@@ -11,11 +11,11 @@ import sys
 from datetime import timedelta
 from typing import Optional, Dict, Union
 
-from torch._C._distributed_c10d import FileStore
+from . import FileStore
 from .constants import default_pg_timeout
 
 if sys.platform != 'win32':
-    from torch._C._distributed_c10d import TCPStore
+    from . import TCPStore
 
 _rendezvous_handlers = {}
 
