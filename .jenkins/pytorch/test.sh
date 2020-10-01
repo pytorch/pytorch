@@ -13,7 +13,7 @@ echo "Testing pytorch"
 
 if [ -n "${IN_CIRCLECI}" ]; then
   # TODO move this to docker
-  pip_install unittest-xml-reporting coverage
+  pip_install unittest-xml-reporting coverage pytest
 
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
     # TODO: move this to Docker
