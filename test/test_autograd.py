@@ -4806,7 +4806,8 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
-                'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot'] + separate_complex_tests
+                'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'addmm', 'mm', 'matmul',
+                'mv', 'ger'] + separate_complex_tests
 
 # TODO(@anjali411): add tests for 'sub', 'div
 # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition - @anjali411
@@ -4840,7 +4841,8 @@ def add_test(
 
             if dtype.is_complex:
                 # TODO: remove this. this is temporary while we ramp up the complex support.
-                if name in complex_list:
+                # TODO(@anjali411): re-enable matmul_4d_4d test for complex once bmm is supported for complex
+                if name in complex_list and 'matmul_4d_4d' not in test_name:
                     if name in separate_complex_tests and 'complex' not in variant_name:
                         continue
                     if not run_only_complex:

@@ -530,9 +530,9 @@ Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, const Tensor &
   at::IntArrayRef sizes = mat1.sizes();
   at::IntArrayRef strides = mat1.strides();
   if (strides[0] == 1 && strides[1] == sizes[0]) {
-    return maybe_multiply(mat2.mm(grad.t()).t(), alpha);
+    return maybe_multiply(mat2.conj().mm(grad.t()).t(), alpha);
   } else {
-    return maybe_multiply(grad.mm(mat2.t()), alpha);
+    return maybe_multiply(grad.mm(mat2.conj().t()), alpha);
   }
 }
 
@@ -547,12 +547,12 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntArrayRef si
       int64_t out_cols = grad.size(1);
       Tensor t = at::zeros({}, grad.options()).expand({out_rows, out_cols}, true);
       Tensor r = at::empty({out_cols, out_rows}, grad.options()).t();
-      at::addmm_out(r, t, mat1.t(), grad, alpha, 1);
+      at::addmm_out(r, t, mat1.conj().t(), grad, alpha, 1);
       return r;
     }
-    return maybe_multiply(grad.t().mm(mat1).t(), alpha);
+    return maybe_multiply(grad.t().mm(mat1.conj()).t(), alpha);
   } else {
-    return maybe_multiply(mat1.t().mm(grad), alpha);
+    return maybe_multiply(mat1.conj().t().mm(grad), alpha);
   }
 }
 

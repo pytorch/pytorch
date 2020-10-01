@@ -498,8 +498,8 @@
   self: not_implemented("geqrf")
 
 - name: ger(Tensor self, Tensor vec2) -> Tensor
-  self: grad.mv(vec2)
-  vec2: grad.t().mv(self)
+  self: grad.mv(vec2.conj())
+  vec2: grad.t().mv(self.conj())
 
 - name: indices(Tensor(a) self) -> Tensor(a)
   output_differentiability: [False]
@@ -743,8 +743,8 @@
   self: mul_tensor_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
-  self: grad.ger(vec)
-  vec: self.t().mv(grad)
+  self: grad.ger(vec.conj())
+  vec: self.conj().t().mv(grad)
 
 - name: mvlgamma(Tensor self, int p) -> Tensor
   self: mvlgamma_backward(grad, self, p)
