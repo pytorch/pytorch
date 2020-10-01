@@ -21,6 +21,7 @@ static constexpr char TupleOpen = '(';
 static constexpr char TupleClose = ')';
 static constexpr char Variable = 'v';
 static constexpr char String = 's';
+static constexpr char NoneType = 'n';
 } // namespace D
 
 namespace {
@@ -62,6 +63,9 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Variable);
+  } else if (strcmp(THPUtils_typename(obj),"NoneType") == 0) {
+    auto none_type = py::cast<py::none>(obj);
+    args.desc.structure.push_back(D::NoneType);+
   } else {
     std::string msg =
         "Only tuples, lists and Variables supported as JIT inputs/outputs. "

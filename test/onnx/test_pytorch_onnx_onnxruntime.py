@@ -452,6 +452,19 @@ class TestONNXRuntime(unittest.TestCase):
         x = {"test_key_in": torch.randn(1, 2, 3)}
         self.run_test(MyModel(), (x,))
 
+    def test_none_as_named_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y=None, z=None):
+                if y is not None:
+                    return x + y
+                if z is not None:
+                    return x + z
+                return x
+
+        x = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+        self.run_test(Model(), (x, None, z))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_cste_script(self):
         class MyModel(torch.jit.ScriptModule):
