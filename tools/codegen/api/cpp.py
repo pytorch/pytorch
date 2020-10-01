@@ -158,6 +158,26 @@ JIT_TO_CPP_DEFAULT = {
 def default_expr(d: str, t: Type) -> str:
     if d == 'None' and str(t) == 'Tensor?':
         return '{}'
+    if isinstance(t, BaseType) and t.name is BaseTy.str:
+        # Schema allows single quotes but C++ needs double
+        if len(d) >= 2 and d[0] == "'" and d[-1] == "'":
+            s = ''
+            i = 1
+            while i + 1 < len(d):
+                if d[i] != '\\':
+                    if d[i] == '"':
+                        s += '\\"'
+                    else:
+                        s += d[i]
+                    i += 1
+                else:
+                    if d[i + 1] == "'":
+                        s += "'"
+                    else:
+                        s += d[i:i + 2]
+                    i += 2
+
+            return f'"{s}"'
     return JIT_TO_CPP_DEFAULT.get(d, d)
 
 # Convert an argument into its C++ API form

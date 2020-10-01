@@ -36,6 +36,7 @@ from .gen_variable_type import should_trace
 from .utils import write, is_tensor_method
 
 from tools.codegen.code_template import CodeTemplate
+from tools.codegen.gen import escape_string
 
 #
 # declarations blocklist
@@ -965,7 +966,7 @@ def method_impl(name, declarations, is_python_method, module):
     dispatch = []
     for i, dictionary in enumerate(grouped):
         signature = dictionary['signature']
-        signatures.append('"{}",'.format(signature))
+        signatures.append('"{}",'.format(escape_string(str(signature))))
         overload_index = i if not is_singleton else None
         dispatch.append(emit_dispatch_case(overload_index, dictionary, is_python_method))
 

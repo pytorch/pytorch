@@ -123,6 +123,11 @@ def concatMap(func: Callable[[T], Sequence[S]], xs: Sequence[T]) -> Iterator[S]:
         for r in func(x):
             yield r
 
+def escape_string(s: str) -> str:
+    s = s.replace('\\', '\\\\')
+    s = s.replace('"', '\\"')
+    return s
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
 #                        C++ CODE GENERATION
@@ -267,7 +272,7 @@ def compute_type_method(
             # def registration only happens in TypeDefault
             def_registration = ""
             if dispatch is None:
-                def_registration = f'm.def("{f.func}");\n'
+                def_registration = f'm.def("{escape_string(str(f.func))}");\n'
 
             impl_registration = ""
             if not def_only and not f.manual_kernel_registration and (dispatch is not None or f.dispatch is None):
