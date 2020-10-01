@@ -194,6 +194,14 @@ bool is_conv3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
+bool is_conv_transpose1d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_conv_transpose2d_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
 bool is_batchnorm2d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);

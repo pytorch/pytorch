@@ -326,14 +326,16 @@ def set_default_dtype(d):
     _C._set_default_dtype(d)
 
 def set_deterministic(d):
-    r""" Sets whether native PyTorch operations must use deterministic
-    algorithms. When True, operations without deterministic algorithms
-    will throw a :class:RuntimeError when called.
+    r""" Sets whether PyTorch operations must use "deterministic"
+    algorithms. That is, algorithms which, given the same input, and when
+    run on the same software and hardware, always produce the same output.
+    When True, operations will use deterministic algorithms when available,
+    and if only nondeterministic algorithms are available they will throw a
+    :class:RuntimeError when called.
 
     .. warning::
-        This feature is a beta feature, so it does not affect every
-        nondeterministic operation yet. The following operations are
-        affected by this flag.
+        This feature is in beta, and its design and implementation may change
+        in the future.
 
     The following normally-nondeterministic operations will act
     deterministically when `d=True`:
@@ -552,6 +554,7 @@ import torch.nn
 import torch.nn.intrinsic
 import torch.nn.quantized
 import torch.optim
+import torch.optim._multi_tensor
 import torch.multiprocessing
 import torch.sparse
 import torch.utils.backcompat
@@ -612,3 +615,12 @@ from ._vmap_internals import vmap
 # class usage. We add these lines here to preserve backward compatbility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
+
+from .overrides import has_torch_function, handle_torch_function
+
+def Assert(condition, message):
+    r"""A wrapper around Python's assert which is symbolically traceable.
+    """
+    if type(condition) is not torch.Tensor and has_torch_function((condition,)):
+        return handle_torch_function(Assert, (condition,), condition, message)
+    assert condition, message

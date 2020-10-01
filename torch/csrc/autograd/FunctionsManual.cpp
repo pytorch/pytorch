@@ -87,6 +87,14 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
   return tensor;
 }
 
+Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result) {
+  if (!at::isComplexType(self_st) && gradient_result.is_complex()) {
+    // R -> C
+    return at::real(gradient_result);
+  }
+  return gradient_result;
+}
+
 Tensor restore_reduced_dims(const Tensor &output, IntArrayRef dims, bool keepdim) {
   if (keepdim) {
     return output;
@@ -592,7 +600,12 @@ Tensor sum_tensorlist(TensorList tl) {
   return sum;
 }
 
-Tensor repeat_backward(Tensor grad, int64_t input_dims, IntArrayRef repeats) {
+Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape) {
+  auto find_iter = std::find(repeats.cbegin(), repeats.cend(), 0);
+  if (find_iter != repeats.cend()) {
+    return at::zeros(input_shape, grad.options());
+  }
+  const auto input_dims = input_shape.size();
   int64_t num_unsqueezed = grad.dim() - input_dims;
   for (int64_t i = 0; i < num_unsqueezed; ++i) {
     grad = grad.sum(0, false);
@@ -619,13 +632,12 @@ Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
 }
 
 Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tensor & value) {
-  auto mask = (input == value);
-  auto count = mask.sum();
-  auto grad_input = grad / count;
   if (input.is_cuda()) {
-    return mask * grad_input;
+    auto mask = (input == value).logical_or_(input.isnan().logical_and_(value.isnan()));
+    return mask * (grad / mask.sum());
   } else {
-    return at::zeros_like(input).masked_fill_(mask, grad_input);
+    auto mask = value.isnan().item<bool>() ? input.isnan() : input == value;
+    return at::zeros_like(input).masked_fill_(mask, grad / mask.sum());
   }
 }
 
@@ -644,11 +656,11 @@ Tensor var_backward(Tensor grad, const Tensor & self, IntArrayRef dim, bool unbi
 }
 
 Tensor std_backward(const Tensor & result, const Tensor & grad, const Tensor & self, bool unbiased) {
-  return var_backward(grad / (result * 2), self, unbiased);
+  return var_backward((grad / (result * 2)).masked_fill_(result == 0, 0), self, unbiased);
 }
 
 Tensor std_backward(const Tensor & result, Tensor grad, const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return var_backward(grad / (result * 2), self, dim, unbiased, keepdim);
+  return var_backward((grad / (result * 2)).masked_fill_(result == 0, 0), self, dim, unbiased, keepdim);
 }
 
 Tensor mean_backward(Tensor grad, const IntArrayRef sizes, IntArrayRef dim, bool keepdim) {
@@ -711,15 +723,15 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   // leads to stable gradient updates, and retains symmetry of the updated matrix if it
   // were updated by a gradient based algorithm.
   if (upper) {
-    L = L.transpose(-1, -2);
-    grad = grad.transpose(-1, -2);
+    L = L.transpose(-1, -2).conj();
+    grad = grad.transpose(-1, -2).conj();
   }
   auto L_inverse = std::get<0>(at::triangular_solve(at::eye(L.size(-1), L.options()), L, /*upper=*/false));
-  auto phi = at::matmul(L.transpose(-1, -2), grad);
+  auto phi = at::matmul(L.transpose(-1, -2).conj(), grad);
   phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
 
-  auto grad_input = at::matmul(at::matmul(L_inverse.transpose(-1, -2), phi), L_inverse);
-  return grad_input.add(grad_input.transpose(-1, -2)).mul_(0.5);  // Symmetrizing the gradient
+  auto grad_input = at::matmul(at::matmul(L_inverse.transpose(-1, -2).conj(), phi), L_inverse);
+  return grad_input.add(grad_input.transpose(-1, -2).conj()).mul_(0.5);  // Symmetrizing the gradient
 }
 
 Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inverse) {
@@ -952,20 +964,24 @@ Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & i
   return output;
 }
 
-Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
+Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, double beta) {
+  // special case to protect against a divide-by-zero.
+  if (beta == 0) {
+      return at::zeros(grad.sizes(), grad.options());
+  }
   auto d = (input - target).abs();
-  auto grad_input = grad * (d < 1).type_as(grad);
+  auto grad_input = grad * (d < beta).type_as(grad) / beta;
   if (reduction == at::Reduction::Mean) {
     grad_input /= input.numel();
   }
   return grad_input;
 }
 
-Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
+Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction, double beta) {
   if (reduction == at::Reduction::None) {
-    return smooth_l1_loss_backward(grad, input, target, reduction);
+    return smooth_l1_loss_backward(grad, input, target, reduction, beta);
   }
-  auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, reduction);
+  auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, reduction, beta);
   return (r * grad).sum();
 }
 
