@@ -367,12 +367,11 @@ class Quantizer:
 
         get_new_observer_name = get_new_attr_name_with_prefix('activation_post_process_')
 
-        output_node : Optional[torch.fx.Node] = None
+        result_node : Optional[Node] = None
         for node in model.graph.nodes:
             if node.op == 'output':
-                if output_node is not None:
-                    raise RuntimeError('Multiple output nodes in graph!')
-                output_node = node
+                observed_graph.output(load_arg(node.args[0]))
+                result_node = node
                 continue
             if node.name in observed_node_names_set:
                 continue
@@ -493,17 +492,15 @@ class Quantizer:
                     env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
                     observed_node_names_set.add(node.name)
 
-        if output_node is None:
-            raise RuntimeError('Graph had no output node!')
-        observed_graph.output(load_arg(output_node.args[0]))
         model = GraphModule(model, observed_graph)
         self.save_state(model)
         if is_standalone_module:
-            assert isinstance(model.graph.result, Node), \
+            assert result_node is not None
+            assert isinstance(result_node.args[0], Node), \
                 'standalone module returning dict is not yet supported'
             # indicator for whether output is observed or not.
             # This used for correctly quantize standalone modules
-            output_is_observed = model.graph.result.name in observed_node_names_set
+            output_is_observed = result_node.args[0].name in observed_node_names_set
             model._standalone_module_observed_input_idxs = standalone_module_observed_input_idxs
             model._output_is_observed = output_is_observed
         return model
@@ -661,12 +658,14 @@ class Quantizer:
                 else:
                     raise Exception("partially quantized inputs in list not handled yet")
 
-        output_node : Optional[torch.fx.Node] = None
         for node in model.graph.nodes:
             if node.op == 'output':
-                if output_node is not None:
-                    raise RuntimeError('Multiple output nodes in graph!')
-                output_node = node
+                if is_standalone_module:
+                    # result are kept quantized in the quantized standalone module
+                    graph_output = map_arg(node.args[0], load_x)
+                else:
+                    graph_output = map_arg(node.args[0], load_non_quantized)
+                self.quantized_graph.output(graph_output)
                 continue
             root_node, matched, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is node:
@@ -734,28 +733,15 @@ class Quantizer:
                 # dequantize inputs for the node that are not quantized
                 env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
 
-        if output_node is None:
-            raise RuntimeError('Graph had no output node!')
-        if is_standalone_module:
-            # result are kepted quantized in the quantized standalone module
-            graph_output = map_arg(output_node.args[0], load_x)
-        else:
-            graph_output = map_arg(output_node.args[0], load_non_quantized)
-        self.quantized_graph.output(graph_output)
-
         # remove activation post process
         act_post_process_removed_graph = Graph()
         env = {}
-
-        output_node : Optional[torch.fx.Node] = None
 
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
         for node in self.quantized_graph.nodes:
             if node.op == 'output':
-                if output_node is not None:
-                    raise RuntimeError('Multiple output nodes in graph!')
-                output_node = node
+                act_post_process_removed_graph.output(map_arg(node.args[0], load_arg))
                 continue
             if node.op == 'call_module' and \
                is_activation_post_process(self.modules[node.target]):
@@ -763,9 +749,6 @@ class Quantizer:
                 env[node.name] = env[node.args[0].name]
             else:
                 env[node.name] = act_post_process_removed_graph.node_copy(node, load_arg)
-        if output_node is None:
-            raise RuntimeError('Graph has no output node!')
-        act_post_process_removed_graph.output(map_arg(output_node.args[0], load_arg))
 
         module_dict = dict(model.named_modules())
         to_be_removed = []
@@ -807,12 +790,9 @@ class Quantizer:
         get_new_packed_weight_name = get_new_attr_name_with_prefix('_fx_pass_packed_weight_')
         quantized_root = quantized
         quantized_graph = quantized.graph
-        output_node : Optional[torch.fx.Node] = None
         for node in quantized_graph.nodes:
             if node.op == 'output':
-                if output_node is not None:
-                    raise RuntimeError('Multiple output nodes in graph!')
-                output_node = node
+                folded_graph.output(load_arg(node.args[0]))
                 continue
             prepack_node = folded_nodes.get(node.name, None)
             if prepack_node is node:
@@ -829,9 +809,6 @@ class Quantizer:
             else:
                 # copy other nodes
                 env[node.name] = folded_graph.node_copy(node, load_arg)
-        if output_node is None:
-            raise RuntimeError('Graph had no output node!')
-        folded_graph.output(load_arg(output_node.args[0]))
         quantized = GraphModule(quantized_root, folded_graph)
         return quantized
 

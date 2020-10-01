@@ -202,7 +202,6 @@ class Graph:
     def python_code(self, root_module: str) -> str:
         free_vars: List[str] = []
         body: List[str] = []
-        result_value : Optional[Argument] = None
         for node in self._nodes:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
@@ -243,10 +242,7 @@ class Graph:
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}\n')
                 continue
             elif node.op == 'output':
-                if result_value:
-                    raise RuntimeError('Found multiple `output` nodes in the Graph!')
-                assert isinstance(node.args, tuple)
-                result_value = node.args[0]
+                body.append(f'return {node.args[0]}')
                 continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
@@ -255,7 +251,6 @@ class Graph:
         fn_code = f"""\
 def forward(self, {', '.join(free_vars)}):
 {body}
-    return {str(result_value)}
 """
         return fn_code
 
