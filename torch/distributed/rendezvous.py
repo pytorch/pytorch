@@ -7,20 +7,15 @@ except ImportError:
 import torch._six as six
 import numbers
 import os
-<<<<<<< HEAD
+import sys
 from datetime import timedelta
 from typing import Optional, Dict, Union
 
-from torch._C._distributed_c10d import FileStore, TCPStore
-from .constants import default_pg_timeout
-=======
-import sys
 from . import FileStore
 from .constants import default_pg_timeout
 
 if sys.platform != 'win32':
     from . import TCPStore
->>>>>>> master
 
 _rendezvous_handlers = {}
 

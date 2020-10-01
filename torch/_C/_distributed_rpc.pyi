@@ -23,29 +23,13 @@ class RpcBackendOptions:
 # distributed/rpc/init.cpp
 class _TensorPipeRpcBackendOptionsBase(RpcBackendOptions):
     num_worker_threads: int
-    _transports: Optional[List[str]]
-    _channels: Optional[List[str]]
-    _init_method: str
-    rpc_timeout: float
-    device_maps: Dict[str, Dict[int, int]]
-    @overload
     def __init__(
         self,
         num_worker_threads: int,
         _transports: Optional[List],
         _channels: Optional[List],
-        rpc_timeout: float,
-        init_method: str,
-        device_maps: Dict[str, Dict[int, int]]): ...
-    @overload
-    def __init__(
-            self,
-            rpc_timeout: timedelta,
-            init_method: str,
-            num_worker_threads: int,
-            _transports: Optional[List],
-            _channels: Optional[List]
-        ): ...
+        rpc_timeout: float = _DEFAULT_RPC_TIMEOUT_SEC,
+        init_method: str = _DEFAULT_INIT_METHOD,): ...
     def set_device_map(self, to: str, device_map: Dict[str, Dict[int, int]]): ...
 class ProcessGroupRpcBackendOptions(RpcBackendOptions):
     num_send_recv_threads: int

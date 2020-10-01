@@ -181,6 +181,7 @@ class ProcessGroupNCCL(ProcessGroup):
         size: int,
         timeout: timedelta,
     ): ...
+class Device: ...
 class ProcessGroupGloo(ProcessGroup):
     def __init__(
         self,
@@ -189,6 +190,8 @@ class ProcessGroupGloo(ProcessGroup):
         size: int,
         timeout: timedelta,
     ): ...
+    @staticmethod
+    def create_device(hostname = str(), interface = str()) -> Device: ...
 def _compute_bucket_assignment_by_size(
     tensors: List[Tensor],
     bucket_size: int,
