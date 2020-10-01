@@ -306,23 +306,14 @@ def compute_type_method(
 
     return func
 
-@typing.overload
-def unambiguous_defaults(
-        name: str, args: Sequence[CppArgument],
-        seen_functions: Dict[str, List[Sequence[CppArgument]]]) -> List[bool]:
-    pass
-
-@typing.overload
-def unambiguous_defaults(
-        name: str, args: Sequence[LegacyDispatcherArgument],
-        seen_functions: Dict[str, List[Sequence[LegacyDispatcherArgument]]]) -> List[bool]:
-    pass
+ArgT = TypeVar('ArgT', CppArgument, LegacyDispatcherArgument)
 
 # Resolve any overload ambiguities introduced by default values
 # Always prefers the overload declared first, since this will be picked by
 # the PythonArgParser as well
-def unambiguous_defaults(name, args, seen_functions):
-    overloads = seen_functions.get(name, [])
+def unambiguous_defaults(name: str, args: Sequence[ArgT],
+                         seen_functions: Dict[str, List[Sequence[ArgT]]]) -> List[bool]:
+    overloads: List[Sequence[ArgT]] = seen_functions.get(name, [])
     n = 0
     for o_args in overloads:
         for i, (a, b) in enumerate(zip(args, o_args)):
