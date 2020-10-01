@@ -200,6 +200,11 @@ static void ReplaceIndexPutWithMaskedScatter(Block* b) {
     if (it->kind() == aten::index_put_) {
       auto* lc_node = it->input(1)->node();
       if (!(lc_node->input(0)->type()->cast<TensorType>()) ||
+          !(lc_node->input(0)
+                ->type()
+                ->cast<TensorType>()
+                ->scalarType()
+                .has_value()) ||
           (lc_node->input(0)
                ->type()
                ->cast<TensorType>()
@@ -217,11 +222,24 @@ static void ReplaceIndexPutWithMaskedScatter(Block* b) {
       // masked_scatter.
       Node* masked_node;
       if (it->input(2)->type()->cast<TensorType>() &&
-          (it->input(2)->type()->cast<TensorType>()->sizes().size().value()) ==
-              0) {
-        masked_node = b->owningGraph()->create(aten::masked_fill, 1);
+          (it->input(2)
+               ->type()
+               ->cast<TensorType>()
+               ->sizes()
+               .size()
+               .has_value())) {
+        if ((it->input(2)
+                 ->type()
+                 ->cast<TensorType>()
+                 ->sizes()
+                 .size()
+                 .value()) == 0) {
+          masked_node = b->owningGraph()->create(aten::masked_fill, 1);
+        } else {
+          masked_node = b->owningGraph()->create(aten::masked_scatter, 1);
+        }
       } else {
-        masked_node = b->owningGraph()->create(aten::masked_scatter, 1);
+        continue;
       }
 
       masked_node->insertBefore(*it);
