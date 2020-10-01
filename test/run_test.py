@@ -13,7 +13,7 @@ import tempfile
 import torch
 import torch._six
 from torch.utils import cpp_extension
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell
+from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, FILE_SCHEMA
 import torch.distributed as dist
 from typing import Dict, Optional
 
@@ -41,6 +41,7 @@ TESTS = [
     'test_foreach',
     'test_indexing',
     'test_jit',
+    'test_linalg',
     'test_logging',
     'test_mkldnn',
     'test_multiprocessing',
@@ -99,7 +100,6 @@ WINDOWS_BLOCKLIST = [
     'distributed/rpc/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/test_distributed_fork',
-    'distributed/test_distributed_spawn',
 ]
 
 ROCM_BLOCKLIST = [
@@ -110,7 +110,6 @@ ROCM_BLOCKLIST = [
     'test_determination',
     'test_multiprocessing',
     'test_jit_legacy',
-    'test_tensorexpr',
     'test_type_hints',
     'test_openmp',
 ]
@@ -306,9 +305,13 @@ def test_distributed(test_module, test_directory, options):
             'MPI not available -- MPI backend tests will be skipped')
     config = DISTRIBUTED_TESTS_CONFIG
     for backend, env_vars in config.items():
+        if sys.platform == 'win32' and backend != 'gloo':
+            continue
         if backend == 'mpi' and not mpi_available:
             continue
         for with_init_file in {True, False}:
+            if sys.platform == 'win32' and not with_init_file:
+                continue
             tmp_dir = tempfile.mkdtemp()
             if options.verbose:
                 init_str = "with {} init_method"
@@ -322,9 +325,9 @@ def test_distributed(test_module, test_directory, options):
             os.environ.update(env_vars)
             if with_init_file:
                 if test_module in ["test_distributed_fork", "test_distributed_spawn"]:
-                    init_method = 'file://{}/'.format(tmp_dir)
+                    init_method = f'{FILE_SCHEMA}{tmp_dir}/'
                 else:
-                    init_method = 'file://{}/shared_init_file'.format(tmp_dir)
+                    init_method = f'{FILE_SCHEMA}{tmp_dir}/shared_init_file'
                 os.environ['INIT_METHOD'] = init_method
             try:
                 os.mkdir(os.path.join(tmp_dir, 'barrier'))

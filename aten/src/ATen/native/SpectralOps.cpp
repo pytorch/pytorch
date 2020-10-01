@@ -262,12 +262,12 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
       ret.shape[i] = input_sizes[ret.dim[i]];
     }
   }
-  
+
   for (int64_t i = 0; i < ret.shape.size(); ++i) {
     TORCH_CHECK(ret.shape[i] > 0,
                 "Invalid number of data points (", ret.shape[i], ") specified");
   }
-  
+
   return ret;
 }
 
@@ -318,14 +318,14 @@ Tensor fftn_c2c(
 // torch.fft.fft, analogous to NumPy's numpy.fft.fft
 Tensor fft_fft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
                c10::optional<std::string> norm) {
-  return self.is_complex() ? 
+  return self.is_complex() ?
     fft_c2c(self, n, dim, norm, /*forward=*/true) :
     fft_r2c(self, n, dim, norm, /*forward=*/true, /*onesided=*/false);
 }
 
 Tensor fft_ifft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
                 c10::optional<std::string> norm) {
-  return self.is_complex() ? 
+  return self.is_complex() ?
     fft_c2c(self, n, dim, norm, /*forward=*/false) :
     fft_r2c(self, n, dim, norm, /*forward=*/false, /*onesided=*/false);
 }
@@ -711,8 +711,10 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   const bool return_complex = return_complexOpt.value_or(
       self.is_complex() || (window.defined() && window.is_complex()));
   if (!return_complexOpt && !return_complex) {
-    TORCH_WARN("stft will return complex tensors by default in future, use"
-               " return_complex=False to preserve the current output format.");
+    TORCH_WARN_ONCE("stft will require the return_complex parameter be explicitly "
+                    " specified in a future PyTorch release. Use return_complex=False "
+                    " to preserve the current behavior or return_complex=True to return "
+                    " a complex output.");
   }
 
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {
