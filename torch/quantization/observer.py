@@ -2,7 +2,7 @@
 import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
-from typing import List, Tuple, Optional, Dict, Union
+from typing import Any, List, Tuple, Optional, Dict, Union
 from collections import OrderedDict
 import torch
 import torch.nn as nn
@@ -38,7 +38,7 @@ def _with_args(cls_or_self, **kwargs):
     return r
 
 
-ABC = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
+ABC: Any = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
 
 
 class ObserverBase(ABC, nn.Module):
@@ -963,7 +963,8 @@ class HistogramObserver(_ObserverBase):
             self.min_val.copy_(min_val)
             self.max_val.resize_(max_val.shape)
             self.max_val.copy_(max_val)
-            torch.histc(x, self.bins, min=min_val, max=max_val, out=self.histogram)
+            # TODO torch.histc actually doesn't have a signature accepts Tensor as min/max
+            torch.histc(x, self.bins, min=min_val, max=max_val, out=self.histogram)  # type: ignore[arg-type]
         else:
             new_min, new_max = torch._aminmax(x)
             combined_min = torch.min(new_min, min_val)
@@ -973,7 +974,8 @@ class HistogramObserver(_ObserverBase):
             # and then downsampling the histogram efficiently
             combined_min, combined_max, downsample_rate, start_idx = \
                 self._adjust_min_max(combined_min, combined_max, self.upsample_rate)
-            combined_histogram = torch.histc(x, self.bins, min=combined_min, max=combined_max)
+            # TODO torch.histc actually doesn't have a signature accepts Tensor as min/max
+            combined_histogram = torch.histc(x, self.bins, min=combined_min, max=combined_max)  # type: ignore[arg-type]
             if combined_min == min_val and combined_max == max_val:
                 combined_histogram += self.histogram
             else:
@@ -1159,7 +1161,8 @@ def get_observer_state_dict(mod):
         for k, v in mod.state_dict().items():
             if 'activation_post_process' in k:
                 od[k] = v
-    od._metadata = mod.state_dict()._metadata
+    # TODO _metadata is not exposed in model.state_dict() explicitly 
+    od._metadata = mod.state_dict()._metadata  # type: ignore[attr-defined]
     return od
 
 def load_observer_state_dict(mod, obs_dict):
