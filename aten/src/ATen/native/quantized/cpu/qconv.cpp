@@ -15,6 +15,34 @@
 namespace {
 // To have a sanity check for maximum matrix size.
 constexpr int64_t kReasonableMaxDim = 1000000;
+
+// The fallback path should only be used for something that is not implemented.
+// This function performs dequant->convolution->quant
+template <int kSpatialDim, bool kReluFused>
+at::Tensor convolution_fallback_slow(
+    const at::Tensor& input,
+    PackedConvWeight<kSpatialDim>* packed_params,
+    double output_scale,
+    int64_t output_zero_point) {
+  at::Tensor x = input.dequantize();
+  at::Tensor weight;
+  c10::optional<at::Tensor> bias;
+  std::tie(weight, bias) = packed_params->unpack();
+  weight = weight.dequantize();
+
+  x = at::convolution(x, weight, bias,
+                      packed_params->stride().vec(),
+                      packed_params->padding().vec(),
+                      packed_params->dilation().vec(),
+                      packed_params->transpose(),
+                      packed_params->output_padding().vec(),
+                      packed_params->groups());
+  if (kReluFused) {
+    x = at::relu(x);
+  }
+  return at::quantize_per_tensor(x, output_scale, output_zero_point,
+                                 at::kQUInt8);
+}
 }
 
 template <int kSpatialDim = 2>
@@ -277,12 +305,10 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
                                             : "quantized::conv";
   TORCH_CHECK(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
-  TORCH_CHECK(
-    !transpose(),
-    "FBGEMM currently does NOT support transposed convolution. ",
-    "Meanwhile you have multiple options: 1) Replace the ConvTranspose with ",
-    "the 'dequant->conv_tranpose->quant'; 2) Change the current qengine to "
-    "QNNPACK using 'torch.backends.quantized.engine = \"qnnpack\"'.");
+  if (transpose()) {
+    return convolution_fallback_slow<kSpatialDim, kReluFused>(
+      act, this, output_scale, output_zero_point);
+  }
   ConvDimChecks<kSpatialDim>(
       act.ndimension(), stride().size(), padding().size(),
       output_padding().size(), dilation().size(), func_name, transpose());

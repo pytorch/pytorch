@@ -3328,8 +3328,6 @@ class TestQuantizedConv(TestCase):
             Y_scale,
             Y_zero_point,
             use_bias):
-        if not qengine_is_qnnpack():
-            return  # Currently only the QNNPACK is supported
         if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
             return  # QNNPACK doesn't support these
         assume(o_pad < stride or o_pad < dilation)
@@ -3435,8 +3433,6 @@ class TestQuantizedConv(TestCase):
             Y_scale,
             Y_zero_point,
             use_bias):
-        if not qengine_is_qnnpack():
-            return  # Currently only QNNPACK is supported
         if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
             return  # QNNPACK doesn't support these
         assume(o_pad_h < stride_h or o_pad_h < dilation)

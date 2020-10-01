@@ -25,7 +25,16 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
   // S (kernel width)
   const int kernel_w = kernel[kSpatialDim - 1];
 
-  const int C_per_G = input_channels / groups;
+  int C_per_G;
+  std::vector<int64_t> sizes2d_vec;
+  if (transpose() && (kSpatialDim == 2)) {
+    C_per_G = output_channels / groups;
+    sizes2d_vec = {input_channels, C_per_G, kernel_h, kernel_w};
+  } else {
+    C_per_G = input_channels / groups;
+    sizes2d_vec = {output_channels, C_per_G, kernel_h, kernel_w};
+  }
+  c10::IntArrayRef sizes2d(sizes2d_vec);
 
   // Tensor for unpacked weights
   // Unpacked format would be physical KRS(C/G) but logical KCRS (channels
@@ -36,7 +45,7 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
   if (q_scheme == c10::kPerTensorAffine) {
     unpacked_weights = kSpatialDim == 2
         ? at::_empty_affine_quantized(
-              {output_channels, C_per_G, kernel_h, kernel_w},
+              sizes2d,
               device(c10::kCPU)
                   .dtype(c10::kQInt8)
                   .memory_format(c10::MemoryFormat::ChannelsLast),
@@ -60,7 +69,7 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
         w_zp.data(), w_zp.size(), device(c10::kCPU).dtype(c10::kInt));
     unpacked_weights = kSpatialDim == 2
         ? at::_empty_per_channel_affine_quantized(
-              {output_channels, C_per_G, kernel_h, kernel_w},
+              sizes2d,
               scales.toType(c10::kDouble),
               zero_points.toType(c10::kLong),
               0, /* The output channel axis is 0 */
