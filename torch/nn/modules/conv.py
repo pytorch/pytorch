@@ -11,7 +11,7 @@ from .module import Module
 from .utils import _single, _pair, _triple, _reverse_repeat_tuple
 
 from ..common_types import _size_1_t, _size_2_t, _size_3_t
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Union
 
 
 class _ConvNd(Module):
@@ -22,10 +22,11 @@ class _ConvNd(Module):
     __annotations__ = {'bias': Optional[torch.Tensor]}
 
     _in_channels: int
+    _reversed_padding_repeated_twice: List[int]
     out_channels: int
     kernel_size: Tuple[int, ...]
     stride: Tuple[int, ...]
-    padding: Tuple[int, ...]
+    padding: Union[str, Tuple[int, ...]]
     dilation: Tuple[int, ...]
     transposed: bool
     output_padding: Tuple[int, ...]
@@ -51,6 +52,12 @@ class _ConvNd(Module):
             raise ValueError('in_channels must be divisible by groups')
         if out_channels % groups != 0:
             raise ValueError('out_channels must be divisible by groups')
+        valid_padding_strings = {'same', 'valid'}
+        if isinstance(padding, str) and padding not in valid_padding_strings:
+            raise ValueError(
+                "Invalid padding string {!r}, should be one of {}".format(
+                    padding, valid_padding_strings))
+
         valid_padding_modes = {'zeros', 'reflect', 'replicate', 'circular'}
         if padding_mode not in valid_padding_modes:
             raise ValueError("padding_mode must be one of {}, but got padding_mode='{}'".format(
@@ -69,7 +76,19 @@ class _ConvNd(Module):
         # `F.pad` if needed (e.g., for non-zero padding types that are
         # implemented as two ops: padding + conv). `F.pad` accepts paddings in
         # reverse order than the dimension.
-        self._reversed_padding_repeated_twice = _reverse_repeat_tuple(self.padding, 2)
+        if isinstance(self.padding, str):
+            self._reversed_padding_repeated_twice = [0, 0] * len(kernel_size)
+            if padding == 'same':
+                for d, k, i in zip(dilation, kernel_size,
+                                   range(len(kernel_size) - 1, -1, -1)):
+                    total_padding = d * (k - 1)
+                    left_pad = total_padding // 2
+                    self._reversed_padding_repeated_twice[2 * i] = left_pad
+                    self._reversed_padding_repeated_twice[2 * i + 1] = (
+                        total_padding - left_pad)
+        else:
+            self._reversed_padding_repeated_twice = _reverse_repeat_tuple(self.padding, 2)
+
         if transposed:
             self.weight = Parameter(torch.Tensor(
                 in_channels, out_channels // groups, *kernel_size))
@@ -134,8 +153,9 @@ class Conv1d(_ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a one-element tuple.
 
-    * :attr:`padding` controls the amount of implicit zero-paddings on both sides
-      for :attr:`padding` number of points.
+    * :attr:`padding` controls the amount of padding applied to the input.
+      It can be either a string {'valid', 'same'} or a tuple of ints for the
+      padding to add to each side of the input.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
@@ -160,7 +180,7 @@ class Conv1d(_ConvNd):
         Depending of the size of your kernel, several (of the last)
         columns of the input might be lost, because it is a valid
         `cross-correlation`_, and not a full `cross-correlation`_.
-        It is up to the user to add proper padding.
+        To recover the full input, use ``padding='same'``
 
     Note:
 
@@ -180,13 +200,18 @@ class Conv1d(_ConvNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        Padding mode 'valid' is the same as no padding. 'same' pads the input so
+        the output has shape ``ceil(in_shape / stride)`` in each dimension.
+        For the default ``stride = 1``, the output is the same size as the input.
+
 
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): Zero-padding added to both sides of
+        padding (int, tuple or str, optional): Padding added to both sides of
             the input. Default: 0
         padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
@@ -236,7 +261,7 @@ class Conv1d(_ConvNd):
         out_channels: int,
         kernel_size: _size_1_t,
         stride: _size_1_t = 1,
-        padding: _size_1_t = 0,
+        padding: Union[str, _size_1_t] = 0,
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
@@ -244,7 +269,8 @@ class Conv1d(_ConvNd):
     ):
         kernel_size = _single(kernel_size)
         stride = _single(stride)
-        padding = _single(padding)
+        if not isinstance(padding, str):
+            padding = _single(padding)
         dilation = _single(dilation)
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -282,8 +308,9 @@ class Conv2d(_ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a tuple.
 
-    * :attr:`padding` controls the amount of implicit zero-paddings on both
-      sides for :attr:`padding` number of points for each dimension.
+    * :attr:`padding` controls the amount of padding applied to the input.
+      It can be either a string {'valid', 'same'} or a tuple of ints for the
+      padding to add to each side of the input.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
@@ -313,7 +340,7 @@ class Conv2d(_ConvNd):
          Depending of the size of your kernel, several (of the last)
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
-         It is up to the user to add proper padding.
+         To recover the full input, use ``padding='same'``
 
     Note:
 
@@ -333,13 +360,18 @@ class Conv2d(_ConvNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        Padding mode 'valid' is the same as no padding. 'same' pads the input so
+        the output has shape ``ceil(in_shape / stride)`` in each dimension.
+        For the default ``stride = 1``, the output is the same size as the input.
+
 
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): Zero-padding added to both sides of
+        padding (int, tuple or str, optional): Padding added to all four sides of
             the input. Default: 0
         padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
@@ -397,7 +429,7 @@ class Conv2d(_ConvNd):
         out_channels: int,
         kernel_size: _size_2_t,
         stride: _size_2_t = 1,
-        padding: _size_2_t = 0,
+        padding: Union[str, _size_2_t] = 0,
         dilation: _size_2_t = 1,
         groups: int = 1,
         bias: bool = True,
@@ -405,7 +437,8 @@ class Conv2d(_ConvNd):
     ):
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
-        padding = _pair(padding)
+        if not isinstance(padding, str):
+            padding = _pair(padding)
         dilation = _pair(dilation)
         super(Conv2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -439,8 +472,9 @@ class Conv3d(_ConvNd):
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
-    * :attr:`padding` controls the amount of implicit zero-paddings on both
-      sides for :attr:`padding` number of points for each dimension.
+    * :attr:`padding` controls the amount of padding applied to the input.
+      It can be either a string {'valid', 'same'} or a tuple of ints for the
+      padding to add to each side of the input.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
@@ -469,7 +503,7 @@ class Conv3d(_ConvNd):
          Depending of the size of your kernel, several (of the last)
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
-         It is up to the user to add proper padding.
+         To recover the full input, use ``padding='same'``
 
     Note:
 
@@ -489,13 +523,19 @@ class Conv3d(_ConvNd):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        Padding mode 'valid' is the same as no padding. 'same' pads the input so
+        the output has shape ``ceil(in_shape / stride)`` in each dimension.
+        For the default ``stride = 1``, the output is the same size as the input.
+
 
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): Zero-padding added to all three sides of the input. Default: 0
+        padding (int, tuple or str, optional): Padding added to all six sides of
+            the input. Default: 0
         padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
@@ -550,7 +590,7 @@ class Conv3d(_ConvNd):
         out_channels: int,
         kernel_size: _size_3_t,
         stride: _size_3_t = 1,
-        padding: _size_3_t = 0,
+        padding: Union[str, _size_3_t] = 0,
         dilation: _size_3_t = 1,
         groups: int = 1,
         bias: bool = True,
@@ -558,7 +598,8 @@ class Conv3d(_ConvNd):
     ):
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
-        padding = _triple(padding)
+        if not isinstance(padding, str):
+            padding = _triple(padding)
         dilation = _triple(dilation)
         super(Conv3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
