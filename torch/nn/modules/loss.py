@@ -1273,7 +1273,7 @@ class TripletMarginWithDistanceLoss(_Loss):
 
     where :math:`N` is the batch size; :math:`d` is a nonnegative, real-valued function
     quantifying the closeness of two tensors, referred to as the :attr:`distance_function`;
-    and :math:`margin` is a non-negative margin representing the minimum difference
+    and :math:`margin` is a nonnegative margin representing the minimum difference
     between the positive and negative distances that is required for the loss to
     be 0.  The input tensors have :math:`N` elements each and can be of any shape
     that the distance function can handle.
@@ -1295,7 +1295,7 @@ class TripletMarginWithDistanceLoss(_Loss):
         distance_function (callable, optional): A nonnegative, real-valued function that
             quantifies the closeness of two tensors. If not specified,
             `nn.PairwiseDistance` will be used.  Default: ``None``
-        margin (float, optional): A non-negative margin representing the minimum difference
+        margin (float, optional): A nonnegative margin representing the minimum difference
             between the positive and negative distances required for the loss to be 0. Larger
             margins penalize cases where the negative examples are not distant enough from the
             anchors, relative to the positives. Default: :math:`1`.
