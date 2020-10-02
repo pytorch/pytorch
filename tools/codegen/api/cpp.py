@@ -1,7 +1,9 @@
 from tools.codegen.model import *
 from tools.codegen.api.types import TensorOptionsArguments, CppArgument, ThisArgument
 import tools.codegen.local as local
-from typing import Optional, Sequence, Union, Callable, List
+from typing import Optional, Sequence, Union, Callable, List, Tuple
+import copy
+from dataclasses import dataclass
 
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.
@@ -152,6 +154,7 @@ JIT_TO_CPP_DEFAULT = {
     '[]': '{}',
     '[0,1]': '{0,1}',  # TODO: stop special casing
     'contiguous_format': 'MemoryFormat::Contiguous',
+    'long': 'at::kLong',
 }
 
 # Convert a JIT default into C++ expression representing the default
@@ -191,9 +194,50 @@ def argument(a: Union[Argument, TensorOptionsArguments, ThisArgument]) -> CppArg
     else:
         assert_never(a)
 
-def group_arguments(
-    func: FunctionSchema, *, method: bool = False
-) -> Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]]:
+@dataclass(frozen=True)
+class CppSignature:
+    returns: Tuple[Return, ...]
+    arguments: Tuple[Union[Argument, TensorOptionsArguments, ThisArgument], ...]
+
+    def cpp_arguments(self) -> Sequence[CppArgument]:
+        return list(map(argument, self.arguments))
+
+    # Return arguments as a comma separated list, i.e. like they would be in a C++
+    # function signature. Include default values for arguments.
+    def cpp_arguments_str(self, with_defaults: bool) -> str:
+        args_without_this = [argument(a) for a in self.arguments if not isinstance(a, ThisArgument)]
+        if with_defaults:
+            return ', '.join(map(str, args_without_this))
+        else:
+            return ', '.join(map(lambda s: s.str_no_default(), args_without_this))
+
+
+@dataclass(frozen=True)
+class CppSignatureGroup:
+    # arguments contains the arguments for the C++ signature as it is represented
+    # in the JIT schema.
+    signature: CppSignature
+
+    # gathered_signature is an alternative C++ signature in which TensorOptions are
+    # gathered into one TensorOptions object instead of being scattered into
+    # ScalarType, Layout, Device. This is only present for factory operators,
+    # other operators have this set to None. This can be used to generate a
+    # convenience API in the C++ frontend so users can call using TensorOptions objects.
+    gathered_signature: Optional[CppSignature]
+
+    # If it is a factory op, this returns the arguments for the convenience API
+    # that takes TensorOptions. If it is not a factory op and doesn't have
+    # a gathered signature, then this returns the regular signature instead.
+    def signature_prefer_gathered(self) -> CppSignature:
+        if self.gathered_signature is not None:
+            return self.gathered_signature
+        else:
+            return self.signature
+
+
+def signature_group(
+    func: FunctionSchema, *, method: bool = False,
+) -> CppSignatureGroup:
     args: List[Union[Argument, ThisArgument, TensorOptionsArguments]] = []
     args.extend(func.out_arguments)
 
@@ -202,8 +246,9 @@ def group_arguments(
     else:
         args.extend(func.arguments)
 
-    # group up arguments for tensor options
+    gathered_args = copy.deepcopy(args)
 
+    # group up arguments for tensor options
     def pred(name: str, ty: Type) -> Callable[[Argument], bool]:
         return lambda a: a.name == name and a.type in [ty, OptionalType(ty)]
     predicates = [  # order matters
@@ -213,14 +258,16 @@ def group_arguments(
         pred('pin_memory', Type.parse('bool')),
     ]
 
+    has_tensoroptions_argument = False
     i = 0
     while i < len(func.kwarg_only_arguments):
         # If there is enough space...
         if i <= len(func.kwarg_only_arguments) - len(predicates):
             # And the next len(predicates) arguments look like TensorOptions arguments
             if all(p(a) for p, a in zip(predicates, func.kwarg_only_arguments[i : i + len(predicates)])):
+                has_tensoroptions_argument = True
                 # Group them together as one argument
-                args.append(TensorOptionsArguments(
+                gathered_args.append(TensorOptionsArguments(
                     dtype=func.kwarg_only_arguments[i],
                     layout=func.kwarg_only_arguments[i + 1],
                     device=func.kwarg_only_arguments[i + 2],
@@ -228,11 +275,19 @@ def group_arguments(
                 ))
                 i += len(predicates)
                 continue
-        args.append(func.kwarg_only_arguments[i])
+        gathered_args.append(func.kwarg_only_arguments[i])
         i += 1
 
-    return args
+    args.extend(func.kwarg_only_arguments)
 
-# Convert arguments to C++ API form
-def arguments(func: FunctionSchema, *, method: bool = False) -> Sequence[CppArgument]:
-    return list(map(argument, group_arguments(func, method=method)))
+    if has_tensoroptions_argument:
+        return CppSignatureGroup(
+            signature=CppSignature(arguments=tuple(args), returns=tuple(func.returns)),
+            gathered_signature=CppSignature(arguments=tuple(gathered_args), returns=tuple(func.returns)),
+        )
+    else:
+        assert gathered_args == args
+        return CppSignatureGroup(
+            signature=CppSignature(arguments=tuple(args), returns=tuple(func.returns)),
+            gathered_signature=None,
+        )
