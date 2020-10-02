@@ -3201,7 +3201,7 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
     """
     # DeprecationWarning is ignored by default
     warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
-    return interpolate(input, size, scale_factor, mode = 'nearest')
+    return interpolate(input, size, scale_factor, mode='nearest')
 upsample_nearest.__doc__ = upsample_nearest.__doc__.format(**reproducibility_notes)
 
 @_overload  # noqa: F811
