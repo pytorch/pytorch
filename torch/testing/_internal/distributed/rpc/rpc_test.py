@@ -3161,10 +3161,11 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_add_done_callback(self):
-        set_by_cb = Fakse
+        set_by_cb = False
         n = self.rank + 1
 
         def callback(fut):
+            nonlocal set_by_cb
             fut.wait()
             set_by_cb = True
 

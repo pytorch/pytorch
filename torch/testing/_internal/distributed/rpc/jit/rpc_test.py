@@ -1042,7 +1042,7 @@ class JitRpcTest(
     def test_add_done_callback(self):
         callback_called = None
 
-        def callback(_fut):
+        def callback(fut):
             nonlocal callback_called
             callback_called = fut.wait() * 2
 
@@ -1050,8 +1050,11 @@ class JitRpcTest(
             worker_name((self.rank + 1) % self.world_size),
             script_fork_wait_udf,
             args=(torch.ones(2),),
-        ).add_done_callback(callback)
-        self.assertFalse(callback_called)
+        )
+
+        future.add_done_callback(callback)
+
+        self.assertEqual(callback_called, None)
         self.assertEqual(future.wait(), torch.ones(2) * 2)
         self.assertEqual(callback_called, torch.ones(2) * 4)
 
