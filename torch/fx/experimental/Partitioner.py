@@ -100,10 +100,12 @@ class Partition:
     def get_output_nodes(self) -> List[Node]:
         """Output nodes are the nodes that without any user inside this partition."""
         output_nodes: List[Node] = []
+        nodes = list(self.nodes)
+        indices = {n: i for i, n in enumerate(nodes)}
         for node in self.nodes:
-            index = self.graph_module.graph.nodes.index(node)
+            index = indices[node]
             user_indexes = GraphManipulation.get_all_users_of(self.graph_module, index)
-            user_nodes = {self.graph_module.graph.nodes[i] for i in user_indexes}
+            user_nodes = {nodes[i] for i in user_indexes}
             # check if user nodes has an intersection with self.nodes
             if not set(self.nodes).intersection(user_nodes):
                 output_nodes.append(node)

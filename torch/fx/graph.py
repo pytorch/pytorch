@@ -52,26 +52,46 @@ def _format_target(base: str, target: str) -> str:
             r = f'{r}.{e}'
     return r
 
-class insert_before:
-    def __init__(self, n : Node):
-        self.n = n
+class _InsertPoint:
+    def __init__(self, graph, new_insert):
+        self.graph = graph
+        self.orig_insert, graph._insert = graph._insert, new_insert
 
     def __enter__(self):
-        self.orig_insert_point = self.n.graph._insert_point
-        self.n.graph._insert_point = self.n
+        pass
 
     def __exit__(self, type, value, tb):
-        self.n.graph._insert_point = self.orig_insert_point
+        self.graph._insert = self.orig_insert
+
+class node_list:
+    def __init__(self, graph: 'Graph', direction: str = '_next'):
+        self.graph = graph
+        self.direction = direction
+
+    def __len__(self):
+        return self.graph._len
+
+    def __iter__(self):
+        root, direction = self.graph._root, self.direction
+        cur = getattr(root, direction)
+        while cur is not root:
+            if not cur._erased:
+                yield cur
+            cur = getattr(cur, direction)
+
+    def __reversed__(self):
+        return node_list(self.graph, '_next' if self.direction == '_prev' else '_prev')
 
 class Graph:
     def __init__(self):
-        self._nodes : List[Node] = []
+        self._root : Node = Node(self, '', 'root', None, (), {})
         self._used_names : Dict[str, int] = {}  # base name -> number
-        self._insert_point : Optional[Node] = None
+        self._insert = self._root.prepend
+        self._len = 0
 
     @property
     def nodes(self):
-        return tuple(self._nodes)
+        return node_list(self)
 
     def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node]) -> Optional[Argument]:
         """
@@ -80,7 +100,7 @@ class Graph:
         items by this function. Returns the equivalent output value of `g` with
         Nodes switched to refer to nodes in `self`.
         """
-        for node in g._nodes:
+        for node in g.nodes:
             if node.op == 'output':
                 rv = map_arg(node.args[0], lambda n: val_map[n])
                 return rv
@@ -104,25 +124,9 @@ class Graph:
         self._mark_uses(kwargs)
         sanitized_name = self._register_name_used(name) if name is not None else self._name(target)
         n = Node(self, sanitized_name, op, target, args, kwargs)
-        if self._insert_point is not None:
-            before_idx = self._nodes.index(self._insert_point)
-            self._nodes.insert(before_idx, n)
-        else:
-            self._nodes.append(n)
+        self._insert(n)
+        self._len += 1
         return n
-
-    def move_node_before(self, to_move : Node, before : Node):
-        """
-        Move node `to_move` before `before` in the Graph. Both `Node` arguments
-        must be present in this graph.
-        """
-        # TODO: Computationally inefficient
-        if to_move.graph != self or before.graph != self:
-            raise RuntimeError('Node arguments must belong to this Graph!')
-        node_idx = self._nodes.index(to_move)
-        before_idx = self._nodes.index(before)
-        self._nodes.insert(before_idx, self._nodes.pop(node_idx))
-
 
     def erase_node(self, to_erase : Node):
         """
@@ -132,11 +136,23 @@ class Graph:
         if to_erase.uses > 0:
             raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {to_erase.uses} uses in the graph!')
 
-        node_indices = [i for i, n in enumerate(self._nodes) if n == to_erase]
-        for idx in reversed(node_indices):
-            self._nodes.pop(idx)
+        to_erase._remove_from_list()
+        to_erase._erased = True  # iterators may retain handles to erased nodes
+        self._len -= 1
 
-    # sugar for above when you know the op
+    # these can be used to permanently set the insert point: g.insert_before(x)
+    # or when used in a with statement, to temporarily change the insert point:
+    # with g.insert_before(n):
+    #     <do some insertions>
+    def insert_before(self, n: Node):
+        assert n.graph == self, "Node to insert before is not in graph."
+        return _InsertPoint(self, n.prepend)
+
+    def insert_after(self, n: Node):
+        assert n.graph == self, "Node to insert after is not in graph."
+        return _InsertPoint(self, n.append)
+
+    # sugar for create_node when you know the op
     def placeholder(self, name: str) -> Node:
         return self.create_node('placeholder', name)
 
@@ -191,7 +207,6 @@ class Graph:
         return self.create_node(node.op, node.target, args, kwargs, name)
 
     def output(self, result: Argument):
-        self._mark_uses(result)
         return self.create_node(op='output', target='output', args=(result,))
 
     def _name(self, target: Target) -> str:
@@ -231,7 +246,7 @@ class Graph:
     def python_code(self, root_module: str) -> str:
         free_vars: List[str] = []
         body: List[str] = []
-        for node in self._nodes:
+        for node in self.nodes:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 free_vars.append(node.target)
@@ -317,7 +332,7 @@ def forward(self, {', '.join(free_vars)}):
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
 
 
-        node_strs = [format_node(node) for node in self._nodes]
+        node_strs = [format_node(node) for node in self.nodes]
         param_str = ', '.join(placeholder_names)
         s = f'graph({param_str}):'
         for node_str in node_strs:
@@ -347,7 +362,7 @@ def forward(self, {', '.join(free_vars)}):
 
         seen_names : Set[str] = set()
         seen_values : Set[Node] = set()
-        for node in self._nodes:
+        for node in self.nodes:
             if node.op not in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output']:
                 raise RuntimeError(f'Node {node} had unknown opcode {node.op}!')
             if node.graph is not self:
@@ -362,7 +377,7 @@ def forward(self, {', '.join(free_vars)}):
 
         # Check targets are legit
         if root:
-            for node in self._nodes:
+            for node in self.nodes:
                 if node.op in ['get_attr', 'call_module']:
                     assert isinstance(node.target, str)
                     target_atoms = node.target.split('.')

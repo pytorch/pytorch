@@ -740,8 +740,8 @@ class TestFX(JitTestCase):
         c : torch.fx.Node = graph.create_node('get_attr', 'zip.zap.zam')
         d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
         graph.output(d)
-        nodes = graph._nodes
-        nodes[2], nodes[3] = nodes[3], nodes[2]
+        nodes = list(graph.nodes)
+        nodes[3].append(nodes[2])
         with self.assertRaisesRegex(RuntimeError, 'was used before it has been defined'):
             graph.lint()
 
@@ -783,7 +783,7 @@ class TestFX(JitTestCase):
         dag = partitioner.partition_graph(traced, devices)
         for node in traced.graph.nodes:
             assert node.partition_ids == [1]
-        nodes = traced.graph.nodes
+        nodes = list(traced.graph.nodes)
         res_dag = DAG()
         res_dag.create_node(0, [], [1], [], [])
         res_dag.create_node(1, [0], [], [nodes[0], nodes[1]], [nodes[2]])
@@ -792,6 +792,7 @@ class TestFX(JitTestCase):
             assert(r.parents == d.parents)
             assert(r.children == d.children)
             assert(r.input_nodes == d.input_nodes)
+            print(r.output_nodes, d.output_nodes)
             assert(r.output_nodes == d.output_nodes)
 
     @skipIfNoTorchVision
@@ -812,7 +813,7 @@ class TestFX(JitTestCase):
                 kwargs = node.kwargs
                 # Neg doesn't have in-place
                 kwargs.pop('inplace')
-                with torch.fx.graph.insert_before(node):
+                with rn18_traced.graph.insert_before(node):
                     new_node = rn18_traced.graph.call_function(
                         the_function=torch.neg, args=node.args, kwargs=node.kwargs)
                 node.replace_all_uses_with(replace_with=new_node)
@@ -827,7 +828,7 @@ class TestFX(JitTestCase):
         b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
         output : torch.fx.Node = graph.output(b)
 
-        with torch.fx.graph.insert_before(b):
+        with graph.insert_before(b):
             neg : torch.fx.Node = graph.call_function(the_function=torch.neg, args=(x,))
             _, *relu_args = b.args
             b.args = (neg, *relu_args)
@@ -847,7 +848,7 @@ class TestFX(JitTestCase):
         neg : torch.fx.Node = graph.call_function(the_function=torch.neg, args=(x,))
         _, *relu_args = b.args
         b.args = (neg, *relu_args)
-        graph.move_node_before(to_move=neg, before=b)
+        b.prepend(neg)
 
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
 
@@ -885,7 +886,7 @@ class TestFX(JitTestCase):
         x = torch.fx.Proxy(graph.placeholder('x'))
         relu = torch.relu(x)
 
-        with torch.fx.graph.insert_before(relu.node):
+        with graph.insert_before(relu.node):
             y = torch.neg(x)
             z = torch.tanh(y)
 

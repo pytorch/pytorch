@@ -21,7 +21,7 @@ def find_use(arg: Any, node: Node) -> bool:
 def get_all_users_of(fx_module: GraphModule, index: int) -> List[int]:
     """Given the graph(fx_module) and an index, return a list of all node indexes that use this node"""
     graph = fx_module.graph
-    current_node = graph.nodes[index]
+    current_node = list(graph.nodes)[index]
     user_indexes: List[int] = []
     """if the node A is in node B's args, then B is the user of A
        go through all the nodes, if the input node in any node's args,
