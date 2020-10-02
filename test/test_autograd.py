@@ -6112,6 +6112,18 @@ class TestAutogradDeviceType(TestCase):
         _test_cdist_for_size((1, 1), (S, 1))
         _test_euclidean_large_cdist((2000, 5))
 
+    # Ensure that cdist backward with p<1 does not produce NaNs
+    def test_cdist_grad_p_lt_1_no_nan(self, device):
+        for p in [0.99, 0.7, 0.5, 0.1, 0.01]:
+            x = torch.randn(1, 2, device=device)
+            y = x.clone().detach() + torch.tensor([[1., 0.]], device=device)
+            x.requires_grad = True
+            y.requires_grad = True
+            result = torch.cdist(x, y, p=p)
+            result.backward(torch.ones_like(result))
+            self.assertFalse(torch.isnan(x.grad).any())
+            self.assertFalse(torch.isnan(y.grad).any())
+
     def test_cdist_same_inputs(self, device):
         # Test to detect issues in cdist gradient calculation
         # When the distances are 0
