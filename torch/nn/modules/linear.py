@@ -102,8 +102,6 @@ class Linear(Module):
 # This class exists solely for Transformer; it has an annotation stating
 # that bias is never None, which appeases TorchScript
 class _LinearWithBias(Linear):
-    bias: Tensor
-
     def __init__(self, in_features: int, out_features: int) -> None:
         super().__init__(in_features, out_features, bias=True)
 
