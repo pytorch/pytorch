@@ -200,7 +200,7 @@ RegisterOperators reg_guard({
               return;
             }
 
-            for (int i = 0; i < num_inputs; i++) {
+            for (size_t i = 0; i < num_inputs; i++) {
               const c10::TensorTypePtr& guard_tensor_type =
                   types[i]->cast<TensorType>();
 
