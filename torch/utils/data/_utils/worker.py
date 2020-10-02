@@ -7,7 +7,6 @@ static methods.
 import torch
 import random
 import os
-from collections import namedtuple
 from torch._six import queue
 from torch._utils import ExceptionWrapper
 from typing import Union
@@ -110,10 +109,13 @@ def get_worker_info():
 
 
 r"""Dummy class used to signal the end of an IterableDataset"""
-_IterableDatasetStopIteration = namedtuple('_IterableDatasetStopIteration', ['worker_id'])
+class _IterableDatasetStopIteration(object):
+    def __init__(self, worker_id):
+        self.worker_id = worker_id
 
 r"""Dummy class used to resume the fetching when worker reuse is enabled"""
-_ResumeIteration = namedtuple('_ResumeIteration', [])
+class _ResumeIteration(object):
+    pass
 
 def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                  auto_collation, collate_fn, drop_last, seed, init_fn, worker_id,
