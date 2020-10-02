@@ -5503,14 +5503,14 @@
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: take_out_cpu
-    CUDA: legacy::cuda::_th_take_out
+    CUDA: take_out_cuda
 
 - func: take(Tensor self, Tensor index) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: take_cpu
-    CUDA: legacy::cuda::_th_take
+    CUDA: take_cuda
 
 - func: take_backward(Tensor grad, Tensor input, Tensor index) -> Tensor
   use_c10_dispatcher: full
