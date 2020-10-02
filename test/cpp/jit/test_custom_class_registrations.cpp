@@ -25,6 +25,9 @@ struct Foo : torch::CustomClassHolder {
     this->x += z;
     this->y += z;
   }
+  static int64_t func_mul(int64_t x, int64_t y) {
+    return x * y;
+  }
   int64_t combine(c10::intrusive_ptr<Foo> b) {
     return this->info() + b->info();
   }
@@ -200,6 +203,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("info", &Foo::info)
       .def("increment", &Foo::increment)
       .def("add", &Foo::add)
+      .def_static("func_mul", &Foo::func_mul)
       .def("combine", &Foo::combine);
 
   m.class_<NoInit>("_NoInit").def(

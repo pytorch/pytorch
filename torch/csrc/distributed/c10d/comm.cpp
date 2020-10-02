@@ -3,6 +3,7 @@
 #include <deque>
 
 #include <ATen/core/functional.h>
+#include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/tensor_flatten.h>
@@ -46,7 +47,7 @@ class BroadcastWork {
   std::vector<at::Tensor> flat_tensor_;
 
   // The broadcast work that is kicked off upon construction.
-  std::shared_ptr<c10d::ProcessGroup::Work> work_;
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> work_;
 };
 
 } // namespace

@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
@@ -30,7 +31,8 @@ class Reducer {
       std::shared_ptr<c10d::ProcessGroup> process_group,
       std::vector<std::vector<bool>> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
-      bool find_unused_parameters);
+      bool find_unused_parameters,
+      bool gradient_as_bucket_view);
 
   ~Reducer() noexcept(false);
 
@@ -54,7 +56,7 @@ class Reducer {
     return backward_stats_;
   }
 
-  // Registeres a hook to the reducer. The hook is `CommHookInterface`
+  // Registers a hook to the reducer. The hook is `CommHookInterface`
   // type to allow both Python and CPP hooks. This function can only
   // be called once before calling backward.
   void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
@@ -88,7 +90,7 @@ class Reducer {
   // Creates and sets ForwardPassWorkHandle given a ProcessGroup::Work and the
   // corresponding tensor being reduced.
   void set_forward_pass_work_handle(
-      std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
+      c10::intrusive_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
       bool useStaticWorldSize);
 
   // Retrieve on-device tensors used to track locally unused parameters. For
@@ -103,6 +105,13 @@ class Reducer {
   struct VariableIndex {
     size_t replica_index;
     size_t variable_index;
+
+    VariableIndex() = default;
+
+    VariableIndex(size_t replica_index_, size_t variable_index_) {
+      replica_index = replica_index_;
+      variable_index = variable_index_;
+    }
   };
 
   void push_rebuilt_params(const VariableIndex& index);
@@ -124,6 +133,7 @@ class Reducer {
 
   bool has_marked_unused_parameters_;
   const bool find_unused_parameters_;
+  const bool gradient_as_bucket_view_;
   std::vector<VariableIndex> unused_parameters_;
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
@@ -141,7 +151,7 @@ class Reducer {
   bool local_used_maps_reduced_;
 
   // Work handle for allreduce on local_used_maps_
-  std::shared_ptr<c10d::ProcessGroup::Work> local_used_work_;
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
   void verify_replicas_within_process();
 
@@ -230,6 +240,19 @@ class Reducer {
   // with the result of `future_work`.
   void populate_bucket_views_out(BucketReplica& replica, at::Tensor& tensor);
 
+  // If gradient_as_bucket_view_ is false, after allreduce buckets,
+  // copy bucket results back to grads.
+  void copy_bucket_to_grad(
+      torch::autograd::Variable& variable,
+      Reducer::BucketReplica& replica,
+      size_t intra_bucket_index,
+      bool global_unused);
+  // Check layout of grad and bucket_view before calling copy_grad_to_bucket
+  void check_grad_layout(const at::Tensor& grad, const at::Tensor& bucket_view);
+  // If gradient_as_bucket_view_ is false, before allreduce buckets,
+  // copy grads to buckets.
+  void copy_grad_to_bucket(at::Tensor& grad, at::Tensor& bucket_view);
+
   // A bucket holds N bucket replicas (1 per model replica).
   //
   // If every bucket in this struct is ready, the reduction can be kicked off.
@@ -245,7 +268,7 @@ class Reducer {
     size_t pending;
 
     // Keep work handle around when this set of buckets is being reduced.
-    std::shared_ptr<c10d::ProcessGroup::Work> work;
+    c10::intrusive_ptr<c10d::ProcessGroup::Work> work;
 
     // Keep future work handle around if DDP comm hook is registered.
     c10::intrusive_ptr<torch::jit::Future> future_work;
@@ -266,6 +289,13 @@ class Reducer {
     size_t bucket_index;
     // Index of parameter in single bucket replica.
     size_t intra_bucket_index;
+
+    VariableLocator() = default;
+
+    VariableLocator(size_t bucket_index_, size_t intra_bucket_index_) {
+      bucket_index = bucket_index_;
+      intra_bucket_index = intra_bucket_index_;
+    }
   };
 
   // Map the index of a variable to its location in the bucket structure.
@@ -296,7 +326,7 @@ class Reducer {
   // A struct containing work handle and tensor for allreduce scheduled in
   // forward pass, if applicable.
   struct ForwardPassAllreduceWork {
-    std::shared_ptr<c10d::ProcessGroup::Work> workHandle;
+    c10::intrusive_ptr<c10d::ProcessGroup::Work> workHandle;
     at::Tensor resultTensor;
     // whether we should divide by the initial world_size or the no. of
     // remaining DDP ranks.

@@ -17,6 +17,8 @@
 
 namespace py = pybind11;
 
+PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true);
+
 namespace pybind11 { namespace detail {
 
 // torch.autograd.Variable <-> at::Tensor conversions (without unwrapping)

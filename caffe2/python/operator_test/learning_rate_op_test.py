@@ -50,7 +50,7 @@ class TestLearningRate(serial.SerializedTestCase):
     def test_hill_learning_rate_op(self, gc, dc):
         iter = np.random.randint(low=1, high=1e5, size=1)
 
-        num_iter = int(np.random.randint(low=1e2, high=1e3, size=1))
+        num_iter = int(np.random.randint(low=1e2, high=1e8, size=1))
         start_multiplier = 1e-4
         gamma = 1.0
         power = 0.5
