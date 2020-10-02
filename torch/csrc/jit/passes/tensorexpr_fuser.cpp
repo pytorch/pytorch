@@ -86,9 +86,11 @@ bool isSupported(Node* node) {
       "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor",
       "aten::lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor",
       "aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor",
+      "aten::lgamma(Tensor self) -> Tensor",
       "aten::log10(Tensor self) -> Tensor",
       "aten::log(Tensor self) -> Tensor",
       "aten::log2(Tensor self) -> Tensor",
+      "aten::log1p(Tensor self) -> Tensor",
       // TODO: log1p
       "aten::exp(Tensor self) -> Tensor",
       "aten::erf(Tensor self) -> Tensor",
