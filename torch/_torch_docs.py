@@ -114,7 +114,7 @@ tf32_notes = {
 reproducibility_notes = {
     "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
 a CUDA device. See :doc:`/notes/randomness` for more information.""",
-    "backward_reproducibility_note": """Backward of operation may behave nondeterministically when given tensors on \
+    "backward_reproducibility_note": """This operation may produce nondeterministic gradients when given tensors on \
 a CUDA device. See :doc:`/notes/randomness` for more information.""",
     "cudnn_reproducibility_note": """In some circumstances when given tensors on a CUDA device \
 and using CuDNN, this operator may select a nondeterministic algorithm to increase performance. If this is \
