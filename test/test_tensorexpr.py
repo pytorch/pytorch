@@ -716,7 +716,8 @@ class TestTensorExprFuser(BaseTestClass):
                 in1 = 20 * torch.rand(1024, device=dev)
                 in2 = 20 * torch.rand(1024, device=dev)
                 traced = torch.jit.trace(torch_fn, (in1, in2))
-                x = traced(rand_a, rand_b)
+                x = warmup_and_run_forward(traced, rand_a, rand_b)
+                self.assertLastGraphAllFused()
                 y = torch_fn(rand_a, rand_b)
                 np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy(), atol=2e-3)
 
@@ -926,7 +927,8 @@ class TestTensorExprFuser(BaseTestClass):
         for device in devices:
             x = torch.rand(N, device=device)
             traced = torch.jit.trace(run_rand_like, (x, x), check_trace=False)
-            x_v = traced(x, x)
+            x_v = warmup_and_run_forward(traced, x, x)
+            self.assertLastGraphAllFused()
             x_np = x.cpu().numpy()
             x1_mean = np.mean(x_np)
             x2_mean = np.mean(x_np ** 2)
@@ -948,10 +950,12 @@ class TestTensorExprFuser(BaseTestClass):
         x = torch.tensor([np.nan])
         y = torch.tensor([1.0])
 
-        assert np.isnan(tmin(x, y).item())
-        assert np.isnan(tmin(y, x).item())
-        assert np.isnan(tmax(x, y).item())
-        assert np.isnan(tmax(y, x).item())
+        assert np.isnan(warmup_and_run_forward(tmin, x, y).item())
+        assert np.isnan(warmup_and_run_forward(tmin, y, x).item())
+        self.assertLastGraphAllFused()
+        assert np.isnan(warmup_and_run_forward(tmax, x, y).item())
+        assert np.isnan(warmup_and_run_forward(tmax, y, x).item())
+        self.assertLastGraphAllFused()
 
     def test_remainder(self):
         def run_remainder(x, y):
@@ -967,19 +971,22 @@ class TestTensorExprFuser(BaseTestClass):
 
         # random floats
         traced = torch.jit.trace(run_remainder, (torch.zeros(1024), torch.zeros(1024)))
-        x = traced(a, b)
+        x = warmup_and_run_forward(traced, a, b)
+        self.assertLastGraphAllFused()
         y = run_remainder(a, b)
         np.testing.assert_allclose(x.numpy(), y.numpy())
 
         # div by 0
         traced = torch.jit.trace(run_remainder, (torch.zeros(1024), torch.zeros(1024)))
-        x = traced(zeros, a)
+        x = warmup_and_run_forward(traced, zeros, a)
+        self.assertLastGraphAllFused()
         y = run_remainder(zeros, a)
         np.testing.assert_allclose(x.numpy(), y.numpy())
 
         # numerators and denominatos are nan
         traced = torch.jit.trace(run_remainder, (torch.zeros(1024), torch.zeros(1024)))
-        x = traced(nans, a)
+        x = warmup_and_run_forward(traced, nans, a)
+        self.assertLastGraphAllFused()
         y = run_remainder(nans, a)
         np.testing.assert_allclose(x.numpy(), y.numpy())
 
@@ -992,7 +999,8 @@ class TestTensorExprFuser(BaseTestClass):
         traced = torch.jit.trace(easy, (torch.zeros(1024)))
 
         a = torch.zeros(1024)
-        b, c = traced(a)
+        b, c = warmup_and_run_forward(traced, a)
+        self.assertLastGraphAllFused()
         bp = a.numpy() + 1
         cp = bp + bp
         np.testing.assert_allclose(b.numpy(), bp)
@@ -1007,7 +1015,8 @@ class TestTensorExprFuser(BaseTestClass):
         traced = torch.jit.trace(easy, (torch.zeros(1024, 1024)))
 
         a = torch.zeros(1024, 1024)
-        x = traced(a)
+        x = warmup_and_run_forward(traced, a)
+        self.assertLastGraphAllFused()
         npr = a.numpy()
         npr2 = npr + 1
         npr_a, npr_b = np.array_split(npr2, 2)
@@ -1024,7 +1033,8 @@ class TestTensorExprFuser(BaseTestClass):
         values = [torch.zeros(M, N, device=device) for N in Ns]
         traced = torch.jit.trace(easy, values)
 
-        x = traced(*values)
+        x = warmup_and_run_forward(traced, *values)
+        self.assertLastGraphAllFused()
         npr = [v.cpu().numpy() for v in values]
         npr_2 = [v + i for i, v in enumerate(npr)]
         npr_x = np.concatenate(npr_2, axis=1)
@@ -1229,7 +1239,8 @@ class TestTensorExprFuser(BaseTestClass):
                 b = torch.zeros(128, dtype=torch.int32, device=device)
                 inp = torch.ones(128, dtype=torch.int32, device=device)
                 traced = torch.jit.trace(fn, (inp, inp))
-                x = traced(a, b)
+                x = warmup_and_run_forward(traced, a, b)
+                self.assertLastGraphAllFused()
                 y = fn(a, b)
                 np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())
 
@@ -1240,7 +1251,8 @@ class TestTensorExprFuser(BaseTestClass):
         a = torch.rand(1024, dtype=float)
         b = torch.rand(1024, dtype=float)
         traced = torch.jit.trace(run_where, (torch.zeros(1024), torch.zeros(1024)))
-        x = traced(a, b)
+        x = warmup_and_run_forward(traced, a, b)
+        self.assertLastGraphAllFused()
         y = run_where(a, b)
         np.testing.assert_allclose(x.numpy(), y.numpy())
 
@@ -1251,9 +1263,10 @@ class TestTensorExprFuser(BaseTestClass):
             return (x + y) - (y - x)
         a = torch.rand(4, device="cuda")
         scripted = torch.jit.script(test)
-        scripted(a)
+        out = warmup_and_run_forward(scripted, a)
+        self.assertLastGraphAllFused()
         cx = CudaCodeGenExecuted()
-        assert torch.allclose(scripted(a), 2 * a)
+        assert torch.allclose(out, 2 * a)
         assert cx.elapsed_value() == 1
 
     def test_mask(self):
@@ -1265,8 +1278,9 @@ class TestTensorExprFuser(BaseTestClass):
         for d in devices:
             x = torch.rand(4, device=d) > 0.5
             scripted = torch.jit.script(test)
-            scripted(x)
-            assert torch.equal(scripted(x), test(x))
+            out = warmup_and_run_forward(scripted, x)
+            self.assertLastGraphAllFused()
+            assert torch.equal(out, test(x))
 
     def test_simple_add(self):
         val = torch._C._jit_get_te_generate_block_code()
