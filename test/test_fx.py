@@ -899,7 +899,7 @@ class TestFX(JitTestCase):
         for node in traced.graph.nodes:
             # Test deleting with uses both in another Node and at the output
             if node.target in [operator.add, torch.relu]:
-                with self.assertRaisesRegex(RuntimeError, 'but it still had .* uses in the graph!'):
+                with self.assertRaisesRegex(RuntimeError, 'but it still had .* uses in the graph'):
                     traced.graph.erase_node(node)
 
     def test_find_uses(self):
@@ -912,11 +912,12 @@ class TestFX(JitTestCase):
         graph.output((y + z + u).node)
         graph.lint()
 
-        uses_of_x = x.node.find_uses()
+        uses_of_x = x.node.uses
         self.assertEqual(len(uses_of_x), 3)
-        expected_ops = ['relu', 'add', 'neg']
-        for node, expected in zip(uses_of_x, expected_ops):
-            assert expected in node.name
+        expected_ops = set(['relu', 'add', 'neg'])
+        for use in uses_of_x:
+            assert any(use.name.startswith(prefix) for prefix in expected_ops)
+
 
     def test_multi_insert_point(self):
         graph = torch.fx.Graph()

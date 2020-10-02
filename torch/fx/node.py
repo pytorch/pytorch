@@ -1,5 +1,5 @@
 # Nodes represent a definition of a value in our graph of operators.
-from typing import TYPE_CHECKING, Union, Callable, Any, Tuple, List, Optional, Dict
+from typing import TYPE_CHECKING, Union, Callable, Any, Set, Tuple, List, Optional, Dict
 import torch
 
 if TYPE_CHECKING:
@@ -32,29 +32,7 @@ class Node:
         # being invoked, e.g add, layer1, or torch.add
         self.args = args
         self.kwargs = kwargs
-        self.uses = 0
-
-    def find_uses(self) -> List['Node']:
-        """
-        Find all nodes that use the value produced by `self`. The complexity of
-        this function is linear in the number of nodes * number of arguments to
-        each node.
-
-        Note that len(find_uses()) is not necessarily equal to attribute `uses`.
-        This node could be used multiple times in the same `Node`. In that case,
-        the user node would appear once in the return value here, but `uses` would
-        account for the total number of times this Node is used by the user node.
-        e.g. a node for `x + x` would have two uses for the `x` node, but the
-        `x + x` node would appear once in the return from `find_uses`
-        """
-        use_nodes : List[Node] = []
-        for node in self.graph._nodes:
-            def record_use(arg_node : Node) -> None:
-                if arg_node == self and (len(use_nodes) == 0 or use_nodes[-1] != node):
-                    use_nodes.append(node)
-            map_arg(node.args, record_use)
-            map_arg(node.kwargs, record_use)
-        return use_nodes
+        self.uses : Set['Node'] = set()
 
     def __repr__(self) -> str:
         return self.name
@@ -64,18 +42,18 @@ class Node:
         Replace all uses of `self` in the Graph with the Node `replace_with`.
         Returns the list of nodes on which this change was made.
         """
-        use_nodes : List[Node] = self.find_uses()
-        for use_node in use_nodes:
+        to_process = list(self.uses)
+        for use_node in to_process:
             def maybe_replace_node(n : Node) -> Node:
                 if n == self:
-                    self.uses -= 1
+                    self.uses.remove(use_node)
                     return replace_with
                 else:
                     return n
             use_node.args = map_arg(use_node.args, maybe_replace_node)
             use_node.kwargs = map_arg(use_node.kwargs, maybe_replace_node)
 
-        return use_nodes
+        return to_process
 
 
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:

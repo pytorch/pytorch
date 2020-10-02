@@ -87,11 +87,12 @@ class Graph:
             val_map[node] = self.node_copy(node, lambda n : val_map[n])
         return None
 
-    def _mark_uses(self, a: Argument):
-        def add_use(n: Node):
-            n.uses += 1
-            return n
-        map_arg(a, add_use)
+    def _mark_uses(self, use_node : Node):
+        def add_use(def_node: Node):
+            def_node.uses.add(use_node)
+            return def_node
+        map_arg(use_node.args, add_use)
+        map_arg(use_node.kwargs, add_use)
 
     def create_node(self, op: str, target: Target,
                     args: Optional[Tuple[Argument, ...]] = None,
@@ -100,10 +101,9 @@ class Graph:
         assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
-        self._mark_uses(args)
-        self._mark_uses(kwargs)
         sanitized_name = self._register_name_used(name) if name is not None else self._name(target)
         n = Node(self, sanitized_name, op, target, args, kwargs)
+        self._mark_uses(n)
         if self._insert_point is not None:
             before_idx = self._nodes.index(self._insert_point)
             self._nodes.insert(before_idx, n)
@@ -129,8 +129,9 @@ class Graph:
         Erases the node `to_erase` from the `Graph`. Throws an exception if
         there are still uses of that node in the `Graph`.
         """
-        if to_erase.uses > 0:
-            raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {to_erase.uses} uses in the graph!')
+        if len(to_erase.uses) > 0:
+            raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.uses)} '
+                               f'uses in the graph: {to_erase.uses}!')
 
         node_indices = [i for i, n in enumerate(self._nodes) if n == to_erase]
         for idx in reversed(node_indices):
@@ -191,7 +192,6 @@ class Graph:
         return self.create_node(node.op, node.target, args, kwargs, name)
 
     def output(self, result: Argument):
-        self._mark_uses(result)
         return self.create_node(op='output', target='output', args=(result,))
 
     def _name(self, target: Target) -> str:
