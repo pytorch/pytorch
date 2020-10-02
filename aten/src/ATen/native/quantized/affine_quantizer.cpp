@@ -17,6 +17,8 @@ DEFINE_DISPATCH(quantize_tensor_per_channel_float_qparams_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_channel_affine_stub);
 DEFINE_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub);
+DEFINE_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
+DEFINE_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
 
 namespace {
 
@@ -55,7 +57,8 @@ void checkQuantizedTensor(const std::string& fn_name, Tensor t) {
       fn_name,
       " expects a ",
       caffe2::TypeMeta::Make<T>(),
-      " Tensor");
+      " Tensor, got ",
+      t.scalar_type());
 }
 
 template <typename T>
@@ -103,13 +106,21 @@ Tensor quantize_tensor_per_tensor_affine(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     checkZeroPoint<underlying_t>(fn_name, zero_point);
   });
 
-  quantize_tensor_per_tensor_affine_stub(
+  // Temporary solution to pack the tensor if dtype is torch.quint4x2
+  // Can move this into the fbgemm::Quantize op.
+  if (qtensor.scalar_type() == at::ScalarType::QUInt4x2) {
+    quantize_tensor_per_tensor_affine_sub_byte_stub(
       rtensor.device().type(), rtensor, qtensor, scale, zero_point);
+  }
+  else {
+    quantize_tensor_per_tensor_affine_stub(
+      rtensor.device().type(), rtensor, qtensor, scale, zero_point);
+  }
   return qtensor;
 }
 
@@ -195,13 +206,18 @@ Tensor dequantize_tensor_per_tensor_affine(
   checkSameDevice(fn_name, rtensor, qtensor);
   checkSameSize(fn_name, qtensor, rtensor);
 
-  AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
     checkZeroPoint<underlying_t>(fn_name, zero_point);
   });
 
-  dequantize_tensor_per_tensor_affine_stub(
-      qtensor.device().type(), qtensor, rtensor, scale, zero_point);
+  if (qtensor.scalar_type() == at::ScalarType::QUInt4x2) {
+    dequantize_tensor_per_tensor_affine_sub_byte_stub(
+        qtensor.device().type(), qtensor, rtensor, scale, zero_point);
+  } else {
+    dequantize_tensor_per_tensor_affine_stub(
+        qtensor.device().type(), qtensor, rtensor, scale, zero_point);
+  }
   return rtensor;
 }
 
