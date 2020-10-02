@@ -2693,9 +2693,7 @@ class TestAutograd(TestCase):
                     return torch.triangular_solve(b, A, upper, transpose, unitriangular)
 
                 gradcheck(func, [A, b])
-                # TODO: gradgradcheck does not work correctly yet for complex
-                if not dtype.is_complex:
-                    gradgradcheck(func, [A, b])
+                gradgradcheck(func, [A, b])
 
         for dtype in (torch.double, torch.cdouble):
             run_test((3, 3), (3, 4), dtype)
