@@ -2509,9 +2509,7 @@ class TestAutograd(TestCase):
             root = root + torch.eye(dims[-1])
 
             gradcheck(func, [root, upper])
-            # TODO: gradgradcheck does not work correctly yet for complex
-            if not dtype.is_complex:
-                gradgradcheck(func, [root, upper])
+            gradgradcheck(func, [root, upper])
 
             root = torch.rand(*dims, dtype=dtype)
             root = torch.matmul(root, root.transpose(-1, -2).conj())
@@ -4807,7 +4805,8 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
-                'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'matmul', 'mv', 'ger', 'bmm'] + separate_complex_tests
+                'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'matmul', 'mv', 'ger', 'bmm',
+                'diagonal', ] + separate_complex_tests
 
 # TODO(@anjali411): add tests for 'sub', 'div
 # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition - @anjali411
