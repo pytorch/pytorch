@@ -32,12 +32,9 @@ const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
 inline void checkCPUTensor(const torch::Tensor& tensor) {
   TORCH_CHECK(
       tensor.device() == at::kCPU,
-      "TensorPipeAgent only supports CPU tensors by default. Sending "
-      "GPU tensors using RPC requires explicitly configurations using "
-      "`set_device_map` on `TensorPipeRpcBackendOptions`. Got a tensor "
-      "with device ",
-      tensor.device(),
-      ", but no device map is specified.");
+      "TensorPipe RPC backend only supports CPU tensors, please move your ",
+      "tensors to CPU before sending them over RPC. Found tensor on device: ",
+      tensor.device());
 }
 
 std::vector<c10::DeviceIndex> getDevicesForTensors(
@@ -480,41 +477,16 @@ void TensorPipeAgent::sendCompletedResponseMessage(
   Message&& responseMessage = std::move(*futureResponseMessage).moveValue();
   responseMessage.setId(messageId);
   if (!error) {
-    const auto& iter = reverseDeviceMaps_.find(pipe->getRemoteName());
-    if (iter == opts_.deviceMaps.end()) {
-      for (const auto& t : responseMessage.tensors()) {
-        if (!t.device().is_cpu()) {
-          responseMessage = createExceptionResponse(
-              c10::str(
-                  "TensorPipe RPC backend only supports CPU tensors by default,"
-                  " please move your tensors to CPU before sending them over "
-                  "RPC, or call `set_device_map` on "
-                  "`TensorPipeRpcBackendOptions` to explicitly configure "
-                  "device mapping. Response device mapping is not available for "
-                  "destination ",
-                  pipe->getRemoteName(),
-                  ", but found tensor on device: ",
-                  t.device()),
-              responseMessage.id());
-          break;
-        }
-      }
-    } else {
-      const auto& deviceMap = iter->second;
-      for (const auto& t : responseMessage.tensors()) {
-        if (!t.device().is_cpu() &&
-            deviceMap.find(t.device().index()) == deviceMap.end()) {
-          responseMessage = createExceptionResponse(
-              c10::str(
-                  "TensorPipe RPC backend only supports CPU tensors by default."
-                  " Response device mapping is not available for destination ",
-                  pipe->getRemoteName(),
-                  " for device ",
-                  t.device(),
-                  " but received a tensor on that device."),
-              responseMessage.id());
-          break;
-        }
+    for (const auto& tensor : responseMessage.tensors()) {
+      if (!tensor.device().is_cpu()) {
+        responseMessage = createExceptionResponse(
+            c10::str(
+                "TensorPipe RPC backend only supports CPU tensors, please ",
+                "move your tensors to CPU before sending them over RPC. Found ",
+                "tensor on device: ",
+                tensor.device()),
+            responseMessage.id());
+        break;
       }
     }
 
