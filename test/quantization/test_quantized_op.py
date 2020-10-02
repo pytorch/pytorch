@@ -140,11 +140,9 @@ class TestQuantizedOps(TestCase):
             quantized_fn: a list of the quantized functions to be tested
             reference_fn: the original reference function to be called on the
             the dequantized X
-            inplace_kwarg: the additional inplace keyword argument to test in-place
+            extra_kwargs: the additional keyword arguments
             for each test entry in ops_under_test, it must have at least the fields
-            for quantized_fn and reference_fn. If inplace_kwarg is missing, the
-            quantized function is assumed to be either inplace by default or the
-            test is not testing an inplace function.
+            for quantized_fn and reference_fn.
             output_range: the output range the operator will map to. By default, if it is
             no specified, the range will not be controlled and depend on Xmin and Xmax.
             change_zero_point: a boolean flag indicating if the zero point parameter should
@@ -222,7 +220,7 @@ class TestQuantizedOps(TestCase):
                     torch.nn.quantized.functional.relu,
                 ],
                 'reference_fn': torch.nn.functional.relu,
-                'inplace_kwarg': {
+                'extra_kwargs': {
                     'inplace': True
                 }
             }
@@ -280,6 +278,24 @@ class TestQuantizedOps(TestCase):
         ]
         self._test_activation_function(X, 'hardsigmoid', hardsigmoid_test_configs)
 
+    @override_qengines
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_leaky_relu(self, X):
+        leaky_relu_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.nn.quantized.functional.leaky_relu
+                ],
+                'reference_fn': torch.nn.functional.leaky_relu,
+                'extra_kwargs': {
+                    'negative_slope': 0.1,
+                    'inplace': False,
+                },
+            }
+        ]
+        self._test_activation_function(X, 'leaky_relu', leaky_relu_test_configs)
+
     """Tests the correctness of the quantized::relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()),
@@ -300,30 +316,6 @@ class TestQuantizedOps(TestCase):
         qY_hat = op(qX, negative_slope=alpha)
         self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
                          msg="F.leaky_relu failed ({} vs {})".format(qY, qY_hat))
-
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       qparams=hu.qparams()),
-           alpha=st.floats(0.0, 1.0, allow_nan=False, allow_infinity=False))
-    def test_leaky_relu(self, X, alpha):
-        """ Test quantized::leaky_relu op that takes scale/zero_point as input
-        """
-        X, (scale, zero_point, torch_type) = X
-        Y_scale = scale / 2
-
-        X = torch.from_numpy(X)
-        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
-        dqX = qX.dequantize()
-
-        # torch.nn.functional
-        op = torch.nn.functional.leaky_relu
-        dqY = op(dqX, negative_slope=alpha)
-        qY = torch.quantize_per_tensor(dqY, scale=Y_scale, zero_point=zero_point,
-                                       dtype=torch_type)
-        quantized_op = torch.ops.quantized.leaky_relu
-        qY_hat = quantized_op(qX, negative_slope=alpha, output_scale=Y_scale, output_zero_point=zero_point)
-        self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-                         msg="quantized::leaky_relu failed ({} vs {})".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::elu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -1750,12 +1742,14 @@ class TestQuantizedOps(TestCase):
         torch.testing.assert_allclose(out.dequantize(), ref.dequantize())
         self.assertNotEqual(out.stride(), sorted(out.stride()))
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=3,
-                                              min_side=1, max_side=2),
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=1, max_dims=5,
+                                              min_side=1, max_side=4),
                        qparams=hu.qparams()),
-           dim=st.integers(1, 2))
+           dim=st.integers(-1, 5))
+    @override_qengines
     def test_mean(self, X, dim):
         X, (scale, zero_point, torch_type) = X
+        assume(dim < X.ndim)
         qX = torch.quantize_per_tensor(torch.tensor(X).float(), scale, zero_point, torch_type)
 
         Y = torch.mean(qX.dequantize(), dim)

@@ -172,7 +172,8 @@ class QRelu6 final {
 
 class QLeakyRelu final {
  public:
-  static Tensor run(Tensor self, Scalar negative_slope, double output_scale, int64_t output_zero_point) {
+  static Tensor run(Tensor self, Scalar negative_slope, bool inplace, double output_scale, int64_t output_zero_point) {
+    // inplace argument is ignored now, TODO:support inplace
     const auto qx = self.contiguous(self.suggest_memory_format());
     auto qy = at::_empty_affine_quantized(qx.sizes(),
       at::device(kCPU).dtype(self.scalar_type()),
