@@ -243,6 +243,18 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
   ncclComms_.resize(devices.size());
 }
 
+ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
+    : std::enable_shared_from_this<WorkNCCL>(w),
+      devices_(w.devices_),
+      cudaEvents_(w.cudaEvents_),
+      ncclComms_(w.ncclComms_),
+      blockingWait_(w.blockingWait_),
+      opTimeout_(w.opTimeout_),
+      workStartTime_(w.workStartTime_) {
+  completed_ = w.completed_;
+  exception_ = w.exception_;
+}
+
 ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
 
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
@@ -465,30 +477,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   terminateProcessGroup_.store(true);
+
   watchdogCV_.notify_one();
-  workListCV_.notify_one();
-
-  if (asyncErrorHandling_) {
-    std::unique_lock<std::mutex> lock(workListMutex_);
-    // TODO: We can potentially merge this functionality into the workCleanup
-    // thread or just allow the destructor to free workList_.
-    // Clean up any remaining items in the workList_ instead of waiting for the
-    // workCleanup Thread to be scheduled again.
-    for (auto it = workList_.begin(); it != workList_.end();
-         /* no increment*/) {
-      auto& work = *it;
-      if (work->isCompleted()) {
-        it = workList_.erase(it);
-      } else {
-        ++it;
-      }
-    }
-    // Wait for workList_ to become empty before proceeding with shutdown.
-    workListCV_.wait(lock, [&]() -> bool { return workList_.empty(); });
-    lock.unlock();
-    workCleanupThread_.join();
-  }
-
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_.join();
 #endif
@@ -504,12 +494,17 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
       }
     }
   }
+
+  if (asyncErrorHandling_) {
+    workMetaListCV_.notify_one();
+    workCleanupThread_.join();
+  }
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
     ncclCommWatchdogInternal();
-    LOG(INFO) << "NCCL watchdog thread terminated normally";
+    LOG(INFO) << "[Rank " << rank_ << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
     LOG(INFO) << "NCCL watchdog thread terminated with exception: " << e.what();
   } catch (...) {
@@ -562,21 +557,22 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
     }
 
     if (asyncErrorHandling_) {
-      std::unique_lock<std::mutex> lock(workListMutex_);
-      for (auto& work : workList_) {
-        work->checkAndSetException();
+      std::unique_lock<std::mutex> lock(workMetaListMutex_);
+      for (auto& work : workMetaList_) {
+        work.checkAndSetException();
         // Aborting NCCL Communicators due to errors is already handled above.
-        if (work->exception()) {
+        if (work.exception()) {
           continue;
         }
 
         // Check for Timeouts in the WorkNCCL Operations, and abort all
         // communicators accordingly.
-        if (work->timedOut()) {
+        if (work.timedOut()) {
+          LOG(INFO) << "[" << rank_ << "] caught collective operation timeout";
           std::exception_ptr exception_ptr = std::make_exception_ptr(
               std::runtime_error("NCCL Operation Timed Out"));
-          work->setException(exception_ptr);
-          for (const auto& ncclComm : work->ncclComms_) {
+          work.setException(exception_ptr);
+          for (const auto& ncclComm : work.ncclComms_) {
             ncclComm->ncclCommAbort();
             abortedCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
           }
@@ -639,36 +635,38 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
 }
 
 void ProcessGroupNCCL::workCleanupLoop() {
-  while (!terminateProcessGroup_.load()) {
-    std::unique_lock<std::mutex> lock(workListMutex_);
-    // We busy-poll the work vector every kWatchdogThreadSleepMillis
-    // milliseconds as long as the atomic is True.
-    workListCV_.wait_for(
-        lock,
-        std::chrono::milliseconds(kWorkCleanupThreadSleepMillis),
-        [&]() -> bool { return terminateProcessGroup_.load(); });
+  bool done = false;
+  while (!terminateProcessGroup_.load() || !done) {
+    std::list<WorkNCCL> doneWorks;
+    {
+      std::unique_lock<std::mutex> lock(workMetaListMutex_);
+      // We busy-poll the work vector every kWatchdogThreadSleepMillis
+      // milliseconds as long as the atomic is True.
+      workMetaListCV_.wait_for(
+          lock,
+          std::chrono::milliseconds(kWorkCleanupThreadSleepMillis),
+          [&]() -> bool { return terminateProcessGroup_.load(); });
 
-    for (auto it = workList_.begin(); it != workList_.end();
-         /* no increment*/) {
-      auto& work = *it;
-      if (work->isCompleted()) {
-        // Handle Exceptions on failed GPU operations and remove completed
-        // workNCCL objects from work vector.
-        work->handleNCCLGuard();
-        it = workList_.erase(it);
-      } else {
-        // Increment the iterator if the current WorkNCCL object is not
-        // completed.
-        ++it;
+      for (auto it = workMetaList_.begin(); it != workMetaList_.end();
+           /* no increment*/) {
+        auto& work = *it;
+        if (work.isCompleted()) {
+          // Handle Exceptions on failed GPU operations and remove completed
+          // workNCCL objects from work vector.
+          if (!terminateProcessGroup_.load()) {
+            work.handleNCCLGuard();
+          }
+          doneWorks.push_back(std::move(*it));
+          it = workMetaList_.erase(it);
+        } else {
+          // Increment the iterator if the current WorkNCCL object is not
+          // completed.
+          ++it;
+        }
       }
+      done = workMetaList_.empty();
     }
-
-    if (workList_.empty()) {
-      // Notify the main thread if it is blocked in the shutdown sequence,
-      // waiting for the work vector to become empty.
-      lock.unlock();
-      workListCV_.notify_one();
-    }
+    doneWorks.clear();
   }
 }
 
@@ -928,8 +926,12 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
 void ProcessGroupNCCL::workEnqueue(
     std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work) {
   if (!terminateProcessGroup_.load()) {
-    std::lock_guard<std::mutex> lock(workListMutex_);
-    workList_.emplace_back(std::move(work));
+    std::lock_guard<std::mutex> lock(workMetaListMutex_);
+    // Avoid view tensors to be processed in cleanup thread.
+    // View tensors' destruction invokes autograd_meta, which
+    // needs to be destructed in user thread. Otherwise will
+    // get deadlock. Here we enqueue work without outputs_.
+    workMetaList_.emplace_back(WorkNCCL(*work));
   }
 }
 ProcessGroupNCCL::Options::Options()

@@ -7,6 +7,9 @@ import copy
 from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.experimental import GraphManipulation
+from torch.fx.experimental import shape_prop
+from torch.fx.experimental.Partitioner import DAG, Partitioner
+from torch.fx.experimental.subgraph_creation_example import split_module 
 
 from torch.fx.proxy import TraceError
 
@@ -599,6 +602,24 @@ class TestFX(JitTestCase):
         out = gm(input)
         self.assertEqual(out, ref_out)
 
+    def test_replace_target_nodes_with(self):
+        class testModule(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+        m = testModule()
+        traced = symbolic_trace(m)
+        input1 = torch.randn(1)
+        input2 = torch.randn(1)
+        assert (input1 + input2) == traced(input1, input2)
+        GraphManipulation.replace_target_nodes_with(
+            fx_module=traced,
+            old_op="call_function",
+            old_target=operator.add,
+            new_op="call_function",
+            new_target=operator.mul,
+        )
+        assert (input1 * input2) == traced(input1, input2)
+
     def test_pretty_print(self):
         st = SimpleTest()
         traced = symbolic_trace(st)
@@ -714,6 +735,88 @@ class TestFX(JitTestCase):
         nodes[2], nodes[3] = nodes[3], nodes[2]
         with self.assertRaisesRegex(RuntimeError, 'was used before it has been defined'):
             graph.lint()
+
+    def test_example_shape_prop(self):
+        class TestCase(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.randn(3, 4)
+                self.submod = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return torch.neg(self.submod(x.relu() + self.attr))
+        tc = TestCase()
+        tc_traced = symbolic_trace(tc)
+        ref_out = tc_traced(torch.rand(3, 4))
+
+        # Make sure we're testing all opcodes
+        opcodes = set()
+        for node in tc_traced.graph.nodes:
+            opcodes.add(node.op)
+        self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method', 'call_module']))
+
+        # Test shape propogation and make sure results match actual
+        shape_prop.ShapeProp(tc_traced).propagate(torch.rand(3, 4))
+        self.assertEqual(tc_traced.graph.result.shape, ref_out.shape)
+
+    def test_find_single_partition(self):
+        class testModule(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+        m = testModule()
+        traced = symbolic_trace(m)
+        partitioner = Partitioner()
+        devices = [{"name": "dev_0", "available_mem": float('inf')}]
+        dag = partitioner.partition_graph(traced, devices)
+        for node in traced.graph.nodes:
+            assert node.partition_ids == [1]
+        nodes = traced.graph.nodes
+        res_dag = DAG()
+        res_dag.create_node(0, [], [1], [], [])
+        res_dag.create_node(1, [0], [], [nodes[0], nodes[1]], [nodes[2]])
+        for r, d in zip(res_dag.nodes, dag.nodes):
+            assert(r.partition_id == d.partition_id)
+            assert(r.parents == d.parents)
+            assert(r.children == d.children)
+            assert(r.input_nodes == d.input_nodes)
+            assert(r.output_nodes == d.output_nodes)
+
+    def test_subgraph_creation(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+                self.linear = torch.nn.Linear(4, 5)
+
+            def forward(self, x, y):
+                z = self.linear(x + self.param).clamp(min=0.0, max=1.0) 
+                w = self.linear(y).clamp(min=0.0, max=1.0) 
+                return z + w
+
+        # symbolically trace model
+        my_module = MyModule()
+        my_module_traced = symbolic_trace(my_module)
+
+        # random mod partitioning
+        partition_counter = 0
+        NPARTITIONS = 3
+
+        def mod_partition(node: Node):
+            nonlocal partition_counter
+            partition = partition_counter % NPARTITIONS
+            partition_counter = (partition_counter + 1) % NPARTITIONS
+            return partition
+
+        # split module in module with submodules 
+        module_with_submodules = split_module(my_module_traced, my_module, mod_partition)
+
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+
+        orig_out = my_module_traced(x, y)
+        submodules_out = module_with_submodules(x, y)
+
+        self.assertEqual(orig_out, submodules_out)
 
 if __name__ == '__main__':
     run_tests()

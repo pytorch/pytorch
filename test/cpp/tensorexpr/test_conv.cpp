@@ -60,9 +60,7 @@ void testConv2D() {
         // FIXME: We have to use `call` and construct a `std::vector` here
         // because the `operator()` overload is only specialized for a small
         // number of arguments.
-        return inputB.call(
-                   std::vector<te::ExprHandle>({n, c, oh + r, ow + s})) *
-            filterB.call(std::vector<te::ExprHandle>({k, c, r, s}));
+        return inputB.load(n, c, oh + r, ow + s) * filterB.load(k, c, r, s);
       },
       // FIXME: If you forget one of the reduction dims, you get a segfault.
       // Could that be caught by a verifier?

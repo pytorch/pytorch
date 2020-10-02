@@ -31,7 +31,7 @@ import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
-                                                  load_tests, random_symmetric_pd_matrix, random_symmetric_matrix,
+                                                  load_tests, random_symmetric_matrix,
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
@@ -2501,22 +2501,28 @@ class TestAutograd(TestCase):
     @skipIfNoLapack
     def test_cholesky(self):
         def func(root, upper):
-            x = torch.matmul(root, root.transpose(-1, -2)) + 1e-05
+            x = 0.5 * (root + root.transpose(-1, -2).conj())
             return torch.cholesky(x, upper)
 
-        def run_test(upper, dims):
-            root = torch.rand(*dims, requires_grad=True)
+        def run_test(upper, dims, dtype):
+            root = torch.rand(*dims, dtype=dtype, requires_grad=True)
+            root = root + torch.eye(dims[-1])
 
             gradcheck(func, [root, upper])
-            gradgradcheck(func, [root, upper])
+            # TODO: gradgradcheck does not work correctly yet for complex
+            if not dtype.is_complex:
+                gradgradcheck(func, [root, upper])
 
-            root = random_symmetric_pd_matrix(dims[-1], *dims[:-2]).requires_grad_()
+            root = torch.rand(*dims, dtype=dtype)
+            root = torch.matmul(root, root.transpose(-1, -2).conj())
+            root.requires_grad_()
             chol = root.cholesky().sum().backward()
-            self.assertEqual(root.grad, root.grad.transpose(-1, -2))  # Check the gradient is symmetric
+            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())  # Check the gradient is hermitian
 
-        for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
-            run_test(upper, dims)
-            run_test(upper, dims)
+        for upper, dims, dtype in product([True, False],
+                                          [(3, 3), (4, 3, 2, 2)],
+                                          [torch.double, torch.cdouble]):
+            run_test(upper, dims, dtype)
 
     @skipIfNoLapack
     def test_cholesky_solve(self):
@@ -4800,8 +4806,9 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
-                'cosh', '__rmul__', 'sgn', 'abs'] + separate_complex_tests
+                'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot'] + separate_complex_tests
 
+# TODO(@anjali411): add tests for 'sub', 'div
 # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition - @anjali411
 # complex_list += ['fill_', 't', '__rdiv__', 'tanh']
 

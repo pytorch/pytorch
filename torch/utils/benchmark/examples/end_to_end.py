@@ -26,8 +26,8 @@ import textwrap
 
 import numpy as np
 import torch
-from torch.utils._benchmark.op_fuzzers import unary
-from torch.utils._benchmark import Timer, Measurement
+from torch.utils.benchmark.op_fuzzers import unary
+from torch.utils.benchmark import Timer, Measurement
 from typing import Dict, Tuple, List
 
 

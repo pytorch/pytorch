@@ -587,25 +587,60 @@ namespace {
     }
   }
 
-  cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors, const Tensor input){
-      cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-      const int64_t bsize = tensors.mini_batch;
-      //excluding Turing from using persistent rnn.
-      if (prop->major == 7 && prop->minor != 5 && getCudnnDataType(input) == CUDNN_DATA_HALF && !tensors.is_input_packed()) {
-          if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && rnn.num_directions() == 1 &&
-                  rnn.hidden_size % 128 == 0 && tensors.input_size % 128 == 0){
-              //technically, batch size should be multiple of 8, but there are quite a few multiple-of-8 batchsizes that give bad perf,
-              //weed them out
-              if ((bsize % 16 == 0 && bsize != 80 && bsize !=112) || bsize == 8){
-                  if ((tensors.seq_length >=40 && bsize <=128) ||
-                     (tensors.seq_length >=20 && bsize <=96) ||
-                     (tensors.seq_length >=10 && bsize <=32)) {
-                     return CUDNN_RNN_ALGO_PERSIST_STATIC;
-                  }
-              }
-          }
+  inline bool use_persist_common_heuristics(const RNNDescriptorParams& rnn,
+                                            const TensorDescriptorListParams& tensors) {
+    return rnn.num_layers == 1 &&
+           rnn.hidden_size <= 1024 &&
+           rnn.num_directions() == 1 &&
+           rnn.hidden_size % 128 == 0 &&
+           tensors.input_size % 128 == 0;
+  }
+
+  inline bool use_persist_device_heuristics(const RNNDescriptorParams& rnn,
+                                            const TensorDescriptorListParams& tensors) {
+    auto bsize = tensors.mini_batch;
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    if (prop->major == 7) {
+      if (prop->minor == 5) {
+        // Excludes Turing from using persistent rnn.
+        return false;
+      } else {
+        // technically, batch size should be multiple of 8, but there are quite a few multiple-of-8 batchsizes that give bad perf,
+        // weed them out
+        return ((bsize % 16 == 0 && bsize != 80 && bsize !=112) || bsize == 8) &&
+               ((tensors.seq_length >=40 && bsize <=128) ||
+                (tensors.seq_length >=20 && bsize <=96) ||
+                (tensors.seq_length >=10 && bsize <=32));
       }
-      return CUDNN_RNN_ALGO_STANDARD;
+    } else if (prop->major >= 8) {
+      // Based on tests by Vasily Volkov and xwang233.  Vasily only tried bsize <= 128,
+      // so conservatively enable persistence for bsize <= 128 only.
+      // TODO:  Run more tests for bsize > 128.
+      if (rnn.mode == CUDNN_GRU) {
+        // Persistent GRU performance is flakier than other RNN types.  Exclude them for now.
+        // TODO:  Write a more refined GRU heuristic.
+        return false;
+      } else if (rnn.mode == CUDNN_LSTM) {
+        // Persistent LSTMs are comparable to or better than non-persistent for bsize <= 128.
+        return bsize <= 128;
+      } else {
+        // Persistent RNN_RELU and TANH show poor performance when bsize >= 96 AND hidden size >= 896.
+        return (bsize <= 128) && (bsize < 96 || rnn.hidden_size < 896);
+      }
+    } else {
+      return false;
+    }
+  }
+
+  cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors, const Tensor input) {
+    if (getCudnnDataType(input) == CUDNN_DATA_HALF &&
+        !tensors.is_input_packed()) {
+      if (use_persist_common_heuristics(rnn, tensors) &&
+          use_persist_device_heuristics(rnn, tensors)) {
+        return CUDNN_RNN_ALGO_PERSIST_STATIC;
+      }
+    }
+    return CUDNN_RNN_ALGO_STANDARD;
   }
 
   cudnnDataType_t promote_rnn_math_type(cudnnDataType_t dtype) {

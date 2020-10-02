@@ -391,26 +391,28 @@ class TORCH_API Load : public ExprNode<Load> {
     return buf_;
   }
   static ExprHandle make(
-      const Placeholder& buffer,
+      Dtype dtype,
+      const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& mask);
   static ExprHandle make(
-      Dtype dtype,
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& mask);
 
   Load(
-      const Placeholder& buffer,
+      Dtype dtype,
+      const Buf* base_handle,
       const std::vector<const Expr*>& indices,
       const Expr* mask);
   Load(
-      Dtype dtype,
       const Buf* base_handle,
       const std::vector<const Expr*>& indices,
       const Expr* mask);
 
  private:
+  void verify_dtypes() const;
+
   const Buf* buf_;
   std::vector<const Expr*> indices_;
   const Expr* mask_;
