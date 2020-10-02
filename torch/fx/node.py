@@ -30,12 +30,44 @@ class Node:
             assert isinstance(target, str)
         self.target = target  # for method/module/function, the name of the method/module/function/attr
         # being invoked, e.g add, layer1, or torch.add
-        self.args = args
-        self.kwargs = kwargs
+        self._args, self._kwargs = (), {}
+        self.args, self.kwargs = args, kwargs
         # All of the nodes that use the value produced by this Node
         # Note one user may correspond to several uses, e.g. the node fo `x + x`
         # would appear once here, but represents two uses.
         self.users : Set['Node'] = set()
+
+    @property
+    def args(self) -> Tuple[Argument, ...]:
+        return self._args
+
+    @args.setter
+    def args(self, a : Tuple[Argument, ...]):
+        self._update_args_kwargs(new_args=a, new_kwargs=self._kwargs)
+
+    @property
+    def kwargs(self) -> Dict[str, Argument]:
+        return self._kwargs
+
+    @kwargs.setter
+    def kwargs(self, k : Dict[str, Argument]):
+        self._update_args_kwargs(new_args=self._args, new_kwargs=k)
+
+    def _update_args_kwargs(self, new_args : Tuple[Argument, ...], new_kwargs : Dict[str, Argument]):
+        old_defs = self._collect_all_defs()
+        self._args = new_args
+        self._kwargs = new_kwargs
+        new_defs = self._collect_all_defs()
+        for to_remove in old_defs - new_defs:
+            to_remove.users.remove(self)
+        for to_add in new_defs - old_defs:
+            to_add.users.add(self)
+
+    def _collect_all_defs(self) -> Set['Node']:
+        defs = set()
+        map_arg(self._args, lambda n: defs.add(n))
+        map_arg(self._kwargs, lambda n: defs.add(n))
+        return defs
 
     def __repr__(self) -> str:
         return self.name
@@ -59,8 +91,8 @@ class Node:
             new_kwargs = map_arg(use_node.kwargs, maybe_replace_node)
             assert isinstance(new_kwargs, dict)
             use_node.kwargs = new_kwargs
-            self.users.remove(use_node)
 
+        self.users.clear()
         return to_process
 
 

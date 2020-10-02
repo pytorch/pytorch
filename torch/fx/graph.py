@@ -103,7 +103,6 @@ class Graph:
         kwargs = {} if kwargs is None else kwargs
         sanitized_name = self._register_name_used(name) if name is not None else self._name(target)
         n = Node(self, sanitized_name, op, target, args, kwargs)
-        self._mark_uses(n)
         if self._insert_point is not None:
             before_idx = self._nodes.index(self._insert_point)
             self._nodes.insert(before_idx, n)

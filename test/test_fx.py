@@ -913,5 +913,21 @@ class TestFX(JitTestCase):
         for node, expected in zip(graph.nodes, expected_ops):
             assert expected in node.name
 
+    def test_reassign_args_kwargs_uses(self):
+        graph = torch.fx.Graph()
+        x, y = Proxy(graph.placeholder('x')), Proxy(graph.placeholder('y'))
+        z = x + y
+        zed = z + z + z
+        graph.output(zed.node)
+        graph.lint()
+
+        # zed = z + z + z -> zed = z + z + x
+        zed.node.args = (zed.node.args[0], x.node)
+        self.assertEqual(x.node.users, set([z.node, zed.node]))
+
+        # z = x + y -> z = y + y
+        z.node.args = (y.node, y.node)
+        self.assertEqual(x.node.users, set([zed.node]))
+
 if __name__ == '__main__':
     run_tests()
