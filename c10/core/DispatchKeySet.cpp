@@ -24,6 +24,7 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
 });
 
 // backend_dispatch_keyset should include all runtime backend keys.
+// Alias key DispatchKey::DefaultBackend maps to backend_dispatch_keyset
 constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends | DispatchKeySet({
   DispatchKey::CPU,
   DispatchKey::CUDA,
@@ -44,6 +45,8 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
       return autograd_dispatch_keyset;
     case DispatchKey::Math:
       return math_dispatch_keyset;
+    case DispatchKey::DefaultBackend:
+      return backend_dispatch_keyset;
     default:
       return DispatchKeySet(t);
   }

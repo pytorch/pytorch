@@ -99,6 +99,9 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Math:
       return "Math";
 
+    case DispatchKey::DefaultBackend:
+      return "DefaultBackend";
+
     case DispatchKey::TESTING_ONLY_GenericWrapper:
       return "TESTING_ONLY_GenericWrapper";
 
