@@ -101,11 +101,8 @@ class Partition:
         """Output nodes are the nodes that without any user inside this partition."""
         output_nodes: List[Node] = []
         for node in self.nodes:
-            index = self.graph_module.graph.nodes.index(node)
-            user_indexes = GraphManipulation.get_all_users_of(self.graph_module, index)
-            user_nodes = {self.graph_module.graph.nodes[i] for i in user_indexes}
             # check if user nodes has an intersection with self.nodes
-            if not set(self.nodes).intersection(user_nodes):
+            if not set(self.nodes).intersection(node.uses):
                 output_nodes.append(node)
         return output_nodes
 
