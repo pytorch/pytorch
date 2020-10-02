@@ -131,7 +131,7 @@ void _register_comm_hook(
       std::move(state), std::move(comm_hook)));
 };
 
-PyObject* c10d_init(PyObject* _unused) {
+PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
