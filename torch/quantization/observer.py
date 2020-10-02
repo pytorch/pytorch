@@ -915,12 +915,12 @@ class HistogramObserver(_ObserverBase):
         # start_idx maps min_val to the histogram bin index.
 
         hist_bin_width = (self.max_val - self.min_val) / (self.bins * upsample_rate)
-        downsample_rate = int(torch.ceil((combined_max - combined_min) / (self.bins * hist_bin_width)).to(torch.int).item())
+        downsample_rate = int(torch.ceil((combined_max - combined_min) / (self.bins * hist_bin_width)).item())
         e = downsample_rate * (self.bins * hist_bin_width) - (combined_max - combined_min)
         # Relax only the max, not the min, so that for one sided distributions, min stays at zero
         combined_max = combined_max + e
         combined_min = combined_min
-        start_idx = int(torch.round((self.min_val - combined_min) / hist_bin_width).to(torch.int).item())
+        start_idx = int(torch.round((self.min_val - combined_min) / hist_bin_width).item())
         return combined_min, combined_max, downsample_rate, start_idx
 
     @torch.jit.ignore
