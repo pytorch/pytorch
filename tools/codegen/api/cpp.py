@@ -86,7 +86,8 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
             if mutable:
                 return 'Tensor &'  # TODO: fix this discrepancy
             else:
-                if local.use_c10_dispatcher() is UseC10Dispatcher.full or local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
+                if local.use_c10_dispatcher() is UseC10Dispatcher.full or \
+                        local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
                     return 'const c10::optional<Tensor>&'
                 else:
                     assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper

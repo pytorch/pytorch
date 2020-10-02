@@ -371,7 +371,8 @@ CAFFE2_API {cpp_returns_type} {cpp_name}({signature_group.signature.cpp_argument
     return op.call({exprs_str(signature_group.signature)});
 }}
 """
-        elif local.use_c10_dispatcher() is UseC10Dispatcher.full or local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
+        elif local.use_c10_dispatcher() is UseC10Dispatcher.full or \
+                local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
             # for c10-full ops, the scattered version is the real op and the gathered version is a proxy
             # calling into the scattered version
             return f"""
@@ -461,7 +462,8 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
     return op.call({exprs_str(signature_group.signature)});
 }}
 """
-        elif local.use_c10_dispatcher() is UseC10Dispatcher.full or local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
+        elif local.use_c10_dispatcher() is UseC10Dispatcher.full or \
+                local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
             # for c10-full ops, the scattered version is the real op and the gathered version is a proxy
             # calling into the scattered version
             return f"""
@@ -553,7 +555,8 @@ def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], Opti
         dispatcher_args = dispatcher.arguments(f.func)
 
         args: Union[Sequence[DispatcherArgument], Sequence[LegacyDispatcherArgument]]
-        if local.use_c10_dispatcher() is UseC10Dispatcher.full or local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
+        if local.use_c10_dispatcher() is UseC10Dispatcher.full or \
+                local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
             returns_type = dispatcher_returns_type
             args = dispatcher_args
             exprs = dispatcher.exprs(dispatcher_args)
