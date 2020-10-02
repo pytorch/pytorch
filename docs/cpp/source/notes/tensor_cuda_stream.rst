@@ -14,7 +14,7 @@ Acquiring CUDA stream
 
 Pytorch C++ API provides the following ways to acquire a CUDA stream:
 
-1. Get a new stream from the CUDA stream pool, streams are preallocated from the pool and returned in a round-robin fashion.
+1. Acquire a new stream from the CUDA stream pool, streams are preallocated from the pool and returned in a round-robin fashion.
 
 .. code-block:: cpp
   
@@ -25,7 +25,7 @@ Pytorch C++ API provides the following ways to acquire a CUDA stream:
   You can request a stream from the high priority pool by setting isHighPriority to true, or a stream for a specific device
   by setting device index (defaulting to the current CUDA stream's device index).
 
-2. Get the default CUDA stream, for the passed CUDA device, or for the current device if no device index is passed.
+2. Acquire the default CUDA stream, for the passed CUDA device, or for the current device if no device index is passed.
 
 .. code-block:: cpp
   
@@ -35,7 +35,7 @@ Pytorch C++ API provides the following ways to acquire a CUDA stream:
   
   The default stream is where most computation occurs when you aren't explicitly using streams.
 
-3. Get the current CUDA stream, for the CUDA device with index ``device_index``, or for the current device if no device index is passed. 
+3. Acquire the current CUDA stream, for the CUDA device with index ``device_index``, or for the current device if no device index is passed. 
 
 .. code-block:: cpp
   
@@ -78,15 +78,15 @@ CUDA Stream Usage Examples
 
 .. code-block:: cpp
 
-  // get a new stream from CUDA stream pool on current device (device 0)
-  // set current stream with this new stream and get current stream
+  // acquire a new stream from CUDA stream pool on current device (device 0)
+  // set current stream with this new stream and acquire current stream
   torch::cuda::CUDAStream myStream = at::cuda::getStreamFromPool();
   torch::cuda::setCurrentCUDAStream(myStream);
   torch::cuda::CUDAStream curStream = torch::cuda::getCurrentCUDAStream();
   assert(curStream == myStream);
 
-  // get the default CUDA stream on current device (device 0)
-  // set current stream with default stream and get current stream
+  // acquire the default CUDA stream on current device (device 0)
+  // set current stream with default stream and acquire current stream
   torch::cuda::CUDAStream defaultStream = torch::cuda::getDefaultCUDAStream();
   torch::cuda::setCurrentCUDAStream(defaultStream);
   curStream = torch::cuda::getCurrentCUDAStream();
@@ -96,7 +96,7 @@ CUDA Stream Usage Examples
 .. attention::
   
   Above code is running on the same device/gpu (say device 0). `setCurrentCUDAStream` works as expected and set current CUDA stream correctly
-  on device 0, this is because all the streams are on the same device. However, say above code is running on device 0 and we get `myStream`
+  on device 0, this is because all the streams are on the same device. However, say above code is running on device 0 and we acquire `myStream`
   from device 1, then `torch::cuda::setCurrentCUDAStream(myStream)` will set `myStream` as current stream on device 1, not device 0.
 
 
@@ -116,9 +116,9 @@ CUDA Stream Usage Examples
    {
      // create a CUDA Device guard within the scope to guard device 1
      torch::cuda::CUDAGuard device_guard(1);
-     // get default CUDA stream from device 1
+     // acquire default CUDA stream from device 1
      streams1.push_back(torch::cuda::getDefaultCUDAStream());
-     // get a new stream from CUDA stream pool on device 1
+     // acquire a new stream from CUDA stream pool on device 1
      streams1.push_back(torch::cuda::getStreamFromPool());
    }
    assert(streams1[0].device_index() == 1);
