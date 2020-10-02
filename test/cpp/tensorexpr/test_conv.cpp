@@ -57,9 +57,6 @@ void testConv2D() {
         auto const& c = v[4];
         auto const& r = v[5];
         auto const& s = v[6];
-        // FIXME: We have to use `call` and construct a `std::vector` here
-        // because the `operator()` overload is only specialized for a small
-        // number of arguments.
         return inputB.load(n, c, oh + r, ow + s) * filterB.load(k, c, r, s);
       },
       // FIXME: If you forget one of the reduction dims, you get a segfault.
