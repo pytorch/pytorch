@@ -32,6 +32,14 @@ CPU and CUDA)::
     import torch
     torch.manual_seed(0)
 
+Python
+------
+
+For custom operators, you might need to set python seed as well::
+
+    inport random
+    random.seed(0)
+
 Random number generators in other libraries
 -------------------------------------------
 If you or any of the libraries you are using rely on NumPy, you can seed the global
@@ -122,22 +130,6 @@ CUDA RNN and LSTM
 -----------------
 In some versions of CUDA, RNNs and LSTM networks may have non-deterministic behavior.
 See :meth:`torch.nn.RNN` and :meth:`torch.nn.LSTM` for details and workarounds.
-
-CUDA random seed
-----------------
-
-Also it is recommended to set CUDAs random seed::
-
-    torch.cuda.manual_seed_all(0)
-    torch.cuda.manual_seed(0)
-
-Python
-......
-
-For custom operators, you might need to set python seed as well::
-
-    inport random
-    random.seed(0)
 
 DataLoader
 ..........
