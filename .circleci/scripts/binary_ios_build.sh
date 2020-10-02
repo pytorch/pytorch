@@ -21,6 +21,8 @@ export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 
 # sync submodules
 cd ${PROJ_ROOT}
+git fetch
+git checkout 1.6.1
 git submodule sync
 git submodule update --init --recursive
 
