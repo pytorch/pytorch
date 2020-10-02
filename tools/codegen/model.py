@@ -49,7 +49,8 @@ Variant = Enum('Variant', ('function', 'method'))
 
 UseC10Dispatcher = Enum('UseC10Dispatcher', (
     'full',
-    'with_codegenerated_unboxing_wrapper'
+    'with_codegenerated_unboxing_wrapper',
+    'hacky_wrapper_for_legacy_signatures',
 ))
 
 # The basic input to the code generation is native_functions.yaml.
@@ -128,6 +129,8 @@ class NativeFunction:
             use_c10_dispatcher = UseC10Dispatcher.with_codegenerated_unboxing_wrapper
         elif use_c10_dispatcher_s == 'full':
             use_c10_dispatcher = UseC10Dispatcher.full
+        elif use_c10_dispatcher_s == 'hacky_wrapper_for_legacy_signatures':
+            use_c10_dispatcher = UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
         else:
             raise AssertionError(
                 f'use_c10_dispatcher must be unset or set to full, got {use_c10_dispatcher}')
