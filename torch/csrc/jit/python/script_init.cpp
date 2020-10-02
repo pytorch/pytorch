@@ -1448,6 +1448,8 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_debug_set_autodiff_subgraph_inlining",
       debugSetAutodiffSubgraphInlining);
+  m.def("_debug_set_fusion_group_inlining", debugSetFusionGroupInlining);
+  m.def("_debug_get_fusion_group_inlining", getFusionGroupInlining);
   m.def("_propagate_shapes", _propagate_shapes);
   m.def(
       "_propagate_and_assign_input_shapes", _propagate_and_assign_input_shapes);
