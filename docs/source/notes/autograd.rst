@@ -220,11 +220,15 @@ Autograd for Complex Numbers
 *******************************************************
 
 PyTorch uses the Wirtinger Calculus to compute gradients for functions with complex valued input and (or)
-output. PyTorch's autograd convention for complex numbers allows gradient values to be used in
+output. Wirtinger Calculus provides a means of computing gradients of real valued cost functions defined on
+complex domains(:math:`ℂ^n`) which are not holomorphic (complex differentiable). This comes in very handy since
+most of the commonly used linear algebraic functions are not holomorphic.
+
+PyTorch's autograd convention for complex numbers also allows gradient values to be used in
 Gradient Descent with the same update rule as that in the case of real numbers. This convention works for
 optimization problems where the objective function is real valued.
 
-Suppose we have a function :math:`F: ℂ → ℂ`, which is a part of a :math:`G: ℂ → ℝ` function,
+Consider a function :math:`F: ℂ → ℂ`, which is a part of a :math:`G: ℂ → ℝ` function,
 and can be decomposed into functions :math:`u` and :math:`v` which compute the real and imaginary parts of
 the output of function :math:`F`:
 
