@@ -636,13 +636,13 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             AT_ERROR("Unsupported device type for mkldnn layout: ", device_.type());
         }
       case Layout::SparseGCS:
-        switch(device().type()) {
+        switch(device_.type()) {
           case DeviceType::CPU:
             return DispatchKey::SparseGCS_CPU;
           case DeviceType::CUDA:
             return DispatchKey::SparseGCS_CUDA;
           default:
-            AT_ERROR("Unsupported device type for sparse GCS layout: ", device().type());
+            AT_ERROR("Unsupported device type for sparse GCS layout: ", device_.type());
         }
       default:
         AT_ERROR("Unsupported layout: ", layout_);

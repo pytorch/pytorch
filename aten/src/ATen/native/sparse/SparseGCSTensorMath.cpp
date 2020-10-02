@@ -60,7 +60,7 @@ Tensor& addmm_out_sparse_gcs_dense_cpu(
     Scalar beta,
     Scalar alpha) {
   Tensor b_self;
-  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out_sparse_gcs");
   return s_addmm_out_sparse_gcs_dense_cpu(result, b_self, mat1, mat2, beta, alpha);
 }
 

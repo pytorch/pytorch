@@ -23,17 +23,21 @@
 namespace at { namespace native {
   using namespace at::sparse;
 
-  Tensor& sparse_gcs_mm_cpu(Tensor& res, const SparseTensor& sparse_, const Tensor& t,
+  // res - result (output) tensor, sparse_ - sparse tensor to be multiplied.
+  // temp_dense - temp dense (input) matrix with expanded dimensions.
+  Tensor& sparse_gcs_mm_cpu(Tensor& res, const SparseTensor& sparse_, const Tensor& temp_res,
                             const Tensor& dense, Scalar alpha, Scalar beta) {
 
-    TORCH_CHECK(sparse_.dim() == 2, "addmm: sparse matrix must have 2 dimensions, not ", sparse_.dim());
-    TORCH_CHECK(sparse_.size(1) == t.size(0), "addmm: Expected dim1 of sparse matrix to be same as dim0 of t.");
-
+    TORCH_CHECK(sparse_.dim() == 2, "sparse_gcs_mm_cpu: sparse matrix must have 2 dimensions, not ", sparse_.dim());
+    std::cout << "t: "  << temp_res.sizes() << std::endl;
+    std::cout << "sparse_: " << sparse_.sizes() << std::endl;
+    TORCH_CHECK(sparse_.size(1) == dense.size(0), "sparse_gcs_mm_cpu: Expected dim1 of sparse matrix to be same as dim0 of dense.");
+ 
     LongTensor indices = sparse_.indices();
     LongTensor pointers = sparse_.pointers();
     Tensor values      = sparse_.values();
     int64_t nnz = sparse_._nnz();
-    int64_t dim_k = dense.size(1);
+    int64_t dim_k = dense.size(0);
     
     AT_DISPATCH_FLOATING_TYPES(
       values.scalar_type(), "addmm_sparse_gcs_dense", [&] {
@@ -43,16 +47,16 @@ namespace at { namespace native {
         if (cast_beta == 0) {
           res.zero_();
         } else if (cast_beta == 1) {
-          if (!is_same_tensor(res, t)) {
-            res.copy_(t);
+          if (!is_same_tensor(res, temp_res)) {
+            res.copy_(temp_res);
           }
         } else {
-          at::mul_out(res, t, scalar_to_tensor(beta));
+          at::mul_out(res, temp_res, scalar_to_tensor(beta));
         }
     });
 
     if (at::hasMKL()) {
-      at::native::sparse_mm_mkl(res, sparse_, dense, t, alpha, beta);
+      at::native::sparse_mm_mkl(res, sparse_, dense, temp_res, alpha, beta);
     }
     else {
       int64_t dense_stride0 = dense.stride(0);
