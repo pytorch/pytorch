@@ -502,24 +502,25 @@ void minimum_kernel(TensorIterator& iter) {
   }
 }
 
-void smooth_l1_kernel(TensorIterator& iter) {
+void smooth_l1_kernel(TensorIterator& iter, double beta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
         kBFloat16, kHalf, iter.dtype(), "smooth_l1_cpu", [&]() {
         using Vec = Vec256<scalar_t>;
-        const Vec one_vec(static_cast<scalar_t>(1));
+        const scalar_t beta_val(beta);
+        const Vec beta_val_vec(beta_val);
         const Vec point_five_vec(static_cast<scalar_t>(0.5));
         cpu_kernel_vec(
             iter,
-            [](scalar_t a, scalar_t b) -> scalar_t {
+            [&beta_val](scalar_t a, scalar_t b) -> scalar_t {
               auto z = std::abs(a - b);
-              return z < static_cast<scalar_t>(1)
-                  ? static_cast<scalar_t>(0.5) * z * z
-                  : z - static_cast<scalar_t>(0.5);
+              return z < beta_val
+                  ? static_cast<scalar_t>(0.5) * z * z / beta_val
+                  : z - static_cast<scalar_t>(0.5) * beta_val;
             },
-            [&one_vec, &point_five_vec](Vec a, Vec b) {
+            [&beta_val_vec, &point_five_vec](Vec a, Vec b) {
               auto z = (a - b).abs();
               return Vec::blendv(
-                  point_five_vec * z * z, z - point_five_vec, z >= one_vec);
+                  point_five_vec * z * z / beta_val_vec, z - point_five_vec * beta_val_vec, z >= beta_val_vec);
             });
       });
 }
@@ -588,7 +589,20 @@ void logit_backward_kernel(TensorIterator& iter, Scalar eps_scalar) {
 }
 
 void tanh_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
+  if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
+    auto one_vec = Vec256<scalar_t>(scalar_t{1});
+    cpu_kernel_vec(
+      iter,
+      [=](scalar_t a, scalar_t b) -> scalar_t {
+        return a * std::conj(scalar_t{1} - b * b);
+      },
+      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        return a * (one_vec - b * b).conj();
+      });
+  });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
     auto one_vec = Vec256<scalar_t>(scalar_t{1});
     cpu_kernel_vec(
       iter,
@@ -599,6 +613,7 @@ void tanh_backward_kernel(TensorIterator& iter) {
         return a * (one_vec - b * b);
       });
   });
+  }
 }
 
 void mse_kernel(TensorIterator& iter) {

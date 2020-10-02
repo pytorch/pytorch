@@ -42,7 +42,14 @@ class AttributePropagator {
     // explicitly.
     auto checkName = [this](std::string& name) {
       if (module_.hasattr(name)) {
-        insertMutableAttr(name, module_.attr(name), module_._ivalue());
+        auto attr = module_.attr(name);
+
+        // Freezing client wants to presever this submodule. When cleaning
+        // the frozen module, make sure it will be preserved entirely.
+        if (attr.isModule()) {
+          preservedSubModule_.insert(attr.toModule()._ivalue());
+        }
+        insertMutableAttr(name, attr, module_._ivalue());
         return true;
       }
 
@@ -503,7 +510,32 @@ class AttributePropagator {
         return true;
       }
     }
-    return false;
+    return preservedSubModule_.count(subModule._ivalue());
+  }
+
+  void removeExtraWaitCalls(Block* b) {
+    auto nodes = b->nodes();
+    for (auto it = nodes.begin(); it != nodes.end(); it++) {
+      auto node = *it;
+      if (node->kind() != aten::wait) {
+        continue;
+      }
+      TORCH_INTERNAL_ASSERT(node->inputs().size() == 1);
+      TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
+      // If input type is not a from aten::fork call then the
+      // aten::wait operator can be deleted.
+      if (node->input()->type()->kind() != TypeKind::FutureType) {
+        node->output()->replaceAllUsesWith(node->input());
+        it.destroyCurrent();
+      }
+    }
+    // For the remaining nodes, recurse.
+    for (auto it = nodes.begin(); it != nodes.end(); it++) {
+      auto node = *it;
+      for (auto sub_b : node->blocks()) {
+        removeExtraWaitCalls(sub_b);
+      }
+    }
   }
 
   // cleanupFrozenModule function cleans up the Frozen module. It performs the
@@ -516,6 +548,7 @@ class AttributePropagator {
       auto graph = function->graph();
       recordReferencedAttrs(graph);
       handleSharedClassType(module_, graph);
+      removeExtraWaitCalls(graph->block());
     }
     removeUnusedAttrs();
   }
@@ -656,6 +689,9 @@ class AttributePropagator {
 
   // Contains user specified methods to be preserved in frozen module.
   std::unordered_set<Function*> preservedMethods_;
+
+  // Contains user specified sub module to be preserve in frozen module.
+  std::unordered_set<ModulePtr> preservedSubModule_;
 
   // Track all used attributes ivalues that can be aliased.
   IValue::HashAliasedIValues usedAttrs_;
