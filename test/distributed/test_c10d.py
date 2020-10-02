@@ -29,7 +29,8 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import MultiProcessTestCase, \
     requires_gloo, requires_nccl, requires_nccl_version, \
     skip_if_not_multigpu, skip_if_lt_x_gpu, get_timeout, skip_if_rocm, \
-    simple_sparse_reduce_tests, skip_if_win32, create_device
+    skip_if_rocm_single_process, simple_sparse_reduce_tests, skip_if_win32, \
+    create_device
 
 from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, \
     retry_on_connect_failures, ADDRESS_IN_USE, CONNECT_TIMEOUT, TEST_WITH_TSAN
@@ -1603,13 +1604,13 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
         self.file = tempfile.NamedTemporaryFile(delete=False)
         self.num_gpus = torch.cuda.device_count()
         if self.num_gpus > 0:
-            raise unittest.SkipTest("NCCL no gpu test runs without GPUs")
+            raise unittest.SkipTest("GPUs are available, skipping test")
 
     def tearDown(self):
         pass
 
     @requires_nccl()
-    @skip_if_rocm
+    @skip_if_rocm_single_process
     def test_init_no_gpus(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         with self.assertRaisesRegex(
@@ -1633,7 +1634,7 @@ class ProcessGroupNCCLTest(TestCase):
         pass
 
     @requires_nccl()
-    @skip_if_rocm
+    @skip_if_rocm_single_process
     def test_empty_tensors(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -1659,7 +1660,7 @@ class ProcessGroupNCCLTest(TestCase):
         self.assertEqual(0, ys[0].numel())
 
     @requires_nccl()
-    @skip_if_rocm
+    @skip_if_rocm_single_process
     def test_broadcast_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -1683,7 +1684,7 @@ class ProcessGroupNCCLTest(TestCase):
                 self.assertEqual(tensors[i], tensors[rt])
 
     @requires_nccl()
-    @skip_if_rocm
+    @skip_if_rocm_single_process
     def test_allreduce_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -1746,7 +1747,7 @@ class ProcessGroupNCCLTest(TestCase):
                 allreduce(tensors, op)
 
     @requires_nccl()
-    @skip_if_rocm
+    @skip_if_rocm_single_process
     def test_reduce_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -1778,7 +1779,7 @@ class ProcessGroupNCCLTest(TestCase):
                     reduce(tensors, self.rank, rt, op)
 
     @requires_nccl()
-    @skip_if_rocm
+    @skip_if_rocm_single_process
     def test_allgather_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -1805,7 +1806,7 @@ class ProcessGroupNCCLTest(TestCase):
                 self.assertEqual(torch.tensor([s_idx]), t)
 
     @requires_nccl()
-    @skip_if_rocm
+    @skip_if_rocm_single_process
     def test_reduce_scatter_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -1884,7 +1885,7 @@ class ProcessGroupNCCLTest(TestCase):
             self.assertEqualIgnoreType(expected, output[i])
 
     @requires_nccl()
-    @skip_if_rocm
+    @skip_if_rocm_single_process
     def test_barrier(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
