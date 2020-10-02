@@ -280,7 +280,8 @@ def main():
             subprocess_file_handles.append((stdout_handle, stderr_handle))
             stdout_name = stdout_handle.name
             stderr_name = stderr_handle.name
-            print(f"Note: Stdout and stderr for node {node_rank} rank {local_rank} will be written to {stdout_name}, {stderr_name} respectively.")
+            print(f"""Note: Stdout and stderr for node {node_rank} rank {local_rank} will
+            be written to {stdout_name}, {stderr_name} respectively.""")
 
         stdout_handle = None if not subprocess_file_handles else subprocess_file_handles[local_rank][0]
         stderr_handle = None if not subprocess_file_handles else subprocess_file_handles[local_rank][1]
