@@ -16,7 +16,7 @@ namespace jit {
  * The function is sensitive to value naming and whitespace, so it should be
  * used with care. Nevertheless, it helps to keep tests more compact.
  */
-git static void checkRoundtrip(const std::string& s) {
+static void checkRoundtrip(const std::string& s) {
   auto graph = std::make_shared<Graph>();
   parseIR(s, &*graph);
   std::ostringstream ss;
