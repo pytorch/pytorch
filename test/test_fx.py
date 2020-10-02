@@ -782,7 +782,7 @@ class TestFX(JitTestCase):
         devices = [{"name": "dev_0", "available_mem": float('inf')}]
         dag = partitioner.partition_graph(traced, devices)
         for node in traced.graph.nodes:
-            assert node.partition_ids == [1]
+            assert node.op == 'output' or node.partition_ids == [1]
         nodes = traced.graph.nodes
         res_dag = DAG()
         res_dag.create_node(0, [], [1], [], [])
