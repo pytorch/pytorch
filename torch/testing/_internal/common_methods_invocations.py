@@ -350,7 +350,7 @@ op_db = [
                    dtypesIfCUDA=all_types_and_complex(),
                    handles_large_floats=False,
                    handles_complex_extremals=False,
-                   unary_float_op=True,
+                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
