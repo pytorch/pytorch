@@ -78,6 +78,9 @@ class MobileModuleObserver {
   virtual void onExitLoadModel(
       const std::unordered_map<std::string, std::string>&) {}
   virtual void onFailLoadModel(const char*) {}
+  virtual void onFailLoadModel(
+      const char*,
+      const std::unordered_map<std::string, std::string>&) {}
 };
 
 class MobileObserverConfig {

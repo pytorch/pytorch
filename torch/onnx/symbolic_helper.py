@@ -222,8 +222,12 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
 
 def _is_fp(value):
     if value:
-        type = value.type().scalarType()
-        return (type == 'Float') or (type == 'Double') or (type == 'Half')
+        if isinstance(value, torch.Tensor):
+            type = value.dtype
+            return (type == 'torch.float32') or (type == 'torch.float64') or (type == 'torch.float16')
+        else:
+            type = value.type().scalarType()
+            return (type == 'Float') or (type == 'Double') or (type == 'Half')
     return False
 
 

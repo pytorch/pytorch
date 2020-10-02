@@ -225,7 +225,8 @@ Gradient Descent with the same update rule as that in the case of real numbers. 
 optimization problems where the objective function is real valued.
 
 Suppose we have a function :math:`F: ℂ → ℂ`, which is a part of a :math:`G: ℂ → ℝ` function,
-and can be decomposed into functions :math:`u` and :math:`v` which compute the real and imaginary parts of the function:
+and can be decomposed into functions :math:`u` and :math:`v` which compute the real and imaginary parts of
+the output of function :math:`F`:
 
     .. code::
 
@@ -236,27 +237,36 @@ and can be decomposed into functions :math:`u` and :math:`v` which compute the r
 
 where :math:`1j` is a unit imaginary number and :math:`u` and :math:`v` are :math:`ℝ^{2} → ℝ` functions.
 
-We define the Vector-Jacobian Product `VJP` of :math:`F` at :math:`x + yj` for grad output vector :math:`grad\_out` as:
+According to Wirtinger calculus, we can define the following two derivatives for complex numbers:
+
+Wirtinger Derivative:
+
+    .. math::
+        \frac{\partial s}{\partial z} = 1/2 * (\frac{\partial s}{\partial x} - \frac{\partial s}{\partial y} j)
+        :label: [1]
+
+Conjugate Wirtinger derivative:
+
+    .. math::
+        \frac{\partial s}{\partial z^{*}} = 1/2 * (\frac{\partial s}{\partial x} + \frac{\partial s}{\partial y} j)
+        :label: [2]
+
+Using the real-valued chain rule to calculate gradients wrt., x and y individually and putting them together as
+explained in the Section 3.1 `here <https://arxiv.org/pdf/1701.00392.pdf>`_, we get the following result for
+the Vector-Jacobian product `VJP`:
 
     .. math::
         VJP = grad\_out^{*} * \frac{\partial s}{\partial z^{*}} + grad\_out * (\frac{\partial s}{\partial z})^{*}
-        :label: [1]
+        :label: [3]
 
-where
+where :math:`grad\_out` is the grad output vector.
 
-    .. math:: \frac{\partial s}{\partial z^{*}} = 1/2 * (\frac{\partial s}{\partial x} + \frac{\partial s}{\partial y} j)
-
-and
-
-    .. math:: \frac{\partial s}{\partial z} = 1/2 * (\frac{\partial s}{\partial x} - \frac{\partial s}{\partial y} j)
-
-are Conjugate Wirtinger and Wirtinger derivatives respectively.
-
-For :math:`grad\_out = c + dj \in C`, the Vector-Jacobian Product can also be expressed as:
+Substituting :math:`grad\_out = c + dj \in ℂ` in :eq:`[3]`, we get an alternate formula for `VJP` in terms
+of the Jacobian matrix defined for an :math:`ℝ^{2} → ℝ^{2}` corresponding to :math:`F`:
 
     .. math::
         VJP = \begin{bmatrix} c & d \end{bmatrix} * J^{T} * \begin{bmatrix} 1 \\ 1j \end{bmatrix}
-        :label: [2]
+        :label: [4]
 
 where
 
@@ -265,14 +275,15 @@ where
             \frac{\partial u(x, y)}{\partial x} & \frac{\partial u(x, y)}{\partial y}\\
             \frac{\partial v(x, y)}{\partial x} & \frac{\partial v(x, y)}{\partial y} \end{bmatrix} \\
 
-The key assumption made in the derivation of :eq:`[1]` is that function :math:`F` is a part of a
+The key assumption made in the derivation of :eq:`[3]` is that function :math:`F` is a part of a
 real valued function. It implies that the Conjugate Wirtinger and Wirtinger derivative flowing back
-to :math:`F` are complex conjugates of each other. This allows us to use :math:`grad\_output` as the incoming Conjugate
-Wirtinger derivative and recover the incoming Wirtinger derivative by complex conjugation of :math:`grad\_output`.
+from the last `ℂ -> ℝ` function in :math:`G`, say :math:`H`, are complex conjugates of each other.
+This allows us to use :math:`grad\_output` as the incoming Conjugate Wirtinger derivative and recover the
+incoming Wirtinger derivative by complex conjugation of :math:`grad\_output` for function :math:`H`.
 For more details, please check out Section 3.4 `here <https://arxiv.org/pdf/1701.00392.pdf>`_.
 
-**What happens for cross-domain functions?**
-*********************************************
+**What about cross-domain functions?**
+**************************************
 
 The above formula can also be verified to be correct for cross-domain functions functions.
 
@@ -289,7 +300,7 @@ at :math:`x + yj` can be simplified to:
 
     .. math::
         VJP = 2 * grad\_out * \frac{\partial s}{\partial z^{*}}
-        :label: [3]
+        :label: [5]
 
 since the Wirtinger and Conjugate Wirtinger derivative in this case are conjugate of each other and :math:`grad\_out` is
 real valued.
@@ -303,13 +314,94 @@ The Vector-Jacobian Product for a function :math:`F: ℝ → ℂ`:
             s = u(x, y) + v(x, y) * 1j
             return s
 
-at :math:`x + yj` can be simplified to:
+at :math:`x` can be simplified to:
 
     .. math::
         VJP = real(grad\_out^{*} * \frac{\partial s}{\partial z^{*}} + grad\_out * (\frac{\partial s}{\partial z^{*}})^{*})
-        :label: [4]
+        :label: [6]
 
-Note that the gradient in this case equals to the real value of the result obtained using :eq:`[1]`. This is because
-in the derivation of :eq:`[1]`, we assumed that the function in question is :math:`F: ℂ → ℂ`. However, by redoing the math
-from scratch for an :math:`F: ℝ → ℂ` which itself is a part of a real valued function :math:`G`, it can be verified that applying the
-real operator (in :eq:`[4]`) to the result obtained using :eq:`[1]` gives the correct gradient.
+
+Note that the gradient in this case equals to the real value of the result obtained using :eq:`[3]`. The real operator
+has to be applied to the gradient since the input is real-valued, and in general the gradient is complex valued.
+
+**How can I use this formula to calculate gradients for a function?**
+*********************************************************************
+
+Let us consider a function :math:`F` that multiplies the input values.
+
+    .. code::
+
+        def F(a, b):
+            s = a * b
+            return s
+
+Consider the case where :math:`a=x+yj \in ℂ` and :math:`b \in ℝ`.
+
+    .. math::
+        \begin{aligned}
+            s &= F(x+yj, b)     \\
+            s &= u(x, y, b) + v(x, y, b) * 1j   \\
+            u &= x * b  \\
+            v &= y * b
+        \end{aligned}
+
+Let's first calculate the gradient w.r.t. :math:`b` for :math:`grad\_out = 1.0 + 1j`. This is an
+example of computing gradient for an :math:`ℝ → ℂ` function.
+
+    .. math::
+        \frac{\partial u}{\partial b} = x, \frac{\partial v}{\partial b} = y
+        :label: [7]
+
+Using :eq:`[1]` and :eq:`[7]` we have,
+
+    .. math::
+        \begin{aligned}
+            \frac{\partial s}{\partial b^*} &= 1/2 * (\frac{\partial (u + vj)}{\partial b} + 0j) \\
+                                            &= 1/2 * (\frac{\partial u}{\partial b} + \frac{\partial v}{\partial b} * 1j) \\
+                                            &= 1/2 * (x + yj)
+        \end{aligned}
+
+Substituting the values of :math:`\frac{\partial s}{\partial b^*}` and :math:`grad\_out` in :eq:`[6]`, we get:
+
+    .. math::
+        \begin{aligned}
+            VJP &= real([(1+1j)^* * 1/2 * (x+yj)] + [(1+1j) * 1/2 * (x+yj)^*])  \\
+                &= x + y
+        \end{aligned}
+
+Now, let's compute the gradient w.r.t. :math:`a`. This is an example of computing gradient
+for a :math:`ℂ → ℂ` function. To compute the gradient, we will first work out the partial derivatives of
+:math:`u` and :math:`v` w.r.t :math:`x` and :math:`y` equals:
+
+    .. math::
+        \frac{\partial u}{\partial x} = b, \frac{\partial u}{\partial y} = 0 \\
+        \frac{\partial v}{\partial x} = 0, \frac{\partial v}{\partial y} = b
+
+Thus,
+
+    .. math::
+        \begin{aligned}
+            \frac{\partial (u + vj)}{\partial x} &= b + 0j \\
+            \frac{\partial (u + vj)}{\partial y} &= 0 + bj
+        \end{aligned}
+
+Using :eq:`[1]` and :eq:`[2]` we have,
+
+    .. math::
+        \begin{aligned}
+            \frac{\partial s}{\partial a^*} &= 1/2 * ( \frac{\partial (u + vj)}{\partial x} + \frac{\partial (u + vj)}{\partial y}j) \\
+                                            &= 1/2 * (b + bj)   \\
+            \frac{\partial s}{\partial a}   &= 1/2 * ( \frac{\partial (u + vj)}{\partial x} - \frac{\partial (u + vj)}{\partial y}j) \\
+                                            &= 1/2 * (b - bj)
+        \end{aligned}
+
+Substituting the values of :math:`\frac{\partial s}{\partial a}`, :math:`\frac{\partial s}{\partial a^*}`, and :math:`grad\_out` in :eq:`[3]`, we get:
+
+    .. math::
+        \begin{aligned}
+            VJP &= [(1+1j)^{*} * 1/2 * (b + bj)] + [(1+1j) * 1/2 * {(b-bj)}^{*}]  \\
+                &= b + bj
+        \end{aligned}
+
+Note that PyTorch Autograd uses :math:`grad\_out = 1.0` by default when :func:`backward` is called on a scalar output. :math:`grad\_out=1+1j`
+was used above to make the example more interesting.

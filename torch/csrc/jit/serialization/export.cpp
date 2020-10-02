@@ -854,7 +854,8 @@ std::string pretty_print_onnx(
 // conform to the ONNX op specification. Thus, the output will not
 // be interpretable by a ONNX-compatible framework. However, PyTorch or
 // libtorch will be able to import the IR and play it back.
-std::tuple<std::string, RawDataExportMap> export_onnx(
+std::tuple<std::shared_ptr<::ONNX_NAMESPACE::ModelProto>, RawDataExportMap>
+export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
@@ -888,9 +889,14 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       "Exporting model exceed maximum protobuf size of 2GB. "
       "Please call torch.onnx.export with use_external_data_format=True.");
   GRAPH_UPDATE("onnx proto:", prettyPrint(graph_encoder.get_model_proto()));
-  return std::make_tuple(
-      graph_encoder.get_model_proto().SerializeAsString(),
-      graph_encoder.get_raw_data_export_map());
+  std::shared_ptr<onnx::ModelProto> model_proto =
+      std::make_shared<onnx::ModelProto>(graph_encoder.get_model_proto());
+  return std::make_tuple(model_proto, graph_encoder.get_raw_data_export_map());
+}
+
+std::string serialize_model_proto_to_string(
+    const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto) {
+  return model_proto->SerializeAsString();
 }
 
 void check_onnx_proto(const std::string& proto_string) {

@@ -126,7 +126,7 @@ void Method::run(Stack& stack) {
   std::unordered_map<std::string, std::string> copied_metadata =
       owner_->metadata();
   if (owner_->metadata().find("model_name") == owner_->metadata().end()) {
-    copied_metadata["model_name"] = name();
+    copied_metadata["model_name"] = owner_->name();
   }
   if (observer) {
     observer->onEnterRunMethod(copied_metadata, function_->name());
