@@ -1,6 +1,0 @@
-torch.set\_deterministic
-========================
-
-.. currentmodule:: torch
-
-.. autofunction:: set_deterministic
