@@ -323,7 +323,12 @@ Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
 Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
 Tensor& sin_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sin_stub); }
-Tensor sin(const Tensor& self) { return unary_op_impl(self, at::sin_out); }
+Tensor sin(const Tensor& self) {
+  Tensor result;
+  auto iter = TensorIterator::unary_float_op(result, self);
+  sin_stub(iter.device_type(), iter);
+  return iter.output();
+}
 Tensor& sin_(Tensor& self) { return unary_op_impl_(self, at::sin_out); }
 
 Tensor& cos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, cos_stub); }
