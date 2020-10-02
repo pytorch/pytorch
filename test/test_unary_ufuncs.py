@@ -210,7 +210,7 @@ class TestUnaryUfuncs(TestCase):
                 with self.assertRaises(RuntimeError):
                     alt(t.clone())
 
-            if inplace and op.promotes_integers_to_float and dtype in integral_types():
+            if inplace and op.promotes_integers_to_float and dtype in integral_types() + (torch.bool,):
                 # Assert that RuntimeError is raised
                 # for inplace variant of Operators that
                 # promote integer input to floating dtype.
@@ -280,10 +280,10 @@ class TestUnaryUfuncs(TestCase):
                 msg = None
 
             exact_dtype = True
-            if op.promotes_integers_to_float and dtype in integral_types():
+            if op.promotes_integers_to_float and dtype in integral_types() + (torch.bool,):
                 exact_dtype = False
 
-                if dtype in [torch.uint8, torch.int8]:
+                if dtype in [torch.uint8, torch.int8, torch.bool]:
                     # Facing tolerance issue with above dtypes.
                     self.assertEqualHelper(actual, expected, msg, dtype=dtype,
                                            exact_dtype=exact_dtype, rtol=1e-4, atol=1e-3)
