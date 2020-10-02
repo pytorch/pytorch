@@ -162,7 +162,10 @@ Tensor& abs_out(Tensor& result, const Tensor& self) {
 Tensor abs(const Tensor& self) {
   return unary_op_impl_with_complex_to_float(self, at::abs_out);
 }
-Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
+Tensor& abs_(Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "In-place abs is not supported for complex tensors.");
+  return unary_op_impl_(self, at::abs_out);
+}
 
 // Absolute, alias for abs
 Tensor& absolute_out(Tensor& result, const Tensor& self) {
@@ -301,6 +304,17 @@ Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
 Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
 
+Tensor& sgn_out(Tensor& result, const Tensor& self) {
+  if (self.is_complex()) {
+    return unary_op_impl_out(result, self, sgn_stub);
+  } else {
+    return unary_op_impl_out(result, self, sign_stub);
+  }
+}
+
+Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
+Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
+
 Tensor& sin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sin_stub); }
 Tensor sin(const Tensor& self) { return unary_op_impl(self, at::sin_out); }
 Tensor& sin_(Tensor& self) { return unary_op_impl_(self, at::sin_out); }
@@ -405,9 +419,9 @@ Tensor& neg_out(Tensor& result, const Tensor& self) {
 Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
 Tensor& neg_(Tensor& self) { return unary_op_impl_(self, at::neg_out); }
 
-Tensor& negative_out(Tensor& result, const Tensor& self) { return at::native::neg_out(result, self); }
-Tensor negative(const Tensor& self) { return at::native::neg(self); }
-Tensor& negative_(Tensor& self) { return at::native::neg_(self); }
+Tensor& negative_out(Tensor& result, const Tensor& self) { return at::neg_out(result, self); }
+Tensor negative(const Tensor& self) { return self.neg(); }
+Tensor& negative_(Tensor& self) { return self.neg_(); }
 
 Tensor logical_not(const Tensor& self) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
@@ -639,6 +653,7 @@ DEFINE_DISPATCH(sigmoid_stub);
 DEFINE_DISPATCH(logit_stub);
 DEFINE_DISPATCH(sign_stub);
 DEFINE_DISPATCH(signbit_stub);
+DEFINE_DISPATCH(sgn_stub);
 DEFINE_DISPATCH(sin_stub);
 DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);

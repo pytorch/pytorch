@@ -436,6 +436,10 @@ def init_process_group(backend,
     _backend = _pg_map[_default_pg][0]
     _default_pg_init_method = init_method
 
+    # barrier at the end to ensure that once we return from this method, all
+    # process groups including global variables are updated correctly on all
+    # ranks.
+    barrier()
 
 def _new_process_group_helper(world_size,
                               rank,
@@ -1960,7 +1964,8 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     should be created in the same order in all processes.
 
     Arguments:
-        ranks (list[int]): List of ranks of group members.
+        ranks (list[int]): List of ranks of group members. If ``None``, will be
+            set to all ranks. Default is ``None``.
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value equals 30 minutes.
             This is only applicable for the ``gloo`` backend.
@@ -2023,5 +2028,10 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
         global_rank: group_rank
         for group_rank, global_rank in enumerate(ranks)
     }
+
+    # barrier at the end to ensure that once we return from this method, all
+    # process groups including global variables are updated correctly on all
+    # ranks.
+    barrier()
 
     return pg

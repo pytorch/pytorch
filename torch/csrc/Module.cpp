@@ -61,6 +61,12 @@
 #endif
 #endif
 
+#if (defined(_WIN32) || defined(_WIN64) || defined(FBCODE_CAFFE2) || defined(C10_MOBILE))
+#define NVALGRIND
+#else
+#include <callgrind.h>
+#endif
+
 #define WITH_NUMPY_IMPORT_ARRAY
 #include <torch/csrc/utils/numpy_stub.h>
 
@@ -688,9 +694,9 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
-#ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
+#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
+#ifndef _WIN32
   THPUtils_addPyMethodDefs(methods, torch::distributed::rpc::python_functions());
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::autograd::python_functions());
@@ -820,6 +826,26 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
+
+  py_module.def(
+    "valgrind_supported_platform", [](){
+      #if defined(NVALGRIND)
+      return false;
+      #else
+      return true;
+      #endif
+    }
+  );
+
+  py_module.def(
+    "valgrind_toggle", [](){
+      #if defined(NVALGRIND)
+      TORCH_CHECK(false, "Valgrind is not supported.");
+      #else
+      CALLGRIND_TOGGLE_COLLECT;
+      #endif
+    }
+  );
 
 #ifdef USE_CUDA
   PyObject *has_cuda = Py_True;

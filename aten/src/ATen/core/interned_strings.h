@@ -59,6 +59,8 @@ namespace c10 {
   _(prim, Store)                     \
   _(prim, AutogradZero)              \
   _(prim, AutogradAnyNonZero)        \
+  _(prim, AutogradAllNonZero)        \
+  _(prim, AutogradAllZero)           \
   _(prim, Starred)                   \
   _(prim, TupleConstruct)            \
   _(prim, TupleUnpack)               \
@@ -190,6 +192,8 @@ namespace c10 {
   _(aten, copy_)                     \
   _(aten, div)                       \
   _(aten, div_)                      \
+  _(aten, divide)                    \
+  _(aten, divide_)                   \
   _(aten, true_divide)               \
   _(aten, true_divide_)              \
   _(aten, t_)                        \
@@ -216,6 +220,10 @@ namespace c10 {
   _(aten, lt_)                       \
   _(aten, less)                      \
   _(aten, less_)                     \
+  _(aten, mul)                       \
+  _(aten, mul_)                      \
+  _(aten, multiply)                  \
+  _(aten, multiply_)                 \
   _(aten, ne)                        \
   _(aten, ne_)                       \
   _(aten, not_equal)                 \
@@ -264,6 +272,7 @@ namespace c10 {
   _(prim, grad)                      \
   _(aten, zero_)                     \
   _(aten, fill_)                     \
+  _(aten, masked_fill_)              \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \

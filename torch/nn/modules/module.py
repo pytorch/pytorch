@@ -1315,11 +1315,11 @@ class Module:
 
     def zero_grad(self, set_to_none: bool = False) -> None:
         r"""Sets gradients of all model parameters to zero. See similar function
-        under `torch.optimizer` for more contexts.
+        under :class:`torch.optim.Optimizer` for more context.
 
         Arguments:
-            set_to_none (bool): instead of setting to zero, set the grad to None.
-                See :meth:`torch.optim.optimizer.zero_grad` for details.
+            set_to_none (bool): instead of setting to zero, set the grads to None.
+                See :meth:`torch.optim.Optimizer.zero_grad` for details.
         """
         if getattr(self, '_is_replica', False):
             warnings.warn(
