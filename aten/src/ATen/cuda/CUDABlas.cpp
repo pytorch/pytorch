@@ -374,7 +374,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
     // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   } else {
-    AT_ERROR("BFloat16 gemm in CUDA requires Ampere or later GPU");
+    TORCH_CHECK(false, "BFloat16 gemm in CUDA requires Ampere or later GPU");
   }
 }
 #endif
@@ -497,46 +497,6 @@ void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16)) {
       'n', trans_flipped, 1, m, n, alpha, x, incx, a, lda, beta, y, incy);
 }
 #endif
-
-namespace {
-template<typename scalar_t>
-cublasStatus_t cublasGer(const cublasHandle_t &handle, int64_t m, int64_t n, scalar_t *alpha, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy, scalar_t *a, int64_t lda) {
-  TORCH_CHECK(false, "cublas ger is defined only for float and double");
-  return {};
-}
-template<>
-cublasStatus_t cublasGer<float>(const cublasHandle_t &handle, int64_t m, int64_t n, float *alpha, float *x, int64_t incx, float *y, int64_t incy, float *a, int64_t lda) {
-  return cublasSger(handle, m, n, alpha, x, incx, y, incy, a, lda);
-}
-template<>
-cublasStatus_t cublasGer<double>(const cublasHandle_t &handle, int64_t m, int64_t n, double *alpha, double *x, int64_t incx, double *y, int64_t incy, double *a, int64_t lda) {
-  return cublasDger(handle, m, n, alpha, x, incx, y, incy, a, lda);
-}
-} // anonymous namespace
-
-template<typename scalar_t>
-void ger(int64_t m, int64_t n, scalar_t alpha, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy, scalar_t *a, int64_t lda)
-{
-  _cublasAdjustLdLevel2(m, n, &lda);
-  TORCH_CHECK((m <= INT_MAX) &&
-              (n <= INT_MAX) &&
-              (lda <= INT_MAX) &&
-              (incx <= INT_MAX) &&
-              (incy <= INT_MAX),
-              "cublasSger/cublasDger only supports m, n, lda, incx, incy with "
-              "the bound [val] <= %d", INT_MAX);
-  int i_m = (int)m;
-  int i_n = (int)n;
-  int i_lda = (int)lda;
-  int i_incx = (int)incx;
-  int i_incy = (int)incy;
-
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasGer<scalar_t>(
-    handle, i_m, i_n, &alpha, x, i_incx, y, i_incy, a, i_lda));
-}
-template void ger<float>(int64_t m, int64_t n, float alpha, float *x, int64_t incx, float *y, int64_t incy, float *a, int64_t lda);
-template void ger<double>(int64_t m, int64_t n, double alpha, double *x, int64_t incx, double *y, int64_t incy, double *a, int64_t lda);
 
 /* LEVEL 1 BLAS FUNCTIONS */
 

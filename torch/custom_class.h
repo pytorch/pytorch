@@ -120,10 +120,7 @@ class class_ {
 
   template <typename Func>
   class_& def_static(std::string name, Func f) {
-    // auto wrapped_f = detail::wrap_func<CurClass, Func>(std::move(f));
-    std::string copy_name = name;
     defineMethod(std::move(name), std::move(f));
-    LOG(ERROR) << "ClassType: " << classTypePtr->repr_str() << " def_static, has method?" << classTypePtr->hasMethod(copy_name);
     return *this;
   }
   /// This is an unsafe method registration API added for adding custom JIT backend support via custom

@@ -22,6 +22,11 @@ if __name__ == "__main__":
         "instead."
     )
 
+def test_equality(f, cmp_key):
+    obj1 = f()
+    obj2 = torch.jit.script(f)()
+    return (cmp_key(obj1), cmp_key(obj2))
+
 class TestTorchbind(JitTestCase):
     def setUp(self):
         if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
@@ -31,11 +36,6 @@ class TestTorchbind(JitTestCase):
         torch.ops.load_library(str(p))
 
     def test_torchbind(self):
-        def test_equality(f, cmp_key):
-            obj1 = f()
-            obj2 = torch.jit.script(f)()
-            return (cmp_key(obj1), cmp_key(obj2))
-
         def f():
             val = torch.classes._TorchScriptTesting._Foo(5, 3)
             val.increment(1)
@@ -57,6 +57,16 @@ class TestTorchbind(JitTestCase):
             ss1.push(ss2.pop())
             return ss1.pop() + ss2.pop()
         test_equality(f, lambda x: x)
+
+    def test_torchbind_static(self):
+        def f():
+            val = torch.classes._TorchScriptTesting._Foo.func_mul(3, 5)
+            return val
+
+        # test_equality(f, lambda x: x)
+        # obj1 = torch.jit.script(f)()
+        # print(obj1)
+
 
     def test_torchbind_take_as_arg(self):
         global StackString  # see [local resolution in python]

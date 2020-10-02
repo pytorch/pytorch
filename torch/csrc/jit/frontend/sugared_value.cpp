@@ -611,7 +611,6 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
     Function& m,
     const std::string& field) {
 
-  LOG(ERROR) << "ClassValue::attr class type: " << type_->repr_str() << " field: " << field << " has it?: " << type_->hasMethod(field);
   if (field == "__new__") {
     return SpecialFormValue::create(prim::CreateObject);
   } else if(auto func = type_->findMethod(field)) {
