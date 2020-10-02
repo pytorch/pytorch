@@ -51,7 +51,7 @@ void Trace::logEvent(char ph, const char* name, char sep) {
   const unsigned int tid = GetCurrentThreadId();
 #else
   const unsigned int pid = getpid();
-  const unsigned int tid = pthread_self();
+  const unsigned int tid = std::hash<pthread_t>{}(pthread_self());
 #endif // _WIN32
 
   fprintf(
