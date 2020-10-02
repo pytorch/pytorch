@@ -286,8 +286,9 @@ They are used in specifying strategies for reduction collectives, e.g.,
       py::class_<::c10d::Store, std::shared_ptr<::c10d::Store>, PythonStore>(
           module, "Store",
           R"(
-Base class for the 3 store implementations: (:class:`~torch.distributed.TCPStore`,
-:class:`~torch.distributed.FileStore`, and :class:`~torch.distributed.HashStore`).
+Base class for all store implementations, such as the 3 provided by PyTorch
+distributed: (:class:`~torch.distributed.TCPStore`, :class:`~torch.distributed.FileStore`,
+and :class:`~torch.distributed.HashStore`).
 )")
           // Default constructor.
           .def(py::init<>())
