@@ -1053,9 +1053,15 @@ class JitRpcTest(
         )
 
         future.add_done_callback(callback)
+        future_then = future.then(lambda _: True)
+
 
         self.assertEqual(callback_called, None)
         self.assertEqual(future.wait(), torch.ones(2) * 2)
+
+        # We have no guarantee that the add_done_callback fn will execute before the test finishes.
+        # Adding a 'then' callback that runs afterwards to guarantee we wait for the first callback
+        future_then.wait()
         self.assertEqual(callback_called, torch.ones(2) * 4)
 
     @dist_init

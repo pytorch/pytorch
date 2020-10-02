@@ -3176,9 +3176,14 @@ class RpcTest(RpcAgentTestFixture):
         )
 
         fut.add_done_callback(callback)
+        fut_then = fut.then(lambda _: True)
 
         self.assertFalse(set_by_cb)
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+        # We have no guarantee that the add_done_callback fn will execute before the test finishes.
+        # Adding a 'then' callback that runs afterwards to guarantee we wait for the first callback
+        fut_then.wait()
         self.assertTrue(set_by_cb)
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
