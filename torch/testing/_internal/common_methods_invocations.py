@@ -175,7 +175,7 @@ class UnaryUfuncInfo(OpInfo):
                  handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
-                 unary_float_op=False,  # whether op promotes unary output to float or not
+                 promotes_integers_to_float=False,  # whether op promotes unary output to float or not
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
@@ -188,7 +188,7 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_large_floats = handles_large_floats
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
-        self.unary_float_op = unary_float_op
+        self.promotes_integers_to_float = promotes_integers_to_float
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
