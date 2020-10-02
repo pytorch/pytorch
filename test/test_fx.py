@@ -645,7 +645,7 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(st)
         traced.graph.lint(traced)
         stringed = str(traced.graph)
-        for s in ['args', 'kwargs', 'uses']:
+        for s in ['args', 'kwargs', '#users']:
             assert s in stringed
 
     def test_graph_fns(self):
@@ -877,7 +877,7 @@ class TestFX(JitTestCase):
         for node in traced.graph.nodes:
             # Test deleting with uses both in another Node and at the output
             if node.target in [operator.add, torch.relu]:
-                with self.assertRaisesRegex(RuntimeError, 'but it still had .* uses in the graph'):
+                with self.assertRaisesRegex(RuntimeError, 'but it still had .* users in the graph'):
                     traced.graph.erase_node(node)
 
     def test_find_uses(self):
@@ -890,10 +890,10 @@ class TestFX(JitTestCase):
         graph.output((y + z + u).node)
         graph.lint()
 
-        uses_of_x = x.node.uses
-        self.assertEqual(len(uses_of_x), 3)
+        users_of_x = x.node.users
+        self.assertEqual(len(users_of_x), 3)
         expected_ops = set(['relu', 'add', 'neg'])
-        for use in uses_of_x:
+        for use in users_of_x:
             assert any(use.name.startswith(prefix) for prefix in expected_ops)
 
 

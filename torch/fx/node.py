@@ -32,7 +32,10 @@ class Node:
         # being invoked, e.g add, layer1, or torch.add
         self.args = args
         self.kwargs = kwargs
-        self.uses : Set['Node'] = set()
+        # All of the nodes that use the value produced by this Node
+        # Note one user may correspond to several uses, e.g. the node fo `x + x`
+        # would appear once here, but represents two uses.
+        self.users : Set['Node'] = set()
 
     def __repr__(self) -> str:
         return self.name
@@ -42,16 +45,16 @@ class Node:
         Replace all uses of `self` in the Graph with the Node `replace_with`.
         Returns the list of nodes on which this change was made.
         """
-        to_process = list(self.uses)
+        to_process = list(self.users)
         for use_node in to_process:
             def maybe_replace_node(n : Node) -> Node:
                 if n == self:
-                    self.uses.remove(use_node)
                     return replace_with
                 else:
                     return n
             use_node.args = map_arg(use_node.args, maybe_replace_node)
             use_node.kwargs = map_arg(use_node.kwargs, maybe_replace_node)
+            self.users.remove(use_node)
 
         return to_process
 

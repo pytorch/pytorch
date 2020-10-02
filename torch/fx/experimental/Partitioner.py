@@ -100,9 +100,10 @@ class Partition:
     def get_output_nodes(self) -> List[Node]:
         """Output nodes are the nodes that without any user inside this partition."""
         output_nodes: List[Node] = []
+        nodes_set = set(self.nodes)
         for node in self.nodes:
             # check if user nodes has an intersection with self.nodes
-            if not set(self.nodes).intersection(node.uses):
+            if not nodes_set.intersection(node.users):
                 output_nodes.append(node)
         return output_nodes
 

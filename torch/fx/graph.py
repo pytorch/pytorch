@@ -89,7 +89,7 @@ class Graph:
 
     def _mark_uses(self, use_node : Node):
         def add_use(def_node: Node):
-            def_node.uses.add(use_node)
+            def_node.users.add(use_node)
             return def_node
         map_arg(use_node.args, add_use)
         map_arg(use_node.kwargs, add_use)
@@ -127,11 +127,11 @@ class Graph:
     def erase_node(self, to_erase : Node):
         """
         Erases the node `to_erase` from the `Graph`. Throws an exception if
-        there are still uses of that node in the `Graph`.
+        there are still users of that node in the `Graph`.
         """
-        if len(to_erase.uses) > 0:
-            raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.uses)} '
-                               f'uses in the graph: {to_erase.uses}!')
+        if len(to_erase.users) > 0:
+            raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.users)} '
+                               f'users in the graph: {to_erase.users}!')
 
         node_indices = [i for i, n in enumerate(self._nodes) if n == to_erase]
         for idx in reversed(node_indices):
@@ -309,11 +309,11 @@ def forward(self, {', '.join(free_vars)}):
                 placeholder_names.append(n.target)
                 return None
             elif n.op == 'get_attr':
-                return f'%{n.name} : [uses={n.uses}] = self.{n.target}'
+                return f'%{n.name} : [#users={len(n.users)}] = self.{n.target}'
             elif n.op == 'output':
                 return f'return {n.args[0]}'
             else:
-                return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}](' \
+                return f'%{n.name} : [#users={len(n.users)}] = {n.op}[target={n.target}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
 
 
