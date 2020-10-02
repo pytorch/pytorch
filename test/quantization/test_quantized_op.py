@@ -3529,7 +3529,6 @@ class TestQuantizedConv(TestCase):
             qconv_prepack, qconv_unpack, inputs, [stride],
             [pad], [o_pad], channelwise)
 
-    @override_qengines
     @given(
         inputs=hu.tensor_conv(
             spatial_dim=2, batch_size_range=(1, 3),
@@ -3550,6 +3549,7 @@ class TestQuantizedConv(TestCase):
         pad=st.integers(0, 2),
         o_pad=st.integers(0, 2),
         channelwise=st.booleans())
+    @override_qengines
     def test_qconv2d_unpack(self, inputs, stride, pad, o_pad, channelwise):
         transposed = inputs[-1]
         qengine = torch.backends.quantized.engine
