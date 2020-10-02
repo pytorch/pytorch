@@ -112,16 +112,15 @@ tf32_notes = {
 
 
 reproducibility_notes = {
-    "forward_reproducibility_note": """When using the CUDA backend, this operation may induce nondeterministic \
-behavior that cannot be switched off. Please see the notes on :doc:`/notes/randomness` for background.""",
-    "backward_reproducibility_note": """When using the CUDA backend, this operation may induce nondeterministic \
-behavior in its backward pass that is not easily switched off. \
-Please see the notes on :doc:`/notes/randomness` for background. """,
-    "cudnn_reproducibility_note": """In some circumstances when using the CUDA backend with CuDNN, this operator \
-may select a nondeterministic algorithm to increase performance. If this is \
+    "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
+a CUDA device. See :doc:`/notes/randomness` for more information.""",
+    "backward_reproducibility_note": """Backward of operation may behave nondeterministically when given tensors on \
+a CUDA device. See :doc:`/notes/randomness` for more information.""",
+    "cudnn_reproducibility_note": """In some circumstances when given tensors on a CUDA device \
+and using CuDNN, this operator may select a nondeterministic algorithm to increase performance. If this is \
 undesirable, you can try to make the operation deterministic (potentially at \
 a performance cost) by setting ``torch.backends.cudnn.deterministic = True``. \
-Please see the notes on :doc:`/notes/randomness` for background."""
+See :doc:`/notes/randomness` for more information."""
 }
 
 add_docstr(torch.abs, r"""
