@@ -14,7 +14,6 @@ from torch.fx.symbolic_trace import Tracer
 # graph mode quantization based on fx
 from torch.quantization import (
     QuantType,
-    fuse_fx,
     prepare_fx,
     convert_fx,
     prepare_qat_fx,
@@ -264,8 +263,7 @@ class TestQuantizeFx(QuantizationTestCase):
         model = symbolic_trace(model)
 
         # QAT prepare
-        model = fuse_fx(model)
-        model = prepare_fx(model, qconfig_dict)
+        model = prepare_qat_fx(model, qconfig_dict)
 
         # ensure that running an input on CUDA works without any needed changes
         input = torch.randn(4, 1, 4, 4, device=device)
@@ -1513,7 +1511,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
         if mode != 'static':
             model.train()
 
-        graph_module = fuse_fx(graph_module)
         prepared = prepare_fx(graph_module, qconfig_dict)
 
         if mode == 'ddp':
