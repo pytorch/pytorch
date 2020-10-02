@@ -342,6 +342,7 @@ op_db = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16)),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
+                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                    handles_large_floats=False,
                    handles_complex_extremals=False,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
