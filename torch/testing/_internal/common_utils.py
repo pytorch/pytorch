@@ -161,7 +161,7 @@ if args.jit_executor == 'legacy':
     GRAPH_EXECUTOR = ProfilingMode.LEGACY
 elif args.jit_executor == 'profiling':
     GRAPH_EXECUTOR = ProfilingMode.PROFILING
-elif args.ge_config == 'simple':
+elif args.jit_executor == 'simple':
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
 else:
     # infer flags based on the default settings
