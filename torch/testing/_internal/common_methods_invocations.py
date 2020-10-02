@@ -12,7 +12,8 @@ from typing import List, Tuple, Dict, Any
 from torch.testing import \
     (make_non_contiguous, _dispatch_dtypes,
      floating_types, floating_types_and, floating_and_complex_types,
-     floating_and_complex_types_and, all_types_and_complex_and)
+     floating_and_complex_types_and, all_types_and_complex_and,
+     all_types_and_complex)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
      expectedAlertNondeterministic, precisionOverride)
@@ -174,6 +175,7 @@ class UnaryUfuncInfo(OpInfo):
                  handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
+                 unary_float_op=False,  # whether op promotes unary output to float or not
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
@@ -186,6 +188,7 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_large_floats = handles_large_floats
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
+        self.unary_float_op = unary_float_op
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
@@ -342,9 +345,12 @@ op_db = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16)),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
-                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex(),
                    handles_large_floats=False,
                    handles_complex_extremals=False,
+                   unary_float_op=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',

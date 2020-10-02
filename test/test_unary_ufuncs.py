@@ -14,7 +14,7 @@ from torch.testing._internal.common_methods_invocations import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes)
 from torch.testing import \
-    (floating_types_and)
+    (floating_types_and, integral_types)
 
 if TEST_NUMPY:
     import numpy as np
@@ -204,10 +204,19 @@ class TestUnaryUfuncs(TestCase):
         t = make_tensor((5, 5), device, dtype, low=op.domain[0], high=op.domain[1])
         expected = op(t)
 
-        for alt in (op.get_method(), op.get_inplace(), torch.jit.script(_fn)):
+        for inplace, alt in ((False, op.get_method()), (True, op.get_inplace()),
+                             (False, torch.jit.script(_fn))):
             if alt is None:
                 with self.assertRaises(RuntimeError):
                     alt(t.clone())
+
+            if inplace and op.unary_float_op and dtype in integral_types():
+                # Assert that RuntimeError is raised
+                # for inplace variant of Operators that
+                # promote integer input to floating dtype.
+                with self.assertRaises(RuntimeError):
+                    alt(t.clone())
+                continue
 
             actual = alt(t.clone())
             self.assertEqual(actual, expected, rtol=0, atol=0)
@@ -219,7 +228,7 @@ class TestUnaryUfuncs(TestCase):
 
         # Some NumPy functions return scalars, not arrays
         if isinstance(expected, Number):
-            self.assertEqual(actual.item(), expected)
+            self.assertEqual(actual.item(), expected, **kwargs)
         elif isinstance(expected, np.ndarray):
             # Handles exact dtype comparisons between arrays and tensors
             if exact_dtype:
@@ -270,7 +279,18 @@ class TestUnaryUfuncs(TestCase):
             else:
                 msg = None
 
-            self.assertEqualHelper(actual, expected, msg, dtype=dtype)
+            exact_dtype = True
+            if op.unary_float_op and dtype in integral_types():
+                exact_dtype = False
+
+                if dtype in [torch.uint8, torch.int8]:
+                    # Since torch.uint8 and torch.int8 are promoted to
+                    # half types which have lower precision, relax tolerance.
+                    self.assertEqualHelper(actual, expected, msg, dtype=dtype,
+                                           exact_dtype=exact_dtype, rtol=1e-4, atol=1e-3)
+                    continue
+
+            self.assertEqualHelper(actual, expected, msg, dtype=dtype, exact_dtype=exact_dtype)
 
     # Tests for testing (dis)contiguity consistency
 
