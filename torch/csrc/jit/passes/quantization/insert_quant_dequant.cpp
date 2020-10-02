@@ -991,7 +991,8 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   if (isPlaceholderObserver(n->input(0))) {
     // get compute_dtype for dynamic quantization
     if (observer_module.hasattr("compute_dtype")) {
-      qparams.push_back(std::make_pair("_scalar_type", observer_module.attr("compute_dtype")));
+      qparams.push_back(std::make_pair(
+          "_scalar_type", observer_module.attr("compute_dtype")));
     }
     return std::make_tuple(qscheme, qparams);
   } else if (scalar_type == at::ScalarType::Half) {

@@ -87,7 +87,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   } else if (qtype == c10::kPerChannelAffine) {
     int64_t axis = weight.q_per_channel_axis();
     TORCH_CHECK(
-        axis == 0,
+        axis == int(transpose),  // 0 for non-transposed, 1 for transposed
         "Only per output channel quantization is supported for the weights");
     zero_points.resize(output_channels);
     for (int i = 0; i < output_channels; ++i) {

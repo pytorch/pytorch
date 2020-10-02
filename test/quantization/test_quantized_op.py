@@ -1726,12 +1726,14 @@ class TestQuantizedOps(TestCase):
         torch.testing.assert_allclose(out.dequantize(), ref.dequantize())
         self.assertNotEqual(out.stride(), sorted(out.stride()))
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=3,
-                                              min_side=1, max_side=2),
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=1, max_dims=5,
+                                              min_side=1, max_side=4),
                        qparams=hu.qparams()),
-           dim=st.integers(1, 2))
+           dim=st.integers(-1, 5))
+    @override_qengines
     def test_mean(self, X, dim):
         X, (scale, zero_point, torch_type) = X
+        assume(dim < X.ndim)
         qX = torch.quantize_per_tensor(torch.tensor(X).float(), scale, zero_point, torch_type)
 
         Y = torch.mean(qX.dequantize(), dim)
@@ -3527,6 +3529,8 @@ class TestQuantizedConv(TestCase):
             qconv_prepack, qconv_unpack, inputs, [stride],
             [pad], [o_pad], channelwise)
 
+    from hypothesis import example
+    @override_qengines
     @given(
         inputs=hu.tensor_conv(
             spatial_dim=2, batch_size_range=(1, 3),
@@ -3547,7 +3551,19 @@ class TestQuantizedConv(TestCase):
         pad=st.integers(0, 2),
         o_pad=st.integers(0, 2),
         channelwise=st.booleans())
-    @override_qengines
+    @example(
+        inputs=(
+            (np.zeros((1, 1, 4, 4)), (1.0, 0, torch.quint8)),
+            (np.zeros((1, 1, 1, 1)), (1.0, 0, torch.qint8)),
+            (np.zeros(1), (1.0, 0, torch.qint8)),
+            1,  # groups
+            True  # transposed
+        ),
+        o_pad=0,
+        pad=0,
+        stride=1,
+        channelwise=True
+    )
     def test_qconv2d_unpack(self, inputs, stride, pad, o_pad, channelwise):
         transposed = inputs[-1]
         qengine = torch.backends.quantized.engine
