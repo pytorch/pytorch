@@ -48,6 +48,7 @@ template <typename Stub>
 static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self, Stub& stub) {
   auto iter = TensorIterator::unary_float_op(result, self);
   stub(iter.device_type(), iter);
+  iter.cast_outputs();
   return result;
 }
 
