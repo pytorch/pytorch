@@ -63,7 +63,6 @@ class TestSparse(TestCase):
             kwargs['dtype'] = kwargs.get('dtype', self.value_dtype)
             kwargs['device'] = kwargs.get('device', self.device)
             return torch.sparse_coo_tensor(*args, **kwargs)
-
         self.sparse_tensor = sparse_tensor_factory
         self.legacy_sparse_tensor = torch.sparse.DoubleTensor
         super(TestSparse, self).setUp()
@@ -338,7 +337,7 @@ class TestSparse(TestCase):
         self.assertTrue(a_coalesced.is_coalesced())
         self.assertEqual(self.value_tensor(0), a.to_dense())
         self.assertEqual(a, a.to_dense().to_sparse())
-        
+
     def test_shared(self):
         i = self.index_tensor([[2]])
         v = self.value_tensor([5])
@@ -1912,26 +1911,25 @@ class TestSparse(TestCase):
             x, _, _ = self._gen_sparse(2, nnz, [di, dj])
             t = torch.randn(dk, device=self.device)
 
-            print("pre res")
             res = x.matmul(t)
-            # expected = self.safeToDense(x).matmul(t)
-            # self.assertEqual(res, expected)
+            expected = self.safeToDense(x).matmul(t)
+            self.assertEqual(res, expected)
 
         test_shape(10, 100, 100, 20)
-        # test_shape(100, 1000, 1000, 20)
-        # test_shape(64, 10000, 10000, 20)
-        # test_shape(0, 100, 100, 0)
-        # test_shape(10, 0, 0, 0)
-        # test_shape(10, 100, 100, 0)
-        # test_shape(10, 100, 100, 20)
+        test_shape(100, 1000, 1000, 20)
+        test_shape(64, 10000, 10000, 20)
+        test_shape(0, 100, 100, 0)
+        test_shape(10, 0, 0, 0)
+        test_shape(10, 100, 100, 0)
+        test_shape(10, 100, 100, 20)
 
-        # with self.assertRaisesRegex(RuntimeError, r"mv: expected self\.size\(-1\) == vec\.size\(-1\)"):
-        #     test_shape(10, 100, 10, 20)
+        with self.assertRaisesRegex(RuntimeError, r"mv: expected self\.size\(-1\) == vec\.size\(-1\)"):
+            test_shape(10, 100, 10, 20)
 
-        # with self.assertRaisesRegex(RuntimeError, "mv: two tensor dim should be 2 and 1"):
-        #     x, _, _ = self._gen_sparse(2, 20, [10, 100])
-        #     y, _, _ = self._gen_sparse(2, 20, [10, 100])
-        #     res = x.mv(y)
+        with self.assertRaisesRegex(RuntimeError, "mv: two tensor dim should be 2 and 1"):
+            x, _, _ = self._gen_sparse(2, 20, [10, 100])
+            y, _, _ = self._gen_sparse(2, 20, [10, 100])
+            res = x.mv(y)
 
     def test_sparse_add_coalesce(self):
         i = self.index_tensor([[1, 2, 1]])

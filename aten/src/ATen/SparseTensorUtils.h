@@ -19,15 +19,9 @@ using SparseType = Type;
 // the low level setters/getters that were implemented using this.
 //
 // This may be called repeatedly, so make sure it's pretty cheap.
-// inline SparseTensorImpl* get_sparse_impl(const SparseTensor& self) {
-//   TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
-//   AT_ASSERTM(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
-//   return static_cast<SparseTensorImpl*>(self.unsafeGetTensorImpl());
-// }
-
 template <typename SparseType=SparseTensorImpl>
 inline SparseType* get_sparse_impl(const SparseTensor& self) {
-  // TODO: uncoment when GCS gets support for autograd.
+  // TODO: uncomment when GCS gets support for autograd.
   // TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   AT_ASSERTM(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
   return static_cast<SparseType*>(self.unsafeGetTensorImpl());

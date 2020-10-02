@@ -18,7 +18,8 @@ namespace {
 }
 
 
-SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type)
+SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set,
+                                         const caffe2::TypeMeta& data_type)
   :   SparseGCSTensorImpl(key_set, data_type
       , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Long))
       // indices in case of GCS tensor is always a 1D array so need to init size as {1,0}.
@@ -27,7 +28,8 @@ SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set, const caffe
       , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Long))
       , Scalar()  ) {}
 
-SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
+SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set,
+                                         const caffe2::TypeMeta& data_type,
                                          at::Tensor pointers, at::Tensor indices, at::Tensor values,
                                          at::Tensor reduction, Scalar fill_value)
   : TensorImpl(key_set, data_type, values.device()),
