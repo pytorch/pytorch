@@ -164,8 +164,8 @@ struct FunctionSchema {
   //   and kwargs in a function, all the arguments in the old function schema
   //   must have a matching backward compatible argument in the same position
   //   in this schema.
-  // * All remaining (i.e. new) arguments in this schema must appear be
-  //   appended to the list of arguments, and have a default value.
+  // * All remaining (i.e. new) arguments in this schema must appear last in
+  //   the list of arguments, and have a default value.
   // E.g.
   //   OK    f_new(a, b, c=1) => f_old(a, b)
   //   NOK   f_new(a, c=1, *, b) => f_old(a, *, b)
