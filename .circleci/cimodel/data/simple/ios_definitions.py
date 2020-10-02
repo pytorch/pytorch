@@ -1,7 +1,7 @@
 from cimodel.data.simple.util.versions import MultiPartVersion
 
 
-IOS_VERSION = MultiPartVersion([11, 2, 1])
+IOS_VERSION = MultiPartVersion([12, 0, 0])
 
 
 class ArchVariant:
@@ -62,8 +62,8 @@ class IOSJob:
 
 WORKFLOW_DATA = [
     IOSJob(IOS_VERSION, ArchVariant("x86_64"), is_org_member_context=False),
-    # IOSJob(IOS_VERSION, ArchVariant("arm64")),
-    # IOSJob(IOS_VERSION, ArchVariant("arm64", True), extra_props={"op_list": "mobilenetv2.yaml"}),
+    IOSJob(IOS_VERSION, ArchVariant("arm64")),
+    IOSJob(IOS_VERSION, ArchVariant("arm64", True), extra_props={"op_list": "mobilenetv2.yaml"}),
 ]
 
 
