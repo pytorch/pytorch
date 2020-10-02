@@ -92,7 +92,7 @@ def gen_build_workflows_tree():
         # cimodel.data.simple.ge_config_tests.get_workflow_jobs,
         # cimodel.data.simple.bazel_definitions.get_workflow_jobs,
         # cimodel.data.simple.binary_smoketest.get_workflow_jobs,
-        # cimodel.data.simple.nightly_ios.get_workflow_jobs,
+        cimodel.data.simple.nightly_ios.get_workflow_jobs,
         # cimodel.data.simple.nightly_android.get_workflow_jobs,
         # cimodel.data.simple.anaconda_prune_defintions.get_workflow_jobs,
         # windows_build_definitions.get_windows_workflows,
