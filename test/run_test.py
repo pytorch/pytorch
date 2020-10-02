@@ -527,10 +527,12 @@ def get_selected_tests(options):
         selected_tests = selected_tests[:last_index + 1]
 
     if options.shard:
-        num_shards = min(max(options.shard), len(selected_tests))
-        which_shard = max(min(options.shard + [num_shards]), 1)
-        num_tests = len(selected_tests) * 1.0 / num_shards
-        selected_tests = selected_tests[math.floor((which_shard - 1) * num_tests) : math.floor(which_shard * num_tests)]
+        assert len(options.shard) == 2, "Unexpected shard format"
+        assert min(options.shard) > 0, "Shards must be positive numbers"
+        which_shard, num_shards = options.shard
+        assert which_shard <= num_shards, "Selected shard must be less or equal that total number of shards"
+        assert num_shards <= len(selected_tests), f"Number of shards must be less than {len(selected_tests)}"
+        selected_tests = selected_tests[which_shard - 1 :: num_shards]
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
