@@ -430,6 +430,15 @@ class TestONNXRuntime(unittest.TestCase):
         m1 = torch.randn(3, 4, 5, 6, 7)
         self.run_test(MyModel(), m1)
 
+    def test_data(self):
+        class Data(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x.new_zeros(x.data.size())
+        
+        x = torch.randn(3, 4)
+        self.run_test(Data(), x)
+
     @disableScriptTest()
     def test_dict(self):
         class MyModel(torch.nn.Module):
