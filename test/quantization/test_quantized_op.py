@@ -3529,7 +3529,6 @@ class TestQuantizedConv(TestCase):
             qconv_prepack, qconv_unpack, inputs, [stride],
             [pad], [o_pad], channelwise)
 
-    from hypothesis import example
     @override_qengines
     @given(
         inputs=hu.tensor_conv(
@@ -3551,19 +3550,6 @@ class TestQuantizedConv(TestCase):
         pad=st.integers(0, 2),
         o_pad=st.integers(0, 2),
         channelwise=st.booleans())
-    @example(
-        inputs=(
-            (np.zeros((1, 1, 4, 4)), (1.0, 0, torch.quint8)),
-            (np.zeros((1, 1, 1, 1)), (1.0, 0, torch.qint8)),
-            (np.zeros(1), (1.0, 0, torch.qint8)),
-            1,  # groups
-            True  # transposed
-        ),
-        o_pad=0,
-        pad=0,
-        stride=1,
-        channelwise=True
-    )
     def test_qconv2d_unpack(self, inputs, stride, pad, o_pad, channelwise):
         transposed = inputs[-1]
         qengine = torch.backends.quantized.engine
