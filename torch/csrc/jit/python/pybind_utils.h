@@ -153,7 +153,8 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
             pf->func_(pyFut);
           } catch (std::exception& e) {
             // Log and ignore exceptions raised through the callback
-            std::cout << "Got the following error when running the callback: " << e.what() << std::endl;
+            std::cout << "Got the following error when running the callback: "
+                      << e.what() << std::endl;
           }
         },
         std::move(pf)));
