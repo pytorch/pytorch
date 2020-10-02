@@ -676,7 +676,6 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
         "Future marked complete from outside the thread pool");
   });
 
-  increaseCallCount(clientActiveCalls_);
   // Use the default RPC timeout if no timeout is specified for this send call
   auto timeout = rpcTimeoutSeconds == kUnsetRpcTimeout
       ? getRpcTimeout()
@@ -797,6 +796,8 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
               }
             });
       });
+
+  increaseCallCount(clientActiveCalls_);
 
   return std::shared_ptr<FutureMessage>(
       futureResponseMessage, &futureResponseMessage->futMsg);
