@@ -119,7 +119,7 @@ class Tracer(TracerBase):
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
-    def trace(self, root: torch.nn.Module) -> GraphModule:
+    def trace(self, root: torch.nn.Module) -> Graph:
         self.root = root
         self.graph = Graph()
 
