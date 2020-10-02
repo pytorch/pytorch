@@ -812,7 +812,7 @@ class TestFX(JitTestCase):
                 kwargs = node.kwargs
                 # Neg doesn't have in-place
                 kwargs.pop('inplace')
-                with rn18_traced.graph.insert_before(node):
+                with rn18_traced.graph.inserting_before(node):
                     new_node = rn18_traced.graph.call_function(
                         the_function=torch.neg, args=node.args, kwargs=node.kwargs)
                 node.replace_all_uses_with(replace_with=new_node)
@@ -827,7 +827,7 @@ class TestFX(JitTestCase):
         b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
         output : torch.fx.Node = graph.output(b)
 
-        with graph.insert_before(b):
+        with graph.inserting_before(b):
             neg : torch.fx.Node = graph.call_function(the_function=torch.neg, args=(x,))
             _, *relu_args = b.args
             b.args = (neg, *relu_args)
@@ -885,7 +885,7 @@ class TestFX(JitTestCase):
         x = torch.fx.Proxy(graph.placeholder('x'))
         relu = torch.relu(x)
 
-        with graph.insert_before(relu.node):
+        with graph.inserting_before(relu.node):
             y = torch.neg(x)
             z = torch.tanh(y)
 

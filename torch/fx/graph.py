@@ -63,8 +63,9 @@ class _InsertPoint:
     def __exit__(self, type, value, tb):
         self.graph._insert = self.orig_insert
 
-class node_list:
+class _node_list:
     def __init__(self, graph: 'Graph', direction: str = '_next'):
+        assert direction in ['_next', '_prev']
         self.graph = graph
         self.direction = direction
 
@@ -80,7 +81,7 @@ class node_list:
             cur = getattr(cur, direction)
 
     def __reversed__(self):
-        return node_list(self.graph, '_next' if self.direction == '_prev' else '_prev')
+        return _node_list(self.graph, '_next' if self.direction == '_prev' else '_prev')
 
 class Graph:
     def __init__(self):
@@ -91,7 +92,7 @@ class Graph:
 
     @property
     def nodes(self):
-        return node_list(self)
+        return _node_list(self)
 
     def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node]) -> Optional[Argument]:
         """
@@ -144,11 +145,47 @@ class Graph:
     # or when used in a with statement, to temporarily change the insert point:
     # with g.insert_before(n):
     #     <do some insertions>
-    def insert_before(self, n: Node):
+    def inserting_before(self, n: Optional[Node] = None):
+        """Set the point at which create_node and companion methods will insert into the graph.
+        When used within a 'with' statement, this will temporary set the insert point and
+        then restore it when the with statement exits:
+
+            with g.inserting_before(n):
+                ... # inserting before node n
+            ... # insert point restored to what it was previously
+            g.inserting_before(n) #  set the insert point permanently
+
+        Args:
+            n (Optional[Node]): The node before which to insert. If None this will insert before
+              the beginning of the entire graph.
+
+        Returns:
+            A resource manager that will restore the insert point on `__exit__`.
+        """
+        if n is None:
+            return self.insert_after(self._root)
         assert n.graph == self, "Node to insert before is not in graph."
         return _InsertPoint(self, n.prepend)
 
-    def insert_after(self, n: Node):
+    def inserting_after(self, n: Optional[Node] = None):
+        """Set the point at which create_node and companion methods will insert into the graph.
+        When used within a 'with' statement, this will temporary set the insert point and
+        then restore it when the with statement exits:
+
+            with g.inserting_after(n):
+                ... # inserting after node n
+            ... # insert point restored to what it was previously
+            g.inserting_after(n) #  set the insert point permanently
+
+        Args:
+            n (Optional[Node]): The node before which to insert. If None this will insert after
+              the beginning of the entire graph.
+
+        Returns:
+            A resource manager that will restore the insert point on `__exit__`.
+        """
+        if n is None:
+            return self.insert_before(self._root)
         assert n.graph == self, "Node to insert after is not in graph."
         return _InsertPoint(self, n.append)
 

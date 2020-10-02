@@ -46,14 +46,28 @@ class Node:
         return self._prev
 
     def prepend(self, x: 'Node'):
+        """Insert x before this node in the list of nodes in the graph.
+           Before: p -> self
+                   bx -> x -> ax
+           After:  p -> x -> self
+                   bx -> ax
+
+        Args:
+            x (Node): The node to put before this node. Must be a member of the same graph.
+        """
         assert self.graph == x.graph, "Attempting to move a Node into a different Graph"
         x._remove_from_list()
-        # current: p -> self
-        # after p -> x -> self
         p = self._prev
-        p._next, x._prev, x._next, self._prev = x, p, self, x
+        p._next, x._prev = x, p
+        x._next, self._prev = self, x
 
     def append(self, x: 'Node'):
+        """Insert x after this node in the list of nodes in the graph.
+        Equvalent to `self.next.prepend(x)`
+
+        Args:
+            x (Node): The node to put before this node. Must be a member of the same graph.
+        """
         self._next.prepend(x)
 
     def _remove_from_list(self):
