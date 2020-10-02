@@ -390,6 +390,7 @@ ARGS_TO_SKIP = {
     ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
 }
 @register_quant_pattern(torch.nn.ELU)
+@register_quant_pattern(torch.nn.LeakyReLU)
 @register_quant_pattern(torch.nn.Hardswish)
 @register_quant_pattern(torch.nn.InstanceNorm1d)
 @register_quant_pattern(torch.nn.InstanceNorm2d)
@@ -398,6 +399,9 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.functional.hardswish)
 @register_quant_pattern(torch.nn.functional.instance_norm)
 @register_quant_pattern(torch.nn.functional.layer_norm)
+@register_quant_pattern(torch.nn.functional.leaky_relu)
+@register_quant_pattern('leaky_relu')
+@register_quant_pattern('leaky_relu_')
 class DefaultNode(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
@@ -463,7 +467,6 @@ class ELU(QuantizeHandler):
 @register_quant_pattern(torch.nn.Dropout)
 @register_quant_pattern(torch.nn.Hardsigmoid)
 @register_quant_pattern(torch.nn.Hardtanh)
-@register_quant_pattern(torch.nn.LeakyReLU)
 @register_quant_pattern(torch.nn.MaxPool1d)
 @register_quant_pattern(torch.nn.MaxPool2d)
 @register_quant_pattern(torch.nn.MaxPool3d)
@@ -479,7 +482,6 @@ class ELU(QuantizeHandler):
 @register_quant_pattern(torch.nn.functional.hardtanh)
 @register_quant_pattern(torch.nn.functional.hardtanh_)
 @register_quant_pattern(torch.nn.functional.interpolate)
-@register_quant_pattern(torch.nn.functional.leaky_relu)
 @register_quant_pattern(torch.nn.functional.max_pool1d)
 @register_quant_pattern(torch.nn.functional.max_pool2d)
 @register_quant_pattern(torch.nn.functional.max_pool3d)
@@ -511,8 +513,6 @@ class ELU(QuantizeHandler):
 @register_quant_pattern('detach_')
 @register_quant_pattern('hardsigmoid')
 @register_quant_pattern('hardsigmoid_')
-@register_quant_pattern('leaky_relu')
-@register_quant_pattern('leaky_relu_')
 @register_quant_pattern('mean')
 @register_quant_pattern('numel')
 @register_quant_pattern('permute')
