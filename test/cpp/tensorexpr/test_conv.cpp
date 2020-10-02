@@ -39,8 +39,8 @@ void testConv2D() {
   ASSERT_EQ(ref.size(2), OH);
   ASSERT_EQ(ref.size(3), OW);
 
-  te::Buffer inputB(te::BufHandle("input", {N, C, H, W}, te::kFloat));
-  te::Buffer filterB(te::BufHandle("filter", {K, C, R, S}, te::kFloat));
+  te::Placeholder inputB(te::BufHandle("input", {N, C, H, W}, te::kFloat));
+  te::Placeholder filterB(te::BufHandle("filter", {K, C, R, S}, te::kFloat));
 
   te::Tensor* conv = te::Reduce(
       "conv",
