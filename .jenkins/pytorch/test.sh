@@ -126,18 +126,18 @@ if ([ -n "$CIRCLE_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]); 
   file_diff_from_base "$DETERMINE_FROM"
 fi
 
-test_python_nn() {
-  time python test/run_test.py --include test_nn --verbose --determine-from="$DETERMINE_FROM"
-  assert_git_not_dirty
-}
-
 test_python_legacy_jit() {
   time python test/run_test.py --include test_jit_cuda_fuser_legacy test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
-test_python_all_except_nn_and_cpp_extensions() {
-  time python test/run_test.py --exclude test_jit_cuda_fuser_profiling test_jit_cuda_fuser_legacy test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
+test_python_shard1() {
+  time python test/run_test.py --shard 1 2 --verbose --determine-from="$DETERMINE_FROM"
+  assert_git_not_dirty
+}
+
+test_python_shard2() {
+  time python test/run_test.py --shard 2 2 --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -299,7 +299,7 @@ test_xla() {
   assert_git_not_dirty
 }
 
-# Do NOT run this test before any other tests, like test_python_nn, etc.
+# Do NOT run this test before any other tests, like test_python_shard1, etc.
 # Because this function uninstalls the torch built from branch, and install
 # nightly version.
 test_backward_compatibility() {
@@ -382,11 +382,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
-  test_python_nn
-  test_cpp_extensions
+  install_torchvision
+  test_python_shard1
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   install_torchvision
-  test_python_all_except_nn_and_cpp_extensions
+  test_python_shard2
   test_aten
   test_libtorch
   test_custom_script_ops
@@ -402,9 +402,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4
   test_cpp_extensions
 else
   install_torchvision
-  test_python_nn
-  test_python_all_except_nn_and_cpp_extensions
-  test_cpp_extensions
+  test_python_shard1
+  test_python_shard2
   test_aten
   test_vec256
   test_libtorch
