@@ -1,0 +1,1369 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>torch.autograd.functional &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/_modules/torch/autograd/functional.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../../_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../../_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+
+  
+  <script src="../../../_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="../../../_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/_modules/torch/autograd/functional.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="../../../index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+          <li><a href="../../index.html">Module code</a> &gt;</li>
+        
+          <li><a href="../../torch.html">torch</a> &gt;</li>
+        
+          <li><a href="../autograd.html">torch.autograd</a> &gt;</li>
+        
+      <li>torch.autograd.functional</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <h1>Source code for torch.autograd.functional</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">torch</span>
+
+<span class="c1"># Utility functions</span>
+
+<span class="k">def</span> <span class="nf">_as_tuple</span><span class="p">(</span><span class="n">inp</span><span class="p">,</span> <span class="n">arg_name</span><span class="p">,</span> <span class="n">fn_name</span><span class="p">):</span>
+    <span class="c1"># Ensures that inp is a tuple of Tensors</span>
+    <span class="c1"># Returns whether or not the original inp was a tuple and the tupled version of the input</span>
+    <span class="n">is_inp_tuple</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">inp</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
+        <span class="n">inp</span> <span class="o">=</span> <span class="p">(</span><span class="n">inp</span><span class="p">,)</span>
+        <span class="n">is_inp_tuple</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">el</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">inp</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">el</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">is_inp_tuple</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s2">&quot;The </span><span class="si">{}</span><span class="s2"> given to </span><span class="si">{}</span><span class="s2"> must be either a Tensor or a tuple of Tensors but the&quot;</span>
+                                <span class="s2">&quot; value at index </span><span class="si">{}</span><span class="s2"> has type </span><span class="si">{}</span><span class="s2">.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">arg_name</span><span class="p">,</span> <span class="n">fn_name</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="n">el</span><span class="p">)))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s2">&quot;The </span><span class="si">{}</span><span class="s2"> given to </span><span class="si">{}</span><span class="s2"> must be either a Tensor or a tuple of Tensors but the&quot;</span>
+                                <span class="s2">&quot; given </span><span class="si">{}</span><span class="s2"> has type </span><span class="si">{}</span><span class="s2">.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">arg_name</span><span class="p">,</span> <span class="n">fn_name</span><span class="p">,</span> <span class="n">arg_name</span><span class="p">,</span> <span class="nb">type</span><span class="p">(</span><span class="n">el</span><span class="p">)))</span>
+
+    <span class="k">return</span> <span class="n">is_inp_tuple</span><span class="p">,</span> <span class="n">inp</span>
+
+<span class="k">def</span> <span class="nf">_tuple_postprocess</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="n">to_unpack</span><span class="p">):</span>
+    <span class="c1"># Unpacks a potentially nested tuple of Tensors</span>
+    <span class="c1"># to_unpack should be a single boolean or a tuple of two booleans.</span>
+    <span class="c1"># It is used to:</span>
+    <span class="c1"># - invert _as_tuple when res should match the inp given to _as_tuple</span>
+    <span class="c1"># - optionally remove nesting of two tuples created by multiple calls to _as_tuple</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">to_unpack</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">to_unpack</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">to_unpack</span><span class="p">[</span><span class="mi">1</span><span class="p">]:</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">el</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">el</span> <span class="ow">in</span> <span class="n">res</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">to_unpack</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="n">res</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">to_unpack</span><span class="p">:</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="n">res</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">res</span>
+
+<span class="k">def</span> <span class="nf">_grad_preprocess</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">,</span> <span class="n">need_graph</span><span class="p">):</span>
+    <span class="c1"># Preprocess the inputs to make sure they require gradient</span>
+    <span class="c1"># inputs is a tuple of Tensors to preprocess</span>
+    <span class="c1"># create_graph specifies if the user wants gradients to flow back to the Tensors in inputs</span>
+    <span class="c1"># need_graph specifies if we internally want gradients to flow back to the Tensors in res</span>
+    <span class="c1"># Note that we *always* create a new Tensor object to be able to see the difference between</span>
+    <span class="c1"># inputs given as arguments and the same Tensors automatically captured by the user function.</span>
+    <span class="c1"># Check this issue for more details on how that can happen: https://github.com/pytorch/pytorch/issues/32576</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">inp</span> <span class="ow">in</span> <span class="n">inputs</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">create_graph</span> <span class="ow">and</span> <span class="n">inp</span><span class="o">.</span><span class="n">requires_grad</span><span class="p">:</span>
+            <span class="c1"># Create at least a new Tensor object in a differentiable way</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">inp</span><span class="o">.</span><span class="n">is_sparse</span><span class="p">:</span>
+                <span class="c1"># Use .view_as() to get a shallow copy</span>
+                <span class="n">res</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">inp</span><span class="o">.</span><span class="n">view_as</span><span class="p">(</span><span class="n">inp</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># We cannot use view for sparse Tensors so we clone</span>
+                <span class="n">res</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">inp</span><span class="o">.</span><span class="n">clone</span><span class="p">())</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">res</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">inp</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">requires_grad_</span><span class="p">(</span><span class="n">need_graph</span><span class="p">))</span>
+    <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_grad_postprocess</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">):</span>
+    <span class="c1"># Postprocess the generated Tensors to avoid returning Tensors with history when the user did not</span>
+    <span class="c1"># request it.</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">inputs</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">create_graph</span><span class="p">:</span>
+            <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">inp</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span> <span class="k">for</span> <span class="n">inp</span> <span class="ow">in</span> <span class="n">inputs</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">inputs</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">_grad_postprocess</span><span class="p">(</span><span class="n">inp</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">)</span> <span class="k">for</span> <span class="n">inp</span> <span class="ow">in</span> <span class="n">inputs</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">_validate_v</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">other</span><span class="p">,</span> <span class="n">is_other_tuple</span><span class="p">):</span>
+    <span class="c1"># This assumes that other is the correct shape, and v should match</span>
+    <span class="c1"># Both are assumed to be tuples of Tensors</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">other</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">is_other_tuple</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;v is a tuple of invalid length: should be </span><span class="si">{}</span><span class="s2"> but got </span><span class="si">{}</span><span class="s2">.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">other</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The given v should contain a single Tensor.&quot;</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="p">(</span><span class="n">el_v</span><span class="p">,</span> <span class="n">el_other</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">other</span><span class="p">)):</span>
+        <span class="k">if</span> <span class="n">el_v</span><span class="o">.</span><span class="n">size</span><span class="p">()</span> <span class="o">!=</span> <span class="n">el_other</span><span class="o">.</span><span class="n">size</span><span class="p">():</span>
+            <span class="n">prepend</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+            <span class="k">if</span> <span class="n">is_other_tuple</span><span class="p">:</span>
+                <span class="n">prepend</span> <span class="o">=</span> <span class="s2">&quot;Entry </span><span class="si">{}</span><span class="s2"> in &quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">idx</span><span class="p">)</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">{}</span><span class="s2">v has invalid size: should be </span><span class="si">{}</span><span class="s2"> but got </span><span class="si">{}</span><span class="s2">.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                               <span class="n">prepend</span><span class="p">,</span> <span class="n">el_other</span><span class="o">.</span><span class="n">size</span><span class="p">(),</span> <span class="n">el_v</span><span class="o">.</span><span class="n">size</span><span class="p">()))</span>
+
+
+<span class="k">def</span> <span class="nf">_check_requires_grad</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">input_type</span><span class="p">,</span> <span class="n">strict</span><span class="p">):</span>
+    <span class="c1"># Used to make all the necessary checks to raise nice errors in strict mode.</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">strict</span><span class="p">:</span>
+        <span class="k">return</span>
+
+    <span class="k">if</span> <span class="n">input_type</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;outputs&quot;</span><span class="p">,</span> <span class="s2">&quot;grad_inputs&quot;</span><span class="p">,</span> <span class="s2">&quot;jacobian&quot;</span><span class="p">,</span> <span class="s2">&quot;hessian&quot;</span><span class="p">]:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Invalid input_type to _check_requires_grad&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">inp</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">inputs</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">inp</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># This can only be reached for grad_inputs.</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The output of the user-provided function is independent of input </span><span class="si">{}</span><span class="s2">.&quot;</span>
+                               <span class="s2">&quot; This is not allowed in strict mode.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">inp</span><span class="o">.</span><span class="n">requires_grad</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">input_type</span> <span class="o">==</span> <span class="s2">&quot;hessian&quot;</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The hessian of the user-provided function with respect to input </span><span class="si">{}</span><span class="s2">&quot;</span>
+                                   <span class="s2">&quot; is independent of the input. This is not allowed in strict mode.&quot;</span>
+                                   <span class="s2">&quot; You should ensure that your function is thrice differentiable and that&quot;</span>
+                                   <span class="s2">&quot; the hessian depends on the inputs.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+            <span class="k">elif</span> <span class="n">input_type</span> <span class="o">==</span> <span class="s2">&quot;jacobian&quot;</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;While computing the hessian, found that the jacobian of the user-provided&quot;</span>
+                                   <span class="s2">&quot; function with respect to input </span><span class="si">{}</span><span class="s2"> is independent of the input. This is not&quot;</span>
+                                   <span class="s2">&quot; allowed in strict mode. You should ensure that your function is twice&quot;</span>
+                                   <span class="s2">&quot; differentiable and that the jacobian depends on the inputs (this would be&quot;</span>
+                                   <span class="s2">&quot; violated by a linear function for example).&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+            <span class="k">elif</span> <span class="n">input_type</span> <span class="o">==</span> <span class="s2">&quot;grad_inputs&quot;</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The gradient with respect to input </span><span class="si">{}</span><span class="s2"> is independent of the inputs of the&quot;</span>
+                                   <span class="s2">&quot; user-provided function. This is not allowed in strict mode.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Output </span><span class="si">{}</span><span class="s2"> of the user-provided function does not require gradients.&quot;</span>
+                                   <span class="s2">&quot; The outputs must be computed in a differentiable manner from the input&quot;</span>
+                                   <span class="s2">&quot; when running in strict mode.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+
+<span class="k">def</span> <span class="nf">_autograd_grad</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">grad_outputs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">retain_graph</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="c1"># Version of autograd.grad that accepts `None` in outputs and do not compute gradients for them.</span>
+    <span class="c1"># This has the extra constraint that inputs has to be a tuple</span>
+    <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">grad_outputs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">grad_outputs</span> <span class="o">=</span> <span class="p">(</span><span class="kc">None</span><span class="p">,)</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">outputs</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">grad_outputs</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">outputs</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">grad_outputs</span><span class="p">)</span>
+
+    <span class="n">new_outputs</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">()</span>
+    <span class="n">new_grad_outputs</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">out</span><span class="p">,</span> <span class="n">grad_out</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">grad_outputs</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">out</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">out</span><span class="o">.</span><span class="n">requires_grad</span><span class="p">:</span>
+            <span class="n">new_outputs</span> <span class="o">+=</span> <span class="p">(</span><span class="n">out</span><span class="p">,)</span>
+            <span class="n">new_grad_outputs</span> <span class="o">+=</span> <span class="p">(</span><span class="n">grad_out</span><span class="p">,)</span>
+
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">new_outputs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="c1"># No differentiable output, we don&#39;t need to call the autograd engine</span>
+        <span class="k">return</span> <span class="p">(</span><span class="kc">None</span><span class="p">,)</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">autograd</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">new_outputs</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">new_grad_outputs</span><span class="p">,</span> <span class="n">allow_unused</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                                   <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">,</span> <span class="n">retain_graph</span><span class="o">=</span><span class="n">retain_graph</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">_fill_in_zeros</span><span class="p">(</span><span class="n">grads</span><span class="p">,</span> <span class="n">refs</span><span class="p">,</span> <span class="n">strict</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">,</span> <span class="n">stage</span><span class="p">):</span>
+    <span class="c1"># Used to detect None in the grads and depending on the flags, either replace them</span>
+    <span class="c1"># with Tensors full of 0s of the appropriate size based on the refs or raise an error.</span>
+    <span class="c1"># strict and create graph allow us to detect when it is appropriate to raise an error</span>
+    <span class="c1"># stage gives us information of which backward call we consider to give good error message</span>
+    <span class="k">if</span> <span class="n">stage</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;back&quot;</span><span class="p">,</span> <span class="s2">&quot;back_trick&quot;</span><span class="p">,</span> <span class="s2">&quot;double_back&quot;</span><span class="p">,</span> <span class="s2">&quot;double_back_trick&quot;</span><span class="p">]:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Invalid stage argument &#39;</span><span class="si">{}</span><span class="s2">&#39; to _fill_in_zeros&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">stage</span><span class="p">))</span>
+
+    <span class="n">res</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">grads_i</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">grads</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">grads_i</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">strict</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">stage</span> <span class="o">==</span> <span class="s2">&quot;back&quot;</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The output of the user-provided function is independent of &quot;</span>
+                                       <span class="s2">&quot;input </span><span class="si">{}</span><span class="s2">. This is not allowed in strict mode.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+                <span class="k">elif</span> <span class="n">stage</span> <span class="o">==</span> <span class="s2">&quot;back_trick&quot;</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The gradient with respect to the input is independent of entry </span><span class="si">{}</span><span class="s2">&quot;</span>
+                                       <span class="s2">&quot; in the grad_outputs when using the double backward trick to compute&quot;</span>
+                                       <span class="s2">&quot; forward mode gradients. This is not allowed in strict mode.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+                <span class="k">elif</span> <span class="n">stage</span> <span class="o">==</span> <span class="s2">&quot;double_back&quot;</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The jacobian of the user-provided function is independent of &quot;</span>
+                                       <span class="s2">&quot;input </span><span class="si">{}</span><span class="s2">. This is not allowed in strict mode.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The hessian of the user-provided function is independent of &quot;</span>
+                                       <span class="s2">&quot;entry </span><span class="si">{}</span><span class="s2"> in the grad_jacobian. This is not allowed in strict &quot;</span>
+                                       <span class="s2">&quot;mode as it prevents from using the double backward trick to &quot;</span>
+                                       <span class="s2">&quot;replace forward mode AD.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+
+            <span class="n">grads_i</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">refs</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">strict</span> <span class="ow">and</span> <span class="n">create_graph</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">grads_i</span><span class="o">.</span><span class="n">requires_grad</span><span class="p">:</span>
+                <span class="k">if</span> <span class="s2">&quot;double&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">stage</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The jacobian of the user-provided function is independent of &quot;</span>
+                                       <span class="s2">&quot;input </span><span class="si">{}</span><span class="s2">. This is not allowed in strict mode when create_graph=True.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The hessian of the user-provided function is independent of &quot;</span>
+                                       <span class="s2">&quot;input </span><span class="si">{}</span><span class="s2">. This is not allowed in strict mode when create_graph=True.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+
+        <span class="n">res</span> <span class="o">+=</span> <span class="p">(</span><span class="n">grads_i</span><span class="p">,)</span>
+
+    <span class="k">return</span> <span class="n">res</span>
+
+<span class="c1"># Public API</span>
+
+<div class="viewcode-block" id="vjp"><a class="viewcode-back" href="../../../autograd.html#torch.autograd.functional.vjp">[docs]</a><span class="k">def</span> <span class="nf">vjp</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">v</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Function that computes the dot product between a vector ``v`` and the</span>
+<span class="sd">    Jacobian of the given function at the point given by the inputs.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        func (function): a Python function that takes Tensor inputs and returns</span>
+<span class="sd">            a tuple of Tensors or a Tensor.</span>
+<span class="sd">        inputs (tuple of Tensors or Tensor): inputs to the function ``func``.</span>
+<span class="sd">        v (tuple of Tensors or Tensor): The vector for which the vector</span>
+<span class="sd">            Jacobian product is computed.  Must be the same size as the output</span>
+<span class="sd">            of ``func``. This argument is optional when the output of ``func``</span>
+<span class="sd">            contains a single element and (if it is not provided) will be set</span>
+<span class="sd">            as a Tensor containing a single ``1``.</span>
+<span class="sd">        create_graph (bool, optional): If ``True``, both the output and result</span>
+<span class="sd">            will be computed in a differentiable way. Note that when ``strict``</span>
+<span class="sd">            is ``False``, the result can not require gradients or be</span>
+<span class="sd">            disconnected from the inputs.  Defaults to ``False``.</span>
+<span class="sd">        strict (bool, optional): If ``True``, an error will be raised when we</span>
+<span class="sd">            detect that there exists an input such that all the outputs are</span>
+<span class="sd">            independent of it. If ``False``, we return a Tensor of zeros as the</span>
+<span class="sd">            vjp for said inputs, which is the expected mathematical value.</span>
+<span class="sd">            Defaults to ``False``.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        vjp (tuple of Tensors or Tensor): result of the dot product with</span>
+<span class="sd">        the same shape as the inputs.</span>
+
+<span class="sd">    Example:</span>
+
+<span class="sd">        &gt;&gt;&gt; def exp_reducer(x):</span>
+<span class="sd">        ...   return x.exp().sum(dim=1)</span>
+<span class="sd">        &gt;&gt;&gt; inputs = torch.rand(4, 4)</span>
+<span class="sd">        &gt;&gt;&gt; v = torch.ones(4)</span>
+<span class="sd">        &gt;&gt;&gt; vjp(exp_reducer, inputs, v)</span>
+<span class="sd">        (tensor([5.7817, 7.2458, 5.7830, 6.7782]),</span>
+<span class="sd">         tensor([[1.4458, 1.3962, 1.3042, 1.6354],</span>
+<span class="sd">                [2.1288, 1.0652, 1.5483, 2.5035],</span>
+<span class="sd">                [2.2046, 1.1292, 1.1432, 1.3059],</span>
+<span class="sd">                [1.3225, 1.6652, 1.7753, 2.0152]]))</span>
+
+<span class="sd">        &gt;&gt;&gt; vjp(exp_reducer, inputs, v, create_graph=True)</span>
+<span class="sd">        (tensor([5.7817, 7.2458, 5.7830, 6.7782], grad_fn=&lt;SumBackward1&gt;),</span>
+<span class="sd">         tensor([[1.4458, 1.3962, 1.3042, 1.6354],</span>
+<span class="sd">                [2.1288, 1.0652, 1.5483, 2.5035],</span>
+<span class="sd">                [2.2046, 1.1292, 1.1432, 1.3059],</span>
+<span class="sd">                [1.3225, 1.6652, 1.7753, 2.0152]], grad_fn=&lt;MulBackward0&gt;))</span>
+
+<span class="sd">        &gt;&gt;&gt; def adder(x, y):</span>
+<span class="sd">        ...   return 2 * x + 3 * y</span>
+<span class="sd">        &gt;&gt;&gt; inputs = (torch.rand(2), torch.rand(2))</span>
+<span class="sd">        &gt;&gt;&gt; v = torch.ones(2)</span>
+<span class="sd">        &gt;&gt;&gt; vjp(adder, inputs, v)</span>
+<span class="sd">        (tensor([2.4225, 2.3340]),</span>
+<span class="sd">         (tensor([2., 2.]), tensor([3., 3.])))</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">is_inputs_tuple</span><span class="p">,</span> <span class="n">inputs</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="s2">&quot;inputs&quot;</span><span class="p">,</span> <span class="s2">&quot;vjp&quot;</span><span class="p">)</span>
+    <span class="n">inputs</span> <span class="o">=</span> <span class="n">_grad_preprocess</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">,</span> <span class="n">need_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="n">outputs</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">inputs</span><span class="p">)</span>
+    <span class="n">is_outputs_tuple</span><span class="p">,</span> <span class="n">outputs</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="s2">&quot;outputs of the user-provided function&quot;</span><span class="p">,</span> <span class="s2">&quot;vjp&quot;</span><span class="p">)</span>
+    <span class="n">_check_requires_grad</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="s2">&quot;outputs&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="n">strict</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">v</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="s2">&quot;v&quot;</span><span class="p">,</span> <span class="s2">&quot;vjp&quot;</span><span class="p">)</span>
+        <span class="n">v</span> <span class="o">=</span> <span class="n">_grad_preprocess</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">,</span> <span class="n">need_graph</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">_validate_v</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">outputs</span><span class="p">,</span> <span class="n">is_outputs_tuple</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">outputs</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">1</span> <span class="ow">or</span> <span class="n">outputs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">nelement</span><span class="p">()</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The vector v can only be None if the &quot;</span>
+                               <span class="s2">&quot;user-provided function returns &quot;</span>
+                               <span class="s2">&quot;a single Tensor with a single element.&quot;</span><span class="p">)</span>
+
+    <span class="n">grad_res</span> <span class="o">=</span> <span class="n">_autograd_grad</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">)</span>
+
+    <span class="n">vjp</span> <span class="o">=</span> <span class="n">_fill_in_zeros</span><span class="p">(</span><span class="n">grad_res</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">strict</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">,</span> <span class="s2">&quot;back&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Cleanup objects and return them to the user</span>
+    <span class="n">outputs</span> <span class="o">=</span> <span class="n">_grad_postprocess</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">)</span>
+    <span class="n">vjp</span> <span class="o">=</span> <span class="n">_grad_postprocess</span><span class="p">(</span><span class="n">vjp</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">_tuple_postprocess</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">is_outputs_tuple</span><span class="p">),</span> <span class="n">_tuple_postprocess</span><span class="p">(</span><span class="n">vjp</span><span class="p">,</span> <span class="n">is_inputs_tuple</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="jvp"><a class="viewcode-back" href="../../../autograd.html#torch.autograd.functional.jvp">[docs]</a><span class="k">def</span> <span class="nf">jvp</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">v</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Function that computes the dot product between  the Jacobian of</span>
+<span class="sd">    the given function at the point given by the inputs and a vector ``v``.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        func (function): a Python function that takes Tensor inputs and returns</span>
+<span class="sd">            a tuple of Tensors or a Tensor.</span>
+<span class="sd">        inputs (tuple of Tensors or Tensor): inputs to the function ``func``.</span>
+<span class="sd">        v (tuple of Tensors or Tensor): The vector for which the Jacobian</span>
+<span class="sd">            vector product is computed. Must be the same size as the input of</span>
+<span class="sd">            ``func``. This argument is optional when the input to ``func``</span>
+<span class="sd">            contains a single element and (if it is not provided) will be set</span>
+<span class="sd">            as a Tensor containing a single ``1``.</span>
+<span class="sd">        create_graph (bool, optional): If ``True``, both the output and result</span>
+<span class="sd">            will be computed in a differentiable way. Note that when ``strict``</span>
+<span class="sd">            is ``False``, the result can not require gradients or be</span>
+<span class="sd">            disconnected from the inputs.  Defaults to ``False``.</span>
+<span class="sd">        strict (bool, optional): If ``True``, an error will be raised when we</span>
+<span class="sd">            detect that there exists an input such that all the outputs are</span>
+<span class="sd">            independent of it. If ``False``, we return a Tensor of zeros as the</span>
+<span class="sd">            jvp for said inputs, which is the expected mathematical value.</span>
+<span class="sd">            Defaults to ``False``.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        jvp (tuple of Tensors or Tensor): result of the dot product with</span>
+<span class="sd">        the same shape as the output.</span>
+
+<span class="sd">    Example:</span>
+
+<span class="sd">        &gt;&gt;&gt; def exp_reducer(x):</span>
+<span class="sd">        ...   return x.exp().sum(dim=1)</span>
+<span class="sd">        &gt;&gt;&gt; inputs = torch.rand(4, 4)</span>
+<span class="sd">        &gt;&gt;&gt; v = torch.ones(4, 4)</span>
+<span class="sd">        &gt;&gt;&gt; jvp(exp_reducer, inputs, v)</span>
+<span class="sd">        (tensor([6.3090, 4.6742, 7.9114, 8.2106]),</span>
+<span class="sd">         tensor([6.3090, 4.6742, 7.9114, 8.2106]))</span>
+
+<span class="sd">        &gt;&gt;&gt; jvp(exp_reducer, inputs, v, create_graph=True)</span>
+<span class="sd">        (tensor([6.3090, 4.6742, 7.9114, 8.2106], grad_fn=&lt;SumBackward1&gt;),</span>
+<span class="sd">         tensor([6.3090, 4.6742, 7.9114, 8.2106], grad_fn=&lt;SqueezeBackward1&gt;))</span>
+
+<span class="sd">        &gt;&gt;&gt; def adder(x, y):</span>
+<span class="sd">        ...   return 2 * x + 3 * y</span>
+<span class="sd">        &gt;&gt;&gt; inputs = (torch.rand(2), torch.rand(2))</span>
+<span class="sd">        &gt;&gt;&gt; v = (torch.ones(2), torch.ones(2))</span>
+<span class="sd">        &gt;&gt;&gt; jvp(adder, inputs, v)</span>
+<span class="sd">        (tensor([2.2399, 2.5005]),</span>
+<span class="sd">         tensor([5., 5.]))</span>
+
+<span class="sd">    Note:</span>
+<span class="sd">        The jvp is currently computed by using the backward of the backward</span>
+<span class="sd">        (sometimes called the double backwards trick) as we don&#39;t have support</span>
+<span class="sd">        for forward mode AD in PyTorch at the moment.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">is_inputs_tuple</span><span class="p">,</span> <span class="n">inputs</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="s2">&quot;inputs&quot;</span><span class="p">,</span> <span class="s2">&quot;jvp&quot;</span><span class="p">)</span>
+    <span class="n">inputs</span> <span class="o">=</span> <span class="n">_grad_preprocess</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">,</span> <span class="n">need_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">v</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="s2">&quot;v&quot;</span><span class="p">,</span> <span class="s2">&quot;jvp&quot;</span><span class="p">)</span>
+        <span class="n">v</span> <span class="o">=</span> <span class="n">_grad_preprocess</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">,</span> <span class="n">need_graph</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">_validate_v</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">is_inputs_tuple</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">1</span> <span class="ow">or</span> <span class="n">inputs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">nelement</span><span class="p">()</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The vector v can only be None if the input to &quot;</span>
+                               <span class="s2">&quot;the user-provided function is a single Tensor &quot;</span>
+                               <span class="s2">&quot;with a single element.&quot;</span><span class="p">)</span>
+
+    <span class="n">outputs</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">inputs</span><span class="p">)</span>
+    <span class="n">is_outputs_tuple</span><span class="p">,</span> <span class="n">outputs</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="s2">&quot;outputs of the user-provided function&quot;</span><span class="p">,</span> <span class="s2">&quot;jvp&quot;</span><span class="p">)</span>
+    <span class="n">_check_requires_grad</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="s2">&quot;outputs&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="n">strict</span><span class="p">)</span>
+    <span class="c1"># The backward is linear so the value of grad_outputs is not important as</span>
+    <span class="c1"># it won&#39;t appear in the double backward graph. We only need to ensure that</span>
+    <span class="c1"># it does not contain inf or nan.</span>
+    <span class="n">grad_outputs</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">for</span> <span class="n">out</span> <span class="ow">in</span> <span class="n">outputs</span><span class="p">)</span>
+
+    <span class="n">grad_inputs</span> <span class="o">=</span> <span class="n">_autograd_grad</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">grad_outputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">_check_requires_grad</span><span class="p">(</span><span class="n">grad_inputs</span><span class="p">,</span> <span class="s2">&quot;grad_inputs&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="n">strict</span><span class="p">)</span>
+
+    <span class="n">grad_res</span> <span class="o">=</span> <span class="n">_autograd_grad</span><span class="p">(</span><span class="n">grad_inputs</span><span class="p">,</span> <span class="n">grad_outputs</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">)</span>
+
+    <span class="n">jvp</span> <span class="o">=</span> <span class="n">_fill_in_zeros</span><span class="p">(</span><span class="n">grad_res</span><span class="p">,</span> <span class="n">outputs</span><span class="p">,</span> <span class="n">strict</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">,</span> <span class="s2">&quot;back_trick&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Cleanup objects and return them to the user</span>
+    <span class="n">outputs</span> <span class="o">=</span> <span class="n">_grad_postprocess</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">)</span>
+    <span class="n">jvp</span> <span class="o">=</span> <span class="n">_grad_postprocess</span><span class="p">(</span><span class="n">jvp</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">_tuple_postprocess</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">is_outputs_tuple</span><span class="p">),</span> <span class="n">_tuple_postprocess</span><span class="p">(</span><span class="n">jvp</span><span class="p">,</span> <span class="n">is_outputs_tuple</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="jacobian"><a class="viewcode-back" href="../../../autograd.html#torch.autograd.functional.jacobian">[docs]</a><span class="k">def</span> <span class="nf">jacobian</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Function that computes the Jacobian of a given function.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        func (function): a Python function that takes Tensor inputs and returns</span>
+<span class="sd">            a tuple of Tensors or a Tensor.</span>
+<span class="sd">        inputs (tuple of Tensors or Tensor): inputs to the function ``func``.</span>
+<span class="sd">        create_graph (bool, optional): If ``True``, the Jacobian will be</span>
+<span class="sd">            computed in a differentiable manner. Note that when ``strict`` is</span>
+<span class="sd">            ``False``, the result can not require gradients or be disconnected</span>
+<span class="sd">            from the inputs.  Defaults to ``False``.</span>
+<span class="sd">        strict (bool, optional): If ``True``, an error will be raised when we</span>
+<span class="sd">            detect that there exists an input such that all the outputs are</span>
+<span class="sd">            independent of it. If ``False``, we return a Tensor of zeros as the</span>
+<span class="sd">            jacobian for said inputs, which is the expected mathematical value.</span>
+<span class="sd">            Defaults to ``False``.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Jacobian (Tensor or nested tuple of Tensors): if there are a single</span>
+<span class="sd">            input and output, this will be a single Tensor containing the</span>
+<span class="sd">            Jacobian for the linearized inputs and output. If one of the two is</span>
+<span class="sd">            a tuple, then the Jacobian will be a tuple of Tensors. If both of</span>
+<span class="sd">            them are tuples, then the Jacobian will be a tuple of tuple of</span>
+<span class="sd">            Tensors where ``Jacobian[i][j]`` will contain the Jacobian of the</span>
+<span class="sd">            ``i``\th output and ``j``\th input and will have as size the</span>
+<span class="sd">            concatenation of the sizes of the corresponding output and the</span>
+<span class="sd">            corresponding input.</span>
+
+<span class="sd">    Example:</span>
+
+<span class="sd">        &gt;&gt;&gt; def exp_reducer(x):</span>
+<span class="sd">        ...   return x.exp().sum(dim=1)</span>
+<span class="sd">        &gt;&gt;&gt; inputs = torch.rand(2, 2)</span>
+<span class="sd">        &gt;&gt;&gt; jacobian(exp_reducer, inputs)</span>
+<span class="sd">        tensor([[[1.4917, 2.4352],</span>
+<span class="sd">                 [0.0000, 0.0000]],</span>
+<span class="sd">                [[0.0000, 0.0000],</span>
+<span class="sd">                 [2.4369, 2.3799]]])</span>
+
+<span class="sd">        &gt;&gt;&gt; jacobian(exp_reducer, inputs, create_graph=True)</span>
+<span class="sd">        tensor([[[1.4917, 2.4352],</span>
+<span class="sd">                 [0.0000, 0.0000]],</span>
+<span class="sd">                [[0.0000, 0.0000],</span>
+<span class="sd">                 [2.4369, 2.3799]]], grad_fn=&lt;ViewBackward&gt;)</span>
+
+<span class="sd">        &gt;&gt;&gt; def exp_adder(x, y):</span>
+<span class="sd">        ...   return 2 * x.exp() + 3 * y</span>
+<span class="sd">        &gt;&gt;&gt; inputs = (torch.rand(2), torch.rand(2))</span>
+<span class="sd">        &gt;&gt;&gt; jacobian(exp_adder, inputs)</span>
+<span class="sd">        (tensor([[2.8052, 0.0000],</span>
+<span class="sd">                [0.0000, 3.3963]]),</span>
+<span class="sd">         tensor([[3., 0.],</span>
+<span class="sd">                 [0., 3.]]))</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">is_inputs_tuple</span><span class="p">,</span> <span class="n">inputs</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="s2">&quot;inputs&quot;</span><span class="p">,</span> <span class="s2">&quot;jacobian&quot;</span><span class="p">)</span>
+    <span class="n">inputs</span> <span class="o">=</span> <span class="n">_grad_preprocess</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">,</span> <span class="n">need_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="n">outputs</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">inputs</span><span class="p">)</span>
+    <span class="n">is_outputs_tuple</span><span class="p">,</span> <span class="n">outputs</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span>
+                                          <span class="s2">&quot;outputs of the user-provided function&quot;</span><span class="p">,</span>
+                                          <span class="s2">&quot;jacobian&quot;</span><span class="p">)</span>
+    <span class="n">_check_requires_grad</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="s2">&quot;outputs&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="n">strict</span><span class="p">)</span>
+
+    <span class="n">jacobian</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">out</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">outputs</span><span class="p">):</span>
+
+        <span class="n">jac_i</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">([]</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">inputs</span><span class="p">)))</span>
+        <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">nelement</span><span class="p">()):</span>
+            <span class="n">vj</span> <span class="o">=</span> <span class="n">_autograd_grad</span><span class="p">((</span><span class="n">out</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)[</span><span class="n">j</span><span class="p">],),</span> <span class="n">inputs</span><span class="p">,</span>
+                                <span class="n">retain_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">)</span>
+
+            <span class="k">for</span> <span class="n">el_idx</span><span class="p">,</span> <span class="p">(</span><span class="n">jac_i_el</span><span class="p">,</span> <span class="n">vj_el</span><span class="p">,</span> <span class="n">inp_el</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">jac_i</span><span class="p">,</span> <span class="n">vj</span><span class="p">,</span> <span class="n">inputs</span><span class="p">)):</span>
+                <span class="k">if</span> <span class="n">vj_el</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">strict</span> <span class="ow">and</span> <span class="n">create_graph</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">vj_el</span><span class="o">.</span><span class="n">requires_grad</span><span class="p">:</span>
+                        <span class="n">msg</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;The jacobian of the user-provided function is &quot;</span>
+                               <span class="s2">&quot;independent of input </span><span class="si">{}</span><span class="s2">. This is not allowed in &quot;</span>
+                               <span class="s2">&quot;strict mode when create_graph=True.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">))</span>
+                        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+                    <span class="n">jac_i_el</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">vj_el</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">strict</span><span class="p">:</span>
+                        <span class="n">msg</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;Output </span><span class="si">{}</span><span class="s2"> of the user-provided function is &quot;</span>
+                               <span class="s2">&quot;independent of input </span><span class="si">{}</span><span class="s2">. This is not allowed in &quot;</span>
+                               <span class="s2">&quot;strict mode.&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">el_idx</span><span class="p">))</span>
+                        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+                    <span class="n">jac_i_el</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">inp_el</span><span class="p">))</span>
+
+        <span class="n">jacobian</span> <span class="o">+=</span> <span class="p">(</span><span class="nb">tuple</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">jac_i_el</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">size</span><span class="p">()</span>
+                     <span class="o">+</span> <span class="n">inputs</span><span class="p">[</span><span class="n">el_idx</span><span class="p">]</span><span class="o">.</span><span class="n">size</span><span class="p">())</span> <span class="k">for</span> <span class="p">(</span><span class="n">el_idx</span><span class="p">,</span> <span class="n">jac_i_el</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">jac_i</span><span class="p">)),</span> <span class="p">)</span>
+
+    <span class="n">jacobian</span> <span class="o">=</span> <span class="n">_grad_postprocess</span><span class="p">(</span><span class="n">jacobian</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">_tuple_postprocess</span><span class="p">(</span><span class="n">jacobian</span><span class="p">,</span> <span class="p">(</span><span class="n">is_outputs_tuple</span><span class="p">,</span> <span class="n">is_inputs_tuple</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="hessian"><a class="viewcode-back" href="../../../autograd.html#torch.autograd.functional.hessian">[docs]</a><span class="k">def</span> <span class="nf">hessian</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Function that computes the Hessian of a given scalar function.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        func (function): a Python function that takes Tensor inputs and returns</span>
+<span class="sd">            a Tensor with a single element.</span>
+<span class="sd">        inputs (tuple of Tensors or Tensor): inputs to the function ``func``.</span>
+<span class="sd">        create_graph (bool, optional): If ``True``, the Hessian will be computed in</span>
+<span class="sd">            a differentiable manner. Note that when ``strict`` is ``False``, the result can not</span>
+<span class="sd">            require gradients or be disconnected from the inputs.</span>
+<span class="sd">            Defaults to ``False``.</span>
+<span class="sd">        strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input</span>
+<span class="sd">            such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the</span>
+<span class="sd">            hessian for said inputs, which is the expected mathematical value.</span>
+<span class="sd">            Defaults to ``False``.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Hessian (Tensor or a tuple of tuple of Tensors) if there are a single input,</span>
+<span class="sd">            this will be a single Tensor containing the Hessian for the input.</span>
+<span class="sd">            If it is a tuple, then the Hessian will be a tuple of tuples where</span>
+<span class="sd">            ``Hessian[i][j]`` will contain the Hessian of the ``i``\th input</span>
+<span class="sd">            and ``j``\th input with size the sum of the size of the ``i``\th input plus</span>
+<span class="sd">            the size of the ``j``\th input.</span>
+
+<span class="sd">    Example:</span>
+
+<span class="sd">        &gt;&gt;&gt; def pow_reducer(x):</span>
+<span class="sd">        ...   return x.pow(3).sum()</span>
+<span class="sd">        &gt;&gt;&gt; inputs = torch.rand(2, 2)</span>
+<span class="sd">        &gt;&gt;&gt; hessian(pow_reducer, inputs)</span>
+<span class="sd">        tensor([[[[5.2265, 0.0000],</span>
+<span class="sd">                  [0.0000, 0.0000]],</span>
+<span class="sd">                 [[0.0000, 4.8221],</span>
+<span class="sd">                  [0.0000, 0.0000]]],</span>
+<span class="sd">                [[[0.0000, 0.0000],</span>
+<span class="sd">                  [1.9456, 0.0000]],</span>
+<span class="sd">                 [[0.0000, 0.0000],</span>
+<span class="sd">                  [0.0000, 3.2550]]]])</span>
+
+<span class="sd">        &gt;&gt;&gt; hessian(pow_reducer, inputs, create_graph=True)</span>
+<span class="sd">        tensor([[[[5.2265, 0.0000],</span>
+<span class="sd">                  [0.0000, 0.0000]],</span>
+<span class="sd">                 [[0.0000, 4.8221],</span>
+<span class="sd">                  [0.0000, 0.0000]]],</span>
+<span class="sd">                [[[0.0000, 0.0000],</span>
+<span class="sd">                  [1.9456, 0.0000]],</span>
+<span class="sd">                 [[0.0000, 0.0000],</span>
+<span class="sd">                  [0.0000, 3.2550]]]], grad_fn=&lt;ViewBackward&gt;)</span>
+
+
+<span class="sd">        &gt;&gt;&gt; def pow_adder_reducer(x, y):</span>
+<span class="sd">        ...   return (2 * x.pow(2) + 3 * y.pow(2)).sum()</span>
+<span class="sd">        &gt;&gt;&gt; inputs = (torch.rand(2), torch.rand(2))</span>
+<span class="sd">        &gt;&gt;&gt; hessian(pow_adder_reducer, inputs)</span>
+<span class="sd">        ((tensor([[4., 0.],</span>
+<span class="sd">                  [0., 4.]]),</span>
+<span class="sd">          tensor([[0., 0.],</span>
+<span class="sd">                  [0., 0.]])),</span>
+<span class="sd">         (tensor([[0., 0.],</span>
+<span class="sd">                  [0., 0.]]),</span>
+<span class="sd">          tensor([[6., 0.],</span>
+<span class="sd">                  [0., 6.]])))</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">is_inputs_tuple</span><span class="p">,</span> <span class="n">inputs</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="s2">&quot;inputs&quot;</span><span class="p">,</span> <span class="s2">&quot;hessian&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">ensure_single_output_function</span><span class="p">(</span><span class="o">*</span><span class="n">inp</span><span class="p">):</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">inp</span><span class="p">)</span>
+        <span class="n">is_out_tuple</span><span class="p">,</span> <span class="n">t_out</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="s2">&quot;outputs of the user-provided function&quot;</span><span class="p">,</span> <span class="s2">&quot;hessian&quot;</span><span class="p">)</span>
+        <span class="n">_check_requires_grad</span><span class="p">(</span><span class="n">t_out</span><span class="p">,</span> <span class="s2">&quot;outputs&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="n">strict</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">is_out_tuple</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The function given to hessian should return a single Tensor&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">out</span><span class="o">.</span><span class="n">nelement</span><span class="p">()</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The Tensor returned by the function given to hessian should contain a single element&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">out</span><span class="o">.</span><span class="n">squeeze</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">jac_func</span><span class="p">(</span><span class="o">*</span><span class="n">inp</span><span class="p">):</span>
+        <span class="n">jac</span> <span class="o">=</span> <span class="n">jacobian</span><span class="p">(</span><span class="n">ensure_single_output_function</span><span class="p">,</span> <span class="n">inp</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">_check_requires_grad</span><span class="p">(</span><span class="n">jac</span><span class="p">,</span> <span class="s2">&quot;jacobian&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="n">strict</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">jac</span>
+
+    <span class="n">res</span> <span class="o">=</span> <span class="n">jacobian</span><span class="p">(</span><span class="n">jac_func</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="n">strict</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">_tuple_postprocess</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="p">(</span><span class="n">is_inputs_tuple</span><span class="p">,</span> <span class="n">is_inputs_tuple</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="vhp"><a class="viewcode-back" href="../../../autograd.html#torch.autograd.functional.vhp">[docs]</a><span class="k">def</span> <span class="nf">vhp</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">v</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Function that computes the dot product between a vector ``v`` and the</span>
+<span class="sd">    Hessian of a given scalar function at the point given by the inputs.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        func (function): a Python function that takes Tensor inputs and returns</span>
+<span class="sd">            a Tensor with a single element.</span>
+<span class="sd">        inputs (tuple of Tensors or Tensor): inputs to the function ``func``.</span>
+<span class="sd">        v (tuple of Tensors or Tensor): The vector for which the vector Hessian</span>
+<span class="sd">            product is computed. Must be the same size as the input of</span>
+<span class="sd">            ``func``. This argument is optional when ``func``&#39;s input contains</span>
+<span class="sd">            a single element and (if it is not provided) will be set as a</span>
+<span class="sd">            Tensor containing a single ``1``.</span>
+<span class="sd">        create_graph (bool, optional): If ``True``, both the output and result</span>
+<span class="sd">            will be computed in a differentiable way. Note that when ``strict``</span>
+<span class="sd">            is ``False``, the result can not require gradients or be</span>
+<span class="sd">            disconnected from the inputs.</span>
+<span class="sd">            Defaults to ``False``.</span>
+<span class="sd">        strict (bool, optional): If ``True``, an error will be raised when we</span>
+<span class="sd">            detect that there exists an input such that all the outputs are</span>
+<span class="sd">            independent of it. If ``False``, we return a Tensor of zeros as the</span>
+<span class="sd">            vhp for said inputs, which is the expected mathematical value.</span>
+<span class="sd">            Defaults to ``False``.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        output (tuple): tuple with:</span>
+<span class="sd">            func_output (tuple of Tensors or Tensor): output of ``func(inputs)``</span>
+
+<span class="sd">            vhp (tuple of Tensors or Tensor): result of the dot product with the</span>
+<span class="sd">            same shape as the inputs.</span>
+
+<span class="sd">    Example:</span>
+
+<span class="sd">        &gt;&gt;&gt; def pow_reducer(x):</span>
+<span class="sd">        ...   return x.pow(3).sum()</span>
+<span class="sd">        &gt;&gt;&gt; inputs = torch.rand(2, 2)</span>
+<span class="sd">        &gt;&gt;&gt; v = torch.ones(2, 2)</span>
+<span class="sd">        &gt;&gt;&gt; vhp(pow_reducer, inputs, v)</span>
+<span class="sd">        (tensor(0.5591),</span>
+<span class="sd">         tensor([[1.0689, 1.2431],</span>
+<span class="sd">                 [3.0989, 4.4456]]))</span>
+<span class="sd">        &gt;&gt;&gt; vhp(pow_reducer, inputs, v, create_graph=True)</span>
+<span class="sd">        (tensor(0.5591, grad_fn=&lt;SumBackward0&gt;),</span>
+<span class="sd">         tensor([[1.0689, 1.2431],</span>
+<span class="sd">                 [3.0989, 4.4456]], grad_fn=&lt;MulBackward0&gt;))</span>
+<span class="sd">        &gt;&gt;&gt; def pow_adder_reducer(x, y):</span>
+<span class="sd">        ...   return (2 * x.pow(2) + 3 * y.pow(2)).sum()</span>
+<span class="sd">        &gt;&gt;&gt; inputs = (torch.rand(2), torch.rand(2))</span>
+<span class="sd">        &gt;&gt;&gt; v = (torch.zeros(2), torch.ones(2))</span>
+<span class="sd">        &gt;&gt;&gt; vhp(pow_adder_reducer, inputs, v)</span>
+<span class="sd">        (tensor(4.8053),</span>
+<span class="sd">         (tensor([0., 0.]),</span>
+<span class="sd">          tensor([6., 6.])))</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">is_inputs_tuple</span><span class="p">,</span> <span class="n">inputs</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="s2">&quot;inputs&quot;</span><span class="p">,</span> <span class="s2">&quot;vhp&quot;</span><span class="p">)</span>
+    <span class="n">inputs</span> <span class="o">=</span> <span class="n">_grad_preprocess</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">,</span> <span class="n">need_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">v</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="s2">&quot;v&quot;</span><span class="p">,</span> <span class="s2">&quot;vhp&quot;</span><span class="p">)</span>
+        <span class="n">v</span> <span class="o">=</span> <span class="n">_grad_preprocess</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">,</span> <span class="n">need_graph</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">_validate_v</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">is_inputs_tuple</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">1</span> <span class="ow">or</span> <span class="n">inputs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">nelement</span><span class="p">()</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The vector v can only be None if the input to the user-provided function &quot;</span>
+                               <span class="s2">&quot;is a single Tensor with a single element.&quot;</span><span class="p">)</span>
+
+    <span class="n">outputs</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">inputs</span><span class="p">)</span>
+    <span class="n">is_outputs_tuple</span><span class="p">,</span> <span class="n">outputs</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="s2">&quot;outputs of the user-provided function&quot;</span><span class="p">,</span> <span class="s2">&quot;vhp&quot;</span><span class="p">)</span>
+    <span class="n">_check_requires_grad</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="s2">&quot;outputs&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="n">strict</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">is_outputs_tuple</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">outputs</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The function given to vhp should return a single Tensor&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">outputs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">nelement</span><span class="p">()</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The Tensor returned by the function given to vhp should contain a single element&quot;</span><span class="p">)</span>
+
+    <span class="n">jac</span> <span class="o">=</span> <span class="n">_autograd_grad</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">_check_requires_grad</span><span class="p">(</span><span class="n">jac</span><span class="p">,</span> <span class="s2">&quot;jacobian&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="n">strict</span><span class="p">)</span>
+
+    <span class="n">grad_res</span> <span class="o">=</span> <span class="n">_autograd_grad</span><span class="p">(</span><span class="n">jac</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">)</span>
+
+    <span class="n">vhp</span> <span class="o">=</span> <span class="n">_fill_in_zeros</span><span class="p">(</span><span class="n">grad_res</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">strict</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">,</span> <span class="s2">&quot;double_back&quot;</span><span class="p">)</span>
+
+    <span class="n">outputs</span> <span class="o">=</span> <span class="n">_grad_postprocess</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">)</span>
+    <span class="n">vhp</span> <span class="o">=</span> <span class="n">_grad_postprocess</span><span class="p">(</span><span class="n">vhp</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">_tuple_postprocess</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">is_outputs_tuple</span><span class="p">),</span> <span class="n">_tuple_postprocess</span><span class="p">(</span><span class="n">vhp</span><span class="p">,</span> <span class="n">is_inputs_tuple</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="hvp"><a class="viewcode-back" href="../../../autograd.html#torch.autograd.functional.hvp">[docs]</a><span class="k">def</span> <span class="nf">hvp</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">v</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Function that computes the dot product between the Hessian of a given scalar</span>
+<span class="sd">    function and a vector ``v`` at the point given by the inputs.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        func (function): a Python function that takes Tensor inputs and returns</span>
+<span class="sd">            a Tensor with a single element.</span>
+<span class="sd">        inputs (tuple of Tensors or Tensor): inputs to the function ``func``.</span>
+<span class="sd">        v (tuple of Tensors or Tensor): The vector for which the Hessian vector</span>
+<span class="sd">            product is computed. Must be the same size as the input of</span>
+<span class="sd">            ``func``. This argument is optional when ``func``&#39;s input contains</span>
+<span class="sd">            a single element and (if it is not provided) will be set as a</span>
+<span class="sd">            Tensor containing a single ``1``.</span>
+<span class="sd">        create_graph (bool, optional): If ``True``, both the output and result will be</span>
+<span class="sd">            computed in a differentiable way. Note that when ``strict`` is</span>
+<span class="sd">            ``False``, the result can not require gradients or be disconnected</span>
+<span class="sd">            from the inputs.  Defaults to ``False``.</span>
+<span class="sd">        strict (bool, optional): If ``True``, an error will be raised when we</span>
+<span class="sd">            detect that there exists an input such that all the outputs are</span>
+<span class="sd">            independent of it. If ``False``, we return a Tensor of zeros as the</span>
+<span class="sd">            hvp for said inputs, which is the expected mathematical value.</span>
+<span class="sd">            Defaults to ``False``.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        func_output (tuple of Tensors or Tensor): output of ``func(inputs)``</span>
+<span class="sd">            hvp (tuple of Tensors or Tensor): result of the dot product with</span>
+<span class="sd">            the same shape as the inputs.</span>
+
+<span class="sd">    Example:</span>
+
+<span class="sd">        &gt;&gt;&gt; def pow_reducer(x):</span>
+<span class="sd">        ...   return x.pow(3).sum()</span>
+<span class="sd">        &gt;&gt;&gt; inputs = torch.rand(2, 2)</span>
+<span class="sd">        &gt;&gt;&gt; v = torch.ones(2, 2)</span>
+<span class="sd">        &gt;&gt;&gt; hvp(pow_reducer, inputs, v)</span>
+<span class="sd">        (tensor(0.1448),</span>
+<span class="sd">         tensor([[2.0239, 1.6456],</span>
+<span class="sd">                 [2.4988, 1.4310]]))</span>
+
+<span class="sd">        &gt;&gt;&gt; hvp(pow_reducer, inputs, v, create_graph=True)</span>
+<span class="sd">        (tensor(0.1448, grad_fn=&lt;SumBackward0&gt;),</span>
+<span class="sd">         tensor([[2.0239, 1.6456],</span>
+<span class="sd">                 [2.4988, 1.4310]], grad_fn=&lt;MulBackward0&gt;))</span>
+
+
+<span class="sd">        &gt;&gt;&gt; def pow_adder_reducer(x, y):</span>
+<span class="sd">        ...   return (2 * x.pow(2) + 3 * y.pow(2)).sum()</span>
+<span class="sd">        &gt;&gt;&gt; inputs = (torch.rand(2), torch.rand(2))</span>
+<span class="sd">        &gt;&gt;&gt; v = (torch.zeros(2), torch.ones(2))</span>
+<span class="sd">        &gt;&gt;&gt; hvp(pow_adder_reducer, inputs, v)</span>
+<span class="sd">        (tensor(2.3030),</span>
+<span class="sd">         (tensor([0., 0.]),</span>
+<span class="sd">          tensor([6., 6.])))</span>
+
+<span class="sd">    Note:</span>
+
+<span class="sd">        This function is significantly slower than `vhp` due to backward mode AD constraints.</span>
+<span class="sd">        If your functions is twice continuously differentiable, then hvp = vhp.t(). So if you</span>
+<span class="sd">        know that your function satisfies this condition, you should use vhp instead that is</span>
+<span class="sd">        much faster with the current implementation.</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">is_inputs_tuple</span><span class="p">,</span> <span class="n">inputs</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="s2">&quot;inputs&quot;</span><span class="p">,</span> <span class="s2">&quot;hvp&quot;</span><span class="p">)</span>
+    <span class="n">inputs</span> <span class="o">=</span> <span class="n">_grad_preprocess</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">,</span> <span class="n">need_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">_</span><span class="p">,</span> <span class="n">v</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="s2">&quot;v&quot;</span><span class="p">,</span> <span class="s2">&quot;hvp&quot;</span><span class="p">)</span>
+        <span class="n">v</span> <span class="o">=</span> <span class="n">_grad_preprocess</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">,</span> <span class="n">need_graph</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">_validate_v</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">is_inputs_tuple</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">1</span> <span class="ow">or</span> <span class="n">inputs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">nelement</span><span class="p">()</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The vector v can only be None if the input to the user-provided function &quot;</span>
+                               <span class="s2">&quot;is a single Tensor with a single element.&quot;</span><span class="p">)</span>
+
+    <span class="n">outputs</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">inputs</span><span class="p">)</span>
+    <span class="n">is_outputs_tuple</span><span class="p">,</span> <span class="n">outputs</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="s2">&quot;outputs of the user-provided function&quot;</span><span class="p">,</span> <span class="s2">&quot;hvp&quot;</span><span class="p">)</span>
+    <span class="n">_check_requires_grad</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="s2">&quot;outputs&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="n">strict</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">is_outputs_tuple</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">outputs</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The function given to hvp should return a single Tensor&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">outputs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">nelement</span><span class="p">()</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The Tensor returned by the function given to hvp should contain a single element&quot;</span><span class="p">)</span>
+
+    <span class="n">jac</span> <span class="o">=</span> <span class="n">_autograd_grad</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">_check_requires_grad</span><span class="p">(</span><span class="n">jac</span><span class="p">,</span> <span class="s2">&quot;jacobian&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="n">strict</span><span class="p">)</span>
+
+    <span class="n">grad_jac</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">inp</span><span class="p">,</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">for</span> <span class="n">inp</span> <span class="ow">in</span> <span class="n">inputs</span><span class="p">)</span>
+
+    <span class="n">double_back</span> <span class="o">=</span> <span class="n">_autograd_grad</span><span class="p">(</span><span class="n">jac</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">grad_jac</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">_check_requires_grad</span><span class="p">(</span><span class="n">jac</span><span class="p">,</span> <span class="s2">&quot;hessian&quot;</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="n">strict</span><span class="p">)</span>
+
+    <span class="n">grad_res</span> <span class="o">=</span> <span class="n">_autograd_grad</span><span class="p">(</span><span class="n">double_back</span><span class="p">,</span> <span class="n">grad_jac</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">)</span>
+
+    <span class="n">hvp</span> <span class="o">=</span> <span class="n">_fill_in_zeros</span><span class="p">(</span><span class="n">grad_res</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">strict</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">,</span> <span class="s2">&quot;double_back_trick&quot;</span><span class="p">)</span>
+
+    <span class="n">outputs</span> <span class="o">=</span> <span class="n">_grad_postprocess</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">)</span>
+    <span class="n">hvp</span> <span class="o">=</span> <span class="n">_grad_postprocess</span><span class="p">(</span><span class="n">hvp</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">_tuple_postprocess</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">is_outputs_tuple</span><span class="p">),</span> <span class="n">_tuple_postprocess</span><span class="p">(</span><span class="n">hvp</span><span class="p">,</span> <span class="n">is_inputs_tuple</span><span class="p">)</span></div>
+</pre></div>
+
+             </article>
+             
+            </div>
+            <footer>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+         <script src="../../../_static/jquery.js"></script>
+         <script src="../../../_static/underscore.js"></script>
+         <script src="../../../_static/doctools.js"></script>
+         <script src="../../../_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="../../../_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="../../../_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="../../../_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="../../../_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="../../../_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>

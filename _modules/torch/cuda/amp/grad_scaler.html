@@ -1,0 +1,1166 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>torch.cuda.amp.grad_scaler &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/_modules/torch/cuda/amp/grad_scaler.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="../../../../_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="../../../../_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../../../_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../../../_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+
+  
+  <script src="../../../../_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/_modules/torch/cuda/amp/grad_scaler.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="../../../../index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+          <li><a href="../../../index.html">Module code</a> &gt;</li>
+        
+          <li><a href="../../../torch.html">torch</a> &gt;</li>
+        
+          <li><a href="../../cuda.html">torch.cuda</a> &gt;</li>
+        
+      <li>torch.cuda.amp.grad_scaler</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <h1>Source code for torch.cuda.amp.grad_scaler</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">from</span> <span class="nn">collections</span> <span class="kn">import</span> <span class="n">defaultdict</span>
+<span class="kn">from</span> <span class="nn">torch._six</span> <span class="kn">import</span> <span class="n">container_abcs</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
+<span class="kn">from</span> <span class="nn">enum</span> <span class="kn">import</span> <span class="n">Enum</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span>
+
+
+<span class="k">class</span> <span class="nc">_MultiDeviceReplicator</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Lazily serves copies of a tensor to requested devices.  Copies are cached per-device.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">master_tensor</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">assert</span> <span class="n">master_tensor</span><span class="o">.</span><span class="n">is_cuda</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">master</span> <span class="o">=</span> <span class="n">master_tensor</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_per_device_tensors</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">def</span> <span class="nf">get</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">device</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+        <span class="n">retval</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_per_device_tensors</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">retval</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">retval</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">master</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span> <span class="n">non_blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_per_device_tensors</span><span class="p">[</span><span class="n">device</span><span class="p">]</span> <span class="o">=</span> <span class="n">retval</span>
+        <span class="k">return</span> <span class="n">retval</span>
+
+
+<span class="c1"># Defines default_factory for GradScaler&#39;s _per_optimizer_states defaultdict,</span>
+<span class="c1"># as well as associated &quot;enum&quot; values.  Prefers defining these at top level because</span>
+<span class="c1"># - Lambdas can&#39;t be pickled, so we don&#39;t want to supply a lambda as the factory.</span>
+<span class="c1"># - Defining READY, UNSCALED, STEPPED and _refresh_per_optimizer_state within GradScaler</span>
+<span class="c1">#   causes a circular reference, which we&#39;d rather avoid.</span>
+<span class="k">class</span> <span class="nc">OptState</span><span class="p">(</span><span class="n">Enum</span><span class="p">):</span>
+    <span class="n">READY</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">UNSCALED</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="n">STEPPED</span> <span class="o">=</span> <span class="mi">2</span>
+
+
+<span class="k">def</span> <span class="nf">_refresh_per_optimizer_state</span><span class="p">():</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;stage&quot;</span><span class="p">:</span> <span class="n">OptState</span><span class="o">.</span><span class="n">READY</span><span class="p">,</span> <span class="s2">&quot;found_inf_per_device&quot;</span><span class="p">:</span> <span class="p">{}}</span>
+
+
+<div class="viewcode-block" id="GradScaler"><a class="viewcode-back" href="../../../../amp.html#torch.cuda.amp.GradScaler">[docs]</a><span class="k">class</span> <span class="nc">GradScaler</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="n">_scale</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]</span>
+    <span class="n">_grows_tracker</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]</span>
+    <span class="n">_per_optimizer_states</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    An instance ``scaler`` of :class:`GradScaler` helps perform the steps of gradient scaling</span>
+<span class="sd">    conveniently.</span>
+
+<span class="sd">    * ``scaler.scale(loss)`` multiplies a given loss by ``scaler``&#39;s current scale factor.</span>
+<span class="sd">    * ``scaler.step(optimizer)`` safely unscales gradients and calls ``optimizer.step()``.</span>
+<span class="sd">    * ``scaler.update()`` updates ``scaler``&#39;s scale factor.</span>
+
+<span class="sd">    Example::</span>
+
+<span class="sd">        # Creates a GradScaler once at the beginning of training.</span>
+<span class="sd">        scaler = GradScaler()</span>
+
+<span class="sd">        for epoch in epochs:</span>
+<span class="sd">            for input, target in data:</span>
+<span class="sd">                optimizer.zero_grad()</span>
+<span class="sd">                output = model(input)</span>
+<span class="sd">                loss = loss_fn(output, target)</span>
+
+<span class="sd">                # Scales loss.  Calls backward() on scaled loss to create scaled gradients.</span>
+<span class="sd">                scaler.scale(loss).backward()</span>
+
+<span class="sd">                # scaler.step() first unscales gradients of the optimizer&#39;s params.</span>
+<span class="sd">                # If gradients don&#39;t contain infs/NaNs, optimizer.step() is then called,</span>
+<span class="sd">                # otherwise, optimizer.step() is skipped.</span>
+<span class="sd">                scaler.step(optimizer)</span>
+
+<span class="sd">                # Updates the scale for next iteration.</span>
+<span class="sd">                scaler.update()</span>
+
+<span class="sd">    See the :ref:`Automatic Mixed Precision examples&lt;amp-examples&gt;` for usage</span>
+<span class="sd">    (along with autocasting) in more complex cases like gradient clipping, gradient accumulation, gradient penalty,</span>
+<span class="sd">    and multiple losses/optimizers.</span>
+
+<span class="sd">    ``scaler`` dynamically estimates the scale factor each iteration.  To minimize gradient underflow,</span>
+<span class="sd">    a large scale factor should be used.  However, ``float16`` values can &quot;overflow&quot; (become inf or NaN) if</span>
+<span class="sd">    the scale factor is too large.  Therefore, the optimal scale factor is the largest factor that can be used</span>
+<span class="sd">    without incurring inf or NaN gradient values.</span>
+<span class="sd">    ``scaler`` approximates the optimal scale factor over time by checking the gradients for infs and NaNs during every</span>
+<span class="sd">    ``scaler.step(optimizer)`` (or optional separate ``scaler.unscale_(optimizer)``, see :meth:`unscale_`).</span>
+
+<span class="sd">    * If infs/NaNs are found, ``scaler.step(optimizer)`` skips the underlying ``optimizer.step()`` (so the params</span>
+<span class="sd">      themselves remain uncorrupted) and ``update()`` multiplies the scale by ``backoff_factor``.</span>
+
+<span class="sd">    * If no infs/NaNs are found, ``scaler.step(optimizer)`` runs the underlying ``optimizer.step()`` as usual.</span>
+<span class="sd">      If ``growth_interval`` unskipped iterations occur consecutively, ``update()`` multiplies the scale by</span>
+<span class="sd">      ``growth_factor``.</span>
+
+<span class="sd">    The scale factor often causes infs/NaNs to appear in gradients for the first few iterations as its</span>
+<span class="sd">    value calibrates.  ``scaler.step`` will skip the underlying ``optimizer.step()`` for these</span>
+<span class="sd">    iterations.  After that, step skipping should occur rarely (once every few hundred or thousand iterations).</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        init_scale (float, optional, default=2.**16):  Initial scale factor.</span>
+<span class="sd">        growth_factor (float, optional, default=2.0):  Factor by which the scale is multiplied during</span>
+<span class="sd">            :meth:`update` if no inf/NaN gradients occur for ``growth_interval`` consecutive iterations.</span>
+<span class="sd">        backoff_factor (float, optional, default=0.5):  Factor by which the scale is multiplied during</span>
+<span class="sd">            :meth:`update` if inf/NaN gradients occur in an iteration.</span>
+<span class="sd">        growth_interval (int, optional, default=2000):  Number of consecutive iterations without inf/NaN gradients</span>
+<span class="sd">            that must occur for the scale to be multiplied by ``growth_factor``.</span>
+<span class="sd">        enabled (bool, optional, default=True):  If ``False``, disables gradient scaling. :meth:`step` simply</span>
+<span class="sd">            invokes the underlying ``optimizer.step()``, and other methods become no-ops.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                 <span class="n">init_scale</span><span class="o">=</span><span class="mf">2.</span><span class="o">**</span><span class="mi">16</span><span class="p">,</span>
+                 <span class="n">growth_factor</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span>
+                 <span class="n">backoff_factor</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>
+                 <span class="n">growth_interval</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span>
+                 <span class="n">enabled</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">enabled</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">():</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s2">&quot;torch.cuda.amp.GradScaler is enabled, but CUDA is not available.  Disabling.&quot;</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_enabled</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_enabled</span> <span class="o">=</span> <span class="n">enabled</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enabled</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="n">growth_factor</span> <span class="o">&gt;</span> <span class="mf">1.0</span><span class="p">,</span> <span class="s2">&quot;The growth factor must be &gt; 1.0.&quot;</span>
+            <span class="k">assert</span> <span class="n">backoff_factor</span> <span class="o">&lt;</span> <span class="mf">1.0</span><span class="p">,</span> <span class="s2">&quot;The backoff factor must be &lt; 1.0.&quot;</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">_init_scale</span> <span class="o">=</span> <span class="n">init_scale</span>
+            <span class="c1"># self._scale will be lazily initialized during the first call to scale()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_growth_factor</span> <span class="o">=</span> <span class="n">growth_factor</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_backoff_factor</span> <span class="o">=</span> <span class="n">backoff_factor</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_growth_interval</span> <span class="o">=</span> <span class="n">growth_interval</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_init_growth_tracker</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="c1"># self._growth_tracker will be lazily initialized during the first call to scale()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_growth_tracker</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_per_optimizer_states</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="n">_refresh_per_optimizer_state</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_check_scale_growth_tracker</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">funcname</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]:</span>
+        <span class="n">fix</span> <span class="o">=</span> <span class="s2">&quot;This may indicate your script did not use scaler.scale(loss or outputs) earlier in the iteration.&quot;</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;Attempted </span><span class="si">{}</span><span class="s2"> but _scale is None.  &quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">funcname</span><span class="p">)</span> <span class="o">+</span> <span class="n">fix</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_growth_tracker</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;Attempted </span><span class="si">{}</span><span class="s2"> but _growth_tracker is None.  &quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">funcname</span><span class="p">)</span> <span class="o">+</span> <span class="n">fix</span>
+        <span class="k">return</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_scale</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_growth_tracker</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_lazy_init_scale_growth_tracker</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dev</span><span class="p">):</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_growth_tracker</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;_growth_tracker initialized before _scale&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">full</span><span class="p">((</span><span class="mi">1</span><span class="p">,),</span> <span class="bp">self</span><span class="o">.</span><span class="n">_init_scale</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">dev</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_growth_tracker</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">full</span><span class="p">((</span><span class="mi">1</span><span class="p">,),</span> <span class="bp">self</span><span class="o">.</span><span class="n">_init_growth_tracker</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">dev</span><span class="p">)</span>
+
+<div class="viewcode-block" id="GradScaler.scale"><a class="viewcode-back" href="../../../../amp.html#torch.cuda.amp.GradScaler.scale">[docs]</a>    <span class="k">def</span> <span class="nf">scale</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">outputs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Multiplies (&#39;scales&#39;) a tensor or list of tensors by the scale factor.</span>
+
+<span class="sd">        Returns scaled outputs.  If this instance of :class:`GradScaler` is not enabled, outputs are returned</span>
+<span class="sd">        unmodified.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            outputs (Tensor or iterable of Tensors):  Outputs to scale.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enabled</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">outputs</span>
+
+        <span class="c1"># Short-circuit for the common case.</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="k">assert</span> <span class="n">outputs</span><span class="o">.</span><span class="n">is_cuda</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_lazy_init_scale_growth_tracker</span><span class="p">(</span><span class="n">outputs</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+            <span class="k">return</span> <span class="n">outputs</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="n">outputs</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">non_blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># Invoke the more complex machinery only if we&#39;re treating multiple outputs.</span>
+        <span class="n">stash</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">_MultiDeviceReplicator</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>  <span class="c1"># holds a reference that can be overwritten by apply_scale</span>
+
+        <span class="k">def</span> <span class="nf">apply_scale</span><span class="p">(</span><span class="n">val</span><span class="p">):</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">val</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+                <span class="k">assert</span> <span class="n">val</span><span class="o">.</span><span class="n">is_cuda</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">stash</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_lazy_init_scale_growth_tracker</span><span class="p">(</span><span class="n">val</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+                    <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                    <span class="n">stash</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_MultiDeviceReplicator</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_scale</span><span class="p">))</span>
+                <span class="k">return</span> <span class="n">val</span> <span class="o">*</span> <span class="n">stash</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">val</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">val</span><span class="p">,</span> <span class="n">container_abcs</span><span class="o">.</span><span class="n">Iterable</span><span class="p">):</span>
+                <span class="n">iterable</span> <span class="o">=</span> <span class="nb">map</span><span class="p">(</span><span class="n">apply_scale</span><span class="p">,</span> <span class="n">val</span><span class="p">)</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">val</span><span class="p">,</span> <span class="nb">list</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">val</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
+                    <span class="k">return</span> <span class="nb">type</span><span class="p">(</span><span class="n">val</span><span class="p">)(</span><span class="n">iterable</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="n">iterable</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;outputs must be a Tensor or an iterable of Tensors&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">apply_scale</span><span class="p">(</span><span class="n">outputs</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">_unscale_grads_</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">inv_scale</span><span class="p">,</span> <span class="n">found_inf</span><span class="p">,</span> <span class="n">allow_fp16</span><span class="p">):</span>
+        <span class="n">per_device_inv_scale</span> <span class="o">=</span> <span class="n">_MultiDeviceReplicator</span><span class="p">(</span><span class="n">inv_scale</span><span class="p">)</span>
+        <span class="n">per_device_found_inf</span> <span class="o">=</span> <span class="n">_MultiDeviceReplicator</span><span class="p">(</span><span class="n">found_inf</span><span class="p">)</span>
+
+        <span class="c1"># To set up _amp_foreach_non_finite_check_and_unscale_, split grads by device and dtype.</span>
+        <span class="c1"># There could be hundreds of grads, so we&#39;d like to iterate through them just once.</span>
+        <span class="c1"># However, we don&#39;t know their devices or dtypes in advance.</span>
+
+        <span class="c1"># https://stackoverflow.com/questions/5029934/defaultdict-of-defaultdict</span>
+        <span class="c1"># Google says mypy struggles with defaultdicts type annotations.</span>
+        <span class="n">per_device_and_dtype_grads</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">))</span>  <span class="c1"># type: ignore[var-annotated]</span>
+        <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+            <span class="k">for</span> <span class="n">group</span> <span class="ow">in</span> <span class="n">optimizer</span><span class="o">.</span><span class="n">param_groups</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">param</span> <span class="ow">in</span> <span class="n">group</span><span class="p">[</span><span class="s2">&quot;params&quot;</span><span class="p">]:</span>
+                    <span class="k">if</span> <span class="n">param</span><span class="o">.</span><span class="n">grad</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                        <span class="k">continue</span>
+                    <span class="k">if</span> <span class="p">(</span><span class="ow">not</span> <span class="n">allow_fp16</span><span class="p">)</span> <span class="ow">and</span> <span class="n">param</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">dtype</span> <span class="o">==</span> <span class="n">torch</span><span class="o">.</span><span class="n">float16</span><span class="p">:</span>
+                        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Attempting to unscale FP16 gradients.&quot;</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">param</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">is_sparse</span><span class="p">:</span>
+                        <span class="c1"># is_coalesced() == False means the sparse grad has values with duplicate indices.</span>
+                        <span class="c1"># coalesce() deduplicates indices and adds all values that have the same index.</span>
+                        <span class="c1"># For scaled fp16 values, there&#39;s a good chance coalescing will cause overflow,</span>
+                        <span class="c1"># so we should check the coalesced _values().</span>
+                        <span class="k">if</span> <span class="n">param</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">dtype</span> <span class="ow">is</span> <span class="n">torch</span><span class="o">.</span><span class="n">float16</span><span class="p">:</span>
+                            <span class="n">param</span><span class="o">.</span><span class="n">grad</span> <span class="o">=</span> <span class="n">param</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">coalesce</span><span class="p">()</span>
+                        <span class="n">to_unscale</span> <span class="o">=</span> <span class="n">param</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">_values</span><span class="p">()</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">to_unscale</span> <span class="o">=</span> <span class="n">param</span><span class="o">.</span><span class="n">grad</span>
+
+                    <span class="c1"># TODO: is there a way to split by device and dtype without appending in the inner loop?</span>
+                    <span class="n">per_device_and_dtype_grads</span><span class="p">[</span><span class="n">to_unscale</span><span class="o">.</span><span class="n">device</span><span class="p">][</span><span class="n">to_unscale</span><span class="o">.</span><span class="n">dtype</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">to_unscale</span><span class="p">)</span>
+
+            <span class="k">for</span> <span class="n">device</span><span class="p">,</span> <span class="n">per_dtype_grads</span> <span class="ow">in</span> <span class="n">per_device_and_dtype_grads</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="k">for</span> <span class="n">grads</span> <span class="ow">in</span> <span class="n">per_dtype_grads</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+                    <span class="n">torch</span><span class="o">.</span><span class="n">_amp_foreach_non_finite_check_and_unscale_</span><span class="p">(</span><span class="n">grads</span><span class="p">,</span>
+                                                                     <span class="n">per_device_found_inf</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">device</span><span class="p">),</span>
+                                                                     <span class="n">per_device_inv_scale</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">device</span><span class="p">))</span>
+
+        <span class="k">return</span> <span class="n">per_device_found_inf</span><span class="o">.</span><span class="n">_per_device_tensors</span>
+
+<div class="viewcode-block" id="GradScaler.unscale_"><a class="viewcode-back" href="../../../../amp.html#torch.cuda.amp.GradScaler.unscale_">[docs]</a>    <span class="k">def</span> <span class="nf">unscale_</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Divides (&quot;unscales&quot;) the optimizer&#39;s gradient tensors by the scale factor.</span>
+
+<span class="sd">        :meth:`unscale_` is optional, serving cases where you need to</span>
+<span class="sd">        :ref:`modify or inspect gradients&lt;working-with-unscaled-gradients&gt;`</span>
+<span class="sd">        between the backward pass(es) and :meth:`step`.</span>
+<span class="sd">        If :meth:`unscale_` is not called explicitly,  gradients will be unscaled  automatically during :meth:`step`.</span>
+
+<span class="sd">        Simple example, using :meth:`unscale_` to enable clipping of unscaled gradients::</span>
+
+<span class="sd">            ...</span>
+<span class="sd">            scaler.scale(loss).backward()</span>
+<span class="sd">            scaler.unscale_(optimizer)</span>
+<span class="sd">            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)</span>
+<span class="sd">            scaler.step(optimizer)</span>
+<span class="sd">            scaler.update()</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            optimizer (torch.optim.Optimizer):  Optimizer that owns the gradients to be unscaled.</span>
+
+<span class="sd">        .. note::</span>
+<span class="sd">            :meth:`unscale_` does not incur a CPU-GPU sync.</span>
+
+<span class="sd">        .. warning::</span>
+<span class="sd">            :meth:`unscale_` should only be called once per optimizer per :meth:`step` call,</span>
+<span class="sd">            and only after all gradients for that optimizer&#39;s assigned parameters have been accumulated.</span>
+<span class="sd">            Calling :meth:`unscale_` twice for a given optimizer between each :meth:`step` triggers a RuntimeError.</span>
+
+<span class="sd">        .. warning::</span>
+<span class="sd">            :meth:`unscale_` may unscale sparse gradients out of place, replacing the ``.grad`` attribute.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enabled</span><span class="p">:</span>
+            <span class="k">return</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_check_scale_growth_tracker</span><span class="p">(</span><span class="s2">&quot;unscale_&quot;</span><span class="p">)</span>
+
+        <span class="n">optimizer_state</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_per_optimizer_states</span><span class="p">[</span><span class="nb">id</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)]</span>
+
+        <span class="k">if</span> <span class="n">optimizer_state</span><span class="p">[</span><span class="s2">&quot;stage&quot;</span><span class="p">]</span> <span class="ow">is</span> <span class="n">OptState</span><span class="o">.</span><span class="n">UNSCALED</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;unscale_() has already been called on this optimizer since the last update().&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">optimizer_state</span><span class="p">[</span><span class="s2">&quot;stage&quot;</span><span class="p">]</span> <span class="ow">is</span> <span class="n">OptState</span><span class="o">.</span><span class="n">STEPPED</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;unscale_() is being called after step().&quot;</span><span class="p">)</span>
+
+        <span class="c1"># FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+        <span class="n">inv_scale</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span><span class="o">.</span><span class="n">double</span><span class="p">()</span><span class="o">.</span><span class="n">reciprocal</span><span class="p">()</span><span class="o">.</span><span class="n">float</span><span class="p">()</span>
+        <span class="n">found_inf</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">full</span><span class="p">((</span><span class="mi">1</span><span class="p">,),</span> <span class="mf">0.0</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_scale</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+
+        <span class="n">optimizer_state</span><span class="p">[</span><span class="s2">&quot;found_inf_per_device&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_unscale_grads_</span><span class="p">(</span><span class="n">optimizer</span><span class="p">,</span> <span class="n">inv_scale</span><span class="p">,</span> <span class="n">found_inf</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+        <span class="n">optimizer_state</span><span class="p">[</span><span class="s2">&quot;stage&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">OptState</span><span class="o">.</span><span class="n">UNSCALED</span></div>
+
+<div class="viewcode-block" id="GradScaler.step"><a class="viewcode-back" href="../../../../amp.html#torch.cuda.amp.GradScaler.step">[docs]</a>    <span class="k">def</span> <span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        :meth:`step` carries out the following two operations:</span>
+
+<span class="sd">        1.  Internally invokes ``unscale_(optimizer)`` (unless :meth:`unscale_` was explicitly called for ``optimizer``</span>
+<span class="sd">            earlier in the iteration).  As part of the :meth:`unscale_`, gradients are checked for infs/NaNs.</span>
+<span class="sd">        2.  If no inf/NaN gradients are found, invokes ``optimizer.step()`` using the unscaled</span>
+<span class="sd">            gradients.  Otherwise, ``optimizer.step()`` is skipped to avoid corrupting the params.</span>
+
+<span class="sd">        ``*args`` and ``**kwargs`` are forwarded to ``optimizer.step()``.</span>
+
+<span class="sd">        Returns the return value of ``optimizer.step(*args, **kwargs)``.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            optimizer (torch.optim.Optimizer):  Optimizer that applies the gradients.</span>
+<span class="sd">            args:  Any arguments.</span>
+<span class="sd">            kwargs:  Any keyword arguments.</span>
+
+<span class="sd">        .. warning::</span>
+<span class="sd">            Closure use is not currently supported.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="p">(</span><span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enabled</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="s2">&quot;closure&quot;</span> <span class="ow">in</span> <span class="n">kwargs</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Closure use is not currently supported if GradScaler is enabled.&quot;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_check_scale_growth_tracker</span><span class="p">(</span><span class="s2">&quot;step&quot;</span><span class="p">)</span>
+
+        <span class="n">optimizer_state</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_per_optimizer_states</span><span class="p">[</span><span class="nb">id</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)]</span>
+
+        <span class="k">if</span> <span class="n">optimizer_state</span><span class="p">[</span><span class="s2">&quot;stage&quot;</span><span class="p">]</span> <span class="ow">is</span> <span class="n">OptState</span><span class="o">.</span><span class="n">STEPPED</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;step() has already been called since the last update().&quot;</span><span class="p">)</span>
+
+        <span class="n">retval</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="nb">hasattr</span><span class="p">(</span><span class="n">optimizer</span><span class="p">,</span> <span class="s2">&quot;_step_supports_amp_scaling&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">optimizer</span><span class="o">.</span><span class="n">_step_supports_amp_scaling</span><span class="p">):</span>
+            <span class="c1"># This optimizer has customized scale-handling logic, so we can call optimizer.step() directly.</span>
+            <span class="c1"># The contract with custom optimizers is that their step() should accept an additional,</span>
+            <span class="c1"># optional grad_scaler kwarg.  We append self to the kwargs so the custom optimizer has full information:</span>
+            <span class="c1"># it can query its own state, invoke unscale_ on itself, etc</span>
+            <span class="n">retval</span> <span class="o">=</span> <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="nb">dict</span><span class="p">(</span><span class="n">kwargs</span><span class="p">,</span> <span class="n">grad_scaler</span><span class="o">=</span><span class="bp">self</span><span class="p">))</span>
+            <span class="n">optimizer_state</span><span class="p">[</span><span class="s2">&quot;stage&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">OptState</span><span class="o">.</span><span class="n">STEPPED</span>
+            <span class="k">return</span> <span class="n">retval</span>
+
+        <span class="k">if</span> <span class="n">optimizer_state</span><span class="p">[</span><span class="s2">&quot;stage&quot;</span><span class="p">]</span> <span class="ow">is</span> <span class="n">OptState</span><span class="o">.</span><span class="n">READY</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">unscale_</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)</span>
+
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">optimizer_state</span><span class="p">[</span><span class="s2">&quot;found_inf_per_device&quot;</span><span class="p">])</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;No inf checks were recorded for this optimizer.&quot;</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">sum</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">item</span><span class="p">()</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">optimizer_state</span><span class="p">[</span><span class="s2">&quot;found_inf_per_device&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">()):</span>
+            <span class="n">retval</span> <span class="o">=</span> <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+        <span class="n">optimizer_state</span><span class="p">[</span><span class="s2">&quot;stage&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">OptState</span><span class="o">.</span><span class="n">STEPPED</span>
+
+        <span class="k">return</span> <span class="n">retval</span></div>
+
+<div class="viewcode-block" id="GradScaler.update"><a class="viewcode-back" href="../../../../amp.html#torch.cuda.amp.GradScaler.update">[docs]</a>    <span class="k">def</span> <span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">new_scale</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Updates the scale factor.</span>
+
+<span class="sd">        If any optimizer steps were skipped the scale is multiplied by ``backoff_factor``</span>
+<span class="sd">        to reduce it. If ``growth_interval`` unskipped iterations occurred consecutively,</span>
+<span class="sd">        the scale is multiplied by ``growth_factor`` to increase it.</span>
+
+<span class="sd">        Passing ``new_scale`` sets the scale directly.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            new_scale (float or :class:`torch.cuda.FloatTensor`, optional, default=None):  New scale factor.</span>
+
+<span class="sd">        .. warning::</span>
+<span class="sd">            :meth:`update` should only be called at the end of the iteration, after ``scaler.step(optimizer)`` has</span>
+<span class="sd">            been invoked for all optimizers used this iteration.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enabled</span><span class="p">:</span>
+            <span class="k">return</span>
+
+        <span class="n">_scale</span><span class="p">,</span> <span class="n">_growth_tracker</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_scale_growth_tracker</span><span class="p">(</span><span class="s2">&quot;update&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">new_scale</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># Accept a new user-defined scale.</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">new_scale</span><span class="p">,</span> <span class="nb">float</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">full</span><span class="p">((</span><span class="mi">1</span><span class="p">,),</span> <span class="n">new_scale</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">_scale</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">reason</span> <span class="o">=</span> <span class="s2">&quot;new_scale should be a float or a 1-element torch.cuda.FloatTensor with requires_grad=False.&quot;</span>
+                <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">new_scale</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">FloatTensor</span><span class="p">),</span> <span class="n">reason</span>  <span class="c1"># type: ignore[attr-defined]</span>
+                <span class="k">assert</span> <span class="n">new_scale</span><span class="o">.</span><span class="n">numel</span><span class="p">()</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="n">reason</span>
+                <span class="k">assert</span> <span class="n">new_scale</span><span class="o">.</span><span class="n">requires_grad</span> <span class="ow">is</span> <span class="kc">False</span><span class="p">,</span> <span class="n">reason</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span> <span class="o">=</span> <span class="n">new_scale</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Consume shared inf/nan data collected from optimizers to update the scale.</span>
+            <span class="c1"># If all found_inf tensors are on the same device as self._scale, this operation is asynchronous.</span>
+            <span class="n">found_infs</span> <span class="o">=</span> <span class="p">[</span><span class="n">found_inf</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="n">_scale</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">non_blocking</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                          <span class="k">for</span> <span class="n">state</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_per_optimizer_states</span><span class="o">.</span><span class="n">values</span><span class="p">()</span>
+                          <span class="k">for</span> <span class="n">found_inf</span> <span class="ow">in</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;found_inf_per_device&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">()]</span>
+
+            <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">found_infs</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;No inf checks were recorded prior to update.&quot;</span>
+
+            <span class="n">found_inf_combined</span> <span class="o">=</span> <span class="n">found_infs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">found_infs</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">found_infs</span><span class="p">)):</span>
+                    <span class="n">found_inf_combined</span> <span class="o">+=</span> <span class="n">found_infs</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">_amp_update_scale</span><span class="p">(</span><span class="n">_growth_tracker</span><span class="p">,</span>
+                                                  <span class="n">_scale</span><span class="p">,</span>
+                                                  <span class="n">found_inf_combined</span><span class="p">,</span>
+                                                  <span class="bp">self</span><span class="o">.</span><span class="n">_growth_factor</span><span class="p">,</span>
+                                                  <span class="bp">self</span><span class="o">.</span><span class="n">_backoff_factor</span><span class="p">,</span>
+                                                  <span class="bp">self</span><span class="o">.</span><span class="n">_growth_interval</span><span class="p">)</span>
+
+        <span class="c1"># To prepare for next iteration, clear the data collected from optimizers this iteration.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_per_optimizer_states</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="n">_refresh_per_optimizer_state</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">_get_scale_async</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span>
+
+<div class="viewcode-block" id="GradScaler.get_scale"><a class="viewcode-back" href="../../../../amp.html#torch.cuda.amp.GradScaler.get_scale">[docs]</a>    <span class="k">def</span> <span class="nf">get_scale</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns a Python float containing the current scale, or 1.0 if scaling is disabled.</span>
+
+<span class="sd">        .. warning::</span>
+<span class="sd">            :meth:`get_scale` incurs a CPU-GPU sync.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enabled</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_init_scale</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_scale_async</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="mf">1.0</span></div>
+
+<div class="viewcode-block" id="GradScaler.get_growth_factor"><a class="viewcode-back" href="../../../../amp.html#torch.cuda.amp.GradScaler.get_growth_factor">[docs]</a>    <span class="k">def</span> <span class="nf">get_growth_factor</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns a Python float containing the scale growth factor.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_growth_factor</span></div>
+
+<div class="viewcode-block" id="GradScaler.set_growth_factor"><a class="viewcode-back" href="../../../../amp.html#torch.cuda.amp.GradScaler.set_growth_factor">[docs]</a>    <span class="k">def</span> <span class="nf">set_growth_factor</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">new_factor</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Arguments:</span>
+<span class="sd">            new_scale (float):  Value to use as the new scale growth factor.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_growth_factor</span> <span class="o">=</span> <span class="n">new_factor</span></div>
+
+<div class="viewcode-block" id="GradScaler.get_backoff_factor"><a class="viewcode-back" href="../../../../amp.html#torch.cuda.amp.GradScaler.get_backoff_factor">[docs]</a>    <span class="k">def</span> <span class="nf">get_backoff_factor</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns a Python float containing the scale backoff factor.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_backoff_factor</span></div>
+
+<div class="viewcode-block" id="GradScaler.set_backoff_factor"><a class="viewcode-back" href="../../../../amp.html#torch.cuda.amp.GradScaler.set_backoff_factor">[docs]</a>    <span class="k">def</span> <span class="nf">set_backoff_factor</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">new_factor</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Arguments:</span>
+<span class="sd">            new_scale (float):  Value to use as the new scale backoff factor.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_backoff_factor</span> <span class="o">=</span> <span class="n">new_factor</span></div>
+
+<div class="viewcode-block" id="GradScaler.get_growth_interval"><a class="viewcode-back" href="../../../../amp.html#torch.cuda.amp.GradScaler.get_growth_interval">[docs]</a>    <span class="k">def</span> <span class="nf">get_growth_interval</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns a Python int containing the growth interval.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_growth_interval</span></div>
+
+<div class="viewcode-block" id="GradScaler.set_growth_interval"><a class="viewcode-back" href="../../../../amp.html#torch.cuda.amp.GradScaler.set_growth_interval">[docs]</a>    <span class="k">def</span> <span class="nf">set_growth_interval</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">new_interval</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Arguments:</span>
+<span class="sd">            new_interval (int):  Value to use as the new growth interval.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_growth_interval</span> <span class="o">=</span> <span class="n">new_interval</span></div>
+
+    <span class="k">def</span> <span class="nf">_get_growth_tracker</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enabled</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_init_growth_tracker</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_growth_tracker</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">_growth_tracker</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="mi">0</span>
+
+<div class="viewcode-block" id="GradScaler.is_enabled"><a class="viewcode-back" href="../../../../amp.html#torch.cuda.amp.GradScaler.is_enabled">[docs]</a>    <span class="k">def</span> <span class="nf">is_enabled</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns a bool indicating whether this instance is enabled.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enabled</span></div>
+
+<div class="viewcode-block" id="GradScaler.state_dict"><a class="viewcode-back" href="../../../../amp.html#torch.cuda.amp.GradScaler.state_dict">[docs]</a>    <span class="k">def</span> <span class="nf">state_dict</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns the state of the scaler as a :class:`dict`.  It contains five entries:</span>
+
+<span class="sd">        * ``&quot;scale&quot;`` - a Python float containing the current scale</span>
+<span class="sd">        * ``&quot;growth_factor&quot;`` - a Python float containing the current growth factor</span>
+<span class="sd">        * ``&quot;backoff_factor&quot;`` - a Python float containing the current backoff factor</span>
+<span class="sd">        * ``&quot;growth_interval&quot;`` - a Python int containing the current growth interval</span>
+<span class="sd">        * ``&quot;_growth_tracker&quot;`` - a Python int containing the number of recent consecutive unskipped steps.</span>
+
+<span class="sd">        If this instance is not enabled, returns an empty dict.</span>
+
+<span class="sd">        .. note::</span>
+<span class="sd">           If you wish to checkpoint the scaler&#39;s state after a particular iteration, :meth:`state_dict`</span>
+<span class="sd">           should be called after :meth:`update`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;scale&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_scale</span><span class="p">(),</span>
+                <span class="s2">&quot;growth_factor&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_growth_factor</span><span class="p">,</span>
+                <span class="s2">&quot;backoff_factor&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_backoff_factor</span><span class="p">,</span>
+                <span class="s2">&quot;growth_interval&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_growth_interval</span><span class="p">,</span>
+                <span class="s2">&quot;_growth_tracker&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_growth_tracker</span><span class="p">()}</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enabled</span> <span class="k">else</span> <span class="p">{}</span></div>
+
+<div class="viewcode-block" id="GradScaler.load_state_dict"><a class="viewcode-back" href="../../../../amp.html#torch.cuda.amp.GradScaler.load_state_dict">[docs]</a>    <span class="k">def</span> <span class="nf">load_state_dict</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state_dict</span><span class="p">):</span>
+        <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Loads the scaler state.  If this instance is disabled, :meth:`load_state_dict` is a no-op.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">           state_dict(dict): scaler state.  Should be an object returned from a call to :meth:`state_dict`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enabled</span><span class="p">:</span>
+            <span class="k">return</span>
+
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">state_dict</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;The source state dict is empty, possibly because it was saved &quot;</span>
+                               <span class="s2">&quot;from a disabled instance of GradScaler.&quot;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_init_scale</span> <span class="o">=</span> <span class="n">state_dict</span><span class="p">[</span><span class="s2">&quot;scale&quot;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_scale</span><span class="o">.</span><span class="n">fill_</span><span class="p">(</span><span class="n">state_dict</span><span class="p">[</span><span class="s2">&quot;scale&quot;</span><span class="p">])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_growth_factor</span> <span class="o">=</span> <span class="n">state_dict</span><span class="p">[</span><span class="s2">&quot;growth_factor&quot;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_backoff_factor</span> <span class="o">=</span> <span class="n">state_dict</span><span class="p">[</span><span class="s2">&quot;backoff_factor&quot;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_growth_interval</span> <span class="o">=</span> <span class="n">state_dict</span><span class="p">[</span><span class="s2">&quot;growth_interval&quot;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_init_growth_tracker</span> <span class="o">=</span> <span class="n">state_dict</span><span class="p">[</span><span class="s2">&quot;_growth_tracker&quot;</span><span class="p">]</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_growth_tracker</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_growth_tracker</span><span class="o">.</span><span class="n">fill_</span><span class="p">(</span><span class="n">state_dict</span><span class="p">[</span><span class="s2">&quot;_growth_tracker&quot;</span><span class="p">])</span></div>
+
+    <span class="k">def</span> <span class="nf">__getstate__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">state</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__dict__</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enabled</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_per_optimizer_states</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;A GradScaler instance may only be pickled at the beginning &quot;</span>\
+                                                         <span class="s2">&quot;of an iteration, or at the end after scaler.update().&quot;</span>
+            <span class="c1"># Pickling _scale and _growth_tracker Tensors directly triggers</span>
+            <span class="c1"># &quot;warnings.warn(&quot;pickle support for Storage will be removed in 1.5...&quot;</span>
+            <span class="c1"># so instead, we set the unpickled instance up to reinitialize them lazily.</span>
+            <span class="n">state</span><span class="p">[</span><span class="s1">&#39;_init_scale&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_scale</span><span class="p">()</span>
+            <span class="n">state</span><span class="p">[</span><span class="s1">&#39;_init_growth_tracker&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_growth_tracker</span><span class="p">()</span>
+            <span class="n">state</span><span class="p">[</span><span class="s1">&#39;_scale&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">state</span><span class="p">[</span><span class="s1">&#39;_growth_tracker&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="n">state</span>
+
+    <span class="k">def</span> <span class="nf">__setstate__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="vm">__dict__</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_check_inf_per_device</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">):</span>
+        <span class="n">_scale</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_scale_growth_tracker</span><span class="p">(</span><span class="s2">&quot;_check_inf_per_device&quot;</span><span class="p">)</span>
+
+        <span class="n">dummy_inv_scale</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">full</span><span class="p">((</span><span class="mi">1</span><span class="p">,),</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">_scale</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">found_inf</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">full</span><span class="p">((</span><span class="mi">1</span><span class="p">,),</span> <span class="mf">0.0</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">_scale</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_per_optimizer_states</span><span class="p">[</span><span class="nb">id</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)][</span><span class="s2">&quot;found_inf_per_device&quot;</span><span class="p">]</span> <span class="o">=</span> \
+            <span class="bp">self</span><span class="o">.</span><span class="n">_unscale_grads_</span><span class="p">(</span><span class="n">optimizer</span><span class="p">,</span> <span class="n">dummy_inv_scale</span><span class="p">,</span> <span class="n">found_inf</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_per_optimizer_states</span><span class="p">[</span><span class="nb">id</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)][</span><span class="s2">&quot;found_inf_per_device&quot;</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="nf">_found_inf_per_device</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_per_optimizer_states</span><span class="p">[</span><span class="nb">id</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)][</span><span class="s2">&quot;found_inf_per_device&quot;</span><span class="p">]</span></div>
+</pre></div>
+
+             </article>
+             
+            </div>
+            <footer>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="../../../../" src="../../../../_static/documentation_options.js"></script>
+         <script src="../../../../_static/jquery.js"></script>
+         <script src="../../../../_static/underscore.js"></script>
+         <script src="../../../../_static/doctools.js"></script>
+         <script src="../../../../_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="../../../../_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="../../../../_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="../../../../_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="../../../../_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="../../../../_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>

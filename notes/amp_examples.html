@@ -1,0 +1,1087 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Automatic Mixed Precision examples &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/notes/amp_examples.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="../_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Autograd mechanics" href="autograd.html" />
+    <link rel="prev" title="PyTorch documentation" href="../index.html" /> 
+
+  
+  <script src="../_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="../_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/notes/amp_examples.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="../index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+      <li>Automatic Mixed Precision examples</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+            
+            <a href="../_sources/notes/amp_examples.rst.txt" rel="nofollow"><img src="../_static/images/view-page-source-icon.svg"></a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <div class="section" id="automatic-mixed-precision-examples">
+<span id="amp-examples"></span><h1>Automatic Mixed Precision examples<a class="headerlink" href="#automatic-mixed-precision-examples" title="Permalink to this headline">¶</a></h1>
+<p>Ordinarily, “automatic mixed precision training” means training with
+<a class="reference internal" href="../amp.html#torch.cuda.amp.autocast" title="torch.cuda.amp.autocast"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.cuda.amp.autocast</span></code></a> and <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler" title="torch.cuda.amp.GradScaler"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.cuda.amp.GradScaler</span></code></a> together.</p>
+<p>Instances of <a class="reference internal" href="../amp.html#torch.cuda.amp.autocast" title="torch.cuda.amp.autocast"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.cuda.amp.autocast</span></code></a> enable autocasting for chosen regions.
+Autocasting automatically chooses the precision for GPU operations to improve performance
+while maintaining accuracy.</p>
+<p>Instances of <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler" title="torch.cuda.amp.GradScaler"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.cuda.amp.GradScaler</span></code></a> help perform the steps of
+gradient scaling conveniently.  Gradient scaling improves convergence for networks with <code class="docutils literal notranslate"><span class="pre">float16</span></code>
+gradients by minimizing gradient underflow, as explained <a class="reference internal" href="../amp.html#gradient-scaling"><span class="std std-ref">here</span></a>.</p>
+<p><a class="reference internal" href="../amp.html#torch.cuda.amp.autocast" title="torch.cuda.amp.autocast"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.cuda.amp.autocast</span></code></a> and <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler" title="torch.cuda.amp.GradScaler"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.cuda.amp.GradScaler</span></code></a> are modular.
+In the samples below, each is used as its individual documentation suggests.</p>
+<p>(Samples here are illustrative.  See the
+<a class="reference external" href="https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html">Automatic Mixed Precision recipe</a>
+for a runnable walkthrough.)</p>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><p><a class="reference internal" href="#typical-mixed-precision-training" id="id2">Typical Mixed Precision Training</a></p></li>
+<li><p><a class="reference internal" href="#working-with-unscaled-gradients" id="id3">Working with Unscaled Gradients</a></p>
+<ul>
+<li><p><a class="reference internal" href="#gradient-clipping" id="id4">Gradient clipping</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#working-with-scaled-gradients" id="id5">Working with Scaled Gradients</a></p>
+<ul>
+<li><p><a class="reference internal" href="#gradient-accumulation" id="id6">Gradient accumulation</a></p></li>
+<li><p><a class="reference internal" href="#gradient-penalty" id="id7">Gradient penalty</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#working-with-multiple-models-losses-and-optimizers" id="id8">Working with Multiple Models, Losses, and Optimizers</a></p></li>
+<li><p><a class="reference internal" href="#working-with-multiple-gpus" id="id9">Working with Multiple GPUs</a></p>
+<ul>
+<li><p><a class="reference internal" href="#dataparallel-in-a-single-process" id="id10">DataParallel in a single process</a></p></li>
+<li><p><a class="reference internal" href="#distributeddataparallel-one-gpu-per-process" id="id11">DistributedDataParallel, one GPU per process</a></p></li>
+<li><p><a class="reference internal" href="#distributeddataparallel-multiple-gpus-per-process" id="id12">DistributedDataParallel, multiple GPUs per process</a></p></li>
+</ul>
+</li>
+<li><p><a class="reference internal" href="#autocast-and-custom-autograd-functions" id="id13">Autocast and Custom Autograd Functions</a></p>
+<ul>
+<li><p><a class="reference internal" href="#functions-with-multiple-inputs-or-autocastable-ops" id="id14">Functions with multiple inputs or autocastable ops</a></p></li>
+<li><p><a class="reference internal" href="#functions-that-need-a-particular-dtype" id="id15">Functions that need a particular <code class="docutils literal notranslate"><span class="pre">dtype</span></code></a></p></li>
+</ul>
+</li>
+</ul>
+</div>
+<div class="section" id="typical-mixed-precision-training">
+<h2><a class="toc-backref" href="#id2">Typical Mixed Precision Training</a><a class="headerlink" href="#typical-mixed-precision-training" title="Permalink to this headline">¶</a></h2>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Creates model and optimizer in default precision</span>
+<span class="n">model</span> <span class="o">=</span> <span class="n">Net</span><span class="p">()</span><span class="o">.</span><span class="n">cuda</span><span class="p">()</span>
+<span class="n">optimizer</span> <span class="o">=</span> <span class="n">optim</span><span class="o">.</span><span class="n">SGD</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="o">...</span><span class="p">)</span>
+
+<span class="c1"># Creates a GradScaler once at the beginning of training.</span>
+<span class="n">scaler</span> <span class="o">=</span> <span class="n">GradScaler</span><span class="p">()</span>
+
+<span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="n">epochs</span><span class="p">:</span>
+    <span class="k">for</span> <span class="nb">input</span><span class="p">,</span> <span class="n">target</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+
+        <span class="c1"># Runs the forward pass with autocasting.</span>
+        <span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+            <span class="n">output</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_fn</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">target</span><span class="p">)</span>
+
+        <span class="c1"># Scales loss.  Calls backward() on scaled loss to create scaled gradients.</span>
+        <span class="c1"># Backward passes under autocast are not recommended.</span>
+        <span class="c1"># Backward ops run in the same dtype autocast chose for corresponding forward ops.</span>
+        <span class="n">scaler</span><span class="o">.</span><span class="n">scale</span><span class="p">(</span><span class="n">loss</span><span class="p">)</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+        <span class="c1"># scaler.step() first unscales the gradients of the optimizer&#39;s assigned params.</span>
+        <span class="c1"># If these gradients do not contain infs or NaNs, optimizer.step() is then called,</span>
+        <span class="c1"># otherwise, optimizer.step() is skipped.</span>
+        <span class="n">scaler</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)</span>
+
+        <span class="c1"># Updates the scale for next iteration.</span>
+        <span class="n">scaler</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="working-with-unscaled-gradients">
+<span id="id1"></span><h2><a class="toc-backref" href="#id3">Working with Unscaled Gradients</a><a class="headerlink" href="#working-with-unscaled-gradients" title="Permalink to this headline">¶</a></h2>
+<p>All gradients produced by <code class="docutils literal notranslate"><span class="pre">scaler.scale(loss).backward()</span></code> are scaled.  If you wish to modify or inspect
+the parameters’ <code class="docutils literal notranslate"><span class="pre">.grad</span></code> attributes between <code class="docutils literal notranslate"><span class="pre">backward()</span></code> and <code class="docutils literal notranslate"><span class="pre">scaler.step(optimizer)</span></code>,  you should
+unscale them first.  For example, gradient clipping manipulates a set of gradients such that their global norm
+(see <a class="reference internal" href="../generated/torch.nn.utils.clip_grad_norm_.html#torch.nn.utils.clip_grad_norm_" title="torch.nn.utils.clip_grad_norm_"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.nn.utils.clip_grad_norm_()</span></code></a>) or maximum magnitude (see <a class="reference internal" href="../generated/torch.nn.utils.clip_grad_value_.html#torch.nn.utils.clip_grad_value_" title="torch.nn.utils.clip_grad_value_"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.nn.utils.clip_grad_value_()</span></code></a>)
+is <span class="math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo>&lt;</mo><mo>=</mo></mrow><annotation encoding="application/x-tex">&lt;=</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5782em;vertical-align:-0.0391em;"></span><span class="mrel">&lt;</span></span><span class="base"><span class="strut" style="height:0.36687em;vertical-align:0em;"></span><span class="mrel">=</span></span></span></span>
+
+</span> some user-imposed threshold.  If you attempted to clip <em>without</em> unscaling, the gradients’ norm/maximum
+magnitude would also be scaled, so your requested threshold (which was meant to be the threshold for <em>unscaled</em>
+gradients) would be invalid.</p>
+<p><code class="docutils literal notranslate"><span class="pre">scaler.unscale_(optimizer)</span></code> unscales gradients held by <code class="docutils literal notranslate"><span class="pre">optimizer</span></code>’s assigned parameters.
+If your model or models contain other parameters that were assigned to another optimizer
+(say <code class="docutils literal notranslate"><span class="pre">optimizer2</span></code>), you may call <code class="docutils literal notranslate"><span class="pre">scaler.unscale_(optimizer2)</span></code> separately to unscale those
+parameters’ gradients as well.</p>
+<div class="section" id="gradient-clipping">
+<h3><a class="toc-backref" href="#id4">Gradient clipping</a><a class="headerlink" href="#gradient-clipping" title="Permalink to this headline">¶</a></h3>
+<p>Calling <code class="docutils literal notranslate"><span class="pre">scaler.unscale_(optimizer)</span></code> before clipping enables you to clip unscaled gradients as usual:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">scaler</span> <span class="o">=</span> <span class="n">GradScaler</span><span class="p">()</span>
+
+<span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="n">epochs</span><span class="p">:</span>
+    <span class="k">for</span> <span class="nb">input</span><span class="p">,</span> <span class="n">target</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+        <span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+            <span class="n">output</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_fn</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">target</span><span class="p">)</span>
+        <span class="n">scaler</span><span class="o">.</span><span class="n">scale</span><span class="p">(</span><span class="n">loss</span><span class="p">)</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+        <span class="c1"># Unscales the gradients of optimizer&#39;s assigned params in-place</span>
+        <span class="n">scaler</span><span class="o">.</span><span class="n">unscale_</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)</span>
+
+        <span class="c1"># Since the gradients of optimizer&#39;s assigned params are unscaled, clips as usual:</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">clip_grad_norm_</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">max_norm</span><span class="p">)</span>
+
+        <span class="c1"># optimizer&#39;s gradients are already unscaled, so scaler.step does not unscale them,</span>
+        <span class="c1"># although it still skips optimizer.step() if the gradients contain infs or NaNs.</span>
+        <span class="n">scaler</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)</span>
+
+        <span class="c1"># Updates the scale for next iteration.</span>
+        <span class="n">scaler</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">scaler</span></code> records that <code class="docutils literal notranslate"><span class="pre">scaler.unscale_(optimizer)</span></code> was already called for this optimizer
+this iteration, so <code class="docutils literal notranslate"><span class="pre">scaler.step(optimizer)</span></code> knows not to redundantly unscale gradients before
+(internally) calling <code class="docutils literal notranslate"><span class="pre">optimizer.step()</span></code>.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p><a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler.unscale_" title="torch.cuda.amp.GradScaler.unscale_"><code class="xref py py-meth docutils literal notranslate"><span class="pre">unscale_</span></code></a> should only be called once per optimizer per <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler.step" title="torch.cuda.amp.GradScaler.step"><code class="xref py py-meth docutils literal notranslate"><span class="pre">step</span></code></a> call,
+and only after all gradients for that optimizer’s assigned parameters have been accumulated.
+Calling <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler.unscale_" title="torch.cuda.amp.GradScaler.unscale_"><code class="xref py py-meth docutils literal notranslate"><span class="pre">unscale_</span></code></a> twice for a given optimizer between each <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler.step" title="torch.cuda.amp.GradScaler.step"><code class="xref py py-meth docutils literal notranslate"><span class="pre">step</span></code></a> triggers a RuntimeError.</p>
+</div>
+</div>
+</div>
+<div class="section" id="working-with-scaled-gradients">
+<h2><a class="toc-backref" href="#id5">Working with Scaled Gradients</a><a class="headerlink" href="#working-with-scaled-gradients" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="gradient-accumulation">
+<h3><a class="toc-backref" href="#id6">Gradient accumulation</a><a class="headerlink" href="#gradient-accumulation" title="Permalink to this headline">¶</a></h3>
+<p>Gradient accumulation adds gradients over an effective batch of size <code class="docutils literal notranslate"><span class="pre">batch_per_iter</span> <span class="pre">*</span> <span class="pre">iters_to_accumulate</span></code>
+(<code class="docutils literal notranslate"><span class="pre">*</span> <span class="pre">num_procs</span></code> if distributed).  The scale should be calibrated for the effective batch, which means inf/NaN checking,
+step skipping if inf/NaN grads are found, and scale updates should occur at effective-batch granularity.
+Also, grads should remain scaled, and the scale factor should remain constant, while grads for a given effective
+batch are accumulated.  If grads are unscaled (or the scale factor changes) before accumulation is complete,
+the next backward pass will add scaled grads to unscaled grads (or grads scaled by a different factor)
+after which it’s impossible to recover the accumulated unscaled grads <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler.step" title="torch.cuda.amp.GradScaler.step"><code class="xref py py-meth docutils literal notranslate"><span class="pre">step</span></code></a> must apply.</p>
+<p>Therefore, if you want to <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler.unscale_" title="torch.cuda.amp.GradScaler.unscale_"><code class="xref py py-meth docutils literal notranslate"><span class="pre">unscale_</span></code></a> grads (e.g., to allow clipping unscaled grads),
+call <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler.unscale_" title="torch.cuda.amp.GradScaler.unscale_"><code class="xref py py-meth docutils literal notranslate"><span class="pre">unscale_</span></code></a> just before <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler.step" title="torch.cuda.amp.GradScaler.step"><code class="xref py py-meth docutils literal notranslate"><span class="pre">step</span></code></a>, after all (scaled) grads for the upcoming
+<a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler.step" title="torch.cuda.amp.GradScaler.step"><code class="xref py py-meth docutils literal notranslate"><span class="pre">step</span></code></a> have been accumulated.  Also, only call <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler.update" title="torch.cuda.amp.GradScaler.update"><code class="xref py py-meth docutils literal notranslate"><span class="pre">update</span></code></a> at the end of iterations
+where you called <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler.step" title="torch.cuda.amp.GradScaler.step"><code class="xref py py-meth docutils literal notranslate"><span class="pre">step</span></code></a> for a full effective batch:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">scaler</span> <span class="o">=</span> <span class="n">GradScaler</span><span class="p">()</span>
+
+<span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="n">epochs</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">target</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">data</span><span class="p">):</span>
+        <span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+            <span class="n">output</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_fn</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">target</span><span class="p">)</span>
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">loss</span> <span class="o">/</span> <span class="n">iters_to_accumulate</span>
+
+        <span class="c1"># Accumulates scaled gradients.</span>
+        <span class="n">scaler</span><span class="o">.</span><span class="n">scale</span><span class="p">(</span><span class="n">loss</span><span class="p">)</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">%</span> <span class="n">iters_to_accumulate</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="c1"># may unscale_ here if desired (e.g., to allow clipping unscaled gradients)</span>
+
+            <span class="n">scaler</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)</span>
+            <span class="n">scaler</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+            <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="gradient-penalty">
+<h3><a class="toc-backref" href="#id7">Gradient penalty</a><a class="headerlink" href="#gradient-penalty" title="Permalink to this headline">¶</a></h3>
+<p>A gradient penalty implementation commonly creates gradients using
+<a class="reference internal" href="../autograd.html#torch.autograd.grad" title="torch.autograd.grad"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.autograd.grad()</span></code></a>, combines them to create the penalty value,
+and adds the penalty value to the loss.</p>
+<p>Here’s an ordinary example of an L2 penalty without gradient scaling or autocasting:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="n">epochs</span><span class="p">:</span>
+    <span class="k">for</span> <span class="nb">input</span><span class="p">,</span> <span class="n">target</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_fn</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">target</span><span class="p">)</span>
+
+        <span class="c1"># Creates gradients</span>
+        <span class="n">grad_params</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">autograd</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">outputs</span><span class="o">=</span><span class="n">loss</span><span class="p">,</span>
+                                          <span class="n">inputs</span><span class="o">=</span><span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span>
+                                          <span class="n">create_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># Computes the penalty term and adds it to the loss</span>
+        <span class="n">grad_norm</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">grad</span> <span class="ow">in</span> <span class="n">grad_params</span><span class="p">:</span>
+            <span class="n">grad_norm</span> <span class="o">+=</span> <span class="n">grad</span><span class="o">.</span><span class="n">pow</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+        <span class="n">grad_norm</span> <span class="o">=</span> <span class="n">grad_norm</span><span class="o">.</span><span class="n">sqrt</span><span class="p">()</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="n">loss</span> <span class="o">+</span> <span class="n">grad_norm</span>
+
+        <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+        <span class="c1"># clip gradients here, if desired</span>
+
+        <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>To implement a gradient penalty <em>with</em> gradient scaling, the <code class="docutils literal notranslate"><span class="pre">outputs</span></code> Tensor(s)
+passed to <a class="reference internal" href="../autograd.html#torch.autograd.grad" title="torch.autograd.grad"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.autograd.grad()</span></code></a> should be scaled.  The resulting gradients
+will therefore be scaled, and should be unscaled before being combined to create the
+penalty value.</p>
+<p>Also, the penalty term computation is part of the forward pass, and therefore should be
+inside an <a class="reference internal" href="../amp.html#torch.cuda.amp.autocast" title="torch.cuda.amp.autocast"><code class="xref py py-class docutils literal notranslate"><span class="pre">autocast</span></code></a> context.</p>
+<p>Here’s how that looks for the same L2 penalty:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">scaler</span> <span class="o">=</span> <span class="n">GradScaler</span><span class="p">()</span>
+
+<span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="n">epochs</span><span class="p">:</span>
+    <span class="k">for</span> <span class="nb">input</span><span class="p">,</span> <span class="n">target</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+        <span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+            <span class="n">output</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_fn</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">target</span><span class="p">)</span>
+
+        <span class="c1"># Scales the loss for autograd.grad&#39;s backward pass, producing scaled_grad_params</span>
+        <span class="n">scaled_grad_params</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">autograd</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">outputs</span><span class="o">=</span><span class="n">scaler</span><span class="o">.</span><span class="n">scale</span><span class="p">(</span><span class="n">loss</span><span class="p">),</span>
+                                                 <span class="n">inputs</span><span class="o">=</span><span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span>
+                                                 <span class="n">create_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># Creates unscaled grad_params before computing the penalty. scaled_grad_params are</span>
+        <span class="c1"># not owned by any optimizer, so ordinary division is used instead of scaler.unscale_:</span>
+        <span class="n">inv_scale</span> <span class="o">=</span> <span class="mf">1.</span><span class="o">/</span><span class="n">scaler</span><span class="o">.</span><span class="n">get_scale</span><span class="p">()</span>
+        <span class="n">grad_params</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span> <span class="o">*</span> <span class="n">inv_scale</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">scaled_grad_params</span><span class="p">]</span>
+
+        <span class="c1"># Computes the penalty term and adds it to the loss</span>
+        <span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+            <span class="n">grad_norm</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">for</span> <span class="n">grad</span> <span class="ow">in</span> <span class="n">grad_params</span><span class="p">:</span>
+                <span class="n">grad_norm</span> <span class="o">+=</span> <span class="n">grad</span><span class="o">.</span><span class="n">pow</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+            <span class="n">grad_norm</span> <span class="o">=</span> <span class="n">grad_norm</span><span class="o">.</span><span class="n">sqrt</span><span class="p">()</span>
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">loss</span> <span class="o">+</span> <span class="n">grad_norm</span>
+
+        <span class="c1"># Applies scaling to the backward call as usual.</span>
+        <span class="c1"># Accumulates leaf gradients that are correctly scaled.</span>
+        <span class="n">scaler</span><span class="o">.</span><span class="n">scale</span><span class="p">(</span><span class="n">loss</span><span class="p">)</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+        <span class="c1"># may unscale_ here if desired (e.g., to allow clipping unscaled gradients)</span>
+
+        <span class="c1"># step() and update() proceed as usual.</span>
+        <span class="n">scaler</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)</span>
+        <span class="n">scaler</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="working-with-multiple-models-losses-and-optimizers">
+<h2><a class="toc-backref" href="#id8">Working with Multiple Models, Losses, and Optimizers</a><a class="headerlink" href="#working-with-multiple-models-losses-and-optimizers" title="Permalink to this headline">¶</a></h2>
+<p>If your network has multiple losses, you must call <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler.scale" title="torch.cuda.amp.GradScaler.scale"><code class="xref py py-meth docutils literal notranslate"><span class="pre">scaler.scale</span></code></a> on each of them individually.
+If your network has multiple optimizers, you may call <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler.unscale_" title="torch.cuda.amp.GradScaler.unscale_"><code class="xref py py-meth docutils literal notranslate"><span class="pre">scaler.unscale_</span></code></a> on any of them individually,
+and you must call <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler.step" title="torch.cuda.amp.GradScaler.step"><code class="xref py py-meth docutils literal notranslate"><span class="pre">scaler.step</span></code></a> on each of them individually.</p>
+<p>However, <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler.update" title="torch.cuda.amp.GradScaler.update"><code class="xref py py-meth docutils literal notranslate"><span class="pre">scaler.update</span></code></a> should only be called once,
+after all optimizers used this iteration have been stepped:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">scaler</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">amp</span><span class="o">.</span><span class="n">GradScaler</span><span class="p">()</span>
+
+<span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="n">epochs</span><span class="p">:</span>
+    <span class="k">for</span> <span class="nb">input</span><span class="p">,</span> <span class="n">target</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="n">optimizer0</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+        <span class="n">optimizer1</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+        <span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+            <span class="n">output0</span> <span class="o">=</span> <span class="n">model0</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+            <span class="n">output1</span> <span class="o">=</span> <span class="n">model1</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+            <span class="n">loss0</span> <span class="o">=</span> <span class="n">loss_fn</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">output0</span> <span class="o">+</span> <span class="mi">3</span> <span class="o">*</span> <span class="n">output1</span><span class="p">,</span> <span class="n">target</span><span class="p">)</span>
+            <span class="n">loss1</span> <span class="o">=</span> <span class="n">loss_fn</span><span class="p">(</span><span class="mi">3</span> <span class="o">*</span> <span class="n">output0</span> <span class="o">-</span> <span class="mi">5</span> <span class="o">*</span> <span class="n">output1</span><span class="p">,</span> <span class="n">target</span><span class="p">)</span>
+
+        <span class="c1"># (retain_graph here is unrelated to amp, it&#39;s present because in this</span>
+        <span class="c1"># example, both backward() calls share some sections of graph.)</span>
+        <span class="n">scaler</span><span class="o">.</span><span class="n">scale</span><span class="p">(</span><span class="n">loss0</span><span class="p">)</span><span class="o">.</span><span class="n">backward</span><span class="p">(</span><span class="n">retain_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">scaler</span><span class="o">.</span><span class="n">scale</span><span class="p">(</span><span class="n">loss1</span><span class="p">)</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+        <span class="c1"># You can choose which optimizers receive explicit unscaling, if you</span>
+        <span class="c1"># want to inspect or modify the gradients of the params they own.</span>
+        <span class="n">scaler</span><span class="o">.</span><span class="n">unscale_</span><span class="p">(</span><span class="n">optimizer0</span><span class="p">)</span>
+
+        <span class="n">scaler</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">optimizer0</span><span class="p">)</span>
+        <span class="n">scaler</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">optimizer1</span><span class="p">)</span>
+
+        <span class="n">scaler</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Each optimizer checks its gradients for infs/NaNs and makes an independent decision
+whether or not to skip the step.  This may result in one optimizer skipping the step
+while the other one does not.  Since step skipping occurs rarely (every several hundred iterations)
+this should not impede convergence.  If you observe poor convergence after adding gradient scaling
+to a multiple-optimizer model, please report a bug.</p>
+</div>
+<div class="section" id="working-with-multiple-gpus">
+<span id="amp-multigpu"></span><h2><a class="toc-backref" href="#id9">Working with Multiple GPUs</a><a class="headerlink" href="#working-with-multiple-gpus" title="Permalink to this headline">¶</a></h2>
+<p>The issues described here only affect <a class="reference internal" href="../amp.html#torch.cuda.amp.autocast" title="torch.cuda.amp.autocast"><code class="xref py py-class docutils literal notranslate"><span class="pre">autocast</span></code></a>.  <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler" title="torch.cuda.amp.GradScaler"><code class="xref py py-class docutils literal notranslate"><span class="pre">GradScaler</span></code></a>’s usage is unchanged.</p>
+<div class="section" id="dataparallel-in-a-single-process">
+<span id="amp-dataparallel"></span><h3><a class="toc-backref" href="#id10">DataParallel in a single process</a><a class="headerlink" href="#dataparallel-in-a-single-process" title="Permalink to this headline">¶</a></h3>
+<p><a class="reference internal" href="../generated/torch.nn.DataParallel.html#torch.nn.DataParallel" title="torch.nn.DataParallel"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.nn.DataParallel</span></code></a> spawns threads to run the forward pass on each device.
+The autocast state is thread local, so the following will not work:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">model</span> <span class="o">=</span> <span class="n">MyModel</span><span class="p">()</span>
+<span class="n">dp_model</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">DataParallel</span><span class="p">(</span><span class="n">model</span><span class="p">)</span>
+
+<span class="c1"># Sets autocast in the main thread</span>
+<span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+    <span class="c1"># dp_model&#39;s internal threads won&#39;t autocast.  The main thread&#39;s autocast state has no effect.</span>
+    <span class="n">output</span> <span class="o">=</span> <span class="n">dp_model</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+    <span class="c1"># loss_fn still autocasts, but it&#39;s too late...</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_fn</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>The fix is simple.  Enable autocast as part of <code class="docutils literal notranslate"><span class="pre">MyModel.forward</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">MyModel</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="o">...</span>
+    <span class="nd">@autocast</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">):</span>
+       <span class="o">...</span>
+
+<span class="c1"># Alternatively</span>
+<span class="n">MyModel</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="o">...</span>
+    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">):</span>
+        <span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+            <span class="o">...</span>
+</pre></div>
+</div>
+<p>The following now autocasts in <code class="docutils literal notranslate"><span class="pre">dp_model</span></code>’s threads (which execute <code class="docutils literal notranslate"><span class="pre">forward</span></code>) and the main thread
+(which executes <code class="docutils literal notranslate"><span class="pre">loss_fn</span></code>):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">model</span> <span class="o">=</span> <span class="n">MyModel</span><span class="p">()</span>
+<span class="n">dp_model</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">DataParallel</span><span class="p">(</span><span class="n">model</span><span class="p">)</span>
+
+<span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+    <span class="n">output</span> <span class="o">=</span> <span class="n">dp_model</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_fn</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="distributeddataparallel-one-gpu-per-process">
+<h3><a class="toc-backref" href="#id11">DistributedDataParallel, one GPU per process</a><a class="headerlink" href="#distributeddataparallel-one-gpu-per-process" title="Permalink to this headline">¶</a></h3>
+<p><a class="reference internal" href="../generated/torch.nn.parallel.DistributedDataParallel.html#torch.nn.parallel.DistributedDataParallel" title="torch.nn.parallel.DistributedDataParallel"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.nn.parallel.DistributedDataParallel</span></code></a>’s documentation recommends one GPU per process for best
+performance.  In this case, <code class="docutils literal notranslate"><span class="pre">DistributedDataParallel</span></code> does not spawn threads internally,
+so usages of <a class="reference internal" href="../amp.html#torch.cuda.amp.autocast" title="torch.cuda.amp.autocast"><code class="xref py py-class docutils literal notranslate"><span class="pre">autocast</span></code></a> and <a class="reference internal" href="../amp.html#torch.cuda.amp.GradScaler" title="torch.cuda.amp.GradScaler"><code class="xref py py-class docutils literal notranslate"><span class="pre">GradScaler</span></code></a> are not affected.</p>
+</div>
+<div class="section" id="distributeddataparallel-multiple-gpus-per-process">
+<h3><a class="toc-backref" href="#id12">DistributedDataParallel, multiple GPUs per process</a><a class="headerlink" href="#distributeddataparallel-multiple-gpus-per-process" title="Permalink to this headline">¶</a></h3>
+<p>Here <a class="reference internal" href="../generated/torch.nn.parallel.DistributedDataParallel.html#torch.nn.parallel.DistributedDataParallel" title="torch.nn.parallel.DistributedDataParallel"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.nn.parallel.DistributedDataParallel</span></code></a> may spawn a side thread to run the forward pass on each
+device, like <a class="reference internal" href="../generated/torch.nn.DataParallel.html#torch.nn.DataParallel" title="torch.nn.DataParallel"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.nn.DataParallel</span></code></a>.  <a class="reference internal" href="#amp-dataparallel"><span class="std std-ref">The fix is the same</span></a>:
+apply autocast as part of your model’s <code class="docutils literal notranslate"><span class="pre">forward</span></code> method to ensure it’s enabled in side threads.</p>
+</div>
+</div>
+<div class="section" id="autocast-and-custom-autograd-functions">
+<span id="amp-custom-examples"></span><h2><a class="toc-backref" href="#id13">Autocast and Custom Autograd Functions</a><a class="headerlink" href="#autocast-and-custom-autograd-functions" title="Permalink to this headline">¶</a></h2>
+<p>If your network uses <a class="reference internal" href="extending.html#extending-autograd"><span class="std std-ref">custom autograd functions</span></a>
+(subclasses of <a class="reference internal" href="../autograd.html#torch.autograd.Function" title="torch.autograd.Function"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.autograd.Function</span></code></a>), changes are required for
+autocast compatibility if any function</p>
+<ul class="simple">
+<li><p>takes multiple floating-point Tensor inputs,</p></li>
+<li><p>wraps any autocastable op (see the <a class="reference internal" href="../amp.html#autocast-op-reference"><span class="std std-ref">Autocast Op Reference</span></a>), or</p></li>
+<li><p>requires a particular <code class="docutils literal notranslate"><span class="pre">dtype</span></code> (for example, if it wraps
+<a class="reference external" href="https://pytorch.org/tutorials/advanced/cpp_extension.html">CUDA extensions</a>
+that were only compiled for <code class="docutils literal notranslate"><span class="pre">dtype</span></code>).</p></li>
+</ul>
+<p>In all cases, if you’re importing the function and can’t alter its definition, a safe fallback
+is to disable autocast and force execution in <code class="docutils literal notranslate"><span class="pre">float32</span></code> ( or <code class="docutils literal notranslate"><span class="pre">dtype</span></code>) at any points of use where errors occur:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+    <span class="o">...</span>
+    <span class="k">with</span> <span class="n">autocast</span><span class="p">(</span><span class="n">enabled</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="n">imported_function</span><span class="p">(</span><span class="n">input1</span><span class="o">.</span><span class="n">float</span><span class="p">(),</span> <span class="n">input2</span><span class="o">.</span><span class="n">float</span><span class="p">())</span>
+</pre></div>
+</div>
+<p>If you’re the function’s author (or can alter its definition) a better solution is to use the
+<a class="reference internal" href="../amp.html#torch.cuda.amp.custom_fwd" title="torch.cuda.amp.custom_fwd"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.cuda.amp.custom_fwd()</span></code></a> and <a class="reference internal" href="../amp.html#torch.cuda.amp.custom_bwd" title="torch.cuda.amp.custom_bwd"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.cuda.amp.custom_bwd()</span></code></a> decorators as shown in
+the relevant case below.</p>
+<div class="section" id="functions-with-multiple-inputs-or-autocastable-ops">
+<h3><a class="toc-backref" href="#id14">Functions with multiple inputs or autocastable ops</a><a class="headerlink" href="#functions-with-multiple-inputs-or-autocastable-ops" title="Permalink to this headline">¶</a></h3>
+<p>Apply <a class="reference internal" href="../amp.html#torch.cuda.amp.custom_fwd" title="torch.cuda.amp.custom_fwd"><code class="xref py py-func docutils literal notranslate"><span class="pre">custom_fwd</span></code></a> and <a class="reference internal" href="../amp.html#torch.cuda.amp.custom_bwd" title="torch.cuda.amp.custom_bwd"><code class="xref py py-func docutils literal notranslate"><span class="pre">custom_bwd</span></code></a> (with no arguments) to <code class="docutils literal notranslate"><span class="pre">forward</span></code> and
+<code class="docutils literal notranslate"><span class="pre">backward</span></code> respectively.  These ensure <code class="docutils literal notranslate"><span class="pre">forward</span></code> executes with the current autocast state and <code class="docutils literal notranslate"><span class="pre">backward</span></code>
+executes with the same autocast state as <code class="docutils literal notranslate"><span class="pre">forward</span></code> (which can prevent type mismatch errors):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">MyMM</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">autograd</span><span class="o">.</span><span class="n">Function</span><span class="p">):</span>
+    <span class="nd">@staticmethod</span>
+    <span class="nd">@custom_fwd</span>
+    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+        <span class="n">ctx</span><span class="o">.</span><span class="n">save_for_backward</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">a</span><span class="o">.</span><span class="n">mm</span><span class="p">(</span><span class="n">b</span><span class="p">)</span>
+    <span class="nd">@staticmethod</span>
+    <span class="nd">@custom_bwd</span>
+    <span class="k">def</span> <span class="nf">backward</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">grad</span><span class="p">):</span>
+        <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">.</span><span class="n">saved_tensors</span>
+        <span class="k">return</span> <span class="n">grad</span><span class="o">.</span><span class="n">mm</span><span class="p">(</span><span class="n">b</span><span class="o">.</span><span class="n">t</span><span class="p">()),</span> <span class="n">a</span><span class="o">.</span><span class="n">t</span><span class="p">()</span><span class="o">.</span><span class="n">mm</span><span class="p">(</span><span class="n">grad</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Now <code class="docutils literal notranslate"><span class="pre">MyMM</span></code> can be invoked anywhere, without disabling autocast or manually casting inputs:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">mymm</span> <span class="o">=</span> <span class="n">MyMM</span><span class="o">.</span><span class="n">apply</span>
+
+<span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+    <span class="n">output</span> <span class="o">=</span> <span class="n">mymm</span><span class="p">(</span><span class="n">input1</span><span class="p">,</span> <span class="n">input2</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="functions-that-need-a-particular-dtype">
+<h3><a class="toc-backref" href="#id15">Functions that need a particular <code class="docutils literal notranslate"><span class="pre">dtype</span></code></a><a class="headerlink" href="#functions-that-need-a-particular-dtype" title="Permalink to this headline">¶</a></h3>
+<p>Consider a custom function that requires <code class="docutils literal notranslate"><span class="pre">torch.float32</span></code> inputs.
+Apply <a class="reference internal" href="../amp.html#torch.cuda.amp.custom_fwd" title="torch.cuda.amp.custom_fwd"><code class="xref py py-func docutils literal notranslate"><span class="pre">custom_fwd(cast_inputs=torch.float32)</span></code></a> to <code class="docutils literal notranslate"><span class="pre">forward</span></code>
+and <a class="reference internal" href="../amp.html#torch.cuda.amp.custom_bwd" title="torch.cuda.amp.custom_bwd"><code class="xref py py-func docutils literal notranslate"><span class="pre">custom_bwd</span></code></a> (with no arguments) to <code class="docutils literal notranslate"><span class="pre">backward</span></code>.
+If <code class="docutils literal notranslate"><span class="pre">forward</span></code> runs in an autocast-enabled region, the decorators cast floating-point CUDA Tensor
+inputs to <code class="docutils literal notranslate"><span class="pre">float32</span></code>, and locally disable autocast during <code class="docutils literal notranslate"><span class="pre">forward</span></code> and <code class="docutils literal notranslate"><span class="pre">backward</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">MyFloat32Func</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">autograd</span><span class="o">.</span><span class="n">Function</span><span class="p">):</span>
+    <span class="nd">@staticmethod</span>
+    <span class="nd">@custom_fwd</span><span class="p">(</span><span class="n">cast_inputs</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="nb">input</span><span class="p">):</span>
+        <span class="n">ctx</span><span class="o">.</span><span class="n">save_for_backward</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+        <span class="o">...</span>
+        <span class="k">return</span> <span class="n">fwd_output</span>
+    <span class="nd">@staticmethod</span>
+    <span class="nd">@custom_bwd</span>
+    <span class="k">def</span> <span class="nf">backward</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">grad</span><span class="p">):</span>
+        <span class="o">...</span>
+</pre></div>
+</div>
+<p>Now <code class="docutils literal notranslate"><span class="pre">MyFloat32Func</span></code> can be invoked anywhere, without manually disabling autocast or casting inputs:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">func</span> <span class="o">=</span> <span class="n">MyFloat32Func</span><span class="o">.</span><span class="n">apply</span>
+
+<span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+    <span class="c1"># func will run in float32, regardless of the surrounding autocast state</span>
+    <span class="n">output</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</div>
+
+
+             </article>
+             
+            </div>
+            <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="autograd.html" class="btn btn-neutral float-right" title="Autograd mechanics" accesskey="n" rel="next">Next <img src="../_static/images/chevron-right-orange.svg" class="next-page"></a>
+      
+      
+        <a href="../index.html" class="btn btn-neutral" title="PyTorch documentation" accesskey="p" rel="prev"><img src="../_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
+      
+    </div>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              <ul>
+<li><a class="reference internal" href="#">Automatic Mixed Precision examples</a><ul>
+<li><a class="reference internal" href="#typical-mixed-precision-training">Typical Mixed Precision Training</a></li>
+<li><a class="reference internal" href="#working-with-unscaled-gradients">Working with Unscaled Gradients</a><ul>
+<li><a class="reference internal" href="#gradient-clipping">Gradient clipping</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#working-with-scaled-gradients">Working with Scaled Gradients</a><ul>
+<li><a class="reference internal" href="#gradient-accumulation">Gradient accumulation</a></li>
+<li><a class="reference internal" href="#gradient-penalty">Gradient penalty</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#working-with-multiple-models-losses-and-optimizers">Working with Multiple Models, Losses, and Optimizers</a></li>
+<li><a class="reference internal" href="#working-with-multiple-gpus">Working with Multiple GPUs</a><ul>
+<li><a class="reference internal" href="#dataparallel-in-a-single-process">DataParallel in a single process</a></li>
+<li><a class="reference internal" href="#distributeddataparallel-one-gpu-per-process">DistributedDataParallel, one GPU per process</a></li>
+<li><a class="reference internal" href="#distributeddataparallel-multiple-gpus-per-process">DistributedDataParallel, multiple GPUs per process</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#autocast-and-custom-autograd-functions">Autocast and Custom Autograd Functions</a><ul>
+<li><a class="reference internal" href="#functions-with-multiple-inputs-or-autocastable-ops">Functions with multiple inputs or autocastable ops</a></li>
+<li><a class="reference internal" href="#functions-that-need-a-particular-dtype">Functions that need a particular <code class="docutils literal notranslate"><span class="pre">dtype</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+         <script src="../_static/jquery.js"></script>
+         <script src="../_static/underscore.js"></script>
+         <script src="../_static/doctools.js"></script>
+         <script src="../_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="../_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="../_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="../_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="../_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="../_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>

@@ -1,0 +1,1669 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>torch.utils.tensorboard.writer &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/_modules/torch/utils/tensorboard/writer.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="../../../../_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="../../../../_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../../../_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../../../_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+
+  
+  <script src="../../../../_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/_modules/torch/utils/tensorboard/writer.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="../../../../index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+          <li><a href="../../../index.html">Module code</a> &gt;</li>
+        
+          <li><a href="../../../torch.html">torch</a> &gt;</li>
+        
+      <li>torch.utils.tensorboard.writer</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <h1>Source code for torch.utils.tensorboard.writer</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Provides an API for writing protocol buffers to event files to be</span>
+<span class="sd">consumed by TensorBoard for visualization.&quot;&quot;&quot;</span>
+
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">six</span>
+<span class="kn">import</span> <span class="nn">time</span>
+<span class="kn">import</span> <span class="nn">torch</span>
+
+<span class="kn">from</span> <span class="nn">tensorboard.compat</span> <span class="kn">import</span> <span class="n">tf</span>
+<span class="kn">from</span> <span class="nn">tensorboard.compat.proto.event_pb2</span> <span class="kn">import</span> <span class="n">SessionLog</span>
+<span class="kn">from</span> <span class="nn">tensorboard.compat.proto.event_pb2</span> <span class="kn">import</span> <span class="n">Event</span>
+<span class="kn">from</span> <span class="nn">tensorboard.compat.proto</span> <span class="kn">import</span> <span class="n">event_pb2</span>
+<span class="kn">from</span> <span class="nn">tensorboard.plugins.projector.projector_config_pb2</span> <span class="kn">import</span> <span class="n">ProjectorConfig</span>
+<span class="kn">from</span> <span class="nn">tensorboard.summary.writer.event_file_writer</span> <span class="kn">import</span> <span class="n">EventFileWriter</span>
+
+<span class="kn">from</span> <span class="nn">._convert_np</span> <span class="kn">import</span> <span class="n">make_np</span>
+<span class="kn">from</span> <span class="nn">._embedding</span> <span class="kn">import</span> <span class="p">(</span>
+    <span class="n">make_mat</span><span class="p">,</span> <span class="n">make_sprite</span><span class="p">,</span> <span class="n">make_tsv</span><span class="p">,</span> <span class="n">write_pbtxt</span><span class="p">,</span> <span class="n">get_embedding_info</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span> <span class="nn">._onnx_graph</span> <span class="kn">import</span> <span class="n">load_onnx_graph</span>
+<span class="kn">from</span> <span class="nn">._pytorch_graph</span> <span class="kn">import</span> <span class="n">graph</span>
+<span class="kn">from</span> <span class="nn">._utils</span> <span class="kn">import</span> <span class="n">figure_to_image</span>
+<span class="kn">from</span> <span class="nn">.summary</span> <span class="kn">import</span> <span class="p">(</span>
+    <span class="n">scalar</span><span class="p">,</span> <span class="n">histogram</span><span class="p">,</span> <span class="n">histogram_raw</span><span class="p">,</span> <span class="n">image</span><span class="p">,</span> <span class="n">audio</span><span class="p">,</span> <span class="n">text</span><span class="p">,</span>
+    <span class="n">pr_curve</span><span class="p">,</span> <span class="n">pr_curve_raw</span><span class="p">,</span> <span class="n">video</span><span class="p">,</span> <span class="n">custom_scalars</span><span class="p">,</span> <span class="n">image_boxes</span><span class="p">,</span> <span class="n">mesh</span><span class="p">,</span> <span class="n">hparams</span>
+<span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">FileWriter</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Writes protocol buffers to event files to be consumed by TensorBoard.</span>
+
+<span class="sd">    The `FileWriter` class provides a mechanism to create an event file in a</span>
+<span class="sd">    given directory and add summaries and events to it. The class updates the</span>
+<span class="sd">    file contents asynchronously. This allows a training program to call methods</span>
+<span class="sd">    to add data to the file directly from the training loop, without slowing down</span>
+<span class="sd">    training.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">log_dir</span><span class="p">,</span> <span class="n">max_queue</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">flush_secs</span><span class="o">=</span><span class="mi">120</span><span class="p">,</span> <span class="n">filename_suffix</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Creates a `FileWriter` and an event file.</span>
+<span class="sd">        On construction the writer creates a new event file in `log_dir`.</span>
+<span class="sd">        The other arguments to the constructor control the asynchronous writes to</span>
+<span class="sd">        the event file.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">          log_dir: A string. Directory where event file will be written.</span>
+<span class="sd">          max_queue: Integer. Size of the queue for pending events and</span>
+<span class="sd">            summaries before one of the &#39;add&#39; calls forces a flush to disk.</span>
+<span class="sd">            Default is ten items.</span>
+<span class="sd">          flush_secs: Number. How often, in seconds, to flush the</span>
+<span class="sd">            pending events and summaries to disk. Default is every two minutes.</span>
+<span class="sd">          filename_suffix: A string. Suffix added to all event filenames</span>
+<span class="sd">            in the log_dir directory. More details on filename construction in</span>
+<span class="sd">            tensorboard.summary.writer.event_file_writer.EventFileWriter.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Sometimes PosixPath is passed in and we need to coerce it to</span>
+        <span class="c1"># a string in all cases</span>
+        <span class="c1"># TODO: See if we can remove this in the future if we are</span>
+        <span class="c1"># actually the ones passing in a PosixPath</span>
+        <span class="n">log_dir</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">log_dir</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">event_writer</span> <span class="o">=</span> <span class="n">EventFileWriter</span><span class="p">(</span>
+            <span class="n">log_dir</span><span class="p">,</span> <span class="n">max_queue</span><span class="p">,</span> <span class="n">flush_secs</span><span class="p">,</span> <span class="n">filename_suffix</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">get_logdir</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns the directory where event file will be written.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">event_writer</span><span class="o">.</span><span class="n">get_logdir</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">add_event</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">,</span> <span class="n">step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Adds an event to the event file.</span>
+<span class="sd">        Args:</span>
+<span class="sd">          event: An `Event` protocol buffer.</span>
+<span class="sd">          step: Number. Optional global step value for training process</span>
+<span class="sd">            to record with the event.</span>
+<span class="sd">          walltime: float. Optional walltime to override the default (current)</span>
+<span class="sd">            walltime (from time.time()) seconds after epoch</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">event</span><span class="o">.</span><span class="n">wall_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="k">if</span> <span class="n">walltime</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">walltime</span>
+        <span class="k">if</span> <span class="n">step</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># Make sure step is converted from numpy or other formats</span>
+            <span class="c1"># since protobuf might not convert depending on version</span>
+            <span class="n">event</span><span class="o">.</span><span class="n">step</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">step</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">event_writer</span><span class="o">.</span><span class="n">add_event</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">add_summary</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">summary</span><span class="p">,</span> <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Adds a `Summary` protocol buffer to the event file.</span>
+<span class="sd">        This method wraps the provided summary in an `Event` protocol buffer</span>
+<span class="sd">        and adds it to the event file.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">          summary: A `Summary` protocol buffer.</span>
+<span class="sd">          global_step: Number. Optional global step value for training process</span>
+<span class="sd">            to record with the summary.</span>
+<span class="sd">          walltime: float. Optional walltime to override the default (current)</span>
+<span class="sd">            walltime (from time.time()) seconds after epoch</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">event</span> <span class="o">=</span> <span class="n">event_pb2</span><span class="o">.</span><span class="n">Event</span><span class="p">(</span><span class="n">summary</span><span class="o">=</span><span class="n">summary</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">add_event</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="n">global_step</span><span class="p">,</span> <span class="n">walltime</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">add_graph</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">graph_profile</span><span class="p">,</span> <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Adds a `Graph` and step stats protocol buffer to the event file.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">          graph_profile: A `Graph` and step stats protocol buffer.</span>
+<span class="sd">          walltime: float. Optional walltime to override the default (current)</span>
+<span class="sd">            walltime (from time.time()) seconds after epoch</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">graph</span> <span class="o">=</span> <span class="n">graph_profile</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">stepstats</span> <span class="o">=</span> <span class="n">graph_profile</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">event</span> <span class="o">=</span> <span class="n">event_pb2</span><span class="o">.</span><span class="n">Event</span><span class="p">(</span><span class="n">graph_def</span><span class="o">=</span><span class="n">graph</span><span class="o">.</span><span class="n">SerializeToString</span><span class="p">())</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">add_event</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">walltime</span><span class="p">)</span>
+
+        <span class="n">trm</span> <span class="o">=</span> <span class="n">event_pb2</span><span class="o">.</span><span class="n">TaggedRunMetadata</span><span class="p">(</span>
+            <span class="n">tag</span><span class="o">=</span><span class="s1">&#39;step1&#39;</span><span class="p">,</span> <span class="n">run_metadata</span><span class="o">=</span><span class="n">stepstats</span><span class="o">.</span><span class="n">SerializeToString</span><span class="p">())</span>
+        <span class="n">event</span> <span class="o">=</span> <span class="n">event_pb2</span><span class="o">.</span><span class="n">Event</span><span class="p">(</span><span class="n">tagged_run_metadata</span><span class="o">=</span><span class="n">trm</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">add_event</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">walltime</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">add_onnx_graph</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">graph</span><span class="p">,</span> <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Adds a `Graph` protocol buffer to the event file.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">          graph: A `Graph` protocol buffer.</span>
+<span class="sd">          walltime: float. Optional walltime to override the default (current)</span>
+<span class="sd">            _get_file_writerfrom time.time())</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">event</span> <span class="o">=</span> <span class="n">event_pb2</span><span class="o">.</span><span class="n">Event</span><span class="p">(</span><span class="n">graph_def</span><span class="o">=</span><span class="n">graph</span><span class="o">.</span><span class="n">SerializeToString</span><span class="p">())</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">add_event</span><span class="p">(</span><span class="n">event</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">walltime</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">flush</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Flushes the event file to disk.</span>
+<span class="sd">        Call this method to make sure that all pending events have been written to</span>
+<span class="sd">        disk.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">event_writer</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Flushes the event file to disk and close the file.</span>
+<span class="sd">        Call this method when you do not need the summary writer anymore.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">event_writer</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">reopen</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Reopens the EventFileWriter.</span>
+<span class="sd">        Can be called after `close()` to add more events in the same directory.</span>
+<span class="sd">        The events will go into a new events file.</span>
+<span class="sd">        Does nothing if the EventFileWriter was not closed.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">event_writer</span><span class="o">.</span><span class="n">reopen</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="SummaryWriter"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter">[docs]</a><span class="k">class</span> <span class="nc">SummaryWriter</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Writes entries directly to event files in the log_dir to be</span>
+<span class="sd">    consumed by TensorBoard.</span>
+
+<span class="sd">    The `SummaryWriter` class provides a high-level API to create an event file</span>
+<span class="sd">    in a given directory and add summaries and events to it. The class updates the</span>
+<span class="sd">    file contents asynchronously. This allows a training program to call methods</span>
+<span class="sd">    to add data to the file directly from the training loop, without slowing down</span>
+<span class="sd">    training.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="SummaryWriter.__init__"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.__init__">[docs]</a>    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">log_dir</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">comment</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">purge_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_queue</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+                 <span class="n">flush_secs</span><span class="o">=</span><span class="mi">120</span><span class="p">,</span> <span class="n">filename_suffix</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Creates a `SummaryWriter` that will write out events and summaries</span>
+<span class="sd">        to the event file.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            log_dir (string): Save directory location. Default is</span>
+<span class="sd">              runs/**CURRENT_DATETIME_HOSTNAME**, which changes after each run.</span>
+<span class="sd">              Use hierarchical folder structure to compare</span>
+<span class="sd">              between runs easily. e.g. pass in &#39;runs/exp1&#39;, &#39;runs/exp2&#39;, etc.</span>
+<span class="sd">              for each new experiment to compare across them.</span>
+<span class="sd">            comment (string): Comment log_dir suffix appended to the default</span>
+<span class="sd">              ``log_dir``. If ``log_dir`` is assigned, this argument has no effect.</span>
+<span class="sd">            purge_step (int):</span>
+<span class="sd">              When logging crashes at step :math:`T+X` and restarts at step :math:`T`,</span>
+<span class="sd">              any events whose global_step larger or equal to :math:`T` will be</span>
+<span class="sd">              purged and hidden from TensorBoard.</span>
+<span class="sd">              Note that crashed and resumed experiments should have the same ``log_dir``.</span>
+<span class="sd">            max_queue (int): Size of the queue for pending events and</span>
+<span class="sd">              summaries before one of the &#39;add&#39; calls forces a flush to disk.</span>
+<span class="sd">              Default is ten items.</span>
+<span class="sd">            flush_secs (int): How often, in seconds, to flush the</span>
+<span class="sd">              pending events and summaries to disk. Default is every two minutes.</span>
+<span class="sd">            filename_suffix (string): Suffix added to all event filenames in</span>
+<span class="sd">              the log_dir directory. More details on filename construction in</span>
+<span class="sd">              tensorboard.summary.writer.event_file_writer.EventFileWriter.</span>
+
+<span class="sd">        Examples::</span>
+
+<span class="sd">            from torch.utils.tensorboard import SummaryWriter</span>
+
+<span class="sd">            # create a summary writer with automatically generated folder name.</span>
+<span class="sd">            writer = SummaryWriter()</span>
+<span class="sd">            # folder location: runs/May04_22-14-54_s-MacBook-Pro.local/</span>
+
+<span class="sd">            # create a summary writer using the specified folder name.</span>
+<span class="sd">            writer = SummaryWriter(&quot;my_experiment&quot;)</span>
+<span class="sd">            # folder location: my_experiment</span>
+
+<span class="sd">            # create a summary writer with comment appended.</span>
+<span class="sd">            writer = SummaryWriter(comment=&quot;LR_0.1_BATCH_16&quot;)</span>
+<span class="sd">            # folder location: runs/May04_22-14-54_s-MacBook-Pro.localLR_0.1_BATCH_16/</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.create.summarywriter&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">log_dir</span><span class="p">:</span>
+            <span class="kn">import</span> <span class="nn">socket</span>
+            <span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">datetime</span>
+            <span class="n">current_time</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%b</span><span class="si">%d</span><span class="s1">_%H-%M-%S&#39;</span><span class="p">)</span>
+            <span class="n">log_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+                <span class="s1">&#39;runs&#39;</span><span class="p">,</span> <span class="n">current_time</span> <span class="o">+</span> <span class="s1">&#39;_&#39;</span> <span class="o">+</span> <span class="n">socket</span><span class="o">.</span><span class="n">gethostname</span><span class="p">()</span> <span class="o">+</span> <span class="n">comment</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">log_dir</span> <span class="o">=</span> <span class="n">log_dir</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">purge_step</span> <span class="o">=</span> <span class="n">purge_step</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_queue</span> <span class="o">=</span> <span class="n">max_queue</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">flush_secs</span> <span class="o">=</span> <span class="n">flush_secs</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">filename_suffix</span> <span class="o">=</span> <span class="n">filename_suffix</span>
+
+        <span class="c1"># Initialize the file writers, but they can be cleared out on close</span>
+        <span class="c1"># and recreated later as needed.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">all_writers</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span>
+
+        <span class="c1"># Create default bins for histograms, see generate_testdata.py in tensorflow/tensorboard</span>
+        <span class="n">v</span> <span class="o">=</span> <span class="mf">1E-12</span>
+        <span class="n">buckets</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">neg_buckets</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">while</span> <span class="n">v</span> <span class="o">&lt;</span> <span class="mf">1E20</span><span class="p">:</span>
+            <span class="n">buckets</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+            <span class="n">neg_buckets</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="o">-</span><span class="n">v</span><span class="p">)</span>
+            <span class="n">v</span> <span class="o">*=</span> <span class="mf">1.1</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">default_bins</span> <span class="o">=</span> <span class="n">neg_buckets</span><span class="p">[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">buckets</span></div>
+
+    <span class="k">def</span> <span class="nf">_check_caffe2_blob</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">item</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Caffe2 users have the option of passing a string representing the name of</span>
+<span class="sd">        a blob in the workspace instead of passing the actual Tensor/array containing</span>
+<span class="sd">        the numeric values. Thus, we need to check if we received a string as input</span>
+<span class="sd">        instead of an actual Tensor/array, and if so, we need to fetch the Blob</span>
+<span class="sd">        from the workspace corresponding to that name. Fetching can be done with the</span>
+<span class="sd">        following:</span>
+
+<span class="sd">        from caffe2.python import workspace (if not already imported)</span>
+<span class="sd">        workspace.FetchBlob(blob_name)</span>
+<span class="sd">        workspace.FetchBlobs([blob_name1, blob_name2, ...])</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">item</span><span class="p">,</span> <span class="n">six</span><span class="o">.</span><span class="n">string_types</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_get_file_writer</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns the default FileWriter instance. Recreates it if closed.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">all_writers</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span> <span class="o">=</span> <span class="n">FileWriter</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">log_dir</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_queue</span><span class="p">,</span>
+                                          <span class="bp">self</span><span class="o">.</span><span class="n">flush_secs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">filename_suffix</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">all_writers</span> <span class="o">=</span> <span class="p">{</span><span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span><span class="o">.</span><span class="n">get_logdir</span><span class="p">():</span> <span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span><span class="p">}</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">purge_step</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">most_recent_step</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">purge_step</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span><span class="o">.</span><span class="n">add_event</span><span class="p">(</span>
+                    <span class="n">Event</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">most_recent_step</span><span class="p">,</span> <span class="n">file_version</span><span class="o">=</span><span class="s1">&#39;brain.Event:2&#39;</span><span class="p">))</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span><span class="o">.</span><span class="n">add_event</span><span class="p">(</span>
+                    <span class="n">Event</span><span class="p">(</span><span class="n">step</span><span class="o">=</span><span class="n">most_recent_step</span><span class="p">,</span> <span class="n">session_log</span><span class="o">=</span><span class="n">SessionLog</span><span class="p">(</span><span class="n">status</span><span class="o">=</span><span class="n">SessionLog</span><span class="o">.</span><span class="n">START</span><span class="p">)))</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">purge_step</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span>
+
+    <span class="k">def</span> <span class="nf">get_logdir</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Returns the directory where event files will be written.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">log_dir</span>
+
+<div class="viewcode-block" id="SummaryWriter.add_hparams"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.add_hparams">[docs]</a>    <span class="k">def</span> <span class="nf">add_hparams</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">hparam_dict</span><span class="p">,</span> <span class="n">metric_dict</span><span class="p">,</span> <span class="n">hparam_domain_discrete</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">run_name</span><span class="o">=</span><span class="kc">None</span>
+    <span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add a set of hyperparameters to be compared in TensorBoard.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            hparam_dict (dict): Each key-value pair in the dictionary is the</span>
+<span class="sd">              name of the hyper parameter and it&#39;s corresponding value.</span>
+<span class="sd">              The type of the value can be one of `bool`, `string`, `float`,</span>
+<span class="sd">              `int`, or `None`.</span>
+<span class="sd">            metric_dict (dict): Each key-value pair in the dictionary is the</span>
+<span class="sd">              name of the metric and it&#39;s corresponding value. Note that the key used</span>
+<span class="sd">              here should be unique in the tensorboard record. Otherwise the value</span>
+<span class="sd">              you added by ``add_scalar`` will be displayed in hparam plugin. In most</span>
+<span class="sd">              cases, this is unwanted.</span>
+<span class="sd">            hparam_domain_discrete: (Optional[Dict[str, List[Any]]]) A dictionary that</span>
+<span class="sd">              contains names of the hyperparameters and all discrete values they can hold</span>
+<span class="sd">            run_name (str): Name of the run, to be included as part of the logdir.</span>
+<span class="sd">              If unspecified, will use current timestamp.</span>
+
+<span class="sd">        Examples::</span>
+
+<span class="sd">            from torch.utils.tensorboard import SummaryWriter</span>
+<span class="sd">            with SummaryWriter() as w:</span>
+<span class="sd">                for i in range(5):</span>
+<span class="sd">                    w.add_hparams({&#39;lr&#39;: 0.1*i, &#39;bsize&#39;: i},</span>
+<span class="sd">                                  {&#39;hparam/accuracy&#39;: 10*i, &#39;hparam/loss&#39;: 10*i})</span>
+
+<span class="sd">        Expected result:</span>
+
+<span class="sd">        .. image:: _static/img/tensorboard/add_hparam.png</span>
+<span class="sd">           :scale: 50 %</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_hparams&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">type</span><span class="p">(</span><span class="n">hparam_dict</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="nb">dict</span> <span class="ow">or</span> <span class="nb">type</span><span class="p">(</span><span class="n">metric_dict</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="nb">dict</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s1">&#39;hparam_dict and metric_dict should be dictionary.&#39;</span><span class="p">)</span>
+        <span class="n">exp</span><span class="p">,</span> <span class="n">ssi</span><span class="p">,</span> <span class="n">sei</span> <span class="o">=</span> <span class="n">hparams</span><span class="p">(</span><span class="n">hparam_dict</span><span class="p">,</span> <span class="n">metric_dict</span><span class="p">,</span> <span class="n">hparam_domain_discrete</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">run_name</span><span class="p">:</span>
+            <span class="n">run_name</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">())</span>
+        <span class="n">logdir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">get_logdir</span><span class="p">(),</span> <span class="n">run_name</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">SummaryWriter</span><span class="p">(</span><span class="n">log_dir</span><span class="o">=</span><span class="n">logdir</span><span class="p">)</span> <span class="k">as</span> <span class="n">w_hp</span><span class="p">:</span>
+            <span class="n">w_hp</span><span class="o">.</span><span class="n">file_writer</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span><span class="n">exp</span><span class="p">)</span>
+            <span class="n">w_hp</span><span class="o">.</span><span class="n">file_writer</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span><span class="n">ssi</span><span class="p">)</span>
+            <span class="n">w_hp</span><span class="o">.</span><span class="n">file_writer</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span><span class="n">sei</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">metric_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">w_hp</span><span class="o">.</span><span class="n">add_scalar</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="SummaryWriter.add_scalar"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.add_scalar">[docs]</a>    <span class="k">def</span> <span class="nf">add_scalar</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">scalar_value</span><span class="p">,</span> <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add scalar data to summary.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tag (string): Data identifier</span>
+<span class="sd">            scalar_value (float or string/blobname): Value to save</span>
+<span class="sd">            global_step (int): Global step value to record</span>
+<span class="sd">            walltime (float): Optional override default walltime (time.time())</span>
+<span class="sd">              with seconds after epoch of event</span>
+
+<span class="sd">        Examples::</span>
+
+<span class="sd">            from torch.utils.tensorboard import SummaryWriter</span>
+<span class="sd">            writer = SummaryWriter()</span>
+<span class="sd">            x = range(100)</span>
+<span class="sd">            for i in x:</span>
+<span class="sd">                writer.add_scalar(&#39;y=2x&#39;, i * 2, i)</span>
+<span class="sd">            writer.close()</span>
+
+<span class="sd">        Expected result:</span>
+
+<span class="sd">        .. image:: _static/img/tensorboard/add_scalar.png</span>
+<span class="sd">           :scale: 50 %</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_scalar&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_caffe2_blob</span><span class="p">(</span><span class="n">scalar_value</span><span class="p">):</span>
+            <span class="kn">from</span> <span class="nn">caffe2.python</span> <span class="kn">import</span> <span class="n">workspace</span>
+            <span class="n">scalar_value</span> <span class="o">=</span> <span class="n">workspace</span><span class="o">.</span><span class="n">FetchBlob</span><span class="p">(</span><span class="n">scalar_value</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span>
+            <span class="n">scalar</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">scalar_value</span><span class="p">),</span> <span class="n">global_step</span><span class="p">,</span> <span class="n">walltime</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="SummaryWriter.add_scalars"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.add_scalars">[docs]</a>    <span class="k">def</span> <span class="nf">add_scalars</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">main_tag</span><span class="p">,</span> <span class="n">tag_scalar_dict</span><span class="p">,</span> <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Adds many scalar data to summary.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            main_tag (string): The parent name for the tags</span>
+<span class="sd">            tag_scalar_dict (dict): Key-value pair storing the tag and corresponding values</span>
+<span class="sd">            global_step (int): Global step value to record</span>
+<span class="sd">            walltime (float): Optional override default walltime (time.time())</span>
+<span class="sd">              seconds after epoch of event</span>
+
+<span class="sd">        Examples::</span>
+
+<span class="sd">            from torch.utils.tensorboard import SummaryWriter</span>
+<span class="sd">            writer = SummaryWriter()</span>
+<span class="sd">            r = 5</span>
+<span class="sd">            for i in range(100):</span>
+<span class="sd">                writer.add_scalars(&#39;run_14h&#39;, {&#39;xsinx&#39;:i*np.sin(i/r),</span>
+<span class="sd">                                                &#39;xcosx&#39;:i*np.cos(i/r),</span>
+<span class="sd">                                                &#39;tanx&#39;: np.tan(i/r)}, i)</span>
+<span class="sd">            writer.close()</span>
+<span class="sd">            # This call adds three values to the same scalar plot with the tag</span>
+<span class="sd">            # &#39;run_14h&#39; in TensorBoard&#39;s scalar section.</span>
+
+<span class="sd">        Expected result:</span>
+
+<span class="sd">        .. image:: _static/img/tensorboard/add_scalars.png</span>
+<span class="sd">           :scale: 50 %</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_scalars&quot;</span><span class="p">)</span>
+        <span class="n">walltime</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="k">if</span> <span class="n">walltime</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">walltime</span>
+        <span class="n">fw_logdir</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">get_logdir</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">tag</span><span class="p">,</span> <span class="n">scalar_value</span> <span class="ow">in</span> <span class="n">tag_scalar_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">fw_tag</span> <span class="o">=</span> <span class="n">fw_logdir</span> <span class="o">+</span> <span class="s2">&quot;/&quot;</span> <span class="o">+</span> <span class="n">main_tag</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">,</span> <span class="s2">&quot;_&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;_&quot;</span> <span class="o">+</span> <span class="n">tag</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">all_writers</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+            <span class="k">if</span> <span class="n">fw_tag</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">all_writers</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+                <span class="n">fw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">all_writers</span><span class="p">[</span><span class="n">fw_tag</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">fw</span> <span class="o">=</span> <span class="n">FileWriter</span><span class="p">(</span><span class="n">fw_tag</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_queue</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">flush_secs</span><span class="p">,</span>
+                                <span class="bp">self</span><span class="o">.</span><span class="n">filename_suffix</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">all_writers</span><span class="p">[</span><span class="n">fw_tag</span><span class="p">]</span> <span class="o">=</span> <span class="n">fw</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_caffe2_blob</span><span class="p">(</span><span class="n">scalar_value</span><span class="p">):</span>
+                <span class="kn">from</span> <span class="nn">caffe2.python</span> <span class="kn">import</span> <span class="n">workspace</span>
+                <span class="n">scalar_value</span> <span class="o">=</span> <span class="n">workspace</span><span class="o">.</span><span class="n">FetchBlob</span><span class="p">(</span><span class="n">scalar_value</span><span class="p">)</span>
+            <span class="n">fw</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span><span class="n">scalar</span><span class="p">(</span><span class="n">main_tag</span><span class="p">,</span> <span class="n">scalar_value</span><span class="p">),</span>
+                           <span class="n">global_step</span><span class="p">,</span> <span class="n">walltime</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="SummaryWriter.add_histogram"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.add_histogram">[docs]</a>    <span class="k">def</span> <span class="nf">add_histogram</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">values</span><span class="p">,</span> <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="s1">&#39;tensorflow&#39;</span><span class="p">,</span> <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">max_bins</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add histogram to summary.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tag (string): Data identifier</span>
+<span class="sd">            values (torch.Tensor, numpy.array, or string/blobname): Values to build histogram</span>
+<span class="sd">            global_step (int): Global step value to record</span>
+<span class="sd">            bins (string): One of {&#39;tensorflow&#39;,&#39;auto&#39;, &#39;fd&#39;, ...}. This determines how the bins are made. You can find</span>
+<span class="sd">              other options in: https://docs.scipy.org/doc/numpy/reference/generated/numpy.histogram.html</span>
+<span class="sd">            walltime (float): Optional override default walltime (time.time())</span>
+<span class="sd">              seconds after epoch of event</span>
+
+<span class="sd">        Examples::</span>
+
+<span class="sd">            from torch.utils.tensorboard import SummaryWriter</span>
+<span class="sd">            import numpy as np</span>
+<span class="sd">            writer = SummaryWriter()</span>
+<span class="sd">            for i in range(10):</span>
+<span class="sd">                x = np.random.random(1000)</span>
+<span class="sd">                writer.add_histogram(&#39;distribution centers&#39;, x + i, i)</span>
+<span class="sd">            writer.close()</span>
+
+<span class="sd">        Expected result:</span>
+
+<span class="sd">        .. image:: _static/img/tensorboard/add_histogram.png</span>
+<span class="sd">           :scale: 50 %</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_histogram&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_caffe2_blob</span><span class="p">(</span><span class="n">values</span><span class="p">):</span>
+            <span class="kn">from</span> <span class="nn">caffe2.python</span> <span class="kn">import</span> <span class="n">workspace</span>
+            <span class="n">values</span> <span class="o">=</span> <span class="n">workspace</span><span class="o">.</span><span class="n">FetchBlob</span><span class="p">(</span><span class="n">values</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">bins</span><span class="p">,</span> <span class="n">six</span><span class="o">.</span><span class="n">string_types</span><span class="p">)</span> <span class="ow">and</span> <span class="n">bins</span> <span class="o">==</span> <span class="s1">&#39;tensorflow&#39;</span><span class="p">:</span>
+            <span class="n">bins</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_bins</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span>
+            <span class="n">histogram</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">values</span><span class="p">,</span> <span class="n">bins</span><span class="p">,</span> <span class="n">max_bins</span><span class="o">=</span><span class="n">max_bins</span><span class="p">),</span> <span class="n">global_step</span><span class="p">,</span> <span class="n">walltime</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">add_histogram_raw</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="nb">min</span><span class="p">,</span> <span class="nb">max</span><span class="p">,</span> <span class="n">num</span><span class="p">,</span> <span class="nb">sum</span><span class="p">,</span> <span class="n">sum_squares</span><span class="p">,</span>
+                          <span class="n">bucket_limits</span><span class="p">,</span> <span class="n">bucket_counts</span><span class="p">,</span> <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                          <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Adds histogram with raw data.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tag (string): Data identifier</span>
+<span class="sd">            min (float or int): Min value</span>
+<span class="sd">            max (float or int): Max value</span>
+<span class="sd">            num (int): Number of values</span>
+<span class="sd">            sum (float or int): Sum of all values</span>
+<span class="sd">            sum_squares (float or int): Sum of squares for all values</span>
+<span class="sd">            bucket_limits (torch.Tensor, numpy.array): Upper value per bucket.</span>
+<span class="sd">              The number of elements of it should be the same as `bucket_counts`.</span>
+<span class="sd">            bucket_counts (torch.Tensor, numpy.array): Number of values per bucket</span>
+<span class="sd">            global_step (int): Global step value to record</span>
+<span class="sd">            walltime (float): Optional override default walltime (time.time())</span>
+<span class="sd">              seconds after epoch of event</span>
+<span class="sd">            see: https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/histogram/README.md</span>
+
+<span class="sd">        Examples::</span>
+
+<span class="sd">            from torch.utils.tensorboard import SummaryWriter</span>
+<span class="sd">            import numpy as np</span>
+<span class="sd">            writer = SummaryWriter()</span>
+<span class="sd">            dummy_data = []</span>
+<span class="sd">            for idx, value in enumerate(range(50)):</span>
+<span class="sd">                dummy_data += [idx + 0.001] * value</span>
+
+<span class="sd">            bins = list(range(50+2))</span>
+<span class="sd">            bins = np.array(bins)</span>
+<span class="sd">            values = np.array(dummy_data).astype(float).reshape(-1)</span>
+<span class="sd">            counts, limits = np.histogram(values, bins=bins)</span>
+<span class="sd">            sum_sq = values.dot(values)</span>
+<span class="sd">            writer.add_histogram_raw(</span>
+<span class="sd">                tag=&#39;histogram_with_raw_data&#39;,</span>
+<span class="sd">                min=values.min(),</span>
+<span class="sd">                max=values.max(),</span>
+<span class="sd">                num=len(values),</span>
+<span class="sd">                sum=values.sum(),</span>
+<span class="sd">                sum_squares=sum_sq,</span>
+<span class="sd">                bucket_limits=limits[1:].tolist(),</span>
+<span class="sd">                bucket_counts=counts.tolist(),</span>
+<span class="sd">                global_step=0)</span>
+<span class="sd">            writer.close()</span>
+
+<span class="sd">        Expected result:</span>
+
+<span class="sd">        .. image:: _static/img/tensorboard/add_histogram_raw.png</span>
+<span class="sd">           :scale: 50 %</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_histogram_raw&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">bucket_limits</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">bucket_counts</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;len(bucket_limits) != len(bucket_counts), see the document.&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span>
+            <span class="n">histogram_raw</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span>
+                          <span class="nb">min</span><span class="p">,</span>
+                          <span class="nb">max</span><span class="p">,</span>
+                          <span class="n">num</span><span class="p">,</span>
+                          <span class="nb">sum</span><span class="p">,</span>
+                          <span class="n">sum_squares</span><span class="p">,</span>
+                          <span class="n">bucket_limits</span><span class="p">,</span>
+                          <span class="n">bucket_counts</span><span class="p">),</span>
+            <span class="n">global_step</span><span class="p">,</span>
+            <span class="n">walltime</span><span class="p">)</span>
+
+<div class="viewcode-block" id="SummaryWriter.add_image"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.add_image">[docs]</a>    <span class="k">def</span> <span class="nf">add_image</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">img_tensor</span><span class="p">,</span> <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">dataformats</span><span class="o">=</span><span class="s1">&#39;CHW&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add image data to summary.</span>
+
+<span class="sd">        Note that this requires the ``pillow`` package.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tag (string): Data identifier</span>
+<span class="sd">            img_tensor (torch.Tensor, numpy.array, or string/blobname): Image data</span>
+<span class="sd">            global_step (int): Global step value to record</span>
+<span class="sd">            walltime (float): Optional override default walltime (time.time())</span>
+<span class="sd">              seconds after epoch of event</span>
+<span class="sd">        Shape:</span>
+<span class="sd">            img_tensor: Default is :math:`(3, H, W)`. You can use ``torchvision.utils.make_grid()`` to</span>
+<span class="sd">            convert a batch of tensor into 3xHxW format or call ``add_images`` and let us do the job.</span>
+<span class="sd">            Tensor with :math:`(1, H, W)`, :math:`(H, W)`, :math:`(H, W, 3)` is also suitable as long as</span>
+<span class="sd">            corresponding ``dataformats`` argument is passed, e.g. ``CHW``, ``HWC``, ``HW``.</span>
+
+<span class="sd">        Examples::</span>
+
+<span class="sd">            from torch.utils.tensorboard import SummaryWriter</span>
+<span class="sd">            import numpy as np</span>
+<span class="sd">            img = np.zeros((3, 100, 100))</span>
+<span class="sd">            img[0] = np.arange(0, 10000).reshape(100, 100) / 10000</span>
+<span class="sd">            img[1] = 1 - np.arange(0, 10000).reshape(100, 100) / 10000</span>
+
+<span class="sd">            img_HWC = np.zeros((100, 100, 3))</span>
+<span class="sd">            img_HWC[:, :, 0] = np.arange(0, 10000).reshape(100, 100) / 10000</span>
+<span class="sd">            img_HWC[:, :, 1] = 1 - np.arange(0, 10000).reshape(100, 100) / 10000</span>
+
+<span class="sd">            writer = SummaryWriter()</span>
+<span class="sd">            writer.add_image(&#39;my_image&#39;, img, 0)</span>
+
+<span class="sd">            # If you have non-default dimension setting, set the dataformats argument.</span>
+<span class="sd">            writer.add_image(&#39;my_image_HWC&#39;, img_HWC, 0, dataformats=&#39;HWC&#39;)</span>
+<span class="sd">            writer.close()</span>
+
+<span class="sd">        Expected result:</span>
+
+<span class="sd">        .. image:: _static/img/tensorboard/add_image.png</span>
+<span class="sd">           :scale: 50 %</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_image&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_caffe2_blob</span><span class="p">(</span><span class="n">img_tensor</span><span class="p">):</span>
+            <span class="kn">from</span> <span class="nn">caffe2.python</span> <span class="kn">import</span> <span class="n">workspace</span>
+            <span class="n">img_tensor</span> <span class="o">=</span> <span class="n">workspace</span><span class="o">.</span><span class="n">FetchBlob</span><span class="p">(</span><span class="n">img_tensor</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span>
+            <span class="n">image</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">img_tensor</span><span class="p">,</span> <span class="n">dataformats</span><span class="o">=</span><span class="n">dataformats</span><span class="p">),</span> <span class="n">global_step</span><span class="p">,</span> <span class="n">walltime</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="SummaryWriter.add_images"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.add_images">[docs]</a>    <span class="k">def</span> <span class="nf">add_images</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">img_tensor</span><span class="p">,</span> <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">dataformats</span><span class="o">=</span><span class="s1">&#39;NCHW&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add batched image data to summary.</span>
+
+<span class="sd">        Note that this requires the ``pillow`` package.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tag (string): Data identifier</span>
+<span class="sd">            img_tensor (torch.Tensor, numpy.array, or string/blobname): Image data</span>
+<span class="sd">            global_step (int): Global step value to record</span>
+<span class="sd">            walltime (float): Optional override default walltime (time.time())</span>
+<span class="sd">              seconds after epoch of event</span>
+<span class="sd">            dataformats (string): Image data format specification of the form</span>
+<span class="sd">              NCHW, NHWC, CHW, HWC, HW, WH, etc.</span>
+<span class="sd">        Shape:</span>
+<span class="sd">            img_tensor: Default is :math:`(N, 3, H, W)`. If ``dataformats`` is specified, other shape will be</span>
+<span class="sd">            accepted. e.g. NCHW or NHWC.</span>
+
+<span class="sd">        Examples::</span>
+
+<span class="sd">            from torch.utils.tensorboard import SummaryWriter</span>
+<span class="sd">            import numpy as np</span>
+
+<span class="sd">            img_batch = np.zeros((16, 3, 100, 100))</span>
+<span class="sd">            for i in range(16):</span>
+<span class="sd">                img_batch[i, 0] = np.arange(0, 10000).reshape(100, 100) / 10000 / 16 * i</span>
+<span class="sd">                img_batch[i, 1] = (1 - np.arange(0, 10000).reshape(100, 100) / 10000) / 16 * i</span>
+
+<span class="sd">            writer = SummaryWriter()</span>
+<span class="sd">            writer.add_images(&#39;my_image_batch&#39;, img_batch, 0)</span>
+<span class="sd">            writer.close()</span>
+
+<span class="sd">        Expected result:</span>
+
+<span class="sd">        .. image:: _static/img/tensorboard/add_images.png</span>
+<span class="sd">           :scale: 30 %</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_images&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_caffe2_blob</span><span class="p">(</span><span class="n">img_tensor</span><span class="p">):</span>
+            <span class="kn">from</span> <span class="nn">caffe2.python</span> <span class="kn">import</span> <span class="n">workspace</span>
+            <span class="n">img_tensor</span> <span class="o">=</span> <span class="n">workspace</span><span class="o">.</span><span class="n">FetchBlob</span><span class="p">(</span><span class="n">img_tensor</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span>
+            <span class="n">image</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">img_tensor</span><span class="p">,</span> <span class="n">dataformats</span><span class="o">=</span><span class="n">dataformats</span><span class="p">),</span> <span class="n">global_step</span><span class="p">,</span> <span class="n">walltime</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">add_image_with_boxes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">img_tensor</span><span class="p">,</span> <span class="n">box_tensor</span><span class="p">,</span> <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                             <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">rescale</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">dataformats</span><span class="o">=</span><span class="s1">&#39;CHW&#39;</span><span class="p">,</span> <span class="n">labels</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add image and draw bounding boxes on the image.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tag (string): Data identifier</span>
+<span class="sd">            img_tensor (torch.Tensor, numpy.array, or string/blobname): Image data</span>
+<span class="sd">            box_tensor (torch.Tensor, numpy.array, or string/blobname): Box data (for detected objects)</span>
+<span class="sd">              box should be represented as [x1, y1, x2, y2].</span>
+<span class="sd">            global_step (int): Global step value to record</span>
+<span class="sd">            walltime (float): Optional override default walltime (time.time())</span>
+<span class="sd">              seconds after epoch of event</span>
+<span class="sd">            rescale (float): Optional scale override</span>
+<span class="sd">            dataformats (string): Image data format specification of the form</span>
+<span class="sd">              NCHW, NHWC, CHW, HWC, HW, WH, etc.</span>
+<span class="sd">            labels (list of string): The label to be shown for each bounding box.</span>
+<span class="sd">        Shape:</span>
+<span class="sd">            img_tensor: Default is :math:`(3, H, W)`. It can be specified with ``dataformats`` argument.</span>
+<span class="sd">            e.g. CHW or HWC</span>
+
+<span class="sd">            box_tensor: (torch.Tensor, numpy.array, or string/blobname): NX4,  where N is the number of</span>
+<span class="sd">            boxes and each 4 elements in a row represents (xmin, ymin, xmax, ymax).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_image_with_boxes&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_caffe2_blob</span><span class="p">(</span><span class="n">img_tensor</span><span class="p">):</span>
+            <span class="kn">from</span> <span class="nn">caffe2.python</span> <span class="kn">import</span> <span class="n">workspace</span>
+            <span class="n">img_tensor</span> <span class="o">=</span> <span class="n">workspace</span><span class="o">.</span><span class="n">FetchBlob</span><span class="p">(</span><span class="n">img_tensor</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_caffe2_blob</span><span class="p">(</span><span class="n">box_tensor</span><span class="p">):</span>
+            <span class="kn">from</span> <span class="nn">caffe2.python</span> <span class="kn">import</span> <span class="n">workspace</span>
+            <span class="n">box_tensor</span> <span class="o">=</span> <span class="n">workspace</span><span class="o">.</span><span class="n">FetchBlob</span><span class="p">(</span><span class="n">box_tensor</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">labels</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">labels</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+                <span class="n">labels</span> <span class="o">=</span> <span class="p">[</span><span class="n">labels</span><span class="p">]</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">labels</span><span class="p">)</span> <span class="o">!=</span> <span class="n">box_tensor</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span>
+                <span class="n">labels</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span><span class="n">image_boxes</span><span class="p">(</span>
+            <span class="n">tag</span><span class="p">,</span> <span class="n">img_tensor</span><span class="p">,</span> <span class="n">box_tensor</span><span class="p">,</span> <span class="n">rescale</span><span class="o">=</span><span class="n">rescale</span><span class="p">,</span> <span class="n">dataformats</span><span class="o">=</span><span class="n">dataformats</span><span class="p">,</span> <span class="n">labels</span><span class="o">=</span><span class="n">labels</span><span class="p">),</span> <span class="n">global_step</span><span class="p">,</span> <span class="n">walltime</span><span class="p">)</span>
+
+<div class="viewcode-block" id="SummaryWriter.add_figure"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.add_figure">[docs]</a>    <span class="k">def</span> <span class="nf">add_figure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">figure</span><span class="p">,</span> <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">close</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Render matplotlib figure into an image and add it to summary.</span>
+
+<span class="sd">        Note that this requires the ``matplotlib`` package.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tag (string): Data identifier</span>
+<span class="sd">            figure (matplotlib.pyplot.figure) or list of figures: Figure or a list of figures</span>
+<span class="sd">            global_step (int): Global step value to record</span>
+<span class="sd">            close (bool): Flag to automatically close the figure</span>
+<span class="sd">            walltime (float): Optional override default walltime (time.time())</span>
+<span class="sd">              seconds after epoch of event</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_figure&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">figure</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">add_image</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">figure_to_image</span><span class="p">(</span><span class="n">figure</span><span class="p">,</span> <span class="n">close</span><span class="p">),</span> <span class="n">global_step</span><span class="p">,</span> <span class="n">walltime</span><span class="p">,</span> <span class="n">dataformats</span><span class="o">=</span><span class="s1">&#39;NCHW&#39;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">add_image</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">figure_to_image</span><span class="p">(</span><span class="n">figure</span><span class="p">,</span> <span class="n">close</span><span class="p">),</span> <span class="n">global_step</span><span class="p">,</span> <span class="n">walltime</span><span class="p">,</span> <span class="n">dataformats</span><span class="o">=</span><span class="s1">&#39;CHW&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="SummaryWriter.add_video"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.add_video">[docs]</a>    <span class="k">def</span> <span class="nf">add_video</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">vid_tensor</span><span class="p">,</span> <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">fps</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add video data to summary.</span>
+
+<span class="sd">        Note that this requires the ``moviepy`` package.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tag (string): Data identifier</span>
+<span class="sd">            vid_tensor (torch.Tensor): Video data</span>
+<span class="sd">            global_step (int): Global step value to record</span>
+<span class="sd">            fps (float or int): Frames per second</span>
+<span class="sd">            walltime (float): Optional override default walltime (time.time())</span>
+<span class="sd">              seconds after epoch of event</span>
+<span class="sd">        Shape:</span>
+<span class="sd">            vid_tensor: :math:`(N, T, C, H, W)`. The values should lie in [0, 255] for type `uint8` or [0, 1] for type `float`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_video&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span>
+            <span class="n">video</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">vid_tensor</span><span class="p">,</span> <span class="n">fps</span><span class="p">),</span> <span class="n">global_step</span><span class="p">,</span> <span class="n">walltime</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="SummaryWriter.add_audio"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.add_audio">[docs]</a>    <span class="k">def</span> <span class="nf">add_audio</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">snd_tensor</span><span class="p">,</span> <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">sample_rate</span><span class="o">=</span><span class="mi">44100</span><span class="p">,</span> <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add audio data to summary.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tag (string): Data identifier</span>
+<span class="sd">            snd_tensor (torch.Tensor): Sound data</span>
+<span class="sd">            global_step (int): Global step value to record</span>
+<span class="sd">            sample_rate (int): sample rate in Hz</span>
+<span class="sd">            walltime (float): Optional override default walltime (time.time())</span>
+<span class="sd">              seconds after epoch of event</span>
+<span class="sd">        Shape:</span>
+<span class="sd">            snd_tensor: :math:`(1, L)`. The values should lie between [-1, 1].</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_audio&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_check_caffe2_blob</span><span class="p">(</span><span class="n">snd_tensor</span><span class="p">):</span>
+            <span class="kn">from</span> <span class="nn">caffe2.python</span> <span class="kn">import</span> <span class="n">workspace</span>
+            <span class="n">snd_tensor</span> <span class="o">=</span> <span class="n">workspace</span><span class="o">.</span><span class="n">FetchBlob</span><span class="p">(</span><span class="n">snd_tensor</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span>
+            <span class="n">audio</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">snd_tensor</span><span class="p">,</span> <span class="n">sample_rate</span><span class="o">=</span><span class="n">sample_rate</span><span class="p">),</span> <span class="n">global_step</span><span class="p">,</span> <span class="n">walltime</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="SummaryWriter.add_text"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.add_text">[docs]</a>    <span class="k">def</span> <span class="nf">add_text</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">text_string</span><span class="p">,</span> <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add text data to summary.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tag (string): Data identifier</span>
+<span class="sd">            text_string (string): String to save</span>
+<span class="sd">            global_step (int): Global step value to record</span>
+<span class="sd">            walltime (float): Optional override default walltime (time.time())</span>
+<span class="sd">              seconds after epoch of event</span>
+<span class="sd">        Examples::</span>
+
+<span class="sd">            writer.add_text(&#39;lstm&#39;, &#39;This is an lstm&#39;, 0)</span>
+<span class="sd">            writer.add_text(&#39;rnn&#39;, &#39;This is an rnn&#39;, 10)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_text&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span>
+            <span class="n">text</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">text_string</span><span class="p">),</span> <span class="n">global_step</span><span class="p">,</span> <span class="n">walltime</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">add_onnx_graph</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">prototxt</span><span class="p">):</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_onnx_graph&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_onnx_graph</span><span class="p">(</span><span class="n">load_onnx_graph</span><span class="p">(</span><span class="n">prototxt</span><span class="p">))</span>
+
+<div class="viewcode-block" id="SummaryWriter.add_graph"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.add_graph">[docs]</a>    <span class="k">def</span> <span class="nf">add_graph</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">input_to_model</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">verbose</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="c1"># prohibit second call?</span>
+        <span class="c1"># no, let tensorboard handle it and show its warning message.</span>
+        <span class="sd">&quot;&quot;&quot;Add graph data to summary.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            model (torch.nn.Module): Model to draw.</span>
+<span class="sd">            input_to_model (torch.Tensor or list of torch.Tensor): A variable or a tuple of</span>
+<span class="sd">                variables to be fed.</span>
+<span class="sd">            verbose (bool): Whether to print graph structure in console.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_graph&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="s1">&#39;forward&#39;</span><span class="p">):</span>
+            <span class="c1"># A valid PyTorch model should have a &#39;forward&#39; method</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_graph</span><span class="p">(</span><span class="n">graph</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">input_to_model</span><span class="p">,</span> <span class="n">verbose</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Caffe2 models do not have the &#39;forward&#39; method</span>
+            <span class="kn">from</span> <span class="nn">caffe2.proto</span> <span class="kn">import</span> <span class="n">caffe2_pb2</span>
+            <span class="kn">from</span> <span class="nn">caffe2.python</span> <span class="kn">import</span> <span class="n">core</span>
+            <span class="kn">from</span> <span class="nn">._caffe2_graph</span> <span class="kn">import</span> <span class="p">(</span>
+                <span class="n">model_to_graph_def</span><span class="p">,</span> <span class="n">nets_to_graph_def</span><span class="p">,</span> <span class="n">protos_to_graph_def</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">model</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">core</span><span class="o">.</span><span class="n">Net</span><span class="p">):</span>
+                    <span class="n">current_graph</span> <span class="o">=</span> <span class="n">nets_to_graph_def</span><span class="p">(</span><span class="n">model</span><span class="p">)</span>
+                <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">model</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">caffe2_pb2</span><span class="o">.</span><span class="n">NetDef</span><span class="p">):</span>
+                    <span class="n">current_graph</span> <span class="o">=</span> <span class="n">protos_to_graph_def</span><span class="p">(</span><span class="n">model</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># Handles cnn.CNNModelHelper, model_helper.ModelHelper</span>
+                <span class="n">current_graph</span> <span class="o">=</span> <span class="n">model_to_graph_def</span><span class="p">(</span><span class="n">model</span><span class="p">)</span>
+            <span class="n">event</span> <span class="o">=</span> <span class="n">event_pb2</span><span class="o">.</span><span class="n">Event</span><span class="p">(</span>
+                <span class="n">graph_def</span><span class="o">=</span><span class="n">current_graph</span><span class="o">.</span><span class="n">SerializeToString</span><span class="p">())</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_event</span><span class="p">(</span><span class="n">event</span><span class="p">)</span></div>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span> <span class="nf">_encode</span><span class="p">(</span><span class="n">rawstr</span><span class="p">):</span>
+        <span class="c1"># I&#39;d use urllib but, I&#39;m unsure about the differences from python3 to python2, etc.</span>
+        <span class="n">retval</span> <span class="o">=</span> <span class="n">rawstr</span>
+        <span class="n">retval</span> <span class="o">=</span> <span class="n">retval</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;%&quot;</span><span class="p">,</span> <span class="s2">&quot;</span><span class="si">%%%02x</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="nb">ord</span><span class="p">(</span><span class="s2">&quot;%&quot;</span><span class="p">)))</span>
+        <span class="n">retval</span> <span class="o">=</span> <span class="n">retval</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">,</span> <span class="s2">&quot;</span><span class="si">%%%02x</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="nb">ord</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)))</span>
+        <span class="n">retval</span> <span class="o">=</span> <span class="n">retval</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\\</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;</span><span class="si">%%%02x</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="nb">ord</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\\</span><span class="s2">&quot;</span><span class="p">)))</span>
+        <span class="k">return</span> <span class="n">retval</span>
+
+<div class="viewcode-block" id="SummaryWriter.add_embedding"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.add_embedding">[docs]</a>    <span class="k">def</span> <span class="nf">add_embedding</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">mat</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">label_img</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">tag</span><span class="o">=</span><span class="s1">&#39;default&#39;</span><span class="p">,</span> <span class="n">metadata_header</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add embedding projector data to summary.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            mat (torch.Tensor or numpy.array): A matrix which each row is the feature vector of the data point</span>
+<span class="sd">            metadata (list): A list of labels, each element will be convert to string</span>
+<span class="sd">            label_img (torch.Tensor): Images correspond to each data point</span>
+<span class="sd">            global_step (int): Global step value to record</span>
+<span class="sd">            tag (string): Name for the embedding</span>
+<span class="sd">        Shape:</span>
+<span class="sd">            mat: :math:`(N, D)`, where N is number of data and D is feature dimension</span>
+
+<span class="sd">            label_img: :math:`(N, C, H, W)`</span>
+
+<span class="sd">        Examples::</span>
+
+<span class="sd">            import keyword</span>
+<span class="sd">            import torch</span>
+<span class="sd">            meta = []</span>
+<span class="sd">            while len(meta)&lt;100:</span>
+<span class="sd">                meta = meta+keyword.kwlist # get some strings</span>
+<span class="sd">            meta = meta[:100]</span>
+
+<span class="sd">            for i, v in enumerate(meta):</span>
+<span class="sd">                meta[i] = v+str(i)</span>
+
+<span class="sd">            label_img = torch.rand(100, 3, 10, 32)</span>
+<span class="sd">            for i in range(100):</span>
+<span class="sd">                label_img[i]*=i/100.0</span>
+
+<span class="sd">            writer.add_embedding(torch.randn(100, 5), metadata=meta, label_img=label_img)</span>
+<span class="sd">            writer.add_embedding(torch.randn(100, 5), label_img=label_img)</span>
+<span class="sd">            writer.add_embedding(torch.randn(100, 5), metadata=meta)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_embedding&quot;</span><span class="p">)</span>
+        <span class="n">mat</span> <span class="o">=</span> <span class="n">make_np</span><span class="p">(</span><span class="n">mat</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">global_step</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">global_step</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="c1"># clear pbtxt?</span>
+
+        <span class="c1"># Maybe we should encode the tag so slashes don&#39;t trip us up?</span>
+        <span class="c1"># I don&#39;t think this will mess us up, but better safe than sorry.</span>
+        <span class="n">subdir</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="si">%s</span><span class="s2">/</span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">global_step</span><span class="p">)</span><span class="o">.</span><span class="n">zfill</span><span class="p">(</span><span class="mi">5</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">_encode</span><span class="p">(</span><span class="n">tag</span><span class="p">))</span>
+        <span class="n">save_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">get_logdir</span><span class="p">(),</span> <span class="n">subdir</span><span class="p">)</span>
+
+        <span class="n">fs</span> <span class="o">=</span> <span class="n">tf</span><span class="o">.</span><span class="n">io</span><span class="o">.</span><span class="n">gfile</span><span class="o">.</span><span class="n">get_filesystem</span><span class="p">(</span><span class="n">save_path</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">fs</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">save_path</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">fs</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">save_path</span><span class="p">):</span>
+                <span class="nb">print</span><span class="p">(</span>
+                    <span class="s1">&#39;warning: Embedding dir exists, did you set global_step for add_embedding()?&#39;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Path: `</span><span class="si">%s</span><span class="s2">` exists, but is a file. Cannot proceed.&quot;</span> <span class="o">%</span> <span class="n">save_path</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">fs</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">save_path</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">metadata</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="n">mat</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span>
+                <span class="n">metadata</span><span class="p">),</span> <span class="s1">&#39;#labels should equal with #data points&#39;</span>
+            <span class="n">make_tsv</span><span class="p">(</span><span class="n">metadata</span><span class="p">,</span> <span class="n">save_path</span><span class="p">,</span> <span class="n">metadata_header</span><span class="o">=</span><span class="n">metadata_header</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">label_img</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="n">mat</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="n">label_img</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s1">&#39;#images should equal with #data points&#39;</span>
+            <span class="n">make_sprite</span><span class="p">(</span><span class="n">label_img</span><span class="p">,</span> <span class="n">save_path</span><span class="p">)</span>
+
+        <span class="k">assert</span> <span class="n">mat</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">2</span><span class="p">,</span> <span class="s1">&#39;mat should be 2D, where mat.size(0) is the number of data points&#39;</span>
+        <span class="n">make_mat</span><span class="p">(</span><span class="n">mat</span><span class="p">,</span> <span class="n">save_path</span><span class="p">)</span>
+
+        <span class="c1"># Filesystem doesn&#39;t necessarily have append semantics, so we store an</span>
+        <span class="c1"># internal buffer to append to and re-write whole file after each</span>
+        <span class="c1"># embedding is added</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;_projector_config&quot;</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_projector_config</span> <span class="o">=</span> <span class="n">ProjectorConfig</span><span class="p">()</span>
+        <span class="n">embedding_info</span> <span class="o">=</span> <span class="n">get_embedding_info</span><span class="p">(</span>
+            <span class="n">metadata</span><span class="p">,</span> <span class="n">label_img</span><span class="p">,</span> <span class="n">fs</span><span class="p">,</span> <span class="n">subdir</span><span class="p">,</span> <span class="n">global_step</span><span class="p">,</span> <span class="n">tag</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_projector_config</span><span class="o">.</span><span class="n">embeddings</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="n">embedding_info</span><span class="p">])</span>
+
+        <span class="kn">from</span> <span class="nn">google.protobuf</span> <span class="kn">import</span> <span class="n">text_format</span>  <span class="c1"># type: ignore</span>
+        <span class="n">config_pbtxt</span> <span class="o">=</span> <span class="n">text_format</span><span class="o">.</span><span class="n">MessageToString</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_projector_config</span><span class="p">)</span>
+        <span class="n">write_pbtxt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">get_logdir</span><span class="p">(),</span> <span class="n">config_pbtxt</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SummaryWriter.add_pr_curve"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.add_pr_curve">[docs]</a>    <span class="k">def</span> <span class="nf">add_pr_curve</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">labels</span><span class="p">,</span> <span class="n">predictions</span><span class="p">,</span> <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                     <span class="n">num_thresholds</span><span class="o">=</span><span class="mi">127</span><span class="p">,</span> <span class="n">weights</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Adds precision recall curve.</span>
+<span class="sd">        Plotting a precision-recall curve lets you understand your model&#39;s</span>
+<span class="sd">        performance under different threshold settings. With this function,</span>
+<span class="sd">        you provide the ground truth labeling (T/F) and prediction confidence</span>
+<span class="sd">        (usually the output of your model) for each target. The TensorBoard UI</span>
+<span class="sd">        will let you choose the threshold interactively.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tag (string): Data identifier</span>
+<span class="sd">            labels (torch.Tensor, numpy.array, or string/blobname):</span>
+<span class="sd">              Ground truth data. Binary label for each element.</span>
+<span class="sd">            predictions (torch.Tensor, numpy.array, or string/blobname):</span>
+<span class="sd">              The probability that an element be classified as true.</span>
+<span class="sd">              Value should in [0, 1]</span>
+<span class="sd">            global_step (int): Global step value to record</span>
+<span class="sd">            num_thresholds (int): Number of thresholds used to draw the curve.</span>
+<span class="sd">            walltime (float): Optional override default walltime (time.time())</span>
+<span class="sd">              seconds after epoch of event</span>
+
+<span class="sd">        Examples::</span>
+
+<span class="sd">            from torch.utils.tensorboard import SummaryWriter</span>
+<span class="sd">            import numpy as np</span>
+<span class="sd">            labels = np.random.randint(2, size=100)  # binary label</span>
+<span class="sd">            predictions = np.random.rand(100)</span>
+<span class="sd">            writer = SummaryWriter()</span>
+<span class="sd">            writer.add_pr_curve(&#39;pr_curve&#39;, labels, predictions, 0)</span>
+<span class="sd">            writer.close()</span>
+
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_pr_curve&quot;</span><span class="p">)</span>
+        <span class="n">labels</span><span class="p">,</span> <span class="n">predictions</span> <span class="o">=</span> <span class="n">make_np</span><span class="p">(</span><span class="n">labels</span><span class="p">),</span> <span class="n">make_np</span><span class="p">(</span><span class="n">predictions</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span>
+            <span class="n">pr_curve</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">labels</span><span class="p">,</span> <span class="n">predictions</span><span class="p">,</span> <span class="n">num_thresholds</span><span class="p">,</span> <span class="n">weights</span><span class="p">),</span>
+            <span class="n">global_step</span><span class="p">,</span> <span class="n">walltime</span><span class="p">)</span></div>
+
+    <span class="k">def</span> <span class="nf">add_pr_curve_raw</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">true_positive_counts</span><span class="p">,</span>
+                         <span class="n">false_positive_counts</span><span class="p">,</span>
+                         <span class="n">true_negative_counts</span><span class="p">,</span>
+                         <span class="n">false_negative_counts</span><span class="p">,</span>
+                         <span class="n">precision</span><span class="p">,</span>
+                         <span class="n">recall</span><span class="p">,</span>
+                         <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                         <span class="n">num_thresholds</span><span class="o">=</span><span class="mi">127</span><span class="p">,</span>
+                         <span class="n">weights</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                         <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Adds precision recall curve with raw data.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tag (string): Data identifier</span>
+<span class="sd">            true_positive_counts (torch.Tensor, numpy.array, or string/blobname): true positive counts</span>
+<span class="sd">            false_positive_counts (torch.Tensor, numpy.array, or string/blobname): false positive counts</span>
+<span class="sd">            true_negative_counts (torch.Tensor, numpy.array, or string/blobname): true negative counts</span>
+<span class="sd">            false_negative_counts (torch.Tensor, numpy.array, or string/blobname): false negative counts</span>
+<span class="sd">            precision (torch.Tensor, numpy.array, or string/blobname): precision</span>
+<span class="sd">            recall (torch.Tensor, numpy.array, or string/blobname): recall</span>
+<span class="sd">            global_step (int): Global step value to record</span>
+<span class="sd">            num_thresholds (int): Number of thresholds used to draw the curve.</span>
+<span class="sd">            walltime (float): Optional override default walltime (time.time())</span>
+<span class="sd">              seconds after epoch of event</span>
+<span class="sd">            see: https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/pr_curve/README.md</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_pr_curve_raw&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span>
+            <span class="n">pr_curve_raw</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span>
+                         <span class="n">true_positive_counts</span><span class="p">,</span>
+                         <span class="n">false_positive_counts</span><span class="p">,</span>
+                         <span class="n">true_negative_counts</span><span class="p">,</span>
+                         <span class="n">false_negative_counts</span><span class="p">,</span>
+                         <span class="n">precision</span><span class="p">,</span>
+                         <span class="n">recall</span><span class="p">,</span>
+                         <span class="n">num_thresholds</span><span class="p">,</span>
+                         <span class="n">weights</span><span class="p">),</span>
+            <span class="n">global_step</span><span class="p">,</span>
+            <span class="n">walltime</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">add_custom_scalars_multilinechart</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tags</span><span class="p">,</span> <span class="n">category</span><span class="o">=</span><span class="s1">&#39;default&#39;</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s1">&#39;untitled&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Shorthand for creating multilinechart. Similar to ``add_custom_scalars()``, but the only necessary argument</span>
+<span class="sd">        is *tags*.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tags (list): list of tags that have been used in ``add_scalar()``</span>
+
+<span class="sd">        Examples::</span>
+
+<span class="sd">            writer.add_custom_scalars_multilinechart([&#39;twse/0050&#39;, &#39;twse/2330&#39;])</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_custom_scalars_multilinechart&quot;</span><span class="p">)</span>
+        <span class="n">layout</span> <span class="o">=</span> <span class="p">{</span><span class="n">category</span><span class="p">:</span> <span class="p">{</span><span class="n">title</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;Multiline&#39;</span><span class="p">,</span> <span class="n">tags</span><span class="p">]}}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span><span class="n">custom_scalars</span><span class="p">(</span><span class="n">layout</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">add_custom_scalars_marginchart</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tags</span><span class="p">,</span> <span class="n">category</span><span class="o">=</span><span class="s1">&#39;default&#39;</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s1">&#39;untitled&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Shorthand for creating marginchart. Similar to ``add_custom_scalars()``, but the only necessary argument</span>
+<span class="sd">        is *tags*, which should have exactly 3 elements.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tags (list): list of tags that have been used in ``add_scalar()``</span>
+
+<span class="sd">        Examples::</span>
+
+<span class="sd">            writer.add_custom_scalars_marginchart([&#39;twse/0050&#39;, &#39;twse/2330&#39;, &#39;twse/2006&#39;])</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_custom_scalars_marginchart&quot;</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">tags</span><span class="p">)</span> <span class="o">==</span> <span class="mi">3</span>
+        <span class="n">layout</span> <span class="o">=</span> <span class="p">{</span><span class="n">category</span><span class="p">:</span> <span class="p">{</span><span class="n">title</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;Margin&#39;</span><span class="p">,</span> <span class="n">tags</span><span class="p">]}}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span><span class="n">custom_scalars</span><span class="p">(</span><span class="n">layout</span><span class="p">))</span>
+
+<div class="viewcode-block" id="SummaryWriter.add_custom_scalars"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.add_custom_scalars">[docs]</a>    <span class="k">def</span> <span class="nf">add_custom_scalars</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">layout</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Create special chart by collecting charts tags in &#39;scalars&#39;. Note that this function can only be called once</span>
+<span class="sd">        for each SummaryWriter() object. Because it only provides metadata to tensorboard, the function can be called</span>
+<span class="sd">        before or after the training loop.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            layout (dict): {categoryName: *charts*}, where *charts* is also a dictionary</span>
+<span class="sd">              {chartName: *ListOfProperties*}. The first element in *ListOfProperties* is the chart&#39;s type</span>
+<span class="sd">              (one of **Multiline** or **Margin**) and the second element should be a list containing the tags</span>
+<span class="sd">              you have used in add_scalar function, which will be collected into the new chart.</span>
+
+<span class="sd">        Examples::</span>
+
+<span class="sd">            layout = {&#39;Taiwan&#39;:{&#39;twse&#39;:[&#39;Multiline&#39;,[&#39;twse/0050&#39;, &#39;twse/2330&#39;]]},</span>
+<span class="sd">                         &#39;USA&#39;:{ &#39;dow&#39;:[&#39;Margin&#39;,   [&#39;dow/aaa&#39;, &#39;dow/bbb&#39;, &#39;dow/ccc&#39;]],</span>
+<span class="sd">                              &#39;nasdaq&#39;:[&#39;Margin&#39;,   [&#39;nasdaq/aaa&#39;, &#39;nasdaq/bbb&#39;, &#39;nasdaq/ccc&#39;]]}}</span>
+
+<span class="sd">            writer.add_custom_scalars(layout)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_custom_scalars&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span><span class="n">custom_scalars</span><span class="p">(</span><span class="n">layout</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="SummaryWriter.add_mesh"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.add_mesh">[docs]</a>    <span class="k">def</span> <span class="nf">add_mesh</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">vertices</span><span class="p">,</span> <span class="n">colors</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">faces</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">config_dict</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">global_step</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">walltime</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Add meshes or 3D point clouds to TensorBoard. The visualization is based on Three.js,</span>
+<span class="sd">        so it allows users to interact with the rendered object. Besides the basic definitions</span>
+<span class="sd">        such as vertices, faces, users can further provide camera parameter, lighting condition, etc.</span>
+<span class="sd">        Please check https://threejs.org/docs/index.html#manual/en/introduction/Creating-a-scene for</span>
+<span class="sd">        advanced usage.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            tag (string): Data identifier</span>
+<span class="sd">            vertices (torch.Tensor): List of the 3D coordinates of vertices.</span>
+<span class="sd">            colors (torch.Tensor): Colors for each vertex</span>
+<span class="sd">            faces (torch.Tensor): Indices of vertices within each triangle. (Optional)</span>
+<span class="sd">            config_dict: Dictionary with ThreeJS classes names and configuration.</span>
+<span class="sd">            global_step (int): Global step value to record</span>
+<span class="sd">            walltime (float): Optional override default walltime (time.time())</span>
+<span class="sd">              seconds after epoch of event</span>
+
+<span class="sd">        Shape:</span>
+<span class="sd">            vertices: :math:`(B, N, 3)`. (batch, number_of_vertices, channels)</span>
+
+<span class="sd">            colors: :math:`(B, N, 3)`. The values should lie in [0, 255] for type `uint8` or [0, 1] for type `float`.</span>
+
+<span class="sd">            faces: :math:`(B, N, 3)`. The values should lie in [0, number_of_vertices] for type `uint8`.</span>
+
+<span class="sd">        Examples::</span>
+
+<span class="sd">            from torch.utils.tensorboard import SummaryWriter</span>
+<span class="sd">            vertices_tensor = torch.as_tensor([</span>
+<span class="sd">                [1, 1, 1],</span>
+<span class="sd">                [-1, -1, 1],</span>
+<span class="sd">                [1, -1, -1],</span>
+<span class="sd">                [-1, 1, -1],</span>
+<span class="sd">            ], dtype=torch.float).unsqueeze(0)</span>
+<span class="sd">            colors_tensor = torch.as_tensor([</span>
+<span class="sd">                [255, 0, 0],</span>
+<span class="sd">                [0, 255, 0],</span>
+<span class="sd">                [0, 0, 255],</span>
+<span class="sd">                [255, 0, 255],</span>
+<span class="sd">            ], dtype=torch.int).unsqueeze(0)</span>
+<span class="sd">            faces_tensor = torch.as_tensor([</span>
+<span class="sd">                [0, 2, 3],</span>
+<span class="sd">                [0, 3, 1],</span>
+<span class="sd">                [0, 1, 2],</span>
+<span class="sd">                [1, 3, 2],</span>
+<span class="sd">            ], dtype=torch.int).unsqueeze(0)</span>
+
+<span class="sd">            writer = SummaryWriter()</span>
+<span class="sd">            writer.add_mesh(&#39;my_mesh&#39;, vertices=vertices_tensor, colors=colors_tensor, faces=faces_tensor)</span>
+
+<span class="sd">            writer.close()</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_log_api_usage_once</span><span class="p">(</span><span class="s2">&quot;tensorboard.logging.add_mesh&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_get_file_writer</span><span class="p">()</span><span class="o">.</span><span class="n">add_summary</span><span class="p">(</span><span class="n">mesh</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">vertices</span><span class="p">,</span> <span class="n">colors</span><span class="p">,</span> <span class="n">faces</span><span class="p">,</span> <span class="n">config_dict</span><span class="p">),</span> <span class="n">global_step</span><span class="p">,</span> <span class="n">walltime</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="SummaryWriter.flush"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.flush">[docs]</a>    <span class="k">def</span> <span class="nf">flush</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Flushes the event file to disk.</span>
+<span class="sd">        Call this method to make sure that all pending events have been written to</span>
+<span class="sd">        disk.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">all_writers</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="k">for</span> <span class="n">writer</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">all_writers</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="SummaryWriter.close"><a class="viewcode-back" href="../../../../tensorboard.html#torch.utils.tensorboard.writer.SummaryWriter.close">[docs]</a>    <span class="k">def</span> <span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">all_writers</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span>  <span class="c1"># ignore double close</span>
+        <span class="k">for</span> <span class="n">writer</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">all_writers</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">file_writer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">all_writers</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+    <span class="k">def</span> <span class="fm">__enter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span>
+
+    <span class="k">def</span> <span class="fm">__exit__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc_type</span><span class="p">,</span> <span class="n">exc_val</span><span class="p">,</span> <span class="n">exc_tb</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">close</span><span class="p">()</span></div>
+</pre></div>
+
+             </article>
+             
+            </div>
+            <footer>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="../../../../" src="../../../../_static/documentation_options.js"></script>
+         <script src="../../../../_static/jquery.js"></script>
+         <script src="../../../../_static/underscore.js"></script>
+         <script src="../../../../_static/doctools.js"></script>
+         <script src="../../../../_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="../../../../_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="../../../../_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="../../../../_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="../../../../_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="../../../../_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>

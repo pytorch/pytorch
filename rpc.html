@@ -1,0 +1,1967 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Distributed RPC Framework &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/rpc.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Remote Reference Protocol" href="rpc/rref.html" />
+    <link rel="prev" title="torch.nn.quantized.dynamic" href="torch.nn.quantized.dynamic.html" /> 
+
+  
+  <script src="_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/rpc.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="notes/amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quantization.html">Quantization</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+      <li>Distributed RPC Framework</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+            
+            <a href="_sources/rpc.rst.txt" rel="nofollow"><img src="_static/images/view-page-source-icon.svg"></a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <div class="section" id="distributed-rpc-framework">
+<span id="id1"></span><h1>Distributed RPC Framework<a class="headerlink" href="#distributed-rpc-framework" title="Permalink to this headline">¶</a></h1>
+<p>The distributed RPC framework provides mechanisms for multi-machine model
+training through a set of primitives to allow for remote communication, and a
+higher-level API to automatically differentiate models split across several
+machines.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>APIs in the RPC package are stable. There are multiple ongoing work items
+to improve performance and error handling, which will ship in future releases.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Please refer to <a class="reference external" href="https://pytorch.org/tutorials/beginner/dist_overview.html">PyTorch Distributed Overview</a>
+for a brief introduction to all features related to distributed training.</p>
+</div>
+<div class="section" id="basics">
+<h2>Basics<a class="headerlink" href="#basics" title="Permalink to this headline">¶</a></h2>
+<p>The distributed RPC framework makes it easy to run functions remotely, supports
+referencing remote objects without copying the real data around, and provides
+autograd and optimizer APIs to transparently run backward and update parameters
+across RPC boundaries. These features can be categorized into four sets of APIs.</p>
+<ol class="arabic simple">
+<li><p><strong>Remote Procedure Call (RPC)</strong> supports running a function on the specified
+destination worker with the given arguments and getting the return value back
+or creating a reference to the return value. There are three main RPC APIs:
+<a class="reference internal" href="#torch.distributed.rpc.rpc_sync" title="torch.distributed.rpc.rpc_sync"><code class="xref py py-meth docutils literal notranslate"><span class="pre">rpc_sync()</span></code></a> (synchronous),
+<a class="reference internal" href="#torch.distributed.rpc.rpc_async" title="torch.distributed.rpc.rpc_async"><code class="xref py py-meth docutils literal notranslate"><span class="pre">rpc_async()</span></code></a> (asynchronous), and
+<a class="reference internal" href="#torch.distributed.rpc.remote" title="torch.distributed.rpc.remote"><code class="xref py py-meth docutils literal notranslate"><span class="pre">remote()</span></code></a> (asynchronous and returns a reference
+to the remote return value). Use the synchronous API if the user code cannot
+proceed without the return value. Otherwise, use the asynchronous API to get
+a future, and wait on the future when the return value is needed on the
+caller. The <a class="reference internal" href="#torch.distributed.rpc.remote" title="torch.distributed.rpc.remote"><code class="xref py py-meth docutils literal notranslate"><span class="pre">remote()</span></code></a> API is useful when the
+requirement is to create something remotely but never need to fetch it to
+the caller. Imagine the case that a driver process is setting up a parameter
+server and a trainer. The driver can create an embedding table on the
+parameter server and then share the reference to the embedding table with the
+trainer, but itself will never use the embedding table locally. In this case,
+<a class="reference internal" href="#torch.distributed.rpc.rpc_sync" title="torch.distributed.rpc.rpc_sync"><code class="xref py py-meth docutils literal notranslate"><span class="pre">rpc_sync()</span></code></a> and
+<a class="reference internal" href="#torch.distributed.rpc.rpc_async" title="torch.distributed.rpc.rpc_async"><code class="xref py py-meth docutils literal notranslate"><span class="pre">rpc_async()</span></code></a> are no longer appropriate, as they
+always imply that the return value will be returned to the caller
+immediately or in the future.</p></li>
+<li><p><strong>Remote Reference (RRef)</strong> serves as a distributed shared pointer to a local
+or remote object. It can be shared with other workers and reference counting
+will be handled transparently. Each RRef only has one owner and the object
+only lives on that owner. Non-owner workers holding RRefs can get copies of
+the object from the owner by explicitly requesting it. This is useful when
+a worker needs to access some data object, but itself is neither the creator
+(the caller of <a class="reference internal" href="#torch.distributed.rpc.remote" title="torch.distributed.rpc.remote"><code class="xref py py-meth docutils literal notranslate"><span class="pre">remote()</span></code></a>) or the owner of the
+object. The distributed optimizer, as we will discuss below, is one example
+of such use cases.</p></li>
+<li><p><strong>Distributed Autograd</strong> stitches together local autograd engines on all the
+workers involved in the forward pass, and automatically reach out to them
+during the backward pass to compute gradients. This is especially helpful if
+the forward pass needs to span multiple machines when conducting, e.g.,
+distributed model parallel training, parameter-server training, etc. With
+this feature, user code no longer needs to worry about how to send gradients
+across RPC boundaries and in which order should the local autograd engines
+be launched, which can become quite complicated where there are nested and
+inter-dependent RPC calls in the forward pass.</p></li>
+<li><p><strong>Distributed Optimizer</strong>’s constructor takes a
+<a class="reference internal" href="optim.html#torch.optim.Optimizer" title="torch.optim.Optimizer"><code class="xref py py-meth docutils literal notranslate"><span class="pre">Optimizer()</span></code></a> (e.g., <a class="reference internal" href="optim.html#torch.optim.SGD" title="torch.optim.SGD"><code class="xref py py-meth docutils literal notranslate"><span class="pre">SGD()</span></code></a>,
+<a class="reference internal" href="optim.html#torch.optim.Adagrad" title="torch.optim.Adagrad"><code class="xref py py-meth docutils literal notranslate"><span class="pre">Adagrad()</span></code></a>, etc.) and a list of parameter RRefs, creates an
+<a class="reference internal" href="optim.html#torch.optim.Optimizer" title="torch.optim.Optimizer"><code class="xref py py-meth docutils literal notranslate"><span class="pre">Optimizer()</span></code></a> instance on each distinct RRef owner, and
+updates parameters accordingly when running <code class="docutils literal notranslate"><span class="pre">step()</span></code>. When you have
+distributed forward and backward passes, parameters and gradients will be
+scattered across multiple workers, and hence it requires an optimizer on each
+of the involved workers. Distributed Optimizer wraps all those local
+optimizers into one, and provides a concise constructor and <code class="docutils literal notranslate"><span class="pre">step()</span></code> API.</p></li>
+</ol>
+</div>
+<div class="section" id="rpc">
+<span id="id2"></span><h2>RPC<a class="headerlink" href="#rpc" title="Permalink to this headline">¶</a></h2>
+<p>Before using RPC and distributed autograd primitives, initialization must take
+place. To initialize the RPC framework we need to use
+<a class="reference internal" href="#torch.distributed.rpc.init_rpc" title="torch.distributed.rpc.init_rpc"><code class="xref py py-meth docutils literal notranslate"><span class="pre">init_rpc()</span></code></a> which would initialize the RPC
+framework, RRef framework and distributed autograd.</p>
+<span class="target" id="module-torch.distributed.rpc"></span><dl class="function">
+<dt id="torch.distributed.rpc.init_rpc">
+<code class="sig-prename descclassname">torch.distributed.rpc.</code><code class="sig-name descname">init_rpc</code><span class="sig-paren">(</span><em class="sig-param">name</em>, <em class="sig-param">backend=None</em>, <em class="sig-param">rank=-1</em>, <em class="sig-param">world_size=None</em>, <em class="sig-param">rpc_backend_options=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/rpc.html#init_rpc"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.rpc.init_rpc" title="Permalink to this definition">¶</a></dt>
+<dd><p>Initializes RPC primitives such as the local RPC agent
+and distributed autograd, which immediately makes the current
+process ready to send and receive RPCs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>backend</strong> (<a class="reference internal" href="#torch.distributed.rpc.BackendType" title="torch.distributed.rpc.BackendType"><em>BackendType</em></a><em>, </em><em>optional</em>) – The type of RPC backend
+implementation. Supported values include
+<code class="docutils literal notranslate"><span class="pre">BackendType.TENSORPIPE</span></code> (the default) and
+<code class="docutils literal notranslate"><span class="pre">BackendType.PROCESS_GROUP</span></code>. See <a class="reference internal" href="#rpc-backends"><span class="std std-ref">Backends</span></a> for more
+information.</p></li>
+<li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.8)"><em>str</em></a>) – a globally unique name of this node. (e.g.,
+<code class="docutils literal notranslate"><span class="pre">Trainer3</span></code>, <code class="docutils literal notranslate"><span class="pre">ParameterServer2</span></code>, <code class="docutils literal notranslate"><span class="pre">Master</span></code>, <code class="docutils literal notranslate"><span class="pre">Worker1</span></code>)
+Name can only contain number, alphabet, underscore, colon,
+and/or dash, and must be shorter than 128 characters.</p></li>
+<li><p><strong>rank</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a>) – a globally unique id/rank of this node.</p></li>
+<li><p><strong>world_size</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a>) – The number of workers in the group.</p></li>
+<li><p><strong>rpc_backend_options</strong> (<a class="reference internal" href="#torch.distributed.rpc.RpcBackendOptions" title="torch.distributed.rpc.RpcBackendOptions"><em>RpcBackendOptions</em></a><em>, </em><em>optional</em>) – The options
+passed to the RpcAgent constructor. It must be an agent-specific
+subclass of <a class="reference internal" href="#torch.distributed.rpc.RpcBackendOptions" title="torch.distributed.rpc.RpcBackendOptions"><code class="xref py py-class docutils literal notranslate"><span class="pre">RpcBackendOptions</span></code></a>
+and contains agent-specific initialization configurations. By
+default, for all agents, it sets the default timeout to 60
+seconds and performs the rendezvous with an underlying process
+group initialized using <code class="docutils literal notranslate"><span class="pre">init_method</span> <span class="pre">=</span> <span class="pre">&quot;env://&quot;</span></code>,
+meaning that environment variables <code class="docutils literal notranslate"><span class="pre">MASTER_ADDR</span></code> and
+<code class="docutils literal notranslate"><span class="pre">MASTER_PORT</span></code> need to be set properly. See
+<a class="reference internal" href="#rpc-backends"><span class="std std-ref">Backends</span></a> for more information and find which options
+are available.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<p>The following APIs allow users to remotely execute functions as well as create
+references (RRefs) to remote data objects. In these APIs, when passing a
+<code class="docutils literal notranslate"><span class="pre">Tensor</span></code> as an argument or a return value, the destination worker will try to
+create a <code class="docutils literal notranslate"><span class="pre">Tensor</span></code> with the same meta (i.e., shape, stride, etc.). We
+intentionally disallow transmitting CUDA tensors because it might crash if the
+device lists on source and destination workers do not match. In such cases,
+applications can always explicitly move the input tensors to CPU on the caller
+and move it to the desired devices on the callee if necessary.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>TorchScript support in RPC is a prototype feature and subject to change. Since
+v1.5.0, <code class="docutils literal notranslate"><span class="pre">torch.distributed.rpc</span></code> supports calling TorchScript functions as
+RPC target functions, and this will help improve parallelism on the callee
+side as executing TorchScript functions does not require GIL.</p>
+</div>
+<dl class="function">
+<dt id="torch.distributed.rpc.rpc_sync">
+<code class="sig-prename descclassname">torch.distributed.rpc.</code><code class="sig-name descname">rpc_sync</code><span class="sig-paren">(</span><em class="sig-param">to</em>, <em class="sig-param">func</em>, <em class="sig-param">args=None</em>, <em class="sig-param">kwargs=None</em>, <em class="sig-param">timeout=-1.0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/rpc/api.html#rpc_sync"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.rpc.rpc_sync" title="Permalink to this definition">¶</a></dt>
+<dd><p>Make a blocking RPC call to run function <code class="docutils literal notranslate"><span class="pre">func</span></code> on worker <code class="docutils literal notranslate"><span class="pre">to</span></code>. RPC
+messages are sent and received in parallel to execution of Python code. This
+method is thread-safe.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>to</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.8)"><em>str</em></a><em> or </em><a class="reference internal" href="#torch.distributed.rpc.WorkerInfo" title="torch.distributed.rpc.WorkerInfo"><em>WorkerInfo</em></a>) – id or name of the destination worker.</p></li>
+<li><p><strong>func</strong> (<em>callable</em>) – a callable function, such as Python callables, builtin
+operators (e.g. <a class="reference internal" href="generated/torch.add.html#torch.add" title="torch.add"><code class="xref py py-meth docutils literal notranslate"><span class="pre">add()</span></code></a>) and annotated
+TorchScript functions.</p></li>
+<li><p><strong>args</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.8)"><em>tuple</em></a>) – the argument tuple for the <code class="docutils literal notranslate"><span class="pre">func</span></code> invocation.</p></li>
+<li><p><strong>kwargs</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.8)"><em>dict</em></a>) – is a dictionary of keyword arguments for the <code class="docutils literal notranslate"><span class="pre">func</span></code>
+invocation.</p></li>
+<li><p><strong>timeout</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.8)"><em>float</em></a><em>, </em><em>optional</em>) – timeout in seconds to use for this RPC. If
+the RPC does not complete in this amount of
+time, an exception indicating it has
+timed out will be raised. A value of 0
+indicates an infinite timeout, i.e. a timeout
+error will never be raised. If not provided,
+the default value set during initialization
+or with <code class="docutils literal notranslate"><span class="pre">_set_rpc_timeout</span></code> is used.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Returns the result of running <code class="docutils literal notranslate"><span class="pre">func</span></code> with <code class="docutils literal notranslate"><span class="pre">args</span></code> and <code class="docutils literal notranslate"><span class="pre">kwargs</span></code>.</p>
+</dd>
+</dl>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Using GPU tensors as arguments or return values of <code class="docutils literal notranslate"><span class="pre">func</span></code> is not
+supported since we don’t support sending GPU tensors over the wire. You
+need to explicitly copy GPU tensors to CPU before using them as
+arguments or return values of <code class="docutils literal notranslate"><span class="pre">func</span></code>.</p>
+</div>
+<dl>
+<dt>Example::</dt><dd><p>Make sure that <code class="docutils literal notranslate"><span class="pre">MASTER_ADDR</span></code> and <code class="docutils literal notranslate"><span class="pre">MASTER_PORT</span></code> are set properly
+on both workers. Refer to <a class="reference internal" href="distributed.html#torch.distributed.init_process_group" title="torch.distributed.init_process_group"><code class="xref py py-meth docutils literal notranslate"><span class="pre">init_process_group()</span></code></a>
+API for more details. For example,</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">export</span> <span class="n">MASTER_ADDR</span><span class="o">=</span><span class="n">localhost</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">export</span> <span class="n">MASTER_PORT</span><span class="o">=</span><span class="mi">5678</span>
+</pre></div>
+</div>
+<p>Then run the following code in two different processes:</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker 0:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.rpc</span> <span class="k">as</span> <span class="nn">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span><span class="s2">&quot;worker0&quot;</span><span class="p">,</span> <span class="n">rank</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">ret</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_sync</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">3</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker 1:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.rpc</span> <span class="k">as</span> <span class="nn">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">rank</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Below is an example of running a TorchScript function using RPC.</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On both workers:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nd">@torch</span><span class="o">.</span><span class="n">jit</span><span class="o">.</span><span class="n">script</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">my_script_add</span><span class="p">(</span><span class="n">t1</span><span class="p">,</span> <span class="n">t2</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span>   <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">t1</span><span class="p">,</span> <span class="n">t2</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker 0:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.rpc</span> <span class="k">as</span> <span class="nn">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span><span class="s2">&quot;worker0&quot;</span><span class="p">,</span> <span class="n">rank</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">ret</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_sync</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">my_script_add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">3</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker 1:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.rpc</span> <span class="k">as</span> <span class="nn">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">rank</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</pre></div>
+</div>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.rpc.rpc_async">
+<code class="sig-prename descclassname">torch.distributed.rpc.</code><code class="sig-name descname">rpc_async</code><span class="sig-paren">(</span><em class="sig-param">to</em>, <em class="sig-param">func</em>, <em class="sig-param">args=None</em>, <em class="sig-param">kwargs=None</em>, <em class="sig-param">timeout=-1.0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/rpc/api.html#rpc_async"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.rpc.rpc_async" title="Permalink to this definition">¶</a></dt>
+<dd><p>Make a non-blocking RPC call to run function <code class="docutils literal notranslate"><span class="pre">func</span></code> on worker <code class="docutils literal notranslate"><span class="pre">to</span></code>. RPC
+messages are sent and received in parallel to execution of Python code. This
+method is thread-safe. This method will immediately return a
+<a class="reference internal" href="futures.html#torch.futures.Future" title="torch.futures.Future"><code class="xref py py-class docutils literal notranslate"><span class="pre">Future</span></code></a> that can be awaited on.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>to</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.8)"><em>str</em></a><em> or </em><a class="reference internal" href="#torch.distributed.rpc.WorkerInfo" title="torch.distributed.rpc.WorkerInfo"><em>WorkerInfo</em></a>) – id or name of the destination worker.</p></li>
+<li><p><strong>func</strong> (<em>callable</em>) – a callable function, such as Python callables, builtin
+operators (e.g. <a class="reference internal" href="generated/torch.add.html#torch.add" title="torch.add"><code class="xref py py-meth docutils literal notranslate"><span class="pre">add()</span></code></a>) and annotated
+TorchScript functions.</p></li>
+<li><p><strong>args</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.8)"><em>tuple</em></a>) – the argument tuple for the <code class="docutils literal notranslate"><span class="pre">func</span></code> invocation.</p></li>
+<li><p><strong>kwargs</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.8)"><em>dict</em></a>) – is a dictionary of keyword arguments for the <code class="docutils literal notranslate"><span class="pre">func</span></code>
+invocation.</p></li>
+<li><p><strong>timeout</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.8)"><em>float</em></a><em>, </em><em>optional</em>) – timeout in seconds to use for this RPC. If
+the RPC does not complete in this amount of
+time, an exception indicating it has
+timed out will be raised. A value of 0
+indicates an infinite timeout, i.e. a timeout
+error will never be raised. If not provided,
+the default value set during initialization
+or with <code class="docutils literal notranslate"><span class="pre">_set_rpc_timeout</span></code> is used.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>Returns a <a class="reference internal" href="futures.html#torch.futures.Future" title="torch.futures.Future"><code class="xref py py-class docutils literal notranslate"><span class="pre">Future</span></code></a> object that can be waited
+on. When completed, the return value of <code class="docutils literal notranslate"><span class="pre">func</span></code> on <code class="docutils literal notranslate"><span class="pre">args</span></code> and
+<code class="docutils literal notranslate"><span class="pre">kwargs</span></code> can be retrieved from the <a class="reference internal" href="futures.html#torch.futures.Future" title="torch.futures.Future"><code class="xref py py-class docutils literal notranslate"><span class="pre">Future</span></code></a>
+object.</p>
+</dd>
+</dl>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Using GPU tensors as arguments or return values of <code class="docutils literal notranslate"><span class="pre">func</span></code> is not
+supported since we don’t support sending GPU tensors over the wire. You
+need to explicitly copy GPU tensors to CPU before using them as
+arguments or return values of <code class="docutils literal notranslate"><span class="pre">func</span></code>.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">rpc_async</span></code> API does not copy storages of argument tensors until
+sending them over the wire, which could be done by a different thread
+depending on the RPC backend type. The caller should make sure that the
+contents of those tensors stay intact until the returned
+<a class="reference internal" href="futures.html#torch.futures.Future" title="torch.futures.Future"><code class="xref py py-class docutils literal notranslate"><span class="pre">Future</span></code></a> completes.</p>
+</div>
+<dl>
+<dt>Example::</dt><dd><p>Make sure that <code class="docutils literal notranslate"><span class="pre">MASTER_ADDR</span></code> and <code class="docutils literal notranslate"><span class="pre">MASTER_PORT</span></code> are set properly
+on both workers. Refer to <a class="reference internal" href="distributed.html#torch.distributed.init_process_group" title="torch.distributed.init_process_group"><code class="xref py py-meth docutils literal notranslate"><span class="pre">init_process_group()</span></code></a>
+API for more details. For example,</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">export</span> <span class="n">MASTER_ADDR</span><span class="o">=</span><span class="n">localhost</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">export</span> <span class="n">MASTER_PORT</span><span class="o">=</span><span class="mi">5678</span>
+</pre></div>
+</div>
+<p>Then run the following code in two different processes:</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker 0:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.rpc</span> <span class="k">as</span> <span class="nn">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span><span class="s2">&quot;worker0&quot;</span><span class="p">,</span> <span class="n">rank</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">fut1</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_async</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">3</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">fut2</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_async</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="nb">min</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">result</span> <span class="o">=</span> <span class="n">fut1</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span> <span class="o">+</span> <span class="n">fut2</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker 1:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.rpc</span> <span class="k">as</span> <span class="nn">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">rank</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Below is an example of running a TorchScript function using RPC.</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On both workers:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nd">@torch</span><span class="o">.</span><span class="n">jit</span><span class="o">.</span><span class="n">script</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">my_script_add</span><span class="p">(</span><span class="n">t1</span><span class="p">,</span> <span class="n">t2</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span>   <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">t1</span><span class="p">,</span> <span class="n">t2</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker 0:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.rpc</span> <span class="k">as</span> <span class="nn">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span><span class="s2">&quot;worker0&quot;</span><span class="p">,</span> <span class="n">rank</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">fut</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_async</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">my_script_add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">3</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">ret</span> <span class="o">=</span> <span class="n">fut</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker 1:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.rpc</span> <span class="k">as</span> <span class="nn">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">rank</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</pre></div>
+</div>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.rpc.remote">
+<code class="sig-prename descclassname">torch.distributed.rpc.</code><code class="sig-name descname">remote</code><span class="sig-paren">(</span><em class="sig-param">to</em>, <em class="sig-param">func</em>, <em class="sig-param">args=None</em>, <em class="sig-param">kwargs=None</em>, <em class="sig-param">timeout=-1.0</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/rpc/api.html#remote"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.rpc.remote" title="Permalink to this definition">¶</a></dt>
+<dd><p>Make a remote call to run <code class="docutils literal notranslate"><span class="pre">func</span></code> on worker <code class="docutils literal notranslate"><span class="pre">to</span></code> and return an
+<a class="reference internal" href="#torch.distributed.rpc.RRef" title="torch.distributed.rpc.RRef"><code class="xref py py-class docutils literal notranslate"><span class="pre">RRef</span></code></a> to the result value immediately.
+Worker <code class="docutils literal notranslate"><span class="pre">to</span></code> will be the owner of the returned
+<a class="reference internal" href="#torch.distributed.rpc.RRef" title="torch.distributed.rpc.RRef"><code class="xref py py-class docutils literal notranslate"><span class="pre">RRef</span></code></a>, and the worker calling <code class="docutils literal notranslate"><span class="pre">remote</span></code> is
+a user. The owner manages the global reference count of its
+<a class="reference internal" href="#torch.distributed.rpc.RRef" title="torch.distributed.rpc.RRef"><code class="xref py py-class docutils literal notranslate"><span class="pre">RRef</span></code></a>, and the owner
+<a class="reference internal" href="#torch.distributed.rpc.RRef" title="torch.distributed.rpc.RRef"><code class="xref py py-class docutils literal notranslate"><span class="pre">RRef</span></code></a> is only destructed when globally there
+are no living references to it.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>to</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.8)"><em>str</em></a><em> or </em><a class="reference internal" href="#torch.distributed.rpc.WorkerInfo" title="torch.distributed.rpc.WorkerInfo"><em>WorkerInfo</em></a>) – id or name of the destination worker.</p></li>
+<li><p><strong>func</strong> (<em>callable</em>) – a callable function, such as Python callables, builtin
+operators (e.g. <a class="reference internal" href="generated/torch.add.html#torch.add" title="torch.add"><code class="xref py py-meth docutils literal notranslate"><span class="pre">add()</span></code></a>) and annotated
+TorchScript functions.</p></li>
+<li><p><strong>args</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.8)"><em>tuple</em></a>) – the argument tuple for the <code class="docutils literal notranslate"><span class="pre">func</span></code> invocation.</p></li>
+<li><p><strong>kwargs</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.8)"><em>dict</em></a>) – is a dictionary of keyword arguments for the <code class="docutils literal notranslate"><span class="pre">func</span></code>
+invocation.</p></li>
+<li><p><strong>timeout</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.8)"><em>float</em></a><em>, </em><em>optional</em>) – timeout in seconds for this remote call. If the
+creation of this
+<a class="reference internal" href="#torch.distributed.rpc.RRef" title="torch.distributed.rpc.RRef"><code class="xref py py-class docutils literal notranslate"><span class="pre">RRef</span></code></a> on worker
+<code class="docutils literal notranslate"><span class="pre">to</span></code> is not successfully processed on this
+worker within this timeout, then the next time
+there is an attempt to use the RRef (such as
+<code class="docutils literal notranslate"><span class="pre">to_here()</span></code>), a timeout will be raised
+indicating this failure. A value of 0 indicates
+an infinite timeout, i.e. a timeout error will
+never be raised. If not provided, the default
+value set during initialization or with
+<code class="docutils literal notranslate"><span class="pre">_set_rpc_timeout</span></code> is used.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>A user <a class="reference internal" href="#torch.distributed.rpc.RRef" title="torch.distributed.rpc.RRef"><code class="xref py py-class docutils literal notranslate"><span class="pre">RRef</span></code></a> instance to the result
+value. Use the blocking API <a class="reference internal" href="#torch.distributed.rpc.RRef.to_here" title="torch.distributed.rpc.RRef.to_here"><code class="xref py py-meth docutils literal notranslate"><span class="pre">torch.distributed.rpc.RRef.to_here()</span></code></a>
+to retrieve the result value locally.</p>
+</dd>
+</dl>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Using GPU tensors as arguments or return values of <code class="docutils literal notranslate"><span class="pre">func</span></code> is not
+supported since we don’t support sending GPU tensors over the wire. You
+need to explicitly copy GPU tensors to CPU before using them as
+arguments or return values of <code class="docutils literal notranslate"><span class="pre">func</span></code>.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">remote</span></code> API does not copy storages of argument tensors until
+sending them over the wire, which could be done by a different thread
+depending on the RPC backend type. The caller should make sure that the
+contents of those tensors stay intact until the returned RRef is
+confirmed by the owner, which can be checked using the
+<a class="reference internal" href="#torch.distributed.rpc.RRef.confirmed_by_owner" title="torch.distributed.rpc.RRef.confirmed_by_owner"><code class="xref py py-meth docutils literal notranslate"><span class="pre">torch.distributed.rpc.RRef.confirmed_by_owner()</span></code></a> API.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Errors such as timeouts for the <code class="docutils literal notranslate"><span class="pre">remote</span></code> API are handled on a
+best-effort basis. This means that when remote calls initiated by
+<code class="docutils literal notranslate"><span class="pre">remote</span></code> fail, such as with a timeout error, we take a best-effort
+approach to error handling. This means that errors are handled and set
+on the resulting RRef on an asynchronous basis. If the RRef has not been
+used by the application before this handling (such as <code class="docutils literal notranslate"><span class="pre">to_here</span></code> or
+fork call), then future uses of the <code class="docutils literal notranslate"><span class="pre">RRef</span></code> will appropriately raise
+errors. However, it is possible that the user application will use the
+<code class="docutils literal notranslate"><span class="pre">RRef</span></code> before the errors are handled. In this case, errors may not be
+raised as they have not yet been handled.</p>
+</div>
+<dl>
+<dt>Example::</dt><dd><p>Make sure that <code class="docutils literal notranslate"><span class="pre">MASTER_ADDR</span></code> and <code class="docutils literal notranslate"><span class="pre">MASTER_PORT</span></code> are set properly
+on both workers. Refer to <a class="reference internal" href="distributed.html#torch.distributed.init_process_group" title="torch.distributed.init_process_group"><code class="xref py py-meth docutils literal notranslate"><span class="pre">init_process_group()</span></code></a>
+API for more details. For example,</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">export</span> <span class="n">MASTER_ADDR</span><span class="o">=</span><span class="n">localhost</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">export</span> <span class="n">MASTER_PORT</span><span class="o">=</span><span class="mi">5678</span>
+</pre></div>
+</div>
+<p>Then run the following code in two different processes:</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker 0:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.rpc</span> <span class="k">as</span> <span class="nn">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span><span class="s2">&quot;worker0&quot;</span><span class="p">,</span> <span class="n">rank</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref1</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">3</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref2</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">1</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">x</span> <span class="o">=</span> <span class="n">rref1</span><span class="o">.</span><span class="n">to_here</span><span class="p">()</span> <span class="o">+</span> <span class="n">rref2</span><span class="o">.</span><span class="n">to_here</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker 1:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.rpc</span> <span class="k">as</span> <span class="nn">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">rank</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Below is an example of running a TorchScript function using RPC.</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On both workers:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nd">@torch</span><span class="o">.</span><span class="n">jit</span><span class="o">.</span><span class="n">script</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">my_script_add</span><span class="p">(</span><span class="n">t1</span><span class="p">,</span> <span class="n">t2</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span>   <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">t1</span><span class="p">,</span> <span class="n">t2</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker 0:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.rpc</span> <span class="k">as</span> <span class="nn">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span><span class="s2">&quot;worker0&quot;</span><span class="p">,</span> <span class="n">rank</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">my_script_add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">3</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref</span><span class="o">.</span><span class="n">to_here</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker 1:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.rpc</span> <span class="k">as</span> <span class="nn">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">rank</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</pre></div>
+</div>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.rpc.get_worker_info">
+<code class="sig-prename descclassname">torch.distributed.rpc.</code><code class="sig-name descname">get_worker_info</code><span class="sig-paren">(</span><em class="sig-param">worker_name=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/rpc/api.html#get_worker_info"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.rpc.get_worker_info" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get <a class="reference internal" href="#torch.distributed.rpc.WorkerInfo" title="torch.distributed.rpc.WorkerInfo"><code class="xref py py-class docutils literal notranslate"><span class="pre">WorkerInfo</span></code></a> of a given worker name.
+Use this <a class="reference internal" href="#torch.distributed.rpc.WorkerInfo" title="torch.distributed.rpc.WorkerInfo"><code class="xref py py-class docutils literal notranslate"><span class="pre">WorkerInfo</span></code></a> to avoid passing an
+expensive string on every invocation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>worker_name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.8)"><em>str</em></a>) – the string name of a worker. If <code class="docutils literal notranslate"><span class="pre">None</span></code>, return the
+the id of the current worker. (default <code class="docutils literal notranslate"><span class="pre">None</span></code>)</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p><a class="reference internal" href="#torch.distributed.rpc.WorkerInfo" title="torch.distributed.rpc.WorkerInfo"><code class="xref py py-class docutils literal notranslate"><span class="pre">WorkerInfo</span></code></a> instance for the given
+<code class="docutils literal notranslate"><span class="pre">worker_name</span></code> or <a class="reference internal" href="#torch.distributed.rpc.WorkerInfo" title="torch.distributed.rpc.WorkerInfo"><code class="xref py py-class docutils literal notranslate"><span class="pre">WorkerInfo</span></code></a> of the
+current worker if <code class="docutils literal notranslate"><span class="pre">worker_name</span></code> is <code class="docutils literal notranslate"><span class="pre">None</span></code>.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.rpc.shutdown">
+<code class="sig-prename descclassname">torch.distributed.rpc.</code><code class="sig-name descname">shutdown</code><span class="sig-paren">(</span><em class="sig-param">graceful=True</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/rpc/api.html#shutdown"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.rpc.shutdown" title="Permalink to this definition">¶</a></dt>
+<dd><p>Perform a shutdown of the RPC agent, and then destroy the RPC agent. This
+stops the local agent from accepting outstanding requests, and shuts
+down the RPC framework by terminating all RPC threads. If <code class="docutils literal notranslate"><span class="pre">graceful=True</span></code>,
+this will block until all local and remote RPC processes reach this method
+and wait for all outstanding work to complete. Otherwise, if
+<code class="docutils literal notranslate"><span class="pre">graceful=False</span></code>, this is a local shutdown, and it does not wait for other
+RPC processes to reach this method.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>For <a class="reference internal" href="futures.html#torch.futures.Future" title="torch.futures.Future"><code class="xref py py-class docutils literal notranslate"><span class="pre">Future</span></code></a> objects returned by
+<a class="reference internal" href="#torch.distributed.rpc.rpc_async" title="torch.distributed.rpc.rpc_async"><code class="xref py py-meth docutils literal notranslate"><span class="pre">rpc_async()</span></code></a>, <code class="docutils literal notranslate"><span class="pre">future.wait()</span></code> should not
+be called after <code class="docutils literal notranslate"><span class="pre">shutdown()</span></code>.</p>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>graceful</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a>) – Whether to do a graceful shutdown or not. If True,
+this will 1) wait until there is no pending system
+messages for <code class="docutils literal notranslate"><span class="pre">UserRRefs</span></code> and delete them; 2) block
+until all local and remote RPC processes have reached
+this method and wait for all outstanding work to
+complete.</p>
+</dd>
+</dl>
+<dl>
+<dt>Example::</dt><dd><p>Make sure that <code class="docutils literal notranslate"><span class="pre">MASTER_ADDR</span></code> and <code class="docutils literal notranslate"><span class="pre">MASTER_PORT</span></code> are set properly
+on both workers. Refer to <a class="reference internal" href="distributed.html#torch.distributed.init_process_group" title="torch.distributed.init_process_group"><code class="xref py py-meth docutils literal notranslate"><span class="pre">init_process_group()</span></code></a>
+API for more details. For example,</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">export</span> <span class="n">MASTER_ADDR</span><span class="o">=</span><span class="n">localhost</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">export</span> <span class="n">MASTER_PORT</span><span class="o">=</span><span class="mi">5678</span>
+</pre></div>
+</div>
+<p>Then run the following code in two different processes:</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker 0:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.rpc</span> <span class="k">as</span> <span class="nn">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span><span class="s2">&quot;worker0&quot;</span><span class="p">,</span> <span class="n">rank</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># do some work</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">result</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_sync</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="mi">1</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># ready to shutdown</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker 1:</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.rpc</span> <span class="k">as</span> <span class="nn">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">rank</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># wait for worker 0 to finish work, and then shutdown.</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">shutdown</span><span class="p">()</span>
+</pre></div>
+</div>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="class">
+<dt id="torch.distributed.rpc.WorkerInfo">
+<em class="property">class </em><code class="sig-prename descclassname">torch.distributed.rpc.</code><code class="sig-name descname">WorkerInfo</code><a class="headerlink" href="#torch.distributed.rpc.WorkerInfo" title="Permalink to this definition">¶</a></dt>
+<dd><p>A structure that encapsulates information of a worker in the system.
+Contains the name and ID of the worker. This class is not meant to
+be constructed directly, rather, an instance can be retrieved
+through <a class="reference internal" href="#torch.distributed.rpc.get_worker_info" title="torch.distributed.rpc.get_worker_info"><code class="xref py py-meth docutils literal notranslate"><span class="pre">get_worker_info()</span></code></a> and the
+result can be passed in to functions such as
+<a class="reference internal" href="#torch.distributed.rpc.rpc_sync" title="torch.distributed.rpc.rpc_sync"><code class="xref py py-meth docutils literal notranslate"><span class="pre">rpc_sync()</span></code></a>, <a class="reference internal" href="#torch.distributed.rpc.rpc_async" title="torch.distributed.rpc.rpc_async"><code class="xref py py-meth docutils literal notranslate"><span class="pre">rpc_async()</span></code></a>,
+<a class="reference internal" href="#torch.distributed.rpc.remote" title="torch.distributed.rpc.remote"><code class="xref py py-meth docutils literal notranslate"><span class="pre">remote()</span></code></a> to avoid copying a string on
+every invocation.</p>
+<dl class="method">
+<dt id="torch.distributed.rpc.WorkerInfo.id">
+<em class="property">property </em><code class="sig-name descname">id</code><a class="headerlink" href="#torch.distributed.rpc.WorkerInfo.id" title="Permalink to this definition">¶</a></dt>
+<dd><p>Globally unique id to identify the worker.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.distributed.rpc.WorkerInfo.name">
+<em class="property">property </em><code class="sig-name descname">name</code><a class="headerlink" href="#torch.distributed.rpc.WorkerInfo.name" title="Permalink to this definition">¶</a></dt>
+<dd><p>The name of the worker.</p>
+</dd></dl>
+
+</dd></dl>
+
+<p>The RPC package also provides decorators which allow applications to specify
+how a given function should be treated on the callee side.</p>
+<dl class="function">
+<dt id="torch.distributed.rpc.functions.async_execution">
+<code class="sig-prename descclassname">torch.distributed.rpc.functions.</code><code class="sig-name descname">async_execution</code><span class="sig-paren">(</span><em class="sig-param">fn</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/rpc/functions.html#async_execution"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.rpc.functions.async_execution" title="Permalink to this definition">¶</a></dt>
+<dd><p>A decorator for a function indicating that the return value of the function
+is guaranteed to be a <a class="reference internal" href="futures.html#torch.futures.Future" title="torch.futures.Future"><code class="xref py py-class docutils literal notranslate"><span class="pre">Future</span></code></a> object and this
+function can run asynchronously on the RPC callee. More specifically, the
+callee extracts the <a class="reference internal" href="futures.html#torch.futures.Future" title="torch.futures.Future"><code class="xref py py-class docutils literal notranslate"><span class="pre">Future</span></code></a> returned by the wrapped
+function and installs subsequent processing steps as a callback to that
+<a class="reference internal" href="futures.html#torch.futures.Future" title="torch.futures.Future"><code class="xref py py-class docutils literal notranslate"><span class="pre">Future</span></code></a>. The installed callback will read the value
+from the <a class="reference internal" href="futures.html#torch.futures.Future" title="torch.futures.Future"><code class="xref py py-class docutils literal notranslate"><span class="pre">Future</span></code></a> when completed and send the
+value back as the RPC response. That also means the returned
+<a class="reference internal" href="futures.html#torch.futures.Future" title="torch.futures.Future"><code class="xref py py-class docutils literal notranslate"><span class="pre">Future</span></code></a> only exists on the callee side and is never
+sent through RPC. This decorator is useful when the wrapped function’s
+(<code class="docutils literal notranslate"><span class="pre">fn</span></code>) execution needs to pause and resume due to, e.g., containing
+<a class="reference internal" href="#torch.distributed.rpc.rpc_async" title="torch.distributed.rpc.rpc_async"><code class="xref py py-meth docutils literal notranslate"><span class="pre">rpc_async()</span></code></a> or waiting for other signals.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>To enable asynchronous execution, applications must pass the
+function object returned by this decorator to RPC APIs. If RPC detected
+attributes installed by this decorator, it knows that this function
+returns a <code class="docutils literal notranslate"><span class="pre">Future</span></code> object and will handle that accordingly.
+However, this does not mean this decorator has to be outmost one when
+defining a function. For example, when combined with <code class="docutils literal notranslate"><span class="pre">&#64;staticmethod</span></code>
+or <code class="docutils literal notranslate"><span class="pre">&#64;classmethod</span></code>, <code class="docutils literal notranslate"><span class="pre">&#64;rpc.functions.async_execution</span></code> needs to be the
+inner decorator to allow the target function be recognized as a static
+or class function. This target function can still execute asynchronously
+because, when accessed, the static or class method preserves attributes
+installed by <code class="docutils literal notranslate"><span class="pre">&#64;rpc.functions.async_execution</span></code>.</p>
+</div>
+<dl>
+<dt>Example::</dt><dd><p>The returned <a class="reference internal" href="futures.html#torch.futures.Future" title="torch.futures.Future"><code class="xref py py-class docutils literal notranslate"><span class="pre">Future</span></code></a> object can come from
+<a class="reference internal" href="#torch.distributed.rpc.rpc_async" title="torch.distributed.rpc.rpc_async"><code class="xref py py-meth docutils literal notranslate"><span class="pre">rpc_async()</span></code></a>,
+<a class="reference internal" href="futures.html#torch.futures.Future.then" title="torch.futures.Future.then"><code class="xref py py-meth docutils literal notranslate"><span class="pre">then()</span></code></a>, or <a class="reference internal" href="futures.html#torch.futures.Future" title="torch.futures.Future"><code class="xref py py-class docutils literal notranslate"><span class="pre">Future</span></code></a>
+constructor. The example below shows directly using the
+<a class="reference internal" href="futures.html#torch.futures.Future" title="torch.futures.Future"><code class="xref py py-class docutils literal notranslate"><span class="pre">Future</span></code></a> returned by
+<a class="reference internal" href="futures.html#torch.futures.Future.then" title="torch.futures.Future.then"><code class="xref py py-meth docutils literal notranslate"><span class="pre">then()</span></code></a>.</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">torch.distributed</span> <span class="kn">import</span> <span class="n">rpc</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># omitting setup and shutdown RPC</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># On all workers</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nd">@rpc</span><span class="o">.</span><span class="n">functions</span><span class="o">.</span><span class="n">async_execution</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">async_add_chained</span><span class="p">(</span><span class="n">to</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="c1"># This function runs on &quot;worker1&quot; and returns immediately when</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="c1"># the callback is installed through the `then(cb)` API. In the</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="c1"># mean time, the `rpc_async` to &quot;worker2&quot; can run concurrently.</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="c1"># When the return value of that `rpc_async` arrives at</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="c1"># &quot;worker1&quot;, &quot;worker1&quot; will run the lambda function accordingly</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="c1"># and set the value for the previously returned `Future`, which</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="c1"># will then trigger RPC to send the result back to &quot;worker0&quot;.</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="k">return</span> <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_async</span><span class="p">(</span><span class="n">to</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span><span class="o">.</span><span class="n">then</span><span class="p">(</span>
+<span class="gp">&gt;&gt;&gt; </span>        <span class="k">lambda</span> <span class="n">fut</span><span class="p">:</span> <span class="n">fut</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span> <span class="o">+</span> <span class="n">z</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="p">)</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker0</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">ret</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_sync</span><span class="p">(</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="s2">&quot;worker1&quot;</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">async_add_chained</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;worker2&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">ret</span><span class="p">)</span>  <span class="c1"># prints tensor([3., 3.])</span>
+</pre></div>
+</div>
+<p>When combined with TorchScript decorators, this decorator must be the
+outmost one.</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">torch</span> <span class="kn">import</span> <span class="n">Tensor</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">torch.futures</span> <span class="kn">import</span> <span class="n">Future</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">torch.distributed</span> <span class="kn">import</span> <span class="n">rpc</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># omitting setup and shutdown RPC</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># On all workers</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nd">@torch</span><span class="o">.</span><span class="n">jit</span><span class="o">.</span><span class="n">script</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">script_add</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nd">@rpc</span><span class="o">.</span><span class="n">functions</span><span class="o">.</span><span class="n">async_execution</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nd">@torch</span><span class="o">.</span><span class="n">jit</span><span class="o">.</span><span class="n">script</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">async_add</span><span class="p">(</span><span class="n">to</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">x</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Future</span><span class="p">[</span><span class="n">Tensor</span><span class="p">]:</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="k">return</span> <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_async</span><span class="p">(</span><span class="n">to</span><span class="p">,</span> <span class="n">script_add</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker0</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">ret</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_sync</span><span class="p">(</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="s2">&quot;worker1&quot;</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">async_add</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;worker2&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">ret</span><span class="p">)</span>  <span class="c1"># prints tensor([2., 2.])</span>
+</pre></div>
+</div>
+<p>When combined with static or class method, this decorator must be the
+inner one.</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">torch.distributed</span> <span class="kn">import</span> <span class="n">rpc</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># omitting setup and shutdown RPC</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># On all workers</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">class</span> <span class="nc">AsyncExecutionClass</span><span class="p">:</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="nd">@staticmethod</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="nd">@rpc</span><span class="o">.</span><span class="n">functions</span><span class="o">.</span><span class="n">async_execution</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="k">def</span> <span class="nf">static_async_add</span><span class="p">(</span><span class="n">to</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span>        <span class="k">return</span> <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_async</span><span class="p">(</span><span class="n">to</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span><span class="o">.</span><span class="n">then</span><span class="p">(</span>
+<span class="gp">&gt;&gt;&gt; </span>            <span class="k">lambda</span> <span class="n">fut</span><span class="p">:</span> <span class="n">fut</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span> <span class="o">+</span> <span class="n">z</span>
+<span class="gp">&gt;&gt;&gt; </span>        <span class="p">)</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="nd">@classmethod</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="nd">@rpc</span><span class="o">.</span><span class="n">functions</span><span class="o">.</span><span class="n">async_execution</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="k">def</span> <span class="nf">class_async_add</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">to</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span>        <span class="n">ret_fut</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">futures</span><span class="o">.</span><span class="n">Future</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span>        <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_async</span><span class="p">(</span><span class="n">to</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span><span class="o">.</span><span class="n">then</span><span class="p">(</span>
+<span class="gp">&gt;&gt;&gt; </span>            <span class="k">lambda</span> <span class="n">fut</span><span class="p">:</span> <span class="n">ret_fut</span><span class="o">.</span><span class="n">set_result</span><span class="p">(</span><span class="n">fut</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span> <span class="o">+</span> <span class="n">z</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span>        <span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span>        <span class="k">return</span> <span class="n">ret_fut</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="nd">@rpc</span><span class="o">.</span><span class="n">functions</span><span class="o">.</span><span class="n">async_execution</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="k">def</span> <span class="nf">bound_async_add</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">to</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span>        <span class="k">return</span> <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_async</span><span class="p">(</span><span class="n">to</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span><span class="o">.</span><span class="n">then</span><span class="p">(</span>
+<span class="gp">&gt;&gt;&gt; </span>            <span class="k">lambda</span> <span class="n">fut</span><span class="p">:</span> <span class="n">fut</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span> <span class="o">+</span> <span class="n">z</span>
+<span class="gp">&gt;&gt;&gt; </span>        <span class="p">)</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># On worker0</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">ret</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_sync</span><span class="p">(</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="s2">&quot;worker1&quot;</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">AsyncExecutionClass</span><span class="o">.</span><span class="n">static_async_add</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;worker2&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">ret</span><span class="p">)</span>  <span class="c1"># prints tensor([4., 4.])</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">ret</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_sync</span><span class="p">(</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="s2">&quot;worker1&quot;</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">AsyncExecutionClass</span><span class="o">.</span><span class="n">class_async_add</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;worker2&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">ret</span><span class="p">)</span>  <span class="c1"># prints tensor([4., 4.])</span>
+</pre></div>
+</div>
+<p>This decorator also works with RRef helpers, i.e., .
+<a class="reference internal" href="#torch.distributed.rpc.RRef.rpc_sync" title="torch.distributed.rpc.RRef.rpc_sync"><code class="xref py py-meth docutils literal notranslate"><span class="pre">torch.distributed.rpc.RRef.rpc_sync()</span></code></a>,
+<a class="reference internal" href="#torch.distributed.rpc.RRef.rpc_async" title="torch.distributed.rpc.RRef.rpc_async"><code class="xref py py-meth docutils literal notranslate"><span class="pre">torch.distributed.rpc.RRef.rpc_async()</span></code></a>, and
+<a class="reference internal" href="#torch.distributed.rpc.RRef.remote" title="torch.distributed.rpc.RRef.remote"><code class="xref py py-meth docutils literal notranslate"><span class="pre">torch.distributed.rpc.RRef.remote()</span></code></a>.</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">torch.distributed</span> <span class="kn">import</span> <span class="n">rpc</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># reuse the AsyncExecutionClass class above</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">AsyncExecutionClass</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">ret</span> <span class="o">=</span> <span class="n">rref</span><span class="o">.</span><span class="n">rpc_sync</span><span class="p">()</span><span class="o">.</span><span class="n">static_async_add</span><span class="p">(</span><span class="s2">&quot;worker2&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">ret</span><span class="p">)</span>  <span class="c1"># prints tensor([4., 4.])</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">AsyncExecutionClass</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">ret</span> <span class="o">=</span> <span class="n">rref</span><span class="o">.</span><span class="n">rpc_async</span><span class="p">()</span><span class="o">.</span><span class="n">static_async_add</span><span class="p">(</span><span class="s2">&quot;worker2&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">ret</span><span class="p">)</span>  <span class="c1"># prints tensor([4., 4.])</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">AsyncExecutionClass</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">ret</span> <span class="o">=</span> <span class="n">rref</span><span class="o">.</span><span class="n">remote</span><span class="p">()</span><span class="o">.</span><span class="n">static_async_add</span><span class="p">(</span><span class="s2">&quot;worker2&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">to_here</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">ret</span><span class="p">)</span>  <span class="c1"># prints tensor([4., 4.])</span>
+</pre></div>
+</div>
+</dd>
+</dl>
+</dd></dl>
+
+<div class="section" id="backends">
+<span id="rpc-backends"></span><h3>Backends<a class="headerlink" href="#backends" title="Permalink to this headline">¶</a></h3>
+<p>The RPC module can leverage different backends to perform the communication
+between the nodes. The backend to be used can be specified in the
+<a class="reference internal" href="#torch.distributed.rpc.init_rpc" title="torch.distributed.rpc.init_rpc"><code class="xref py py-func docutils literal notranslate"><span class="pre">init_rpc()</span></code></a> function, by passing a certain value of
+the <a class="reference internal" href="#torch.distributed.rpc.BackendType" title="torch.distributed.rpc.BackendType"><code class="xref py py-class docutils literal notranslate"><span class="pre">BackendType</span></code></a> enum. Regardless of what backend
+is used, the rest of the RPC API won’t change. Each backend also defines its own
+subclass of the <a class="reference internal" href="#torch.distributed.rpc.RpcBackendOptions" title="torch.distributed.rpc.RpcBackendOptions"><code class="xref py py-class docutils literal notranslate"><span class="pre">RpcBackendOptions</span></code></a> class, an
+instance of which can also be passed to <a class="reference internal" href="#torch.distributed.rpc.init_rpc" title="torch.distributed.rpc.init_rpc"><code class="xref py py-func docutils literal notranslate"><span class="pre">init_rpc()</span></code></a>
+to configure the backend’s behavior.</p>
+<dl class="class">
+<dt id="torch.distributed.rpc.BackendType">
+<em class="property">class </em><code class="sig-prename descclassname">torch.distributed.rpc.</code><code class="sig-name descname">BackendType</code><a class="headerlink" href="#torch.distributed.rpc.BackendType" title="Permalink to this definition">¶</a></dt>
+<dd><p>An enum class of available backends.</p>
+<p>PyTorch ships with two builtin backends: <code class="docutils literal notranslate"><span class="pre">BackendType.TENSORPIPE</span></code> and
+<code class="docutils literal notranslate"><span class="pre">BackendType.PROCESS_GROUP</span></code>. Additional ones can be registered using the
+<code class="xref py py-func docutils literal notranslate"><span class="pre">register_backend()</span></code> function.</p>
+</dd></dl>
+
+<dl class="class">
+<dt id="torch.distributed.rpc.RpcBackendOptions">
+<em class="property">class </em><code class="sig-prename descclassname">torch.distributed.rpc.</code><code class="sig-name descname">RpcBackendOptions</code><a class="headerlink" href="#torch.distributed.rpc.RpcBackendOptions" title="Permalink to this definition">¶</a></dt>
+<dd><p>An abstract structure encapsulating the options passed into the RPC
+backend. An instance of this class can be passed in to
+<a class="reference internal" href="#torch.distributed.rpc.init_rpc" title="torch.distributed.rpc.init_rpc"><code class="xref py py-meth docutils literal notranslate"><span class="pre">init_rpc()</span></code></a> in order to initialize RPC
+with specific configurations, such as the RPC timeout and
+<code class="docutils literal notranslate"><span class="pre">init_method</span></code> to be used.</p>
+<dl class="method">
+<dt id="torch.distributed.rpc.RpcBackendOptions.init_method">
+<em class="property">property </em><code class="sig-name descname">init_method</code><a class="headerlink" href="#torch.distributed.rpc.RpcBackendOptions.init_method" title="Permalink to this definition">¶</a></dt>
+<dd><p>URL specifying how to initialize the process group.
+Default is <code class="docutils literal notranslate"><span class="pre">env://</span></code></p>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.distributed.rpc.RpcBackendOptions.rpc_timeout">
+<em class="property">property </em><code class="sig-name descname">rpc_timeout</code><a class="headerlink" href="#torch.distributed.rpc.RpcBackendOptions.rpc_timeout" title="Permalink to this definition">¶</a></dt>
+<dd><p>A float indicating the timeout to use for all
+RPCs. If an RPC does not complete in this timeframe, it will
+complete with an exception indicating that it has timed out.</p>
+</dd></dl>
+
+</dd></dl>
+
+<div class="section" id="tensorpipe-backend">
+<h4>TensorPipe Backend<a class="headerlink" href="#tensorpipe-backend" title="Permalink to this headline">¶</a></h4>
+<p>The TensorPipe agent, which is the default, leverages <a class="reference external" href="https://github.com/pytorch/tensorpipe">the TensorPipe library</a>, which provides a natively
+point-to-point communication primitive specifically suited for machine learning
+that fundamentally addresses some of the limitations of Gloo. Compared to Gloo,
+it has the advantage of being asynchronous, which allows a large number of
+transfers to occur simultaneously, each at their own speed, without blocking
+each other. It will only open pipes between pairs of nodes when needed, on
+demand, and when one node fails only its incident pipes will be closed, while
+all other ones will keep working as normal. In addition, it is able to support
+multiple different transports (TCP, of course, but also shared memory, NVLink,
+InfiniBand, …) and can automatically detect their availability and negotiate
+the best transport to use for each pipe.</p>
+<p>The TensorPipe backend has been introduced in PyTorch v1.6 and is being actively
+developed. At the moment, it only supports CPU tensors, with GPU support coming
+soon. It comes with a TCP-based transport, just like Gloo. It is also able to
+automatically chunk and multiplex large tensors over multiple sockets and
+threads in order to achieve very high bandwidths. The agent will be able to pick
+the best transport on its own, with no intervention required.</p>
+<p>Example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">os</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">torch.distributed</span> <span class="kn">import</span> <span class="n">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;MASTER_ADDR&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;localhost&#39;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;MASTER_PORT&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;29500&#39;</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="s2">&quot;worker1&quot;</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">rank</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">rpc_backend_options</span><span class="o">=</span><span class="n">rpc</span><span class="o">.</span><span class="n">TensorPipeRpcBackendOptions</span><span class="p">(</span>
+<span class="gp">&gt;&gt;&gt; </span>        <span class="n">num_worker_threads</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>        <span class="n">rpc_timeout</span><span class="o">=</span><span class="mi">20</span> <span class="c1"># 20 second timeout</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="p">)</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># omitting init_rpc invocation on worker2</span>
+</pre></div>
+</div>
+<dl class="class">
+<dt id="torch.distributed.rpc.TensorPipeRpcBackendOptions">
+<em class="property">class </em><code class="sig-prename descclassname">torch.distributed.rpc.</code><code class="sig-name descname">TensorPipeRpcBackendOptions</code><span class="sig-paren">(</span><em class="sig-param">*</em>, <em class="sig-param">num_worker_threads: int = 16</em>, <em class="sig-param">rpc_timeout: float = 60.0</em>, <em class="sig-param">init_method: str = 'env://'</em>, <em class="sig-param">_transports: List = None</em>, <em class="sig-param">_channels: List = None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/rpc/options.html#TensorPipeRpcBackendOptions"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.rpc.TensorPipeRpcBackendOptions" title="Permalink to this definition">¶</a></dt>
+<dd><p>The backend options for
+<code class="xref py py-class docutils literal notranslate"><span class="pre">TensorPipeAgent</span></code>, derived from
+<a class="reference internal" href="#torch.distributed.rpc.RpcBackendOptions" title="torch.distributed.rpc.RpcBackendOptions"><code class="xref py py-class docutils literal notranslate"><span class="pre">RpcBackendOptions</span></code></a>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>num_worker_threads</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em>, </em><em>optional</em>) – The number of threads in the
+thread-pool used by
+<code class="xref py py-class docutils literal notranslate"><span class="pre">TensorPipeAgent</span></code> to execute
+requests (default: 16).</p></li>
+<li><p><strong>rpc_timeout</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.8)"><em>float</em></a><em>, </em><em>optional</em>) – The default timeout, in seconds,
+for RPC requests (default: 60 seconds). If the RPC has not
+completed in this timeframe, an exception indicating so will
+be raised. Callers can override this timeout for individual
+RPCs in <a class="reference internal" href="#torch.distributed.rpc.rpc_sync" title="torch.distributed.rpc.rpc_sync"><code class="xref py py-meth docutils literal notranslate"><span class="pre">rpc_sync()</span></code></a> and
+<a class="reference internal" href="#torch.distributed.rpc.rpc_async" title="torch.distributed.rpc.rpc_async"><code class="xref py py-meth docutils literal notranslate"><span class="pre">rpc_async()</span></code></a> if necessary.</p></li>
+<li><p><strong>init_method</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.8)"><em>str</em></a><em>, </em><em>optional</em>) – The URL to initialize the distributed
+store used for rendezvous. It takes any value accepted for the
+same argument of <a class="reference internal" href="distributed.html#torch.distributed.init_process_group" title="torch.distributed.init_process_group"><code class="xref py py-meth docutils literal notranslate"><span class="pre">init_process_group()</span></code></a>
+(default: <code class="docutils literal notranslate"><span class="pre">env://</span></code>).</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="method">
+<dt id="torch.distributed.rpc.TensorPipeRpcBackendOptions.init_method">
+<em class="property">property </em><code class="sig-name descname">init_method</code><a class="headerlink" href="#torch.distributed.rpc.TensorPipeRpcBackendOptions.init_method" title="Permalink to this definition">¶</a></dt>
+<dd><p>URL specifying how to initialize the process group.
+Default is <code class="docutils literal notranslate"><span class="pre">env://</span></code></p>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.distributed.rpc.TensorPipeRpcBackendOptions.num_worker_threads">
+<em class="property">property </em><code class="sig-name descname">num_worker_threads</code><a class="headerlink" href="#torch.distributed.rpc.TensorPipeRpcBackendOptions.num_worker_threads" title="Permalink to this definition">¶</a></dt>
+<dd><p>The number of threads in the thread-pool used by
+<code class="xref py py-class docutils literal notranslate"><span class="pre">TensorPipeAgent</span></code> to execute
+requests.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.distributed.rpc.TensorPipeRpcBackendOptions.rpc_timeout">
+<em class="property">property </em><code class="sig-name descname">rpc_timeout</code><a class="headerlink" href="#torch.distributed.rpc.TensorPipeRpcBackendOptions.rpc_timeout" title="Permalink to this definition">¶</a></dt>
+<dd><p>A float indicating the timeout to use for all
+RPCs. If an RPC does not complete in this timeframe, it will
+complete with an exception indicating that it has timed out.</p>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+<div class="section" id="process-group-backend">
+<h4>Process Group Backend<a class="headerlink" href="#process-group-backend" title="Permalink to this headline">¶</a></h4>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>The Process Group Backend will be deprecated soon, we recommend using the
+TensorPipe Backend instead.</p>
+</div>
+<p>The Process Group agent instantiates a process group from
+the <a class="reference internal" href="distributed.html#module-torch.distributed" title="torch.distributed"><code class="xref py py-mod docutils literal notranslate"><span class="pre">distributed</span></code></a> module and utilizes its point-to-point
+communication capabilities to send RPC messages. Internally, the process
+group uses <a class="reference external" href="https://github.com/facebookincubator/gloo/">the Gloo library</a>.</p>
+<p>Gloo has been hardened by years of extensive use in PyTorch and is thus very
+reliable. However, as it was designed to perform collective communication, it
+may not always be the best fit for RPC. For example, each networking operation
+is synchronous and blocking, which means that it cannot be run in parallel with
+others. Moreover, it opens a connection between all pairs of nodes, and brings
+down all of them when one fails, thus reducing the resiliency and the elasticity
+of the system.</p>
+<p>Example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">os</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">torch.distributed</span> <span class="kn">import</span> <span class="n">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;MASTER_ADDR&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;localhost&#39;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;MASTER_PORT&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;29500&#39;</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">init_rpc</span><span class="p">(</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="s2">&quot;worker1&quot;</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">rank</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">world_size</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">backend</span><span class="o">=</span><span class="n">rpc</span><span class="o">.</span><span class="n">BackendType</span><span class="o">.</span><span class="n">PROCESS_GROUP</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">rpc_backend_options</span><span class="o">=</span><span class="n">rpc</span><span class="o">.</span><span class="n">ProcessGroupRpcBackendOptions</span><span class="p">(</span>
+<span class="gp">&gt;&gt;&gt; </span>        <span class="n">num_send_recv_threads</span><span class="o">=</span><span class="mi">16</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>        <span class="n">rpc_timeout</span><span class="o">=</span><span class="mi">20</span> <span class="c1"># 20 second timeout</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="p">)</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># omitting init_rpc invocation on worker2</span>
+</pre></div>
+</div>
+<dl class="class">
+<dt id="torch.distributed.rpc.ProcessGroupRpcBackendOptions">
+<em class="property">class </em><code class="sig-prename descclassname">torch.distributed.rpc.</code><code class="sig-name descname">ProcessGroupRpcBackendOptions</code><a class="headerlink" href="#torch.distributed.rpc.ProcessGroupRpcBackendOptions" title="Permalink to this definition">¶</a></dt>
+<dd><p>The backend options class for <code class="docutils literal notranslate"><span class="pre">ProcessGroupAgent</span></code>, which is derived
+from <code class="docutils literal notranslate"><span class="pre">RpcBackendOptions</span></code>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>num_send_recv_threads</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em>, </em><em>optional</em>) – The number of threads in
+the thread-pool used by <code class="docutils literal notranslate"><span class="pre">ProcessGroupAgent</span></code> (default: 4).</p></li>
+<li><p><strong>rpc_timeout</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.8)"><em>float</em></a><em>, </em><em>optional</em>) – The default timeout, in seconds,
+for RPC requests (default: 60 seconds). If the
+RPC has not completed in this timeframe, an exception
+indicating so will be raised. Callers can override this
+timeout for individual RPCs in
+<a class="reference internal" href="#torch.distributed.rpc.rpc_sync" title="torch.distributed.rpc.rpc_sync"><code class="xref py py-meth docutils literal notranslate"><span class="pre">rpc_sync()</span></code></a> and
+<a class="reference internal" href="#torch.distributed.rpc.rpc_async" title="torch.distributed.rpc.rpc_async"><code class="xref py py-meth docutils literal notranslate"><span class="pre">rpc_async()</span></code></a> if necessary.</p></li>
+<li><p><strong>init_method</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.8)"><em>str</em></a><em>, </em><em>optional</em>) – The URL to initialize
+<code class="docutils literal notranslate"><span class="pre">ProcessGroupGloo</span></code> (default: <code class="docutils literal notranslate"><span class="pre">env://</span></code>).</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="method">
+<dt id="torch.distributed.rpc.ProcessGroupRpcBackendOptions.init_method">
+<em class="property">property </em><code class="sig-name descname">init_method</code><a class="headerlink" href="#torch.distributed.rpc.ProcessGroupRpcBackendOptions.init_method" title="Permalink to this definition">¶</a></dt>
+<dd><p>URL specifying how to initialize the process group.
+Default is <code class="docutils literal notranslate"><span class="pre">env://</span></code></p>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.distributed.rpc.ProcessGroupRpcBackendOptions.num_send_recv_threads">
+<em class="property">property </em><code class="sig-name descname">num_send_recv_threads</code><a class="headerlink" href="#torch.distributed.rpc.ProcessGroupRpcBackendOptions.num_send_recv_threads" title="Permalink to this definition">¶</a></dt>
+<dd><p>The number of threads in the thread-pool used by ProcessGroupAgent.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.distributed.rpc.ProcessGroupRpcBackendOptions.rpc_timeout">
+<em class="property">property </em><code class="sig-name descname">rpc_timeout</code><a class="headerlink" href="#torch.distributed.rpc.ProcessGroupRpcBackendOptions.rpc_timeout" title="Permalink to this definition">¶</a></dt>
+<dd><p>A float indicating the timeout to use for all
+RPCs. If an RPC does not complete in this timeframe, it will
+complete with an exception indicating that it has timed out.</p>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+</div>
+</div>
+<div class="section" id="rref">
+<span id="id3"></span><h2>RRef<a class="headerlink" href="#rref" title="Permalink to this headline">¶</a></h2>
+<p>An <code class="docutils literal notranslate"><span class="pre">RRef</span></code> (Remote REFerence) is a reference to a value of some type <code class="docutils literal notranslate"><span class="pre">T</span></code>
+(e.g. <code class="docutils literal notranslate"><span class="pre">Tensor</span></code>) on a remote worker. This handle keeps the referenced remote
+value alive on the owner, but there is no implication that the value will be
+transferred to the local worker in the future. RRefs can be used in
+multi-machine training by holding references to <a class="reference external" href="https://pytorch.org/docs/stable/nn.html#torch.nn.Module">nn.Modules</a> that exist on
+other workers, and calling the appropriate functions to retrieve or modify their
+parameters during training. See <a class="reference internal" href="rpc/rref.html#remote-reference-protocol"><span class="std std-ref">Remote Reference Protocol</span></a> for more
+details.</p>
+<dl class="class">
+<dt id="torch.distributed.rpc.RRef">
+<em class="property">class </em><code class="sig-prename descclassname">torch.distributed.rpc.</code><code class="sig-name descname">RRef</code><a class="reference internal" href="_modules/torch/distributed/rpc/api.html#RRef"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.rpc.RRef" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="method">
+<dt id="torch.distributed.rpc.RRef.confirmed_by_owner">
+<code class="sig-name descname">confirmed_by_owner</code><span class="sig-paren">(</span><em class="sig-param">self: torch.distributed.rpc.RRef</em><span class="sig-paren">)</span> &#x2192; bool<a class="headerlink" href="#torch.distributed.rpc.RRef.confirmed_by_owner" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns whether this <code class="docutils literal notranslate"><span class="pre">RRef</span></code> has been confirmed by the owner.
+<code class="docutils literal notranslate"><span class="pre">OwnerRRef</span></code> always returns true, while <code class="docutils literal notranslate"><span class="pre">UserRRef</span></code> only
+returns true when the owner knowns about this <code class="docutils literal notranslate"><span class="pre">UserRRef</span></code>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.distributed.rpc.RRef.is_owner">
+<code class="sig-name descname">is_owner</code><span class="sig-paren">(</span><em class="sig-param">self: torch.distributed.rpc.RRef</em><span class="sig-paren">)</span> &#x2192; bool<a class="headerlink" href="#torch.distributed.rpc.RRef.is_owner" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns whether or not the current node is the owner of this
+<code class="docutils literal notranslate"><span class="pre">RRef</span></code>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.distributed.rpc.RRef.local_value">
+<code class="sig-name descname">local_value</code><span class="sig-paren">(</span><em class="sig-param">self: torch.distributed.rpc.RRef</em><span class="sig-paren">)</span> &#x2192; object<a class="headerlink" href="#torch.distributed.rpc.RRef.local_value" title="Permalink to this definition">¶</a></dt>
+<dd><p>If the current node is the owner, returns a reference to the
+local value. Otherwise, throws an exception.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.distributed.rpc.RRef.owner">
+<code class="sig-name descname">owner</code><span class="sig-paren">(</span><em class="sig-param">self: torch.distributed.rpc.RRef</em><span class="sig-paren">)</span> &#x2192; torch.distributed.rpc.WorkerInfo<a class="headerlink" href="#torch.distributed.rpc.RRef.owner" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns worker information of the node that owns this <code class="docutils literal notranslate"><span class="pre">RRef</span></code>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.distributed.rpc.RRef.owner_name">
+<code class="sig-name descname">owner_name</code><span class="sig-paren">(</span><em class="sig-param">self: torch.distributed.rpc.RRef</em><span class="sig-paren">)</span> &#x2192; str<a class="headerlink" href="#torch.distributed.rpc.RRef.owner_name" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns worker name of the node that owns this <code class="docutils literal notranslate"><span class="pre">RRef</span></code>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.distributed.rpc.RRef.remote">
+<code class="sig-name descname">remote</code><span class="sig-paren">(</span><em class="sig-param">self: torch.distributed.rpc.RRef</em><span class="sig-paren">)</span> &#x2192; object<a class="headerlink" href="#torch.distributed.rpc.RRef.remote" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create a helper proxy to easily launch a <code class="docutils literal notranslate"><span class="pre">remote</span></code> using
+the owner of the RRef as the destination to run functions on
+the object referenced by this RRef. More specifically,
+<code class="docutils literal notranslate"><span class="pre">rref.remote().func_name(*args,</span> <span class="pre">**kwargs)</span></code> is the same as
+the following:</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="n">rref</span><span class="p">,</span> <span class="n">func_name</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="k">return</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">rref</span><span class="o">.</span><span class="n">local_value</span><span class="p">(),</span> <span class="n">func_name</span><span class="p">)(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="n">rref</span><span class="o">.</span><span class="n">owner</span><span class="p">(),</span> <span class="n">run</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">rref</span><span class="p">,</span> <span class="n">func_name</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">))</span>
+</pre></div>
+</div>
+<dl>
+<dt>Example::</dt><dd><div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">torch.distributed</span> <span class="kn">import</span> <span class="n">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="mi">1</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref</span><span class="o">.</span><span class="n">remote</span><span class="p">()</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">to_here</span><span class="p">()</span>  <span class="c1"># returns torch.Size([2, 2])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref</span><span class="o">.</span><span class="n">remote</span><span class="p">()</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span><span class="o">.</span><span class="n">to_here</span><span class="p">()</span>  <span class="c1"># returns tensor([[1., 1., 1., 1.]])</span>
+</pre></div>
+</div>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.distributed.rpc.RRef.rpc_async">
+<code class="sig-name descname">rpc_async</code><span class="sig-paren">(</span><em class="sig-param">self: torch.distributed.rpc.RRef</em><span class="sig-paren">)</span> &#x2192; object<a class="headerlink" href="#torch.distributed.rpc.RRef.rpc_async" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create a helper proxy to easily launch an <code class="docutils literal notranslate"><span class="pre">rpc_async</span></code> using
+the owner of the RRef as the destination to run functions on
+the object referenced by this RRef. More specifically,
+<code class="docutils literal notranslate"><span class="pre">rref.rpc_async().func_name(*args,</span> <span class="pre">**kwargs)</span></code> is the same as
+the following:</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="n">rref</span><span class="p">,</span> <span class="n">func_name</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="k">return</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">rref</span><span class="o">.</span><span class="n">local_value</span><span class="p">(),</span> <span class="n">func_name</span><span class="p">)(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">rpc_async</span><span class="p">(</span><span class="n">rref</span><span class="o">.</span><span class="n">owner</span><span class="p">(),</span> <span class="n">run</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">rref</span><span class="p">,</span> <span class="n">func_name</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">))</span>
+</pre></div>
+</div>
+<dl>
+<dt>Example::</dt><dd><div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">torch.distributed</span> <span class="kn">import</span> <span class="n">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="mi">1</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref</span><span class="o">.</span><span class="n">rpc_async</span><span class="p">()</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>  <span class="c1"># returns torch.Size([2, 2])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref</span><span class="o">.</span><span class="n">rpc_async</span><span class="p">()</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span><span class="o">.</span><span class="n">wait</span><span class="p">()</span>  <span class="c1"># returns tensor([[1., 1., 1., 1.]])</span>
+</pre></div>
+</div>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.distributed.rpc.RRef.rpc_sync">
+<code class="sig-name descname">rpc_sync</code><span class="sig-paren">(</span><em class="sig-param">self: torch.distributed.rpc.RRef</em><span class="sig-paren">)</span> &#x2192; object<a class="headerlink" href="#torch.distributed.rpc.RRef.rpc_sync" title="Permalink to this definition">¶</a></dt>
+<dd><p>Create a helper proxy to easily launch an <code class="docutils literal notranslate"><span class="pre">rpc_sync</span></code> using
+the owner of the RRef as the destination to run functions on
+the object referenced by this RRef. More specifically,
+<code class="docutils literal notranslate"><span class="pre">rref.rpc_sync().func_name(*args,</span> <span class="pre">**kwargs)</span></code> is the same as
+the following:</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="n">rref</span><span class="p">,</span> <span class="n">func_name</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">):</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="k">return</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">rref</span><span class="o">.</span><span class="n">local_value</span><span class="p">(),</span> <span class="n">func_name</span><span class="p">)(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rpc</span><span class="o">.</span><span class="n">rpc_sync</span><span class="p">(</span><span class="n">rref</span><span class="o">.</span><span class="n">owner</span><span class="p">(),</span> <span class="n">run</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">rref</span><span class="p">,</span> <span class="n">func_name</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">))</span>
+</pre></div>
+</div>
+<dl>
+<dt>Example::</dt><dd><div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">torch.distributed</span> <span class="kn">import</span> <span class="n">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="mi">1</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref</span><span class="o">.</span><span class="n">rpc_sync</span><span class="p">()</span><span class="o">.</span><span class="n">size</span><span class="p">()</span>  <span class="c1"># returns torch.Size([2, 2])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">rref</span><span class="o">.</span><span class="n">rpc_sync</span><span class="p">()</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>  <span class="c1"># returns tensor([[1., 1., 1., 1.]])</span>
+</pre></div>
+</div>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="method">
+<dt id="torch.distributed.rpc.RRef.to_here">
+<code class="sig-name descname">to_here</code><span class="sig-paren">(</span><em class="sig-param">self: torch.distributed.rpc.RRef</em>, <em class="sig-param">timeout: float = -1.0</em><span class="sig-paren">)</span> &#x2192; object<a class="headerlink" href="#torch.distributed.rpc.RRef.to_here" title="Permalink to this definition">¶</a></dt>
+<dd><p>Blocking call that copies the value of the RRef from the owner
+to the local node and returns it. If the current node is the
+owner, returns a reference to the local value.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>timeout</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.8)"><em>float</em></a><em>, </em><em>optional</em>) – Timeout for <code class="docutils literal notranslate"><span class="pre">to_here</span></code>. If
+the call does not complete within this timeframe, an
+exception indicating so will be raised. If this
+argument is not provided, the default RPC timeout
+(60s) will be used.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<div class="toctree-wrapper compound">
+<p class="caption"><span class="caption-text">More Information about RRef</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="rpc/rref.html">Remote Reference Protocol</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="rpc/rref.html#background">Background</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rpc/rref.html#assumptions">Assumptions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rpc/rref.html#rref-lifetime">RRef Lifetime</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="rpc/rref.html#design-reasoning">Design Reasoning</a></li>
+<li class="toctree-l3"><a class="reference internal" href="rpc/rref.html#implementation">Implementation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="rpc/rref.html#protocol-scenarios">Protocol Scenarios</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="rpc/rref.html#user-share-rref-with-owner-as-return-value">User Share RRef with Owner as Return Value</a></li>
+<li class="toctree-l3"><a class="reference internal" href="rpc/rref.html#user-share-rref-with-owner-as-argument">User Share RRef with Owner as Argument</a></li>
+<li class="toctree-l3"><a class="reference internal" href="rpc/rref.html#owner-share-rref-with-user">Owner Share RRef with User</a></li>
+<li class="toctree-l3"><a class="reference internal" href="rpc/rref.html#user-share-rref-with-user">User Share RRef with User</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<div class="section" id="distributed-autograd-framework">
+<h2>Distributed Autograd Framework<a class="headerlink" href="#distributed-autograd-framework" title="Permalink to this headline">¶</a></h2>
+<p>This module provides an RPC-based distributed autograd framework that can be
+used for applications such as model parallel training. In short, applications
+may send and receive gradient recording tensors over RPC. In the forward pass,
+we record when gradient recording tensors are sent over RPC and during the
+backward pass we use this information to perform a distributed backward pass
+using RPC. For more details see <a class="reference internal" href="rpc/distributed_autograd.html#distributed-autograd-design"><span class="std std-ref">Distributed Autograd Design</span></a>.</p>
+<span class="target" id="module-torch.distributed.autograd"></span><dl class="class">
+<dt id="torch.distributed.autograd.context">
+<em class="property">class </em><code class="sig-prename descclassname">torch.distributed.autograd.</code><code class="sig-name descname">context</code><a class="reference internal" href="_modules/torch/distributed/autograd.html#context"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.autograd.context" title="Permalink to this definition">¶</a></dt>
+<dd><p>Context object to wrap forward and backward passes when using
+distributed autograd. The <code class="docutils literal notranslate"><span class="pre">context_id</span></code> generated in the <code class="docutils literal notranslate"><span class="pre">with</span></code>
+statement  is required to uniquely identify a distributed backward pass
+on all workers. Each worker stores metadata associated with this
+<code class="docutils literal notranslate"><span class="pre">context_id</span></code>, which is required to correctly execute a distributed
+autograd pass.</p>
+<dl>
+<dt>Example::</dt><dd><div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.autograd</span> <span class="k">as</span> <span class="nn">dist_autograd</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">dist_autograd</span><span class="o">.</span><span class="n">context</span><span class="p">()</span> <span class="k">as</span> <span class="n">context_id</span><span class="p">:</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="n">t1</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">((</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="n">t2</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">((</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="n">loss</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">rpc_sync</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">t1</span><span class="p">,</span> <span class="n">t2</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="n">dist_autograd</span><span class="o">.</span><span class="n">backward</span><span class="p">(</span><span class="n">context_id</span><span class="p">,</span> <span class="p">[</span><span class="n">loss</span><span class="p">])</span>
+</pre></div>
+</div>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.autograd.backward">
+<code class="sig-prename descclassname">torch.distributed.autograd.</code><code class="sig-name descname">backward</code><span class="sig-paren">(</span><em class="sig-param">context_id: int, roots: List[Tensor], retain_graph = False</em><span class="sig-paren">)</span> &#x2192; None<a class="headerlink" href="#torch.distributed.autograd.backward" title="Permalink to this definition">¶</a></dt>
+<dd><p>Kicks off the distributed backward pass using the provided roots. This
+currently implements the <a class="reference internal" href="rpc/distributed_autograd.html#fast-mode-algorithm"><span class="std std-ref">FAST mode algorithm</span></a> which
+assumes all RPC messages sent in the same distributed autograd context
+across workers would be part of the autograd graph during the backward pass.</p>
+<p>We use the provided roots to discover the autograd graph and compute
+appropriate dependencies. This method blocks until the entire
+autograd computation is done.</p>
+<p>We accumulate the gradients in the appropriate
+<a class="reference internal" href="#torch.distributed.autograd.context" title="torch.distributed.autograd.context"><code class="xref py py-class docutils literal notranslate"><span class="pre">torch.distributed.autograd.context</span></code></a> on each of the nodes. The autograd
+context to be used is looked up given the <code class="docutils literal notranslate"><span class="pre">context_id</span></code> that is passed in when
+<a class="reference internal" href="#torch.distributed.autograd.backward" title="torch.distributed.autograd.backward"><code class="xref py py-meth docutils literal notranslate"><span class="pre">torch.distributed.autograd.backward()</span></code></a> is called. If there is no valid
+autograd context corresponding to the given ID, we throw an error. You can
+retrieve the accumulated gradients using the
+<a class="reference internal" href="#torch.distributed.autograd.get_gradients" title="torch.distributed.autograd.get_gradients"><code class="xref py py-meth docutils literal notranslate"><span class="pre">get_gradients()</span></code></a> API.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>context_id</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a>) – The autograd context id for which we should retrieve the gradients.</p></li>
+<li><p><strong>roots</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><em>list</em></a>) – Tensors which represent the roots of the autograd
+computation. All the tensors should be scalars.</p></li>
+<li><p><strong>retain_graph</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – If False, the graph used to compute the grad
+will be freed. Note that in nearly all cases setting this
+option to True is not needed and often can be worked around
+in a much more efficient way. Usually, you need to set this
+to True to run backward multiple times.</p></li>
+</ul>
+</dd>
+</dl>
+<dl>
+<dt>Example::</dt><dd><div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.autograd</span> <span class="k">as</span> <span class="nn">dist_autograd</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">dist_autograd</span><span class="o">.</span><span class="n">context</span><span class="p">()</span> <span class="k">as</span> <span class="n">context_id</span><span class="p">:</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">pred</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">forward</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_func</span><span class="p">(</span><span class="n">pred</span><span class="p">,</span> <span class="n">loss</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">dist_autograd</span><span class="o">.</span><span class="n">backward</span><span class="p">(</span><span class="n">context_id</span><span class="p">,</span> <span class="n">loss</span><span class="p">)</span>
+</pre></div>
+</div>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.distributed.autograd.get_gradients">
+<code class="sig-prename descclassname">torch.distributed.autograd.</code><code class="sig-name descname">get_gradients</code><span class="sig-paren">(</span><em class="sig-param">context_id: int</em><span class="sig-paren">)</span> &#x2192; Dict[Tensor, Tensor]<a class="headerlink" href="#torch.distributed.autograd.get_gradients" title="Permalink to this definition">¶</a></dt>
+<dd><p>Retrieves a map from Tensor to the appropriate gradient for that Tensor
+accumulated in the provided context corresponding to the given <code class="docutils literal notranslate"><span class="pre">context_id</span></code>
+as part of the distributed autograd backward pass.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>context_id</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a>) – The autograd context id for which we should retrieve the
+gradients.</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>A map where the key is the Tensor and the value is the associated gradient
+for that Tensor.</p>
+</dd>
+</dl>
+<dl>
+<dt>Example::</dt><dd><div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.autograd</span> <span class="k">as</span> <span class="nn">dist_autograd</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">dist_autograd</span><span class="o">.</span><span class="n">context</span><span class="p">()</span> <span class="k">as</span> <span class="n">context_id</span><span class="p">:</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">t1</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">((</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">t2</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">((</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">loss</span> <span class="o">=</span> <span class="n">t1</span> <span class="o">+</span> <span class="n">t2</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">dist_autograd</span><span class="o">.</span><span class="n">backward</span><span class="p">(</span><span class="n">context_id</span><span class="p">,</span> <span class="p">[</span><span class="n">loss</span><span class="o">.</span><span class="n">sum</span><span class="p">()])</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">grads</span> <span class="o">=</span> <span class="n">dist_autograd</span><span class="o">.</span><span class="n">get_gradients</span><span class="p">(</span><span class="n">context_id</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="nb">print</span><span class="p">(</span><span class="n">grads</span><span class="p">[</span><span class="n">t1</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="nb">print</span><span class="p">(</span><span class="n">grads</span><span class="p">[</span><span class="n">t2</span><span class="p">])</span>
+</pre></div>
+</div>
+</dd>
+</dl>
+</dd></dl>
+
+<div class="toctree-wrapper compound">
+<p class="caption"><span class="caption-text">More Information about RPC Autograd</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="rpc/distributed_autograd.html">Distributed Autograd Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="rpc/distributed_autograd.html#background">Background</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rpc/distributed_autograd.html#autograd-recording-during-the-forward-pass">Autograd recording during the forward pass</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rpc/distributed_autograd.html#distributed-autograd-context">Distributed Autograd Context</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rpc/distributed_autograd.html#distributed-backward-pass">Distributed Backward Pass</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="rpc/distributed_autograd.html#computing-dependencies">Computing dependencies</a></li>
+<li class="toctree-l3"><a class="reference internal" href="rpc/distributed_autograd.html#fast-mode-algorithm">FAST mode algorithm</a></li>
+<li class="toctree-l3"><a class="reference internal" href="rpc/distributed_autograd.html#smart-mode-algorithm">SMART mode algorithm</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="rpc/distributed_autograd.html#distributed-optimizer">Distributed Optimizer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="rpc/distributed_autograd.html#simple-end-to-end-example">Simple end to end example</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<div class="section" id="module-torch.distributed.optim">
+<span id="distributed-optimizer"></span><h2>Distributed Optimizer<a class="headerlink" href="#module-torch.distributed.optim" title="Permalink to this headline">¶</a></h2>
+<p><a class="reference internal" href="#module-torch.distributed.optim" title="torch.distributed.optim"><code class="xref py py-mod docutils literal notranslate"><span class="pre">torch.distributed.optim</span></code></a> exposes DistributedOptimizer, which takes a list
+of remote parameters (<a class="reference internal" href="#torch.distributed.rpc.RRef" title="torch.distributed.rpc.RRef"><code class="xref py py-class docutils literal notranslate"><span class="pre">RRef</span></code></a>) and runs the
+optimizer locally on the workers where the parameters live.  The distributed
+optimizer can use any of the local optimizer <a class="reference internal" href="optim.html#optimizer-algorithms"><span class="std std-ref">Algorithms</span></a> to
+apply the gradients on each worker.</p>
+<dl class="class">
+<dt id="torch.distributed.optim.DistributedOptimizer">
+<em class="property">class </em><code class="sig-prename descclassname">torch.distributed.optim.</code><code class="sig-name descname">DistributedOptimizer</code><span class="sig-paren">(</span><em class="sig-param">optimizer_class</em>, <em class="sig-param">params_rref</em>, <em class="sig-param">*args</em>, <em class="sig-param">**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/optim/optimizer.html#DistributedOptimizer"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.optim.DistributedOptimizer" title="Permalink to this definition">¶</a></dt>
+<dd><p>DistributedOptimizer takes remote references to parameters scattered
+across workers and applies the given optimizer locally for each parameter.</p>
+<p>This class uses <a class="reference internal" href="#torch.distributed.autograd.get_gradients" title="torch.distributed.autograd.get_gradients"><code class="xref py py-meth docutils literal notranslate"><span class="pre">get_gradients()</span></code></a> in order
+to retrieve the gradients for specific parameters.</p>
+<p>Concurrent calls to
+<a class="reference internal" href="#torch.distributed.optim.DistributedOptimizer.step" title="torch.distributed.optim.DistributedOptimizer.step"><code class="xref py py-meth docutils literal notranslate"><span class="pre">step()</span></code></a>,
+either from the same or different clients, will
+be serialized on each worker – as each worker’s optimizer can only work
+on one set of gradients at a time. However, there is no guarantee that
+the full forward-backward-optimizer sequence will execute for one client
+at a time. This means that the gradients being applied may not correspond
+to the latest forward pass executed on a given worker. Also, there is no
+guaranteed ordering across workers.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>optimizer_class</strong> (<a class="reference internal" href="optim.html#torch.optim.Optimizer" title="torch.optim.Optimizer"><em>optim.Optimizer</em></a>) – the class of optimizer to
+instantiate on each worker.</p></li>
+<li><p><strong>params_rref</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.8)"><em>list</em></a><em>[</em><a class="reference internal" href="#torch.distributed.rpc.RRef" title="torch.distributed.rpc.RRef"><em>RRef</em></a><em>]</em>) – list of RRefs to local or remote parameters
+to optimize.</p></li>
+<li><p><strong>args</strong> – arguments to pass to the optimizer constructor on each worker.</p></li>
+<li><p><strong>kwargs</strong> – arguments to pass to the optimizer constructor on each worker.</p></li>
+</ul>
+</dd>
+</dl>
+<dl>
+<dt>Example::</dt><dd><div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.autograd</span> <span class="k">as</span> <span class="nn">dist_autograd</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span> <span class="nn">torch.distributed.rpc</span> <span class="k">as</span> <span class="nn">rpc</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">torch</span> <span class="kn">import</span> <span class="n">optim</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span> <span class="nn">torch.distributed.optim</span> <span class="kn">import</span> <span class="n">DistributedOptimizer</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">dist_autograd</span><span class="o">.</span><span class="n">context</span><span class="p">()</span> <span class="k">as</span> <span class="n">context_id</span><span class="p">:</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="c1"># Forward pass.</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="n">rref1</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">3</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="n">rref2</span> <span class="o">=</span> <span class="n">rpc</span><span class="o">.</span><span class="n">remote</span><span class="p">(</span><span class="s2">&quot;worker1&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">add</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="mi">1</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="n">loss</span> <span class="o">=</span> <span class="n">rref1</span><span class="o">.</span><span class="n">to_here</span><span class="p">()</span> <span class="o">+</span> <span class="n">rref2</span><span class="o">.</span><span class="n">to_here</span><span class="p">()</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="c1"># Backward pass.</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="n">dist_autograd</span><span class="o">.</span><span class="n">backward</span><span class="p">(</span><span class="n">context_id</span><span class="p">,</span> <span class="p">[</span><span class="n">loss</span><span class="o">.</span><span class="n">sum</span><span class="p">()])</span>
+<span class="go">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="c1"># Optimizer.</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="n">dist_optim</span> <span class="o">=</span> <span class="n">DistributedOptimizer</span><span class="p">(</span>
+<span class="gp">&gt;&gt;&gt; </span>     <span class="n">optim</span><span class="o">.</span><span class="n">SGD</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>     <span class="p">[</span><span class="n">rref1</span><span class="p">,</span> <span class="n">rref2</span><span class="p">],</span>
+<span class="gp">&gt;&gt;&gt; </span>     <span class="n">lr</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span>  <span class="n">dist_optim</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">context_id</span><span class="p">)</span>
+</pre></div>
+</div>
+</dd>
+</dl>
+<dl class="method">
+<dt id="torch.distributed.optim.DistributedOptimizer.step">
+<code class="sig-name descname">step</code><span class="sig-paren">(</span><em class="sig-param">context_id</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/distributed/optim/optimizer.html#DistributedOptimizer.step"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.distributed.optim.DistributedOptimizer.step" title="Permalink to this definition">¶</a></dt>
+<dd><p>Performs a single optimization step.</p>
+<p>This will call <a class="reference internal" href="optim.html#torch.optim.Optimizer.step" title="torch.optim.Optimizer.step"><code class="xref py py-meth docutils literal notranslate"><span class="pre">torch.optim.Optimizer.step()</span></code></a> on each worker
+containing parameters to be optimized, and will block until all workers
+return. The provided <code class="docutils literal notranslate"><span class="pre">context_id</span></code> will be used to retrieve the
+corresponding <a class="reference internal" href="#torch.distributed.autograd.context" title="torch.distributed.autograd.context"><code class="xref py py-class docutils literal notranslate"><span class="pre">context</span></code></a> that
+contains the gradients that should be applied to the parameters.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>context_id</strong> – the autograd context id for which we should run the
+optimizer step.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</div>
+<div class="section" id="design-notes">
+<h2>Design Notes<a class="headerlink" href="#design-notes" title="Permalink to this headline">¶</a></h2>
+<p>The distributed autograd design note covers the design of the RPC-based distributed autograd framework that is useful for applications such as model parallel training.</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="rpc/distributed_autograd.html#distributed-autograd-design"><span class="std std-ref">Distributed Autograd Design</span></a></p></li>
+</ul>
+<p>The RRef design note covers the design of the <a class="reference internal" href="#rref"><span class="std std-ref">RRef</span></a> (Remote REFerence) protocol used to refer to values on remote workers by the framework.</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="rpc/rref.html#remote-reference-protocol"><span class="std std-ref">Remote Reference Protocol</span></a></p></li>
+</ul>
+</div>
+<div class="section" id="tutorials">
+<h2>Tutorials<a class="headerlink" href="#tutorials" title="Permalink to this headline">¶</a></h2>
+<p>The RPC tutorials introduce users to the RPC framework, provide several example applications
+using <a class="reference internal" href="#distributed-rpc-framework"><span class="std std-ref">torch.distributed.rpc</span></a> APIs, and demonstrate how
+to use <a class="reference external" href="https://pytorch.org/docs/stable/autograd.html#profiler">the profiler</a> to profile RPC-based workloads.</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://pytorch.org/tutorials/intermediate/rpc_tutorial.html">Getting started with Distributed RPC Framework</a></p></li>
+<li><p><a class="reference external" href="https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html">Implementing a Parameter Server using Distributed RPC Framework</a></p></li>
+<li><p><a class="reference external" href="https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html">Combining Distributed DataParallel with Distributed RPC Framework</a></p></li>
+<li><p><a class="reference external" href="https://pytorch.org/tutorials/recipes/distributed_rpc_profiling.html">Profiling RPC-based Workloads</a></p></li>
+<li><p><a class="reference external" href="https://pytorch.org/tutorials/intermediate/rpc_async_execution.html">Implementing batch RPC processing</a></p></li>
+<li><p><a class="reference external" href="https://pytorch.org/tutorials/intermediate/dist_pipeline_parallel_tutorial.html">Distributed Pipeline Parallel</a></p></li>
+</ul>
+</div>
+</div>
+
+
+             </article>
+             
+            </div>
+            <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="rpc/rref.html" class="btn btn-neutral float-right" title="Remote Reference Protocol" accesskey="n" rel="next">Next <img src="_static/images/chevron-right-orange.svg" class="next-page"></a>
+      
+      
+        <a href="torch.nn.quantized.dynamic.html" class="btn btn-neutral" title="torch.nn.quantized.dynamic" accesskey="p" rel="prev"><img src="_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
+      
+    </div>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              <ul>
+<li><a class="reference internal" href="#">Distributed RPC Framework</a><ul>
+<li><a class="reference internal" href="#basics">Basics</a></li>
+<li><a class="reference internal" href="#rpc">RPC</a><ul>
+<li><a class="reference internal" href="#backends">Backends</a><ul>
+<li><a class="reference internal" href="#tensorpipe-backend">TensorPipe Backend</a></li>
+<li><a class="reference internal" href="#process-group-backend">Process Group Backend</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#rref">RRef</a></li>
+<li><a class="reference internal" href="#distributed-autograd-framework">Distributed Autograd Framework</a></li>
+<li><a class="reference internal" href="#module-torch.distributed.optim">Distributed Optimizer</a></li>
+<li><a class="reference internal" href="#design-notes">Design Notes</a></li>
+<li><a class="reference internal" href="#tutorials">Tutorials</a></li>
+</ul>
+</li>
+</ul>
+
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+         <script src="_static/jquery.js"></script>
+         <script src="_static/underscore.js"></script>
+         <script src="_static/doctools.js"></script>
+         <script src="_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>

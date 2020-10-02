@@ -1,0 +1,863 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>torch.autograd &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/_modules/torch/autograd.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="../../_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+
+  
+  <script src="../../_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/_modules/torch/autograd.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="../../index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+          <li><a href="../index.html">Module code</a> &gt;</li>
+        
+          <li><a href="../torch.html">torch</a> &gt;</li>
+        
+      <li>torch.autograd</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <h1>Source code for torch.autograd</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">``torch.autograd`` provides classes and functions implementing automatic</span>
+<span class="sd">differentiation of arbitrary scalar valued functions. It requires minimal</span>
+<span class="sd">changes to the existing code - you only need to declare :class:`Tensor` s</span>
+<span class="sd">for which gradients should be computed with the ``requires_grad=True`` keyword.</span>
+<span class="sd">As of now, we only support autograd for floating point :class:`Tensor` types (</span>
+<span class="sd">half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdouble).</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
+
+<span class="kn">from</span> <span class="nn">torch.types</span> <span class="kn">import</span> <span class="n">_TensorOrTensors</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Sequence</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Union</span>
+
+<span class="kn">from</span> <span class="nn">.variable</span> <span class="kn">import</span> <span class="n">Variable</span>
+<span class="kn">from</span> <span class="nn">.function</span> <span class="kn">import</span> <span class="n">Function</span><span class="p">,</span> <span class="n">NestedIOFunction</span>
+<span class="kn">from</span> <span class="nn">.gradcheck</span> <span class="kn">import</span> <span class="n">gradcheck</span><span class="p">,</span> <span class="n">gradgradcheck</span>
+<span class="kn">from</span> <span class="nn">.grad_mode</span> <span class="kn">import</span> <span class="n">no_grad</span><span class="p">,</span> <span class="n">enable_grad</span><span class="p">,</span> <span class="n">set_grad_enabled</span>
+<span class="kn">from</span> <span class="nn">.anomaly_mode</span> <span class="kn">import</span> <span class="n">detect_anomaly</span><span class="p">,</span> <span class="n">set_detect_anomaly</span>
+<span class="kn">from</span> <span class="nn">..overrides</span> <span class="kn">import</span> <span class="n">has_torch_function</span><span class="p">,</span> <span class="n">handle_torch_function</span>
+<span class="kn">from</span> <span class="nn">.</span> <span class="kn">import</span> <span class="n">profiler</span>
+<span class="kn">from</span> <span class="nn">.</span> <span class="kn">import</span> <span class="n">functional</span>
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;Variable&#39;</span><span class="p">,</span> <span class="s1">&#39;Function&#39;</span><span class="p">,</span> <span class="s1">&#39;backward&#39;</span><span class="p">,</span> <span class="s1">&#39;grad_mode&#39;</span><span class="p">]</span>
+
+<span class="n">_OptionalTensor</span> <span class="o">=</span> <span class="n">Optional</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]</span>
+
+<span class="k">def</span> <span class="nf">_make_grads</span><span class="p">(</span><span class="n">outputs</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">],</span> <span class="n">grads</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">_OptionalTensor</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">_OptionalTensor</span><span class="p">,</span> <span class="o">...</span><span class="p">]:</span>
+    <span class="n">new_grads</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">_OptionalTensor</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">out</span><span class="p">,</span> <span class="n">grad</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">grads</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">grad</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">out</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="n">grad</span><span class="o">.</span><span class="n">shape</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Mismatch in shape: grad_output[&quot;</span>
+                                   <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">grads</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">grad</span><span class="p">))</span> <span class="o">+</span> <span class="s2">&quot;] has a shape of &quot;</span>
+                                   <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">grad</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot; and output[&quot;</span>
+                                   <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">outputs</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">out</span><span class="p">))</span> <span class="o">+</span> <span class="s2">&quot;] has a shape of &quot;</span>
+                                   <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;.&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">out</span><span class="o">.</span><span class="n">dtype</span><span class="o">.</span><span class="n">is_complex</span> <span class="o">!=</span> <span class="n">grad</span><span class="o">.</span><span class="n">dtype</span><span class="o">.</span><span class="n">is_complex</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;For complex Tensors, both grad_output and output&quot;</span>
+                                   <span class="s2">&quot; are required to have the same dtype.&quot;</span>
+                                   <span class="s2">&quot; Mismatch in dtype: grad_output[&quot;</span>
+                                   <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">grads</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">grad</span><span class="p">))</span> <span class="o">+</span> <span class="s2">&quot;] has a dtype of &quot;</span>
+                                   <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">grad</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot; and output[&quot;</span>
+                                   <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">outputs</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">out</span><span class="p">))</span> <span class="o">+</span> <span class="s2">&quot;] has a dtype of &quot;</span>
+                                   <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;.&quot;</span><span class="p">)</span>
+            <span class="n">new_grads</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">grad</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">grad</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">out</span><span class="o">.</span><span class="n">requires_grad</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">out</span><span class="o">.</span><span class="n">numel</span><span class="p">()</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;grad can be implicitly created only for scalar outputs&quot;</span><span class="p">)</span>
+                <span class="n">new_grads</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">memory_format</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">preserve_format</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">new_grads</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="kc">None</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s2">&quot;gradients can be either Tensors or None, but got &quot;</span> <span class="o">+</span>
+                            <span class="nb">type</span><span class="p">(</span><span class="n">grad</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">new_grads</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_tensor_or_tensors_to_tuple</span><span class="p">(</span><span class="n">tensors</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">_TensorOrTensors</span><span class="p">],</span> <span class="n">length</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">_OptionalTensor</span><span class="p">,</span> <span class="o">...</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="n">tensors</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="p">)</span> <span class="o">*</span> <span class="n">length</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">tensors</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">tensors</span><span class="p">,</span> <span class="p">)</span>
+    <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">tensors</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="backward"><a class="viewcode-back" href="../../autograd.html#torch.autograd.backward">[docs]</a><span class="k">def</span> <span class="nf">backward</span><span class="p">(</span>
+    <span class="n">tensors</span><span class="p">:</span> <span class="n">_TensorOrTensors</span><span class="p">,</span>
+    <span class="n">grad_tensors</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">_TensorOrTensors</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">retain_graph</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">create_graph</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">grad_variables</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">_TensorOrTensors</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Computes the sum of gradients of given tensors w.r.t. graph leaves.</span>
+
+<span class="sd">    The graph is differentiated using the chain rule. If any of ``tensors``</span>
+<span class="sd">    are non-scalar (i.e. their data has more than one element) and require</span>
+<span class="sd">    gradient, then the Jacobian-vector product would be computed, in this</span>
+<span class="sd">    case the function additionally requires specifying ``grad_tensors``.</span>
+<span class="sd">    It should be a sequence of matching length, that contains the &quot;vector&quot;</span>
+<span class="sd">    in the Jacobian-vector product, usually the gradient of the differentiated</span>
+<span class="sd">    function w.r.t. corresponding tensors (``None`` is an acceptable value for</span>
+<span class="sd">    all tensors that don&#39;t need gradient tensors).</span>
+
+<span class="sd">    This function accumulates gradients in the leaves - you might need to zero</span>
+<span class="sd">    ``.grad`` attributes or set them to ``None`` before calling it.</span>
+<span class="sd">    See :ref:`Default gradient layouts&lt;default-grad-layouts&gt;`</span>
+<span class="sd">    for details on the memory layout of accumulated gradients.</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        Using this method with ``create_graph=True`` will create a reference cycle</span>
+<span class="sd">        between the parameter and its gradient which can cause a memory leak.</span>
+<span class="sd">        We recommend using ``autograd.grad`` when creating the graph to avoid this.</span>
+<span class="sd">        If you have to use this function, make sure to reset the ``.grad`` fields of your</span>
+<span class="sd">        parameters to ``None`` after use to break the cycle and avoid the leak.</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        tensors (sequence of Tensor): Tensors of which the derivative will be</span>
+<span class="sd">            computed.</span>
+<span class="sd">        grad_tensors (sequence of (Tensor or None)): The &quot;vector&quot; in the Jacobian-vector</span>
+<span class="sd">            product, usually gradients w.r.t. each element of corresponding tensors.</span>
+<span class="sd">            None values can be specified for scalar Tensors or ones that don&#39;t require</span>
+<span class="sd">            grad. If a None value would be acceptable for all grad_tensors, then this</span>
+<span class="sd">            argument is optional.</span>
+<span class="sd">        retain_graph (bool, optional): If ``False``, the graph used to compute the grad</span>
+<span class="sd">            will be freed. Note that in nearly all cases setting this option to ``True``</span>
+<span class="sd">            is not needed and often can be worked around in a much more efficient</span>
+<span class="sd">            way. Defaults to the value of ``create_graph``.</span>
+<span class="sd">        create_graph (bool, optional): If ``True``, graph of the derivative will</span>
+<span class="sd">            be constructed, allowing to compute higher order derivative products.</span>
+<span class="sd">            Defaults to ``False``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">grad_variables</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s2">&quot;&#39;grad_variables&#39; is deprecated. Use &#39;grad_tensors&#39; instead.&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">grad_tensors</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">grad_tensors</span> <span class="o">=</span> <span class="n">grad_variables</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;&#39;grad_tensors&#39; and &#39;grad_variables&#39; (deprecated) &quot;</span>
+                               <span class="s2">&quot;arguments both passed to backward(). Please only &quot;</span>
+                               <span class="s2">&quot;use &#39;grad_tensors&#39;.&quot;</span><span class="p">)</span>
+
+    <span class="n">tensors</span> <span class="o">=</span> <span class="p">(</span><span class="n">tensors</span><span class="p">,)</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">tensors</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="k">else</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">tensors</span><span class="p">)</span>
+
+    <span class="n">grad_tensors_</span> <span class="o">=</span> <span class="n">_tensor_or_tensors_to_tuple</span><span class="p">(</span><span class="n">grad_tensors</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">tensors</span><span class="p">))</span>
+    <span class="n">grad_tensors_</span> <span class="o">=</span> <span class="n">_make_grads</span><span class="p">(</span><span class="n">tensors</span><span class="p">,</span> <span class="n">grad_tensors_</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">retain_graph</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">retain_graph</span> <span class="o">=</span> <span class="n">create_graph</span>
+
+    <span class="n">Variable</span><span class="o">.</span><span class="n">_execution_engine</span><span class="o">.</span><span class="n">run_backward</span><span class="p">(</span>
+        <span class="n">tensors</span><span class="p">,</span> <span class="n">grad_tensors_</span><span class="p">,</span> <span class="n">retain_graph</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">,</span>
+        <span class="n">allow_unreachable</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># allow_unreachable flag</span></div>
+
+
+<div class="viewcode-block" id="grad"><a class="viewcode-back" href="../../autograd.html#torch.autograd.grad">[docs]</a><span class="k">def</span> <span class="nf">grad</span><span class="p">(</span>
+    <span class="n">outputs</span><span class="p">:</span> <span class="n">_TensorOrTensors</span><span class="p">,</span>
+    <span class="n">inputs</span><span class="p">:</span> <span class="n">_TensorOrTensors</span><span class="p">,</span>
+    <span class="n">grad_outputs</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">_TensorOrTensors</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">retain_graph</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">create_graph</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">only_inputs</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">allow_unused</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="o">...</span><span class="p">]:</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Computes and returns the sum of gradients of outputs w.r.t. the inputs.</span>
+
+<span class="sd">    ``grad_outputs`` should be a sequence of length matching ``output``</span>
+<span class="sd">    containing the &quot;vector&quot; in Jacobian-vector product, usually the pre-computed</span>
+<span class="sd">    gradients w.r.t. each of the outputs. If an output doesn&#39;t require_grad,</span>
+<span class="sd">    then the gradient can be ``None``).</span>
+
+<span class="sd">    If ``only_inputs`` is ``True``, the function will only return a list of gradients</span>
+<span class="sd">    w.r.t the specified inputs. If it&#39;s ``False``, then gradient w.r.t. all remaining</span>
+<span class="sd">    leaves will still be computed, and will be accumulated into their ``.grad``</span>
+<span class="sd">    attribute.</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        outputs (sequence of Tensor): outputs of the differentiated function.</span>
+<span class="sd">        inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be</span>
+<span class="sd">            returned (and not accumulated into ``.grad``).</span>
+<span class="sd">        grad_outputs (sequence of Tensor): The &quot;vector&quot; in the Jacobian-vector product.</span>
+<span class="sd">            Usually gradients w.r.t. each output. None values can be specified for scalar</span>
+<span class="sd">            Tensors or ones that don&#39;t require grad. If a None value would be acceptable</span>
+<span class="sd">            for all grad_tensors, then this argument is optional. Default: None.</span>
+<span class="sd">        retain_graph (bool, optional): If ``False``, the graph used to compute the grad</span>
+<span class="sd">            will be freed. Note that in nearly all cases setting this option to ``True``</span>
+<span class="sd">            is not needed and often can be worked around in a much more efficient</span>
+<span class="sd">            way. Defaults to the value of ``create_graph``.</span>
+<span class="sd">        create_graph (bool, optional): If ``True``, graph of the derivative will</span>
+<span class="sd">            be constructed, allowing to compute higher order derivative products.</span>
+<span class="sd">            Default: ``False``.</span>
+<span class="sd">        allow_unused (bool, optional): If ``False``, specifying inputs that were not</span>
+<span class="sd">            used when computing outputs (and therefore their grad is always zero)</span>
+<span class="sd">            is an error. Defaults to ``False``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">outputs</span> <span class="o">=</span> <span class="p">(</span><span class="n">outputs</span><span class="p">,)</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="k">else</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">outputs</span><span class="p">)</span>
+    <span class="n">inputs</span> <span class="o">=</span> <span class="p">(</span><span class="n">inputs</span><span class="p">,)</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">inputs</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="k">else</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+    <span class="n">overridable_args</span> <span class="o">=</span> <span class="n">outputs</span> <span class="o">+</span> <span class="n">inputs</span>
+    <span class="k">if</span> <span class="n">has_torch_function</span><span class="p">(</span><span class="n">overridable_args</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">handle_torch_function</span><span class="p">(</span>
+            <span class="n">grad</span><span class="p">,</span>
+            <span class="n">overridable_args</span><span class="p">,</span>
+            <span class="n">outputs</span><span class="p">,</span>
+            <span class="n">inputs</span><span class="p">,</span>
+            <span class="n">grad_outputs</span><span class="o">=</span><span class="n">grad_outputs</span><span class="p">,</span>
+            <span class="n">retain_graph</span><span class="o">=</span><span class="n">retain_graph</span><span class="p">,</span>
+            <span class="n">create_graph</span><span class="o">=</span><span class="n">create_graph</span><span class="p">,</span>
+            <span class="n">only_inputs</span><span class="o">=</span><span class="n">only_inputs</span><span class="p">,</span> 
+            <span class="n">allow_unused</span><span class="o">=</span><span class="n">allow_unused</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">only_inputs</span><span class="p">:</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s2">&quot;only_inputs argument is deprecated and is ignored now &quot;</span>
+                      <span class="s2">&quot;(defaults to True). To accumulate gradient for other &quot;</span>
+                      <span class="s2">&quot;parts of the graph, please use torch.autograd.backward.&quot;</span><span class="p">)</span>
+
+    <span class="n">grad_outputs_</span> <span class="o">=</span> <span class="n">_tensor_or_tensors_to_tuple</span><span class="p">(</span><span class="n">grad_outputs</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">outputs</span><span class="p">))</span>
+    <span class="n">grad_outputs_</span> <span class="o">=</span> <span class="n">_make_grads</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">grad_outputs_</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">retain_graph</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">retain_graph</span> <span class="o">=</span> <span class="n">create_graph</span>
+
+    <span class="k">return</span> <span class="n">Variable</span><span class="o">.</span><span class="n">_execution_engine</span><span class="o">.</span><span class="n">run_backward</span><span class="p">(</span>
+        <span class="n">outputs</span><span class="p">,</span> <span class="n">grad_outputs_</span><span class="p">,</span> <span class="n">retain_graph</span><span class="p">,</span> <span class="n">create_graph</span><span class="p">,</span>
+        <span class="n">inputs</span><span class="p">,</span> <span class="n">allow_unused</span><span class="p">)</span></div>
+
+
+<span class="c1"># This function applies in case of gradient checkpointing for memory</span>
+<span class="c1"># optimization. Currently, for gradient checkpointing, we only support imperative</span>
+<span class="c1"># backwards call i.e. torch.autograd.backward() and the torch.autograd.grad() won&#39;t</span>
+<span class="c1"># work. The reason being that: torch.autograd.grad() only calculates the grads</span>
+<span class="c1"># for the inputs that are passed by user but it doesn&#39;t calculate grad for</span>
+<span class="c1"># anything else e.g. model parameters like weights, bias etc. However, for</span>
+<span class="c1"># torch.autograd.backward(), we would actually compute the grad for the weights as well.</span>
+<span class="c1">#</span>
+<span class="c1"># This function returns whether the checkpointing is valid i.e. torch.autograd.backward</span>
+<span class="c1"># or not i.e. torch.autograd.grad. The implementation works by maintaining a thread</span>
+<span class="c1"># local variable in torch/csrc/autograd/engine.cpp which looks at the NodeTask</span>
+<span class="c1"># in the stack and before a NodeTask is executed in evaluate_function, it</span>
+<span class="c1"># checks for whether reentrant backwards is imperative or not.</span>
+<span class="c1"># See https://github.com/pytorch/pytorch/pull/4594 for more discussion/context</span>
+<span class="k">def</span> <span class="nf">_is_checkpoint_valid</span><span class="p">():</span>
+    <span class="k">return</span> <span class="n">Variable</span><span class="o">.</span><span class="n">_execution_engine</span><span class="o">.</span><span class="n">is_checkpoint_valid</span><span class="p">()</span>
+
+
+<span class="k">def</span> <span class="nf">variable</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s2">&quot;torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+<span class="k">if</span> <span class="ow">not</span> <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_autograd_init</span><span class="p">():</span>
+    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;autograd initialization failed&quot;</span><span class="p">)</span>
+
+<span class="c1"># Import all native method/classes</span>
+<span class="kn">from</span> <span class="nn">torch._C._autograd</span> <span class="kn">import</span> <span class="p">(</span><span class="n">ProfilerState</span><span class="p">,</span> <span class="n">ProfilerConfig</span><span class="p">,</span> <span class="n">ProfilerEvent</span><span class="p">,</span>
+                                <span class="n">_enable_profiler</span><span class="p">,</span> <span class="n">_disable_profiler</span><span class="p">,</span> <span class="n">_profiler_enabled</span><span class="p">,</span>
+                                <span class="n">_enable_record_function</span><span class="p">,</span> <span class="n">_set_empty_test_observer</span><span class="p">)</span>
+</pre></div>
+
+             </article>
+             
+            </div>
+            <footer>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+         <script src="../../_static/jquery.js"></script>
+         <script src="../../_static/underscore.js"></script>
+         <script src="../../_static/doctools.js"></script>
+         <script src="../../_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="../../_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="../../_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="../../_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="../../_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="../../_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>

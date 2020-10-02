@@ -1,0 +1,1103 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>torch.optim.lbfgs &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/_modules/torch/optim/lbfgs.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="../../../_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="../../../_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../../_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../../_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+
+  
+  <script src="../../../_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="../../../_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/_modules/torch/optim/lbfgs.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="../../../index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+          <li><a href="../../index.html">Module code</a> &gt;</li>
+        
+          <li><a href="../../torch.html">torch</a> &gt;</li>
+        
+      <li>torch.optim.lbfgs</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <h1>Source code for torch.optim.lbfgs</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="n">reduce</span>
+<span class="kn">from</span> <span class="nn">.optimizer</span> <span class="kn">import</span> <span class="n">Optimizer</span>
+
+
+<span class="k">def</span> <span class="nf">_cubic_interpolate</span><span class="p">(</span><span class="n">x1</span><span class="p">,</span> <span class="n">f1</span><span class="p">,</span> <span class="n">g1</span><span class="p">,</span> <span class="n">x2</span><span class="p">,</span> <span class="n">f2</span><span class="p">,</span> <span class="n">g2</span><span class="p">,</span> <span class="n">bounds</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="c1"># ported from https://github.com/torch/optim/blob/master/polyinterp.lua</span>
+    <span class="c1"># Compute bounds of interpolation area</span>
+    <span class="k">if</span> <span class="n">bounds</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">xmin_bound</span><span class="p">,</span> <span class="n">xmax_bound</span> <span class="o">=</span> <span class="n">bounds</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">xmin_bound</span><span class="p">,</span> <span class="n">xmax_bound</span> <span class="o">=</span> <span class="p">(</span><span class="n">x1</span><span class="p">,</span> <span class="n">x2</span><span class="p">)</span> <span class="k">if</span> <span class="n">x1</span> <span class="o">&lt;=</span> <span class="n">x2</span> <span class="k">else</span> <span class="p">(</span><span class="n">x2</span><span class="p">,</span> <span class="n">x1</span><span class="p">)</span>
+
+    <span class="c1"># Code for most common case: cubic interpolation of 2 points</span>
+    <span class="c1">#   w/ function and derivative values for both</span>
+    <span class="c1"># Solution in this case (where x2 is the farthest point):</span>
+    <span class="c1">#   d1 = g1 + g2 - 3*(f1-f2)/(x1-x2);</span>
+    <span class="c1">#   d2 = sqrt(d1^2 - g1*g2);</span>
+    <span class="c1">#   min_pos = x2 - (x2 - x1)*((g2 + d2 - d1)/(g2 - g1 + 2*d2));</span>
+    <span class="c1">#   t_new = min(max(min_pos,xmin_bound),xmax_bound);</span>
+    <span class="n">d1</span> <span class="o">=</span> <span class="n">g1</span> <span class="o">+</span> <span class="n">g2</span> <span class="o">-</span> <span class="mi">3</span> <span class="o">*</span> <span class="p">(</span><span class="n">f1</span> <span class="o">-</span> <span class="n">f2</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">x1</span> <span class="o">-</span> <span class="n">x2</span><span class="p">)</span>
+    <span class="n">d2_square</span> <span class="o">=</span> <span class="n">d1</span><span class="o">**</span><span class="mi">2</span> <span class="o">-</span> <span class="n">g1</span> <span class="o">*</span> <span class="n">g2</span>
+    <span class="k">if</span> <span class="n">d2_square</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">d2</span> <span class="o">=</span> <span class="n">d2_square</span><span class="o">.</span><span class="n">sqrt</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">x1</span> <span class="o">&lt;=</span> <span class="n">x2</span><span class="p">:</span>
+            <span class="n">min_pos</span> <span class="o">=</span> <span class="n">x2</span> <span class="o">-</span> <span class="p">(</span><span class="n">x2</span> <span class="o">-</span> <span class="n">x1</span><span class="p">)</span> <span class="o">*</span> <span class="p">((</span><span class="n">g2</span> <span class="o">+</span> <span class="n">d2</span> <span class="o">-</span> <span class="n">d1</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">g2</span> <span class="o">-</span> <span class="n">g1</span> <span class="o">+</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">d2</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">min_pos</span> <span class="o">=</span> <span class="n">x1</span> <span class="o">-</span> <span class="p">(</span><span class="n">x1</span> <span class="o">-</span> <span class="n">x2</span><span class="p">)</span> <span class="o">*</span> <span class="p">((</span><span class="n">g1</span> <span class="o">+</span> <span class="n">d2</span> <span class="o">-</span> <span class="n">d1</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">g1</span> <span class="o">-</span> <span class="n">g2</span> <span class="o">+</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">d2</span><span class="p">))</span>
+        <span class="k">return</span> <span class="nb">min</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="n">min_pos</span><span class="p">,</span> <span class="n">xmin_bound</span><span class="p">),</span> <span class="n">xmax_bound</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">xmin_bound</span> <span class="o">+</span> <span class="n">xmax_bound</span><span class="p">)</span> <span class="o">/</span> <span class="mf">2.</span>
+
+
+<span class="k">def</span> <span class="nf">_strong_wolfe</span><span class="p">(</span><span class="n">obj_func</span><span class="p">,</span>
+                  <span class="n">x</span><span class="p">,</span>
+                  <span class="n">t</span><span class="p">,</span>
+                  <span class="n">d</span><span class="p">,</span>
+                  <span class="n">f</span><span class="p">,</span>
+                  <span class="n">g</span><span class="p">,</span>
+                  <span class="n">gtd</span><span class="p">,</span>
+                  <span class="n">c1</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">,</span>
+                  <span class="n">c2</span><span class="o">=</span><span class="mf">0.9</span><span class="p">,</span>
+                  <span class="n">tolerance_change</span><span class="o">=</span><span class="mf">1e-9</span><span class="p">,</span>
+                  <span class="n">max_ls</span><span class="o">=</span><span class="mi">25</span><span class="p">):</span>
+    <span class="c1"># ported from https://github.com/torch/optim/blob/master/lswolfe.lua</span>
+    <span class="n">d_norm</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
+    <span class="n">g</span> <span class="o">=</span> <span class="n">g</span><span class="o">.</span><span class="n">clone</span><span class="p">(</span><span class="n">memory_format</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">contiguous_format</span><span class="p">)</span>
+    <span class="c1"># evaluate objective and gradient using initial step</span>
+    <span class="n">f_new</span><span class="p">,</span> <span class="n">g_new</span> <span class="o">=</span> <span class="n">obj_func</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+    <span class="n">ls_func_evals</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="n">gtd_new</span> <span class="o">=</span> <span class="n">g_new</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+
+    <span class="c1"># bracket an interval containing a point satisfying the Wolfe criteria</span>
+    <span class="n">t_prev</span><span class="p">,</span> <span class="n">f_prev</span><span class="p">,</span> <span class="n">g_prev</span><span class="p">,</span> <span class="n">gtd_prev</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">f</span><span class="p">,</span> <span class="n">g</span><span class="p">,</span> <span class="n">gtd</span>
+    <span class="n">done</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">ls_iter</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">while</span> <span class="n">ls_iter</span> <span class="o">&lt;</span> <span class="n">max_ls</span><span class="p">:</span>
+        <span class="c1"># check conditions</span>
+        <span class="k">if</span> <span class="n">f_new</span> <span class="o">&gt;</span> <span class="p">(</span><span class="n">f</span> <span class="o">+</span> <span class="n">c1</span> <span class="o">*</span> <span class="n">t</span> <span class="o">*</span> <span class="n">gtd</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="n">ls_iter</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">f_new</span> <span class="o">&gt;=</span> <span class="n">f_prev</span><span class="p">):</span>
+            <span class="n">bracket</span> <span class="o">=</span> <span class="p">[</span><span class="n">t_prev</span><span class="p">,</span> <span class="n">t</span><span class="p">]</span>
+            <span class="n">bracket_f</span> <span class="o">=</span> <span class="p">[</span><span class="n">f_prev</span><span class="p">,</span> <span class="n">f_new</span><span class="p">]</span>
+            <span class="n">bracket_g</span> <span class="o">=</span> <span class="p">[</span><span class="n">g_prev</span><span class="p">,</span> <span class="n">g_new</span><span class="o">.</span><span class="n">clone</span><span class="p">(</span><span class="n">memory_format</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">contiguous_format</span><span class="p">)]</span>
+            <span class="n">bracket_gtd</span> <span class="o">=</span> <span class="p">[</span><span class="n">gtd_prev</span><span class="p">,</span> <span class="n">gtd_new</span><span class="p">]</span>
+            <span class="k">break</span>
+
+        <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">gtd_new</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="o">-</span><span class="n">c2</span> <span class="o">*</span> <span class="n">gtd</span><span class="p">:</span>
+            <span class="n">bracket</span> <span class="o">=</span> <span class="p">[</span><span class="n">t</span><span class="p">]</span>
+            <span class="n">bracket_f</span> <span class="o">=</span> <span class="p">[</span><span class="n">f_new</span><span class="p">]</span>
+            <span class="n">bracket_g</span> <span class="o">=</span> <span class="p">[</span><span class="n">g_new</span><span class="p">]</span>
+            <span class="n">done</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="k">break</span>
+
+        <span class="k">if</span> <span class="n">gtd_new</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">bracket</span> <span class="o">=</span> <span class="p">[</span><span class="n">t_prev</span><span class="p">,</span> <span class="n">t</span><span class="p">]</span>
+            <span class="n">bracket_f</span> <span class="o">=</span> <span class="p">[</span><span class="n">f_prev</span><span class="p">,</span> <span class="n">f_new</span><span class="p">]</span>
+            <span class="n">bracket_g</span> <span class="o">=</span> <span class="p">[</span><span class="n">g_prev</span><span class="p">,</span> <span class="n">g_new</span><span class="o">.</span><span class="n">clone</span><span class="p">(</span><span class="n">memory_format</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">contiguous_format</span><span class="p">)]</span>
+            <span class="n">bracket_gtd</span> <span class="o">=</span> <span class="p">[</span><span class="n">gtd_prev</span><span class="p">,</span> <span class="n">gtd_new</span><span class="p">]</span>
+            <span class="k">break</span>
+
+        <span class="c1"># interpolate</span>
+        <span class="n">min_step</span> <span class="o">=</span> <span class="n">t</span> <span class="o">+</span> <span class="mf">0.01</span> <span class="o">*</span> <span class="p">(</span><span class="n">t</span> <span class="o">-</span> <span class="n">t_prev</span><span class="p">)</span>
+        <span class="n">max_step</span> <span class="o">=</span> <span class="n">t</span> <span class="o">*</span> <span class="mi">10</span>
+        <span class="n">tmp</span> <span class="o">=</span> <span class="n">t</span>
+        <span class="n">t</span> <span class="o">=</span> <span class="n">_cubic_interpolate</span><span class="p">(</span>
+            <span class="n">t_prev</span><span class="p">,</span>
+            <span class="n">f_prev</span><span class="p">,</span>
+            <span class="n">gtd_prev</span><span class="p">,</span>
+            <span class="n">t</span><span class="p">,</span>
+            <span class="n">f_new</span><span class="p">,</span>
+            <span class="n">gtd_new</span><span class="p">,</span>
+            <span class="n">bounds</span><span class="o">=</span><span class="p">(</span><span class="n">min_step</span><span class="p">,</span> <span class="n">max_step</span><span class="p">))</span>
+
+        <span class="c1"># next step</span>
+        <span class="n">t_prev</span> <span class="o">=</span> <span class="n">tmp</span>
+        <span class="n">f_prev</span> <span class="o">=</span> <span class="n">f_new</span>
+        <span class="n">g_prev</span> <span class="o">=</span> <span class="n">g_new</span><span class="o">.</span><span class="n">clone</span><span class="p">(</span><span class="n">memory_format</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">contiguous_format</span><span class="p">)</span>
+        <span class="n">gtd_prev</span> <span class="o">=</span> <span class="n">gtd_new</span>
+        <span class="n">f_new</span><span class="p">,</span> <span class="n">g_new</span> <span class="o">=</span> <span class="n">obj_func</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+        <span class="n">ls_func_evals</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">gtd_new</span> <span class="o">=</span> <span class="n">g_new</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+        <span class="n">ls_iter</span> <span class="o">+=</span> <span class="mi">1</span>
+
+    <span class="c1"># reached max number of iterations?</span>
+    <span class="k">if</span> <span class="n">ls_iter</span> <span class="o">==</span> <span class="n">max_ls</span><span class="p">:</span>
+        <span class="n">bracket</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="n">t</span><span class="p">]</span>
+        <span class="n">bracket_f</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span><span class="p">,</span> <span class="n">f_new</span><span class="p">]</span>
+        <span class="n">bracket_g</span> <span class="o">=</span> <span class="p">[</span><span class="n">g</span><span class="p">,</span> <span class="n">g_new</span><span class="p">]</span>
+
+    <span class="c1"># zoom phase: we now have a point satisfying the criteria, or</span>
+    <span class="c1"># a bracket around it. We refine the bracket until we find the</span>
+    <span class="c1"># exact point satisfying the criteria</span>
+    <span class="n">insuf_progress</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="c1"># find high and low points in bracket</span>
+    <span class="n">low_pos</span><span class="p">,</span> <span class="n">high_pos</span> <span class="o">=</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="k">if</span> <span class="n">bracket_f</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">bracket_f</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">else</span> <span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="k">while</span> <span class="ow">not</span> <span class="n">done</span> <span class="ow">and</span> <span class="n">ls_iter</span> <span class="o">&lt;</span> <span class="n">max_ls</span><span class="p">:</span>
+        <span class="c1"># line-search bracket is so small</span>
+        <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">bracket</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">bracket</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">*</span> <span class="n">d_norm</span> <span class="o">&lt;</span> <span class="n">tolerance_change</span><span class="p">:</span>
+            <span class="k">break</span>
+
+        <span class="c1"># compute new trial value</span>
+        <span class="n">t</span> <span class="o">=</span> <span class="n">_cubic_interpolate</span><span class="p">(</span><span class="n">bracket</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">bracket_f</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">bracket_gtd</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span>
+                               <span class="n">bracket</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">bracket_f</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">bracket_gtd</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+
+        <span class="c1"># test that we are making sufficient progress:</span>
+        <span class="c1"># in case `t` is so close to boundary, we mark that we are making</span>
+        <span class="c1"># insufficient progress, and if</span>
+        <span class="c1">#   + we have made insufficient progress in the last step, or</span>
+        <span class="c1">#   + `t` is at one of the boundary,</span>
+        <span class="c1"># we will move `t` to a position which is `0.1 * len(bracket)`</span>
+        <span class="c1"># away from the nearest boundary point.</span>
+        <span class="n">eps</span> <span class="o">=</span> <span class="mf">0.1</span> <span class="o">*</span> <span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="n">bracket</span><span class="p">)</span> <span class="o">-</span> <span class="nb">min</span><span class="p">(</span><span class="n">bracket</span><span class="p">))</span>
+        <span class="k">if</span> <span class="nb">min</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="n">bracket</span><span class="p">)</span> <span class="o">-</span> <span class="n">t</span><span class="p">,</span> <span class="n">t</span> <span class="o">-</span> <span class="nb">min</span><span class="p">(</span><span class="n">bracket</span><span class="p">))</span> <span class="o">&lt;</span> <span class="n">eps</span><span class="p">:</span>
+            <span class="c1"># interpolation close to boundary</span>
+            <span class="k">if</span> <span class="n">insuf_progress</span> <span class="ow">or</span> <span class="n">t</span> <span class="o">&gt;=</span> <span class="nb">max</span><span class="p">(</span><span class="n">bracket</span><span class="p">)</span> <span class="ow">or</span> <span class="n">t</span> <span class="o">&lt;=</span> <span class="nb">min</span><span class="p">(</span><span class="n">bracket</span><span class="p">):</span>
+                <span class="c1"># evaluate at 0.1 away from boundary</span>
+                <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">t</span> <span class="o">-</span> <span class="nb">max</span><span class="p">(</span><span class="n">bracket</span><span class="p">))</span> <span class="o">&lt;</span> <span class="nb">abs</span><span class="p">(</span><span class="n">t</span> <span class="o">-</span> <span class="nb">min</span><span class="p">(</span><span class="n">bracket</span><span class="p">)):</span>
+                    <span class="n">t</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">bracket</span><span class="p">)</span> <span class="o">-</span> <span class="n">eps</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">t</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">bracket</span><span class="p">)</span> <span class="o">+</span> <span class="n">eps</span>
+                <span class="n">insuf_progress</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">insuf_progress</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">insuf_progress</span> <span class="o">=</span> <span class="kc">False</span>
+
+        <span class="c1"># Evaluate new point</span>
+        <span class="n">f_new</span><span class="p">,</span> <span class="n">g_new</span> <span class="o">=</span> <span class="n">obj_func</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+        <span class="n">ls_func_evals</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">gtd_new</span> <span class="o">=</span> <span class="n">g_new</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+        <span class="n">ls_iter</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="k">if</span> <span class="n">f_new</span> <span class="o">&gt;</span> <span class="p">(</span><span class="n">f</span> <span class="o">+</span> <span class="n">c1</span> <span class="o">*</span> <span class="n">t</span> <span class="o">*</span> <span class="n">gtd</span><span class="p">)</span> <span class="ow">or</span> <span class="n">f_new</span> <span class="o">&gt;=</span> <span class="n">bracket_f</span><span class="p">[</span><span class="n">low_pos</span><span class="p">]:</span>
+            <span class="c1"># Armijo condition not satisfied or not lower than lowest point</span>
+            <span class="n">bracket</span><span class="p">[</span><span class="n">high_pos</span><span class="p">]</span> <span class="o">=</span> <span class="n">t</span>
+            <span class="n">bracket_f</span><span class="p">[</span><span class="n">high_pos</span><span class="p">]</span> <span class="o">=</span> <span class="n">f_new</span>
+            <span class="n">bracket_g</span><span class="p">[</span><span class="n">high_pos</span><span class="p">]</span> <span class="o">=</span> <span class="n">g_new</span><span class="o">.</span><span class="n">clone</span><span class="p">(</span><span class="n">memory_format</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">contiguous_format</span><span class="p">)</span>
+            <span class="n">bracket_gtd</span><span class="p">[</span><span class="n">high_pos</span><span class="p">]</span> <span class="o">=</span> <span class="n">gtd_new</span>
+            <span class="n">low_pos</span><span class="p">,</span> <span class="n">high_pos</span> <span class="o">=</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="k">if</span> <span class="n">bracket_f</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">bracket_f</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="k">else</span> <span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">gtd_new</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="o">-</span><span class="n">c2</span> <span class="o">*</span> <span class="n">gtd</span><span class="p">:</span>
+                <span class="c1"># Wolfe conditions satisfied</span>
+                <span class="n">done</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="k">elif</span> <span class="n">gtd_new</span> <span class="o">*</span> <span class="p">(</span><span class="n">bracket</span><span class="p">[</span><span class="n">high_pos</span><span class="p">]</span> <span class="o">-</span> <span class="n">bracket</span><span class="p">[</span><span class="n">low_pos</span><span class="p">])</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="c1"># old high becomes new low</span>
+                <span class="n">bracket</span><span class="p">[</span><span class="n">high_pos</span><span class="p">]</span> <span class="o">=</span> <span class="n">bracket</span><span class="p">[</span><span class="n">low_pos</span><span class="p">]</span>
+                <span class="n">bracket_f</span><span class="p">[</span><span class="n">high_pos</span><span class="p">]</span> <span class="o">=</span> <span class="n">bracket_f</span><span class="p">[</span><span class="n">low_pos</span><span class="p">]</span>
+                <span class="n">bracket_g</span><span class="p">[</span><span class="n">high_pos</span><span class="p">]</span> <span class="o">=</span> <span class="n">bracket_g</span><span class="p">[</span><span class="n">low_pos</span><span class="p">]</span>
+                <span class="n">bracket_gtd</span><span class="p">[</span><span class="n">high_pos</span><span class="p">]</span> <span class="o">=</span> <span class="n">bracket_gtd</span><span class="p">[</span><span class="n">low_pos</span><span class="p">]</span>
+
+            <span class="c1"># new point becomes new low</span>
+            <span class="n">bracket</span><span class="p">[</span><span class="n">low_pos</span><span class="p">]</span> <span class="o">=</span> <span class="n">t</span>
+            <span class="n">bracket_f</span><span class="p">[</span><span class="n">low_pos</span><span class="p">]</span> <span class="o">=</span> <span class="n">f_new</span>
+            <span class="n">bracket_g</span><span class="p">[</span><span class="n">low_pos</span><span class="p">]</span> <span class="o">=</span> <span class="n">g_new</span><span class="o">.</span><span class="n">clone</span><span class="p">(</span><span class="n">memory_format</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">contiguous_format</span><span class="p">)</span>
+            <span class="n">bracket_gtd</span><span class="p">[</span><span class="n">low_pos</span><span class="p">]</span> <span class="o">=</span> <span class="n">gtd_new</span>
+
+    <span class="c1"># return stuff</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">bracket</span><span class="p">[</span><span class="n">low_pos</span><span class="p">]</span>
+    <span class="n">f_new</span> <span class="o">=</span> <span class="n">bracket_f</span><span class="p">[</span><span class="n">low_pos</span><span class="p">]</span>
+    <span class="n">g_new</span> <span class="o">=</span> <span class="n">bracket_g</span><span class="p">[</span><span class="n">low_pos</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">f_new</span><span class="p">,</span> <span class="n">g_new</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">ls_func_evals</span>
+
+
+<div class="viewcode-block" id="LBFGS"><a class="viewcode-back" href="../../../optim.html#torch.optim.LBFGS">[docs]</a><span class="k">class</span> <span class="nc">LBFGS</span><span class="p">(</span><span class="n">Optimizer</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;Implements L-BFGS algorithm, heavily inspired by `minFunc</span>
+<span class="sd">    &lt;https://www.cs.ubc.ca/~schmidtm/Software/minFunc.html&gt;`.</span>
+
+<span class="sd">    .. warning::</span>
+<span class="sd">        This optimizer doesn&#39;t support per-parameter options and parameter</span>
+<span class="sd">        groups (there can be only one).</span>
+
+<span class="sd">    .. warning::</span>
+<span class="sd">        Right now all parameters have to be on a single device. This will be</span>
+<span class="sd">        improved in the future.</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        This is a very memory intensive optimizer (it requires additional</span>
+<span class="sd">        ``param_bytes * (history_size + 1)`` bytes). If it doesn&#39;t fit in memory</span>
+<span class="sd">        try reducing the history size, or use a different algorithm.</span>
+
+<span class="sd">    Arguments:</span>
+<span class="sd">        lr (float): learning rate (default: 1)</span>
+<span class="sd">        max_iter (int): maximal number of iterations per optimization step</span>
+<span class="sd">            (default: 20)</span>
+<span class="sd">        max_eval (int): maximal number of function evaluations per optimization</span>
+<span class="sd">            step (default: max_iter * 1.25).</span>
+<span class="sd">        tolerance_grad (float): termination tolerance on first order optimality</span>
+<span class="sd">            (default: 1e-5).</span>
+<span class="sd">        tolerance_change (float): termination tolerance on function</span>
+<span class="sd">            value/parameter changes (default: 1e-9).</span>
+<span class="sd">        history_size (int): update history size (default: 100).</span>
+<span class="sd">        line_search_fn (str): either &#39;strong_wolfe&#39; or None (default: None).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span>
+                 <span class="n">params</span><span class="p">,</span>
+                 <span class="n">lr</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+                 <span class="n">max_iter</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+                 <span class="n">max_eval</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                 <span class="n">tolerance_grad</span><span class="o">=</span><span class="mf">1e-7</span><span class="p">,</span>
+                 <span class="n">tolerance_change</span><span class="o">=</span><span class="mf">1e-9</span><span class="p">,</span>
+                 <span class="n">history_size</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>
+                 <span class="n">line_search_fn</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">max_eval</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">max_eval</span> <span class="o">=</span> <span class="n">max_iter</span> <span class="o">*</span> <span class="mi">5</span> <span class="o">//</span> <span class="mi">4</span>
+        <span class="n">defaults</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span>
+            <span class="n">lr</span><span class="o">=</span><span class="n">lr</span><span class="p">,</span>
+            <span class="n">max_iter</span><span class="o">=</span><span class="n">max_iter</span><span class="p">,</span>
+            <span class="n">max_eval</span><span class="o">=</span><span class="n">max_eval</span><span class="p">,</span>
+            <span class="n">tolerance_grad</span><span class="o">=</span><span class="n">tolerance_grad</span><span class="p">,</span>
+            <span class="n">tolerance_change</span><span class="o">=</span><span class="n">tolerance_change</span><span class="p">,</span>
+            <span class="n">history_size</span><span class="o">=</span><span class="n">history_size</span><span class="p">,</span>
+            <span class="n">line_search_fn</span><span class="o">=</span><span class="n">line_search_fn</span><span class="p">)</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">LBFGS</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">params</span><span class="p">,</span> <span class="n">defaults</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">param_groups</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;LBFGS doesn&#39;t support per-parameter options &quot;</span>
+                             <span class="s2">&quot;(parameter groups)&quot;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_params</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">param_groups</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;params&#39;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_numel_cache</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">_numel</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_numel_cache</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_numel_cache</span> <span class="o">=</span> <span class="n">reduce</span><span class="p">(</span><span class="k">lambda</span> <span class="n">total</span><span class="p">,</span> <span class="n">p</span><span class="p">:</span> <span class="n">total</span> <span class="o">+</span> <span class="n">p</span><span class="o">.</span><span class="n">numel</span><span class="p">(),</span> <span class="bp">self</span><span class="o">.</span><span class="n">_params</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_numel_cache</span>
+
+    <span class="k">def</span> <span class="nf">_gather_flat_grad</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">views</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_params</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">grad</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">view</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">numel</span><span class="p">())</span><span class="o">.</span><span class="n">zero_</span><span class="p">()</span>
+            <span class="k">elif</span> <span class="n">p</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">is_sparse</span><span class="p">:</span>
+                <span class="n">view</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">to_dense</span><span class="p">()</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">view</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">views</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">view</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">(</span><span class="n">views</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_add_grad</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">step_size</span><span class="p">,</span> <span class="n">update</span><span class="p">):</span>
+        <span class="n">offset</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_params</span><span class="p">:</span>
+            <span class="n">numel</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">numel</span><span class="p">()</span>
+            <span class="c1"># view as to avoid deprecated pointwise semantics</span>
+            <span class="n">p</span><span class="o">.</span><span class="n">add_</span><span class="p">(</span><span class="n">update</span><span class="p">[</span><span class="n">offset</span><span class="p">:</span><span class="n">offset</span> <span class="o">+</span> <span class="n">numel</span><span class="p">]</span><span class="o">.</span><span class="n">view_as</span><span class="p">(</span><span class="n">p</span><span class="p">),</span> <span class="n">alpha</span><span class="o">=</span><span class="n">step_size</span><span class="p">)</span>
+            <span class="n">offset</span> <span class="o">+=</span> <span class="n">numel</span>
+        <span class="k">assert</span> <span class="n">offset</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">_numel</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">_clone_param</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">clone</span><span class="p">(</span><span class="n">memory_format</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">contiguous_format</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_params</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="nf">_set_param</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">params_data</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">p</span><span class="p">,</span> <span class="n">pdata</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_params</span><span class="p">,</span> <span class="n">params_data</span><span class="p">):</span>
+            <span class="n">p</span><span class="o">.</span><span class="n">copy_</span><span class="p">(</span><span class="n">pdata</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_directional_evaluate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">closure</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">d</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_add_grad</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">closure</span><span class="p">())</span>
+        <span class="n">flat_grad</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_gather_flat_grad</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_set_param</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">loss</span><span class="p">,</span> <span class="n">flat_grad</span>
+
+<div class="viewcode-block" id="LBFGS.step"><a class="viewcode-back" href="../../../optim.html#torch.optim.LBFGS.step">[docs]</a>    <span class="nd">@torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">()</span>
+    <span class="k">def</span> <span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">closure</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;Performs a single optimization step.</span>
+
+<span class="sd">        Arguments:</span>
+<span class="sd">            closure (callable): A closure that reevaluates the model</span>
+<span class="sd">                and returns the loss.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">param_groups</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span>
+
+        <span class="c1"># Make sure the closure is always called with grad enabled</span>
+        <span class="n">closure</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">enable_grad</span><span class="p">()(</span><span class="n">closure</span><span class="p">)</span>
+
+        <span class="n">group</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">param_groups</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">lr</span> <span class="o">=</span> <span class="n">group</span><span class="p">[</span><span class="s1">&#39;lr&#39;</span><span class="p">]</span>
+        <span class="n">max_iter</span> <span class="o">=</span> <span class="n">group</span><span class="p">[</span><span class="s1">&#39;max_iter&#39;</span><span class="p">]</span>
+        <span class="n">max_eval</span> <span class="o">=</span> <span class="n">group</span><span class="p">[</span><span class="s1">&#39;max_eval&#39;</span><span class="p">]</span>
+        <span class="n">tolerance_grad</span> <span class="o">=</span> <span class="n">group</span><span class="p">[</span><span class="s1">&#39;tolerance_grad&#39;</span><span class="p">]</span>
+        <span class="n">tolerance_change</span> <span class="o">=</span> <span class="n">group</span><span class="p">[</span><span class="s1">&#39;tolerance_change&#39;</span><span class="p">]</span>
+        <span class="n">line_search_fn</span> <span class="o">=</span> <span class="n">group</span><span class="p">[</span><span class="s1">&#39;line_search_fn&#39;</span><span class="p">]</span>
+        <span class="n">history_size</span> <span class="o">=</span> <span class="n">group</span><span class="p">[</span><span class="s1">&#39;history_size&#39;</span><span class="p">]</span>
+
+        <span class="c1"># NOTE: LBFGS has only global state, but we register it as state for</span>
+        <span class="c1"># the first param, because this helps with casting in load_state_dict</span>
+        <span class="n">state</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">_params</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span>
+        <span class="n">state</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s1">&#39;func_evals&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">state</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="s1">&#39;n_iter&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+        <span class="c1"># evaluate initial f(x) and df/dx</span>
+        <span class="n">orig_loss</span> <span class="o">=</span> <span class="n">closure</span><span class="p">()</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">orig_loss</span><span class="p">)</span>
+        <span class="n">current_evals</span> <span class="o">=</span> <span class="mi">1</span>
+        <span class="n">state</span><span class="p">[</span><span class="s1">&#39;func_evals&#39;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="n">flat_grad</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_gather_flat_grad</span><span class="p">()</span>
+        <span class="n">opt_cond</span> <span class="o">=</span> <span class="n">flat_grad</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">&lt;=</span> <span class="n">tolerance_grad</span>
+
+        <span class="c1"># optimal condition</span>
+        <span class="k">if</span> <span class="n">opt_cond</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">orig_loss</span>
+
+        <span class="c1"># tensors cached in state (for tracing)</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;d&#39;</span><span class="p">)</span>
+        <span class="n">t</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;t&#39;</span><span class="p">)</span>
+        <span class="n">old_dirs</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;old_dirs&#39;</span><span class="p">)</span>
+        <span class="n">old_stps</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;old_stps&#39;</span><span class="p">)</span>
+        <span class="n">ro</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;ro&#39;</span><span class="p">)</span>
+        <span class="n">H_diag</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;H_diag&#39;</span><span class="p">)</span>
+        <span class="n">prev_flat_grad</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;prev_flat_grad&#39;</span><span class="p">)</span>
+        <span class="n">prev_loss</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;prev_loss&#39;</span><span class="p">)</span>
+
+        <span class="n">n_iter</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="c1"># optimize for a max of max_iter iterations</span>
+        <span class="k">while</span> <span class="n">n_iter</span> <span class="o">&lt;</span> <span class="n">max_iter</span><span class="p">:</span>
+            <span class="c1"># keep track of nb of iterations</span>
+            <span class="n">n_iter</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">state</span><span class="p">[</span><span class="s1">&#39;n_iter&#39;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+
+            <span class="c1">############################################################</span>
+            <span class="c1"># compute gradient descent direction</span>
+            <span class="c1">############################################################</span>
+            <span class="k">if</span> <span class="n">state</span><span class="p">[</span><span class="s1">&#39;n_iter&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">d</span> <span class="o">=</span> <span class="n">flat_grad</span><span class="o">.</span><span class="n">neg</span><span class="p">()</span>
+                <span class="n">old_dirs</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">old_stps</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">ro</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">H_diag</span> <span class="o">=</span> <span class="mi">1</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># do lbfgs update (update memory)</span>
+                <span class="n">y</span> <span class="o">=</span> <span class="n">flat_grad</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="n">prev_flat_grad</span><span class="p">)</span>
+                <span class="n">s</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">mul</span><span class="p">(</span><span class="n">t</span><span class="p">)</span>
+                <span class="n">ys</span> <span class="o">=</span> <span class="n">y</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>  <span class="c1"># y*s</span>
+                <span class="k">if</span> <span class="n">ys</span> <span class="o">&gt;</span> <span class="mf">1e-10</span><span class="p">:</span>
+                    <span class="c1"># updating memory</span>
+                    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">old_dirs</span><span class="p">)</span> <span class="o">==</span> <span class="n">history_size</span><span class="p">:</span>
+                        <span class="c1"># shift history by one (limited-memory)</span>
+                        <span class="n">old_dirs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+                        <span class="n">old_stps</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+                        <span class="n">ro</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+                    <span class="c1"># store new direction/step</span>
+                    <span class="n">old_dirs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">y</span><span class="p">)</span>
+                    <span class="n">old_stps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
+                    <span class="n">ro</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="mf">1.</span> <span class="o">/</span> <span class="n">ys</span><span class="p">)</span>
+
+                    <span class="c1"># update scale of initial Hessian approximation</span>
+                    <span class="n">H_diag</span> <span class="o">=</span> <span class="n">ys</span> <span class="o">/</span> <span class="n">y</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">y</span><span class="p">)</span>  <span class="c1"># (y*y)</span>
+
+                <span class="c1"># compute the approximate (L-BFGS) inverse Hessian</span>
+                <span class="c1"># multiplied by the gradient</span>
+                <span class="n">num_old</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">old_dirs</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="s1">&#39;al&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">state</span><span class="p">:</span>
+                    <span class="n">state</span><span class="p">[</span><span class="s1">&#39;al&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="n">history_size</span>
+                <span class="n">al</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s1">&#39;al&#39;</span><span class="p">]</span>
+
+                <span class="c1"># iteration in L-BFGS loop collapsed to use just one buffer</span>
+                <span class="n">q</span> <span class="o">=</span> <span class="n">flat_grad</span><span class="o">.</span><span class="n">neg</span><span class="p">()</span>
+                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_old</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">):</span>
+                    <span class="n">al</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">old_stps</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">q</span><span class="p">)</span> <span class="o">*</span> <span class="n">ro</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+                    <span class="n">q</span><span class="o">.</span><span class="n">add_</span><span class="p">(</span><span class="n">old_dirs</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">alpha</span><span class="o">=-</span><span class="n">al</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+
+                <span class="c1"># multiply by initial Hessian</span>
+                <span class="c1"># r/d is the final direction</span>
+                <span class="n">d</span> <span class="o">=</span> <span class="n">r</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">mul</span><span class="p">(</span><span class="n">q</span><span class="p">,</span> <span class="n">H_diag</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_old</span><span class="p">):</span>
+                    <span class="n">be_i</span> <span class="o">=</span> <span class="n">old_dirs</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">r</span><span class="p">)</span> <span class="o">*</span> <span class="n">ro</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+                    <span class="n">r</span><span class="o">.</span><span class="n">add_</span><span class="p">(</span><span class="n">old_stps</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">alpha</span><span class="o">=</span><span class="n">al</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">be_i</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">prev_flat_grad</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">prev_flat_grad</span> <span class="o">=</span> <span class="n">flat_grad</span><span class="o">.</span><span class="n">clone</span><span class="p">(</span><span class="n">memory_format</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">contiguous_format</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">prev_flat_grad</span><span class="o">.</span><span class="n">copy_</span><span class="p">(</span><span class="n">flat_grad</span><span class="p">)</span>
+            <span class="n">prev_loss</span> <span class="o">=</span> <span class="n">loss</span>
+
+            <span class="c1">############################################################</span>
+            <span class="c1"># compute step length</span>
+            <span class="c1">############################################################</span>
+            <span class="c1"># reset initial guess for step size</span>
+            <span class="k">if</span> <span class="n">state</span><span class="p">[</span><span class="s1">&#39;n_iter&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">t</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="mf">1.</span><span class="p">,</span> <span class="mf">1.</span> <span class="o">/</span> <span class="n">flat_grad</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span> <span class="o">*</span> <span class="n">lr</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">t</span> <span class="o">=</span> <span class="n">lr</span>
+
+            <span class="c1"># directional derivative</span>
+            <span class="n">gtd</span> <span class="o">=</span> <span class="n">flat_grad</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>  <span class="c1"># g * d</span>
+
+            <span class="c1"># directional derivative is below tolerance</span>
+            <span class="k">if</span> <span class="n">gtd</span> <span class="o">&gt;</span> <span class="o">-</span><span class="n">tolerance_change</span><span class="p">:</span>
+                <span class="k">break</span>
+
+            <span class="c1"># optional line search: user function</span>
+            <span class="n">ls_func_evals</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">if</span> <span class="n">line_search_fn</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="c1"># perform line search, using user function</span>
+                <span class="k">if</span> <span class="n">line_search_fn</span> <span class="o">!=</span> <span class="s2">&quot;strong_wolfe&quot;</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;only &#39;strong_wolfe&#39; is supported&quot;</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">x_init</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_clone_param</span><span class="p">()</span>
+
+                    <span class="k">def</span> <span class="nf">obj_func</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">d</span><span class="p">):</span>
+                        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_directional_evaluate</span><span class="p">(</span><span class="n">closure</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+
+                    <span class="n">loss</span><span class="p">,</span> <span class="n">flat_grad</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">ls_func_evals</span> <span class="o">=</span> <span class="n">_strong_wolfe</span><span class="p">(</span>
+                        <span class="n">obj_func</span><span class="p">,</span> <span class="n">x_init</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">d</span><span class="p">,</span> <span class="n">loss</span><span class="p">,</span> <span class="n">flat_grad</span><span class="p">,</span> <span class="n">gtd</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_grad</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+                <span class="n">opt_cond</span> <span class="o">=</span> <span class="n">flat_grad</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">&lt;=</span> <span class="n">tolerance_grad</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># no line search, simply move with fixed-step</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_grad</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">n_iter</span> <span class="o">!=</span> <span class="n">max_iter</span><span class="p">:</span>
+                    <span class="c1"># re-evaluate function only if not in last iteration</span>
+                    <span class="c1"># the reason we do this: in a stochastic setting,</span>
+                    <span class="c1"># no use to re-evaluate that function here</span>
+                    <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">enable_grad</span><span class="p">():</span>
+                        <span class="n">loss</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">closure</span><span class="p">())</span>
+                    <span class="n">flat_grad</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_gather_flat_grad</span><span class="p">()</span>
+                    <span class="n">opt_cond</span> <span class="o">=</span> <span class="n">flat_grad</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">&lt;=</span> <span class="n">tolerance_grad</span>
+                    <span class="n">ls_func_evals</span> <span class="o">=</span> <span class="mi">1</span>
+
+            <span class="c1"># update func eval</span>
+            <span class="n">current_evals</span> <span class="o">+=</span> <span class="n">ls_func_evals</span>
+            <span class="n">state</span><span class="p">[</span><span class="s1">&#39;func_evals&#39;</span><span class="p">]</span> <span class="o">+=</span> <span class="n">ls_func_evals</span>
+
+            <span class="c1">############################################################</span>
+            <span class="c1"># check conditions</span>
+            <span class="c1">############################################################</span>
+            <span class="k">if</span> <span class="n">n_iter</span> <span class="o">==</span> <span class="n">max_iter</span><span class="p">:</span>
+                <span class="k">break</span>
+
+            <span class="k">if</span> <span class="n">current_evals</span> <span class="o">&gt;=</span> <span class="n">max_eval</span><span class="p">:</span>
+                <span class="k">break</span>
+
+            <span class="c1"># optimal condition</span>
+            <span class="k">if</span> <span class="n">opt_cond</span><span class="p">:</span>
+                <span class="k">break</span>
+
+            <span class="c1"># lack of progress</span>
+            <span class="k">if</span> <span class="n">d</span><span class="o">.</span><span class="n">mul</span><span class="p">(</span><span class="n">t</span><span class="p">)</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">&lt;=</span> <span class="n">tolerance_change</span><span class="p">:</span>
+                <span class="k">break</span>
+
+            <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">loss</span> <span class="o">-</span> <span class="n">prev_loss</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">tolerance_change</span><span class="p">:</span>
+                <span class="k">break</span>
+
+        <span class="n">state</span><span class="p">[</span><span class="s1">&#39;d&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">d</span>
+        <span class="n">state</span><span class="p">[</span><span class="s1">&#39;t&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">t</span>
+        <span class="n">state</span><span class="p">[</span><span class="s1">&#39;old_dirs&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">old_dirs</span>
+        <span class="n">state</span><span class="p">[</span><span class="s1">&#39;old_stps&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">old_stps</span>
+        <span class="n">state</span><span class="p">[</span><span class="s1">&#39;ro&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ro</span>
+        <span class="n">state</span><span class="p">[</span><span class="s1">&#39;H_diag&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">H_diag</span>
+        <span class="n">state</span><span class="p">[</span><span class="s1">&#39;prev_flat_grad&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">prev_flat_grad</span>
+        <span class="n">state</span><span class="p">[</span><span class="s1">&#39;prev_loss&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">prev_loss</span>
+
+        <span class="k">return</span> <span class="n">orig_loss</span></div></div>
+</pre></div>
+
+             </article>
+             
+            </div>
+            <footer>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="../../../" src="../../../_static/documentation_options.js"></script>
+         <script src="../../../_static/jquery.js"></script>
+         <script src="../../../_static/underscore.js"></script>
+         <script src="../../../_static/doctools.js"></script>
+         <script src="../../../_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="../../../_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="../../../_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="../../../_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="../../../_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="../../../_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>

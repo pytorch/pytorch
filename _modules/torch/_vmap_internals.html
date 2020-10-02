@@ -1,0 +1,895 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>torch._vmap_internals &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/_modules/torch/_vmap_internals.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="../../_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+
+  
+  <script src="../../_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/_modules/torch/_vmap_internals.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="../../index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+          <li><a href="../index.html">Module code</a> &gt;</li>
+        
+          <li><a href="../torch.html">torch</a> &gt;</li>
+        
+      <li>torch._vmap_internals</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <h1>Source code for torch._vmap_internals</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">import</span> <span class="nn">functools</span>
+<span class="kn">from</span> <span class="nn">torch</span> <span class="kn">import</span> <span class="n">Tensor</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Union</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
+
+<span class="n">in_dims_t</span> <span class="o">=</span> <span class="n">Union</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="o">...</span><span class="p">]]</span>
+<span class="n">out_dims_t</span> <span class="o">=</span> <span class="n">Union</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">]]</span>
+
+<span class="c1"># Checks that all args-to-be-batched have the same batch dim size</span>
+<span class="k">def</span> <span class="nf">_validate_and_get_batch_size</span><span class="p">(</span>
+        <span class="n">in_dims_as_tuple</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="o">...</span><span class="p">],</span>
+        <span class="n">args</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">batch_sizes</span> <span class="o">=</span> <span class="p">[</span><span class="n">arg</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="n">in_dim</span><span class="p">)</span> <span class="k">for</span> <span class="n">in_dim</span><span class="p">,</span> <span class="n">arg</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">in_dims_as_tuple</span><span class="p">,</span> <span class="n">args</span><span class="p">)</span>
+                   <span class="k">if</span> <span class="n">in_dim</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">batch_sizes</span> <span class="ow">and</span> <span class="nb">any</span><span class="p">([</span><span class="n">size</span> <span class="o">!=</span> <span class="n">batch_sizes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">size</span> <span class="ow">in</span> <span class="n">batch_sizes</span><span class="p">]):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s1">&#39;vmap: Expected all tensors to have the same size in the mapped &#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;dimension, got sizes </span><span class="si">{</span><span class="n">batch_sizes</span><span class="si">}</span><span class="s1"> for the mapped dimension&#39;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">batch_sizes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+<span class="c1"># Check compatibility of `in_dims` and `args`. More specifically, checks the following:</span>
+<span class="c1"># Wherever an in_dim is not None, then the corresponding index in args must be</span>
+<span class="c1"># a Tensor. Furthermore, tensor must have the `in_dim` (0 &lt;= in_dim &lt; tensor.dim())</span>
+<span class="k">def</span> <span class="nf">_check_args_can_be_mapped_with_in_dims</span><span class="p">(</span>
+        <span class="n">in_dims_as_tuple</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="o">...</span><span class="p">],</span>
+        <span class="n">args</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">,</span>
+        <span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span>
+        <span class="n">in_dims</span><span class="p">:</span> <span class="n">in_dims_t</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="p">(</span><span class="n">in_dim</span><span class="p">,</span> <span class="n">arg</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">in_dims_as_tuple</span><span class="p">,</span> <span class="n">args</span><span class="p">)):</span>
+        <span class="k">if</span> <span class="n">in_dim</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">in_dim</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s1">&#39;vmap(</span><span class="si">{</span><span class="n">_get_name</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s1">, in_dims=</span><span class="si">{</span><span class="n">in_dims</span><span class="si">}</span><span class="s1">, ...)(&lt;inputs&gt;): in_dims &#39;</span>
+                <span class="sa">f</span><span class="s1">&#39;must be a flat tuple containing ints and/or Nones. If you were &#39;</span>
+                <span class="sa">f</span><span class="s1">&#39;trying to vmap over a Tensor inside a Python collection in &#39;</span>
+                <span class="sa">f</span><span class="s1">&#39;`inputs`, we do not yet support that.&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">arg</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s1">&#39;vmap(</span><span class="si">{</span><span class="n">_get_name</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s1">, in_dims=</span><span class="si">{</span><span class="n">in_dims</span><span class="si">}</span><span class="s1">, ...)(&lt;inputs&gt;): Got &#39;</span>
+                <span class="sa">f</span><span class="s1">&#39;in_dim=</span><span class="si">{</span><span class="n">in_dim</span><span class="si">}</span><span class="s1"> for input </span><span class="si">{</span><span class="n">idx</span><span class="si">}</span><span class="s1">, but input </span><span class="si">{</span><span class="n">idx</span><span class="si">}</span><span class="s1"> is not a &#39;</span>
+                <span class="sa">f</span><span class="s1">&#39;Tensor (got </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">arg</span><span class="p">)</span><span class="si">}</span><span class="s1">) so it cannot be vmap</span><span class="se">\&#39;</span><span class="s1">ed over. &#39;</span>
+                <span class="sa">f</span><span class="s1">&#39;If you were trying to vmap over a Tensor inside a Python &#39;</span>
+                <span class="sa">f</span><span class="s1">&#39;collection in `inputs`, we do not yet support that; otherwise, &#39;</span>
+                <span class="sa">f</span><span class="s1">&#39;use None as the respective in_dim for input </span><span class="si">{</span><span class="n">idx</span><span class="si">}</span><span class="s1">.&#39;</span><span class="p">)</span>
+        <span class="c1"># NB: We don&#39;t do dimension wrapping here. Consider allowing it in the</span>
+        <span class="c1"># future if there is demand.</span>
+        <span class="k">if</span> <span class="n">in_dim</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">in_dim</span> <span class="o">&lt;</span> <span class="n">arg</span><span class="o">.</span><span class="n">dim</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s1">&#39;vmap(</span><span class="si">{</span><span class="n">_get_name</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s1">, in_dims=</span><span class="si">{</span><span class="n">in_dims</span><span class="si">}</span><span class="s1">, ...)(&lt;inputs&gt;): Got in_dim=</span><span class="si">{</span><span class="n">in_dim</span><span class="si">}</span><span class="s1"> &#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;for input </span><span class="si">{</span><span class="n">idx</span><span class="si">}</span><span class="s1">, but input </span><span class="si">{</span><span class="n">idx</span><span class="si">}</span><span class="s1"> is a Tensor of dimensionality &#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">arg</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span><span class="si">}</span><span class="s1"> so expected in_dim to satisfy 0 &lt;= in_dim &lt; </span><span class="si">{</span><span class="n">arg</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span><span class="si">}</span><span class="s1">.&#39;</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">_num_outputs</span><span class="p">(</span><span class="n">batched_outputs</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="o">...</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">batched_outputs</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">batched_outputs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">1</span>
+
+<span class="c1"># If value is a tuple, check it has length `num_elements`.</span>
+<span class="c1"># If value is not a tuple, make a tuple with `value` repeated `num_elements` times</span>
+<span class="k">def</span> <span class="nf">_as_tuple</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="n">num_elements</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">error_message_lambda</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[],</span> <span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">value</span><span class="p">,)</span> <span class="o">*</span> <span class="n">num_elements</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="o">!=</span> <span class="n">num_elements</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="n">error_message_lambda</span><span class="p">())</span>
+    <span class="k">return</span> <span class="n">value</span>
+
+<span class="c1"># Creates BatchedTensors for every Tensor in arg that should be batched.</span>
+<span class="c1"># Returns the (potentially) batched arguments and the batch_size.</span>
+<span class="k">def</span> <span class="nf">_create_batched_inputs</span><span class="p">(</span>
+        <span class="n">in_dims</span><span class="p">:</span> <span class="n">in_dims_t</span><span class="p">,</span> <span class="n">args</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">vmap_level</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Tuple</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">in_dims</span><span class="p">,</span> <span class="nb">int</span><span class="p">)</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">in_dims</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s1">&#39;vmap(</span><span class="si">{</span><span class="n">_get_name</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s1">, in_dims=</span><span class="si">{</span><span class="n">in_dims</span><span class="si">}</span><span class="s1">, ...): expected `in_dims` to &#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;be int or tuple, got: </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">in_dims</span><span class="p">)</span><span class="si">}</span><span class="s1">.&#39;</span><span class="p">)</span>
+
+    <span class="c1"># NB: Checks that len(in_dims) == len(args) (if in_dims is a tuple).</span>
+    <span class="n">in_dims_as_tuple</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span>
+        <span class="n">in_dims</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">args</span><span class="p">),</span>
+        <span class="k">lambda</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;vmap(</span><span class="si">{</span><span class="n">_get_name</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s1">, in_dims=</span><span class="si">{</span><span class="n">in_dims</span><span class="si">}</span><span class="s1">, ...)(&lt;inputs&gt;): expected &#39;</span>
+                <span class="sa">f</span><span class="s1">&#39;one `in_dim` per input (got </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">args</span><span class="p">)</span><span class="si">}</span><span class="s1"> inputs) of </span><span class="si">{</span><span class="n">_get_name</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">args</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s1">&#39;vmap(</span><span class="si">{</span><span class="n">_get_name</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s1">)(&lt;inputs&gt;): got no inputs. Maybe you forgot to add &#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;inputs, or you are trying to vmap over a function with no inputs. &#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;The latter is unsupported.&#39;</span><span class="p">)</span>
+
+    <span class="n">_check_args_can_be_mapped_with_in_dims</span><span class="p">(</span><span class="n">in_dims_as_tuple</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">func</span><span class="p">,</span> <span class="n">in_dims</span><span class="p">)</span>
+    <span class="n">batch_size</span> <span class="o">=</span> <span class="n">_validate_and_get_batch_size</span><span class="p">(</span><span class="n">in_dims_as_tuple</span><span class="p">,</span> <span class="n">args</span><span class="p">)</span>
+    <span class="c1"># See NOTE [Ignored _remove_batch_dim, _add_batch_dim]</span>
+    <span class="n">batched_inputs</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">arg</span> <span class="k">if</span> <span class="n">in_dim</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span>
+                           <span class="n">torch</span><span class="o">.</span><span class="n">_add_batch_dim</span><span class="p">(</span><span class="n">arg</span><span class="p">,</span> <span class="n">in_dim</span><span class="p">,</span> <span class="n">vmap_level</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
+                           <span class="k">for</span> <span class="n">in_dim</span><span class="p">,</span> <span class="n">arg</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">in_dims_as_tuple</span><span class="p">,</span> <span class="n">args</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">batched_inputs</span><span class="p">,</span> <span class="n">batch_size</span>
+
+<span class="c1"># Undos the batching (and any batch dimensions) associated with the `vmap_level`.</span>
+<span class="k">def</span> <span class="nf">_unwrap_batched</span><span class="p">(</span>
+        <span class="n">batched_outputs</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="o">...</span><span class="p">]],</span>
+        <span class="n">out_dims</span><span class="p">:</span> <span class="n">out_dims_t</span><span class="p">,</span>
+        <span class="n">vmap_level</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">:</span>
+    <span class="n">num_outputs</span> <span class="o">=</span> <span class="n">_num_outputs</span><span class="p">(</span><span class="n">batched_outputs</span><span class="p">)</span>
+    <span class="n">out_dims_as_tuple</span> <span class="o">=</span> <span class="n">_as_tuple</span><span class="p">(</span>
+        <span class="n">out_dims</span><span class="p">,</span> <span class="n">num_outputs</span><span class="p">,</span>
+        <span class="k">lambda</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;vmap(</span><span class="si">{</span><span class="n">_get_name</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s1">, ..., out_dims=</span><span class="si">{</span><span class="n">out_dims</span><span class="si">}</span><span class="s1">): `out_dims` must &#39;</span>
+                <span class="sa">f</span><span class="s1">&#39;have one dim per output (got </span><span class="si">{</span><span class="n">num_outputs</span><span class="si">}</span><span class="s1"> outputs) of </span><span class="si">{</span><span class="n">_get_name</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s1">.&#39;</span><span class="p">)</span>
+
+    <span class="c1"># NOTE [Ignored _remove_batch_dim, _add_batch_dim]</span>
+    <span class="c1"># There is something wrong with our type bindings for functions that begin</span>
+    <span class="c1"># with &#39;_&#39;, see #40397.</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">batched_outputs</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">):</span>
+        <span class="n">out_dim</span> <span class="o">=</span> <span class="n">out_dims_as_tuple</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">_remove_batch_dim</span><span class="p">(</span><span class="n">batched_outputs</span><span class="p">,</span> <span class="n">vmap_level</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">,</span> <span class="n">out_dim</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
+    <span class="k">return</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">_remove_batch_dim</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">vmap_level</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">,</span> <span class="n">out_dim</span><span class="p">)</span>  <span class="c1"># type: ignore</span>
+                 <span class="k">for</span> <span class="n">out</span><span class="p">,</span> <span class="n">out_dim</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">batched_outputs</span><span class="p">,</span> <span class="n">out_dims_as_tuple</span><span class="p">))</span>
+
+<span class="c1"># Checks that `fn` returned one or more Tensors and nothing else.</span>
+<span class="c1"># NB: A python function that return multiple arguments returns a single tuple,</span>
+<span class="c1"># so we are effectively checking that `outputs` is a single Tensor or a tuple of</span>
+<span class="c1"># Tensors.</span>
+<span class="k">def</span> <span class="nf">_validate_outputs</span><span class="p">(</span><span class="n">outputs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">):</span>
+        <span class="k">return</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;vmap(</span><span class="si">{</span><span class="n">_get_name</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s1">, ...): `</span><span class="si">{</span><span class="n">_get_name</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s1">` must only return &#39;</span>
+                         <span class="sa">f</span><span class="s1">&#39;Tensors, got type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">outputs</span><span class="p">)</span><span class="si">}</span><span class="s1"> as the return.&#39;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">output</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">outputs</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;vmap(</span><span class="si">{</span><span class="n">_get_name</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s1">, ...): `</span><span class="si">{</span><span class="n">_get_name</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s1">` must only return &#39;</span>
+                         <span class="sa">f</span><span class="s1">&#39;Tensors, got type </span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">output</span><span class="p">)</span><span class="si">}</span><span class="s1"> for return </span><span class="si">{</span><span class="n">idx</span><span class="si">}</span><span class="s1">.&#39;</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">_check_out_dims_is_int_or_int_tuple</span><span class="p">(</span><span class="n">out_dims</span><span class="p">:</span> <span class="n">out_dims_t</span><span class="p">,</span> <span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">out_dims</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+        <span class="k">return</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">out_dims</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">)</span> <span class="ow">or</span> \
+            <span class="ow">not</span> <span class="nb">all</span><span class="p">([</span><span class="nb">isinstance</span><span class="p">(</span><span class="n">out_dim</span><span class="p">,</span> <span class="nb">int</span><span class="p">)</span> <span class="k">for</span> <span class="n">out_dim</span> <span class="ow">in</span> <span class="n">out_dims</span><span class="p">]):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s1">&#39;vmap(</span><span class="si">{</span><span class="n">_get_name</span><span class="p">(</span><span class="n">func</span><span class="p">)</span><span class="si">}</span><span class="s1">, ..., out_dims=</span><span class="si">{</span><span class="n">out_dims</span><span class="si">}</span><span class="s1">): `out_dims` must be &#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;an int or a tuple of int representing where in the outputs the &#39;</span>
+            <span class="sa">f</span><span class="s1">&#39;vmapped dimension should appear.&#39;</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">_get_name</span><span class="p">(</span><span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="s1">&#39;__name__&#39;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">func</span><span class="o">.</span><span class="vm">__name__</span>
+
+    <span class="c1"># Not all callables have __name__, in fact, only static functions/methods do.</span>
+    <span class="c1"># A callable created via functools.partial or an nn.Module, to name some</span>
+    <span class="c1"># examples, don&#39;t have a __name__.</span>
+    <span class="n">fn_name</span> <span class="o">=</span> <span class="nb">repr</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+
+<span class="c1"># vmap(func)(inputs) wraps all Tensor inputs to be batched in BatchedTensors,</span>
+<span class="c1"># sends those into func, and then unwraps the output BatchedTensors. Operations</span>
+<span class="c1"># on BatchedTensors perform the batched operations that the user is asking for.</span>
+<div class="viewcode-block" id="vmap"><a class="viewcode-back" href="../../generated/torch.vmap.html#torch.vmap">[docs]</a><span class="k">def</span> <span class="nf">vmap</span><span class="p">(</span><span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">in_dims</span><span class="p">:</span> <span class="n">in_dims_t</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">out_dims</span><span class="p">:</span> <span class="n">out_dims_t</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Callable</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    vmap is the vectorizing map. Returns a new function that maps `func` over some</span>
+<span class="sd">    dimension of the inputs. Semantically, vmap pushes the map into PyTorch</span>
+<span class="sd">    operations called by `func`, effectively vectorizing those operations.</span>
+
+<span class="sd">    vmap is useful for handling batch dimensions: one can write a function `func`</span>
+<span class="sd">    that runs on examples and then lift it to a function that can take batches of</span>
+<span class="sd">    examples with `vmap(func)`. vmap can also be used to compute batched</span>
+<span class="sd">    gradients when composed with autograd.</span>
+
+<span class="sd">    .. warning::</span>
+<span class="sd">        torch.vmap is an experimental prototype that is subject to</span>
+<span class="sd">        change and/or deletion. Please use at your own risk.</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        If you&#39;re interested in using vmap for your use case, please</span>
+<span class="sd">        `contact us! &lt;https://github.com/pytorch/pytorch/issues/42368&gt;`_</span>
+<span class="sd">        We&#39;re interested in gathering feedback from early adopters to inform</span>
+<span class="sd">        the design.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        func (function): A Python function that takes one or more arguments.</span>
+<span class="sd">            Must return one or more Tensors.</span>
+<span class="sd">        in_dims (int or Tuple[Optional[int]]): Specifies which dimension of the</span>
+<span class="sd">            inputs should be mapped over. If `in_dims` is a Tuple, then it should have</span>
+<span class="sd">            one element per input. If the `in_dim` for a particular input is</span>
+<span class="sd">            None, then that indicates there is no map dimension. Default: 0.</span>
+<span class="sd">        out_dims (int or Tuple[int]): Specifies where the mapped dimension</span>
+<span class="sd">            should appear in the outputs. If `out_dims` is a Tuple, then it should</span>
+<span class="sd">            have one element per output. Default: 0.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Returns a new &quot;batched&quot; function. It takes the same inputs as `func`,</span>
+<span class="sd">        except each input has an extra dimension at the index specified by `in_dims`.</span>
+<span class="sd">        It takes returns the same outputs as `func`, except each output has</span>
+<span class="sd">        an extra dimension at the index specified by `out_dims`.</span>
+
+<span class="sd">    .. warning:</span>
+<span class="sd">        vmap works best with functional-style code. Please do not perform any</span>
+<span class="sd">        side-effects in `func`, with the exception of in-place PyTorch operations.</span>
+<span class="sd">        Examples of side-effects include mutating Python data structures and</span>
+<span class="sd">        assigning values to variables not captured in `func`.</span>
+
+<span class="sd">    One example of using `vmap` is to compute batched dot products. PyTorch</span>
+<span class="sd">    doesn&#39;t provide a batched `torch.dot` API; instead of unsuccessfully</span>
+<span class="sd">    rummaging through docs, use `vmap` to construct a new function.</span>
+
+<span class="sd">        &gt;&gt;&gt; torch.dot                            # [D], [D] -&gt; []</span>
+<span class="sd">        &gt;&gt;&gt; batched_dot = torch.vmap(torch.dot)  # [N, D], [N, D] -&gt; [N]</span>
+<span class="sd">        &gt;&gt;&gt; x, y = torch.randn(2, 5), torch.randn(2, 5)</span>
+<span class="sd">        &gt;&gt;&gt; batched_dot(x, y)</span>
+
+<span class="sd">    `vmap` can be helpful in hiding batch dimensions, leading to a simpler</span>
+<span class="sd">    model authoring experience.</span>
+
+<span class="sd">        &gt;&gt;&gt; batch_size, feature_size = 3, 5</span>
+<span class="sd">        &gt;&gt;&gt; weights = torch.randn(feature_size, requires_grad=True)</span>
+<span class="sd">        &gt;&gt;&gt;</span>
+<span class="sd">        &gt;&gt;&gt; def model(feature_vec):</span>
+<span class="sd">        &gt;&gt;&gt;     # Very simple linear model with activation</span>
+<span class="sd">        &gt;&gt;&gt;     return feature_vec.dot(weights).relu()</span>
+<span class="sd">        &gt;&gt;&gt;</span>
+<span class="sd">        &gt;&gt;&gt; examples = torch.randn(batch_size, feature_size)</span>
+<span class="sd">        &gt;&gt;&gt; result = torch.vmap(model)(examples)</span>
+
+<span class="sd">    `vmap` can also help vectorize computations that were previously difficult</span>
+<span class="sd">    or impossible to batch. One example is higher-order gradient computation.</span>
+<span class="sd">    The PyTorch autograd engine computes vjps (vector-Jacobian products).</span>
+<span class="sd">    Computing a full Jacobian matrix for some function f: R^N -&gt; R^N usually</span>
+<span class="sd">    requires N calls to `autograd.grad`, one per Jacobian row. Using `vmap`,</span>
+<span class="sd">    we can vectorize the whole computation, computing the Jacobian in a single</span>
+<span class="sd">    call to `autograd.grad`.</span>
+
+<span class="sd">        &gt;&gt;&gt; # Setup</span>
+<span class="sd">        &gt;&gt;&gt; N = 5</span>
+<span class="sd">        &gt;&gt;&gt; f = lambda x: x ** 2</span>
+<span class="sd">        &gt;&gt;&gt; x = torch.randn(N, requires_grad=True)</span>
+<span class="sd">        &gt;&gt;&gt; y = f(x)</span>
+<span class="sd">        &gt;&gt;&gt; I_N = torch.eye(N)</span>
+<span class="sd">        &gt;&gt;&gt;</span>
+<span class="sd">        &gt;&gt;&gt; # Sequential approach</span>
+<span class="sd">        &gt;&gt;&gt; jacobian_rows = [torch.autograd.grad(y, x, v, retain_graph=True)[0]</span>
+<span class="sd">        &gt;&gt;&gt;                  for v in I_N.unbind()]</span>
+<span class="sd">        &gt;&gt;&gt; jacobian = torch.stack(jacobian_rows)</span>
+<span class="sd">        &gt;&gt;&gt;</span>
+<span class="sd">        &gt;&gt;&gt; # vectorized gradient computation</span>
+<span class="sd">        &gt;&gt;&gt; def get_vjp(v):</span>
+<span class="sd">        &gt;&gt;&gt;     return torch.autograd.grad(y, x, v)</span>
+<span class="sd">        &gt;&gt;&gt; jacobian = torch.vmap(get_vjp)(I_N)</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        vmap does not provide general autobatching or handle variable-length</span>
+<span class="sd">        sequences out of the box.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+        <span class="s1">&#39;torch.vmap is an experimental prototype that is subject to &#39;</span>
+        <span class="s1">&#39;change and/or deletion. Please use at your own risk.&#39;</span><span class="p">)</span>
+
+    <span class="nd">@functools</span><span class="o">.</span><span class="n">wraps</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">wrapped</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">):</span>
+        <span class="n">_check_out_dims_is_int_or_int_tuple</span><span class="p">(</span><span class="n">out_dims</span><span class="p">,</span> <span class="n">func</span><span class="p">)</span>
+        <span class="n">vmap_level</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_vmapmode_increment_nesting</span><span class="p">()</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">batched_inputs</span><span class="p">,</span> <span class="n">batch_size</span> <span class="o">=</span> <span class="n">_create_batched_inputs</span><span class="p">(</span><span class="n">in_dims</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">vmap_level</span><span class="p">,</span> <span class="n">func</span><span class="p">)</span>
+            <span class="n">batched_outputs</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">batched_inputs</span><span class="p">)</span>
+            <span class="n">_validate_outputs</span><span class="p">(</span><span class="n">batched_outputs</span><span class="p">,</span> <span class="n">func</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">_unwrap_batched</span><span class="p">(</span><span class="n">batched_outputs</span><span class="p">,</span> <span class="n">out_dims</span><span class="p">,</span> <span class="n">vmap_level</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">,</span> <span class="n">func</span><span class="p">)</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="n">torch</span><span class="o">.</span><span class="n">_C</span><span class="o">.</span><span class="n">_vmapmode_decrement_nesting</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">wrapped</span></div>
+</pre></div>
+
+             </article>
+             
+            </div>
+            <footer>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+         <script src="../../_static/jquery.js"></script>
+         <script src="../../_static/underscore.js"></script>
+         <script src="../../_static/doctools.js"></script>
+         <script src="../../_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="../../_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="../../_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="../../_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="../../_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="../../_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>

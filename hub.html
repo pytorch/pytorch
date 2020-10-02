@@ -1,0 +1,949 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>torch.hub &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/hub.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="TorchScript" href="jit.html" />
+    <link rel="prev" title="torch.futures" href="futures.html" /> 
+
+  
+  <script src="_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/hub.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="notes/amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="futures.html">torch.futures</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+      <li>torch.hub</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+            
+            <a href="_sources/hub.rst.txt" rel="nofollow"><img src="_static/images/view-page-source-icon.svg"></a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <div class="section" id="torch-hub">
+<h1>torch.hub<a class="headerlink" href="#torch-hub" title="Permalink to this headline">¶</a></h1>
+<p>Pytorch Hub is a pre-trained model repository designed to facilitate research reproducibility.</p>
+<div class="section" id="publishing-models">
+<h2>Publishing models<a class="headerlink" href="#publishing-models" title="Permalink to this headline">¶</a></h2>
+<p>Pytorch Hub supports publishing pre-trained models(model definitions and pre-trained weights)
+to a github repository by adding a simple <code class="docutils literal notranslate"><span class="pre">hubconf.py</span></code> file;</p>
+<p><code class="docutils literal notranslate"><span class="pre">hubconf.py</span></code> can have multiple entrypoints. Each entrypoint is defined as a python function
+(example: a pre-trained model you want to publish).</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">entrypoint_name</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="c1"># args &amp; kwargs are optional, for models which take positional/keyword arguments.</span>
+    <span class="o">...</span>
+</pre></div>
+</div>
+<div class="section" id="how-to-implement-an-entrypoint">
+<h3>How to implement an entrypoint?<a class="headerlink" href="#how-to-implement-an-entrypoint" title="Permalink to this headline">¶</a></h3>
+<p>Here is a code snippet specifies an entrypoint for <code class="docutils literal notranslate"><span class="pre">resnet18</span></code> model if we expand
+the implementation in <code class="docutils literal notranslate"><span class="pre">pytorch/vision/hubconf.py</span></code>.
+In most case importing the right function in <code class="docutils literal notranslate"><span class="pre">hubconf.py</span></code> is sufficient. Here we
+just want to use the expanded version as an example to show how it works.
+You can see the full script in
+<a class="reference external" href="https://github.com/pytorch/vision/blob/master/hubconf.py">pytorch/vision repo</a></p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">dependencies</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;torch&#39;</span><span class="p">]</span>
+<span class="kn">from</span> <span class="nn">torchvision.models.resnet</span> <span class="kn">import</span> <span class="n">resnet18</span> <span class="k">as</span> <span class="n">_resnet18</span>
+
+<span class="c1"># resnet18 is the name of entrypoint</span>
+<span class="k">def</span> <span class="nf">resnet18</span><span class="p">(</span><span class="n">pretrained</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; # This docstring shows up in hub.help()</span>
+<span class="sd">    Resnet18 model</span>
+<span class="sd">    pretrained (bool): kwargs, load pretrained weights into the model</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Call the model, load pretrained weights</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">_resnet18</span><span class="p">(</span><span class="n">pretrained</span><span class="o">=</span><span class="n">pretrained</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">model</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">dependencies</span></code> variable is a <strong>list</strong> of package names required to <strong>load</strong> the model. Note this might
+be slightly different from dependencies required for training a model.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">args</span></code> and <code class="docutils literal notranslate"><span class="pre">kwargs</span></code> are passed along to the real callable function.</p></li>
+<li><p>Docstring of the function works as a help message. It explains what does the model do and what
+are the allowed positional/keyword arguments. It’s highly recommended to add a few examples here.</p></li>
+<li><p>Entrypoint function can either return a model(nn.module), or auxiliary tools to make the user workflow smoother, e.g. tokenizers.</p></li>
+<li><p>Callables prefixed with underscore are considered as helper functions which won’t show up in <a class="reference internal" href="#torch.hub.list" title="torch.hub.list"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.hub.list()</span></code></a>.</p></li>
+<li><p>Pretrained weights can either be stored locally in the github repo, or loadable by
+<a class="reference internal" href="#torch.hub.load_state_dict_from_url" title="torch.hub.load_state_dict_from_url"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.hub.load_state_dict_from_url()</span></code></a>. If less than 2GB, it’s recommended to attach it to a <a class="reference external" href="https://help.github.com/en/articles/distributing-large-binaries">project release</a>
+and use the url from the release.
+In the example above <code class="docutils literal notranslate"><span class="pre">torchvision.models.resnet.resnet18</span></code> handles <code class="docutils literal notranslate"><span class="pre">pretrained</span></code>, alternatively you can put the following logic in the entrypoint definition.</p></li>
+</ul>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">if</span> <span class="n">pretrained</span><span class="p">:</span>
+    <span class="c1"># For checkpoint saved in local github repo, e.g. &lt;RELATIVE_PATH_TO_CHECKPOINT&gt;=weights/save.pth</span>
+    <span class="n">dirname</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span>
+    <span class="n">checkpoint</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">dirname</span><span class="p">,</span> <span class="o">&lt;</span><span class="n">RELATIVE_PATH_TO_CHECKPOINT</span><span class="o">&gt;</span><span class="p">)</span>
+    <span class="n">state_dict</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">checkpoint</span><span class="p">)</span>
+    <span class="n">model</span><span class="o">.</span><span class="n">load_state_dict</span><span class="p">(</span><span class="n">state_dict</span><span class="p">)</span>
+
+    <span class="c1"># For checkpoint saved elsewhere</span>
+    <span class="n">checkpoint</span> <span class="o">=</span> <span class="s1">&#39;https://download.pytorch.org/models/resnet18-5c106cde.pth&#39;</span>
+    <span class="n">model</span><span class="o">.</span><span class="n">load_state_dict</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">hub</span><span class="o">.</span><span class="n">load_state_dict_from_url</span><span class="p">(</span><span class="n">checkpoint</span><span class="p">,</span> <span class="n">progress</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="important-notice">
+<h3>Important Notice<a class="headerlink" href="#important-notice" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p>The published models should be at least in a branch/tag. It can’t be a random commit.</p></li>
+</ul>
+</div>
+</div>
+<div class="section" id="loading-models-from-hub">
+<h2>Loading models from Hub<a class="headerlink" href="#loading-models-from-hub" title="Permalink to this headline">¶</a></h2>
+<p>Pytorch Hub provides convenient APIs to explore all available models in hub
+through <a class="reference internal" href="#torch.hub.list" title="torch.hub.list"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.hub.list()</span></code></a>, show docstring and examples through
+<a class="reference internal" href="#torch.hub.help" title="torch.hub.help"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.hub.help()</span></code></a> and load the pre-trained models using
+<a class="reference internal" href="#torch.hub.load" title="torch.hub.load"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.hub.load()</span></code></a>.</p>
+<span class="target" id="module-torch.hub"></span><dl class="function">
+<dt id="torch.hub.list">
+<code class="sig-prename descclassname">torch.hub.</code><code class="sig-name descname">list</code><span class="sig-paren">(</span><em class="sig-param">github</em>, <em class="sig-param">force_reload=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/hub.html#list"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.hub.list" title="Permalink to this definition">¶</a></dt>
+<dd><p>List all entrypoints available in <cite>github</cite> hubconf.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>github</strong> (<em>string</em>) – a string with format “repo_owner/repo_name[:tag_name]” with an optional
+tag/branch. The default branch is <cite>master</cite> if not specified.
+Example: ‘pytorch/vision[:hub]’</p></li>
+<li><p><strong>force_reload</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – whether to discard the existing cache and force a fresh download.
+Default is <cite>False</cite>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a list of available entrypoint names</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>entrypoints</p>
+</dd>
+</dl>
+<p class="rubric">Example</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">entrypoints</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">hub</span><span class="o">.</span><span class="n">list</span><span class="p">(</span><span class="s1">&#39;pytorch/vision&#39;</span><span class="p">,</span> <span class="n">force_reload</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.hub.help">
+<code class="sig-prename descclassname">torch.hub.</code><code class="sig-name descname">help</code><span class="sig-paren">(</span><em class="sig-param">github</em>, <em class="sig-param">model</em>, <em class="sig-param">force_reload=False</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/hub.html#help"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.hub.help" title="Permalink to this definition">¶</a></dt>
+<dd><p>Show the docstring of entrypoint <cite>model</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>github</strong> (<em>string</em>) – a string with format &lt;repo_owner/repo_name[:tag_name]&gt; with an optional
+tag/branch. The default branch is <cite>master</cite> if not specified.
+Example: ‘pytorch/vision[:hub]’</p></li>
+<li><p><strong>model</strong> (<em>string</em>) – a string of entrypoint name defined in repo’s hubconf.py</p></li>
+<li><p><strong>force_reload</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – whether to discard the existing cache and force a fresh download.
+Default is <cite>False</cite>.</p></li>
+</ul>
+</dd>
+</dl>
+<p class="rubric">Example</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">hub</span><span class="o">.</span><span class="n">help</span><span class="p">(</span><span class="s1">&#39;pytorch/vision&#39;</span><span class="p">,</span> <span class="s1">&#39;resnet18&#39;</span><span class="p">,</span> <span class="n">force_reload</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.hub.load">
+<code class="sig-prename descclassname">torch.hub.</code><code class="sig-name descname">load</code><span class="sig-paren">(</span><em class="sig-param">repo_or_dir</em>, <em class="sig-param">model</em>, <em class="sig-param">*args</em>, <em class="sig-param">**kwargs</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/hub.html#load"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.hub.load" title="Permalink to this definition">¶</a></dt>
+<dd><p>Load a model from a github repo or a local directory.</p>
+<p>Note: Loading a model is the typical use case, but this can also be used to
+for loading other objects such as tokenizers, loss functions, etc.</p>
+<p>If <code class="xref py py-attr docutils literal notranslate"><span class="pre">source</span></code> is <code class="docutils literal notranslate"><span class="pre">'github'</span></code>, <code class="xref py py-attr docutils literal notranslate"><span class="pre">repo_or_dir</span></code> is expected to be
+of the form <code class="docutils literal notranslate"><span class="pre">repo_owner/repo_name[:tag_name]</span></code> with an optional
+tag/branch.</p>
+<p>If <code class="xref py py-attr docutils literal notranslate"><span class="pre">source</span></code> is <code class="docutils literal notranslate"><span class="pre">'local'</span></code>, <code class="xref py py-attr docutils literal notranslate"><span class="pre">repo_or_dir</span></code> is expected to be a
+path to a local directory.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>repo_or_dir</strong> (<em>string</em>) – repo name (<code class="docutils literal notranslate"><span class="pre">repo_owner/repo_name[:tag_name]</span></code>),
+if <code class="docutils literal notranslate"><span class="pre">source</span> <span class="pre">=</span> <span class="pre">'github'</span></code>; or a path to a local directory, if
+<code class="docutils literal notranslate"><span class="pre">source</span> <span class="pre">=</span> <span class="pre">'local'</span></code>.</p></li>
+<li><p><strong>model</strong> (<em>string</em>) – the name of a callable (entrypoint) defined in the
+repo/dir’s <code class="docutils literal notranslate"><span class="pre">hubconf.py</span></code>.</p></li>
+<li><p><strong>*args</strong> (<em>optional</em>) – the corresponding args for callable <code class="xref py py-attr docutils literal notranslate"><span class="pre">model</span></code>.</p></li>
+<li><p><strong>source</strong> (<em>string</em><em>, </em><em>optional</em>) – <code class="docutils literal notranslate"><span class="pre">'github'</span></code> | <code class="docutils literal notranslate"><span class="pre">'local'</span></code>. Specifies how
+<code class="docutils literal notranslate"><span class="pre">repo_or_dir</span></code> is to be interpreted. Default is <code class="docutils literal notranslate"><span class="pre">'github'</span></code>.</p></li>
+<li><p><strong>force_reload</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – whether to force a fresh download of
+the github repo unconditionally. Does not have any effect if
+<code class="docutils literal notranslate"><span class="pre">source</span> <span class="pre">=</span> <span class="pre">'local'</span></code>. Default is <code class="docutils literal notranslate"><span class="pre">False</span></code>.</p></li>
+<li><p><strong>verbose</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – If <code class="docutils literal notranslate"><span class="pre">False</span></code>, mute messages about hitting
+local caches. Note that the message about first download cannot be
+muted. Does not have any effect if <code class="docutils literal notranslate"><span class="pre">source</span> <span class="pre">=</span> <span class="pre">'local'</span></code>.
+Default is <code class="docutils literal notranslate"><span class="pre">True</span></code>.</p></li>
+<li><p><strong>**kwargs</strong> (<em>optional</em>) – the corresponding kwargs for callable
+<code class="xref py py-attr docutils literal notranslate"><span class="pre">model</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>The output of the <code class="xref py py-attr docutils literal notranslate"><span class="pre">model</span></code> callable when called with the given
+<code class="docutils literal notranslate"><span class="pre">*args</span></code> and <code class="docutils literal notranslate"><span class="pre">**kwargs</span></code>.</p>
+</dd>
+</dl>
+<p class="rubric">Example</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># from a github repo</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">repo</span> <span class="o">=</span> <span class="s1">&#39;pytorch/vision&#39;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">model</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">hub</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">repo</span><span class="p">,</span> <span class="s1">&#39;resnet50&#39;</span><span class="p">,</span> <span class="n">pretrained</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># from a local directory</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">path</span> <span class="o">=</span> <span class="s1">&#39;/some/local/path/pytorch/vision&#39;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">model</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">hub</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="s1">&#39;resnet50&#39;</span><span class="p">,</span> <span class="n">pretrained</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.hub.download_url_to_file">
+<code class="sig-prename descclassname">torch.hub.</code><code class="sig-name descname">download_url_to_file</code><span class="sig-paren">(</span><em class="sig-param">url</em>, <em class="sig-param">dst</em>, <em class="sig-param">hash_prefix=None</em>, <em class="sig-param">progress=True</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/hub.html#download_url_to_file"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.hub.download_url_to_file" title="Permalink to this definition">¶</a></dt>
+<dd><p>Download object at the given URL to a local path.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>url</strong> (<em>string</em>) – URL of the object to download</p></li>
+<li><p><strong>dst</strong> (<em>string</em>) – Full path where object will be saved, e.g. <cite>/tmp/temporary_file</cite></p></li>
+<li><p><strong>hash_prefix</strong> (<em>string</em><em>, </em><em>optional</em>) – If not None, the SHA256 downloaded file should start with <cite>hash_prefix</cite>.
+Default: None</p></li>
+<li><p><strong>progress</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – whether or not to display a progress bar to stderr
+Default: True</p></li>
+</ul>
+</dd>
+</dl>
+<p class="rubric">Example</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">torch</span><span class="o">.</span><span class="n">hub</span><span class="o">.</span><span class="n">download_url_to_file</span><span class="p">(</span><span class="s1">&#39;https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth&#39;</span><span class="p">,</span> <span class="s1">&#39;/tmp/temporary_file&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.hub.load_state_dict_from_url">
+<code class="sig-prename descclassname">torch.hub.</code><code class="sig-name descname">load_state_dict_from_url</code><span class="sig-paren">(</span><em class="sig-param">url</em>, <em class="sig-param">model_dir=None</em>, <em class="sig-param">map_location=None</em>, <em class="sig-param">progress=True</em>, <em class="sig-param">check_hash=False</em>, <em class="sig-param">file_name=None</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/hub.html#load_state_dict_from_url"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.hub.load_state_dict_from_url" title="Permalink to this definition">¶</a></dt>
+<dd><p>Loads the Torch serialized object at the given URL.</p>
+<p>If downloaded file is a zip file, it will be automatically
+decompressed.</p>
+<p>If the object is already present in <cite>model_dir</cite>, it’s deserialized and
+returned.
+The default value of <cite>model_dir</cite> is <code class="docutils literal notranslate"><span class="pre">&lt;hub_dir&gt;/checkpoints</span></code> where
+<cite>hub_dir</cite> is the directory returned by <a class="reference internal" href="#torch.hub.get_dir" title="torch.hub.get_dir"><code class="xref py py-func docutils literal notranslate"><span class="pre">get_dir()</span></code></a>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>url</strong> (<em>string</em>) – URL of the object to download</p></li>
+<li><p><strong>model_dir</strong> (<em>string</em><em>, </em><em>optional</em>) – directory in which to save the object</p></li>
+<li><p><strong>map_location</strong> (<em>optional</em>) – a function or a dict specifying how to remap storage locations (see torch.load)</p></li>
+<li><p><strong>progress</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – whether or not to display a progress bar to stderr.
+Default: True</p></li>
+<li><p><strong>check_hash</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.8)"><em>bool</em></a><em>, </em><em>optional</em>) – If True, the filename part of the URL should follow the naming convention
+<code class="docutils literal notranslate"><span class="pre">filename-&lt;sha256&gt;.ext</span></code> where <code class="docutils literal notranslate"><span class="pre">&lt;sha256&gt;</span></code> is the first eight or more
+digits of the SHA256 hash of the contents of the file. The hash is used to
+ensure unique names and to verify the contents of the file.
+Default: False</p></li>
+<li><p><strong>file_name</strong> (<em>string</em><em>, </em><em>optional</em>) – name for the downloaded file. Filename from <cite>url</cite> will be used if not set.</p></li>
+</ul>
+</dd>
+</dl>
+<p class="rubric">Example</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">state_dict</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">hub</span><span class="o">.</span><span class="n">load_state_dict_from_url</span><span class="p">(</span><span class="s1">&#39;https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<div class="section" id="running-a-loaded-model">
+<h3>Running a loaded model:<a class="headerlink" href="#running-a-loaded-model" title="Permalink to this headline">¶</a></h3>
+<p>Note that <code class="docutils literal notranslate"><span class="pre">*args</span></code> and <code class="docutils literal notranslate"><span class="pre">**kwargs</span></code> in <a class="reference internal" href="#torch.hub.load" title="torch.hub.load"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.hub.load()</span></code></a> are used to
+<strong>instantiate</strong> a model. After you have loaded a model, how can you find out
+what you can do with the model?
+A suggested workflow is</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">dir(model)</span></code> to see all available methods of the model.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">help(model.foo)</span></code> to check what arguments <code class="docutils literal notranslate"><span class="pre">model.foo</span></code> takes to run</p></li>
+</ul>
+<p>To help users explore without referring to documentation back and forth, we strongly
+recommend repo owners make function help messages clear and succinct. It’s also helpful
+to include a minimal working example.</p>
+</div>
+<div class="section" id="where-are-my-downloaded-models-saved">
+<h3>Where are my downloaded models saved?<a class="headerlink" href="#where-are-my-downloaded-models-saved" title="Permalink to this headline">¶</a></h3>
+<p>The locations are used in the order of</p>
+<ul class="simple">
+<li><p>Calling <code class="docutils literal notranslate"><span class="pre">hub.set_dir(&lt;PATH_TO_HUB_DIR&gt;)</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">$TORCH_HOME/hub</span></code>, if environment variable <code class="docutils literal notranslate"><span class="pre">TORCH_HOME</span></code> is set.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">$XDG_CACHE_HOME/torch/hub</span></code>, if environment variable <code class="docutils literal notranslate"><span class="pre">XDG_CACHE_HOME</span></code> is set.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">~/.cache/torch/hub</span></code></p></li>
+</ul>
+<dl class="function">
+<dt id="torch.hub.get_dir">
+<code class="sig-prename descclassname">torch.hub.</code><code class="sig-name descname">get_dir</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/hub.html#get_dir"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.hub.get_dir" title="Permalink to this definition">¶</a></dt>
+<dd><p>Get the Torch Hub cache directory used for storing downloaded models &amp; weights.</p>
+<p>If <a class="reference internal" href="#torch.hub.set_dir" title="torch.hub.set_dir"><code class="xref py py-func docutils literal notranslate"><span class="pre">set_dir()</span></code></a> is not called, default path is <code class="docutils literal notranslate"><span class="pre">$TORCH_HOME/hub</span></code> where
+environment variable <code class="docutils literal notranslate"><span class="pre">$TORCH_HOME</span></code> defaults to <code class="docutils literal notranslate"><span class="pre">$XDG_CACHE_HOME/torch</span></code>.
+<code class="docutils literal notranslate"><span class="pre">$XDG_CACHE_HOME</span></code> follows the X Design Group specification of the Linux
+filesystem layout, with a default value <code class="docutils literal notranslate"><span class="pre">~/.cache</span></code> if the environment
+variable is not set.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.hub.set_dir">
+<code class="sig-prename descclassname">torch.hub.</code><code class="sig-name descname">set_dir</code><span class="sig-paren">(</span><em class="sig-param">d</em><span class="sig-paren">)</span><a class="reference internal" href="_modules/torch/hub.html#set_dir"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.hub.set_dir" title="Permalink to this definition">¶</a></dt>
+<dd><p>Optionally set the Torch Hub directory used to save downloaded models &amp; weights.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>d</strong> (<em>string</em>) – path to a local folder to save downloaded models &amp; weights.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="caching-logic">
+<h3>Caching logic<a class="headerlink" href="#caching-logic" title="Permalink to this headline">¶</a></h3>
+<p>By default, we don’t clean up files after loading it. Hub uses the cache by default if it already exists in the
+directory returned by <a class="reference internal" href="#torch.hub.get_dir" title="torch.hub.get_dir"><code class="xref py py-func docutils literal notranslate"><span class="pre">get_dir()</span></code></a>.</p>
+<p>Users can force a reload by calling <code class="docutils literal notranslate"><span class="pre">hub.load(...,</span> <span class="pre">force_reload=True)</span></code>. This will delete
+the existing github folder and downloaded weights, reinitialize a fresh download. This is useful
+when updates are published to the same branch, users can keep up with the latest release.</p>
+</div>
+<div class="section" id="known-limitations">
+<h3>Known limitations:<a class="headerlink" href="#known-limitations" title="Permalink to this headline">¶</a></h3>
+<p>Torch hub works by importing the package as if it was installed. There’re some side effects
+introduced by importing in Python. For example, you can see new items in Python caches
+<code class="docutils literal notranslate"><span class="pre">sys.modules</span></code> and <code class="docutils literal notranslate"><span class="pre">sys.path_importer_cache</span></code> which is normal Python behavior.</p>
+<p>A known limitation that worth mentioning here is user <strong>CANNOT</strong> load two different branches of
+the same repo in the <strong>same python process</strong>. It’s just like installing two packages with the
+same name in Python, which is not good. Cache might join the party and give you surprises if you
+actually try that. Of course it’s totally fine to load them in separate processes.</p>
+</div>
+</div>
+</div>
+
+
+             </article>
+             
+            </div>
+            <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="jit.html" class="btn btn-neutral float-right" title="TorchScript" accesskey="n" rel="next">Next <img src="_static/images/chevron-right-orange.svg" class="next-page"></a>
+      
+      
+        <a href="futures.html" class="btn btn-neutral" title="torch.futures" accesskey="p" rel="prev"><img src="_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
+      
+    </div>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              <ul>
+<li><a class="reference internal" href="#">torch.hub</a><ul>
+<li><a class="reference internal" href="#publishing-models">Publishing models</a><ul>
+<li><a class="reference internal" href="#how-to-implement-an-entrypoint">How to implement an entrypoint?</a></li>
+<li><a class="reference internal" href="#important-notice">Important Notice</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#loading-models-from-hub">Loading models from Hub</a><ul>
+<li><a class="reference internal" href="#running-a-loaded-model">Running a loaded model:</a></li>
+<li><a class="reference internal" href="#where-are-my-downloaded-models-saved">Where are my downloaded models saved?</a></li>
+<li><a class="reference internal" href="#caching-logic">Caching logic</a></li>
+<li><a class="reference internal" href="#known-limitations">Known limitations:</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+         <script src="_static/jquery.js"></script>
+         <script src="_static/underscore.js"></script>
+         <script src="_static/doctools.js"></script>
+         <script src="_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>

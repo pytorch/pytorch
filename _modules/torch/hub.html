@@ -1,0 +1,1187 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>torch.hub &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/_modules/torch/hub.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="../../_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+
+  
+  <script src="../../_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/_modules/torch/hub.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="../../index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+          <li><a href="../index.html">Module code</a> &gt;</li>
+        
+          <li><a href="../torch.html">torch</a> &gt;</li>
+        
+      <li>torch.hub</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <h1>Source code for torch.hub</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">errno</span>
+<span class="kn">import</span> <span class="nn">hashlib</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">import</span> <span class="nn">shutil</span>
+<span class="kn">import</span> <span class="nn">sys</span>
+<span class="kn">import</span> <span class="nn">tempfile</span>
+<span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
+<span class="kn">import</span> <span class="nn">zipfile</span>
+
+<span class="kn">from</span> <span class="nn">urllib.request</span> <span class="kn">import</span> <span class="n">urlopen</span><span class="p">,</span> <span class="n">Request</span>
+<span class="kn">from</span> <span class="nn">urllib.parse</span> <span class="kn">import</span> <span class="n">urlparse</span>  <span class="c1"># noqa: F401</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">from</span> <span class="nn">tqdm.auto</span> <span class="kn">import</span> <span class="n">tqdm</span>  <span class="c1"># automatically select proper tqdm submodule if available</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span> <span class="nn">tqdm</span> <span class="kn">import</span> <span class="n">tqdm</span>
+    <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+        <span class="c1"># fake tqdm if it&#39;s not installed</span>
+        <span class="k">class</span> <span class="nc">tqdm</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>  <span class="c1"># type: ignore</span>
+
+            <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">total</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">disable</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                         <span class="n">unit</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">unit_scale</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">unit_divisor</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">total</span> <span class="o">=</span> <span class="n">total</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">disable</span> <span class="o">=</span> <span class="n">disable</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">n</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="c1"># ignore unit, unit_scale, unit_divisor; they&#39;re just for real tqdm</span>
+
+            <span class="k">def</span> <span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">disable</span><span class="p">:</span>
+                    <span class="k">return</span>
+
+                <span class="bp">self</span><span class="o">.</span><span class="n">n</span> <span class="o">+=</span> <span class="n">n</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">total</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\r</span><span class="si">{0:.1f}</span><span class="s2"> bytes&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n</span><span class="p">))</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\r</span><span class="si">{0:.1f}</span><span class="s2">%&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="mi">100</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">n</span> <span class="o">/</span> <span class="nb">float</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">total</span><span class="p">)))</span>
+                <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+
+            <span class="k">def</span> <span class="fm">__enter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+                <span class="k">return</span> <span class="bp">self</span>
+
+            <span class="k">def</span> <span class="fm">__exit__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc_type</span><span class="p">,</span> <span class="n">exc_val</span><span class="p">,</span> <span class="n">exc_tb</span><span class="p">):</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">disable</span><span class="p">:</span>
+                    <span class="k">return</span>
+
+                <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+
+<span class="c1"># matches bfd8deac from resnet18-bfd8deac.pth</span>
+<span class="n">HASH_REGEX</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;-([a-f0-9]*)\.&#39;</span><span class="p">)</span>
+
+<span class="n">MASTER_BRANCH</span> <span class="o">=</span> <span class="s1">&#39;master&#39;</span>
+<span class="n">ENV_TORCH_HOME</span> <span class="o">=</span> <span class="s1">&#39;TORCH_HOME&#39;</span>
+<span class="n">ENV_XDG_CACHE_HOME</span> <span class="o">=</span> <span class="s1">&#39;XDG_CACHE_HOME&#39;</span>
+<span class="n">DEFAULT_CACHE_DIR</span> <span class="o">=</span> <span class="s1">&#39;~/.cache&#39;</span>
+<span class="n">VAR_DEPENDENCY</span> <span class="o">=</span> <span class="s1">&#39;dependencies&#39;</span>
+<span class="n">MODULE_HUBCONF</span> <span class="o">=</span> <span class="s1">&#39;hubconf.py&#39;</span>
+<span class="n">READ_DATA_CHUNK</span> <span class="o">=</span> <span class="mi">8192</span>
+<span class="n">_hub_dir</span> <span class="o">=</span> <span class="kc">None</span>
+
+
+<span class="c1"># Copied from tools/shared/module_loader to be included in torch package</span>
+<span class="k">def</span> <span class="nf">import_module</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">path</span><span class="p">):</span>
+    <span class="kn">import</span> <span class="nn">importlib.util</span>
+    <span class="kn">from</span> <span class="nn">importlib.abc</span> <span class="kn">import</span> <span class="n">Loader</span>
+    <span class="n">spec</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">spec_from_file_location</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">path</span><span class="p">)</span>
+    <span class="n">module</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">module_from_spec</span><span class="p">(</span><span class="n">spec</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">spec</span><span class="o">.</span><span class="n">loader</span><span class="p">,</span> <span class="n">Loader</span><span class="p">)</span>
+    <span class="n">spec</span><span class="o">.</span><span class="n">loader</span><span class="o">.</span><span class="n">exec_module</span><span class="p">(</span><span class="n">module</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">module</span>
+
+
+<span class="k">def</span> <span class="nf">_remove_if_exists</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">path</span><span class="p">):</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">shutil</span><span class="o">.</span><span class="n">rmtree</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_git_archive_link</span><span class="p">(</span><span class="n">repo_owner</span><span class="p">,</span> <span class="n">repo_name</span><span class="p">,</span> <span class="n">branch</span><span class="p">):</span>
+    <span class="k">return</span> <span class="s1">&#39;https://github.com/</span><span class="si">{}</span><span class="s1">/</span><span class="si">{}</span><span class="s1">/archive/</span><span class="si">{}</span><span class="s1">.zip&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">repo_owner</span><span class="p">,</span> <span class="n">repo_name</span><span class="p">,</span> <span class="n">branch</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_load_attr_from_module</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="n">func_name</span><span class="p">):</span>
+    <span class="c1"># Check if callable is defined in the module</span>
+    <span class="k">if</span> <span class="n">func_name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="nb">dir</span><span class="p">(</span><span class="n">module</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="n">func_name</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_get_torch_home</span><span class="p">():</span>
+    <span class="n">torch_home</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="n">ENV_TORCH_HOME</span><span class="p">,</span>
+                  <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="n">ENV_XDG_CACHE_HOME</span><span class="p">,</span>
+                                         <span class="n">DEFAULT_CACHE_DIR</span><span class="p">),</span> <span class="s1">&#39;torch&#39;</span><span class="p">)))</span>
+    <span class="k">return</span> <span class="n">torch_home</span>
+
+
+<span class="k">def</span> <span class="nf">_parse_repo_info</span><span class="p">(</span><span class="n">github</span><span class="p">):</span>
+    <span class="n">branch</span> <span class="o">=</span> <span class="n">MASTER_BRANCH</span>
+    <span class="k">if</span> <span class="s1">&#39;:&#39;</span> <span class="ow">in</span> <span class="n">github</span><span class="p">:</span>
+        <span class="n">repo_info</span><span class="p">,</span> <span class="n">branch</span> <span class="o">=</span> <span class="n">github</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;:&#39;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">repo_info</span> <span class="o">=</span> <span class="n">github</span>
+    <span class="n">repo_owner</span><span class="p">,</span> <span class="n">repo_name</span> <span class="o">=</span> <span class="n">repo_info</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">repo_owner</span><span class="p">,</span> <span class="n">repo_name</span><span class="p">,</span> <span class="n">branch</span>
+
+
+<span class="k">def</span> <span class="nf">_get_cache_or_reload</span><span class="p">(</span><span class="n">github</span><span class="p">,</span> <span class="n">force_reload</span><span class="p">,</span> <span class="n">verbose</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+    <span class="c1"># Setup hub_dir to save downloaded files</span>
+    <span class="n">hub_dir</span> <span class="o">=</span> <span class="n">get_dir</span><span class="p">()</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">hub_dir</span><span class="p">):</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">hub_dir</span><span class="p">)</span>
+    <span class="c1"># Parse github repo information</span>
+    <span class="n">repo_owner</span><span class="p">,</span> <span class="n">repo_name</span><span class="p">,</span> <span class="n">branch</span> <span class="o">=</span> <span class="n">_parse_repo_info</span><span class="p">(</span><span class="n">github</span><span class="p">)</span>
+    <span class="c1"># Github allows branch name with slash &#39;/&#39;,</span>
+    <span class="c1"># this causes confusion with path on both Linux and Windows.</span>
+    <span class="c1"># Backslash is not allowed in Github branch name so no need to</span>
+    <span class="c1"># to worry about it.</span>
+    <span class="n">normalized_br</span> <span class="o">=</span> <span class="n">branch</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="s1">&#39;_&#39;</span><span class="p">)</span>
+    <span class="c1"># Github renames folder repo-v1.x.x to repo-1.x.x</span>
+    <span class="c1"># We don&#39;t know the repo name before downloading the zip file</span>
+    <span class="c1"># and inspect name from it.</span>
+    <span class="c1"># To check if cached repo exists, we need to normalize folder names.</span>
+    <span class="n">repo_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">hub_dir</span><span class="p">,</span> <span class="s1">&#39;_&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">repo_owner</span><span class="p">,</span> <span class="n">repo_name</span><span class="p">,</span> <span class="n">normalized_br</span><span class="p">]))</span>
+
+    <span class="n">use_cache</span> <span class="o">=</span> <span class="p">(</span><span class="ow">not</span> <span class="n">force_reload</span><span class="p">)</span> <span class="ow">and</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">repo_dir</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">use_cache</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">verbose</span><span class="p">:</span>
+            <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;Using cache found in </span><span class="si">{}</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">repo_dir</span><span class="p">))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">cached_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">hub_dir</span><span class="p">,</span> <span class="n">normalized_br</span> <span class="o">+</span> <span class="s1">&#39;.zip&#39;</span><span class="p">)</span>
+        <span class="n">_remove_if_exists</span><span class="p">(</span><span class="n">cached_file</span><span class="p">)</span>
+
+        <span class="n">url</span> <span class="o">=</span> <span class="n">_git_archive_link</span><span class="p">(</span><span class="n">repo_owner</span><span class="p">,</span> <span class="n">repo_name</span><span class="p">,</span> <span class="n">branch</span><span class="p">)</span>
+        <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;Downloading: </span><span class="se">\&quot;</span><span class="si">{}</span><span class="se">\&quot;</span><span class="s1"> to </span><span class="si">{}</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">cached_file</span><span class="p">))</span>
+        <span class="n">download_url_to_file</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">cached_file</span><span class="p">,</span> <span class="n">progress</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+        <span class="k">with</span> <span class="n">zipfile</span><span class="o">.</span><span class="n">ZipFile</span><span class="p">(</span><span class="n">cached_file</span><span class="p">)</span> <span class="k">as</span> <span class="n">cached_zipfile</span><span class="p">:</span>
+            <span class="n">extraced_repo_name</span> <span class="o">=</span> <span class="n">cached_zipfile</span><span class="o">.</span><span class="n">infolist</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">filename</span>
+            <span class="n">extracted_repo</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">hub_dir</span><span class="p">,</span> <span class="n">extraced_repo_name</span><span class="p">)</span>
+            <span class="n">_remove_if_exists</span><span class="p">(</span><span class="n">extracted_repo</span><span class="p">)</span>
+            <span class="c1"># Unzip the code and rename the base folder</span>
+            <span class="n">cached_zipfile</span><span class="o">.</span><span class="n">extractall</span><span class="p">(</span><span class="n">hub_dir</span><span class="p">)</span>
+
+        <span class="n">_remove_if_exists</span><span class="p">(</span><span class="n">cached_file</span><span class="p">)</span>
+        <span class="n">_remove_if_exists</span><span class="p">(</span><span class="n">repo_dir</span><span class="p">)</span>
+        <span class="n">shutil</span><span class="o">.</span><span class="n">move</span><span class="p">(</span><span class="n">extracted_repo</span><span class="p">,</span> <span class="n">repo_dir</span><span class="p">)</span>  <span class="c1"># rename the repo</span>
+
+    <span class="k">return</span> <span class="n">repo_dir</span>
+
+
+<span class="k">def</span> <span class="nf">_check_module_exists</span><span class="p">(</span><span class="n">name</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span> <span class="o">&gt;=</span> <span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">):</span>
+        <span class="kn">import</span> <span class="nn">importlib.util</span>
+        <span class="k">return</span> <span class="n">importlib</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">find_spec</span><span class="p">(</span><span class="n">name</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+    <span class="k">elif</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span> <span class="o">&gt;=</span> <span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span>
+        <span class="c1"># Special case for python3.3</span>
+        <span class="kn">import</span> <span class="nn">importlib.find_loader</span>
+        <span class="k">return</span> <span class="n">importlib</span><span class="o">.</span><span class="n">find_loader</span><span class="p">(</span><span class="n">name</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># NB: Python2.7 imp.find_module() doesn&#39;t respect PEP 302,</span>
+        <span class="c1">#     it cannot find a package installed as .egg(zip) file.</span>
+        <span class="c1">#     Here we use workaround from:</span>
+        <span class="c1">#     https://stackoverflow.com/questions/28962344/imp-find-module-which-supports-zipped-eggs?lq=1</span>
+        <span class="c1">#     Also imp doesn&#39;t handle hierarchical module names (names contains dots).</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="c1"># 1. Try imp.find_module(), which searches sys.path, but does</span>
+            <span class="c1"># not respect PEP 302 import hooks.</span>
+            <span class="kn">import</span> <span class="nn">imp</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">imp</span><span class="o">.</span><span class="n">find_module</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">result</span><span class="p">:</span>
+                <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">path</span>
+        <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">path</span><span class="p">:</span>
+            <span class="c1"># 2. Scan path for import hooks. sys.path_importer_cache maps</span>
+            <span class="c1"># path items to optional &quot;importer&quot; objects, that implement</span>
+            <span class="c1"># find_module() etc.  Note that path must be a subset of</span>
+            <span class="c1"># sys.path for this to work.</span>
+            <span class="n">importer</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">path_importer_cache</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">item</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">importer</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">result</span> <span class="o">=</span> <span class="n">importer</span><span class="o">.</span><span class="n">find_module</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="p">[</span><span class="n">item</span><span class="p">])</span>
+                    <span class="k">if</span> <span class="n">result</span><span class="p">:</span>
+                        <span class="k">return</span> <span class="kc">True</span>
+                <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+                    <span class="k">pass</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+<span class="k">def</span> <span class="nf">_check_dependencies</span><span class="p">(</span><span class="n">m</span><span class="p">):</span>
+    <span class="n">dependencies</span> <span class="o">=</span> <span class="n">_load_attr_from_module</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">VAR_DEPENDENCY</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">dependencies</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">missing_deps</span> <span class="o">=</span> <span class="p">[</span><span class="n">pkg</span> <span class="k">for</span> <span class="n">pkg</span> <span class="ow">in</span> <span class="n">dependencies</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">_check_module_exists</span><span class="p">(</span><span class="n">pkg</span><span class="p">)]</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">missing_deps</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;Missing dependencies: </span><span class="si">{}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">missing_deps</span><span class="p">)))</span>
+
+
+<span class="k">def</span> <span class="nf">_load_entry_from_hubconf</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">model</span><span class="p">):</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s1">&#39;Invalid input: model should be a string of function name&#39;</span><span class="p">)</span>
+
+    <span class="c1"># Note that if a missing dependency is imported at top level of hubconf, it will</span>
+    <span class="c1"># throw before this function. It&#39;s a chicken and egg situation where we have to</span>
+    <span class="c1"># load hubconf to know what&#39;re the dependencies, but to import hubconf it requires</span>
+    <span class="c1"># a missing package. This is fine, Python will throw proper error message for users.</span>
+    <span class="n">_check_dependencies</span><span class="p">(</span><span class="n">m</span><span class="p">)</span>
+
+    <span class="n">func</span> <span class="o">=</span> <span class="n">_load_attr_from_module</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">model</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">func</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">callable</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;Cannot find callable </span><span class="si">{}</span><span class="s1"> in hubconf&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">model</span><span class="p">))</span>
+
+    <span class="k">return</span> <span class="n">func</span>
+
+
+<span class="k">def</span> <span class="nf">get_dir</span><span class="p">():</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Get the Torch Hub cache directory used for storing downloaded models &amp; weights.</span>
+
+<span class="sd">    If :func:`~torch.hub.set_dir` is not called, default path is ``$TORCH_HOME/hub`` where</span>
+<span class="sd">    environment variable ``$TORCH_HOME`` defaults to ``$XDG_CACHE_HOME/torch``.</span>
+<span class="sd">    ``$XDG_CACHE_HOME`` follows the X Design Group specification of the Linux</span>
+<span class="sd">    filesystem layout, with a default value ``~/.cache`` if the environment</span>
+<span class="sd">    variable is not set.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Issue warning to move data if old env is set</span>
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s1">&#39;TORCH_HUB&#39;</span><span class="p">):</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s1">&#39;TORCH_HUB is deprecated, please use env TORCH_HOME instead&#39;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">_hub_dir</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_hub_dir</span>
+    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">_get_torch_home</span><span class="p">(),</span> <span class="s1">&#39;hub&#39;</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">set_dir</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Optionally set the Torch Hub directory used to save downloaded models &amp; weights.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        d (string): path to a local folder to save downloaded models &amp; weights.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">global</span> <span class="n">_hub_dir</span>
+    <span class="n">_hub_dir</span> <span class="o">=</span> <span class="n">d</span>
+
+
+<span class="k">def</span> <span class="nf">list</span><span class="p">(</span><span class="n">github</span><span class="p">,</span> <span class="n">force_reload</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    List all entrypoints available in `github` hubconf.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        github (string): a string with format &quot;repo_owner/repo_name[:tag_name]&quot; with an optional</span>
+<span class="sd">            tag/branch. The default branch is `master` if not specified.</span>
+<span class="sd">            Example: &#39;pytorch/vision[:hub]&#39;</span>
+<span class="sd">        force_reload (bool, optional): whether to discard the existing cache and force a fresh download.</span>
+<span class="sd">            Default is `False`.</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        entrypoints: a list of available entrypoint names</span>
+
+<span class="sd">    Example:</span>
+<span class="sd">        &gt;&gt;&gt; entrypoints = torch.hub.list(&#39;pytorch/vision&#39;, force_reload=True)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">repo_dir</span> <span class="o">=</span> <span class="n">_get_cache_or_reload</span><span class="p">(</span><span class="n">github</span><span class="p">,</span> <span class="n">force_reload</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+
+    <span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">repo_dir</span><span class="p">)</span>
+
+    <span class="n">hub_module</span> <span class="o">=</span> <span class="n">import_module</span><span class="p">(</span><span class="n">MODULE_HUBCONF</span><span class="p">,</span> <span class="n">repo_dir</span> <span class="o">+</span> <span class="s1">&#39;/&#39;</span> <span class="o">+</span> <span class="n">MODULE_HUBCONF</span><span class="p">)</span>
+
+    <span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">repo_dir</span><span class="p">)</span>
+
+    <span class="c1"># We take functions starts with &#39;_&#39; as internal helper functions</span>
+    <span class="n">entrypoints</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="nb">dir</span><span class="p">(</span><span class="n">hub_module</span><span class="p">)</span> <span class="k">if</span> <span class="n">callable</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">hub_module</span><span class="p">,</span> <span class="n">f</span><span class="p">))</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">f</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">)]</span>
+
+    <span class="k">return</span> <span class="n">entrypoints</span>
+
+
+<span class="k">def</span> <span class="nf">help</span><span class="p">(</span><span class="n">github</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">force_reload</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Show the docstring of entrypoint `model`.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        github (string): a string with format &lt;repo_owner/repo_name[:tag_name]&gt; with an optional</span>
+<span class="sd">            tag/branch. The default branch is `master` if not specified.</span>
+<span class="sd">            Example: &#39;pytorch/vision[:hub]&#39;</span>
+<span class="sd">        model (string): a string of entrypoint name defined in repo&#39;s hubconf.py</span>
+<span class="sd">        force_reload (bool, optional): whether to discard the existing cache and force a fresh download.</span>
+<span class="sd">            Default is `False`.</span>
+<span class="sd">    Example:</span>
+<span class="sd">        &gt;&gt;&gt; print(torch.hub.help(&#39;pytorch/vision&#39;, &#39;resnet18&#39;, force_reload=True))</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">repo_dir</span> <span class="o">=</span> <span class="n">_get_cache_or_reload</span><span class="p">(</span><span class="n">github</span><span class="p">,</span> <span class="n">force_reload</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+
+    <span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">repo_dir</span><span class="p">)</span>
+
+    <span class="n">hub_module</span> <span class="o">=</span> <span class="n">import_module</span><span class="p">(</span><span class="n">MODULE_HUBCONF</span><span class="p">,</span> <span class="n">repo_dir</span> <span class="o">+</span> <span class="s1">&#39;/&#39;</span> <span class="o">+</span> <span class="n">MODULE_HUBCONF</span><span class="p">)</span>
+
+    <span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">repo_dir</span><span class="p">)</span>
+
+    <span class="n">entry</span> <span class="o">=</span> <span class="n">_load_entry_from_hubconf</span><span class="p">(</span><span class="n">hub_module</span><span class="p">,</span> <span class="n">model</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">entry</span><span class="o">.</span><span class="vm">__doc__</span>
+
+
+<span class="c1"># Ideally this should be `def load(github, model, *args, forece_reload=False, **kwargs):`,</span>
+<span class="c1"># but Python2 complains syntax error for it. We have to skip force_reload in function</span>
+<span class="c1"># signature here but detect it in kwargs instead.</span>
+<span class="c1"># TODO: fix it after Python2 EOL</span>
+<span class="k">def</span> <span class="nf">load</span><span class="p">(</span><span class="n">repo_or_dir</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Load a model from a github repo or a local directory.</span>
+
+<span class="sd">    Note: Loading a model is the typical use case, but this can also be used to</span>
+<span class="sd">    for loading other objects such as tokenizers, loss functions, etc.</span>
+
+<span class="sd">    If :attr:`source` is ``&#39;github&#39;``, :attr:`repo_or_dir` is expected to be</span>
+<span class="sd">    of the form ``repo_owner/repo_name[:tag_name]`` with an optional</span>
+<span class="sd">    tag/branch.</span>
+
+<span class="sd">    If :attr:`source` is ``&#39;local&#39;``, :attr:`repo_or_dir` is expected to be a</span>
+<span class="sd">    path to a local directory.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        repo_or_dir (string): repo name (``repo_owner/repo_name[:tag_name]``),</span>
+<span class="sd">            if ``source = &#39;github&#39;``; or a path to a local directory, if</span>
+<span class="sd">            ``source = &#39;local&#39;``.</span>
+<span class="sd">        model (string): the name of a callable (entrypoint) defined in the</span>
+<span class="sd">            repo/dir&#39;s ``hubconf.py``.</span>
+<span class="sd">        *args (optional): the corresponding args for callable :attr:`model`.</span>
+<span class="sd">        source (string, optional): ``&#39;github&#39;`` | ``&#39;local&#39;``. Specifies how</span>
+<span class="sd">            ``repo_or_dir`` is to be interpreted. Default is ``&#39;github&#39;``.</span>
+<span class="sd">        force_reload (bool, optional): whether to force a fresh download of</span>
+<span class="sd">            the github repo unconditionally. Does not have any effect if</span>
+<span class="sd">            ``source = &#39;local&#39;``. Default is ``False``.</span>
+<span class="sd">        verbose (bool, optional): If ``False``, mute messages about hitting</span>
+<span class="sd">            local caches. Note that the message about first download cannot be</span>
+<span class="sd">            muted. Does not have any effect if ``source = &#39;local&#39;``.</span>
+<span class="sd">            Default is ``True``.</span>
+<span class="sd">        **kwargs (optional): the corresponding kwargs for callable</span>
+<span class="sd">            :attr:`model`.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        The output of the :attr:`model` callable when called with the given</span>
+<span class="sd">        ``*args`` and ``**kwargs``.</span>
+
+<span class="sd">    Example:</span>
+<span class="sd">        &gt;&gt;&gt; # from a github repo</span>
+<span class="sd">        &gt;&gt;&gt; repo = &#39;pytorch/vision&#39;</span>
+<span class="sd">        &gt;&gt;&gt; model = torch.hub.load(repo, &#39;resnet50&#39;, pretrained=True)</span>
+<span class="sd">        &gt;&gt;&gt; # from a local directory</span>
+<span class="sd">        &gt;&gt;&gt; path = &#39;/some/local/path/pytorch/vision&#39;</span>
+<span class="sd">        &gt;&gt;&gt; model = torch.hub.load(path, &#39;resnet50&#39;, pretrained=True)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">source</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;source&#39;</span><span class="p">,</span> <span class="s1">&#39;github&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="n">force_reload</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;force_reload&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+    <span class="n">verbose</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;verbose&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">source</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;github&#39;</span><span class="p">,</span> <span class="s1">&#39;local&#39;</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s1">&#39;Unknown source: &quot;</span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s1">&quot;. Allowed values: &quot;github&quot; | &quot;local&quot;.&#39;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">source</span> <span class="o">==</span> <span class="s1">&#39;github&#39;</span><span class="p">:</span>
+        <span class="n">repo_or_dir</span> <span class="o">=</span> <span class="n">_get_cache_or_reload</span><span class="p">(</span><span class="n">repo_or_dir</span><span class="p">,</span> <span class="n">force_reload</span><span class="p">,</span> <span class="n">verbose</span><span class="p">)</span>
+
+    <span class="n">model</span> <span class="o">=</span> <span class="n">_load_local</span><span class="p">(</span><span class="n">repo_or_dir</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">model</span>
+
+
+<span class="k">def</span> <span class="nf">_load_local</span><span class="p">(</span><span class="n">hubconf_dir</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Load a model from a local directory with a ``hubconf.py``.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        hubconf_dir (string): path to a local directory that contains a</span>
+<span class="sd">            ``hubconf.py``.</span>
+<span class="sd">        model (string): name of an entrypoint defined in the directory&#39;s</span>
+<span class="sd">            `hubconf.py`.</span>
+<span class="sd">        *args (optional): the corresponding args for callable ``model``.</span>
+<span class="sd">        **kwargs (optional): the corresponding kwargs for callable ``model``.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        a single model with corresponding pretrained weights.</span>
+
+<span class="sd">    Example:</span>
+<span class="sd">        &gt;&gt;&gt; path = &#39;/some/local/path/pytorch/vision&#39;</span>
+<span class="sd">        &gt;&gt;&gt; model = _load_local(path, &#39;resnet50&#39;, pretrained=True)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">hubconf_dir</span><span class="p">)</span>
+
+    <span class="n">hubconf_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">hubconf_dir</span><span class="p">,</span> <span class="n">MODULE_HUBCONF</span><span class="p">)</span>
+    <span class="n">hub_module</span> <span class="o">=</span> <span class="n">import_module</span><span class="p">(</span><span class="n">MODULE_HUBCONF</span><span class="p">,</span> <span class="n">hubconf_path</span><span class="p">)</span>
+
+    <span class="n">entry</span> <span class="o">=</span> <span class="n">_load_entry_from_hubconf</span><span class="p">(</span><span class="n">hub_module</span><span class="p">,</span> <span class="n">model</span><span class="p">)</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">entry</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">hubconf_dir</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">model</span>
+
+
+<span class="k">def</span> <span class="nf">download_url_to_file</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">dst</span><span class="p">,</span> <span class="n">hash_prefix</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">progress</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Download object at the given URL to a local path.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        url (string): URL of the object to download</span>
+<span class="sd">        dst (string): Full path where object will be saved, e.g. `/tmp/temporary_file`</span>
+<span class="sd">        hash_prefix (string, optional): If not None, the SHA256 downloaded file should start with `hash_prefix`.</span>
+<span class="sd">            Default: None</span>
+<span class="sd">        progress (bool, optional): whether or not to display a progress bar to stderr</span>
+<span class="sd">            Default: True</span>
+
+<span class="sd">    Example:</span>
+<span class="sd">        &gt;&gt;&gt; torch.hub.download_url_to_file(&#39;https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth&#39;, &#39;/tmp/temporary_file&#39;)</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">file_size</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="c1"># We use a different API for python2 since urllib(2) doesn&#39;t recognize the CA</span>
+    <span class="c1"># certificates in older Python</span>
+    <span class="n">req</span> <span class="o">=</span> <span class="n">Request</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;User-Agent&quot;</span><span class="p">:</span> <span class="s2">&quot;torch.hub&quot;</span><span class="p">})</span>
+    <span class="n">u</span> <span class="o">=</span> <span class="n">urlopen</span><span class="p">(</span><span class="n">req</span><span class="p">)</span>
+    <span class="n">meta</span> <span class="o">=</span> <span class="n">u</span><span class="o">.</span><span class="n">info</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">meta</span><span class="p">,</span> <span class="s1">&#39;getheaders&#39;</span><span class="p">):</span>
+        <span class="n">content_length</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">getheaders</span><span class="p">(</span><span class="s2">&quot;Content-Length&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">content_length</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get_all</span><span class="p">(</span><span class="s2">&quot;Content-Length&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">content_length</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">content_length</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">file_size</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">content_length</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+
+    <span class="c1"># We deliberately save it in a temp file and move it after</span>
+    <span class="c1"># download is complete. This prevents a local working checkpoint</span>
+    <span class="c1"># being overridden by a broken download.</span>
+    <span class="n">dst</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="n">dst</span><span class="p">)</span>
+    <span class="n">dst_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">dst</span><span class="p">)</span>
+    <span class="n">f</span> <span class="o">=</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">NamedTemporaryFile</span><span class="p">(</span><span class="n">delete</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="nb">dir</span><span class="o">=</span><span class="n">dst_dir</span><span class="p">)</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">hash_prefix</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">sha256</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">()</span>
+        <span class="k">with</span> <span class="n">tqdm</span><span class="p">(</span><span class="n">total</span><span class="o">=</span><span class="n">file_size</span><span class="p">,</span> <span class="n">disable</span><span class="o">=</span><span class="ow">not</span> <span class="n">progress</span><span class="p">,</span>
+                  <span class="n">unit</span><span class="o">=</span><span class="s1">&#39;B&#39;</span><span class="p">,</span> <span class="n">unit_scale</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">unit_divisor</span><span class="o">=</span><span class="mi">1024</span><span class="p">)</span> <span class="k">as</span> <span class="n">pbar</span><span class="p">:</span>
+            <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+                <span class="n">buffer</span> <span class="o">=</span> <span class="n">u</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="mi">8192</span><span class="p">)</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">buffer</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="k">break</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">buffer</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">hash_prefix</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">sha256</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">buffer</span><span class="p">)</span>
+                <span class="n">pbar</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">buffer</span><span class="p">))</span>
+
+        <span class="n">f</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">hash_prefix</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">digest</span> <span class="o">=</span> <span class="n">sha256</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">digest</span><span class="p">[:</span><span class="nb">len</span><span class="p">(</span><span class="n">hash_prefix</span><span class="p">)]</span> <span class="o">!=</span> <span class="n">hash_prefix</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;invalid hash value (expected &quot;</span><span class="si">{}</span><span class="s1">&quot;, got &quot;</span><span class="si">{}</span><span class="s1">&quot;)&#39;</span>
+                                   <span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">hash_prefix</span><span class="p">,</span> <span class="n">digest</span><span class="p">))</span>
+        <span class="n">shutil</span><span class="o">.</span><span class="n">move</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">dst</span><span class="p">)</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">f</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">name</span><span class="p">):</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">_download_url_to_file</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">dst</span><span class="p">,</span> <span class="n">hash_prefix</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">progress</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s1">&#39;torch.hub._download_url_to_file has been renamed to</span><span class="se">\</span>
+<span class="s1">            torch.hub.download_url_to_file to be a public API,</span><span class="se">\</span>
+<span class="s1">            _download_url_to_file will be removed in after 1.3 release&#39;</span><span class="p">)</span>
+    <span class="n">download_url_to_file</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">dst</span><span class="p">,</span> <span class="n">hash_prefix</span><span class="p">,</span> <span class="n">progress</span><span class="p">)</span>
+
+<span class="c1"># Hub used to support automatically extracts from zipfile manually compressed by users.</span>
+<span class="c1"># The legacy zip format expects only one file from torch.save() &lt; 1.6 in the zip.</span>
+<span class="c1"># We should remove this support since zipfile is now default zipfile format for torch.save().</span>
+<span class="k">def</span> <span class="nf">_is_legacy_zip_format</span><span class="p">(</span><span class="n">filename</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">zipfile</span><span class="o">.</span><span class="n">is_zipfile</span><span class="p">(</span><span class="n">filename</span><span class="p">):</span>
+        <span class="n">infolist</span> <span class="o">=</span> <span class="n">zipfile</span><span class="o">.</span><span class="n">ZipFile</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span><span class="o">.</span><span class="n">infolist</span><span class="p">()</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="n">infolist</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">infolist</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">is_dir</span><span class="p">()</span>
+    <span class="k">return</span> <span class="kc">False</span>
+
+<span class="k">def</span> <span class="nf">_legacy_zip_load</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">model_dir</span><span class="p">,</span> <span class="n">map_location</span><span class="p">):</span>
+    <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s1">&#39;Falling back to the old format &lt; 1.6. This support will be &#39;</span>
+                  <span class="s1">&#39;deprecated in favor of default zipfile format introduced in 1.6. &#39;</span>
+                  <span class="s1">&#39;Please redo torch.save() to save it in the new zipfile format.&#39;</span><span class="p">)</span>
+    <span class="c1"># Note: extractall() defaults to overwrite file if exists. No need to clean up beforehand.</span>
+    <span class="c1">#       We deliberately don&#39;t handle tarfile here since our legacy serialization format was in tar.</span>
+    <span class="c1">#       E.g. resnet18-5c106cde.pth which is widely used.</span>
+    <span class="k">with</span> <span class="n">zipfile</span><span class="o">.</span><span class="n">ZipFile</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">members</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">infolist</span><span class="p">()</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">members</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s1">&#39;Only one file(not dir) is allowed in the zipfile&#39;</span><span class="p">)</span>
+        <span class="n">f</span><span class="o">.</span><span class="n">extractall</span><span class="p">(</span><span class="n">model_dir</span><span class="p">)</span>
+        <span class="n">extraced_name</span> <span class="o">=</span> <span class="n">members</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">filename</span>
+        <span class="n">extracted_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">model_dir</span><span class="p">,</span> <span class="n">extraced_name</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">extracted_file</span><span class="p">,</span> <span class="n">map_location</span><span class="o">=</span><span class="n">map_location</span><span class="p">)</span>
+
+<span class="k">def</span> <span class="nf">load_state_dict_from_url</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">model_dir</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">map_location</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">progress</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">check_hash</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">file_name</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Loads the Torch serialized object at the given URL.</span>
+
+<span class="sd">    If downloaded file is a zip file, it will be automatically</span>
+<span class="sd">    decompressed.</span>
+
+<span class="sd">    If the object is already present in `model_dir`, it&#39;s deserialized and</span>
+<span class="sd">    returned.</span>
+<span class="sd">    The default value of `model_dir` is ``&lt;hub_dir&gt;/checkpoints`` where</span>
+<span class="sd">    `hub_dir` is the directory returned by :func:`~torch.hub.get_dir`.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        url (string): URL of the object to download</span>
+<span class="sd">        model_dir (string, optional): directory in which to save the object</span>
+<span class="sd">        map_location (optional): a function or a dict specifying how to remap storage locations (see torch.load)</span>
+<span class="sd">        progress (bool, optional): whether or not to display a progress bar to stderr.</span>
+<span class="sd">            Default: True</span>
+<span class="sd">        check_hash(bool, optional): If True, the filename part of the URL should follow the naming convention</span>
+<span class="sd">            ``filename-&lt;sha256&gt;.ext`` where ``&lt;sha256&gt;`` is the first eight or more</span>
+<span class="sd">            digits of the SHA256 hash of the contents of the file. The hash is used to</span>
+<span class="sd">            ensure unique names and to verify the contents of the file.</span>
+<span class="sd">            Default: False</span>
+<span class="sd">        file_name (string, optional): name for the downloaded file. Filename from `url` will be used if not set.</span>
+
+<span class="sd">    Example:</span>
+<span class="sd">        &gt;&gt;&gt; state_dict = torch.hub.load_state_dict_from_url(&#39;https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth&#39;)</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Issue warning to move data if old env is set</span>
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s1">&#39;TORCH_MODEL_ZOO&#39;</span><span class="p">):</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s1">&#39;TORCH_MODEL_ZOO is deprecated, please use env TORCH_HOME instead&#39;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">model_dir</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">hub_dir</span> <span class="o">=</span> <span class="n">get_dir</span><span class="p">()</span>
+        <span class="n">model_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">hub_dir</span><span class="p">,</span> <span class="s1">&#39;checkpoints&#39;</span><span class="p">)</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">model_dir</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">e</span><span class="o">.</span><span class="n">errno</span> <span class="o">==</span> <span class="n">errno</span><span class="o">.</span><span class="n">EEXIST</span><span class="p">:</span>
+            <span class="c1"># Directory already exists, ignore.</span>
+            <span class="k">pass</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Unexpected OSError, re-raise.</span>
+            <span class="k">raise</span>
+
+    <span class="n">parts</span> <span class="o">=</span> <span class="n">urlparse</span><span class="p">(</span><span class="n">url</span><span class="p">)</span>
+    <span class="n">filename</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="n">parts</span><span class="o">.</span><span class="n">path</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">file_name</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">filename</span> <span class="o">=</span> <span class="n">file_name</span>
+    <span class="n">cached_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">model_dir</span><span class="p">,</span> <span class="n">filename</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">cached_file</span><span class="p">):</span>
+        <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;Downloading: &quot;</span><span class="si">{}</span><span class="s1">&quot; to </span><span class="si">{}</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">cached_file</span><span class="p">))</span>
+        <span class="n">hash_prefix</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">check_hash</span><span class="p">:</span>
+            <span class="n">r</span> <span class="o">=</span> <span class="n">HASH_REGEX</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>  <span class="c1"># r is Optional[Match[str]]</span>
+            <span class="n">hash_prefix</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="k">if</span> <span class="n">r</span> <span class="k">else</span> <span class="kc">None</span>
+        <span class="n">download_url_to_file</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">cached_file</span><span class="p">,</span> <span class="n">hash_prefix</span><span class="p">,</span> <span class="n">progress</span><span class="o">=</span><span class="n">progress</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">_is_legacy_zip_format</span><span class="p">(</span><span class="n">cached_file</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_legacy_zip_load</span><span class="p">(</span><span class="n">cached_file</span><span class="p">,</span> <span class="n">model_dir</span><span class="p">,</span> <span class="n">map_location</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">cached_file</span><span class="p">,</span> <span class="n">map_location</span><span class="o">=</span><span class="n">map_location</span><span class="p">)</span>
+</pre></div>
+
+             </article>
+             
+            </div>
+            <footer>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+         <script src="../../_static/jquery.js"></script>
+         <script src="../../_static/underscore.js"></script>
+         <script src="../../_static/doctools.js"></script>
+         <script src="../../_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="../../_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="../../_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="../../_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="../../_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="../../_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>

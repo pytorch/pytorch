@@ -1,0 +1,6 @@
+torch.is\_deterministic
+=======================
+
+.. currentmodule:: torch
+
+.. autofunction:: is_deterministic

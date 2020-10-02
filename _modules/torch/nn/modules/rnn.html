@@ -1,0 +1,1680 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>torch.nn.modules.rnn &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/_modules/torch/nn/modules/rnn.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="../../../../_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="../../../../_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../../../_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../../../_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+
+  
+  <script src="../../../../_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../../../_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/_modules/torch/nn/modules/rnn.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="../../../../index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+          <li><a href="../../../index.html">Module code</a> &gt;</li>
+        
+          <li><a href="../../../torch.html">torch</a> &gt;</li>
+        
+      <li>torch.nn.modules.rnn</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <h1>Source code for torch.nn.modules.rnn</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">math</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
+<span class="kn">import</span> <span class="nn">numbers</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">overload</span>
+
+<span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">from</span> <span class="nn">torch</span> <span class="kn">import</span> <span class="n">Tensor</span>
+<span class="kn">from</span> <span class="nn">.module</span> <span class="kn">import</span> <span class="n">Module</span>
+<span class="kn">from</span> <span class="nn">..parameter</span> <span class="kn">import</span> <span class="n">Parameter</span>
+<span class="kn">from</span> <span class="nn">..utils.rnn</span> <span class="kn">import</span> <span class="n">PackedSequence</span>
+<span class="kn">from</span> <span class="nn">..</span> <span class="kn">import</span> <span class="n">init</span>
+<span class="kn">from</span> <span class="nn">...</span> <span class="kn">import</span> <span class="n">_VF</span>
+
+<span class="n">_rnn_impls</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;RNN_TANH&#39;</span><span class="p">:</span> <span class="n">_VF</span><span class="o">.</span><span class="n">rnn_tanh</span><span class="p">,</span>
+    <span class="s1">&#39;RNN_RELU&#39;</span><span class="p">:</span> <span class="n">_VF</span><span class="o">.</span><span class="n">rnn_relu</span><span class="p">,</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span> <span class="nf">apply_permutation</span><span class="p">(</span><span class="n">tensor</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">permutation</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">dim</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">tensor</span><span class="o">.</span><span class="n">index_select</span><span class="p">(</span><span class="n">dim</span><span class="p">,</span> <span class="n">permutation</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="RNNBase"><a class="viewcode-back" href="../../../../generated/torch.nn.RNNBase.html#torch.nn.RNNBase">[docs]</a><span class="k">class</span> <span class="nc">RNNBase</span><span class="p">(</span><span class="n">Module</span><span class="p">):</span>
+    <span class="n">__constants__</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;mode&#39;</span><span class="p">,</span> <span class="s1">&#39;input_size&#39;</span><span class="p">,</span> <span class="s1">&#39;hidden_size&#39;</span><span class="p">,</span> <span class="s1">&#39;num_layers&#39;</span><span class="p">,</span> <span class="s1">&#39;bias&#39;</span><span class="p">,</span>
+                     <span class="s1">&#39;batch_first&#39;</span><span class="p">,</span> <span class="s1">&#39;dropout&#39;</span><span class="p">,</span> <span class="s1">&#39;bidirectional&#39;</span><span class="p">]</span>
+    <span class="n">__jit_unused_properties__</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;all_weights&#39;</span><span class="p">]</span>
+
+    <span class="n">mode</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">input_size</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">hidden_size</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">num_layers</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">bias</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">batch_first</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">dropout</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">bidirectional</span><span class="p">:</span> <span class="nb">bool</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">mode</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">input_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">hidden_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+                 <span class="n">num_layers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">bias</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">batch_first</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+                 <span class="n">dropout</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.</span><span class="p">,</span> <span class="n">bidirectional</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">RNNBase</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mode</span> <span class="o">=</span> <span class="n">mode</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input_size</span> <span class="o">=</span> <span class="n">input_size</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hidden_size</span> <span class="o">=</span> <span class="n">hidden_size</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">num_layers</span> <span class="o">=</span> <span class="n">num_layers</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bias</span> <span class="o">=</span> <span class="n">bias</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">batch_first</span> <span class="o">=</span> <span class="n">batch_first</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dropout</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">dropout</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bidirectional</span> <span class="o">=</span> <span class="n">bidirectional</span>
+        <span class="n">num_directions</span> <span class="o">=</span> <span class="mi">2</span> <span class="k">if</span> <span class="n">bidirectional</span> <span class="k">else</span> <span class="mi">1</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">dropout</span><span class="p">,</span> <span class="n">numbers</span><span class="o">.</span><span class="n">Number</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="n">dropout</span> <span class="o">&lt;=</span> <span class="mi">1</span> <span class="ow">or</span> \
+                <span class="nb">isinstance</span><span class="p">(</span><span class="n">dropout</span><span class="p">,</span> <span class="nb">bool</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;dropout should be a number in range [0, 1] &quot;</span>
+                             <span class="s2">&quot;representing the probability of an element being &quot;</span>
+                             <span class="s2">&quot;zeroed&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">dropout</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">num_layers</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s2">&quot;dropout option adds dropout after all but last &quot;</span>
+                          <span class="s2">&quot;recurrent layer, so non-zero dropout expects &quot;</span>
+                          <span class="s2">&quot;num_layers greater than 1, but got dropout=</span><span class="si">{}</span><span class="s2"> and &quot;</span>
+                          <span class="s2">&quot;num_layers=</span><span class="si">{}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">dropout</span><span class="p">,</span> <span class="n">num_layers</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="n">mode</span> <span class="o">==</span> <span class="s1">&#39;LSTM&#39;</span><span class="p">:</span>
+            <span class="n">gate_size</span> <span class="o">=</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">hidden_size</span>
+        <span class="k">elif</span> <span class="n">mode</span> <span class="o">==</span> <span class="s1">&#39;GRU&#39;</span><span class="p">:</span>
+            <span class="n">gate_size</span> <span class="o">=</span> <span class="mi">3</span> <span class="o">*</span> <span class="n">hidden_size</span>
+        <span class="k">elif</span> <span class="n">mode</span> <span class="o">==</span> <span class="s1">&#39;RNN_TANH&#39;</span><span class="p">:</span>
+            <span class="n">gate_size</span> <span class="o">=</span> <span class="n">hidden_size</span>
+        <span class="k">elif</span> <span class="n">mode</span> <span class="o">==</span> <span class="s1">&#39;RNN_RELU&#39;</span><span class="p">:</span>
+            <span class="n">gate_size</span> <span class="o">=</span> <span class="n">hidden_size</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Unrecognized RNN mode: &quot;</span> <span class="o">+</span> <span class="n">mode</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights_names</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_all_weights</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">layer</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_layers</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">direction</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_directions</span><span class="p">):</span>
+                <span class="n">layer_input_size</span> <span class="o">=</span> <span class="n">input_size</span> <span class="k">if</span> <span class="n">layer</span> <span class="o">==</span> <span class="mi">0</span> <span class="k">else</span> <span class="n">hidden_size</span> <span class="o">*</span> <span class="n">num_directions</span>
+
+                <span class="n">w_ih</span> <span class="o">=</span> <span class="n">Parameter</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">(</span><span class="n">gate_size</span><span class="p">,</span> <span class="n">layer_input_size</span><span class="p">))</span>
+                <span class="n">w_hh</span> <span class="o">=</span> <span class="n">Parameter</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">(</span><span class="n">gate_size</span><span class="p">,</span> <span class="n">hidden_size</span><span class="p">))</span>
+                <span class="n">b_ih</span> <span class="o">=</span> <span class="n">Parameter</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">(</span><span class="n">gate_size</span><span class="p">))</span>
+                <span class="c1"># Second bias vector included for CuDNN compatibility. Only one</span>
+                <span class="c1"># bias vector is needed in standard definition.</span>
+                <span class="n">b_hh</span> <span class="o">=</span> <span class="n">Parameter</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">(</span><span class="n">gate_size</span><span class="p">))</span>
+                <span class="n">layer_params</span> <span class="o">=</span> <span class="p">(</span><span class="n">w_ih</span><span class="p">,</span> <span class="n">w_hh</span><span class="p">,</span> <span class="n">b_ih</span><span class="p">,</span> <span class="n">b_hh</span><span class="p">)</span>
+
+                <span class="n">suffix</span> <span class="o">=</span> <span class="s1">&#39;_reverse&#39;</span> <span class="k">if</span> <span class="n">direction</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span>
+                <span class="n">param_names</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;weight_ih_l</span><span class="si">{}{}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="s1">&#39;weight_hh_l</span><span class="si">{}{}</span><span class="s1">&#39;</span><span class="p">]</span>
+                <span class="k">if</span> <span class="n">bias</span><span class="p">:</span>
+                    <span class="n">param_names</span> <span class="o">+=</span> <span class="p">[</span><span class="s1">&#39;bias_ih_l</span><span class="si">{}{}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="s1">&#39;bias_hh_l</span><span class="si">{}{}</span><span class="s1">&#39;</span><span class="p">]</span>
+                <span class="n">param_names</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">layer</span><span class="p">,</span> <span class="n">suffix</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">param_names</span><span class="p">]</span>
+
+                <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">param</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">param_names</span><span class="p">,</span> <span class="n">layer_params</span><span class="p">):</span>
+                    <span class="nb">setattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">param</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights_names</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">param_names</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_all_weights</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">param_names</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span> <span class="o">=</span> <span class="p">[(</span><span class="k">lambda</span> <span class="n">wn</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">wn</span><span class="p">)</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">wn</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span><span class="p">)(</span><span class="n">wn</span><span class="p">)</span> <span class="k">for</span> <span class="n">wn</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights_names</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">flatten_parameters</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">reset_parameters</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="fm">__setattr__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attr</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;_flat_weights_names&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">attr</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights_names</span><span class="p">:</span>
+            <span class="c1"># keep self._flat_weights up to date if you do self.weight = ...</span>
+            <span class="n">idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights_names</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">attr</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">RNNBase</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__setattr__</span><span class="p">(</span><span class="n">attr</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+
+<div class="viewcode-block" id="RNNBase.flatten_parameters"><a class="viewcode-back" href="../../../../generated/torch.nn.RNNBase.html#torch.nn.RNNBase.flatten_parameters">[docs]</a>    <span class="k">def</span> <span class="nf">flatten_parameters</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;Resets parameter data pointer so that they can use faster code paths.</span>
+
+<span class="sd">        Right now, this works only if the module is on the GPU and cuDNN is enabled.</span>
+<span class="sd">        Otherwise, it&#39;s a no-op.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Short-circuits if _flat_weights is only partially instantiated</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights_names</span><span class="p">):</span>
+            <span class="k">return</span>
+
+        <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">w</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">):</span>
+                <span class="k">return</span>
+        <span class="c1"># Short-circuits if any tensor in self._flat_weights is not acceptable to cuDNN</span>
+        <span class="c1"># or the tensors in _flat_weights are of different dtypes</span>
+
+        <span class="n">first_fw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">dtype</span> <span class="o">=</span> <span class="n">first_fw</span><span class="o">.</span><span class="n">dtype</span>
+        <span class="k">for</span> <span class="n">fw</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span><span class="p">:</span>
+            <span class="k">if</span> <span class="p">(</span><span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">fw</span><span class="o">.</span><span class="n">data</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="p">(</span><span class="n">fw</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">dtype</span> <span class="o">==</span> <span class="n">dtype</span><span class="p">)</span> <span class="ow">or</span>
+                    <span class="ow">not</span> <span class="n">fw</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">is_cuda</span> <span class="ow">or</span>
+                    <span class="ow">not</span> <span class="n">torch</span><span class="o">.</span><span class="n">backends</span><span class="o">.</span><span class="n">cudnn</span><span class="o">.</span><span class="n">is_acceptable</span><span class="p">(</span><span class="n">fw</span><span class="o">.</span><span class="n">data</span><span class="p">)):</span>
+                <span class="k">return</span>
+
+        <span class="c1"># If any parameters alias, we fall back to the slower, copying code path. This is</span>
+        <span class="c1"># a sufficient check, because overlapping parameter buffers that don&#39;t completely</span>
+        <span class="c1"># alias would break the assumptions of the uniqueness check in</span>
+        <span class="c1"># Module.named_parameters().</span>
+        <span class="n">unique_data_ptrs</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">data_ptr</span><span class="p">()</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">unique_data_ptrs</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span><span class="p">):</span>
+            <span class="k">return</span>
+
+        <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">device_of</span><span class="p">(</span><span class="n">first_fw</span><span class="p">):</span>
+            <span class="kn">import</span> <span class="nn">torch.backends.cudnn.rnn</span> <span class="k">as</span> <span class="nn">rnn</span>
+
+            <span class="c1"># Note: no_grad() is necessary since _cudnn_rnn_flatten_weight is</span>
+            <span class="c1"># an inplace operation on self._flat_weights</span>
+            <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+                <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">_use_cudnn_rnn_flatten_weight</span><span class="p">():</span>
+                    <span class="n">torch</span><span class="o">.</span><span class="n">_cudnn_rnn_flatten_weight</span><span class="p">(</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span><span class="p">,</span> <span class="p">(</span><span class="mi">4</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">bias</span> <span class="k">else</span> <span class="mi">2</span><span class="p">),</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">input_size</span><span class="p">,</span> <span class="n">rnn</span><span class="o">.</span><span class="n">get_cudnn_mode</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">mode</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">hidden_size</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_layers</span><span class="p">,</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">batch_first</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bidirectional</span><span class="p">))</span></div>
+
+    <span class="k">def</span> <span class="nf">_apply</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fn</span><span class="p">):</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="nb">super</span><span class="p">(</span><span class="n">RNNBase</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">_apply</span><span class="p">(</span><span class="n">fn</span><span class="p">)</span>
+
+        <span class="c1"># Resets _flat_weights</span>
+        <span class="c1"># Note: be v. careful before removing this, as 3rd party device types</span>
+        <span class="c1"># likely rely on this behavior to properly .to() modules like LSTM.</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span> <span class="o">=</span> <span class="p">[(</span><span class="k">lambda</span> <span class="n">wn</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">wn</span><span class="p">)</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">wn</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span><span class="p">)(</span><span class="n">wn</span><span class="p">)</span> <span class="k">for</span> <span class="n">wn</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights_names</span><span class="p">]</span>
+        <span class="c1"># Flattens params (on CUDA)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">flatten_parameters</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">ret</span>
+
+    <span class="k">def</span> <span class="nf">reset_parameters</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">stdv</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">hidden_size</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">weight</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">parameters</span><span class="p">():</span>
+            <span class="n">init</span><span class="o">.</span><span class="n">uniform_</span><span class="p">(</span><span class="n">weight</span><span class="p">,</span> <span class="o">-</span><span class="n">stdv</span><span class="p">,</span> <span class="n">stdv</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">check_input</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tensor</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">expected_input_dim</span> <span class="o">=</span> <span class="mi">2</span> <span class="k">if</span> <span class="n">batch_sizes</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="mi">3</span>
+        <span class="k">if</span> <span class="nb">input</span><span class="o">.</span><span class="n">dim</span><span class="p">()</span> <span class="o">!=</span> <span class="n">expected_input_dim</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s1">&#39;input must have </span><span class="si">{}</span><span class="s1"> dimensions, got </span><span class="si">{}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                    <span class="n">expected_input_dim</span><span class="p">,</span> <span class="nb">input</span><span class="o">.</span><span class="n">dim</span><span class="p">()))</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_size</span> <span class="o">!=</span> <span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s1">&#39;input.size(-1) must be equal to input_size. Expected </span><span class="si">{}</span><span class="s1">, got </span><span class="si">{}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">input_size</span><span class="p">,</span> <span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)))</span>
+
+    <span class="k">def</span> <span class="nf">get_expected_hidden_size</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tensor</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+        <span class="k">if</span> <span class="n">batch_sizes</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">mini_batch</span> <span class="o">=</span> <span class="n">batch_sizes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">mini_batch</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">mini_batch</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">mini_batch</span> <span class="o">=</span> <span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">batch_first</span> <span class="k">else</span> <span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">num_directions</span> <span class="o">=</span> <span class="mi">2</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">bidirectional</span> <span class="k">else</span> <span class="mi">1</span>
+        <span class="n">expected_hidden_size</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_layers</span> <span class="o">*</span> <span class="n">num_directions</span><span class="p">,</span>
+                                <span class="n">mini_batch</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">hidden_size</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">expected_hidden_size</span>
+
+    <span class="k">def</span> <span class="nf">check_hidden_size</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">hx</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">expected_hidden_size</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span>
+                          <span class="n">msg</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;Expected hidden size </span><span class="si">{}</span><span class="s1">, got </span><span class="si">{}</span><span class="s1">&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">hx</span><span class="o">.</span><span class="n">size</span><span class="p">()</span> <span class="o">!=</span> <span class="n">expected_hidden_size</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="n">msg</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">expected_hidden_size</span><span class="p">,</span> <span class="nb">list</span><span class="p">(</span><span class="n">hx</span><span class="o">.</span><span class="n">size</span><span class="p">())))</span>
+
+    <span class="k">def</span> <span class="nf">check_forward_args</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">hidden</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tensor</span><span class="p">]):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_input</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">)</span>
+        <span class="n">expected_hidden_size</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_expected_hidden_size</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_hidden_size</span><span class="p">(</span><span class="n">hidden</span><span class="p">,</span> <span class="n">expected_hidden_size</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">permute_hidden</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">hx</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">permutation</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tensor</span><span class="p">]):</span>
+        <span class="k">if</span> <span class="n">permutation</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">hx</span>
+        <span class="k">return</span> <span class="n">apply_permutation</span><span class="p">(</span><span class="n">hx</span><span class="p">,</span> <span class="n">permutation</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">hx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tensor</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]:</span>
+        <span class="n">is_packed</span> <span class="o">=</span> <span class="nb">isinstance</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">PackedSequence</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">is_packed</span><span class="p">:</span>
+            <span class="nb">input</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">,</span> <span class="n">sorted_indices</span><span class="p">,</span> <span class="n">unsorted_indices</span> <span class="o">=</span> <span class="nb">input</span>
+            <span class="n">max_batch_size</span> <span class="o">=</span> <span class="n">batch_sizes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">max_batch_size</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">max_batch_size</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">batch_sizes</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">max_batch_size</span> <span class="o">=</span> <span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">batch_first</span> <span class="k">else</span> <span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">sorted_indices</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">unsorted_indices</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">if</span> <span class="n">hx</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">num_directions</span> <span class="o">=</span> <span class="mi">2</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">bidirectional</span> <span class="k">else</span> <span class="mi">1</span>
+            <span class="n">hx</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_layers</span> <span class="o">*</span> <span class="n">num_directions</span><span class="p">,</span>
+                             <span class="n">max_batch_size</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">hidden_size</span><span class="p">,</span>
+                             <span class="n">dtype</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Each batch of the hidden state should match the input sequence that</span>
+            <span class="c1"># the user believes he/she is passing in.</span>
+            <span class="n">hx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">permute_hidden</span><span class="p">(</span><span class="n">hx</span><span class="p">,</span> <span class="n">sorted_indices</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_forward_args</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">)</span>
+        <span class="n">_impl</span> <span class="o">=</span> <span class="n">_rnn_impls</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">mode</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">batch_sizes</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">_impl</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bias</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_layers</span><span class="p">,</span>
+                           <span class="bp">self</span><span class="o">.</span><span class="n">dropout</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">training</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bidirectional</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">batch_first</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">_impl</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">,</span> <span class="n">hx</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bias</span><span class="p">,</span>
+                           <span class="bp">self</span><span class="o">.</span><span class="n">num_layers</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">dropout</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">training</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bidirectional</span><span class="p">)</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">hidden</span> <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="n">is_packed</span><span class="p">:</span>
+            <span class="n">output</span> <span class="o">=</span> <span class="n">PackedSequence</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">,</span> <span class="n">sorted_indices</span><span class="p">,</span> <span class="n">unsorted_indices</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">output</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">permute_hidden</span><span class="p">(</span><span class="n">hidden</span><span class="p">,</span> <span class="n">unsorted_indices</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">extra_repr</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{input_size}</span><span class="s1">, </span><span class="si">{hidden_size}</span><span class="s1">&#39;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_layers</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">s</span> <span class="o">+=</span> <span class="s1">&#39;, num_layers=</span><span class="si">{num_layers}</span><span class="s1">&#39;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">bias</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="n">s</span> <span class="o">+=</span> <span class="s1">&#39;, bias=</span><span class="si">{bias}</span><span class="s1">&#39;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">batch_first</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">False</span><span class="p">:</span>
+            <span class="n">s</span> <span class="o">+=</span> <span class="s1">&#39;, batch_first=</span><span class="si">{batch_first}</span><span class="s1">&#39;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">dropout</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">s</span> <span class="o">+=</span> <span class="s1">&#39;, dropout=</span><span class="si">{dropout}</span><span class="s1">&#39;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">bidirectional</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">False</span><span class="p">:</span>
+            <span class="n">s</span> <span class="o">+=</span> <span class="s1">&#39;, bidirectional=</span><span class="si">{bidirectional}</span><span class="s1">&#39;</span>
+        <span class="k">return</span> <span class="n">s</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="vm">__dict__</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__setstate__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">RNNBase</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">__setstate__</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s1">&#39;all_weights&#39;</span> <span class="ow">in</span> <span class="n">d</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_all_weights</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="s1">&#39;all_weights&#39;</span><span class="p">]</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_all_weights</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">],</span> <span class="nb">str</span><span class="p">):</span>
+            <span class="k">return</span>
+        <span class="n">num_layers</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_layers</span>
+        <span class="n">num_directions</span> <span class="o">=</span> <span class="mi">2</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">bidirectional</span> <span class="k">else</span> <span class="mi">1</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights_names</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_all_weights</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">layer</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_layers</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">direction</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_directions</span><span class="p">):</span>
+                <span class="n">suffix</span> <span class="o">=</span> <span class="s1">&#39;_reverse&#39;</span> <span class="k">if</span> <span class="n">direction</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span>
+                <span class="n">weights</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;weight_ih_l</span><span class="si">{}{}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="s1">&#39;weight_hh_l</span><span class="si">{}{}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="s1">&#39;bias_ih_l</span><span class="si">{}{}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="s1">&#39;bias_hh_l</span><span class="si">{}{}</span><span class="s1">&#39;</span><span class="p">]</span>
+                <span class="n">weights</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">layer</span><span class="p">,</span> <span class="n">suffix</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">weights</span><span class="p">]</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">bias</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_all_weights</span> <span class="o">+=</span> <span class="p">[</span><span class="n">weights</span><span class="p">]</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights_names</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">weights</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_all_weights</span> <span class="o">+=</span> <span class="p">[</span><span class="n">weights</span><span class="p">[:</span><span class="mi">2</span><span class="p">]]</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights_names</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">weights</span><span class="p">[:</span><span class="mi">2</span><span class="p">])</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span> <span class="o">=</span> <span class="p">[(</span><span class="k">lambda</span> <span class="n">wn</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">wn</span><span class="p">)</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">wn</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span><span class="p">)(</span><span class="n">wn</span><span class="p">)</span> <span class="k">for</span> <span class="n">wn</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights_names</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">all_weights</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Parameter</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="p">[[</span><span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">weight</span><span class="p">)</span> <span class="k">for</span> <span class="n">weight</span> <span class="ow">in</span> <span class="n">weights</span><span class="p">]</span> <span class="k">for</span> <span class="n">weights</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_all_weights</span><span class="p">]</span>
+
+    <span class="k">def</span> <span class="nf">_replicate_for_data_parallel</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">replica</span> <span class="o">=</span> <span class="nb">super</span><span class="p">(</span><span class="n">RNNBase</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">_replicate_for_data_parallel</span><span class="p">()</span>
+        <span class="c1"># Need to copy these caches, otherwise the replica will share the same</span>
+        <span class="c1"># flat weights list.</span>
+        <span class="n">replica</span><span class="o">.</span><span class="n">_flat_weights</span> <span class="o">=</span> <span class="n">replica</span><span class="o">.</span><span class="n">_flat_weights</span><span class="p">[:]</span>
+        <span class="n">replica</span><span class="o">.</span><span class="n">_flat_weights_names</span> <span class="o">=</span> <span class="n">replica</span><span class="o">.</span><span class="n">_flat_weights_names</span><span class="p">[:]</span>
+        <span class="k">return</span> <span class="n">replica</span></div>
+
+
+<div class="viewcode-block" id="RNN"><a class="viewcode-back" href="../../../../generated/torch.nn.RNN.html#torch.nn.RNN">[docs]</a><span class="k">class</span> <span class="nc">RNN</span><span class="p">(</span><span class="n">RNNBase</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Applies a multi-layer Elman RNN with :math:`\tanh` or :math:`\text{ReLU}` non-linearity to an</span>
+<span class="sd">    input sequence.</span>
+
+
+<span class="sd">    For each element in the input sequence, each layer computes the following</span>
+<span class="sd">    function:</span>
+
+<span class="sd">    .. math::</span>
+<span class="sd">        h_t = \tanh(W_{ih} x_t + b_{ih} + W_{hh} h_{(t-1)} + b_{hh})</span>
+
+<span class="sd">    where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is</span>
+<span class="sd">    the input at time `t`, and :math:`h_{(t-1)}` is the hidden state of the</span>
+<span class="sd">    previous layer at time `t-1` or the initial hidden state at time `0`.</span>
+<span class="sd">    If :attr:`nonlinearity` is ``&#39;relu&#39;``, then :math:`\text{ReLU}` is used instead of :math:`\tanh`.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        input_size: The number of expected features in the input `x`</span>
+<span class="sd">        hidden_size: The number of features in the hidden state `h`</span>
+<span class="sd">        num_layers: Number of recurrent layers. E.g., setting ``num_layers=2``</span>
+<span class="sd">            would mean stacking two RNNs together to form a `stacked RNN`,</span>
+<span class="sd">            with the second RNN taking in outputs of the first RNN and</span>
+<span class="sd">            computing the final results. Default: 1</span>
+<span class="sd">        nonlinearity: The non-linearity to use. Can be either ``&#39;tanh&#39;`` or ``&#39;relu&#39;``. Default: ``&#39;tanh&#39;``</span>
+<span class="sd">        bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.</span>
+<span class="sd">            Default: ``True``</span>
+<span class="sd">        batch_first: If ``True``, then the input and output tensors are provided</span>
+<span class="sd">            as `(batch, seq, feature)`. Default: ``False``</span>
+<span class="sd">        dropout: If non-zero, introduces a `Dropout` layer on the outputs of each</span>
+<span class="sd">            RNN layer except the last layer, with dropout probability equal to</span>
+<span class="sd">            :attr:`dropout`. Default: 0</span>
+<span class="sd">        bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``</span>
+
+<span class="sd">    Inputs: input, h_0</span>
+<span class="sd">        - **input** of shape `(seq_len, batch, input_size)`: tensor containing the features</span>
+<span class="sd">          of the input sequence. The input can also be a packed variable length</span>
+<span class="sd">          sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`</span>
+<span class="sd">          or :func:`torch.nn.utils.rnn.pack_sequence`</span>
+<span class="sd">          for details.</span>
+<span class="sd">        - **h_0** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor</span>
+<span class="sd">          containing the initial hidden state for each element in the batch.</span>
+<span class="sd">          Defaults to zero if not provided. If the RNN is bidirectional,</span>
+<span class="sd">          num_directions should be 2, else it should be 1.</span>
+
+<span class="sd">    Outputs: output, h_n</span>
+<span class="sd">        - **output** of shape `(seq_len, batch, num_directions * hidden_size)`: tensor</span>
+<span class="sd">          containing the output features (`h_t`) from the last layer of the RNN,</span>
+<span class="sd">          for each `t`.  If a :class:`torch.nn.utils.rnn.PackedSequence` has</span>
+<span class="sd">          been given as the input, the output will also be a packed sequence.</span>
+
+<span class="sd">          For the unpacked case, the directions can be separated</span>
+<span class="sd">          using ``output.view(seq_len, batch, num_directions, hidden_size)``,</span>
+<span class="sd">          with forward and backward being direction `0` and `1` respectively.</span>
+<span class="sd">          Similarly, the directions can be separated in the packed case.</span>
+<span class="sd">        - **h_n** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor</span>
+<span class="sd">          containing the hidden state for `t = seq_len`.</span>
+
+<span class="sd">          Like *output*, the layers can be separated using</span>
+<span class="sd">          ``h_n.view(num_layers, num_directions, batch, hidden_size)``.</span>
+
+<span class="sd">    Shape:</span>
+<span class="sd">        - Input1: :math:`(L, N, H_{in})` tensor containing input features where</span>
+<span class="sd">          :math:`H_{in}=\text{input\_size}` and `L` represents a sequence length.</span>
+<span class="sd">        - Input2: :math:`(S, N, H_{out})` tensor</span>
+<span class="sd">          containing the initial hidden state for each element in the batch.</span>
+<span class="sd">          :math:`H_{out}=\text{hidden\_size}`</span>
+<span class="sd">          Defaults to zero if not provided. where :math:`S=\text{num\_layers} * \text{num\_directions}`</span>
+<span class="sd">          If the RNN is bidirectional, num_directions should be 2, else it should be 1.</span>
+<span class="sd">        - Output1: :math:`(L, N, H_{all})` where :math:`H_{all}=\text{num\_directions} * \text{hidden\_size}`</span>
+<span class="sd">        - Output2: :math:`(S, N, H_{out})` tensor containing the next hidden state</span>
+<span class="sd">          for each element in the batch</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        weight_ih_l[k]: the learnable input-hidden weights of the k-th layer,</span>
+<span class="sd">            of shape `(hidden_size, input_size)` for `k = 0`. Otherwise, the shape is</span>
+<span class="sd">            `(hidden_size, num_directions * hidden_size)`</span>
+<span class="sd">        weight_hh_l[k]: the learnable hidden-hidden weights of the k-th layer,</span>
+<span class="sd">            of shape `(hidden_size, hidden_size)`</span>
+<span class="sd">        bias_ih_l[k]: the learnable input-hidden bias of the k-th layer,</span>
+<span class="sd">            of shape `(hidden_size)`</span>
+<span class="sd">        bias_hh_l[k]: the learnable hidden-hidden bias of the k-th layer,</span>
+<span class="sd">            of shape `(hidden_size)`</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`</span>
+<span class="sd">        where :math:`k = \frac{1}{\text{hidden\_size}}`</span>
+
+<span class="sd">    .. include:: ../cudnn_rnn_determinism.rst</span>
+
+<span class="sd">    .. include:: ../cudnn_persistent_rnn.rst</span>
+
+<span class="sd">    Examples::</span>
+
+<span class="sd">        &gt;&gt;&gt; rnn = nn.RNN(10, 20, 2)</span>
+<span class="sd">        &gt;&gt;&gt; input = torch.randn(5, 3, 10)</span>
+<span class="sd">        &gt;&gt;&gt; h0 = torch.randn(2, 3, 20)</span>
+<span class="sd">        &gt;&gt;&gt; output, hn = rnn(input, h0)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">nonlinearity</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s1">&#39;nonlinearity&#39;</span><span class="p">,</span> <span class="s1">&#39;tanh&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">nonlinearity</span> <span class="o">==</span> <span class="s1">&#39;tanh&#39;</span><span class="p">:</span>
+            <span class="n">mode</span> <span class="o">=</span> <span class="s1">&#39;RNN_TANH&#39;</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">nonlinearity</span> <span class="o">==</span> <span class="s1">&#39;relu&#39;</span><span class="p">:</span>
+            <span class="n">mode</span> <span class="o">=</span> <span class="s1">&#39;RNN_RELU&#39;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Unknown nonlinearity &#39;</span><span class="si">{}</span><span class="s2">&#39;&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nonlinearity</span><span class="p">))</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">RNN</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">mode</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+<span class="c1"># XXX: LSTM and GRU implementation is different from RNNBase, this is because:</span>
+<span class="c1"># 1. we want to support nn.LSTM and nn.GRU in TorchScript and TorchScript in</span>
+<span class="c1">#    its current state could not support the python Union Type or Any Type</span>
+<span class="c1"># 2. TorchScript static typing does not allow a Function or Callable type in</span>
+<span class="c1">#    Dict values, so we have to separately call _VF instead of using _rnn_impls</span>
+<span class="c1"># 3. This is temporary only and in the transition state that we want to make it</span>
+<span class="c1">#    on time for the release</span>
+<span class="c1">#</span>
+<span class="c1"># More discussion details in https://github.com/pytorch/pytorch/pull/23266</span>
+<span class="c1">#</span>
+<span class="c1"># TODO: remove the overriding implementations for LSTM and GRU when TorchScript</span>
+<span class="c1"># support expressing these two modules generally.</span>
+<span class="k">class</span> <span class="nc">LSTM</span><span class="p">(</span><span class="n">RNNBase</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Applies a multi-layer long short-term memory (LSTM) RNN to an input</span>
+<span class="sd">    sequence.</span>
+
+
+<span class="sd">    For each element in the input sequence, each layer computes the following</span>
+<span class="sd">    function:</span>
+
+<span class="sd">    .. math::</span>
+<span class="sd">        \begin{array}{ll} \\</span>
+<span class="sd">            i_t = \sigma(W_{ii} x_t + b_{ii} + W_{hi} h_{t-1} + b_{hi}) \\</span>
+<span class="sd">            f_t = \sigma(W_{if} x_t + b_{if} + W_{hf} h_{t-1} + b_{hf}) \\</span>
+<span class="sd">            g_t = \tanh(W_{ig} x_t + b_{ig} + W_{hg} h_{t-1} + b_{hg}) \\</span>
+<span class="sd">            o_t = \sigma(W_{io} x_t + b_{io} + W_{ho} h_{t-1} + b_{ho}) \\</span>
+<span class="sd">            c_t = f_t \odot c_{t-1} + i_t \odot g_t \\</span>
+<span class="sd">            h_t = o_t \odot \tanh(c_t) \\</span>
+<span class="sd">        \end{array}</span>
+
+<span class="sd">    where :math:`h_t` is the hidden state at time `t`, :math:`c_t` is the cell</span>
+<span class="sd">    state at time `t`, :math:`x_t` is the input at time `t`, :math:`h_{t-1}`</span>
+<span class="sd">    is the hidden state of the layer at time `t-1` or the initial hidden</span>
+<span class="sd">    state at time `0`, and :math:`i_t`, :math:`f_t`, :math:`g_t`,</span>
+<span class="sd">    :math:`o_t` are the input, forget, cell, and output gates, respectively.</span>
+<span class="sd">    :math:`\sigma` is the sigmoid function, and :math:`\odot` is the Hadamard product.</span>
+
+<span class="sd">    In a multilayer LSTM, the input :math:`x^{(l)}_t` of the :math:`l` -th layer</span>
+<span class="sd">    (:math:`l &gt;= 2`) is the hidden state :math:`h^{(l-1)}_t` of the previous layer multiplied by</span>
+<span class="sd">    dropout :math:`\delta^{(l-1)}_t` where each :math:`\delta^{(l-1)}_t` is a Bernoulli random</span>
+<span class="sd">    variable which is :math:`0` with probability :attr:`dropout`.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        input_size: The number of expected features in the input `x`</span>
+<span class="sd">        hidden_size: The number of features in the hidden state `h`</span>
+<span class="sd">        num_layers: Number of recurrent layers. E.g., setting ``num_layers=2``</span>
+<span class="sd">            would mean stacking two LSTMs together to form a `stacked LSTM`,</span>
+<span class="sd">            with the second LSTM taking in outputs of the first LSTM and</span>
+<span class="sd">            computing the final results. Default: 1</span>
+<span class="sd">        bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.</span>
+<span class="sd">            Default: ``True``</span>
+<span class="sd">        batch_first: If ``True``, then the input and output tensors are provided</span>
+<span class="sd">            as (batch, seq, feature). Default: ``False``</span>
+<span class="sd">        dropout: If non-zero, introduces a `Dropout` layer on the outputs of each</span>
+<span class="sd">            LSTM layer except the last layer, with dropout probability equal to</span>
+<span class="sd">            :attr:`dropout`. Default: 0</span>
+<span class="sd">        bidirectional: If ``True``, becomes a bidirectional LSTM. Default: ``False``</span>
+
+<span class="sd">    Inputs: input, (h_0, c_0)</span>
+<span class="sd">        - **input** of shape `(seq_len, batch, input_size)`: tensor containing the features</span>
+<span class="sd">          of the input sequence.</span>
+<span class="sd">          The input can also be a packed variable length sequence.</span>
+<span class="sd">          See :func:`torch.nn.utils.rnn.pack_padded_sequence` or</span>
+<span class="sd">          :func:`torch.nn.utils.rnn.pack_sequence` for details.</span>
+<span class="sd">        - **h_0** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor</span>
+<span class="sd">          containing the initial hidden state for each element in the batch.</span>
+<span class="sd">          If the LSTM is bidirectional, num_directions should be 2, else it should be 1.</span>
+<span class="sd">        - **c_0** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor</span>
+<span class="sd">          containing the initial cell state for each element in the batch.</span>
+
+<span class="sd">          If `(h_0, c_0)` is not provided, both **h_0** and **c_0** default to zero.</span>
+
+
+<span class="sd">    Outputs: output, (h_n, c_n)</span>
+<span class="sd">        - **output** of shape `(seq_len, batch, num_directions * hidden_size)`: tensor</span>
+<span class="sd">          containing the output features `(h_t)` from the last layer of the LSTM,</span>
+<span class="sd">          for each `t`. If a :class:`torch.nn.utils.rnn.PackedSequence` has been</span>
+<span class="sd">          given as the input, the output will also be a packed sequence.</span>
+
+<span class="sd">          For the unpacked case, the directions can be separated</span>
+<span class="sd">          using ``output.view(seq_len, batch, num_directions, hidden_size)``,</span>
+<span class="sd">          with forward and backward being direction `0` and `1` respectively.</span>
+<span class="sd">          Similarly, the directions can be separated in the packed case.</span>
+<span class="sd">        - **h_n** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor</span>
+<span class="sd">          containing the hidden state for `t = seq_len`.</span>
+
+<span class="sd">          Like *output*, the layers can be separated using</span>
+<span class="sd">          ``h_n.view(num_layers, num_directions, batch, hidden_size)`` and similarly for *c_n*.</span>
+<span class="sd">        - **c_n** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor</span>
+<span class="sd">          containing the cell state for `t = seq_len`.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer</span>
+<span class="sd">            `(W_ii|W_if|W_ig|W_io)`, of shape `(4*hidden_size, input_size)` for `k = 0`.</span>
+<span class="sd">            Otherwise, the shape is `(4*hidden_size, num_directions * hidden_size)`</span>
+<span class="sd">        weight_hh_l[k] : the learnable hidden-hidden weights of the :math:`\text{k}^{th}` layer</span>
+<span class="sd">            `(W_hi|W_hf|W_hg|W_ho)`, of shape `(4*hidden_size, hidden_size)`</span>
+<span class="sd">        bias_ih_l[k] : the learnable input-hidden bias of the :math:`\text{k}^{th}` layer</span>
+<span class="sd">            `(b_ii|b_if|b_ig|b_io)`, of shape `(4*hidden_size)`</span>
+<span class="sd">        bias_hh_l[k] : the learnable hidden-hidden bias of the :math:`\text{k}^{th}` layer</span>
+<span class="sd">            `(b_hi|b_hf|b_hg|b_ho)`, of shape `(4*hidden_size)`</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`</span>
+<span class="sd">        where :math:`k = \frac{1}{\text{hidden\_size}}`</span>
+
+<span class="sd">    .. include:: ../cudnn_rnn_determinism.rst</span>
+
+<span class="sd">    .. include:: ../cudnn_persistent_rnn.rst</span>
+
+<span class="sd">    Examples::</span>
+
+<span class="sd">        &gt;&gt;&gt; rnn = nn.LSTM(10, 20, 2)</span>
+<span class="sd">        &gt;&gt;&gt; input = torch.randn(5, 3, 10)</span>
+<span class="sd">        &gt;&gt;&gt; h0 = torch.randn(2, 3, 20)</span>
+<span class="sd">        &gt;&gt;&gt; c0 = torch.randn(2, 3, 20)</span>
+<span class="sd">        &gt;&gt;&gt; output, (hn, cn) = rnn(input, (h0, c0))</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">LSTM</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;LSTM&#39;</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">check_forward_args</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">hidden</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">],</span> <span class="n">batch_sizes</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tensor</span><span class="p">]):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_input</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">)</span>
+        <span class="n">expected_hidden_size</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_expected_hidden_size</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_hidden_size</span><span class="p">(</span><span class="n">hidden</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">expected_hidden_size</span><span class="p">,</span>
+                               <span class="s1">&#39;Expected hidden[0] size </span><span class="si">{}</span><span class="s1">, got </span><span class="si">{}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_hidden_size</span><span class="p">(</span><span class="n">hidden</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">expected_hidden_size</span><span class="p">,</span>
+                               <span class="s1">&#39;Expected hidden[1] size </span><span class="si">{}</span><span class="s1">, got </span><span class="si">{}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">permute_hidden</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">hx</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">],</span> <span class="n">permutation</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tensor</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]:</span>
+        <span class="k">if</span> <span class="n">permutation</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">hx</span>
+        <span class="k">return</span> <span class="n">apply_permutation</span><span class="p">(</span><span class="n">hx</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">permutation</span><span class="p">),</span> <span class="n">apply_permutation</span><span class="p">(</span><span class="n">hx</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">permutation</span><span class="p">)</span>
+
+    <span class="nd">@overload</span>
+    <span class="nd">@torch</span><span class="o">.</span><span class="n">_jit_internal</span><span class="o">.</span><span class="n">_overload_method</span>  <span class="c1"># noqa: F811</span>
+    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">hx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span>
+                <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]]:</span>  <span class="c1"># noqa: F811</span>
+        <span class="k">pass</span>
+
+    <span class="nd">@overload</span>
+    <span class="nd">@torch</span><span class="o">.</span><span class="n">_jit_internal</span><span class="o">.</span><span class="n">_overload_method</span>  <span class="c1"># noqa: F811</span>
+    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">PackedSequence</span><span class="p">,</span> <span class="n">hx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span>
+                <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">PackedSequence</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]]:</span>  <span class="c1"># noqa: F811</span>
+        <span class="k">pass</span>
+
+    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>  <span class="c1"># noqa: F811</span>
+        <span class="n">orig_input</span> <span class="o">=</span> <span class="nb">input</span>
+        <span class="c1"># xxx: isinstance check needs to be in conditional for TorchScript to compile</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">orig_input</span><span class="p">,</span> <span class="n">PackedSequence</span><span class="p">):</span>
+            <span class="nb">input</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">,</span> <span class="n">sorted_indices</span><span class="p">,</span> <span class="n">unsorted_indices</span> <span class="o">=</span> <span class="nb">input</span>
+            <span class="n">max_batch_size</span> <span class="o">=</span> <span class="n">batch_sizes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">max_batch_size</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">max_batch_size</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">batch_sizes</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">max_batch_size</span> <span class="o">=</span> <span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">batch_first</span> <span class="k">else</span> <span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">sorted_indices</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">unsorted_indices</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">if</span> <span class="n">hx</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">num_directions</span> <span class="o">=</span> <span class="mi">2</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">bidirectional</span> <span class="k">else</span> <span class="mi">1</span>
+            <span class="n">zeros</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_layers</span> <span class="o">*</span> <span class="n">num_directions</span><span class="p">,</span>
+                                <span class="n">max_batch_size</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">hidden_size</span><span class="p">,</span>
+                                <span class="n">dtype</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+            <span class="n">hx</span> <span class="o">=</span> <span class="p">(</span><span class="n">zeros</span><span class="p">,</span> <span class="n">zeros</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Each batch of the hidden state should match the input sequence that</span>
+            <span class="c1"># the user believes he/she is passing in.</span>
+            <span class="n">hx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">permute_hidden</span><span class="p">(</span><span class="n">hx</span><span class="p">,</span> <span class="n">sorted_indices</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_forward_args</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">batch_sizes</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">_VF</span><span class="o">.</span><span class="n">lstm</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bias</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_layers</span><span class="p">,</span>
+                              <span class="bp">self</span><span class="o">.</span><span class="n">dropout</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">training</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bidirectional</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">batch_first</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">_VF</span><span class="o">.</span><span class="n">lstm</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">,</span> <span class="n">hx</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bias</span><span class="p">,</span>
+                              <span class="bp">self</span><span class="o">.</span><span class="n">num_layers</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">dropout</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">training</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bidirectional</span><span class="p">)</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">hidden</span> <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+        <span class="c1"># xxx: isinstance check needs to be in conditional for TorchScript to compile</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">orig_input</span><span class="p">,</span> <span class="n">PackedSequence</span><span class="p">):</span>
+            <span class="n">output_packed</span> <span class="o">=</span> <span class="n">PackedSequence</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">,</span> <span class="n">sorted_indices</span><span class="p">,</span> <span class="n">unsorted_indices</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">output_packed</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">permute_hidden</span><span class="p">(</span><span class="n">hidden</span><span class="p">,</span> <span class="n">unsorted_indices</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">output</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">permute_hidden</span><span class="p">(</span><span class="n">hidden</span><span class="p">,</span> <span class="n">unsorted_indices</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">GRU</span><span class="p">(</span><span class="n">RNNBase</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;Applies a multi-layer gated recurrent unit (GRU) RNN to an input sequence.</span>
+
+
+<span class="sd">    For each element in the input sequence, each layer computes the following</span>
+<span class="sd">    function:</span>
+
+<span class="sd">    .. math::</span>
+<span class="sd">        \begin{array}{ll}</span>
+<span class="sd">            r_t = \sigma(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\</span>
+<span class="sd">            z_t = \sigma(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\</span>
+<span class="sd">            n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn})) \\</span>
+<span class="sd">            h_t = (1 - z_t) * n_t + z_t * h_{(t-1)}</span>
+<span class="sd">        \end{array}</span>
+
+<span class="sd">    where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the input</span>
+<span class="sd">    at time `t`, :math:`h_{(t-1)}` is the hidden state of the layer</span>
+<span class="sd">    at time `t-1` or the initial hidden state at time `0`, and :math:`r_t`,</span>
+<span class="sd">    :math:`z_t`, :math:`n_t` are the reset, update, and new gates, respectively.</span>
+<span class="sd">    :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product.</span>
+
+<span class="sd">    In a multilayer GRU, the input :math:`x^{(l)}_t` of the :math:`l` -th layer</span>
+<span class="sd">    (:math:`l &gt;= 2`) is the hidden state :math:`h^{(l-1)}_t` of the previous layer multiplied by</span>
+<span class="sd">    dropout :math:`\delta^{(l-1)}_t` where each :math:`\delta^{(l-1)}_t` is a Bernoulli random</span>
+<span class="sd">    variable which is :math:`0` with probability :attr:`dropout`.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        input_size: The number of expected features in the input `x`</span>
+<span class="sd">        hidden_size: The number of features in the hidden state `h`</span>
+<span class="sd">        num_layers: Number of recurrent layers. E.g., setting ``num_layers=2``</span>
+<span class="sd">            would mean stacking two GRUs together to form a `stacked GRU`,</span>
+<span class="sd">            with the second GRU taking in outputs of the first GRU and</span>
+<span class="sd">            computing the final results. Default: 1</span>
+<span class="sd">        bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.</span>
+<span class="sd">            Default: ``True``</span>
+<span class="sd">        batch_first: If ``True``, then the input and output tensors are provided</span>
+<span class="sd">            as (batch, seq, feature). Default: ``False``</span>
+<span class="sd">        dropout: If non-zero, introduces a `Dropout` layer on the outputs of each</span>
+<span class="sd">            GRU layer except the last layer, with dropout probability equal to</span>
+<span class="sd">            :attr:`dropout`. Default: 0</span>
+<span class="sd">        bidirectional: If ``True``, becomes a bidirectional GRU. Default: ``False``</span>
+
+<span class="sd">    Inputs: input, h_0</span>
+<span class="sd">        - **input** of shape `(seq_len, batch, input_size)`: tensor containing the features</span>
+<span class="sd">          of the input sequence. The input can also be a packed variable length</span>
+<span class="sd">          sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`</span>
+<span class="sd">          for details.</span>
+<span class="sd">        - **h_0** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor</span>
+<span class="sd">          containing the initial hidden state for each element in the batch.</span>
+<span class="sd">          Defaults to zero if not provided. If the RNN is bidirectional,</span>
+<span class="sd">          num_directions should be 2, else it should be 1.</span>
+
+<span class="sd">    Outputs: output, h_n</span>
+<span class="sd">        - **output** of shape `(seq_len, batch, num_directions * hidden_size)`: tensor</span>
+<span class="sd">          containing the output features h_t from the last layer of the GRU,</span>
+<span class="sd">          for each `t`. If a :class:`torch.nn.utils.rnn.PackedSequence` has been</span>
+<span class="sd">          given as the input, the output will also be a packed sequence.</span>
+<span class="sd">          For the unpacked case, the directions can be separated</span>
+<span class="sd">          using ``output.view(seq_len, batch, num_directions, hidden_size)``,</span>
+<span class="sd">          with forward and backward being direction `0` and `1` respectively.</span>
+
+<span class="sd">          Similarly, the directions can be separated in the packed case.</span>
+<span class="sd">        - **h_n** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor</span>
+<span class="sd">          containing the hidden state for `t = seq_len`</span>
+
+<span class="sd">          Like *output*, the layers can be separated using</span>
+<span class="sd">          ``h_n.view(num_layers, num_directions, batch, hidden_size)``.</span>
+
+<span class="sd">    Shape:</span>
+<span class="sd">        - Input1: :math:`(L, N, H_{in})` tensor containing input features where</span>
+<span class="sd">          :math:`H_{in}=\text{input\_size}` and `L` represents a sequence length.</span>
+<span class="sd">        - Input2: :math:`(S, N, H_{out})` tensor</span>
+<span class="sd">          containing the initial hidden state for each element in the batch.</span>
+<span class="sd">          :math:`H_{out}=\text{hidden\_size}`</span>
+<span class="sd">          Defaults to zero if not provided. where :math:`S=\text{num\_layers} * \text{num\_directions}`</span>
+<span class="sd">          If the RNN is bidirectional, num_directions should be 2, else it should be 1.</span>
+<span class="sd">        - Output1: :math:`(L, N, H_{all})` where :math:`H_{all}=\text{num\_directions} * \text{hidden\_size}`</span>
+<span class="sd">        - Output2: :math:`(S, N, H_{out})` tensor containing the next hidden state</span>
+<span class="sd">          for each element in the batch</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer</span>
+<span class="sd">            (W_ir|W_iz|W_in), of shape `(3*hidden_size, input_size)` for `k = 0`.</span>
+<span class="sd">            Otherwise, the shape is `(3*hidden_size, num_directions * hidden_size)`</span>
+<span class="sd">        weight_hh_l[k] : the learnable hidden-hidden weights of the :math:`\text{k}^{th}` layer</span>
+<span class="sd">            (W_hr|W_hz|W_hn), of shape `(3*hidden_size, hidden_size)`</span>
+<span class="sd">        bias_ih_l[k] : the learnable input-hidden bias of the :math:`\text{k}^{th}` layer</span>
+<span class="sd">            (b_ir|b_iz|b_in), of shape `(3*hidden_size)`</span>
+<span class="sd">        bias_hh_l[k] : the learnable hidden-hidden bias of the :math:`\text{k}^{th}` layer</span>
+<span class="sd">            (b_hr|b_hz|b_hn), of shape `(3*hidden_size)`</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`</span>
+<span class="sd">        where :math:`k = \frac{1}{\text{hidden\_size}}`</span>
+
+<span class="sd">    .. include:: ../cudnn_persistent_rnn.rst</span>
+
+<span class="sd">    Examples::</span>
+
+<span class="sd">        &gt;&gt;&gt; rnn = nn.GRU(10, 20, 2)</span>
+<span class="sd">        &gt;&gt;&gt; input = torch.randn(5, 3, 10)</span>
+<span class="sd">        &gt;&gt;&gt; h0 = torch.randn(2, 3, 20)</span>
+<span class="sd">        &gt;&gt;&gt; output, hn = rnn(input, h0)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">GRU</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s1">&#39;GRU&#39;</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="nd">@overload</span>
+    <span class="nd">@torch</span><span class="o">.</span><span class="n">_jit_internal</span><span class="o">.</span><span class="n">_overload_method</span>  <span class="c1"># noqa: F811</span>
+    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">hx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tensor</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]:</span>  <span class="c1"># noqa: F811</span>
+        <span class="k">pass</span>
+
+    <span class="nd">@overload</span>
+    <span class="nd">@torch</span><span class="o">.</span><span class="n">_jit_internal</span><span class="o">.</span><span class="n">_overload_method</span>  <span class="c1"># noqa: F811</span>
+    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">PackedSequence</span><span class="p">,</span> <span class="n">hx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tensor</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">PackedSequence</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]:</span>  <span class="c1"># noqa: F811</span>
+        <span class="k">pass</span>
+
+    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>  <span class="c1"># noqa: F811</span>
+        <span class="n">orig_input</span> <span class="o">=</span> <span class="nb">input</span>
+        <span class="c1"># xxx: isinstance check needs to be in conditional for TorchScript to compile</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">orig_input</span><span class="p">,</span> <span class="n">PackedSequence</span><span class="p">):</span>
+            <span class="nb">input</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">,</span> <span class="n">sorted_indices</span><span class="p">,</span> <span class="n">unsorted_indices</span> <span class="o">=</span> <span class="nb">input</span>
+            <span class="n">max_batch_size</span> <span class="o">=</span> <span class="n">batch_sizes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">max_batch_size</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">max_batch_size</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">batch_sizes</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">max_batch_size</span> <span class="o">=</span> <span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">batch_first</span> <span class="k">else</span> <span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+            <span class="n">sorted_indices</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="n">unsorted_indices</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">if</span> <span class="n">hx</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">num_directions</span> <span class="o">=</span> <span class="mi">2</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">bidirectional</span> <span class="k">else</span> <span class="mi">1</span>
+            <span class="n">hx</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">num_layers</span> <span class="o">*</span> <span class="n">num_directions</span><span class="p">,</span>
+                             <span class="n">max_batch_size</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">hidden_size</span><span class="p">,</span>
+                             <span class="n">dtype</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># Each batch of the hidden state should match the input sequence that</span>
+            <span class="c1"># the user believes he/she is passing in.</span>
+            <span class="n">hx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">permute_hidden</span><span class="p">(</span><span class="n">hx</span><span class="p">,</span> <span class="n">sorted_indices</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_forward_args</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">batch_sizes</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">_VF</span><span class="o">.</span><span class="n">gru</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bias</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">num_layers</span><span class="p">,</span>
+                             <span class="bp">self</span><span class="o">.</span><span class="n">dropout</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">training</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bidirectional</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">batch_first</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">_VF</span><span class="o">.</span><span class="n">gru</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">,</span> <span class="n">hx</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_flat_weights</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bias</span><span class="p">,</span>
+                             <span class="bp">self</span><span class="o">.</span><span class="n">num_layers</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">dropout</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">training</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bidirectional</span><span class="p">)</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">hidden</span> <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="c1"># xxx: isinstance check needs to be in conditional for TorchScript to compile</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">orig_input</span><span class="p">,</span> <span class="n">PackedSequence</span><span class="p">):</span>
+            <span class="n">output_packed</span> <span class="o">=</span> <span class="n">PackedSequence</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">batch_sizes</span><span class="p">,</span> <span class="n">sorted_indices</span><span class="p">,</span> <span class="n">unsorted_indices</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">output_packed</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">permute_hidden</span><span class="p">(</span><span class="n">hidden</span><span class="p">,</span> <span class="n">unsorted_indices</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">output</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">permute_hidden</span><span class="p">(</span><span class="n">hidden</span><span class="p">,</span> <span class="n">unsorted_indices</span><span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">RNNCellBase</span><span class="p">(</span><span class="n">Module</span><span class="p">):</span>
+    <span class="n">__constants__</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;input_size&#39;</span><span class="p">,</span> <span class="s1">&#39;hidden_size&#39;</span><span class="p">,</span> <span class="s1">&#39;bias&#39;</span><span class="p">]</span>
+
+    <span class="n">input_size</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">hidden_size</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">bias</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">weight_ih</span><span class="p">:</span> <span class="n">Tensor</span>
+    <span class="n">weight_hh</span><span class="p">:</span> <span class="n">Tensor</span>
+    <span class="c1"># WARNING: bias_ih and bias_hh purposely not defined here.</span>
+    <span class="c1"># See https://github.com/pytorch/pytorch/issues/39670</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">hidden_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">bias</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">num_chunks</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">RNNCellBase</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input_size</span> <span class="o">=</span> <span class="n">input_size</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hidden_size</span> <span class="o">=</span> <span class="n">hidden_size</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bias</span> <span class="o">=</span> <span class="n">bias</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">weight_ih</span> <span class="o">=</span> <span class="n">Parameter</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">(</span><span class="n">num_chunks</span> <span class="o">*</span> <span class="n">hidden_size</span><span class="p">,</span> <span class="n">input_size</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">weight_hh</span> <span class="o">=</span> <span class="n">Parameter</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">(</span><span class="n">num_chunks</span> <span class="o">*</span> <span class="n">hidden_size</span><span class="p">,</span> <span class="n">hidden_size</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">bias</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">bias_ih</span> <span class="o">=</span> <span class="n">Parameter</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">(</span><span class="n">num_chunks</span> <span class="o">*</span> <span class="n">hidden_size</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">bias_hh</span> <span class="o">=</span> <span class="n">Parameter</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">(</span><span class="n">num_chunks</span> <span class="o">*</span> <span class="n">hidden_size</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">register_parameter</span><span class="p">(</span><span class="s1">&#39;bias_ih&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">register_parameter</span><span class="p">(</span><span class="s1">&#39;bias_hh&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">reset_parameters</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">extra_repr</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="si">{input_size}</span><span class="s1">, </span><span class="si">{hidden_size}</span><span class="s1">&#39;</span>
+        <span class="k">if</span> <span class="s1">&#39;bias&#39;</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__dict__</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">bias</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="n">s</span> <span class="o">+=</span> <span class="s1">&#39;, bias=</span><span class="si">{bias}</span><span class="s1">&#39;</span>
+        <span class="k">if</span> <span class="s1">&#39;nonlinearity&#39;</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="vm">__dict__</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">nonlinearity</span> <span class="o">!=</span> <span class="s2">&quot;tanh&quot;</span><span class="p">:</span>
+            <span class="n">s</span> <span class="o">+=</span> <span class="s1">&#39;, nonlinearity=</span><span class="si">{nonlinearity}</span><span class="s1">&#39;</span>
+        <span class="k">return</span> <span class="n">s</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="vm">__dict__</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">check_forward_input</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_size</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">&quot;input has inconsistent input_size: got </span><span class="si">{}</span><span class="s2">, expected </span><span class="si">{}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                    <span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_size</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">check_forward_hidden</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">hx</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">hidden_label</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">!=</span> <span class="n">hx</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">&quot;Input batch size </span><span class="si">{}</span><span class="s2"> doesn&#39;t match hidden</span><span class="si">{}</span><span class="s2"> batch size </span><span class="si">{}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                    <span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="n">hidden_label</span><span class="p">,</span> <span class="n">hx</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">)))</span>
+
+        <span class="k">if</span> <span class="n">hx</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">hidden_size</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">&quot;hidden</span><span class="si">{}</span><span class="s2"> has inconsistent hidden_size: got </span><span class="si">{}</span><span class="s2">, expected </span><span class="si">{}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+                    <span class="n">hidden_label</span><span class="p">,</span> <span class="n">hx</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">hidden_size</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">reset_parameters</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">stdv</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">hidden_size</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">weight</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">parameters</span><span class="p">():</span>
+            <span class="n">init</span><span class="o">.</span><span class="n">uniform_</span><span class="p">(</span><span class="n">weight</span><span class="p">,</span> <span class="o">-</span><span class="n">stdv</span><span class="p">,</span> <span class="n">stdv</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="RNNCell"><a class="viewcode-back" href="../../../../generated/torch.nn.RNNCell.html#torch.nn.RNNCell">[docs]</a><span class="k">class</span> <span class="nc">RNNCell</span><span class="p">(</span><span class="n">RNNCellBase</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;An Elman RNN cell with tanh or ReLU non-linearity.</span>
+
+<span class="sd">    .. math::</span>
+
+<span class="sd">        h&#39; = \tanh(W_{ih} x + b_{ih}  +  W_{hh} h + b_{hh})</span>
+
+<span class="sd">    If :attr:`nonlinearity` is `&#39;relu&#39;`, then ReLU is used in place of tanh.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        input_size: The number of expected features in the input `x`</span>
+<span class="sd">        hidden_size: The number of features in the hidden state `h`</span>
+<span class="sd">        bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.</span>
+<span class="sd">            Default: ``True``</span>
+<span class="sd">        nonlinearity: The non-linearity to use. Can be either ``&#39;tanh&#39;`` or ``&#39;relu&#39;``. Default: ``&#39;tanh&#39;``</span>
+
+<span class="sd">    Inputs: input, hidden</span>
+<span class="sd">        - **input** of shape `(batch, input_size)`: tensor containing input features</span>
+<span class="sd">        - **hidden** of shape `(batch, hidden_size)`: tensor containing the initial hidden</span>
+<span class="sd">          state for each element in the batch.</span>
+<span class="sd">          Defaults to zero if not provided.</span>
+
+<span class="sd">    Outputs: h&#39;</span>
+<span class="sd">        - **h&#39;** of shape `(batch, hidden_size)`: tensor containing the next hidden state</span>
+<span class="sd">          for each element in the batch</span>
+
+<span class="sd">    Shape:</span>
+<span class="sd">        - Input1: :math:`(N, H_{in})` tensor containing input features where</span>
+<span class="sd">          :math:`H_{in}` = `input_size`</span>
+<span class="sd">        - Input2: :math:`(N, H_{out})` tensor containing the initial hidden</span>
+<span class="sd">          state for each element in the batch where :math:`H_{out}` = `hidden_size`</span>
+<span class="sd">          Defaults to zero if not provided.</span>
+<span class="sd">        - Output: :math:`(N, H_{out})` tensor containing the next hidden state</span>
+<span class="sd">          for each element in the batch</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        weight_ih: the learnable input-hidden weights, of shape</span>
+<span class="sd">            `(hidden_size, input_size)`</span>
+<span class="sd">        weight_hh: the learnable hidden-hidden weights, of shape</span>
+<span class="sd">            `(hidden_size, hidden_size)`</span>
+<span class="sd">        bias_ih: the learnable input-hidden bias, of shape `(hidden_size)`</span>
+<span class="sd">        bias_hh: the learnable hidden-hidden bias, of shape `(hidden_size)`</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`</span>
+<span class="sd">        where :math:`k = \frac{1}{\text{hidden\_size}}`</span>
+
+<span class="sd">    Examples::</span>
+
+<span class="sd">        &gt;&gt;&gt; rnn = nn.RNNCell(10, 20)</span>
+<span class="sd">        &gt;&gt;&gt; input = torch.randn(6, 3, 10)</span>
+<span class="sd">        &gt;&gt;&gt; hx = torch.randn(3, 20)</span>
+<span class="sd">        &gt;&gt;&gt; output = []</span>
+<span class="sd">        &gt;&gt;&gt; for i in range(6):</span>
+<span class="sd">                hx = rnn(input[i], hx)</span>
+<span class="sd">                output.append(hx)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">__constants__</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;input_size&#39;</span><span class="p">,</span> <span class="s1">&#39;hidden_size&#39;</span><span class="p">,</span> <span class="s1">&#39;bias&#39;</span><span class="p">,</span> <span class="s1">&#39;nonlinearity&#39;</span><span class="p">]</span>
+    <span class="n">nonlinearity</span><span class="p">:</span> <span class="nb">str</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">hidden_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">bias</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">nonlinearity</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;tanh&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">RNNCell</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">input_size</span><span class="p">,</span> <span class="n">hidden_size</span><span class="p">,</span> <span class="n">bias</span><span class="p">,</span> <span class="n">num_chunks</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">nonlinearity</span> <span class="o">=</span> <span class="n">nonlinearity</span>
+
+    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">hx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tensor</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_forward_input</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">hx</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">hx</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">hidden_size</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_forward_hidden</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">nonlinearity</span> <span class="o">==</span> <span class="s2">&quot;tanh&quot;</span><span class="p">:</span>
+            <span class="n">ret</span> <span class="o">=</span> <span class="n">_VF</span><span class="o">.</span><span class="n">rnn_tanh_cell</span><span class="p">(</span>
+                <span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">weight_ih</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">weight_hh</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">bias_ih</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bias_hh</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">nonlinearity</span> <span class="o">==</span> <span class="s2">&quot;relu&quot;</span><span class="p">:</span>
+            <span class="n">ret</span> <span class="o">=</span> <span class="n">_VF</span><span class="o">.</span><span class="n">rnn_relu_cell</span><span class="p">(</span>
+                <span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">weight_ih</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">weight_hh</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">bias_ih</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bias_hh</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">ret</span> <span class="o">=</span> <span class="nb">input</span>  <span class="c1"># TODO: remove when jit supports exception flow</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">&quot;Unknown nonlinearity: </span><span class="si">{}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">nonlinearity</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">ret</span></div>
+
+
+<span class="k">class</span> <span class="nc">LSTMCell</span><span class="p">(</span><span class="n">RNNCellBase</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;A long short-term memory (LSTM) cell.</span>
+
+<span class="sd">    .. math::</span>
+
+<span class="sd">        \begin{array}{ll}</span>
+<span class="sd">        i = \sigma(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\</span>
+<span class="sd">        f = \sigma(W_{if} x + b_{if} + W_{hf} h + b_{hf}) \\</span>
+<span class="sd">        g = \tanh(W_{ig} x + b_{ig} + W_{hg} h + b_{hg}) \\</span>
+<span class="sd">        o = \sigma(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\</span>
+<span class="sd">        c&#39; = f * c + i * g \\</span>
+<span class="sd">        h&#39; = o * \tanh(c&#39;) \\</span>
+<span class="sd">        \end{array}</span>
+
+<span class="sd">    where :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        input_size: The number of expected features in the input `x`</span>
+<span class="sd">        hidden_size: The number of features in the hidden state `h`</span>
+<span class="sd">        bias: If ``False``, then the layer does not use bias weights `b_ih` and</span>
+<span class="sd">            `b_hh`. Default: ``True``</span>
+
+<span class="sd">    Inputs: input, (h_0, c_0)</span>
+<span class="sd">        - **input** of shape `(batch, input_size)`: tensor containing input features</span>
+<span class="sd">        - **h_0** of shape `(batch, hidden_size)`: tensor containing the initial hidden</span>
+<span class="sd">          state for each element in the batch.</span>
+<span class="sd">        - **c_0** of shape `(batch, hidden_size)`: tensor containing the initial cell state</span>
+<span class="sd">          for each element in the batch.</span>
+
+<span class="sd">          If `(h_0, c_0)` is not provided, both **h_0** and **c_0** default to zero.</span>
+
+<span class="sd">    Outputs: (h_1, c_1)</span>
+<span class="sd">        - **h_1** of shape `(batch, hidden_size)`: tensor containing the next hidden state</span>
+<span class="sd">          for each element in the batch</span>
+<span class="sd">        - **c_1** of shape `(batch, hidden_size)`: tensor containing the next cell state</span>
+<span class="sd">          for each element in the batch</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        weight_ih: the learnable input-hidden weights, of shape</span>
+<span class="sd">            `(4*hidden_size, input_size)`</span>
+<span class="sd">        weight_hh: the learnable hidden-hidden weights, of shape</span>
+<span class="sd">            `(4*hidden_size, hidden_size)`</span>
+<span class="sd">        bias_ih: the learnable input-hidden bias, of shape `(4*hidden_size)`</span>
+<span class="sd">        bias_hh: the learnable hidden-hidden bias, of shape `(4*hidden_size)`</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`</span>
+<span class="sd">        where :math:`k = \frac{1}{\text{hidden\_size}}`</span>
+
+<span class="sd">    Examples::</span>
+
+<span class="sd">        &gt;&gt;&gt; rnn = nn.LSTMCell(10, 20)</span>
+<span class="sd">        &gt;&gt;&gt; input = torch.randn(3, 10)</span>
+<span class="sd">        &gt;&gt;&gt; hx = torch.randn(3, 20)</span>
+<span class="sd">        &gt;&gt;&gt; cx = torch.randn(3, 20)</span>
+<span class="sd">        &gt;&gt;&gt; output = []</span>
+<span class="sd">        &gt;&gt;&gt; for i in range(6):</span>
+<span class="sd">                hx, cx = rnn(input[i], (hx, cx))</span>
+<span class="sd">                output.append(hx)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">hidden_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">bias</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">LSTMCell</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">input_size</span><span class="p">,</span> <span class="n">hidden_size</span><span class="p">,</span> <span class="n">bias</span><span class="p">,</span> <span class="n">num_chunks</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">hx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_forward_input</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">hx</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">zeros</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">hidden_size</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+            <span class="n">hx</span> <span class="o">=</span> <span class="p">(</span><span class="n">zeros</span><span class="p">,</span> <span class="n">zeros</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_forward_hidden</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s1">&#39;[0]&#39;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_forward_hidden</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="s1">&#39;[1]&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">_VF</span><span class="o">.</span><span class="n">lstm_cell</span><span class="p">(</span>
+            <span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">weight_ih</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">weight_hh</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">bias_ih</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bias_hh</span><span class="p">,</span>
+        <span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">GRUCell</span><span class="p">(</span><span class="n">RNNCellBase</span><span class="p">):</span>
+    <span class="sa">r</span><span class="sd">&quot;&quot;&quot;A gated recurrent unit (GRU) cell</span>
+
+<span class="sd">    .. math::</span>
+
+<span class="sd">        \begin{array}{ll}</span>
+<span class="sd">        r = \sigma(W_{ir} x + b_{ir} + W_{hr} h + b_{hr}) \\</span>
+<span class="sd">        z = \sigma(W_{iz} x + b_{iz} + W_{hz} h + b_{hz}) \\</span>
+<span class="sd">        n = \tanh(W_{in} x + b_{in} + r * (W_{hn} h + b_{hn})) \\</span>
+<span class="sd">        h&#39; = (1 - z) * n + z * h</span>
+<span class="sd">        \end{array}</span>
+
+<span class="sd">    where :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        input_size: The number of expected features in the input `x`</span>
+<span class="sd">        hidden_size: The number of features in the hidden state `h`</span>
+<span class="sd">        bias: If ``False``, then the layer does not use bias weights `b_ih` and</span>
+<span class="sd">            `b_hh`. Default: ``True``</span>
+
+<span class="sd">    Inputs: input, hidden</span>
+<span class="sd">        - **input** of shape `(batch, input_size)`: tensor containing input features</span>
+<span class="sd">        - **hidden** of shape `(batch, hidden_size)`: tensor containing the initial hidden</span>
+<span class="sd">          state for each element in the batch.</span>
+<span class="sd">          Defaults to zero if not provided.</span>
+
+<span class="sd">    Outputs: h&#39;</span>
+<span class="sd">        - **h&#39;** of shape `(batch, hidden_size)`: tensor containing the next hidden state</span>
+<span class="sd">          for each element in the batch</span>
+
+<span class="sd">    Shape:</span>
+<span class="sd">        - Input1: :math:`(N, H_{in})` tensor containing input features where</span>
+<span class="sd">          :math:`H_{in}` = `input_size`</span>
+<span class="sd">        - Input2: :math:`(N, H_{out})` tensor containing the initial hidden</span>
+<span class="sd">          state for each element in the batch where :math:`H_{out}` = `hidden_size`</span>
+<span class="sd">          Defaults to zero if not provided.</span>
+<span class="sd">        - Output: :math:`(N, H_{out})` tensor containing the next hidden state</span>
+<span class="sd">          for each element in the batch</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        weight_ih: the learnable input-hidden weights, of shape</span>
+<span class="sd">            `(3*hidden_size, input_size)`</span>
+<span class="sd">        weight_hh: the learnable hidden-hidden weights, of shape</span>
+<span class="sd">            `(3*hidden_size, hidden_size)`</span>
+<span class="sd">        bias_ih: the learnable input-hidden bias, of shape `(3*hidden_size)`</span>
+<span class="sd">        bias_hh: the learnable hidden-hidden bias, of shape `(3*hidden_size)`</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`</span>
+<span class="sd">        where :math:`k = \frac{1}{\text{hidden\_size}}`</span>
+
+<span class="sd">    Examples::</span>
+
+<span class="sd">        &gt;&gt;&gt; rnn = nn.GRUCell(10, 20)</span>
+<span class="sd">        &gt;&gt;&gt; input = torch.randn(6, 3, 10)</span>
+<span class="sd">        &gt;&gt;&gt; hx = torch.randn(3, 20)</span>
+<span class="sd">        &gt;&gt;&gt; output = []</span>
+<span class="sd">        &gt;&gt;&gt; for i in range(6):</span>
+<span class="sd">                hx = rnn(input[i], hx)</span>
+<span class="sd">                output.append(hx)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">input_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">hidden_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">bias</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">GRUCell</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">input_size</span><span class="p">,</span> <span class="n">hidden_size</span><span class="p">,</span> <span class="n">bias</span><span class="p">,</span> <span class="n">num_chunks</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">input</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">hx</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tensor</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_forward_input</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">hx</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">hx</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">input</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">hidden_size</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">check_forward_hidden</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">_VF</span><span class="o">.</span><span class="n">gru_cell</span><span class="p">(</span>
+            <span class="nb">input</span><span class="p">,</span> <span class="n">hx</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">weight_ih</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">weight_hh</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">bias_ih</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bias_hh</span><span class="p">,</span>
+        <span class="p">)</span>
+</pre></div>
+
+             </article>
+             
+            </div>
+            <footer>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="../../../../" src="../../../../_static/documentation_options.js"></script>
+         <script src="../../../../_static/jquery.js"></script>
+         <script src="../../../../_static/underscore.js"></script>
+         <script src="../../../../_static/doctools.js"></script>
+         <script src="../../../../_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="../../../../_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="../../../../_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="../../../../_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="../../../../_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="../../../../_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>

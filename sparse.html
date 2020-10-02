@@ -1,0 +1,1038 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>torch.sparse &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/sparse.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="_static/css/jit.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="torch.Storage" href="storage.html" />
+    <link rel="prev" title="torch.random" href="random.html" /> 
+
+  
+  <script src="_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <div class="ecosystem-dropdown">
+              <a id="dropdownMenuButton" data-toggle="ecosystem-dropdown">
+                Ecosystem
+              </a>
+              <div class="ecosystem-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/hub"">
+                  <span class=dropdown-title>Models (Beta)</span>
+                  <p>Discover, publish, and reuse pre-trained models</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/ecosystem">
+                  <span class=dropdown-title>Tools & Libraries</span>
+                  <p>Explore the ecosystem of tools and libraries</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <div class="resources-dropdown">
+              <a id="resourcesDropdownButton" data-toggle="resources-dropdown">
+                Resources
+              </a>
+              <div class="resources-dropdown-menu">
+                <a class="nav-dropdown-item" href="https://pytorch.org/resources"">
+                  <span class=dropdown-title>Developer Resources</span>
+                  <p>Find resources and get questions answered</p>
+                </a>
+                <a class="nav-dropdown-item" href="https://pytorch.org/features">
+                  <span class=dropdown-title>About</span>
+                  <p>Learn about PyTorch’s features and capabilities</p>
+                </a>
+              </div>
+            </div>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.7.0a0+03e4e94 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/sparse.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="notes/amp_examples.html">Automatic Mixed Precision examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/ddp.html">Distributed Data Parallel</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Language Bindings</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="cpp_index.html">C++</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/javadoc/">Javadoc</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensor_view.html">Tensor Views</a></li>
+<li class="toctree-l1"><a class="reference internal" href="autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="amp.html">torch.cuda.amp</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backends.html">torch.backends</a></li>
+<li class="toctree-l1"><a class="reference internal" href="distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="fft.html">torch.fft</a></li>
+<li class="toctree-l1"><a class="reference internal" href="futures.html">torch.futures</a></li>
+<li class="toctree-l1"><a class="reference internal" href="hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="linalg.html">torch.linalg</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="complex_numbers.html">Complex Numbers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rpc.html">Distributed RPC Framework</a></li>
+<li class="toctree-l1"><a class="reference internal" href="random.html">torch.random</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="mobile_optimizer.html">torch.utils.mobile_optimizer</a></li>
+<li class="toctree-l1"><a class="reference internal" href="model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="named_tensor.html">Named Tensors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="name_inference.html">Named Tensors operator coverage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/audio">torchaudio</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/text">torchtext</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/vision">torchvision</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/elastic/">TorchElastic</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://pytorch.org/serve">TorchServe</a></li>
+<li class="toctree-l1"><a class="reference external" href="http://pytorch.org/xla/">PyTorch on XLA Devices</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+      <li>torch.sparse</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+            
+            <a href="_sources/sparse.rst.txt" rel="nofollow"><img src="_static/images/view-page-source-icon.svg"></a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <div class="section" id="torch-sparse">
+<span id="sparse-docs"></span><h1>torch.sparse<a class="headerlink" href="#torch-sparse" title="Permalink to this headline">¶</a></h1>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>This API is in beta and may change in the near future.</p>
+</div>
+<p>Torch supports sparse tensors in COO(rdinate) format, which can
+efficiently store and process tensors for which the majority of elements
+are zeros.</p>
+<p>A sparse tensor is represented as a pair of dense tensors: a tensor
+of values and a 2D tensor of indices.  A sparse tensor can be constructed
+by providing these two tensors, as well as the size of the sparse tensor
+(which cannot be inferred from these tensors!)  Suppose we want to define
+a sparse tensor with the entry 3 at location (0, 2), entry 4 at
+location (1, 0), and entry 5 at location (1, 2).  We would then write:</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">i</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">LongTensor</span><span class="p">([[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span>
+<span class="go">                          [2, 0, 2]])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">v</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">FloatTensor</span><span class="p">([</span><span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">torch</span><span class="o">.</span><span class="n">sparse</span><span class="o">.</span><span class="n">FloatTensor</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">([</span><span class="mi">2</span><span class="p">,</span><span class="mi">3</span><span class="p">]))</span><span class="o">.</span><span class="n">to_dense</span><span class="p">()</span>
+<span class="go"> 0  0  3</span>
+<span class="go"> 4  0  5</span>
+<span class="go">[torch.FloatTensor of size 2x3]</span>
+</pre></div>
+</div>
+<p>Note that the input to LongTensor is NOT a list of index tuples.  If you want
+to write your indices this way, you should transpose before passing them to
+the sparse constructor:</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">i</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">LongTensor</span><span class="p">([[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">]])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">v</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">FloatTensor</span><span class="p">([</span><span class="mi">3</span><span class="p">,</span>      <span class="mi">4</span><span class="p">,</span>      <span class="mi">5</span>    <span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">torch</span><span class="o">.</span><span class="n">sparse</span><span class="o">.</span><span class="n">FloatTensor</span><span class="p">(</span><span class="n">i</span><span class="o">.</span><span class="n">t</span><span class="p">(),</span> <span class="n">v</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">([</span><span class="mi">2</span><span class="p">,</span><span class="mi">3</span><span class="p">]))</span><span class="o">.</span><span class="n">to_dense</span><span class="p">()</span>
+<span class="go"> 0  0  3</span>
+<span class="go"> 4  0  5</span>
+<span class="go">[torch.FloatTensor of size 2x3]</span>
+</pre></div>
+</div>
+<p>You can also construct hybrid sparse tensors, where only the first n
+dimensions are sparse, and the rest of the dimensions are dense.</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">i</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">LongTensor</span><span class="p">([[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">]])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">v</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">FloatTensor</span><span class="p">([[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">],</span> <span class="p">[</span><span class="mi">5</span><span class="p">,</span> <span class="mi">7</span><span class="p">]])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">torch</span><span class="o">.</span><span class="n">sparse</span><span class="o">.</span><span class="n">FloatTensor</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span><span class="o">.</span><span class="n">to_dense</span><span class="p">()</span>
+<span class="go"> 0  0</span>
+<span class="go"> 0  0</span>
+<span class="go"> 1  3</span>
+<span class="go"> 0  0</span>
+<span class="go"> 5  7</span>
+<span class="go">[torch.FloatTensor of size 5x2]</span>
+</pre></div>
+</div>
+<p>An empty sparse tensor can be constructed by specifying its size:</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">torch</span><span class="o">.</span><span class="n">sparse</span><span class="o">.</span><span class="n">FloatTensor</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+<span class="go">SparseFloatTensor of size 2x3 with indices:</span>
+<span class="go">[torch.LongTensor with no dimension]</span>
+<span class="go">and values:</span>
+<span class="go">[torch.FloatTensor with no dimension]</span>
+</pre></div>
+</div>
+<dl class="simple">
+<dt>SparseTensor has the following invariants:</dt><dd><ol class="arabic simple">
+<li><p>sparse_dim + dense_dim = len(SparseTensor.shape)</p></li>
+<li><p>SparseTensor._indices().shape = (sparse_dim, nnz)</p></li>
+<li><p>SparseTensor._values().shape = (nnz, SparseTensor.shape[sparse_dim:])</p></li>
+</ol>
+</dd>
+</dl>
+<p>Since SparseTensor._indices() is always a 2D tensor, the smallest sparse_dim = 1.
+Therefore, representation of a SparseTensor of sparse_dim = 0 is simply a dense tensor.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Our sparse tensor format permits <em>uncoalesced</em> sparse tensors, where
+there may be duplicate coordinates in the indices; in this case,
+the interpretation is that the value at that index is the sum of all
+duplicate value entries. Uncoalesced tensors permit us to implement
+certain operators more efficiently.</p>
+<p>For the most part, you shouldn’t have to care whether or not a
+sparse tensor is coalesced or not, as most operations will work
+identically given a coalesced or uncoalesced sparse tensor.
+However, there are two cases in which you may need to care.</p>
+<p>First, if you repeatedly perform an operation that can produce
+duplicate entries (e.g., <a class="reference internal" href="#torch.sparse.FloatTensor.add" title="torch.sparse.FloatTensor.add"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.sparse.FloatTensor.add()</span></code></a>), you
+should occasionally coalesce your sparse tensors to prevent
+them from growing too large.</p>
+<p>Second, some operators will produce different values depending on
+whether or not they are coalesced or not (e.g.,
+<a class="reference internal" href="#torch.sparse.FloatTensor._values" title="torch.sparse.FloatTensor._values"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.sparse.FloatTensor._values()</span></code></a> and
+<a class="reference internal" href="#torch.sparse.FloatTensor._indices" title="torch.sparse.FloatTensor._indices"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.sparse.FloatTensor._indices()</span></code></a>, as well as
+<a class="reference internal" href="tensors.html#torch.Tensor.sparse_mask" title="torch.Tensor.sparse_mask"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.Tensor.sparse_mask()</span></code></a>).  These operators are
+prefixed by an underscore to indicate that they reveal internal
+implementation details and should be used with care, since code
+that works with coalesced sparse tensors may not work with
+uncoalesced sparse tensors; generally speaking, it is safest
+to explicitly coalesce before working with these operators.</p>
+<p>For example, suppose that we wanted to implement an operator
+by operating directly on <a class="reference internal" href="#torch.sparse.FloatTensor._values" title="torch.sparse.FloatTensor._values"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.sparse.FloatTensor._values()</span></code></a>.
+Multiplication by a scalar can be implemented in the obvious way,
+as multiplication distributes over addition; however, square root
+cannot be implemented directly, since <code class="docutils literal notranslate"><span class="pre">sqrt(a</span> <span class="pre">+</span> <span class="pre">b)</span> <span class="pre">!=</span> <span class="pre">sqrt(a)</span> <span class="pre">+</span>
+<span class="pre">sqrt(b)</span></code> (which is what would be computed if you were given an
+uncoalesced tensor.)</p>
+</div>
+<dl class="class">
+<dt id="torch.sparse.FloatTensor">
+<em class="property">class </em><code class="sig-prename descclassname">torch.sparse.</code><code class="sig-name descname">FloatTensor</code><a class="headerlink" href="#torch.sparse.FloatTensor" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="method">
+<dt id="torch.sparse.FloatTensor.add">
+<code class="sig-name descname">add</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.add" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.add_">
+<code class="sig-name descname">add_</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.add_" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.clone">
+<code class="sig-name descname">clone</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.clone" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.dim">
+<code class="sig-name descname">dim</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.dim" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.div">
+<code class="sig-name descname">div</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.div" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.div_">
+<code class="sig-name descname">div_</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.div_" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.get_device">
+<code class="sig-name descname">get_device</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.get_device" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.hspmm">
+<code class="sig-name descname">hspmm</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.hspmm" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.mm">
+<code class="sig-name descname">mm</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.mm" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.mul">
+<code class="sig-name descname">mul</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.mul" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.mul_">
+<code class="sig-name descname">mul_</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.mul_" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.narrow_copy">
+<code class="sig-name descname">narrow_copy</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.narrow_copy" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.resizeAs_">
+<code class="sig-name descname">resizeAs_</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.resizeAs_" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.size">
+<code class="sig-name descname">size</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.size" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.spadd">
+<code class="sig-name descname">spadd</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.spadd" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.spmm">
+<code class="sig-name descname">spmm</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.spmm" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.sspaddmm">
+<code class="sig-name descname">sspaddmm</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.sspaddmm" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.sspmm">
+<code class="sig-name descname">sspmm</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.sspmm" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.sub">
+<code class="sig-name descname">sub</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.sub" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.sub_">
+<code class="sig-name descname">sub_</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.sub_" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.t_">
+<code class="sig-name descname">t_</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.t_" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.to_dense">
+<code class="sig-name descname">to_dense</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.to_dense" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.transpose">
+<code class="sig-name descname">transpose</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.transpose" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.transpose_">
+<code class="sig-name descname">transpose_</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.transpose_" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.zero_">
+<code class="sig-name descname">zero_</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.zero_" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.coalesce">
+<code class="sig-name descname">coalesce</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.coalesce" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor.is_coalesced">
+<code class="sig-name descname">is_coalesced</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor.is_coalesced" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor._indices">
+<code class="sig-name descname">_indices</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor._indices" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor._values">
+<code class="sig-name descname">_values</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor._values" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="torch.sparse.FloatTensor._nnz">
+<code class="sig-name descname">_nnz</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#torch.sparse.FloatTensor._nnz" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<div class="section" id="functions">
+<h2>Functions<a class="headerlink" href="#functions" title="Permalink to this headline">¶</a></h2>
+<dl class="function">
+<dt id="torch.sparse.addmm">
+<code class="sig-prename descclassname">torch.sparse.</code><code class="sig-name descname">addmm</code><span class="sig-paren">(</span><em class="sig-param">mat: torch.Tensor</em>, <em class="sig-param">mat1: torch.Tensor</em>, <em class="sig-param">mat2: torch.Tensor</em>, <em class="sig-param">beta: float = 1.0</em>, <em class="sig-param">alpha: float = 1.0</em><span class="sig-paren">)</span> &#x2192; torch.Tensor<a class="reference internal" href="_modules/torch/sparse.html#addmm"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.sparse.addmm" title="Permalink to this definition">¶</a></dt>
+<dd><p>This function does exact same thing as <a class="reference internal" href="generated/torch.addmm.html#torch.addmm" title="torch.addmm"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.addmm()</span></code></a> in the forward,
+except that it supports backward for sparse matrix <code class="xref py py-attr docutils literal notranslate"><span class="pre">mat1</span></code>. <code class="xref py py-attr docutils literal notranslate"><span class="pre">mat1</span></code>
+need to have <cite>sparse_dim = 2</cite>. Note that the gradients of <code class="xref py py-attr docutils literal notranslate"><span class="pre">mat1</span></code> is a
+coalesced sparse tensor.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>mat</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a>) – a dense matrix to be added</p></li>
+<li><p><strong>mat1</strong> (<em>SparseTensor</em>) – a sparse matrix to be multiplied</p></li>
+<li><p><strong>mat2</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a>) – a dense matrix be multiplied</p></li>
+<li><p><strong>beta</strong> (<em>Number</em><em>, </em><em>optional</em>) – multiplier for <code class="xref py py-attr docutils literal notranslate"><span class="pre">mat</span></code> (<span class="math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>β</mi></mrow><annotation encoding="application/x-tex">\beta</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8888799999999999em;vertical-align:-0.19444em;"></span><span class="mord mathnormal" style="margin-right:0.05278em;">β</span></span></span></span>
+
+</span>)</p></li>
+<li><p><strong>alpha</strong> (<em>Number</em><em>, </em><em>optional</em>) – multiplier for <span class="math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>m</mi><mi>a</mi><mi>t</mi><mn>1</mn><mi mathvariant="normal">@</mi><mi>m</mi><mi>a</mi><mi>t</mi><mn>2</mn></mrow><annotation encoding="application/x-tex">mat1 @ mat2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.69444em;vertical-align:0em;"></span><span class="mord mathnormal">m</span><span class="mord mathnormal">a</span><span class="mord mathnormal">t</span><span class="mord">1</span><span class="mord">@</span><span class="mord mathnormal">m</span><span class="mord mathnormal">a</span><span class="mord mathnormal">t</span><span class="mord">2</span></span></span></span>
+
+</span> (<span class="math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>α</mi></mrow><annotation encoding="application/x-tex">\alpha</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.43056em;vertical-align:0em;"></span><span class="mord mathnormal" style="margin-right:0.0037em;">α</span></span></span></span>
+
+</span>)</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.sparse.mm">
+<code class="sig-prename descclassname">torch.sparse.</code><code class="sig-name descname">mm</code><span class="sig-paren">(</span><em class="sig-param">mat1: torch.Tensor</em>, <em class="sig-param">mat2: torch.Tensor</em><span class="sig-paren">)</span> &#x2192; torch.Tensor<a class="reference internal" href="_modules/torch/sparse.html#mm"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.sparse.mm" title="Permalink to this definition">¶</a></dt>
+<dd><p>Performs a matrix multiplication of the sparse matrix <code class="xref py py-attr docutils literal notranslate"><span class="pre">mat1</span></code>
+and dense matrix <code class="xref py py-attr docutils literal notranslate"><span class="pre">mat2</span></code>. Similar to <a class="reference internal" href="generated/torch.mm.html#torch.mm" title="torch.mm"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.mm()</span></code></a>, If <code class="xref py py-attr docutils literal notranslate"><span class="pre">mat1</span></code> is a
+<span class="math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mi>n</mi><mo>×</mo><mi>m</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(n \times m)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222222222222222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222222222222222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">m</span><span class="mclose">)</span></span></span></span>
+
+</span> tensor, <code class="xref py py-attr docutils literal notranslate"><span class="pre">mat2</span></code> is a <span class="math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mi>m</mi><mo>×</mo><mi>p</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(m \times p)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal">m</span><span class="mspace" style="margin-right:0.2222222222222222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222222222222222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">p</span><span class="mclose">)</span></span></span></span>
+
+</span> tensor, out will be a
+<span class="math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><mi>n</mi><mo>×</mo><mi>p</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(n \times p)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mopen">(</span><span class="mord mathnormal">n</span><span class="mspace" style="margin-right:0.2222222222222222em;"></span><span class="mbin">×</span><span class="mspace" style="margin-right:0.2222222222222222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal">p</span><span class="mclose">)</span></span></span></span>
+
+</span> dense tensor. <code class="xref py py-attr docutils literal notranslate"><span class="pre">mat1</span></code> need to have <cite>sparse_dim = 2</cite>.
+This function also supports backward for both matrices. Note that the gradients of
+<code class="xref py py-attr docutils literal notranslate"><span class="pre">mat1</span></code> is a coalesced sparse tensor.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>mat1</strong> (<em>SparseTensor</em>) – the first sparse matrix to be multiplied</p></li>
+<li><p><strong>mat2</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a>) – the second dense matrix to be multiplied</p></li>
+</ul>
+</dd>
+</dl>
+<p>Example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">a</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span><span class="o">.</span><span class="n">to_sparse</span><span class="p">()</span><span class="o">.</span><span class="n">requires_grad_</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">a</span>
+<span class="go">tensor(indices=tensor([[0, 0, 0, 1, 1, 1],</span>
+<span class="go">                       [0, 1, 2, 0, 1, 2]]),</span>
+<span class="go">       values=tensor([ 1.5901,  0.0183, -0.6146,  1.8061, -0.0112,  0.6302]),</span>
+<span class="go">       size=(2, 3), nnz=6, layout=torch.sparse_coo, requires_grad=True)</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">b</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">requires_grad</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">b</span>
+<span class="go">tensor([[-0.6479,  0.7874],</span>
+<span class="go">        [-1.2056,  0.5641],</span>
+<span class="go">        [-1.1716, -0.9923]], requires_grad=True)</span>
+
+<span class="gp">&gt;&gt;&gt; </span><span class="n">y</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sparse</span><span class="o">.</span><span class="n">mm</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">y</span>
+<span class="go">tensor([[-0.3323,  1.8723],</span>
+<span class="go">        [-1.8951,  0.7904]], grad_fn=&lt;SparseAddmmBackward&gt;)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">y</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">a</span><span class="o">.</span><span class="n">grad</span>
+<span class="go">tensor(indices=tensor([[0, 0, 0, 1, 1, 1],</span>
+<span class="go">                       [0, 1, 2, 0, 1, 2]]),</span>
+<span class="go">       values=tensor([ 0.1394, -0.6415, -2.1639,  0.1394, -0.6415, -2.1639]),</span>
+<span class="go">       size=(2, 3), nnz=6, layout=torch.sparse_coo)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="function">
+<dt id="torch.sparse.sum">
+<code class="sig-prename descclassname">torch.sparse.</code><code class="sig-name descname">sum</code><span class="sig-paren">(</span><em class="sig-param">input: torch.Tensor</em>, <em class="sig-param">dim: Optional[Tuple[int]] = None</em>, <em class="sig-param">dtype: Optional[int] = None</em><span class="sig-paren">)</span> &#x2192; torch.Tensor<a class="reference internal" href="_modules/torch/sparse.html#sum"><span class="viewcode-link">[source]</span></a><a class="headerlink" href="#torch.sparse.sum" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the sum of each row of SparseTensor <code class="xref py py-attr docutils literal notranslate"><span class="pre">input</span></code> in the given
+dimensions <code class="xref py py-attr docutils literal notranslate"><span class="pre">dim</span></code>. If <code class="xref py py-attr docutils literal notranslate"><span class="pre">dim</span></code> is a list of dimensions,
+reduce over all of them. When sum over all <code class="docutils literal notranslate"><span class="pre">sparse_dim</span></code>, this method
+returns a Tensor instead of SparseTensor.</p>
+<p>All summed <code class="xref py py-attr docutils literal notranslate"><span class="pre">dim</span></code> are squeezed (see <a class="reference internal" href="generated/torch.squeeze.html#torch.squeeze" title="torch.squeeze"><code class="xref py py-func docutils literal notranslate"><span class="pre">torch.squeeze()</span></code></a>), resulting an output
+tensor having <code class="xref py py-attr docutils literal notranslate"><span class="pre">dim</span></code> fewer dimensions than <code class="xref py py-attr docutils literal notranslate"><span class="pre">input</span></code>.</p>
+<p>During backward, only gradients at <code class="docutils literal notranslate"><span class="pre">nnz</span></code> locations of <code class="xref py py-attr docutils literal notranslate"><span class="pre">input</span></code>
+will propagate back. Note that the gradients of <code class="xref py py-attr docutils literal notranslate"><span class="pre">input</span></code> is coalesced.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>input</strong> (<a class="reference internal" href="tensors.html#torch.Tensor" title="torch.Tensor"><em>Tensor</em></a>) – the input SparseTensor</p></li>
+<li><p><strong>dim</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.8)"><em>int</em></a><em> or </em><em>tuple of python:ints</em>) – a dimension or a list of dimensions to reduce. Default: reduce
+over all dims.</p></li>
+<li><p><strong>dtype</strong> (<code class="xref py py-class docutils literal notranslate"><span class="pre">torch.dtype</span></code>, optional) – the desired data type of returned Tensor.
+Default: dtype of <code class="xref py py-attr docutils literal notranslate"><span class="pre">input</span></code>.</p></li>
+</ul>
+</dd>
+</dl>
+<p>Example:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">nnz</span> <span class="o">=</span> <span class="mi">3</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">dims</span> <span class="o">=</span> <span class="p">[</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">I</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">torch</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">dims</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="n">nnz</span><span class="p">,)),</span>
+<span class="go">                   torch.randint(0, dims[1], size=(nnz,))], 0).reshape(2, nnz)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">V</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">nnz</span><span class="p">,</span> <span class="n">dims</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">dims</span><span class="p">[</span><span class="mi">3</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">size</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">(</span><span class="n">dims</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">S</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sparse_coo_tensor</span><span class="p">(</span><span class="n">I</span><span class="p">,</span> <span class="n">V</span><span class="p">,</span> <span class="n">size</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">S</span>
+<span class="go">tensor(indices=tensor([[2, 0, 3],</span>
+<span class="go">                       [2, 4, 1]]),</span>
+<span class="go">       values=tensor([[[-0.6438, -1.6467,  1.4004],</span>
+<span class="go">                       [ 0.3411,  0.0918, -0.2312]],</span>
+
+<span class="go">                      [[ 0.5348,  0.0634, -2.0494],</span>
+<span class="go">                       [-0.7125, -1.0646,  2.1844]],</span>
+
+<span class="go">                      [[ 0.1276,  0.1874, -0.6334],</span>
+<span class="go">                       [-1.9682, -0.5340,  0.7483]]]),</span>
+<span class="go">       size=(5, 5, 2, 3), nnz=3, layout=torch.sparse_coo)</span>
+
+<span class="go"># when sum over only part of sparse_dims, return a SparseTensor</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">torch</span><span class="o">.</span><span class="n">sparse</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">S</span><span class="p">,</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">])</span>
+<span class="go">tensor(indices=tensor([[0, 2, 3]]),</span>
+<span class="go">       values=tensor([[-1.4512,  0.4073],</span>
+<span class="go">                      [-0.8901,  0.2017],</span>
+<span class="go">                      [-0.3183, -1.7539]]),</span>
+<span class="go">       size=(5, 2), nnz=3, layout=torch.sparse_coo)</span>
+
+<span class="go"># when sum over all sparse dim, return a dense Tensor</span>
+<span class="go"># with summed dims squeezed</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">torch</span><span class="o">.</span><span class="n">sparse</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">S</span><span class="p">,</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">])</span>
+<span class="go">tensor([-2.6596, -1.1450])</span>
+</pre></div>
+</div>
+</dd></dl>
+
+</div>
+</div>
+
+
+             </article>
+             
+            </div>
+            <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="storage.html" class="btn btn-neutral float-right" title="torch.Storage" accesskey="n" rel="next">Next <img src="_static/images/chevron-right-orange.svg" class="next-page"></a>
+      
+      
+        <a href="random.html" class="btn btn-neutral" title="torch.random" accesskey="p" rel="prev"><img src="_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
+      
+    </div>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              <ul>
+<li><a class="reference internal" href="#">torch.sparse</a><ul>
+<li><a class="reference internal" href="#functions">Functions</a></li>
+</ul>
+</li>
+</ul>
+
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+         <script src="_static/jquery.js"></script>
+         <script src="_static/underscore.js"></script>
+         <script src="_static/doctools.js"></script>
+         <script src="_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="_static/js/vendor/bootstrap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/list.js/1.5.0/list.min.js"></script>
+  <script type="text/javascript" src="_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/resources">Resources</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.org/assets/brand-guidelines/PyTorch-Brand-Guidelines.pdf" target="_blank">Brand Guidelines</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Stay Connected</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+            <a href="https://www.youtube.com/pytorch" target="_blank" class="youtube"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/mobile">Mobile</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/hub">PyTorch Hub</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+      mainMenuDropdown.bind();
+      filterTags.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>
