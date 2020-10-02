@@ -2,6 +2,7 @@
 
 import argparse
 from datetime import datetime
+import math
 import modulefinder
 import os
 import shutil
@@ -450,6 +451,14 @@ def parse_args():
         nargs='*',
         help='additional arguments passed through to unittest, e.g., '
              'python run_test.py -i sparse -- TestSparse.test_factory_size_check')
+    parser.add_argument(
+        '--shard',
+        nargs=2,
+        type=int,
+        help='runs a shard of the tests (taking into account other selections), e.g., '
+        '--shard 2 3 will break up the selected tests into 3 shards and run the tests '
+        'in the 2nd shard (the number of shards will be whichever argument is greater)',
+    )
     return parser.parse_args()
 
 
@@ -516,6 +525,12 @@ def get_selected_tests(options):
     if options.last:
         last_index = find_test_index(options.last, selected_tests, find_last_index=True)
         selected_tests = selected_tests[:last_index + 1]
+
+    if options.shard:
+        num_shards = min(max(options.shard), len(selected_tests))
+        which_shard = max(min(options.shard + [num_shards]), 1)
+        num_tests = len(selected_tests) * 1.0 / num_shards
+        selected_tests = selected_tests[math.floor((which_shard - 1) * num_tests) : math.floor(which_shard * num_tests)]
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
