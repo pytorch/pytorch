@@ -14,7 +14,8 @@ TEST(StaticRuntime, TrivialModel) {
 
   // run static runtime
   std::vector<at::Tensor> input_tensors({a, b, c});
-  torch::jit::StaticRuntime runtime(mod);
+  auto g = torch::jit::PrepareForStaticRuntime(mod);
+  torch::jit::StaticRuntime runtime(g);
   at::Tensor output_2 = runtime.run(input_tensors)[0];
   EXPECT_TRUE(output_1.equal(output_2));
 }
@@ -23,7 +24,8 @@ TEST(StaticRuntime, DeepWide) {
   const int embedding_size = 32;
   const int num_features = 50;
   torch::jit::Module mod = getDeepAndWideSciptModel();
-  torch::jit::StaticRuntime runtime(mod);
+  auto g = torch::jit::PrepareForStaticRuntime(mod);
+  torch::jit::StaticRuntime runtime(g);
 
   for (int batch_size : {1, 8, 32}) {
     for (int i = 0; i < 5; ++i) {

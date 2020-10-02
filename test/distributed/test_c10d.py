@@ -273,6 +273,30 @@ class TCPStoreTest(TestCase, StoreTestBase):
             store1 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
             store2 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
 
+    def _test_numkeys_delkeys(self, fs):
+        # We start off with one init key in the store to coordinate workers
+        self.assertEqual(fs.num_keys(), 1)
+        fs.add("key", 1)
+        fs.add("key", 2)
+        fs.add("key", 3)
+        fs.set("key0", "value0")
+        fs.add("key3", 1)
+        fs.set("key1", "value1")
+        self.assertEqual(fs.num_keys(), 5)
+        fs.delete_key("key")
+        self.assertEqual(fs.num_keys(), 4)
+        with self.assertRaises(RuntimeError):
+            fs.get("key")
+        fs.delete_key("key0")
+        fs.delete_key("key3")
+        self.assertEqual(fs.num_keys(), 2)
+        fs.set("key4", "value2")
+        self.assertEqual(fs.num_keys(), 3)
+        self.assertEqual(b"value1", fs.get("key1"))
+        self.assertEqual(b"value2", fs.get("key4"))
+
+    def test_numkeys_delkeys(self):
+        self._test_numkeys_delkeys(self._create_store())
 
 @skip_if_win32()
 class PrefixTCPStoreTest(TestCase, StoreTestBase):

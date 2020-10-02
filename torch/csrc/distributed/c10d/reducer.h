@@ -55,7 +55,7 @@ class Reducer {
     return backward_stats_;
   }
 
-  // Registeres a hook to the reducer. The hook is `CommHookInterface`
+  // Registers a hook to the reducer. The hook is `CommHookInterface`
   // type to allow both Python and CPP hooks. This function can only
   // be called once before calling backward.
   void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
