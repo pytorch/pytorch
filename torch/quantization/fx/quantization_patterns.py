@@ -400,8 +400,6 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.functional.instance_norm)
 @register_quant_pattern(torch.nn.functional.layer_norm)
 @register_quant_pattern(torch.nn.functional.leaky_relu)
-@register_quant_pattern('leaky_relu')
-@register_quant_pattern('leaky_relu_')
 class DefaultNode(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
