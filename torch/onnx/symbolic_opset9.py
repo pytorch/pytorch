@@ -854,7 +854,10 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         if mod != [0] * len(mod):
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
-            return sym_help._onnx_unsupported('adaptive pooling, since output size is not factor of input size')
+            if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+                return _unimplemented(name, 'output size that are not factor of input size')
+            else:
+                return sym_help._onnx_unsupported(name, ', since output size is not factor of input size')
         k = [int(dim[i] / output_size[i]) for i in range(0, len(dim))]
         # call max_poolxd_with_indices to get indices in the output
         if type == "MaxPool":
