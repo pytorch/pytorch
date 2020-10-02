@@ -269,6 +269,69 @@ class TorchIntegration(hu.HypothesisTestCase):
             torch.testing.assert_allclose(o, o_ref)
 
     @given(
+        dim_1=st.integers(min_value=10, max_value=10),
+        dim_2=st.integers(min_value=3, max_value=3),
+        dim_3=st.integers(min_value=2, max_value=2),
+    )
+    def test_sparse_to_dense_mask(self, dim_1, dim_2, dim_3):
+        indices = np.array([i + 1 for i in range(dim_1)]).astype(np.int32)
+        values = np.random.rand(dim_1, dim_2, dim_3).astype(np.float32)
+        default_value = np.zeros((dim_2, dim_3)).astype(np.float32)
+        mask = [2, 4, 9]
+
+        def sparse_to_dense_mask_ref(return_presence_mask=False):
+            ref_op = core.CreateOperator(
+                "SparseToDenseMask",
+                ["indices", "values", "default_value"],
+                ["output", "presence_mask"],
+                mask=mask,
+                return_presence_mask=return_presence_mask,
+            )
+            workspace.FeedBlob("indices", indices)
+            workspace.FeedBlob("values", values)
+            workspace.FeedBlob("default_value", default_value)
+            workspace.RunOperatorOnce(ref_op)
+
+            if return_presence_mask:
+                return (
+                    workspace.FetchBlob("output"),
+                    workspace.FetchBlob("presence_mask"),
+                )
+
+            return workspace.FetchBlob("output")
+
+        # Testing return_presence_mask = False
+        output = sparse_to_dense_mask_ref()
+        output = torch.tensor(output)
+
+        a, _ = torch.ops._caffe2.SparseToDenseMask(
+            torch.tensor(indices),
+            torch.tensor(values),
+            torch.tensor(default_value),
+            None,
+            mask=mask,
+        )
+
+        torch.testing.assert_allclose(output, a)
+
+        # Testing return_presence_mask = True
+        output, presence_mask = sparse_to_dense_mask_ref(return_presence_mask=True)
+        output = torch.tensor(output)
+        presence_mask = torch.tensor(presence_mask)
+
+        a, b = torch.ops._caffe2.SparseToDenseMask(
+            torch.tensor(indices),
+            torch.tensor(values),
+            torch.tensor(default_value),
+            None,
+            mask=mask,
+            return_presence_mask=True,
+        )
+
+        torch.testing.assert_allclose(output, a)
+        torch.testing.assert_allclose(presence_mask, b)
+
+    @given(
         A=st.integers(min_value=4, max_value=4),
         H=st.integers(min_value=10, max_value=10),
         W=st.integers(min_value=8, max_value=8),
@@ -874,6 +937,47 @@ class TorchIntegration(hu.HypothesisTestCase):
             torch.tensor(data), torch.Tensor(lengths).int(), torch.Tensor(boundaries)
         )
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    def test_gather_ranges_to_dense_op(self):
+        data = np.array([1, 2, 3, 4, 5, 6, 7, 8])
+        ranges = np.array([[[2, 4]], [[0, 0]]])
+        key = np.array([0, 1, 3, 2, 1, 0, 1, 0])
+        lengths = np.array([4])
+        min_observation = 2
+        max_mismatched_ratio = 0.5
+        max_empty_ratio = 1.0
+
+        outputs_name = ["X_{}".format(i) for i in range(len(lengths))]
+        ref_op = core.CreateOperator(
+            "GatherRangesToDense",
+            ["data", "ranges", "key"],
+            outputs_name,
+            lengths=lengths,
+            min_observation=min_observation,
+            max_mismatched_ratio=max_mismatched_ratio,
+            max_empty_ratio=max_empty_ratio,
+        )
+        workspace.FeedBlob("data", data)
+        workspace.FeedBlob("ranges", ranges)
+        workspace.FeedBlob("key", key)
+        workspace.RunOperatorOnce(ref_op)
+        ref_outputs = []
+        for output_name in outputs_name:
+            ref_outputs.append(workspace.FetchBlob(output_name))
+
+        outputs = torch.ops._caffe2.GatherRangesToDense(
+            torch.from_numpy(data),
+            torch.from_numpy(ranges),
+            torch.from_numpy(key),
+            lengths=lengths,
+            min_observation=min_observation,
+            max_mismatched_ratio=max_mismatched_ratio,
+            max_empty_ratio=max_empty_ratio,
+        )
+
+        self.assertEqual(len(ref_outputs), len(outputs))
+        for i in range(0, len(ref_outputs)):
+            np.testing.assert_array_almost_equal(ref_outputs[i], outputs[i].numpy())
 
     @given(lengths_0=st.integers(1, 10), lengths_1=st.integers(1, 10))
     @settings(deadline=1000)
