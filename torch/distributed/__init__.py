@@ -34,7 +34,9 @@ if is_available():
         _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
         _test_python_store,
-        _round_robin_process_groups,
     )
     if sys.platform != 'win32':
-        from torch._C._distributed_c10d import TCPStore
+        from torch._C._distributed_c10d import (
+            TCPStore,
+            _round_robin_process_groups,
+        )
