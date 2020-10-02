@@ -20838,7 +20838,7 @@ class TestTensorDeviceOps(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(*(_float_types_no_half + _complex_types))
+    @dtypes(*_float_types_no_half)
     def test_svd_square(self, device, dtype):
         self._test_svd_helper((10, 10), True, False, device, dtype)
 
