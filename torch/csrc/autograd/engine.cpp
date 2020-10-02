@@ -227,7 +227,7 @@ Engine::~Engine() {
     // Do not wait for termination of global threads on Windows
     // Because CRT terminates DLL threads before calling
     // global object destructors
-#if !defined(_WIN32) || !defined(C10_BUILD_SHARED_LIBS)
+#if !defined(_WIN32) || defined(C10_USE_MSVC_STATIC_RUNTIME)
     std::unique_lock<std::mutex> lk(non_reentrant_device_thread_mutex_);
     while(non_reentrant_device_thread_count_.load() != 0) {
       non_reentrant_device_thread_condvar_.wait(lk);

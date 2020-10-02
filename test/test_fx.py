@@ -9,6 +9,7 @@ from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
 from torch.fx.experimental.Partitioner import DAG, Partitioner
+from torch.fx.experimental.subgraph_creation_example import split_module
 
 from torch.fx.proxy import TraceError
 
@@ -28,6 +29,9 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 class SimpleTest(torch.nn.Module):
     def forward(self, x):
         return torch.relu(x + 3.0)
+
+def a_non_torch_leaf(a, b):
+    return a + b
 
 class TestFX(JitTestCase):
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
@@ -82,6 +86,17 @@ class TestFX(JitTestCase):
 
         t = T()
         symbolic_trace(t)
+
+    def test_custom_import(self):
+        graph = torch.fx.Graph()
+        a = graph.placeholder('x')
+        b = graph.placeholder('y')
+        c = graph.call_function(a_non_torch_leaf, (a, b))
+        d = graph.call_function(torch.sin, (c,))
+        graph.output(d)
+        gm = GraphModule(torch.nn.Module(), graph)
+        x, y = torch.rand(1), torch.rand(1)
+        self.assertEqual(torch.sin(x + y), gm(x, y))
 
     def test_args_kwargs(self):
         class T(torch.nn.Module):
@@ -779,6 +794,43 @@ class TestFX(JitTestCase):
             assert(r.children == d.children)
             assert(r.input_nodes == d.input_nodes)
             assert(r.output_nodes == d.output_nodes)
+
+    def test_subgraph_creation(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+                self.linear = torch.nn.Linear(4, 5)
+
+            def forward(self, x, y):
+                z = self.linear(x + self.param).clamp(min=0.0, max=1.0)
+                w = self.linear(y).clamp(min=0.0, max=1.0)
+                return z + w
+
+        # symbolically trace model
+        my_module = MyModule()
+        my_module_traced = symbolic_trace(my_module)
+
+        # random mod partitioning
+        partition_counter = 0
+        NPARTITIONS = 3
+
+        def mod_partition(node: Node):
+            nonlocal partition_counter
+            partition = partition_counter % NPARTITIONS
+            partition_counter = (partition_counter + 1) % NPARTITIONS
+            return partition
+
+        # split module in module with submodules
+        module_with_submodules = split_module(my_module_traced, my_module, mod_partition)
+
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+
+        orig_out = my_module_traced(x, y)
+        submodules_out = module_with_submodules(x, y)
+
+        self.assertEqual(orig_out, submodules_out)
 
 if __name__ == '__main__':
     run_tests()

@@ -34,6 +34,21 @@
     return __VA_ARGS__();                                                    \
   }
 
+#define AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                       \
+    enum_type, type, underlying_type, bitwidth, qmin, qmax, ...)                  \
+  case enum_type: {                                                               \
+    using scalar_t = type;                                                        \
+    using underlying_t C10_UNUSED_DISPATCH_CUDA_WORKAROUND =                      \
+        scalar_t::underlying;                                                     \
+    const auto& SCALAR_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = enum_type;      \
+    const auto& UNDERLYING_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND =             \
+        toUnderlying(enum_type);                                                  \
+    int bit_width = bitwidth;                                                     \
+    int64_t quant_min = qmin;                                                     \
+    int64_t quant_max = qmax;                                                     \
+    return __VA_ARGS__();                                                         \
+  }
+
 // This macro should be used to skip bfloat16 dispatch on non-ROCm platforms and
 // should be removed once the bfloat16 bringup is complete on other platforms.
 // This is supposed to be used as a wrapper around the lambda function passed to
@@ -344,6 +359,25 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
       default:                                                              \
         AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");     \
     }                                                                       \
+  }()
+
+#define AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(TYPE, NAME, ...)                                   \
+  [&] {                                                                                        \
+    const auto& the_type = TYPE;                                                               \
+    /* don't use TYPE again in case it is an expensive or side-effect op */                    \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                                      \
+    switch (_st) {                                                                             \
+      AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
+          at::kQInt8, at::qint8, int8_t, CHAR_BIT, SCHAR_MIN, SCHAR_MAX, __VA_ARGS__)          \
+      AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
+          at::kQUInt8, at::quint8, uint8_t, CHAR_BIT, 0, UCHAR_MAX, __VA_ARGS__)               \
+      AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
+          at::kQInt32, at::qint32, int, CHAR_BIT * sizeof(int), INT_MIN, INT_MAX, __VA_ARGS__) \
+      AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                                      \
+          at::kQUInt4x2, at::quint4x2, uint8_t, 4, 0, 15, __VA_ARGS__)                         \
+      default:                                                                                 \
+        AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");                        \
+    }                                                                                          \
   }()
 
 #define AT_DISPATCH_ALL_TYPES_AND_COMPLEX(TYPE, NAME, ...)                  \
