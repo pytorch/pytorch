@@ -52,8 +52,13 @@ class Node:
                     return replace_with
                 else:
                     return n
-            use_node.args = map_arg(use_node.args, maybe_replace_node)
-            use_node.kwargs = map_arg(use_node.kwargs, maybe_replace_node)
+
+            new_args = map_arg(use_node.args, maybe_replace_node)
+            assert isinstance(new_args, tuple)
+            use_node.args = new_args
+            new_kwargs = map_arg(use_node.kwargs, maybe_replace_node)
+            assert isinstance(new_kwargs, dict)
+            use_node.kwargs = new_kwargs
             self.users.remove(use_node)
 
         return to_process
