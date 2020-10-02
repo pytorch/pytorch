@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include <list>
 #include <mutex>
 #include <thread>
@@ -140,6 +141,10 @@ class ProcessGroupNCCL : public ProcessGroup {
     virtual std::exception_ptr checkForNCCLErrors(
         const std::vector<std::shared_ptr<NCCLComm>>& ncclComms) const;
 
+    friend std::ostream& operator<<(
+        std::ostream& output,
+        const WorkNCCL& workNCCL);
+
    private:
     // Helper function for synchronize
     void synchronizeInternal(std::chrono::milliseconds timeout);
@@ -159,9 +164,16 @@ class ProcessGroupNCCL : public ProcessGroup {
 
     // Store a reference to NCCL collective's outputs to be used by getFuture.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
+
     // Store streams that run FutureNCCL then callbacks.
     std::vector<std::shared_ptr<at::cuda::CUDAStream>>
         futureNCCLCallbackStreams_;
+
+    // Current rank of the node.
+    int rank_;
+
+    // Operation type that this work object refers to.
+    OpType opType_;
 
     friend class ProcessGroupNCCL;
   };
@@ -475,14 +487,16 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> collective(
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
-      Fn fn);
+      Fn fn,
+      OpType opType);
   template <typename Fn, typename PreProcess, typename PostProcess>
   std::shared_ptr<ProcessGroup::Work> collective(
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
       Fn fn,
       PreProcess pre,
-      PostProcess post);
+      PostProcess post,
+      OpType opType);
 
   // Checks for NCCL errors on each of the communicators and returns an
   // appropriate exception_ptr (nullptr if no errors).
@@ -506,8 +520,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   // accordingly.
   void parseNcclBlockingWait();
 
-  // Reads the NCCL_ASYNC_ERROR_HANDLING environment variable and sets asyncErrorHandling_
-  // accordingly.
+  // Reads the NCCL_ASYNC_ERROR_HANDLING environment variable and sets
+  // asyncErrorHandling_ accordingly.
   void parseNcclAsyncErrorHandling();
 
   void workCleanupLoop();

@@ -15,6 +15,64 @@ constexpr auto kNoTimeout = std::chrono::milliseconds(0);
 
 namespace c10d {
 
+enum OpType {
+  BROADCAST = 0,
+  ALLREDUCE = 1,
+  ALLREDUCE_COALESCED = 2,
+  REDUCE = 3,
+  ALLGATHER = 4,
+  ALLGATHER_BASE = 5,
+  ALLGATHER_COALESCED = 6,
+  GATHER = 7,
+  SCATTER = 8,
+  REDUCE_SCATTER = 9,
+  ALLTOALL_BASE = 10,
+  ALLTOALL = 11,
+  SEND = 12,
+  RECV = 13,
+  RECVANYSOURCE = 14,
+  BARRIER = 15,
+};
+
+static std::string opTypeToString(OpType opType) {
+  switch (opType) {
+    case BROADCAST:
+      return "BROADCAST";
+    case ALLREDUCE:
+      return "ALLREDUCE";
+    case ALLREDUCE_COALESCED:
+      return "ALLREDUCE_COALESCED";
+    case REDUCE:
+      return "REDUCE";
+    case ALLGATHER:
+      return "ALLGATHER";
+    case ALLGATHER_BASE:
+      return "ALLGATHER_BASE";
+    case ALLGATHER_COALESCED:
+      return "ALLGATHER_COALESCED";
+    case GATHER:
+      return "GATHER";
+    case SCATTER:
+      return "SCATTER";
+    case REDUCE_SCATTER:
+      return "REDUCE_SCATTER";
+    case ALLTOALL_BASE:
+      return "ALLTOALL_BASE";
+    case ALLTOALL:
+      return "ALLTOALL";
+    case SEND:
+      return "SEND";
+    case RECV:
+      return "RECV";
+    case RECVANYSOURCE:
+      return "RECVANYSOURCE";
+    case BARRIER:
+      return "BARRIER";
+    default:
+      TORCH_INTERNAL_ASSERT("Unknown op type!");
+  }
+}
+
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
 //
