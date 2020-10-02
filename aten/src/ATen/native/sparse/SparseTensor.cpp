@@ -369,35 +369,6 @@ std::vector<int> make_strides(std::vector<int> shape) {
   return strides;
 }
 
-// Not used for now. 
-SparseTensor to_sparse_gcs(const Tensor& self, const Tensor& reduction, Scalar fill_value) {
-  IntArrayRef shape = self.sizes();
-  int N = shape.size();
-  std::vector<int> dims1, dims2;
-  // if reduction arg is not specified.
-  if (reduction.numel() == 0) {
-    dims1.resize(N/2);
-    dims2.resize(N/2);
-    std::iota(std::begin(dims1), std::end(dims1), 0);
-    std::iota(std::begin(dims2), std::end(dims2), N/2);
-  }
-  else {
-
-  }
-
-  std::vector<int> strides1 = make_strides(dims1);
-  std::vector<int> strides2 = make_strides(dims2);
-
-  Tensor pointers;
-  Tensor indices;
-  Tensor values_;
-  at::TensorOptions sparse_options = self.options().layout(kSparseGCS);
-
-  Tensor sparse = at::sparse_gcs_tensor(pointers, indices, values_, reduction, shape, fill_value, sparse_options);
-  
-  return sparse;
-}
-
 SparseTensor dense_to_sparse(const Tensor& self){
   return dense_to_sparse(self, self.dim());
 }

@@ -161,7 +161,7 @@ class TestSparseGCS(TestCase):
 
             self.assertEqual(res, expected)
 
-    def test_basic_ops(self):
+    def test_basic_elementwise_ops(self):
         # sparse-sparse addition
         x1 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 100)
         x2 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 140)
@@ -197,12 +197,6 @@ class TestSparseGCS(TestCase):
         expected = x1.to_dense() * 18.3
 
         self.assertEqual(y1.to_dense(), expected)
-        
-    def test_autograd(self):
-        pass
-    
-    def test_sparse_gcs_constructor(self):
-        pass
 
 if __name__ == '__main__':
     run_tests()

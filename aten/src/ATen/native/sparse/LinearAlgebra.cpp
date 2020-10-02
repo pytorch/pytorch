@@ -28,10 +28,10 @@ namespace at { namespace native {
   Tensor& sparse_gcs_mm_cpu(Tensor& res, const SparseTensor& sparse_, const Tensor& temp_res,
                             const Tensor& dense, Scalar alpha, Scalar beta) {
 
-    TORCH_CHECK(sparse_.dim() == 2, "sparse_gcs_mm_cpu: sparse matrix must have 2 dimensions, not ", sparse_.dim());
-    std::cout << "t: "  << temp_res.sizes() << std::endl;
-    std::cout << "sparse_: " << sparse_.sizes() << std::endl;
-    TORCH_CHECK(sparse_.size(1) == dense.size(0), "sparse_gcs_mm_cpu: Expected dim1 of sparse matrix to be same as dim0 of dense.");
+    TORCH_CHECK(sparse_.dim() == 2, "sparse_gcs_mm_cpu: sparse matrix must have 2 dimensions, not ",
+                sparse_.dim());
+    TORCH_CHECK(sparse_.size(1) == dense.size(0),
+                "sparse_gcs_mm_cpu: Expected dim1 of sparse matrix to be same as dim0 of dense.");
  
     LongTensor indices = sparse_.indices();
     LongTensor pointers = sparse_.pointers();
@@ -56,7 +56,7 @@ namespace at { namespace native {
     });
 
     if (at::hasMKL()) {
-      at::native::sparse_mm_mkl(res, sparse_, dense, temp_res, alpha, beta);
+      at::native::sparse_mm_mkl(res, sparse_, dense, temp_res, alpha, beta);      
     }
     else {
       int64_t dense_stride0 = dense.stride(0);

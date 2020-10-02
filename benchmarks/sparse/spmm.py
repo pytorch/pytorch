@@ -24,7 +24,7 @@ def test_sparse_coo(m, n, k, nnz, test_count):
     stop_timer = Event(enable_timing=True)
 
     coo = gen_sparse_coo((m, k), nnz)
-    vector = torch.randn(k, n, dtype=torch.double)
+    mat = torch.randn(k, n, dtype=torch.double)
 
     times = []
     for _ in range(test_count):
