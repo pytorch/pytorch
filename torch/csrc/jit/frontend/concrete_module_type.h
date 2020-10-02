@@ -82,6 +82,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   void addBuiltinFunction(std::string name, std::string symbol_name);
   void addFailedAttribute(std::string name, std::string failureReason);
   void setIterableModuleKind(IterableModuleKind kind);
+  void setHint(TypePtr hint);
 
   // If a ConcreteModuleType is poisoned, it will never compare equal to any
   // other concrete type
@@ -168,6 +169,8 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // The original `nn.Module` class that we derived this ScriptModule from.
   py::object pyClass_;
 
+  TypePtr hint_{nullptr};
+
   // NOTE: If you ever add any more state to this struct, you need to make sure
   // operator== still makes sense!
   friend ConcreteModuleType;
@@ -181,6 +184,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
 
   static std::shared_ptr<ConcreteModuleType> fromJitType(TypePtr type);
 
+  TypePtr getHint() const;
   TypePtr getJitType() const;
   c10::optional<py::object> getPyClass() const;
   IterableModuleKind getIterableModuleKind() const;

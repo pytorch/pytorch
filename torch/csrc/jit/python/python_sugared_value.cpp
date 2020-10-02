@@ -252,6 +252,37 @@ SugaredValuePtr ModuleValue::getitem(
         }
       }
       throw ErrorReport(loc) << "Key Error, " << idx_str;
+    } else if (auto h = concreteType_->getHint()) {
+      // There was a type hint provided for this ModuleDict, so we can emit code
+      // to do a dictionary lookup at runtime instead of desugaring at compile time.
+      DictTypePtr dict_type = h->expect<DictType>();
+
+      std::vector<Value*> keys, values;
+
+      std::vector<std::string> submoduleNames;
+      const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
+      for (size_t i = 0; i < selfType->numAttributes(); ++i) {
+        const auto& attrType = selfType->getAttribute(i);
+        if (attrType->is_module()) {
+          submoduleNames.push_back(selfType->getAttributeName(i));
+        }
+      }
+
+      // Gather Values for the keys and values of this ModuleDict.
+      for (const auto& name : submoduleNames) {
+        auto name_v = insertConstant(*m.graph(), name);
+        Value* module_v = m.graph()->insertGetAttr(self_, name);
+        module_v->setType(dict_type->getValueType());
+        keys.push_back(name_v);
+        values.push_back(module_v);
+      }
+
+      // Create a Dict in the graph with the collected keys and values.
+      // TODO: Emit dict only once and reuse it across multiple getitem calls.
+      auto* dict = m.graph()->insertNode(m.graph()->createDict(dict_type->getKeyType(), dict_type->getValueType(), keys, values));
+      // Emit the lookup.
+      auto dictSimpleValue = SimpleValue(dict->output());
+      return dictSimpleValue.getitem(loc, m, idx);
     }
     throw ErrorReport(loc)
         << "Unable to extract string literal index. "

@@ -91,7 +91,7 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
         super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
 
 
-def infer_concrete_type_builder(nn_module, share_types=True):
+def infer_concrete_type_builder(nn_module, share_types=True, hint=None):
     """
     Build a ConcreteModuleTypeBuilder from an nn.Module. This
     ConcreteModuleType doesn't have a JIT type associated with it yet, it
@@ -100,6 +100,8 @@ def infer_concrete_type_builder(nn_module, share_types=True):
     concrete_type_builder = torch._C.ConcreteModuleTypeBuilder(type(nn_module))
     if isinstance(nn_module, (torch.nn.ModuleDict)):
         concrete_type_builder.set_module_dict()
+        if hint is not None:
+            concrete_type_builder.set_hint(hint)
     if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential)):
         concrete_type_builder.set_module_list()
 
@@ -147,13 +149,16 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             concrete_type_builder.add_attribute(name, attr_type, False, False)
             continue
         if attr_type is not None:
-            assert attr_type.is_interface_type()
-            # if the type can be inferred, it should be a module interface type
-            sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(attr_type)
+            if attr_type.is_interface_type():
+                sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(attr_type)
+                concrete_type_builder.add_module(name, sub_concrete_type)
+            else:
+                sub_concrete_type = get_module_concrete_type(item, share_types, attr_type)
+                concrete_type_builder.add_module(name, sub_concrete_type)
         else:
             # otherwise we get the concrete module type for item and add it to concrete_type
             sub_concrete_type = get_module_concrete_type(item, share_types)
-        concrete_type_builder.add_module(name, sub_concrete_type)
+            concrete_type_builder.add_module(name, sub_concrete_type)
 
         added_names.add(name)
 
@@ -268,12 +273,12 @@ class ConcreteTypeStore(object):
         # ConcreteTypes that have had their methods already compiled
         self.methods_compiled = set()
 
-    def get_or_create_concrete_type(self, nn_module):
+    def get_or_create_concrete_type(self, nn_module, hint=None):
         """
         Infer a ConcreteType from this `nn.Module` instance. Underlying JIT
         types are re-used if possible.
         """
-        concrete_type_builder = infer_concrete_type_builder(nn_module)
+        concrete_type_builder = infer_concrete_type_builder(nn_module, hint=hint)
 
         nn_module_type = type(nn_module)
         if nn_module_type not in self.type_store:
@@ -304,7 +309,7 @@ def create_methods_and_properties_from_stubs(concrete_type, method_stubs, proper
     concrete_type._create_methods_and_properties(property_defs, property_rcbs, method_defs, method_rcbs, method_defaults)
 
 
-def get_module_concrete_type(nn_module, share_types=True):
+def get_module_concrete_type(nn_module, share_types=True, hint=None):
     """
     Gets a concrete type for nn_modules. If share_types is True, the concrete
     type is fetched from concrete_type_store. If it is False, a new concrete type
@@ -324,11 +329,11 @@ def get_module_concrete_type(nn_module, share_types=True):
 
     if share_types:
         # Look into the store of cached JIT types
-        concrete_type = concrete_type_store.get_or_create_concrete_type(nn_module)
+        concrete_type = concrete_type_store.get_or_create_concrete_type(nn_module, hint)
     else:
         # Get a concrete type directly, without trying to re-use an existing JIT
         # type from the type store.
-        concrete_type_builder = infer_concrete_type_builder(nn_module, share_types)
+        concrete_type_builder = infer_concrete_type_builder(nn_module, share_types, hint)
         concrete_type_builder.set_poisoned()
         concrete_type = concrete_type_builder.build()
 
