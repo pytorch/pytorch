@@ -1,3 +1,5 @@
+.. _reproducibility:
+
 Reproducibility
 ===============
 
@@ -120,4 +122,36 @@ CUDA RNN and LSTM
 -----------------
 In some versions of CUDA, RNNs and LSTM networks may have non-deterministic behavior.
 See :meth:`torch.nn.RNN` and :meth:`torch.nn.LSTM` for details and workarounds.
+
+Also it is recommended to set CUDAs random seed::
+
+    torch.cuda.manual_seed_all(0)
+    torch.cuda.manual_seed(0)
+
+Python
+......
+
+For custom operators, you might need to set python seed as well::
+
+    inport random
+    random.seed(0)
+
+DataLoader
+..........
+
+DataLoader will reseed workers following :ref:`data-loading-randomness` algorithm.
+Use :meth:`worker_init_fn` to preserve reproducibility::
+
+    def seed_worker(worker_id):
+        worker_seed = torch.initial_seed() % 2**32
+        numpy.random.seed(worker_seed)
+        random.seed(worker_seed)
+
+    DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        worker_init_fn=seed_worker
+    )
+
 
