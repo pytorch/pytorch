@@ -14,7 +14,7 @@ from torch.testing._internal.common_methods_invocations import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes)
 from torch.testing import \
-    (floating_types_and, integral_types)
+    (floating_types_and, integral_types, all_types_and_complex)
 
 if TEST_NUMPY:
     import numpy as np
@@ -284,8 +284,7 @@ class TestUnaryUfuncs(TestCase):
                 exact_dtype = False
 
                 if dtype in [torch.uint8, torch.int8]:
-                    # Since torch.uint8 and torch.int8 are promoted to
-                    # half types which have lower precision, relax tolerance.
+                    # Facing tolerance issue with above dtypes.
                     self.assertEqualHelper(actual, expected, msg, dtype=dtype,
                                            exact_dtype=exact_dtype, rtol=1e-4, atol=1e-3)
                     continue
@@ -396,6 +395,61 @@ class TestUnaryUfuncs(TestCase):
         expected = torch.stack([op(slice) for slice in input])
 
         self.assertEqual(actual, expected)
+
+    def _compare_out_variant_based_on_device(self, op, input, out):
+        out_dtype = out.dtype
+        if self.device_type == 'cuda':
+            # As input are dynamically casted
+            # in kernel, cast input to out_dtype
+            expected = op(input.to(out_dtype))
+            op(input, out=out)
+            self.assertEqual(out, expected)
+        else:
+            expected = op(input)
+            op(input, out=out)
+            # As output are casted to passed
+            # result dtype on CPU.
+            self.assertEqual(out, expected.to(out_dtype))
+
+    def _test_out(self, op, input, output):
+        dtype = input.dtype
+        out_dtype = output.dtype
+        if dtype is out_dtype:
+            expected = op(input)
+            op(input, out=output)
+            self.assertEqual(out, expected)
+        else:
+            with self.assertRaises(RuntimeError):
+                op(input, out=output)
+
+    def _test_out_promote_int_to_float_op(self, op, input, output):
+        dtype = input.dtype
+        out_dtype = output.dtype
+        if out_dtype.is_floating_point and not dtype.is_complex:
+            self._compare_out_variant_based_on_device(op, input, output)
+        elif out_dtype.is_floating_point and dtype.is_complex:
+            # Can't cast complex to float
+            with self.assertRaises(RuntimeError):
+                op(input, out=output)
+        elif out_dtype.is_complex:
+            self._compare_out_variant_based_on_device(op, input, output)
+        else:
+            # Can't cast to Integral types
+            with self.assertRaises(RuntimeError):
+                op(input, out=output)
+
+    @ops(unary_ufuncs)
+    def test_out_arg_all_dtypes(self, device, dtype, op):
+        input = make_tensor((64, 64), dtype=dtype, device=device,
+                            low=op.domain[0], high=op.domain[1])
+
+        for out_dtype in all_types_and_complex():
+            out = torch.empty_like(input, dtype=out_dtype)
+            if op.promotes_integers_to_float:
+                self._test_out_promote_int_to_float_op(op, input, out)
+                continue
+
+            self._test_out_arg(op, input, out)
 
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
