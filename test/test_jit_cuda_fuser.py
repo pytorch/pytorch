@@ -10,6 +10,11 @@ from test_jit import JitTestCase, RUN_CUDA
 import itertools
 import numpy as np
 
+import os
+os.environ['PYTORCH_CUDA_FUSER_DISABLE_FALLBACK'] = '1'
+os.environ['PYTORCH_CUDA_FUSER_DISABLE_FMA'] = '1'
+os.environ['PYTORCH_CUDA_FUSER_JIT_OPT_LEVEL'] = '0'
+
 if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
     torch._C._jit_set_texpr_fuser_enabled(False)
     torch._C._jit_set_profiling_executor(True)
