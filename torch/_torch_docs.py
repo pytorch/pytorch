@@ -9581,16 +9581,16 @@ satisfies the following rules:
      - *returned index satisfies*
    * - 1-D
      - False
-     - ``sorted_sequence[i-1] <= values[m][n]...[l][x] < sorted_sequence[i]``
+     - ``sorted_sequence[i-1] < values[m][n]...[l][x] <= sorted_sequence[i]``
    * - 1-D
      - True
-     - ``sorted_sequence[i-1] < values[m][n]...[l][x] <= sorted_sequence[i]``
+     - ``sorted_sequence[i-1] <= values[m][n]...[l][x] < sorted_sequence[i]``
    * - N-D
      - False
-     - ``sorted_sequence[m][n]...[l][i-1] <= values[m][n]...[l][x] < sorted_sequence[m][n]...[l][i]``
+     - ``sorted_sequence[m][n]...[l][i-1] < values[m][n]...[l][x] <= sorted_sequence[m][n]...[l][i]``
    * - N-D
      - True
-     - ``sorted_sequence[m][n]...[l][i-1] < values[m][n]...[l][x] <= sorted_sequence[m][n]...[l][i]``
+     - ``sorted_sequence[m][n]...[l][i-1] <= values[m][n]...[l][x] < sorted_sequence[m][n]...[l][i]``
 
 Args:
     sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost*
@@ -9654,9 +9654,9 @@ formally, the returned index satisfies the following rules:
    * - :attr:`right`
      - *returned index satisfies*
    * - False
-     - ``boundaries[i-1] <= input[m][n]...[l][x] < boundaries[i]``
-   * - True
      - ``boundaries[i-1] < input[m][n]...[l][x] <= boundaries[i]``
+   * - True
+     - ``boundaries[i-1] <= input[m][n]...[l][x] < boundaries[i]``
 
 Args:
     input (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
