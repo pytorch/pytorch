@@ -2123,9 +2123,9 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
   Tensor grad_b, grad_a;
   if (grad_x.defined() || grad_m.defined()) {
     if (grad_x.defined()) {
-      grad_b = std::get<0>(grad_x.triangular_solve(a, upper, !transpose, unitriangular));
+      grad_b = std::get<0>(grad_x.triangular_solve(a.conj(), upper, !transpose, unitriangular));
       if (output_mask[1]) {
-        grad_a = transpose ? -x.matmul(grad_b.transpose(-1, -2)) : -grad_b.matmul(x.transpose(-1, -2));
+        grad_a = transpose ? -x.conj().matmul(grad_b.transpose(-1, -2)) : -grad_b.matmul(x.transpose(-1, -2).conj());
         if (upper) {
           grad_a = grad_a.triu((int) unitriangular);
         } else {
