@@ -194,8 +194,9 @@ class Graph:
         i = self._used_names[op] = self._used_names[op] + 1
         return f'{op}_{i}'
 
-    def python_code(self, root_module: str) -> Tuple[str, str, List[str]]:
+    def python_code(self, root_module: str) -> Tuple[str, str, List[str], List[str]]:
         free_vars: List[str] = []
+        modules_used : Set[str] = set()
         body: List[str] = []
         for node in self._nodes:
             if node.op == 'placeholder':
@@ -219,6 +220,9 @@ class Graph:
                     body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}\n')
                     continue
                 qualified_name = _qualified_name(node.target)
+                if '.' in qualified_name:
+                    module_name = qualified_name.split('.', maxsplit=1)[0]
+                    modules_used.add(module_name)
                 if qualified_name == 'getattr' and \
                    isinstance(node.args, tuple) and \
                    isinstance(node.args[1], str) and \
@@ -239,7 +243,7 @@ class Graph:
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
         src = ''.join(body)
-        return src, str(self.result), free_vars
+        return src, str(self.result), free_vars, sorted(modules_used)
 
     def __str__(self) -> str:
         placeholder_names : List[str] = []

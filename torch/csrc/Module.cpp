@@ -133,6 +133,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   THPByteStorage_postInit(module);
   THPBoolStorage_postInit(module);
   THPQUInt8Storage_postInit(module);
+  THPQUInt4x2Storage_postInit(module);
   THPQInt8Storage_postInit(module);
   THPQInt32Storage_postInit(module);
   THPBFloat16Storage_postInit(module);
@@ -752,6 +753,7 @@ PyObject* initModule() {
   ASSERT_TRUE(THPQUInt8Storage_init(module));
   ASSERT_TRUE(THPQInt8Storage_init(module));
   ASSERT_TRUE(THPQInt32Storage_init(module));
+  ASSERT_TRUE(THPQUInt4x2Storage_init(module));
   ASSERT_TRUE(THPBFloat16Storage_init(module));
   ASSERT_TRUE(THPComplexDoubleStorage_init(module));
   ASSERT_TRUE(THPComplexFloatStorage_init(module));
