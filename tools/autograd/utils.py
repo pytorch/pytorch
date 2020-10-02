@@ -74,6 +74,12 @@ def is_tensor_method(declaration):
 def is_out_variant(decl):
     return decl['name'].endswith('_out')
 
+def op_name_with_overload(decl):
+    name = decl['operator_name_with_overload']
+    if is_out_variant(decl):
+        name = decl['operator_name_with_overload'][:-len('_out')]
+    return name
+
 def op_name_without_overload(decl):
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
     return 'aten::{}'.format(name)
