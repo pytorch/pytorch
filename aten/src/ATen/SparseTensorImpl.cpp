@@ -35,7 +35,6 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
       , at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(key_set)).dtype(ScalarType::Long))
       , at::empty({0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(key_set)).dtype(data_type))) {}
 
-
 SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type, at::Tensor indices, at::Tensor values)
     : TensorImpl(key_set, data_type, values.device())
     , sparse_dim_(1)
@@ -67,11 +66,9 @@ void SparseTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
 void SparseTensorImpl::set_storage_offset(int64_t storage_offset) {
   AT_ERROR("sparse tensors do not have set_storage_offset");
 }
-
 int64_t SparseTensorImpl::dim() const {
   return sparse_dim_ + dense_dim_;
 }
-
 bool SparseTensorImpl::has_storage() const {
   return false;
 }
