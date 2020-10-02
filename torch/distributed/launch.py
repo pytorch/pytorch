@@ -192,10 +192,10 @@ def parse_args():
         default=None,
         type=str,
         help=f"""Relative path to write subprocess logs to. Passing in a relative
-        path will create a directory if needed, and write the stdout to a file
-        given by {node_local_rank_stdout_filename}. Note that successive runs with the
-        same path to write logs to will overwrite existing logs, so be sure to save logs
-        as needed.""",
+        path will create a directory if needed, and write the stdout and stderr to files
+        {node_local_rank_stdout_filename} and {node_local_rank_stderr_filename}. Note that
+        successive runs with the  same path to write logs to will overwrite existing logs,
+        so be sure to save logs as needed.""",
     )
 
     # positional
