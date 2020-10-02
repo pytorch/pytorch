@@ -110,6 +110,7 @@ allow_list = [
     ("aten::_foreach_sub", datetime.date(2020, 10, 1)),
     ("aten::_amp_non_finite_check_and_unscale_", datetime.date(9999, 1, 1)),
     ("aten::choose_qparams_optimized", datetime.date(2020, 10, 5)),
+    ("aten::smooth_l1_loss_backward", datetime.date(2020, 10, 15)),
 ]
 
 
