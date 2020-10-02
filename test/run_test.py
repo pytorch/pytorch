@@ -2,7 +2,6 @@
 
 import argparse
 from datetime import datetime
-import math
 import modulefinder
 import os
 import shutil
