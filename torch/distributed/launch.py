@@ -142,7 +142,8 @@ import subprocess
 import os
 from argparse import ArgumentParser, REMAINDER
 
-node_local_rank_stdout_filename = "node_{}_local_rank_{}"
+node_local_rank_stdout_filename = "node_{}_local_rank_{}_stdout"
+node_local_rank_stderr_filename = "node_{}_local_rank_{}_stderr"
 
 def parse_args():
     """
@@ -235,7 +236,7 @@ def main():
         # Possibly create the directory to write subprocess log output to.
         if os.path.exists(args.logdir):
             if not os.path.isdir(args.logdir):
-                print("passed in --logdir must be a relative path to a directory. Ignoring argument.")
+                raise ValueError("argument --logdir must be a path to a directory.")
                 args.logdir = None
         else:
             # create the relative directory
@@ -269,19 +270,21 @@ def main():
 
         cmd.extend(args.training_script_args)
 
-        subprocess_stdout = None
         if args.logdir:
             directory_path = os.path.join(os.getcwd(), args.logdir)
             node_rank = args.node_rank
             stdout_file_name = node_local_rank_stdout_filename.format(node_rank, local_rank)
-            file_path = os.path.join(directory_path, stdout_file_name)
-            file_handle = open(file_path, "w")
-            subprocess_stdout = file_handle
-            subprocess_file_handles.append(file_handle)
-            print(f"Note: Stdout for node {node_rank} rank {local_rank} will be written to {file_path}")
+            stderr_file_name = node_local_rank_stderr_filename.format(node_rank, local_rank)
+            stdout_handle = open(os.path.join(directory_path, stdout_file_name), "w")
+            stderr_handle = open(os.path.join(directory_path, stderr_file_name), "w")
+            subprocess_file_handles.append((stdout_handle, stderr_handle))
+            stdout_name = stdout_handle.name
+            stderr_name = stderr_handle.name
+            print(f"Note: Stdout and stderr for node {node_rank} rank {local_rank} will be written to {stdout_name}, {stderr_name} respectively.")
 
-
-        process = subprocess.Popen(cmd, env=current_env, stdout=subprocess_stdout)
+        stdout_handle = None if not subprocess_file_handles else subprocess_file_handles[local_rank][0]
+        stderr_handle = None if not subprocess_file_handles else subprocess_file_handles[local_rank][1]
+        process = subprocess.Popen(cmd, env=current_env, stdout=stdout_handle, stderr=stderr_handle)
         processes.append(process)
 
     try:
@@ -292,9 +295,9 @@ def main():
                                                     cmd=cmd)
     finally:
         # close open file descriptors
-        for file_handle in subprocess_file_handles:
-            file_handle.close()
-
+        for (stdout_handle, stderr_handle) in subprocess_file_handles:
+            stdout_handle.close()
+            stderr_handle.close()
 
 if __name__ == "__main__":
     main()
