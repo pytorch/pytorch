@@ -1731,6 +1731,46 @@ class TestCuda(TestCase):
         self.assertTrue(a.grad.sum().item() == 4 * size)
         self.assertTrue(b.grad.sum().item() == 4 * size)
 
+    def test_streaming_backward_sync_graph_root(self):
+        # This function tests if bwd ops running on a side stream properly sync with the graph root.
+        fwd_bwd_op_stream = torch.cuda.Stream()
+        bwd_ambient_stream = torch.cuda.Stream()
+        # We need these streams to be different otherwise the test is meaningless.
+        assert fwd_bwd_op_stream != bwd_ambient_stream
+
+        size = int(1e5)
+
+        a = torch.full((size,), 2.0, device="cuda", requires_grad=True)
+        b = torch.full((size,), 3.0, device="cuda", requires_grad=True)
+
+        # I don't think we need any manual record_streams below.
+        # a and b remain in scope for the entire test.
+        # c and grad remain in scope for each iteration, and there's a full sync between iterations.
+        for trial in range(5):
+            torch.cuda.synchronize()
+            a.grad = b.grad = None
+            with torch.cuda.stream(fwd_bwd_op_stream):
+                c = a * b
+
+            with torch.cuda.stream(bwd_ambient_stream):
+                torch.cuda.synchronize()
+                # Long-running dummy kernel on bwd_ambient_stream delays filling of grad
+                torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+                # Fills grad on bwd_ambient_stream
+                grad = torch.full((size,), float(trial), device="cuda")
+
+                # Bwd ops still run on fwd_bwd_ops_stream, so the following ensures
+                # bwd ops sync properly with bwd_ambient_stream before consuming grad.
+                torch.autograd.backward(tensors=c, grad_tensors=grad)
+
+                # assertEquals below run on bwd_ambient_stream, so this test may also fail
+                # if backward() fails to sync with the ambient stream at the end.
+                # A torch.cuda.synchronize() here would ensure this test focuses on GraphRoot only.
+                # Which do we prefer:  A focused test, or a test that has a chance to catch additional related bugs?
+                with torch.no_grad():
+                    self.assertEqual(a.grad, grad * b)
+                    self.assertEqual(b.grad, grad * a)
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @unittest.skipIf(not IS_SANDCASTLE, "Does not work on Sandcastle")
     def test_cuda_init_race(self):
