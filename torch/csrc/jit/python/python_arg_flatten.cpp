@@ -65,7 +65,7 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.desc.structure.push_back(D::Variable);
   } else if (strcmp(THPUtils_typename(obj),"NoneType") == 0) {
     auto none_type = py::cast<py::none>(obj);
-    args.desc.structure.push_back(D::NoneType);+
+    args.desc.structure.push_back(D::NoneType);
   } else {
     std::string msg =
         "Only tuples, lists and Variables supported as JIT inputs/outputs. "
@@ -140,6 +140,8 @@ py::object unflatten_rec(
       throw std::runtime_error("Not enough Variables given to unflatten");
     auto str = *str_it++;
     return py::reinterpret_borrow<py::object>(THPUtils_packString(str));
+  } else if (type == D::NoneType) {
+    return py::reinterpret_borrow<py::object>(py::none());
   } else {
     if (var_it == var_it_end)
       throw std::runtime_error("Not enough Variables given to unflatten");
