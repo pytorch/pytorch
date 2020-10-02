@@ -156,18 +156,22 @@ struct FunctionSchema {
     checkSchema();
   }
 
-  // check whether this schema is backward compatible with the old one.
-  // the following conditions are considered as this schema is backward
-  // compatible with old:
-  //   1) two schemas are equal
-  //   2) this schema has the same or more positional args than old,
-  //      and any positional arg in this schema is backward compatible
-  //      with the corresponding one in old schema, which could be an arg
-  //      or a kwarg, if it has, or it must provide a default value
-  //   3) this schema has the same or more kwargs than old, and all the kwargs
-  //      in old schema can find the corresponding kwarg in this schema which
-  //      is backward compatible with the old kwarg, and the extra kwargs in
-  //      this schema must provide default values.
+  // Checks whether this schema is backward compatible with the old one.
+  // The following conditions must be true:
+  // * The function's structure of old and new match (e.g. name,
+  //   overload name, etc.).
+  // * Considering as 'arguments' the concatenation of positional arguments
+  //   and kwargs in a function, all the arguments in the old function schema
+  //   must have a matching backward compatible argument in the same position
+  //   in this schema.
+  // * All remaining (i.e. new) arguments in this schema must appear be
+  //   appended to the list of arguments, and have a default value.
+  // E.g.
+  //   OK    f_new(a, b, c=1) => f_old(a, b)
+  //   NOK   f_new(a, c=1, *, b) => f_old(a, *, b)
+  //   OK    f_new(a, b, *, c) => f_old(a, *, b, c)
+  //   NOK   f_new(a, *, c, b) => f_old(a, *, b, c)
+  //   OK    f_new(a, *, b, c, d=1) => f_old(a, *, b, c)
   bool isBackwardCompatibleWith(
       const FunctionSchema& old,
       std::ostream* why_not = nullptr) const;
