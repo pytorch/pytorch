@@ -792,7 +792,6 @@ class TestFX(JitTestCase):
             assert(r.parents == d.parents)
             assert(r.children == d.children)
             assert(r.input_nodes == d.input_nodes)
-            print(r.output_nodes, d.output_nodes)
             assert(r.output_nodes == d.output_nodes)
 
     @skipIfNoTorchVision
