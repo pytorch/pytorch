@@ -77,7 +77,7 @@ llvm::CmpInst::Predicate llvm_comparison_predicate(
 
 class LLVMCodeGenImpl : public IRVisitor {
  private:
-  std::unique_ptr<llvm::LLVMContext> context_;
+  llvm::orc::ThreadSafeContext context_;
   llvm::IRBuilder<> irb_;
   std::unique_ptr<llvm::TargetMachine> TM_;
   std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
@@ -313,7 +313,8 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   emitWrapper(params);
   emitKernel(stmt, params);
 
-  cantFail(jit_->addModule(std::move(module_), std::move(context_)));
+  cantFail(jit_->addModule(
+      llvm::orc::ThreadSafeModule(std::move(module_), context_)));
   auto sym = jit_->findSymbol("wrapper");
   kernelAddress_ = cantFail(sym.getAddress());
   argv_ = std::make_unique<void*[]>(params.size());
@@ -322,7 +323,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
 }
 
 llvm::LLVMContext& LLVMCodeGenImpl::getContext() {
-  return *context_;
+  return *context_.getContext();
 }
 
 llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
@@ -972,7 +973,7 @@ void LLVMCodeGenImpl::visit(const Load* v) {
       auto addr = irb_.CreateGEP(base, first_idx);
       auto vaddr = irb_.CreateBitOrPointerCast(
           addr, llvm::PointerType::get(loadType, 0));
-      value_ = irb_.CreateAlignedLoad(vaddr, 4);
+      value_ = irb_.CreateAlignedLoad(loadType, vaddr, 4);
       return;
     }
   }
@@ -1220,47 +1221,13 @@ void LLVMCodeGenImpl::visit(const BaseCallNode* v) {
 
 static void applyMathFunctionAttributes(llvm::Function* f) {
   f->addFnAttr(llvm::Attribute::ReadNone);
+  f->addFnAttr(llvm::Attribute::NoFree);
   f->addFnAttr(llvm::Attribute::NoUnwind);
   // TODO: Adding this attr should be correct, but as of LLVM 9.0.1 adding it
   // causes some math functions to incorrectly be turned into tail calls.
   // f->addFnAttr(llvm::Attribute::Speculatable);
-#if LLVM_VERSION_MAJOR == 9
-  f->addFnAttr(llvm::Attribute::NoFree);
   f->addFnAttr(llvm::Attribute::WillReturn);
-#endif
 }
-
-namespace {
-#if LLVM_VERSION_MAJOR == 9
-
-using FunctionCallee = llvm::FunctionCallee;
-
-#elif LLVM_VERSION_MAJOR == 8 && LLVM_VERSION_PATCH == 20181009
-
-struct FunctionCallee {
-  FunctionCallee() {}
-
-  FunctionCallee(llvm::Constant* fn)
-      : v_(fn), ft_(cast<llvm::Function>(v_)->getFunctionType()) {}
-
-  llvm::FunctionType* getFunctionType() {
-    return ft_;
-  }
-
-  llvm::Value* getCallee() {
-    return v_;
-  }
-
- private:
-  llvm::Value* v_{nullptr};
-  llvm::FunctionType* ft_{nullptr};
-};
-
-#else
-#error Only LLVM versions 8 or 9 are supported.
-#endif
-
-} // namespace
 
 void LLVMCodeGenImpl::visit(const Intrinsics* v) {
   llvm::FunctionType* call_ty = nullptr;
@@ -1283,7 +1250,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #if defined(__AVX__) && !defined(_MSC_VER)
 #define SIMD_UNARY_MATH_CASE(enum, name, type)                               \
   case enum: {                                                               \
-    FunctionCallee callee;                                                   \
+    llvm::FunctionCallee callee;                                             \
     std::string fname;                                                       \
     if (v->dtype().lanes() == 8) {                                           \
       fname = "Sleef_" + std::string(name) + "8";                            \
@@ -1308,7 +1275,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #else
 #define SIMD_UNARY_MATH_CASE(enum, name, type)                               \
   case enum: {                                                               \
-    FunctionCallee callee;                                                   \
+    llvm::FunctionCallee callee;                                             \
     std::string fname;                                                       \
     if (v->dtype().lanes() == 4) {                                           \
       fname = "Sleef_" + std::string(name) + "4";                            \
@@ -1354,7 +1321,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #if defined(__AVX__) && !defined(_MSC_VER)
 #define SIMD_BINARY_MATH_CASE(enum, name, type)                              \
   case enum: {                                                               \
-    FunctionCallee callee;                                                   \
+    llvm::FunctionCallee callee;                                             \
     std::string fname;                                                       \
     if (v->dtype().lanes() == 8) {                                           \
       fname = "Sleef_" + std::string(name) + "8";                            \
@@ -1383,7 +1350,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #else
 #define SIMD_BINARY_MATH_CASE(enum, name, type)                              \
   case enum: {                                                               \
-    FunctionCallee callee;                                                   \
+    llvm::FunctionCallee callee;                                             \
     std::string fname;                                                       \
     if (v->dtype().lanes() == 4) {                                           \
       fname = "Sleef_" + std::string(name) + "4";                            \
@@ -1407,15 +1374,16 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
         SIMD_BINARY_MATH_CASE(kFmod, "fmodf", FloatTy_)
 #undef SIMD_BINARY_MATH_CASE
 
-      case kRemainder: {
-        FunctionCallee callee = module_->getOrInsertFunction(
-            "remainderf",
-            llvm::FunctionType::get(FloatTy_, {FloatTy_, FloatTy_}, false),
-            {});
-        call_ty = callee.getFunctionType();
-        call_fn = callee.getCallee();
-        applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));
-      } break;
+#define BINARY_MATH_CASE(enum, name, type)                             \
+  case enum: {                                                         \
+    auto callee = module_->getOrInsertFunction(                        \
+        name, llvm::FunctionType::get(type, {type, type}, false), {}); \
+    call_ty = callee.getFunctionType();                                \
+    call_fn = callee.getCallee();                                      \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));  \
+  } break;
+        BINARY_MATH_CASE(kRemainder, "remainderf", FloatTy_)
+#undef BINARY_MATH_CASE
 
       default: {
         throw unimplemented_lowering(v);
@@ -1427,7 +1395,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #if defined(__AVX__) && !defined(_MSC_VER)
 #define SIMD_UNARY_MATH_CASE(enum, name, type)                               \
   case enum: {                                                               \
-    FunctionCallee callee;                                                   \
+    llvm::FunctionCallee callee;                                             \
     std::string fname;                                                       \
     if (v->dtype().lanes() == 4) {                                           \
       fname = "Sleef_" + std::string(name) + "d4";                           \
@@ -1452,7 +1420,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #else
 #define SIMD_UNARY_MATH_CASE(enum, name, type)                               \
   case enum: {                                                               \
-    FunctionCallee callee;                                                   \
+    llvm::FunctionCallee callee;                                             \
     std::string fname;                                                       \
     if (v->dtype().lanes() == 2) {                                           \
       fname = "Sleef_" + std::string(name) + "d2";                           \
@@ -1509,7 +1477,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #if defined(__AVX__) && !defined(_MSC_VER)
 #define SIMD_BINARY_MATH_CASE(enum, name, type)                              \
   case enum: {                                                               \
-    FunctionCallee callee;                                                   \
+    llvm::FunctionCallee callee;                                             \
     std::string fname;                                                       \
     if (v->dtype().lanes() == 4) {                                           \
       fname = "Sleef_" + std::string(name) + "d4";                           \
@@ -1538,7 +1506,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #else
 #define SIMD_BINARY_MATH_CASE(enum, name, type)                              \
   case enum: {                                                               \
-    FunctionCallee callee;                                                   \
+    llvm::FunctionCallee callee;                                             \
     std::string fname;                                                       \
     if (v->dtype().lanes() == 2) {                                           \
       fname = "Sleef_" + std::string(name) + "d2";                           \
@@ -1564,7 +1532,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 
 #define BINARY_MATH_CASE(enum, name, type)                             \
   case enum: {                                                         \
-    FunctionCallee callee = module_->getOrInsertFunction(              \
+    auto callee = module_->getOrInsertFunction(                        \
         name, llvm::FunctionType::get(type, {type, type}, false), {}); \
     call_ty = callee.getFunctionType();                                \
     call_fn = callee.getCallee();                                      \

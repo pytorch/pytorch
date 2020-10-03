@@ -21,12 +21,11 @@ class TORCH_API PytorchLLVMJIT {
   PytorchLLVMJIT();
   ~PytorchLLVMJIT();
 
-  Error addModule(std::unique_ptr<Module> M, std::unique_ptr<LLVMContext> C);
+  Error addModule(ThreadSafeModule M);
 
   JITSymbol findSymbol(const std::string Name);
 
   TargetMachine& getTargetMachine();
-
   const DataLayout& getDataLayout();
 
  private:
