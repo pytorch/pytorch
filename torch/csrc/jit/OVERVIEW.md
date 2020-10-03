@@ -886,7 +886,7 @@ def LSTMCellS(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
 
 ### Profiling ###
 
-In the profiling stage, a Profiling Graph Executor takes an unoptimized graph runs required and profiling insensitive passes ([see the next section](#Optimization)) and inserts `prim::profile` on **tensor-typed** inputs to fusible operations. 
+In the profiling stage, a Profiling Graph Executor takes an unoptimized graph runs required and passes that doesn't need profiling information ([see the next section](#Optimization)) and inserts `prim::profile` on **tensor-typed** inputs to fusible operations. 
 `ProfilingRecord` also maintains a mapping between output values of `prim::profile` nodes and the properties of input tensors at runtime.
 This mapping is maintained for each invocation of a function identified by Interpreter's `frame_id` (which is globally unique).
 It's important to not mix the tensor properties from different invocations for the same `Value*`, as this may hinder us to infer the relationships between the arguments of some operation and its output. @#$                                                                                      
@@ -957,59 +957,43 @@ https://github.com/pytorch/pytorch/blob/71e6ce66166bb74dbec0fffcdfc72b5fb0e6f9d5
 
 ### Optimization ###
 
-The optimization phase takes place after the last profiled run.
-The graph executor then runs a number of passes which could be roughly split in three categories:
-* Required passes which are graph transformations necessary to generate legal graphs for the interpreter.
-* Profiling insensitive passes are optimizations that do **not** rely on profiling information
-* Profiling optimizations are transformations that use profiling information and also responsible for fallback/unoptimized paths @#$
+The graph executor performs a number of optimizations.
+The optimizations the graph executor performs can be broadly classified into:
+* optimizations that require profiling information and the ones that do not
+* optimizations that preserve a graph's differentiability and post-derivative optimizations
 
-There are currently two required passes: `LowerGradOf` and `RemoveExpands`
-`LowerGradOf` lowers `GradOf` blocks created by autodifferentiation (autodiff) to `prim::If`s that checks if input gradient are undefined. The `GradOf` blocks are symbolic derivatives (backward functions) of individual pytorch operations (e.g. `aten::add`, `aten::mm`, etc). A symbolic derivative of a graph with regards to its inputs would be a chain of `GraphOf` starting from the derivative of graph outputs all the way back to graph inputs.
+.|Derivative-preserving|Post-derivative
+--|--|--
+**Profiling**|Peephole* </br> | Tensor Expressions Fuser </br> CUDA Fuser 
+**Non-profiling**| Inline </br> Dead code elimination </br> Constant Propagation </br> Common expr elimination </br> Loop Unroller </br> Peephole* </br> LowerGradOf^ </br> RemoveExpands^ | BatchMM 
+
+These properties define a relative order of optimizations in graph executor's optimization pipeline.
+A number of Non-profiling/Derivative-preserving (DCE, Constant prop, and CSE) optimizations are often performed to remove inefficiencies (e.g. dead code or redundant computations) introduced by the other passes. As such, they are executed a number of times through the optimization pipeline. These optimizations don't require profiling information, hence they can be used in both the profiling and optimization stages. They are also derivative-preserving which means they are valid before and after derivative graph splitting or, in other words, within and outside `prim::DifferentiableGraph`s. Derivative-preserving optimizations and Derivative graph splitting are discussed more in detal below.
+
+In the **profiling stage**, the graph executor runs:
+* LowerGradOf^
+* RemoveExpands^
+* EliminateDeadCode
+* EliminateCommonSubexpression
+* ConstantPropagation
+* PeepholeOptimize
+
+The first two are also called required optimizations (marked with **^** in the table). 
+They are necessary to generate valid graphs for the interpreter.
+
+`LowerGradOf` @#$ lowers `GradOf` blocks created by autodifferentiation (autodiff) to `prim::If`s that checks if input gradient are undefined. The `GradOf` blocks are symbolic derivatives (backward functions) of individual pytorch operations (e.g. `aten::add`, `aten::mm`, etc). A symbolic derivative of a graph with regards to its inputs would be a chain of `GraphOf` starting from the derivative of graph outputs all the way back to graph inputs.
 Undefined gradients or rather undefined tensors are conceptually equivalent to zero tensors. However, it's both inefficient and tricky implementation-wise to use zero tensors. Instead, autodiff inserts `GradOf`/`prim::If` checks to make sure that the undefined tensors won't leak into
 symboli derivatives.
-`RemoveExpands` removes implicitly inserted (by tracing) expand nodes which might not necessarily be always valid when used inside script methods that might have unstable shapes
-
-Profiling insensitive passes include
-* Eliminating dead code
-* Eliminating common subexpressions
-* Pooling redundant constants into single values
-* Peephole optimizations (with `disable_shape_peepholes` set to true), including some algebraic rewrites into simpler operations
-* Unrolling small loops.
-
-These passes are also *derivative preserving*. If a computation the graph `requires_grad` and it is valid to compute its derivative, then these passes are only allow to replace that computation with another computation that is also differentiable. In other words, these passes cannot break the ability for autograd to work correctly. Algebraic rewrites and peephole optimizations are generally derivative preserving but something 
-
-Both required and 
 
 
-```
-graph(%x : Float(*, *),
-      %hx : Float(*, *),
-      %cx : Float(*, *),
-      %w_ih : Float(*, *),
-      %w_hh : Float(*, *),
-      %b_ih : Float(*),
-      %b_hh : Float(*)):
-  %8 : int = prim::Constant[value=1]()
-  %9 : Float(*, *) = aten::t(%w_ih)
-  %10 : Float(*, *) = aten::mm(%x, %9)
-  %11 : Float(*, *) = aten::t(%w_hh)
-  %12 : Float(*, *) = aten::mm(%hx, %11)
-  %13 : Float(*, *) = aten::add(%10, %12, %8)
-  %14 : Float(*, *) = aten::add(%13, %b_ih, %8)
-  %gates : Float(*, *) = aten::add(%14, %b_hh, %8)
-  %31 : Float(*, *), %32 : Float(*, *), %33 : Float(*, *), %34 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%gates)
-  %ingate : Float(*, *) = aten::sigmoid(%31)
-  %forgetgate : Float(*, *) = aten::sigmoid(%32)
-  %cellgate : Float(*, *) = aten::tanh(%33)
-  %outgate : Float(*, *) = aten::sigmoid(%34)
-  %25 : Float(*, *) = aten::mul(%forgetgate, %cx)
-  %26 : Float(*, *) = aten::mul(%ingate, %cellgate)
-  %cy : Float(*, *) = aten::add(%25, %26, %8)
-  %28 : Float(*, *) = aten::tanh(%cy)
-  %hy : Float(*, *) = aten::mul(%outgate, %28)
-  %30 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
-  return (%30)
-```
+`RemoveExpands` @#$ removes implicitly inserted (by tracing) expand nodes which might not necessarily be always valid when used inside script methods that might have unstable shapes.
+
+We already mentioned the roles DCE and CSE play. 
+Constant Propagation recognizes and evaluates constant expressions at compile-time, so these expressions don't have to recomputed every time a `GraphFunction` @#$ is executed.
+
+Peephole performs a variety of algebraic simplifications. For example, it recognizes that adding 0 or multiplying by 1 is nop, so is `a.t().t()`. 
+
+The passes above are also *derivative preserving*. If a computation the graph `requires_grad` and it is valid to compute its derivative, then these passes are only allow to replace that computation with another computation that is also differentiable. In other words, these passes cannot break the ability for autograd to work correctly. Algebraic rewrites and peephole optimizations are generally derivative preserving but something 
 
 *Post-derivative optimization* The next optimization depends on whether any part of the graph actual requires a gradient to be calculated, which is determined by `needsGradient`. In the case where no gradients are required (i.e. for inference graphs), then we can directly apply optimizations that generate graphs that may not have valid gradients defined. For now this is the `FuseGraph` pass, which looks for adjacent point-wise operations along with reviewing operations such as `split` and `concat`, and creates `prim::FusionGroup` Nodes in the graph to replace these operations. The Operator registered to execute `prim:FusionGroup` nodes will generate a new CUDA kernel for each unique Node, which replaces the original separate execution.
 
@@ -1076,43 +1060,71 @@ with prim::FusionGroup_0 = graph(%13 : Float(*, *),
 The creating of derivative subgraphs is done using a similar approach to finding fusion groups: adjacent operations with known gradient formulas are grouped together into `prim::DifferentiableGraph` nodes. We only generate these nodes if we can find a large enough subgraph where optimization is likely to be profitable since there is some overhead involved in entering and exiting a differentiable subgraph.
 
 ```
-graph(%x : Float(*, *),
-      %hx : Float(*, *),
-      %cx : Float(*, *),
-      %w_ih : Float(*, *),
-      %w_hh : Float(*, *),
-      %b_ih : Float(*),
-      %b_hh : Float(*)):
-  %8 : int = prim::Constant[value=1]()
-  %hy : Float(*, *), %cy : Float(*, *) = prim::DifferentiableGraph_0(%cx, %b_hh, %b_ih, %hx, %w_hh, %x, %w_ih)
-  %30 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
-  return (%30)
-with prim::DifferentiableGraph_0 = graph(%13 : Float(*, *),
-      %29 : Float(*),
-      %33 : Float(*),
-      %40 : Float(*, *),
-      %43 : Float(*, *),
-      %45 : Float(*, *),
-      %48 : Float(*, *)):
-  %49 : Float(*, *) = aten::t(%48)
-  %47 : Float(*, *) = aten::mm(%45, %49)
-  %44 : Float(*, *) = aten::t(%43)
-  %42 : Float(*, *) = aten::mm(%40, %44)
-  %38 : int = prim::Constant[value=1]()
-  %39 : Float(*, *) = aten::add(%47, %42, %38)
-  %35 : Float(*, *) = aten::add(%39, %33, %38)
-  %gates : Float(*, *) = aten::add(%35, %29, %38)
-  %24 : Float(*, *), %25 : Float(*, *), %26 : Float(*, *), %27 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%gates)
-  %ingate : Float(*, *) = aten::sigmoid(%24)
-  %forgetgate : Float(*, *) = aten::sigmoid(%25)
-  %cellgate : Float(*, *) = aten::tanh(%26)
-  %outgate : Float(*, *) = aten::sigmoid(%27)
-  %14 : Float(*, *) = aten::mul(%forgetgate, %13)
-  %11 : Float(*, *) = aten::mul(%ingate, %cellgate)
-  %cy : Float(*, *) = aten::add(%14, %11, %38)
-  %4 : Float(*, *) = aten::tanh(%cy)
-  %hy : Float(*, *) = aten::mul(%outgate, %4)
-  return (%hy, %cy)
+graph(%x.1 : Tensor,
+      %hx.1 : Tensor,
+      %cx.1 : Tensor,
+      %w_ih.1 : Tensor,
+      %w_hh.1 : Tensor,
+      %b_ih.1 : Tensor,
+      %b_hh.1 : Tensor):
+  %7 : int = prim::Constant[value=1]() # test_jit_fuser_te.py:83:67
+  %101 : Tensor, %156 : Tensor = prim::DifferentiableGraph_0(%cx.1, %b_hh.1, %b_ih.1, %hx.1, %w_hh.1, %x.1, %w_ih.1)
+  %56 : (Tensor, Tensor) = prim::TupleConstruct(%101, %156)
+  return (%56)
+with prim::DifferentiableGraph_0 = graph(%37 : Tensor,
+      %65 : Tensor,
+      %74 : Tensor,
+      %92 : Tensor,
+      %96 : Tensor,
+      %103 : Tensor,
+      %107 : Tensor):
+  %108 : Tensor = prim::profile[profiled_type=Double(2048:512, 512:1, requires_grad=1, device=cuda:0)](%107)
+  %106 : Tensor = aten::t(%108) # test_jit_fuser_te.py:82:25
+  %104 : Tensor = prim::profile[profiled_type=Double(64:512, 512:1, requires_grad=0, device=cuda:0)](%103)
+  %102 : Tensor = prim::profile[profiled_type=Double(512:1, 2048:512, requires_grad=1, device=cuda:0)](%106)
+  %100 : Tensor = aten::mm(%104, %102) # test_jit_fuser_te.py:82:20
+  %97 : Tensor = prim::profile[profiled_type=Double(2048:512, 512:1, requires_grad=1, device=cuda:0)](%96)
+  %95 : Tensor = aten::t(%97) # test_jit_fuser_te.py:82:43
+  %93 : Tensor = prim::profile[profiled_type=Double(64:512, 512:1, requires_grad=1, device=cuda:0)](%92)
+  %91 : Tensor = prim::profile[profiled_type=Double(512:1, 2048:512, requires_grad=1, device=cuda:0)](%95)
+  %89 : Tensor = aten::mm(%93, %91) # test_jit_fuser_te.py:82:37
+  %86 : Tensor = prim::profile[profiled_type=Double(64:2048, 2048:1, requires_grad=1, device=cuda:0)](%100)
+  %84 : Tensor = prim::profile[profiled_type=Double(64:2048, 2048:1, requires_grad=1, device=cuda:0)](%89)
+  %82 : int = prim::Constant[value=1]()
+  %81 : Tensor = aten::add(%86, %84, %82) # test_jit_fuser_te.py:82:20
+  %77 : Tensor = prim::profile[profiled_type=Double(64:2048, 2048:1, requires_grad=1, device=cuda:0)](%81)
+  %75 : Tensor = prim::profile[profiled_type=Double(2048:1, requires_grad=1, device=cuda:0)](%74)
+  %72 : Tensor = aten::add(%77, %75, %82) # test_jit_fuser_te.py:82:20
+  %68 : Tensor = prim::profile[profiled_type=Double(64:2048, 2048:1, requires_grad=1, device=cuda:0)](%72)
+  %66 : Tensor = prim::profile[profiled_type=Double(2048:1, requires_grad=1, device=cuda:0)](%65)
+  %gates.2 : Tensor = aten::add(%68, %66, %82) # test_jit_fuser_te.py:82:20
+  %59 : Tensor = prim::profile[profiled_type=Double(64:2048, 2048:1, requires_grad=1, device=cuda:0)](%gates.2)
+  %54 : Tensor, %55 : Tensor, %56 : Tensor, %57 : Tensor = prim::ConstantChunk[chunks=4, dim=1](%59)
+  %52 : Tensor = prim::profile[profiled_type=Double(64:2048, 512:1, requires_grad=1, device=cuda:0)](%54)
+  %ingate.4 : Tensor = aten::sigmoid(%52) # test_jit_fuser_te.py:84:21
+  %48 : Tensor = prim::profile[profiled_type=Double(64:2048, 512:1, requires_grad=1, device=cuda:0)](%55)
+  %forgetgate.4 : Tensor = aten::sigmoid(%48) # test_jit_fuser_te.py:85:25
+  %44 : Tensor = prim::profile[profiled_type=Double(64:2048, 512:1, requires_grad=1, device=cuda:0)](%56)
+  %cellgate.4 : Tensor = aten::tanh(%44) # test_jit_fuser_te.py:86:23
+  %40 : Tensor = prim::profile[profiled_type=Double(64:512, 512:1, requires_grad=1, device=cuda:0)](%forgetgate.4)
+  %38 : Tensor = prim::profile[profiled_type=Double(64:512, 512:1, requires_grad=1, device=cuda:0)](%37)
+  %36 : Tensor = aten::mul(%40, %38) # test_jit_fuser_te.py:88:18
+  %33 : Tensor = prim::profile[profiled_type=Double(64:512, 512:1, requires_grad=1, device=cuda:0)](%ingate.4)
+  %31 : Tensor = prim::profile[profiled_type=Double(64:512, 512:1, requires_grad=1, device=cuda:0)](%cellgate.4)
+  %29 : Tensor = aten::mul(%33, %31) # test_jit_fuser_te.py:88:38
+  %26 : Tensor = prim::profile[profiled_type=Double(64:512, 512:1, requires_grad=1, device=cuda:0)](%36)
+  %24 : Tensor = prim::profile[profiled_type=Double(64:512, 512:1, requires_grad=1, device=cuda:0)](%29)
+  %cy.2 : Tensor = aten::add(%26, %24, %82) # test_jit_fuser_te.py:88:18
+  %17 : Tensor = prim::profile[profiled_type=Double(64:512, 512:1, requires_grad=1, device=cuda:0)](%cy.2)
+  %16 : Tensor = prim::profile[profiled_type=Double(64:2048, 512:1, requires_grad=1, device=cuda:0)](%57)
+  %outgate.4 : Tensor = aten::sigmoid(%16) # test_jit_fuser_te.py:87:22
+  %12 : Tensor = prim::profile[profiled_type=Double(64:512, 512:1, requires_grad=1, device=cuda:0)](%outgate.4)
+  %10 : Tensor = prim::profile[profiled_type=Double(64:512, 512:1, requires_grad=1, device=cuda:0)](%cy.2)
+  %8 : Tensor = aten::tanh(%10) # test_jit_fuser_te.py:89:27
+  %6 : Tensor = prim::profile[profiled_type=Double(64:512, 512:1, requires_grad=1, device=cuda:0)](%8)
+  %hy.2 : Tensor = aten::mul(%12, %6) # test_jit_fuser_te.py:89:17
+  %1 : Tensor = prim::profile[profiled_type=Double(64:512, 512:1, requires_grad=1, device=cuda:0)](%hy.2)
+  return (%1, %17)
 ```
 
 ## JIT Logging ##
