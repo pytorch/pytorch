@@ -81,7 +81,7 @@ bool SliceImplGpu(
       auto start = starts_data[i];
       auto end = ends_data[i];
       if (start < 0) {
-        start = data.size(i) + start;
+        start = data.size(i) + 1 + start;
       }
       if (end < 0) {
         end = data.size(i) + 1 + end;
