@@ -1452,7 +1452,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Rand(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # symbolic update for randn
     def test_random_dynamic_size(self):
         class RandN(torch.nn.Module):
             def forward(self, x):
@@ -3096,6 +3095,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Zero_(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfONNXShapeInference(True) #  segfault for ConstantOfShape, should be fixed by #45369
     def test_list_pass(self):
         class Slice(torch.nn.Module):
             def forward(self, x, y):
@@ -4342,7 +4342,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Model(), (x, y, z))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()   # symbolic update needed for unbind: ONNX export of unbind with dynamic number of outputs
     def test_where_condition(self):
         class Model1(torch.nn.Module):
             def forward(self, input):
