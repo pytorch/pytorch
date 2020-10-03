@@ -11,7 +11,15 @@ set "DRIVER_DOWNLOAD_LINK=https://s3.amazonaws.com/ossci-windows/451.82-tesla-de
 curl --retry 3 -kL %DRIVER_DOWNLOAD_LINK% --output 451.82-tesla-desktop-winserver-2019-2016-international.exe
 if errorlevel 1 exit /b 1
 
-start /wait 451.82-tesla-desktop-winserver-2019-2016-international.exe -s -noreboot
+mkdir logs
+
+start /wait 451.82-tesla-desktop-winserver-2019-2016-international.exe -s -noreboot -loglevel:6 -log:"%CD%:\logs"
 if errorlevel 1 exit /b 1
 
+type logs\LOG.setup.exe.log
+
+rmdir /s /q logs
+
 del 451.82-tesla-desktop-winserver-2019-2016-international.exe || ver > NUL
+
+if not exist "C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe" exit /b 1

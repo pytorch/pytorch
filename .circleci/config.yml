@@ -819,7 +819,8 @@ jobs:
             export DOCKER_IMAGE=peterjc123/windows-cuda-container-new:v3.0.0
             echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
             time docker pull ${DOCKER_IMAGE} >/dev/null
-            export id=$(docker run --cap-add=SYS_PTRACE -t -v C:/Users/circleci/project:C:/pytorch -v C:/Users/circleci/workspace:C:/Users/circleci/workspace -d ${DOCKER_IMAGE})
+            docker --version
+            export id=$(docker run --device class/5B45201D-F2F2-4F3B-85BB-30FF1F953599 --cap-add=SYS_PTRACE -t -v C:/Users/circleci/project:C:/pytorch -v C:/Users/circleci/workspace:C:/Users/circleci/workspace -d ${DOCKER_IMAGE})
             docker exec -i "$id" sh /c/pytorch/build/win_tmp/ci_test_script.sh
       - store_test_results:
           path: test/test-reports
