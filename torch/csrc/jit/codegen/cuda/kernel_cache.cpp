@@ -409,6 +409,9 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
 }
 
 bool GraphCache::requiresPermutation() {
+  // disable permutation
+  return false;
+
   const size_t input_rank = input_permutation_.size();
   for (size_t i = 0; i < input_rank; i++) {
     if (input_permutation_[i] != (long)i) {
@@ -545,6 +548,7 @@ GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
   //    axes in the graph in order to match the behavior;
   reduction_axes_ = graphReductionAxes(graph);
 
+  /*
   // run over inputs to extract common types;
   TensorTypePtr acc_type = TensorType::get();
   for (const auto& input : graph->inputs()) {
@@ -561,6 +565,7 @@ GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
     }
   }
   extractPermutation(acc_type);
+  */
   createFusion(graph);
 }
 

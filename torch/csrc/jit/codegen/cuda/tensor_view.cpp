@@ -55,6 +55,7 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
   // default to non_contiguous;
   std::vector<bool> contig_info(tensor_type->dim().value(), false);
 
+  /* disable contiguity
   // we iterate through stride_index_, which goes from fastest changing
   // dimension to slowest, instead of iterating through sizes. This allows
   // easier contiguity check;
@@ -82,6 +83,7 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
       }
     }
   }
+  */
 
   domain_ = new TensorDomain(sizes, contig_info);
   name_ = fusion_->registerVal(this);
