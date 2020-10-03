@@ -4964,8 +4964,14 @@ The behavior depends on the dimensionality of the tensors as follows:
   1 is appended to its dimension for the purpose of the batched matrix multiple and removed after.
   The non-matrix (i.e. batch) dimensions are :ref:`broadcasted <broadcasting-semantics>` (and thus
   must be broadcastable).  For example, if :attr:`input` is a
+  :math:`(j \times 1 \times n \times n)` tensor and :attr:`other` is a :math:`(k \times n \times n)`
+  tensor, :attr:`out` will be a :math:`(j \times k \times n \times n)` tensor.
+
+  Note that the broadcasting logic only looks at the batch dimensions when determining if the inputs
+  are broadcastable, and not the matrix dimensions. For example, if :attr:`input` is a
   :math:`(j \times 1 \times n \times m)` tensor and :attr:`other` is a :math:`(k \times m \times p)`
-  tensor, :attr:`out` will be an :math:`(j \times k \times n \times p)` tensor.
+  tensor, these inputs are valid for broadcasting even though the final two dimensions (i.e. the
+  matrix dimensions) are different. :attr:`out` will be a :math:`(j \times k \times n \times p)` tensor.
 
 {tf32_note}
 
@@ -5665,7 +5671,7 @@ Args:
 
 add_docstr(torch.poisson,
            r"""
-poisson(input *, generator=None) -> Tensor
+poisson(input, generator=None) -> Tensor
 
 Returns a tensor of the same size as :attr:`input` with each element
 sampled from a Poisson distribution with rate parameter given by the corresponding
