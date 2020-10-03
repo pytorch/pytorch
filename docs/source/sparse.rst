@@ -141,7 +141,7 @@ negative step):
     >>> s[2, 1:]
     tensor([3])
 
-In general, a (M + K)-dimensional coaleasced sparse COO tensor ``s``
+In general, a (M + K)-dimensional coalesced sparse COO tensor ``s``
 with the number of specified elements ``nse`` has the following
 invariants:
 
@@ -218,21 +218,25 @@ Linear Algebra operations
 +++++++++++++++++++++++++
 
 The following table summarizes supported Linear Algebra operations on
-sparse matrices with different storage layouts. Here ``M[layout]``
-denotes a matrix (2-D Torch tensor) with a given layout, ``f`` denotes
-a scalar (float or 0-D Torch tensor), ``*`` is element-wise
-multiplication, ``@`` is matrix multiplication.
+sparse matrices with different storage layouts. Here ``T[layout]``
+denotes a tensor with a give layout. Similarly, ``M[layout]`` denotes
+a matrix (2-D Torch tensor), and ``V[layout]`` denotes a vector (1-D
+Torch tensor). In addition, ``f`` denotes a scalar (float or 0-D Torch
+tensor), ``*`` is element-wise multiplication, ``@`` is matrix
+multiplication.
 
 .. csv-table::
    :header: "Torch operation", "Sparse grad?", "Layout signature"
    :widths: 20, 5, 60
    :delim: ;
 
+   :func:`torch.mv`;no; ``M[sparse_coo] @ V[strided] -> V[strided]``
    :func:`torch.matmul`; no; ``M[sparse_coo] @ M[strided] -> M[strided]``
    :func:`torch.mm`; no; ``M[sparse_coo] @ M[strided] -> M[strided]``
    :func:`torch.sparse.mm`; yes; ``M[sparse_coo] @ M[strided] -> M[strided]``
    :func:`torch.smm`; no; ``M[sparse_coo] @ M[strided] -> M[sparse_coo]``
    :func:`torch.hspmm`; no; ``M[sparse_coo] @ M[strided] -> M[hybrid sparse_coo]``
+   :func:`torch.bmm`; no; ``T[sparse_coo] @ T[strided] -> T[strided]``
    :func:`torch.addmm`; no; ``f * M[strided] + f * (M[sparse_coo] @ M[strided]) -> M[strided]``
    :func:`torch.sparse.addmm`; yes; ``f * M[strided] + f * (M[sparse_coo] @ M[strided]) -> M[strided]``
    :func:`torch.sspaddmm`; no; ``f * M[sparse_coo] + f * (M[sparse_coo] @ M[strided]) -> M[sparse_coo]``
@@ -248,6 +252,8 @@ matrix arguments.
 .. note::
 
    :func:`torch.spmm` and :func:`torch.dsmm` are aliases to :func:`torch.mm`.
+
+.. note::
 
    Currently, Torch does not support matrix multiplication with the
    layout signature ``M[strided] @ M[sparse_coo]``. However,
