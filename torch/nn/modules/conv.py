@@ -14,7 +14,8 @@ from torch._torch_docs import reproducibility_notes
 from ..common_types import _size_1_t, _size_2_t, _size_3_t
 from typing import Optional, List, Tuple
 
-convolution_notes = {"groups_note": """* :attr:`groups` controls the connections between inputs and outputs.
+convolution_notes = \
+    {"groups_note": """* :attr:`groups` controls the connections between inputs and outputs.
       :attr:`in_channels` and :attr:`out_channels` must both be divisible by
       :attr:`groups`. For example,
 
@@ -25,15 +26,16 @@ convolution_notes = {"groups_note": """* :attr:`groups` controls the connections
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
           its own set of filters (of size
-          : math: `\left\lfloor\\frac{out\_channels}{in\_channels}\\right\\rfloor`).""",
+          : math: `\left\lfloor\\frac{out\_channels}{in\_channels}\\right\\rfloor`).""",  # noqa: W605
+
         "depthwise_separable_note": """When `groups == in_channels` and `out_channels == K * in_channels`,
         where `K` is a positive integer, this operation is also termed in
         literature as depthwise convolution.
 
         In other words, for an input of size :math:`(N, C_{in}, L_{in})`,
         a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
-        :math:`(C_\\text{in}=C_{in}, C_\\text{out}=C_{in} \\times K, ..., \\text{groups}=C_{in})`."""
-}
+        :math:`(C_\\text{in}=C_{in}, C_\\text{out}=C_{in} \\times K, ..., \\text{groups}=C_{in})`."""}
+
 
 
 
@@ -270,7 +272,7 @@ class Conv2d(_ConvNd):
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
     :math:`H` is a height of input planes in pixels, and :math:`W` is
     width in pixels.
-    """ +r"""
+    """ + r"""
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
@@ -356,6 +358,7 @@ class Conv2d(_ConvNd):
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
+
     def __init__(
         self,
         in_channels: int,
@@ -480,6 +483,7 @@ class Conv3d(_ConvNd):
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
+
     def __init__(
         self,
         in_channels: int,
