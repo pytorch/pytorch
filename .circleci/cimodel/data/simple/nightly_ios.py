@@ -54,8 +54,8 @@ class IOSNightlyJob:
 
 
 BUILD_CONFIGS = [
-    # IOSNightlyJob("x86_64"),
-    # IOSNightlyJob("arm64"),
+    IOSNightlyJob("x86_64"),
+    IOSNightlyJob("arm64"),
 ]
 
 

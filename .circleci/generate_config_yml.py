@@ -87,7 +87,7 @@ def gen_build_workflows_tree():
         # pytorch_build_definitions.get_workflow_jobs,
         # cimodel.data.simple.macos_definitions.get_workflow_jobs,
         # cimodel.data.simple.android_definitions.get_workflow_jobs,
-        cimodel.data.simple.ios_definitions.get_workflow_jobs,
+        # cimodel.data.simple.ios_definitions.get_workflow_jobs,
         # cimodel.data.simple.mobile_definitions.get_workflow_jobs,
         # cimodel.data.simple.ge_config_tests.get_workflow_jobs,
         # cimodel.data.simple.bazel_definitions.get_workflow_jobs,
