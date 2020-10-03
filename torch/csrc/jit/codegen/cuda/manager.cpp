@@ -249,15 +249,21 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
     auto outputs =
         CudaFusionManager::getManager().runFusionNode(kernel_id, inputs);
 
-    drop(stack, inputs.size());
-    stack.insert(
-        stack.end(),
-        std::make_move_iterator(outputs.begin()),
-        std::make_move_iterator(outputs.end()));
+    //drop(stack, inputs.size());
+    //stack.insert(
+    //    stack.end(),
+    //    std::make_move_iterator(outputs.begin()),
+    //    std::make_move_iterator(outputs.end()));
   };
 
   const char* disable_fb_env = getenv("PYTORCH_CUDA_FUSER_DISABLE_FALLBACK");
   int disable_fb_flag = disable_fb_env ? atoi(disable_fb_env) : 0;
+
+  execute_lambda();
+  auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
+  EraseShapeInformation(copied_graph);
+  InterpreterState{Code(copied_graph, "fallback_cuda_fuser")}.run(stack);
+  /*
   if (disable_fb_flag) {
     execute_lambda();
   } else {
@@ -275,6 +281,7 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
       InterpreterState{Code(copied_graph, "fallback_cuda_fuser")}.run(stack);
     }
   }
+   */
 }
 
 } // namespace cuda

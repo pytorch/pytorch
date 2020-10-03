@@ -462,18 +462,18 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
   {
     FUSER_PERF_SCOPE("cuLaunchKernel");
-    AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
-        compiled_kernel_.function,
-        launch_params.gdimx(),
-        launch_params.gdimy(),
-        launch_params.gdimz(),
-        launch_params.bdimx(),
-        launch_params.bdimy(),
-        launch_params.bdimz(),
-        launch_params.smem(),
-        stream,
-        kernel_arguments.getBuffer(),
-        nullptr));
+    // AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
+    //     compiled_kernel_.function,
+    //     launch_params.gdimx(),
+    //     launch_params.gdimy(),
+    //     launch_params.gdimz(),
+    //     launch_params.bdimx(),
+    //     launch_params.bdimy(),
+    //     launch_params.bdimz(),
+    //     launch_params.smem(),
+    //     stream,
+    //     kernel_arguments.getBuffer(),
+    //     nullptr));
     AT_CUDA_CHECK(cudaStreamSynchronize(stream));
   }
 
