@@ -78,9 +78,9 @@ class CudaFusionManager {
     if (graph_cache_ids_.count(repr) == 0) {
       int32_t kernel_id = getNextUniqueID();
       graph_cache_ids_[repr] = kernel_id;
-      TORCH_CHECK(
-          graph_cache_.emplace(kernel_id, std::make_unique<GraphCache>(graph))
-              .second);
+      // TORCH_CHECK(
+      //     graph_cache_.emplace(kernel_id, std::make_unique<GraphCache>(graph))
+      //         .second);
     }
     return graph_cache_ids_[repr];
   };
@@ -259,7 +259,7 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   const char* disable_fb_env = getenv("PYTORCH_CUDA_FUSER_DISABLE_FALLBACK");
   int disable_fb_flag = disable_fb_env ? atoi(disable_fb_env) : 0;
 
-  execute_lambda();
+  //execute_lambda();
   auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
   EraseShapeInformation(copied_graph);
   InterpreterState{Code(copied_graph, "fallback_cuda_fuser")}.run(stack);
