@@ -78,9 +78,9 @@ class CudaFusionManager {
     if (graph_cache_ids_.count(repr) == 0) {
       int32_t kernel_id = getNextUniqueID();
       graph_cache_ids_[repr] = kernel_id;
-      // TORCH_CHECK(
-      //     graph_cache_.emplace(kernel_id, std::make_unique<GraphCache>(graph))
-      //         .second);
+      TORCH_CHECK(
+          graph_cache_.emplace(kernel_id, std::make_unique<GraphCache>(graph))
+              .second);
     }
     return graph_cache_ids_[repr];
   };
