@@ -34,17 +34,8 @@ __host__ __device__ __forceinline__ T THCRoundUp(T a, T b) {
  */
 template <typename T>
 __device__ __forceinline__ T doLdg(const T* p) {
-#if __CUDA_ARCH__ >= 350
+#ifndef __HIP_PLATFORM_HCC__
   return __ldg(p);
-#else
-  return *p;
-#endif
-}
-
-template <>
-__device__ __forceinline__ c10::BFloat16 doLdg<c10::BFloat16>(const c10::BFloat16* p) {
-#if __CUDA_ARCH__ >= 350
-  return c10::BFloat16(__ldg(reinterpret_cast<const short *>(p)), c10::BFloat16::from_bits());
 #else
   return *p;
 #endif
