@@ -417,7 +417,7 @@ class TestUnaryUfuncs(TestCase):
         if dtype is out_dtype:
             expected = op(input)
             op(input, out=output)
-            self.assertEqual(out, expected)
+            self.assertEqual(output, expected)
         else:
             with self.assertRaises(RuntimeError):
                 op(input, out=output)
