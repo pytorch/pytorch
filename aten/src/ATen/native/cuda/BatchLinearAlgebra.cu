@@ -1332,9 +1332,11 @@ AT_ERROR("symeig: MAGMA library not found in "
   ALLOCATE_ARRAY(iwork, magma_int_t, liwork);
 
   value_t* rwork = nullptr;
+  c10::Storage storage_rwork;
   if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
     lrwork = magma_int_cast(rwkopt, "rwork_size");
-    ALLOCATE_ARRAY(rwork, value_t, lrwork);
+    storage_rwork = pin_memory<value_t>(lrwork);
+    rwork = static_cast<value_t*>(storage_rwork.data());
   }
 
   for (int64_t i = 0; i < batch_size; i++) {
@@ -1413,7 +1415,9 @@ AT_ERROR("svd: MAGMA library not found in "
   magma_int_t n = magma_int_cast(self.size(-1), "n");
   auto mn = std::min(m, n);
 
+  c10::Storage storage_rwork;
   value_t* rwork = nullptr;
+
   magma_int_t* iwork;
   ALLOCATE_ARRAY(iwork, magma_int_t, 8 * mn);
   // Copy-n-paste rwork size computation from BatchLinearAlgebra.cpp
@@ -1427,7 +1431,8 @@ AT_ERROR("svd: MAGMA library not found in "
     } else {
       lrwork = std::max(7 * mn * mn + 7 * mn, 2 * mx * mn + 2 *mn * mn + mn);
     }
-    ALLOCATE_ARRAY(rwork, value_t, lrwork);
+    storage_rwork = pin_memory<value_t>(lrwork);
+    rwork = static_cast<value_t*>(storage_rwork.data());
   }
 
   magma_int_t info = 0;
