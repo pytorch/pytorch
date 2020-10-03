@@ -14,7 +14,7 @@ from torch.testing._internal.common_methods_invocations import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes)
 from torch.testing import \
-    (floating_types_and, integral_types, all_types_and_complex)
+    (floating_types_and, integral_types, all_types_and_complex_and)
 
 if TEST_NUMPY:
     import numpy as np
@@ -443,7 +443,7 @@ class TestUnaryUfuncs(TestCase):
         input = make_tensor((64, 64), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
 
-        for out_dtype in all_types_and_complex():
+        for out_dtype in all_types_and_complex_and(torch.bool, torch.half):
             out = torch.empty_like(input, dtype=out_dtype)
             if op.promotes_integers_to_float:
                 self._test_out_promote_int_to_float_op(op, input, out)
