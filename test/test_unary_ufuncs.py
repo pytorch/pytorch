@@ -411,7 +411,7 @@ class TestUnaryUfuncs(TestCase):
             # result dtype on CPU.
             self.assertEqual(out, expected.to(out_dtype))
 
-    def _test_out(self, op, input, output):
+    def _test_out_arg(self, op, input, output):
         dtype = input.dtype
         out_dtype = output.dtype
         if dtype is out_dtype:
