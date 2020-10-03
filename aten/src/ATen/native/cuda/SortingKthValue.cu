@@ -241,7 +241,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
     bool keepdim) {
   auto result = [&]() {
     NoNamesGuard guard;
-    return kthvalue_out_impl_cuda(values, indices, self, k, dim, keepdim);
+    return kthvalue_out_impl_cuda(values, indices, self.contiguous(), k, dim, keepdim);
   }();
   namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
   namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
