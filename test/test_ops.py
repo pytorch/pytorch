@@ -125,8 +125,31 @@ class TestGradients(TestCase):
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
 
+class TestOut(TestCase):
+    exact_dtype = True
+
+    @ops(op_db)
+    def test_out(self, device, dtype, op):
+        if not op.supports_tensor_out:
+            self.skipTest("Skipped! Operator %s does not support out=..." % op.name)
+        samples = op.sample_inputs(device, dtype)
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        # NOTE: only tests on first sample
+        sample = samples[0]
+        # call it normally to get the expected result
+        expected = op(sample.input, *sample.args, **sample.kwargs)
+        # call it with out=... and check we get the expected result
+        out_kwargs = sample.kwargs.copy()
+        out_kwargs['out'] = out = torch.empty_like(expected)
+        op(sample.input, *sample.args, **out_kwargs)
+        self.assertEqual(expected, out)
+
+
 instantiate_device_type_tests(TestOpInfo, globals())
 instantiate_device_type_tests(TestGradients, globals())
+instantiate_device_type_tests(TestOut, globals())
 
 if __name__ == '__main__':
     run_tests()

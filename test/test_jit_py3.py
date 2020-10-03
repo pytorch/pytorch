@@ -3,8 +3,10 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck
 from torch import jit
+from textwrap import dedent
 from typing import NamedTuple, List, Optional, Dict, Tuple, Any
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
+import inspect
 import unittest
 import sys
 import torch
@@ -406,6 +408,67 @@ class TestScriptPy3(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
             torch.jit.script(wrong_type)
 
+    def test_optional_no_element_type_annotation(self):
+        """
+        Test that using an optional with no contained types produces an error.
+        """
+        def fn_with_comment(x):
+            # type: (torch.Tensor) -> Optional
+            return (x, x)
+
+        def annotated_fn(x: torch.Tensor) -> Optional:
+            return (x, x)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn_with_comment)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(annotated_fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            torch.jit.script(fn_with_comment)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            torch.jit.script(annotated_fn)
+
+    def test_tuple_no_element_type_annotation(self):
+        """
+        Test that using a tuple with no contained types produces an error.
+        """
+        def fn_with_comment(x):
+            # type: (torch.Tensor) -> Tuple
+            return (x, x)
+
+        def annotated_fn(x: torch.Tensor) -> Tuple:
+            return (x, x)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn_with_comment)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(annotated_fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            torch.jit.script(fn_with_comment)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            torch.jit.script(annotated_fn)
+
+    def test_tuple_subscripted_assign(self):
+        with self.assertRaisesRegex(RuntimeError, "subscripted assignment"):
+            @torch.jit.script
+            def foo(a: Tuple[int, int]) -> None:
+                a[0] = a[1]
+
+        with self.assertRaisesRegex(RuntimeError, "augmented assignment"):
+            @torch.jit.script
+            def bar(a: Tuple[int, int]) -> None:
+                a[0] += a[1]
+
     def test_subexpression_List_Future(self):
 
         @torch.jit.script
@@ -558,7 +621,7 @@ class TestScriptPy3(JitTestCase):
 
     def test_module_properties(self):
         class ModuleWithProperties(torch.nn.Module):
-            __ignored_properties__ = ["ignored_attr"]
+            __jit_unused_properties__ = ["ignored_attr"]
 
             def __init__(self, a: int):
                 super().__init__()
@@ -575,6 +638,15 @@ class TestScriptPy3(JitTestCase):
             @property
             def ignored_attr(self):
                 return sum([self.a])
+
+            @torch.jit.unused
+            @property
+            def ignored_attr_2(self):
+                return sum([self.a])
+
+            @ignored_attr_2.setter
+            def ignored_attr_2(self, value):
+                self.a = sum([self.a])
 
             @attr.setter
             def attr(self, a: int):

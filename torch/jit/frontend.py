@@ -142,12 +142,12 @@ def get_class_properties(cls, self_name):
     props = inspect.getmembers(
         cls, predicate=lambda m: isinstance(m, property))
     # Any property that should not compiled must be in this list on the Module.
-    ignored_properties = getattr(cls, "__ignored_properties__", [])
+    unused_properties = getattr(cls, "__jit_unused_properties__", [])
 
     # Create Property TreeView objects from inspected property objects.
     properties = []
     for prop in props:
-        if prop[0] not in ignored_properties:
+        if prop[0] not in unused_properties and not should_drop(prop[1].fget):
             getter = get_jit_def(prop[1].fget, f"__{prop[0]}_getter", self_name=self_name)
             setter = get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name) if prop[1].fset else None
             properties.append(Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter))
@@ -178,6 +178,34 @@ def get_jit_class_def(cls, self_name):
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
     return build_class_def(ctx, py_ast.body[0], methods, properties, self_name)
 
+def check_and_indent_multiline_strings(sourcelines):
+    """
+    This is a helper function which checks for multiline strings and
+    indents the strings by calculating the leading space and appending
+    the spaces to each line of the multiline string.The failure to indent
+    multiline strings causes failures during downstream dedent
+    Arguments:
+        sourcelines: This is an array of source lines of the function
+    Returns:
+        This function returns the updated indented sources,i.e,sourcelines
+    """
+    indices = []
+    triple_quotes = '\"\"\"'
+    # Extract the start and end line number of the multiline string
+    for index, source in enumerate(sourcelines):
+        if triple_quotes in source and source.find(triple_quotes) == source.rfind(triple_quotes):
+            indices.append(index)
+
+    # Adding leading space for every line of the multiline string
+    indices_length = len(indices)
+    for i in range(0, indices_length, 2):
+        if i + 1 < indices_length:
+            start = indices[i]
+            end = indices[i + 1]
+            leading_space = len(sourcelines[start]) - len(sourcelines[start].lstrip())
+            for lines in range(start + 1, end + 1):
+                sourcelines[lines] = ' ' * leading_space + sourcelines[lines]
+    return sourcelines
 
 def get_jit_def(fn, def_name, self_name=None):
     """
@@ -195,6 +223,7 @@ def get_jit_def(fn, def_name, self_name=None):
         self_name: If this function is a method, what the type name of `self` is.
     """
     sourcelines, file_lineno, filename = get_source_lines_and_file(fn, torch._C.ErrorReport.call_stack())
+    sourcelines = check_and_indent_multiline_strings(sourcelines)
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
@@ -303,6 +332,32 @@ def get_default_args(fn):
         for k, v in signature.parameters.items()
         if v.default is not inspect.Parameter.empty
     }
+
+
+def get_default_args_for_class(cls):
+    """
+    Get default arguments for all methods in a class (except for static methods).
+
+    Args:
+        cls: type - The class type to inspect for default arguments.
+    Returns:
+        A Dict[str, Dict[str, Any]] which maps each method name to a Dict[str, Any]
+        that maps each argument name to its default value.
+    """
+    # Get methods (except static methods because those are compiled separately as
+    # if they were independent script functions).
+    methods = inspect.getmembers(
+        cls,
+        predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m))
+        and not is_static_fn(cls, m.__name__)
+        and m.__name__ in cls.__dict__
+    )
+
+    # Get method defaults. Property defaults do not need to be considered
+    # because setters cannot be invoked without a value.
+    defaults = {method_name: get_default_args(method_impl) for method_name, method_impl in methods}
+
+    return defaults
 
 
 class WithItemBuilder(Builder):

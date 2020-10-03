@@ -121,15 +121,17 @@ Method::Method(const Module* owner, Function* function)
 
 void Method::run(Stack& stack) {
   auto observer = torch::observerConfig().getModuleObserver();
+  auto instance_key = std::rand();
   /* if the metadata dict doesn't contain "model_name", copy the metadata and
   set the value of "model_name" as name() */
   std::unordered_map<std::string, std::string> copied_metadata =
       owner_->metadata();
   if (owner_->metadata().find("model_name") == owner_->metadata().end()) {
-    copied_metadata["model_name"] = name();
+    copied_metadata["model_name"] = owner_->name();
   }
   if (observer) {
-    observer->onEnterRunMethod(copied_metadata, function_->name());
+    observer->onEnterRunMethod(
+        copied_metadata, instance_key, function_->name());
   }
 
   auto debug_info = std::make_shared<MobileDebugInfo>();
@@ -142,11 +144,11 @@ void Method::run(Stack& stack) {
     stack.insert(stack.begin(), owner_->_ivalue());
     function_->run(stack);
     if (observer) {
-      observer->onExitRunMethod();
+      observer->onExitRunMethod(instance_key);
     }
   } catch (c10::Error& error) {
     if (observer) {
-      observer->onFailRunMethod(error.what());
+      observer->onFailRunMethod(instance_key, error.what());
     }
     TORCH_RETHROW(error);
   } catch (...) {
@@ -163,7 +165,7 @@ void Method::run(Stack& stack) {
       }
     } catch (c10::Error& error) {
       if (observer) {
-        observer->onFailRunMethod(error.what());
+        observer->onFailRunMethod(instance_key, error.what());
       }
       TORCH_RETHROW(error);
     }

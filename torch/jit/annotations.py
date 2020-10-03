@@ -1,8 +1,6 @@
 import ast
 import enum
 import inspect
-import warnings
-import os
 import re
 import torch
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
@@ -271,12 +269,6 @@ def get_enum_value_type(e: Type[enum.Enum], loc):
     return torch._C.unify_type_list(ir_types)
 
 
-# Guards against using Enum support in JIT before the feature is complete.
-# TODO(gmagogsfm): remove this check once Enum support is complete.
-def is_enum_support_enabled() -> bool:
-    return os.environ.get('EXPERIMENTAL_ENUM_SUPPORT', "0") == "1"
-
-
 def try_ann_to_type(ann, loc):
     if ann is None:
         return TensorType.get()
@@ -324,10 +316,6 @@ def try_ann_to_type(ann, loc):
     if ann is torch.dtype:
         return IntType.get()  # dtype not yet bound in as its own type
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
-        if not is_enum_support_enabled():
-            warnings.warn(f"Enum support is work in progress, enum class {ann}"
-                          " is not compiled")
-            return None
         if not hasattr(ann, "__torch_script_class__"):
             torch.jit._script._recursive_compile_class(ann, loc)
         return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc), list(ann))
