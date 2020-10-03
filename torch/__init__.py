@@ -330,7 +330,7 @@ def set_deterministic(d):
     algorithms. That is, algorithms which, given the same input, and when
     run on the same software and hardware, always produce the same output.
     When True, operations will use deterministic algorithms when available,
-    and if only nondeterministic algorithms are available they will throw a
+    and if only non-deterministic algorithms are available they will throw a
     :class:RuntimeError when called.
 
     .. warning::
