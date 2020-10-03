@@ -714,7 +714,9 @@ class TestONNXRuntime(unittest.TestCase):
 
         x2 = [] if x2 is None else [x2]
         if len(x2) > 0:
-            self.run_test(Squeeze(d), x1, input_names=['input'], dynamic_axes={'input': {0: '0', 1: '1', 2: '2'}}, test_with_inputs=x2)
+            self.run_test(Squeeze(d), x1,
+                          input_names=['input'], dynamic_axes={'input': {0: '0', 1: '1', 2: '2'}},
+                          test_with_inputs=x2)
         else:
             self.run_test(Squeeze(d), x1)
 

@@ -213,14 +213,16 @@ Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
         // order to be consumed as inputs
         std::vector<Value*> unsqueezed;
         for (auto* input : lc_node->inputs()) {
-          Node* unsqueezed_node = n_graph->insertNode(n_graph->create(::c10::onnx::Unsqueeze, 1));
+          Node* unsqueezed_node =
+              n_graph->insertNode(n_graph->create(::c10::onnx::Unsqueeze, 1));
           auto new_input = n_graph->addInput();
           new_input->copyMetadata(input);
           unsqueezed_node->addInput(new_input);
           unsqueezed_node->is_(attr::axes, {0});
           unsqueezed.emplace_back(unsqueezed_node->output());
         }
-        Node* concat_node = n_graph->insertNode(n_graph->create(::c10::onnx::Concat, 1));
+        Node* concat_node =
+            n_graph->insertNode(n_graph->create(::c10::onnx::Concat, 1));
         concat_node->i_(attr::axis, 0);
         for (auto v : unsqueezed) {
           concat_node->addInput(v);
