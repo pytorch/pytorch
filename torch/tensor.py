@@ -192,15 +192,19 @@ class Tensor(torch._C._TensorBase):
         See :ref:`Default gradient layouts<default-grad-layouts>`
         for details on the memory layout of accumulated gradients.
 
+        .. note::
+
+            If you run any forward ops, create ``gradient``, and/or call ``backward``
+            in a user-specified CUDA stream context, see
+            :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
+
         Arguments:
             gradient (Tensor or None): Gradient w.r.t. the
                 tensor. If it is a tensor, it will be automatically converted
                 to a Tensor that does not require grad unless ``create_graph`` is True.
                 None values can be specified for scalar Tensors or ones that
                 don't require grad. If a None value would be acceptable then
-                this argument is optional.  If creating ``gradient`` or calling
-                ``backward`` in a user-specified CUDA stream context, see
-                :ref:`Stream semantics of backward calls<bwd-cuda-stream-semantics>`_.
+                this argument is optional.
             retain_graph (bool, optional): If ``False``, the graph used to compute
                 the grads will be freed. Note that in nearly all cases setting
                 this option to True is not needed and often can be worked around

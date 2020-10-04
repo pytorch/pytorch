@@ -191,37 +191,37 @@ ensure proper synchronization.
 
 .. _bwd-cuda-stream-semantics:
 
-Stream semantics of backward calls
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Stream semantics of backward passes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Internally, each backward CUDA op runs on the same stream that was used for its corresponding forward op.
 
-When manually passing CUDA tensor(s) as a backward call's initial gradient(s) (e.g.,
-:func:`autograd.backward(..., grad_tensors=initial_grads)<torch.autograd.backward>`_,
-:func:`autograd.grad(..., grad_outputs=initial_grads)<torch.autograd.grad>`_, or
-:meth:`tensor.backward(..., gradient=initial_grad)<torch.Tensor.grad>`_)
+When manually supplying CUDA tensor(s) as a backward pass's initial gradient(s) (e.g.,
+:func:`autograd.backward(..., grad_tensors=initial_grads)<torch.autograd.backward>`,
+:func:`autograd.grad(..., grad_outputs=initial_grads)<torch.autograd.grad>`, or
+:meth:`tensor.backward(..., gradient=initial_grad)<torch.Tensor.backward>`),
 the acts of
 
-1. populating the initial gradient and
-2. the backward call
+1. populating the initial gradient(s) and
+2. invoking the backward pass
 
 have the same stream-semantics relationship as any pair of ops::
 
-    # Safe, populating initial_grad and backward call are in the same stream context
-    with torch.cuda.stream(s):
+    # Safe, populating initial_grad and invoking backward are in the same stream context
+    with torch.cuda.stream(strm):
         loss.backward(gradient=torch.ones_like(loss))
 
-    # Unsafe, populating initial_grad and backward call are in different stream contexts,
+    # Unsafe, populating initial_grad and invoking backward are in different stream contexts,
     # without synchronization
     initial_grad = torch.ones_like(loss)
-    with torch.cuda.stream(s):
+    with torch.cuda.stream(strm):
         loss.backward(gradient=initial_grad)
 
     # Safe, with synchronization
     initial_grad = torch.ones_like(loss)
-    s.wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(s):
-        initial_grad.record_stream(s)
+    strm.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(strm):
+        initial_grad.record_stream(strm)
         loss.backward(gradient=initial_grad)
 
 .. _CUDA stream: https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams

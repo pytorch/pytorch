@@ -95,6 +95,12 @@ def backward(
         If you have to use this function, make sure to reset the ``.grad`` fields of your
         parameters to ``None`` after use to break the cycle and avoid the leak.
 
+    .. note::
+
+        If you run any forward ops, create ``grad_tensors``, and/or call ``backward``
+        in a user-specified CUDA stream context, see
+        :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
+
     Arguments:
         tensors (sequence of Tensor): Tensors of which the derivative will be
             computed.
@@ -102,9 +108,7 @@ def backward(
             product, usually gradients w.r.t. each element of corresponding tensors.
             None values can be specified for scalar Tensors or ones that don't require
             grad. If a None value would be acceptable for all grad_tensors, then this
-            argument is optional.  If creating ``grad_tensors`` or calling ``backward``
-            in a user-specified CUDA stream context, see
-            :ref:`Stream semantics of backward calls<bwd-cuda-stream-semantics>`_.
+            argument is optional.
         retain_graph (bool, optional): If ``False``, the graph used to compute the grad
             will be freed. Note that in nearly all cases setting this option to ``True``
             is not needed and often can be worked around in a much more efficient
@@ -155,6 +159,12 @@ def grad(
     leaves will still be computed, and will be accumulated into their ``.grad``
     attribute.
 
+    .. note::
+
+        If you run any forward ops, create ``grad_outputs``, and/or call ``grad``
+        in a user-specified CUDA stream context, see
+        :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
+
     Arguments:
         outputs (sequence of Tensor): outputs of the differentiated function.
         inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
@@ -163,9 +173,6 @@ def grad(
             Usually gradients w.r.t. each output. None values can be specified for scalar
             Tensors or ones that don't require grad. If a None value would be acceptable
             for all grad_tensors, then this argument is optional. Default: None.
-            If creating ``grad_outputs`` or calling ``grad`` in a user-specified CUDA
-            stream context, see
-            :ref:`Stream semantics of backward calls<bwd-cuda-stream-semantics>`_.
         retain_graph (bool, optional): If ``False``, the graph used to compute the grad
             will be freed. Note that in nearly all cases setting this option to ``True``
             is not needed and often can be worked around in a much more efficient
