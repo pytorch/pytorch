@@ -527,8 +527,8 @@ void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
     }
   }
 
-  fusion_executor_cache_ =
-      std::make_unique<FusionExecutorCache>(parseJitIR(graph));
+  //fusion_executor_cache_ =
+  //    std::make_unique<FusionExecutorCache>(parseJitIR(graph));
 }
 
 GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
