@@ -480,6 +480,16 @@
 - name: floor(Tensor self) -> Tensor
   self: zeros_like(grad)
 
+- name: float_power.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
+  self: pow_backward(grad, self, exponent)
+
+- name: float_power.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
+  self: pow_backward_self(grad, self, exponent)
+  exponent: pow_backward_exponent(grad, self, exponent, result)
+
+- name: float_power.Scalar(Scalar self, Tensor exponent) -> Tensor
+  exponent: pow_backward_exponent(grad, self, exponent, result)
+
 - name: fmod.Scalar(Tensor self, Scalar other) -> Tensor
   self: grad
 

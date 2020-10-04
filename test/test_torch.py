@@ -6205,72 +6205,99 @@ class TestTorchDeviceType(TestCase):
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
 
-    @dtypes(*list(product(torch.testing.get_all_dtypes(include_bool=False),
-                          torch.testing.get_all_dtypes(include_bool=False))))
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @onlyOnCPUAndCUDA
+    @dtypes(*list(product(torch.testing.get_all_dtypes(include_bool=False, include_complex=False),
+                          torch.testing.get_all_dtypes(include_bool=False, include_complex=False))))
     def test_float_power(self, device, dtypes):
+        def to_np(value):
+            if isinstance(value, torch.Tensor):
+                if value.dtype == torch.bfloat16:
+                    value = value.to(dtype=torch.float)
+                return value.cpu().numpy()
+            return value
+
         base_dtype = dtypes[0]
         exp_dtype = dtypes[1]
-        if base_dtype.is_complex or exp_dtype.is_complex:
-            dtype = torch.complex128
-        else:
-            dtype = torch.float64
 
-        base = torch.randint(-100, 100, (30,), device=device).to(dtype=base_dtype)
-        base[0] = base[8] = base[9] = 0
-        exp = torch.randint(-100, 100, (30,), device=device).to(dtype=exp_dtype)
+        base = make_tensor((30,), device, base_dtype, low=-100, high=100)
+        base[0] = base[3] = base[7] = 0
+        exp = make_tensor((30,), device, exp_dtype, low=-2, high=2)
         exp[0] = exp[4] = exp[6] = 0
 
-        expected = torch.pow(base.to(dtype=dtype), exp.to(dtype=dtype))
+        expected = torch.from_numpy(np.float_power(to_np(base), to_np(exp)))
 
-        result = torch.float_power(base, exp)
-        self.assertEqual(expected, result)
+        for op in (torch.float_power, torch.Tensor.float_power, torch.Tensor.float_power_):
+            result = op(base.clone(), exp)
+            self.assertEqual(expected, result)
 
-        result = base.float_power(exp)
-        self.assertEqual(expected, result)
+            if op is torch.float_power:
+                out = torch.empty_like(base).to(device=device, dtype=torch.float64)
+                op(base, exp, out=out)
+                self.assertEqual(expected, out)
 
-        out = torch.empty_like(base).to(device=device, dtype=dtype)
-        torch.float_power(base, exp, out=out)
-        self.assertEqual(expected, out)
+            for i in range(10):
+                expected_scalar_exp = np.float_power(to_np(base), i)
+                expected_scalar_base = np.float_power(i, to_np(exp))
 
-        dtype_scalar_exp = torch.complex128 if base_dtype.is_complex else torch.double
-        dtype_scalar_base = torch.complex128 if exp_dtype.is_complex else torch.double
+                result = op(base.clone(), i)
+                self.assertEqual(expected_scalar_exp, result)
 
-        for i in range(10):
-            expected_scalar_exp = torch.pow(base.to(dtype=dtype_scalar_exp), i)
-            expected_scalar_base = torch.pow(i, exp.to(dtype=dtype_scalar_base))
+                if op is torch.float_power:
+                    result = op(i, exp)
+                    self.assertEqual(expected_scalar_base, result)
 
-            result = torch.float_power(base, i)
-            self.assertEqual(expected_scalar_exp, result)
+                    out = torch.empty_like(base).to(device=device, dtype=torch.float64)
+                    op(base, i, out=out)
+                    self.assertEqual(expected_scalar_exp, out)
 
-            result = torch.float_power(i, exp)
-            self.assertEqual(expected_scalar_base, result)
+                    out = torch.empty_like(exp).to(device=device, dtype=torch.float64)
+                    op(i, exp, out=out)
+                    self.assertEqual(expected_scalar_base, out)
 
-            result = base.float_power(i)
-            self.assertEqual(expected_scalar_exp, result)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @onlyOnCPUAndCUDA
+    @dtypes(*(torch.testing.get_all_dtypes(include_bool=False)))
+    def test_float_power_with_complex(self, device, dtype):
+        def to_np(value):
+            if isinstance(value, torch.Tensor):
+                if value.dtype == torch.bfloat16:
+                    value = value.to(dtype=torch.float)
+                return value.cpu().numpy()
+            return value
 
-            out = torch.empty_like(base).to(device=device, dtype=dtype_scalar_exp)
-            torch.float_power(base, i, out=out)
-            self.assertEqual(expected_scalar_exp, out)
+        base = make_tensor((8,), device, dtype, low=1, high=10)
+        exps = [torch.tensor([-2.8, -2, -1, -0.5, 0, 0.5, 1, 2], device=device),
+                torch.tensor([-2.5j, -1.0j, 0j, 1.0j, 2.5j, 1.0 + 1.0j, -1.0 - 1.5j, 3.3j], device=device)]
 
-            out = torch.empty_like(exp).to(device=device, dtype=dtype_scalar_base)
-            torch.float_power(i, exp, out=out)
-            self.assertEqual(expected_scalar_base, out)
+        for exp in exps:
+            if dtype.is_complex or exp.dtype.is_complex:
+                expected = torch.from_numpy(np.float_power(to_np(base), to_np(exp)))
 
-        for output_type in torch.testing.get_all_dtypes():
-            if (output_type != dtype):
-                out = torch.empty_like(base).to(device=device, dtype=output_type)
+                for op in (torch.float_power, torch.Tensor.float_power, torch.Tensor.float_power_):
+                    result = op(base.clone(), exp)
+                    self.assertEqual(expected, result)
+
+                    if op is torch.float_power:
+                        out = torch.empty_like(base).to(device=device, dtype=torch.complex128)
+                        op(base, exp, out=out)
+                        self.assertEqual(expected, out)
+
+    @dtypes(*(torch.testing.get_all_dtypes(include_bool=False)))
+    def test_float_power_exceptions(self, device, dtype):
+        values = [torch.tensor([-2.8, -2, -1, -0.5, 0, 0.5, 1, 2], device=device),
+                  torch.tensor([-2.5j, -1.0j, 0j, 1.0j, 2.5j, 1.0 + 1.0j, -1.0 - 1.5j, 3.3j], device=device)]
+
+        for value in values:
+            if not ((dtype is torch.complex128 and value.dtype.is_complex) or
+                    (dtype is torch.float64 and not value.dtype.is_complex)):
+                out = torch.empty_like(value).to(device=device, dtype=dtype)
                 with self.assertRaisesRegex(RuntimeError, 'is not the desired output type'):
-                    torch.float_power(base, exp, out=out)
+                    torch.float_power(value, 2, out=out)
 
-            if (output_type != dtype_scalar_exp):
-                out = torch.empty_like(base).to(device=device, dtype=output_type)
+                out = torch.empty_like(value).to(device=device, dtype=dtype)
                 with self.assertRaisesRegex(RuntimeError, 'is not the desired output type'):
-                    torch.float_power(base, 2, out=out)
-
-            if (output_type != dtype_scalar_base):
-                out = torch.empty_like(base).to(device=device, dtype=output_type)
-                with self.assertRaisesRegex(RuntimeError, 'is not the desired output type'):
-                    torch.float_power(2, exp, out=out)
+                    torch.float_power(2, value, out=out)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA

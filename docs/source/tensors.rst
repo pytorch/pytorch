@@ -323,6 +323,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: flipud
    .. automethod:: float
    .. automethod:: float_power
+   .. automethod:: float_power_
    .. automethod:: floor
    .. automethod:: floor_
    .. automethod:: floor_divide

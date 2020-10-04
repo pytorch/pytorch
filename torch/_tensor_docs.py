@@ -2678,6 +2678,13 @@ float_power(exponent) -> Tensor
 See :func:`torch.float_power`
 """)
 
+add_docstr_all('float_power_',
+               r"""
+float_power_(exponent) -> Tensor
+
+In-place version of :meth:`~Tensor.float_power`
+""")
+
 add_docstr_all('prod',
                r"""
 prod(dim=None, keepdim=False, dtype=None) -> Tensor
