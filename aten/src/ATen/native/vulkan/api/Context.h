@@ -26,10 +26,10 @@ class Context final {
  public:
   explicit Context(const Adapter& adapter);
   Context(const Context&) = delete;
-  Context(Context&&) = default;
+  Context(Context&&) = delete;
   Context& operator=(const Context&) = delete;
-  Context& operator=(Context&&) = default;
-  ~Context() = default;
+  Context& operator=(Context&&) = delete;
+  ~Context();
 
   inline GPU gpu() {
     // A GPU is simply a (physical device, logical device, device queue) trio.
@@ -80,7 +80,7 @@ class Context final {
  private:
   // Construction and destruction order matters.  Do not move members around.
   Adapter adapter_;
-  Handle<VkDevice, Deleter> device_;
+  Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;
   VkQueue queue_;
   Command command_;
   Shader shader_;

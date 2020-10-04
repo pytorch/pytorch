@@ -117,7 +117,7 @@ void Command::Buffer::barrier(
 
     case Pipeline::Barrier::Type::Image:
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-          barrier.as.image.handle,
+          barrier.as.image.object.handle,
           "Invalid Vulkan image!");
 
 
@@ -130,7 +130,7 @@ void Command::Buffer::barrier(
           barrier.as.image.layout.dst,
           VK_QUEUE_FAMILY_IGNORED,
           VK_QUEUE_FAMILY_IGNORED,
-          barrier.as.image.handle,
+          barrier.as.image.object.handle,
           VkImageSubresourceRange{
             VK_IMAGE_ASPECT_COLOR_BIT,
             0u,

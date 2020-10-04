@@ -232,48 +232,10 @@ class C10_EXPORT vTensor final {
       Component::Type component;
       Access::Flags access;
 
+      // Debug
       friend std::ostream& operator<<(
           std::ostream& stream,
-          const Active view) {
-        stream << "Component: [";
-        switch (view.component) {
-          case Component::Unknown:
-            stream << "Unknown";
-            break;
-
-          case Component::Buffer:
-            stream << "Buffer";
-            break;
-
-          case Component::Image:
-            stream << "Image";
-            break;
-
-          case Component::Staging:
-            stream << "Staging";
-            break;
-
-          default:
-            stream << "Unknown";
-        }
-
-        stream << "], Access: [";
-
-        if (Access::Read == (view.access & Access::Read)) {
-          stream << "Read";
-        }
-        else if (Access::Write == (view.access & Access::Write)) {
-          stream << "Write";
-        }
-        else if (view.access) {
-          stream << "Read | Write";
-        }
-        else {
-          stream << "Unknown";
-        }
-
-        return stream << "]";
-      }
+          const View::Active view);
     };
 
     Buffer& buffer() const;
@@ -299,6 +261,12 @@ class C10_EXPORT vTensor final {
     c10::SmallVector<int64_t, 6u> sizes_;
     TensorOptions options_;
   } view_;
+
+ private:
+  // Debug
+  friend std::ostream& operator<<(
+      std::ostream& stream,
+      const View::Active view);
 };
 
 using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
