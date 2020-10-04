@@ -102,7 +102,9 @@ def backward(
             product, usually gradients w.r.t. each element of corresponding tensors.
             None values can be specified for scalar Tensors or ones that don't require
             grad. If a None value would be acceptable for all grad_tensors, then this
-            argument is optional.
+            argument is optional.  If creating ``grad_tensors`` or calling ``backward``
+            in a user-specified CUDA stream context, see
+            :ref:`Stream semantics of backward calls<bwd-cuda-stream-semantics>`_.
         retain_graph (bool, optional): If ``False``, the graph used to compute the grad
             will be freed. Note that in nearly all cases setting this option to ``True``
             is not needed and often can be worked around in a much more efficient
@@ -161,6 +163,9 @@ def grad(
             Usually gradients w.r.t. each output. None values can be specified for scalar
             Tensors or ones that don't require grad. If a None value would be acceptable
             for all grad_tensors, then this argument is optional. Default: None.
+            If creating ``grad_outputs`` or calling ``grad`` in a user-specified CUDA
+            stream context, see
+            :ref:`Stream semantics of backward calls<bwd-cuda-stream-semantics>`_.
         retain_graph (bool, optional): If ``False``, the graph used to compute the grad
             will be freed. Note that in nearly all cases setting this option to ``True``
             is not needed and often can be worked around in a much more efficient
@@ -184,7 +189,7 @@ def grad(
             grad_outputs=grad_outputs,
             retain_graph=retain_graph,
             create_graph=create_graph,
-            only_inputs=only_inputs, 
+            only_inputs=only_inputs,
             allow_unused=allow_unused,
         )
 

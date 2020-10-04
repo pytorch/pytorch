@@ -198,7 +198,9 @@ class Tensor(torch._C._TensorBase):
                 to a Tensor that does not require grad unless ``create_graph`` is True.
                 None values can be specified for scalar Tensors or ones that
                 don't require grad. If a None value would be acceptable then
-                this argument is optional.
+                this argument is optional.  If creating ``gradient`` or calling
+                ``backward`` in a user-specified CUDA stream context, see
+                :ref:`Stream semantics of backward calls<bwd-cuda-stream-semantics>`_.
             retain_graph (bool, optional): If ``False``, the graph used to compute
                 the grads will be freed. Note that in nearly all cases setting
                 this option to True is not needed and often can be worked around
