@@ -369,7 +369,7 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.conv2.weight = torch.nn.Parameter(original_m.standalone.conv.weight.detach())
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.standalone.conv.bias.detach())
 
-        m = CustomTracer().trace(original_m).eval()
+        m = torch.fx.GraphModule(original_m, CustomTracer().trace(original_m)).eval()
         qconfig_dict = {'': default_qconfig, 'standalone_module_name': ['standalone']}
         # check prepared model
         m = prepare_fx(m, qconfig_dict)
@@ -762,7 +762,7 @@ class TestQuantizeFx(QuantizationTestCase):
             register_observed_custom_module_mapping(CustomModule, ObservedCustomModule)
             register_quantized_custom_module_mapping(CustomModule, QuantizedCustomModule)
 
-            m = CustomTracer().trace(original_m).eval()
+            m = torch.fx.GraphModule(original_m, CustomTracer().trace(original_m)).eval()
             qconfig_dict = {'': default_qconfig}
             # check prepared model
             m = prepare_fx(m, qconfig_dict)
