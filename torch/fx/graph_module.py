@@ -173,13 +173,7 @@ class GraphModule(torch.nn.Module):
     @graph.setter
     def graph(self, val) -> None:
         self._graph = val
-        body, result, free_variables = self._graph.python_code(root_module='self')
-        body = '\n'.join('    ' + line for line in body.split('\n')) + '\n'
-        self.code = f"""\
-def forward(self, {', '.join(free_variables)}):
-{body}
-    return {result}
-"""
+        self.code = self._graph.python_code(root_module='self')
         cls = type(self)
         cls.forward = _forward_from_src(self.code)
 
