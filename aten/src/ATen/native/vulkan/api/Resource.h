@@ -64,6 +64,7 @@ struct Resource final {
     */
 
     struct Barrier final {
+      VkBuffer hande;
       Memory::Barrier memory;
     };
 
