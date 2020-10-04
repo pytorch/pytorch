@@ -79,8 +79,6 @@ VkQueue acquire_queue(
 } // namespace
 
 void Context::Deleter::operator()(const VkDevice device) const {
-  // No VK_CHECK.  Don't want an exception thrown in the destructor.
-  vkDeviceWaitIdle(device);
   vkDestroyDevice(device, nullptr);
 }
 
@@ -90,13 +88,18 @@ Context::Context(const Adapter& adapter)
           create_device(
               adapter.handle,
               adapter.compute_queue_family_index),
-          Deleter{}),
+          &VK_DELETER(Device)),
       queue_(acquire_queue(device(), adapter.compute_queue_family_index)),
       command_(gpu()),
       shader_(gpu()),
       pipeline_(gpu()),
       descriptor_(gpu()),
       resource_(gpu()) {
+}
+
+Context::~Context() {
+  // No VK_CHECK.  Don't want an exception thrown in the destructor.
+  vkDeviceWaitIdle(device());
 }
 
 Context* context() {

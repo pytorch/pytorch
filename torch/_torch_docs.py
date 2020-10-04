@@ -4964,8 +4964,14 @@ The behavior depends on the dimensionality of the tensors as follows:
   1 is appended to its dimension for the purpose of the batched matrix multiple and removed after.
   The non-matrix (i.e. batch) dimensions are :ref:`broadcasted <broadcasting-semantics>` (and thus
   must be broadcastable).  For example, if :attr:`input` is a
+  :math:`(j \times 1 \times n \times n)` tensor and :attr:`other` is a :math:`(k \times n \times n)`
+  tensor, :attr:`out` will be a :math:`(j \times k \times n \times n)` tensor.
+
+  Note that the broadcasting logic only looks at the batch dimensions when determining if the inputs
+  are broadcastable, and not the matrix dimensions. For example, if :attr:`input` is a
   :math:`(j \times 1 \times n \times m)` tensor and :attr:`other` is a :math:`(k \times m \times p)`
-  tensor, :attr:`out` will be an :math:`(j \times k \times n \times p)` tensor.
+  tensor, these inputs are valid for broadcasting even though the final two dimensions (i.e. the
+  matrix dimensions) are different. :attr:`out` will be a :math:`(j \times k \times n \times p)` tensor.
 
 {tf32_note}
 
@@ -5665,7 +5671,7 @@ Args:
 
 add_docstr(torch.poisson,
            r"""
-poisson(input *, generator=None) -> Tensor
+poisson(input, generator=None) -> Tensor
 
 Returns a tensor of the same size as :attr:`input` with each element
 sampled from a Poisson distribution with rate parameter given by the corresponding
@@ -9581,16 +9587,16 @@ satisfies the following rules:
      - *returned index satisfies*
    * - 1-D
      - False
-     - ``sorted_sequence[i-1] <= values[m][n]...[l][x] < sorted_sequence[i]``
+     - ``sorted_sequence[i-1] < values[m][n]...[l][x] <= sorted_sequence[i]``
    * - 1-D
      - True
-     - ``sorted_sequence[i-1] < values[m][n]...[l][x] <= sorted_sequence[i]``
+     - ``sorted_sequence[i-1] <= values[m][n]...[l][x] < sorted_sequence[i]``
    * - N-D
      - False
-     - ``sorted_sequence[m][n]...[l][i-1] <= values[m][n]...[l][x] < sorted_sequence[m][n]...[l][i]``
+     - ``sorted_sequence[m][n]...[l][i-1] < values[m][n]...[l][x] <= sorted_sequence[m][n]...[l][i]``
    * - N-D
      - True
-     - ``sorted_sequence[m][n]...[l][i-1] < values[m][n]...[l][x] <= sorted_sequence[m][n]...[l][i]``
+     - ``sorted_sequence[m][n]...[l][i-1] <= values[m][n]...[l][x] < sorted_sequence[m][n]...[l][i]``
 
 Args:
     sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost*
@@ -9654,9 +9660,9 @@ formally, the returned index satisfies the following rules:
    * - :attr:`right`
      - *returned index satisfies*
    * - False
-     - ``boundaries[i-1] <= input[m][n]...[l][x] < boundaries[i]``
-   * - True
      - ``boundaries[i-1] < input[m][n]...[l][x] <= boundaries[i]``
+   * - True
+     - ``boundaries[i-1] <= input[m][n]...[l][x] < boundaries[i]``
 
 Args:
     input (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
