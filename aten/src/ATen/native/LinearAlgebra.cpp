@@ -100,10 +100,11 @@ Tensor pinverse(const Tensor& self, double rcond) {
     return at::empty(self_sizes, self.options());
   }
   Tensor U, S, V;
-  std::tie(U, S, V) = self.svd();
+  std::tie(U, S, V) = self.conj().svd();
   Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);
-  Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, self.options()));
-  return at::matmul(V, at::matmul(S_pseudoinv.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1), U.transpose(-2, -1)));
+  Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, S.options()));
+  Tensor S_pseudoinv_diag = S_pseudoinv.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).to(self.dtype());
+  return at::matmul(V, at::matmul(S_pseudoinv_diag, U.transpose(-2, -1)));
 }
 
 static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
