@@ -64,14 +64,6 @@ struct Resource final {
 
   struct Buffer final {
     /*
-      Barrier
-    */
-
-    struct Barrier final {
-      Memory::Barrier memory;
-    };
-
-    /*
       Descriptor
     */
 
@@ -84,14 +76,28 @@ struct Resource final {
       } usage;
     };
 
+    /*
+      Object
+    */
+
     struct Object final {
       VkBuffer handle;
       VkDeviceSize offset;
       VkDeviceSize range;
 
       operator bool() const;
-    } object;
+    };
 
+    /*
+      Barrier
+    */
+
+    struct Barrier final {
+      Object object;
+      Memory::Barrier memory;
+    };
+
+    Object object;
     Memory memory;
 
     operator bool() const;
@@ -153,20 +159,6 @@ struct Resource final {
     };
 
     /*
-      Barrier
-    */
-
-    struct Barrier final {
-      VkImage handle;
-      Memory::Barrier memory;
-
-      struct {
-        VkImageLayout src;
-        VkImageLayout dst;
-      } layout;
-    };
-
-    /*
       Descriptor
     */
 
@@ -188,6 +180,10 @@ struct Resource final {
       Sampler::Descriptor sampler;
     };
 
+    /*
+      Object
+    */
+
     struct Object final {
       VkImage handle;
       VkImageLayout layout;
@@ -195,8 +191,23 @@ struct Resource final {
       VkSampler sampler;
 
       operator bool() const;
-    } object;
+    };
 
+    /*
+      Barrier
+    */
+
+    struct Barrier final {
+      Object object;
+      Memory::Barrier memory;
+
+      struct {
+        VkImageLayout src;
+        VkImageLayout dst;
+      } layout;
+    };
+
+    Object object;
     Memory memory;
 
     operator bool() const;
