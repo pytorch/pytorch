@@ -527,6 +527,7 @@ void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
     }
   }
 
+  auto fusion = parseJitIR(graph);
   //fusion_executor_cache_ =
   //    std::make_unique<FusionExecutorCache>(parseJitIR(graph));
 }
