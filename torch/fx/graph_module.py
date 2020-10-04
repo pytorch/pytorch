@@ -59,7 +59,8 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
         def is_leaf_module(self, _: torch.nn.Module, __: str) -> bool:
             return True
 
-    return KeepModules().trace(CodeOnlyModule(body))
+    com = CodeOnlyModule(body)
+    return GraphModule(com, KeepModules().trace(com))
 
 # copy an attribute value with qualified name 'target' from 'from_module' to 'to_module'
 # This installs empty Modules where none exist yet if they are subpaths of target
