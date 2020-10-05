@@ -210,10 +210,13 @@ class intrusive_ptr final {
  public:
   using element_type = TTarget;
 
-  // This constructor will not increase the ref counter for you.
-  // This is not public because we shouldn't make intrusive_ptr out of raw
-  // pointers except from inside the make_intrusive() and
-  // weak_intrusive_ptr::lock() implementations
+  // This constructor will by_default increase the ref counter for you.
+  // This is public because:
+  // 1. Boost intrusive_ptr has the same public API
+  //    https://www.boost.org/doc/libs/1_74_0/boost/smart_ptr/intrusive_ptr.hpp
+  // 2. Pybind11 custom smart pointer requires pointer/raw pointer constructor
+  //    to be a part of public API
+  //    https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#custom-smart-pointers
   explicit intrusive_ptr(TTarget* target, bool add_ref=true) noexcept : target_(target) {
     if (target_ != NullType::singleton() && add_ref) {
       // We can't use retain_(), because we also have to increase weakcount
