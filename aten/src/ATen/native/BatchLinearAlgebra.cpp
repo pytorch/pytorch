@@ -293,10 +293,14 @@ template<> void lapackSyevd<c10::complex<float>, float>(char jobz, char uplo, in
 }
 
 template<> void lapackSyevd<double>(char jobz, char uplo, int n, double *a, int lda, double *w, double *work, int lwork, double *rwork, int lrwork, int *iwork, int liwork, int *info) {
+  (void)rwork;  // unused
+  (void)lrwork;  // unused
   dsyevd_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, iwork, &liwork, info);
 }
 
 template<> void lapackSyevd<float>(char jobz, char uplo, int n, float *a, int lda, float *w, float *work, int lwork, float *rwork, int lrwork, int *iwork, int liwork, int *info) {
+  (void)rwork;  // unused
+  (void)lrwork;  // unused
   ssyevd_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, iwork, &liwork, info);
 }
 
@@ -929,8 +933,7 @@ static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, std::string uplo_s
   value_t* rwork_data = nullptr;
   if (isComplexType(at::typeMetaToScalarType(v.dtype()))) {
     lrwork = std::max(1, static_cast<int>(rwork_query));
-    ScalarType dtype = toValueType(typeMetaToScalarType(v.dtype()));
-    rwork = at::empty({lrwork}, v.options().dtype(dtype));
+    rwork = at::empty({lrwork}, w.options());
     rwork_data = rwork.data_ptr<value_t>();
   }
 
