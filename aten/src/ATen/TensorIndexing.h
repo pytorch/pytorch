@@ -339,6 +339,10 @@ static inline IntArrayRef slicePrefix1sSize(const IntArrayRef& sizes) {
 }
 
 static inline void copy_to(const Tensor& dst, const Tensor& src) {
+  if (dst.sizes().equals(src.sizes())) {
+    dst.copy_(src);
+    return;
+  }
   Tensor b_src;
   std::tie(b_src) = expand_inplace(dst, src.view(slicePrefix1sSize(src.sizes())), "setitem");
   dst.copy_(b_src);
