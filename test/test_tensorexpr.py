@@ -23,7 +23,7 @@ class BaseTestClass(JitTestCase):
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         torch._C._jit_set_texpr_fuser_enabled(True)
         self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
-        torch._C._debug_set_fusion_group_inlining(True)
+        torch._C._debug_set_fusion_group_inlining(False)
 
     def tearDown(self):
         torch._C._jit_set_profiling_executor(self.old_profiling_executor)
