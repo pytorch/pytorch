@@ -202,6 +202,7 @@ class Graph:
 
     def python_code(self, root_module: str) -> str:
         free_vars: List[str] = []
+        modules_used : Set[str] = set()
         body: List[str] = []
         for node in self._nodes:
             if node.op == 'placeholder':
@@ -225,6 +226,9 @@ class Graph:
                     body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}\n')
                     continue
                 qualified_name = _qualified_name(node.target)
+                if '.' in qualified_name:
+                    module_name = qualified_name.split('.', maxsplit=1)[0]
+                    modules_used.add(module_name)
                 if qualified_name == 'getattr' and \
                    isinstance(node.args, tuple) and \
                    isinstance(node.args[1], str) and \
@@ -247,9 +251,12 @@ class Graph:
                 continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
+        import_block = '\n'.join(f'import {name}' for name in sorted(modules_used))
+
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n')) + '\n'
         fn_code = f"""\
+{import_block}
 def forward(self, {', '.join(free_vars)}):
 {code}
 """
