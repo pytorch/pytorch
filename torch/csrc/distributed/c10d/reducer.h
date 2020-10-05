@@ -30,7 +30,8 @@ class Reducer {
       std::shared_ptr<c10d::ProcessGroup> process_group,
       std::vector<std::vector<bool>> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
-      bool find_unused_parameters);
+      bool find_unused_parameters,
+      bool gradient_as_bucket_view);
 
   ~Reducer() noexcept(false);
 
@@ -54,7 +55,7 @@ class Reducer {
     return backward_stats_;
   }
 
-  // Registeres a hook to the reducer. The hook is `CommHookInterface`
+  // Registers a hook to the reducer. The hook is `CommHookInterface`
   // type to allow both Python and CPP hooks. This function can only
   // be called once before calling backward.
   void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
@@ -62,8 +63,8 @@ class Reducer {
   // Returns a vector of tensors in each bucket in sequential order.
   std::vector<std::vector<at::Tensor>> get_bucket_tensors() const;
 
-  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_ according
-  // to when tensors received grads in the backward pass.
+  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
+  // according to when tensors received grads in the backward pass.
   // TODO this function makes broadcast communication call and
   // could be overlapped with next forward() call, thus
   // it could be async. Will make it async when rebuilding buckets for
@@ -89,7 +90,7 @@ class Reducer {
   // corresponding tensor being reduced.
   void set_forward_pass_work_handle(
       std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
-      at::Tensor& tensor, bool useStaticWorldSize);
+      bool useStaticWorldSize);
 
   // Retrieve on-device tensors used to track locally unused parameters. For
   // each replica, it is a tensor where index i = 1 if the Variable with that
@@ -103,6 +104,13 @@ class Reducer {
   struct VariableIndex {
     size_t replica_index;
     size_t variable_index;
+
+    VariableIndex() = default;
+
+    VariableIndex(size_t replica_index_, size_t variable_index_) {
+      replica_index = replica_index_;
+      variable_index = variable_index_;
+    }
   };
 
   void push_rebuilt_params(const VariableIndex& index);
@@ -124,6 +132,7 @@ class Reducer {
 
   bool has_marked_unused_parameters_;
   const bool find_unused_parameters_;
+  const bool gradient_as_bucket_view_;
   std::vector<VariableIndex> unused_parameters_;
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
@@ -179,7 +188,7 @@ class Reducer {
   // and on the same device can be batched. The tensor that represents the
   // flattened gradient uses the same type and is placed on the same device.
   // Buckets are filled as the gradients they hold are computed (triggered by
-  // autograd hooks). Buckets are reduced in a predetemined order that is
+  // autograd hooks). Buckets are reduced in a predetermined order that is
   // identical across processes.
   struct BucketReplica {
     // Flattened (1 dimensional) contents of bucket.
@@ -219,22 +228,29 @@ class Reducer {
     // std::vector<at::cuda::CUDAEvent> events;
   };
 
-  // This function is called inside `initialize_buckets` and
-  // `finalize_backward`. The function call in `initialize_bucket` creates both
-  // views_in and views_out into the contents tensor for each variable's grad.
-  // Views serve as entry points to copy_ each grad's data in/out of the flat
-  // contents tensor. The function call in `finalize_backward` happens only if
-  // DDP communication hook was registered to recreate just views_out with the
-  // result of `future_work`. If called from `finalize_backward`,
-  // `initialize_bucket_views` will not modify `bucket_views_in`. This will keep
-  // `bucket_views_in` referring to replica's contents and
-  // `bucket_view_in.copy_(grad)` call inside reducer's
-  // `mark_variable_ready_dense` will work as expected. Note that before the
-  // call in `finalize_backward`, views_out must be cleared.
-  void initialize_bucket_views(
-      BucketReplica& replica,
-      at::Tensor& contents,
-      bool populate_bucket_views_in);
+  // This function is called inside `initialize_buckets`, it initializes both
+  // bucket_views_in and bucket_views_out into the contents tensor for each
+  // variable's grad. Views serve as entry points to copy_ each grad's data
+  // in/out of the flat contents tensor.
+  void initialize_bucket_views(BucketReplica& replica, at::Tensor& contents);
+
+  // This function is called inside `finalize_backward`, it happens only if
+  // DDP communication hook was registered to recreate just bucket_views_out
+  // with the result of `future_work`.
+  void populate_bucket_views_out(BucketReplica& replica, at::Tensor& tensor);
+
+  // If gradient_as_bucket_view_ is false, after allreduce buckets,
+  // copy bucket results back to grads.
+  void copy_bucket_to_grad(
+      torch::autograd::Variable& variable,
+      Reducer::BucketReplica& replica,
+      size_t intra_bucket_index,
+      bool global_unused);
+  // Check layout of grad and bucket_view before calling copy_grad_to_bucket
+  void check_grad_layout(const at::Tensor& grad, const at::Tensor& bucket_view);
+  // If gradient_as_bucket_view_ is false, before allreduce buckets,
+  // copy grads to buckets.
+  void copy_grad_to_bucket(at::Tensor& grad, at::Tensor& bucket_view);
 
   // A bucket holds N bucket replicas (1 per model replica).
   //
@@ -272,6 +288,13 @@ class Reducer {
     size_t bucket_index;
     // Index of parameter in single bucket replica.
     size_t intra_bucket_index;
+
+    VariableLocator() = default;
+
+    VariableLocator(size_t bucket_index_, size_t intra_bucket_index_) {
+      bucket_index = bucket_index_;
+      intra_bucket_index = intra_bucket_index_;
+    }
   };
 
   // Map the index of a variable to its location in the bucket structure.
@@ -315,6 +338,7 @@ class Reducer {
 
   // Division factor for reduction of gradients.
   int divFactor_;
+
  private:
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;

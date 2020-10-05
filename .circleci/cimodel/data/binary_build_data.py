@@ -54,7 +54,7 @@ CONFIG_TREE_DATA = OrderedDict(
     )),
     # Skip CUDA-9.2 builds on Windows
     windows=(
-        [v for v in dimensions.GPU_VERSIONS if v not in ['cuda92', "rocm3.7"]],
+        [v for v in dimensions.GPU_VERSIONS if v not in ['cuda92'] + dimensions.ROCM_VERSION_LABELS],
         OrderedDict(
             wheel=dimensions.STANDARD_PYTHON_VERSIONS,
             conda=dimensions.STANDARD_PYTHON_VERSIONS,
@@ -142,11 +142,11 @@ class LinuxGccConfigNode(ConfigNode):
 
         # XXX disabling conda rocm build since docker images are not there
         if self.find_prop("package_format") == 'conda':
-            gpu_versions = filter(lambda x: x != "rocm3.7", gpu_versions)
+            gpu_versions = filter(lambda x: x not in dimensions.ROCM_VERSION_LABELS, gpu_versions)
 
         # XXX libtorch rocm build  is temporarily disabled
         if self.find_prop("package_format") == 'libtorch':
-            gpu_versions = filter(lambda x: x != "rocm3.7", gpu_versions)
+            gpu_versions = filter(lambda x: x not in dimensions.ROCM_VERSION_LABELS, gpu_versions)
 
         return [ArchConfigNode(self, v) for v in gpu_versions]
 

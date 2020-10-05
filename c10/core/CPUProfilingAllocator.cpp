@@ -112,7 +112,7 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
   std::vector<uint64_t> allocation_offsets(
       allocation_sizes.size(), std::numeric_limits<uint64_t>::max());
   auto mem_events = create_and_sort_mem_events(allocation_sizes, allocation_lifetimes);
-  uint64_t max_offset{0}, allocated_offset{0}, allocated_size{0};
+  uint64_t max_offset{0};
   for (const auto& mem_event : mem_events) {
     uint64_t alloc_offset;
     uint64_t new_offset, new_size;
