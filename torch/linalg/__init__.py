@@ -162,6 +162,7 @@ Args:
         =====  ============================
         None   2-norm, computed directly using the SVD
         'fro'  Frobenius norm
+        'nuc'  nuclear norm
         inf    max(sum(abs(x), dim=1))
         -inf   min(sum(abs(x), dim=1))
         1      max(sum(abs(x), dim=0))

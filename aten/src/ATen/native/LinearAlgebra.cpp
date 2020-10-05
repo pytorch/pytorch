@@ -1601,22 +1601,56 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, opt
 
 // Numerical or None norms
 Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
-  optional<Scalar> ord = opt_ord.has_value() ? opt_ord : 2;
-  IntArrayRef dim{-2, -1};
-  Tensor self_inverse = at::inverse(self);
-  Tensor norm_self = at::linalg_norm(self, ord, dim);
-  Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
-  Tensor result = norm_self * norm_inverse;
+  TORCH_CHECK(self.numel() > 0, "linalg_cond is not defined for empty tensors.");
+  TORCH_CHECK(self.dim() >= 2, "Tensor of matrices must have at least 2 dimensions.");
+
+  Tensor self_inverse, result;
+
+  // The default case is using 2-norm
+  Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
+
+  // If ord == None or ord == ±2
+  if (std::abs(ord.toDouble()) == 2.0) {
+    auto singular_values = std::get<1>(at::svd(self));
+    auto s_max = std::get<0>(singular_values.max(/*dim=*/-1));
+    auto s_min = std::get<0>(singular_values.min(/*dim=*/-1));
+    if (ord.toDouble() == -2.0) {
+      result = s_min / s_max;
+    }
+    else {
+      result = s_max / s_min;
+    }
+  }
+  // ord == ±1 ord == ±inf
+  else {
+    squareCheckInputs(self);
+    // Ignore errors if not invertible, self_inverse should contain NaNs in this case
+    try {
+      self_inverse = at::inverse(self);
+    } catch (...) {}
+    IntArrayRef dim{-2, -1};
+    Tensor norm_self = at::linalg_norm(self, ord, dim);
+    Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
+    result = norm_self * norm_inverse;
+  }
+  result = at::nan_to_num(result, INFINITY);
   return result;
 }
 
 // Frobenius norm
 Tensor linalg_cond(const Tensor& self, std::string ord) {
+  TORCH_CHECK(self.numel() > 0, "linalg_cond is not defined for empty tensors.");
+  squareCheckInputs(self);
+  // Ignore errors if not invertible, self_inverse should contain NaNs in this case
+  Tensor self_inverse;
+  try {
+    self_inverse = at::inverse(self);
+  } catch (...) {}
   IntArrayRef dim{-2, -1};
-  Tensor self_inverse = at::inverse(self);
   Tensor norm_self = at::linalg_norm(self, ord, dim);
   Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
   Tensor result = norm_self * norm_inverse;
+  result = at::nan_to_num(result, INFINITY);
   return result;
 }
 

@@ -313,30 +313,30 @@ class TestLinalg(TestCase):
                 for ord in ord_settings:
                     run_test_case(input, ord, dim, keepdim)
 
-    @precisionOverride({torch.float32: 1e-4})
+    @precisionOverride({torch.float32: 1e-3})
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.float32, torch.float64)
-    def test_cond_matrix(self, device, dtype):
+    def test_cond(self, device, dtype):
         def run_test_case(input, ord):
             result = torch.linalg.cond(input, ord)
             input_numpy = input.cpu().numpy()
             result_numpy = np.linalg.cond(input_numpy, ord)
 
-            self.assertEqual(result, result_numpy, rtol=1e-3, atol=self.precision)
+            self.assertEqual(result, result_numpy, rtol=1e-2, atol=self.precision)
 
-        ord_matrix = [1, -1, 2, -2, inf, -inf, 'fro', None]
+        norm_types = [1, -1, 2, -2, inf, -inf, 'fro', 'nuc', None]
         S = 10
         test_cases = [
-            # input size, p settings, dim
-            ((S, S), ord_matrix),
-            ((S, S), ord_matrix),
-            ((S, S), ord_matrix),
-            ((S, S, S, S), ord_matrix),
-            ((S, S, S, S), ord_matrix),
-            ((S, S, S, S), ord_matrix),
-            ((S, S, S, S), ord_matrix),
+            # input size, norm types settings
+            ((S, S), norm_types),
+            ((S, S), norm_types),
+            ((S, S), norm_types),
+            ((S, S, S, S), norm_types),
+            ((S, S, S, S), norm_types),
+            ((S, S, S, S), norm_types),
+            ((S, S, S, S), norm_types),
         ]
         for input_size, ord_settings in test_cases:
             input = torch.randn(*input_size, dtype=dtype, device=device)
