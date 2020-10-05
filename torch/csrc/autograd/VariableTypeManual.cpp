@@ -93,7 +93,7 @@ void backward(
   torch::autograd::backward({self}, {_gradient}, std::move(keep_graph), create_graph);
 }
 
-void set_data(const Tensor & self, const Tensor & new_data) {
+void set_data(Tensor & self, const Tensor & new_data) {
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
   // from `new_data` to `var`. It requires that `new_data` and `var` have compatible
   // tensor type.
@@ -160,7 +160,7 @@ Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
   return self.set_requires_grad(_requires_grad);
 }
 
-void retain_grad(const Tensor & self) {
+void retain_grad(Tensor & self) {
   TORCH_CHECK(self.requires_grad(), "can't retain_grad on Tensor that has requires_grad=False");
   if (self.is_leaf()) {  // no-op for leaves
     return;
@@ -269,7 +269,12 @@ Tensor & detach_(Tensor & self) {
                    "of detach_(). Alternatively, create this view with an "
                    "`unsafe_` version of the function that produced it.");
     } else {
-      AT_ERROR("Can't detach views in-place. Use detach() instead");
+      AT_ERROR("If you are using DistributedDataParallel (DDP) for training, "
+               "and gradient_as_bucket_view is set as True, gradients are "
+               "views of DDP buckets, and hence detach_() cannot be called "
+               "on these gradients. To fix this error, please refer to the "
+               "Optimizer.zero_grad() function in torch/optim/optimizer.py "
+               "as the solution.");
     }
   }
   // I think the choice here is conservative.  In principle, doing

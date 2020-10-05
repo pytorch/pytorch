@@ -2,6 +2,8 @@ import torch
 import numpy as np
 import argparse
 
+from typing import Dict
+
 # debug print
 DEBUG_PRINT = False
 
@@ -71,7 +73,7 @@ def random_topology_test(seed, *inp_tensor_list):
             return get_root(dependency_map[x], dependency_map)
         else:
             return x
-    d_map = {}
+    d_map: Dict[int, int] = {}
     num_sets = num_tensor
     candidate = list(range(num_tensor))
 

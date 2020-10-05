@@ -31,7 +31,7 @@ constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-PyObject* rpc_init(PyObject* /* unused */) {
+PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   auto rpc_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
   if (!rpc_module) {
@@ -81,7 +81,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
             be constructed directly, rather, an instance can be retrieved
             through :meth:`~torch.distributed.rpc.get_worker_info` and the
             result can be passed in to functions such as
-            :meth:`~torch.distributed.rpc.rpc_sync`, :class:`~torch.distributed.rpc.rpc_async`,
+            :meth:`~torch.distributed.rpc.rpc_sync`, :meth:`~torch.distributed.rpc.rpc_async`,
             :meth:`~torch.distributed.rpc.remote` to avoid copying a string on
             every invocation.)")
           .def(
@@ -777,7 +777,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 } // namespace
 
 static PyMethodDef methods[] = { // NOLINT
-    {"_rpc_init", (PyCFunction)rpc_init, METH_NOARGS, nullptr},
+    {"_rpc_init", rpc_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {

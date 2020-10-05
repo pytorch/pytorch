@@ -272,6 +272,7 @@ namespace c10 {
   _(prim, grad)                      \
   _(aten, zero_)                     \
   _(aten, fill_)                     \
+  _(aten, masked_fill_)              \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
@@ -359,7 +360,8 @@ namespace c10 {
   _(attr, scope)                     \
   _(attr, keepdims)                  \
   _(attr, cache_id)                  \
-  _(attr, new_axis)
+  _(attr, new_axis)                  \
+  _(attr, warn_id)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \

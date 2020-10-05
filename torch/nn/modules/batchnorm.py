@@ -114,7 +114,7 @@ class _BatchNorm(_NormBase):
                 else:  # use exponential moving average
                     exponential_average_factor = self.momentum
 
-        r""" 
+        r"""
         Decide whether the mini-batch stats should be used for normalization rather than the buffers.
         Mini-batch stats are used in training mode, and in eval mode when buffers are None.
         """
@@ -185,7 +185,7 @@ class BatchNorm1d(_BatchNorm):
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
-            buffers :attr:`running_mean` and :attr:`running_var` as ``None``. 
+            buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
             When these buffers are ``None``, this module always uses batch statistics.
             in both training and eval modes. Default: ``True``
 
@@ -258,7 +258,7 @@ class BatchNorm2d(_BatchNorm):
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
-            buffers :attr:`running_mean` and :attr:`running_var` as ``None``. 
+            buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
             When these buffers are ``None``, this module always uses batch statistics.
             in both training and eval modes. Default: ``True``
 
@@ -332,7 +332,7 @@ class BatchNorm3d(_BatchNorm):
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
-            buffers :attr:`running_mean` and :attr:`running_var` as ``None``. 
+            buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
             When these buffers are ``None``, this module always uses batch statistics.
             in both training and eval modes. Default: ``True``
 
@@ -414,7 +414,7 @@ class SyncBatchNorm(_BatchNorm):
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics, and initializes statistics
-            buffers :attr:`running_mean` and :attr:`running_var` as ``None``. 
+            buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
             When these buffers are ``None``, this module always uses batch statistics.
             in both training and eval modes. Default: ``True``
         process_group: synchronization of stats happen within each process group
@@ -493,7 +493,7 @@ class SyncBatchNorm(_BatchNorm):
             else:  # use exponential moving average
                 exponential_average_factor = self.momentum
 
-        r""" 
+        r"""
         Decide whether the mini-batch stats should be used for normalization rather than the buffers.
         Mini-batch stats are used in training mode, and in eval mode when buffers are None.
         """
@@ -576,6 +576,8 @@ class SyncBatchNorm(_BatchNorm):
             module_output.running_mean = module.running_mean
             module_output.running_var = module.running_var
             module_output.num_batches_tracked = module.num_batches_tracked
+            if hasattr(module, "qconfig"):
+                module_output.qconfig = module.qconfig
         for name, child in module.named_children():
             module_output.add_module(name, cls.convert_sync_batchnorm(child, process_group))
         del module
