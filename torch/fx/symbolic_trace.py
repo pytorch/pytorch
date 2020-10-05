@@ -119,6 +119,11 @@ class Tracer(TracerBase):
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
+    def call_module(self, m: torch.nn.Module, module_qualified_name: str, forward: callable, args, kwargs):
+        if not self.is_leaf_module(m, module_qualified_name):
+            return forward(*args, **kwargs)
+        return self.create_proxy('call_module', module_qualified_name, args, kwargs)
+
     def trace(self, root: torch.nn.Module) -> Graph:
         self.root = root
         self.graph = Graph()
@@ -143,10 +148,12 @@ class Tracer(TracerBase):
 
         def module_call_wrapper(mod, *args, **kwargs):
             module_qualified_name = _find_module(root, mod)
-            if not self.is_leaf_module(mod, module_qualified_name):
+
+            def forward(*args, **kwargs):
                 return orig_call(mod, *args, **kwargs)
-            else:
-                return self.create_proxy('call_module', module_qualified_name, args, kwargs)
+
+            return self.call_module(mod, module_qualified_name, forward, args, kwargs)
+
         try:
             torch.nn.Module.__call__ = module_call_wrapper
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {})
