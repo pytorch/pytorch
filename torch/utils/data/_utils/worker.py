@@ -110,6 +110,7 @@ def get_worker_info():
 
 r"""Dummy class used to signal the end of an IterableDataset"""
 class _IterableDatasetStopIteration(object):
+    __slots__ = ['worker_id']
     def __init__(self, worker_id):
         self.worker_id = worker_id
 
