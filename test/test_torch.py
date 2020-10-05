@@ -19098,15 +19098,18 @@ else:
                 with self.assertRaisesRegex(RuntimeError, 'exceeds dimension size'):
                     expected = test_fn(t, split_sizes, dim_to_test)
 
+    @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False))
     def test_hsplit(self, device, dtype):
         self._test_special_splits(1, 2, 0, torch.hsplit, torch.split, device, dtype)
         self._test_special_splits(2, 6, 1, torch.hsplit, torch.split, device, dtype)
 
+    @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False))
     def test_vsplit(self, device, dtype):
         self._test_special_splits(1, 6, 0, torch.vsplit, torch.split, device, dtype)
 
+    @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False))
     def test_dsplit(self, device, dtype):
         self._test_special_splits(3, 6, 2, torch.dsplit, torch.split, device, dtype)
