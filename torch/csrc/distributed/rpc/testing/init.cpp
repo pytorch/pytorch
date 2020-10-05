@@ -17,7 +17,7 @@ namespace {
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-PyObject* faulty_agent_init(PyObject* /* unused */) {
+PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
   // Import the rpc_module so we can subclass ProcessGroupAgent
   py::module rpc_module = py::module::import("torch.distributed.rpc");
   if(!rpc_module) {
