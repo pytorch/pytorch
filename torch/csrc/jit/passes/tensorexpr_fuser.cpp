@@ -91,7 +91,6 @@ bool isSupported(Node* node) {
       "aten::log(Tensor self) -> Tensor",
       "aten::log2(Tensor self) -> Tensor",
       "aten::log1p(Tensor self) -> Tensor",
-      // TODO: log1p
       "aten::exp(Tensor self) -> Tensor",
       "aten::erf(Tensor self) -> Tensor",
       "aten::erfc(Tensor self) -> Tensor",
