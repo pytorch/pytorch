@@ -55,7 +55,7 @@ template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 template <typename T>
-using intrusive_ptr_class_ = py::class_<c10::intrusive_ptr<T>>;
+using intrusive_ptr_class_ = py::class_<T, c10::intrusive_ptr<T>>;
 
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
