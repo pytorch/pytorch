@@ -315,9 +315,9 @@ std::string repro_from_args(const ConvolutionArgs& args) {
   ss <<   "device='cuda', requires_grad=True)" << to_channels_last << "\n";
   ss << "net = torch.nn.Conv" << dim-2 << "d(" << in_channels << ", " << out_channels << ", ";
   ss <<   "kernel_size=" << args.weight.sizes().slice(2) << ", ";
-  ss <<   "padding=" << ArrayRef<int>(args.params.padding) << ", ";
-  ss <<   "stride=" << ArrayRef<int>(args.params.stride) << ", ";
-  ss <<   "dilation=" << ArrayRef<int>(args.params.dilation) << ", ";
+  ss <<   "padding=" << ArrayRef<int>(args.params.padding, dim-2) << ", ";
+  ss <<   "stride=" << ArrayRef<int>(args.params.stride, dim-2) << ", ";
+  ss <<   "dilation=" << ArrayRef<int>(args.params.dilation, dim-2) << ", ";
   ss <<   "groups=" << args.params.groups << ")\n";
   ss << "net = net.cuda()." << partial_dtype << "()" << to_channels_last << "\n";
   ss << "out = net(data)\n";
