@@ -4573,13 +4573,12 @@ add_docstr(torch.median,
            r"""
 median(input) -> Tensor
 
-Returns the median value of all elements in the :attr:`input` tensor.
+Returns the median of the values in :attr:`input`.
 
 .. note::
     The median is not unique for :attr:`input` tensors with an even number
     of elements. In this case the lower of the two medians is returned. To
-    compute the mean of both medians in :attr:`input`, use :func:`torch.quantile`
-    with ``q=0.5`` instead.
+    compute the mean of both medians, use :func:`torch.quantile` with ``q=0.5`` instead.
 
 .. warning::
     This function produces deterministic (sub)gradients unlike ``median(dim=0)``
@@ -4597,9 +4596,8 @@ Example::
 
 .. function:: median(input, dim=-1, keepdim=False, *, out=None) -> (Tensor, LongTensor)
 
-Returns a namedtuple ``(values, indices)`` where ``values`` is the median
-value of each row of the :attr:`input` tensor in the given dimension
-:attr:`dim`. And ``indices`` is the index location of each median value found.
+Returns a namedtuple ``(values, indices)`` where ``values`` contains the median of each row of :attr:`input`
+in the dimension :attr:`dim`, and ``indices`` contains the index of the median values found in the dimension :attr:`dim`.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` tensor.
 
@@ -4621,14 +4619,15 @@ the outputs tensor having 1 fewer dimension than :attr:`input`.
     Do not expect the same result when run on CPU and GPU in general.
     For the same reason do not expect the gradients to be deterministic.
 
-
 Args:
     {input}
     {dim}
     {keepdim}
 
 Keyword args:
-    out (tuple, optional): the result tuple of two output tensors (max, max_indices)
+    out ((Tensor, Tensor), optional): The first tensor will be populated with the median values and the second
+                                      tensor, which must have dtype long, with their indices in the dimension
+                                      :attr:`dim` of :attr:`input`.
 
 Example::
 
@@ -4640,6 +4639,60 @@ Example::
             [ 1.0778, -1.9510,  0.7048,  0.4742, -0.7125]])
     >>> torch.median(a, 1)
     torch.return_types.median(values=tensor([-0.3982,  0.2270,  0.2488,  0.4742]), indices=tensor([1, 4, 4, 3]))
+""".format(**single_dim_common))
+
+add_docstr(torch.nanmedian,
+           r"""
+nanmedian(input) -> Tensor
+
+Returns the median of the values in :attr:`input`, ignoring ``NaN`` values.
+
+This function is identical to :func:`torch.median` when there are no ``NaN`` values in :attr:`input`.
+When :attr:`input` has one or more ``NaN`` values, :func:`torch.median` will always return ``NaN``,
+while this function will return the median of the non-``NaN`` elements in :attr:`input`.
+If all the elements in :attr:`input` are ``NaN`` it will also return ``NaN``.
+
+Args:
+    {input}
+
+Example::
+
+    >>> a = torch.tensor([1, float('nan'), 3, 2])
+    >>> a.median()
+    tensor(nan)
+    >>> a.nanmedian()
+    tensor(2.)
+
+.. function:: nanmedian(input, dim=-1, keepdim=False, *, out=None) -> (Tensor, LongTensor)
+
+Returns a namedtuple ``(values, indices)`` where ``values`` contains the median of each row of :attr:`input`
+in the dimension :attr:`dim`, ignoring ``NaN`` values, and ``indices`` contains the index of the median values
+found in the dimension :attr:`dim`.
+
+This function is identical to :func:`torch.median` when there are no ``NaN`` values in a reduced row. When a reduced row has
+one or more ``NaN`` values, :func:`torch.median` will always reduce it to ``NaN``, while this function will reduce it to the
+median of the non-``NaN`` elements. If all the elements in a reduced row are ``NaN`` then it will be reduced to ``NaN``, too.
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    out ((Tensor, Tensor), optional): The first tensor will be populated with the median values and the second
+                                      tensor, which must have dtype long, with their indices in the dimension
+                                      :attr:`dim` of :attr:`input`.
+
+Example::
+
+    >>> a = torch.tensor([[2, 3, 1], [float('nan'), 1, float('nan')]])
+    >>> a
+    tensor([[2., 3., 1.],
+            [nan, 1., nan]])
+    >>> a.median(0)
+    torch.return_types.median(values=tensor([nan, 1., nan]), indices=tensor([1, 1, 1]))
+    >>> a.nanmedian(0)
+    torch.return_types.nanmedian(values=tensor([2., 1., 1.]), indices=tensor([0, 1, 0]))
 """.format(**single_dim_common))
 
 add_docstr(torch.quantile,
