@@ -57,7 +57,8 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
         def is_leaf_module(self, _: torch.nn.Module, __: str) -> bool:
             return True
 
-    return KeepModules().trace(CodeOnlyModule(body))
+    com = CodeOnlyModule(body)
+    return GraphModule(com, KeepModules().trace(com))
 
 # copy an attribute value with qualified name 'target' from 'from_module' to 'to_module'
 # This installs empty Modules where none exist yet if they are subpaths of target
@@ -171,15 +172,7 @@ class GraphModule(torch.nn.Module):
     @graph.setter
     def graph(self, val) -> None:
         self._graph = val
-        body, result, free_variables, imports = self._graph.python_code(root_module='self')
-        import_block = '\n'.join(f'import {name}' for name in imports)
-        body = '\n'.join('    ' + line for line in body.split('\n')) + '\n'
-        self.code = f"""\
-{import_block}
-def forward(self, {', '.join(free_variables)}):
-{body}
-    return {result}
-"""
+        self.code = self._graph.python_code(root_module='self')
         cls = type(self)
         cls.forward = _forward_from_src(self.code)
 
