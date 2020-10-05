@@ -2220,6 +2220,7 @@ def var_mean(g, input, dim, unbiased, keepdim):
         sqrdmean = g.op("ReduceMean", sqrd, axes_i=dim, keepdims_i=keepdim)
         mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
         redudced_dims = g.op("Shape", input)
+        # dim could contain one or more dimensions
         redudced_dims = g.op("Gather", redudced_dims, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
         num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
     meansqrd = g.op("Mul", mean, mean)
