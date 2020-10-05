@@ -188,20 +188,21 @@ class TestLinalg(TestCase):
     def test_eigh(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
-        shapes = (0, 3, 35)
-        tensors = (random_hermitian_matrix(shape, dtype=dtype, device=device) for shape in shapes)
-
-        for t in tensors:
-            expected_w, expected_v = np.linalg.eigh(t.cpu().numpy())
-            actual_w, actual_v = torch.linalg.eigh(t)
-            # The sign of eigenvectors is not unique,
-            # therefore absolute values are compared
+        def run_test(shape, batch):
+            matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
+            expected_w, expected_v = np.linalg.eigh(matrix.cpu().numpy())
+            actual_w, actual_v = torch.linalg.eigh(matrix)
             self.assertEqual(actual_w, expected_w)
-            # TODO: remove abs as it discards imaginary part of complex numbers
+            # sign of eigenvectors is not unique and therefore absolute values are compared
             self.assertEqual(abs(actual_v), abs(expected_v))
 
-        # NOTE: eigh requires a square matrix
-        t = torch.randn(1, device=device, dtype=dtype)
+        shapes = (0, 3, 5)
+        batches = ((), (3, ), (2, 2))
+        for shape, batch in itertools.product(shapes, batches):
+            run_test(shape, batch)
+
+        # eigh requires a square matrix
+        t = torch.randn(2, 3, device=device, dtype=dtype)
         with self.assertRaises(RuntimeError):
             torch.linalg.eigh(t)
 
