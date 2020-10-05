@@ -30,7 +30,8 @@ class Node:
             assert isinstance(target, str)
         self.target = target  # for method/module/function, the name of the method/module/function/attr
         # being invoked, e.g add, layer1, or torch.add
-        self._args, self._kwargs = (), {}
+        self._args : Tuple[Argument, ...] = ()
+        self._kwargs : Dict[str, Argument] = {}
         self.args, self.kwargs = args, kwargs
         # All of the nodes that use the value produced by this Node
         # Note one user may correspond to several uses, e.g. the node fo `x + x`
