@@ -1667,14 +1667,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(16, 16, requires_grad=True)
         self.run_test(MyModel(), (x, y))
 
-    def test_interpolate_adaptive_pooling_error(self):
-        x = torch.randn(1, 2, 6, requires_grad=True)
-        with self.assertRaises(RuntimeError) as cm:
-            self._interpolate(x, "area", True, True)
-
-        with self.assertRaises(RuntimeError) as cm:
-            self._interpolate(x, "area", False, True)
-
+    @disableScriptTest()
     def test_groupnorm(self):
         model = torch.nn.GroupNorm(3, 6, 0.002)
         x = torch.randn(4, 6, 180, 180, 180)
