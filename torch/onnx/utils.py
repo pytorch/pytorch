@@ -583,7 +583,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             enable_onnx_checker=True, use_external_data_format=False,
-            onnx_shape_inference=False, use_new_jit_passes=False):
+            onnx_shape_inference=True, use_new_jit_passes=False):
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
