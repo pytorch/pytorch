@@ -3,7 +3,7 @@ import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, skipCUDAIfRocm
 
-N_values = [30]
+N_values = [20] if not TEST_WITH_SLOW else [30, 300]
 
 class TestForeach(TestCase):
     foreach_bin_ops = [
