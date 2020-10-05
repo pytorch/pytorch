@@ -158,14 +158,19 @@ struct FunctionSchema {
 
   // Checks whether this schema is backward compatible with the old one.
   // The following conditions must be true:
-  // * The function's structure of old and new match (e.g. name,
-  //   overload name, etc.).
-  // * Considering as 'arguments' the concatenation of positional arguments
-  //   and kwargs in a function, all the arguments in the old function schema
-  //   must have a matching backward compatible argument in the same position
-  //   in this schema.
-  // * All remaining (i.e. new) arguments in this schema must appear last in
-  //   the list of arguments, and have a default value.
+  // [Function structure] The new schema's name, overload-name, varargs, and
+  //      return arity are the same.
+  // [Output Narrowing] The new schema's output type must be the same class
+  //      or inherit from the old schema's output type
+  // [Argument count] The new schema must have at least as many arguments as
+  //      the old schema (considering the list of positional and kwargs).
+  // [Arg Compatibility] Every argument in the old schema has a corresponding
+  //      argument in the new schema that:
+  //        * is at the same position.
+  //        * has the same name.
+  //        * has the same type, or the old argument's type inherits from the
+  //          new argument's type.
+  // [Default Values] Every new argument must have a default value.
   // E.g.
   //   OK    f_new(a, b, c=1) => f_old(a, b)
   //   NOK   f_new(a, c=1, *, b) => f_old(a, *, b)
