@@ -7279,12 +7279,6 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "chain_matmul: Expected one or more matrices"):
             torch.chain_matmul()
 
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.complex64, torch.complex128)
-    def test_det_complex_only(self, device, dtype):
-        pass
-
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

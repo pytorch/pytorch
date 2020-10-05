@@ -20,7 +20,9 @@ from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
-     random_fullrank_matrix_distinct_singular_value, set_rng_seed,
+     random_fullrank_matrix_distinct_singular_value,
+     random_hermitian_matrix,
+     set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor)
 
 
@@ -1143,6 +1145,8 @@ def method_tests():
             NO_ARGS, 'symmetric_psd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('det', lambda: random_symmetric_pd_matrix(S),
             NO_ARGS, 'symmetric_pd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('det', lambda: random_hermitian_matrix(S),
+            NO_ARGS, 'hermitian', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('det', lambda: random_square_matrix_of_rank(S, S - 2),
             NO_ARGS, 'dim2_null', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('det', lambda: random_square_matrix_of_rank(S, 1), NO_ARGS, 'rank1', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
@@ -1159,6 +1163,8 @@ def method_tests():
             NO_ARGS, 'batched_symmetric_pd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('det', lambda: random_fullrank_matrix_distinct_singular_value(S, 3, 3), NO_ARGS,
          'batched_distinct_singular_values', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('det', lambda: random_hermitian_matrix(S, 3),
+            NO_ARGS, 'batched_hermitian', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         # For `logdet` and `slogdet`, the function at det=0 is not smooth.
         # We need to exclude tests with det=0 (e.g. dim2_null, rank1, rank2) and use
         # `make_nonzero_det` to make the random matrices have nonzero det. For
