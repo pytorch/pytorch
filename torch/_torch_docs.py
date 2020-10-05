@@ -5301,6 +5301,41 @@ Example::
             [ 8,  9]])
 """)
 
+add_docstr(torch.nan_to_num,
+           r"""
+nan_to_num(input, nan=0.0, posinf=None, neginf=None, *, out=None) -> Tensor
+
+Replaces :literal:`NaN`, positive infinity, and negative infinity values in :attr:`input`
+with the values specified by :attr:`nan`, :attr:`posinf`, and :attr:`neginf`, respectively.
+By default, :literal:`NaN`s are replaced with zero, positive infinity is replaced with the
+greatest finite value representable by :attr:`input`'s dtype, and negative infinity
+is replaced with the least finite value representable by :attr:`input`'s dtype.
+
+Args:
+    {input}
+    nan (Number, optional): the value to replace :literal:`NaN`\s with. Default is zero.
+    posinf (Number, optional): if a Number, the value to replace positive infinity values with.
+        If None, positive infinity values are replaced with the greatest finite value representable by :attr:`input`'s dtype.
+        Default is None.
+    neginf (Number, optional): if a Number, the value to replace negative infinity values with.
+        If None, negative infinity values are replaced with the lowest finite value representable by :attr:`input`'s dtype.
+        Default is None.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> x = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14])
+    >>> torch.nan_to_num(x)
+    tensor([ 0.0000e+00,  3.4028e+38, -3.4028e+38,  3.1400e+00])
+    >>> torch.nan_to_num(x, nan=2.0)
+    tensor([ 2.0000e+00,  3.4028e+38, -3.4028e+38,  3.1400e+00])
+    >>> torch.nan_to_num(x, nan=2.0, posinf=1.0)
+    tensor([ 2.0000e+00,  1.0000e+00, -3.4028e+38,  3.1400e+00])
+
+""".format(**common_args))
+
 add_docstr(torch.ne, r"""
 ne(input, other, *, out=None) -> Tensor
 
@@ -5671,7 +5706,7 @@ Args:
 
 add_docstr(torch.poisson,
            r"""
-poisson(input *, generator=None) -> Tensor
+poisson(input, generator=None) -> Tensor
 
 Returns a tensor of the same size as :attr:`input` with each element
 sampled from a Poisson distribution with rate parameter given by the corresponding

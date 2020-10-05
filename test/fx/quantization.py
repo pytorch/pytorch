@@ -219,6 +219,7 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
+        output_node : Optional[Node] = None
         for node in self.graph.nodes:
             if node.op == 'placeholder':
                 result = next(args_iter)
@@ -232,6 +233,8 @@ class Quantizer:
                 result = getattr(self_obj, node.target)(*args, **kwargs)
             elif node.op == 'call_module':
                 result = self.modules[node.target](*load_arg(node.args), **load_arg(node.kwargs))
+            elif node.op == 'output':
+                return load_arg(node.args[0])
 
             env[node.name] = result
             root_node, obj = self.matches.get(node.name, (None, None))
@@ -240,7 +243,7 @@ class Quantizer:
             if node.name in self.quants:
                 self.quants[node.name].observe(node, env)
 
-        return load_arg(self.graph.result)
+        raise RuntimeError('Graph had no output node!')
 
     def quantize(self):
         self.quantized_graph = Graph()
@@ -281,7 +284,6 @@ class Quantizer:
                 else:
                     quant_env[node.name] = r
 
-        self.quantized_graph.output(load_arg(self.graph.result, quantized=False))
         return GraphModule(self.root, self.quantized_graph)
 
     def _find_matches(self, patterns):
