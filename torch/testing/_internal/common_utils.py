@@ -59,6 +59,7 @@ if sys.platform == 'win32':
     FILE_SCHEMA = "file:///"
 
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
+IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 
 class ProfilingMode(Enum):
     LEGACY = 1
@@ -1174,7 +1175,7 @@ class TestCase(expecttest.TestCase):
         else:
             super().assertEqual(x, y, msg=msg)
 
-    def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override] 
+    def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
                        atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:  # type: ignore[override]
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)

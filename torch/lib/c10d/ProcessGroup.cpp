@@ -4,6 +4,56 @@
 
 namespace c10d {
 
+std::string opTypeToString(OpType opType) {
+  switch (opType) {
+    case BROADCAST:
+      return "BROADCAST";
+    case ALLREDUCE:
+      return "ALLREDUCE";
+    case ALLREDUCE_COALESCED:
+      return "ALLREDUCE_COALESCED";
+    case REDUCE:
+      return "REDUCE";
+    case ALLGATHER:
+      return "ALLGATHER";
+    case ALLGATHER_BASE:
+      return "ALLGATHER_BASE";
+    case ALLGATHER_COALESCED:
+      return "ALLGATHER_COALESCED";
+    case GATHER:
+      return "GATHER";
+    case SCATTER:
+      return "SCATTER";
+    case REDUCE_SCATTER:
+      return "REDUCE_SCATTER";
+    case ALLTOALL_BASE:
+      return "ALLTOALL_BASE";
+    case ALLTOALL:
+      return "ALLTOALL";
+    case SEND:
+      return "SEND";
+    case RECV:
+      return "RECV";
+    case RECVANYSOURCE:
+      return "RECVANYSOURCE";
+    case BARRIER:
+      return "BARRIER";
+    case UNKNOWN:
+      return "UNKNOWN";
+    default:
+      TORCH_INTERNAL_ASSERT("Unknown op type!");
+  }
+}
+
+ProcessGroup::Work::Work() : rank_(-1), opType_(OpType::UNKNOWN) {}
+
+ProcessGroup::Work::Work(int rank, OpType opType)
+    : rank_(rank), opType_(opType) {}
+
+OpType ProcessGroup::Work::retrieveOpType() {
+  return opType_;
+}
+
 ProcessGroup::Work::~Work() {}
 
 bool ProcessGroup::Work::isCompleted() {

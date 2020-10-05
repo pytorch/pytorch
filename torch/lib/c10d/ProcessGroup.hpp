@@ -32,46 +32,10 @@ enum OpType {
   RECV = 13,
   RECVANYSOURCE = 14,
   BARRIER = 15,
+  UNKNOWN = 100,
 };
 
-static std::string opTypeToString(OpType opType) {
-  switch (opType) {
-    case BROADCAST:
-      return "BROADCAST";
-    case ALLREDUCE:
-      return "ALLREDUCE";
-    case ALLREDUCE_COALESCED:
-      return "ALLREDUCE_COALESCED";
-    case REDUCE:
-      return "REDUCE";
-    case ALLGATHER:
-      return "ALLGATHER";
-    case ALLGATHER_BASE:
-      return "ALLGATHER_BASE";
-    case ALLGATHER_COALESCED:
-      return "ALLGATHER_COALESCED";
-    case GATHER:
-      return "GATHER";
-    case SCATTER:
-      return "SCATTER";
-    case REDUCE_SCATTER:
-      return "REDUCE_SCATTER";
-    case ALLTOALL_BASE:
-      return "ALLTOALL_BASE";
-    case ALLTOALL:
-      return "ALLTOALL";
-    case SEND:
-      return "SEND";
-    case RECV:
-      return "RECV";
-    case RECVANYSOURCE:
-      return "RECVANYSOURCE";
-    case BARRIER:
-      return "BARRIER";
-    default:
-      TORCH_INTERNAL_ASSERT("Unknown op type!");
-  }
-}
+std::string opTypeToString(OpType opType);
 
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
@@ -97,6 +61,10 @@ class ProcessGroup {
  public:
   class Work {
    public:
+    Work();
+
+    Work(int rank, OpType opType);
+
     virtual ~Work();
 
     // Checks if request has completed. Non-blocking operation.
@@ -151,6 +119,8 @@ class ProcessGroup {
     // work. Only NCCL backend is currently supported.
     virtual c10::intrusive_ptr<c10::ivalue::Future> getFuture();
 
+    OpType retrieveOpType();
+
    protected:
     // Completes the work object and optionally sets the exception in a
     // thread-safe manner. Notifies all waiting condition variables as well.
@@ -164,6 +134,12 @@ class ProcessGroup {
     std::condition_variable cv_;
     bool completed_ = false;
     std::exception_ptr exception_;
+
+    // Current rank of the node.
+    const int rank_;
+
+    // Operation type that this work object refers to.
+    OpType opType_;
   };
 
   explicit ProcessGroup(int rank, int size);

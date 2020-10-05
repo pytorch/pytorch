@@ -65,7 +65,7 @@ class ProcessGroupNCCL : public ProcessGroup {
                    public std::enable_shared_from_this<WorkNCCL> {
    public:
     // Constructor takes a list of CUDA devices
-    WorkNCCL(const std::vector<at::Device>& devices);
+    WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
     // destructs outputs_ tensors who are view tensors in autograd graph.
@@ -168,12 +168,6 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Store streams that run FutureNCCL then callbacks.
     std::vector<std::shared_ptr<at::cuda::CUDAStream>>
         futureNCCLCallbackStreams_;
-
-    // Current rank of the node.
-    int rank_;
-
-    // Operation type that this work object refers to.
-    OpType opType_;
 
     friend class ProcessGroupNCCL;
   };
@@ -474,7 +468,9 @@ class ProcessGroupNCCL : public ProcessGroup {
       const std::vector<std::shared_ptr<NCCLComm>>& ncclComms);
 
   virtual std::shared_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
-      std::vector<at::Device> devices);
+      std::vector<at::Device> devices,
+      int rank,
+      OpType opType);
 
  private:
   // Helper that encapsulates work shared across all collective communication

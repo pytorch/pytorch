@@ -147,6 +147,8 @@ class Partitioner:
         """Only one partition (one graph on one device)."""
         partition_0 = self.create_partition()
         for i, node in enumerate(self.graph_module.graph.nodes):
+            if node.op == 'output':
+                break
             self.node_to_partitions[node] = [partition_0.partition_id]
             partition_0.add_node(node)
         # Connect the partition to the root.
@@ -157,6 +159,8 @@ class Partitioner:
     def do_partition(self) -> None:
         """Mark the partition on each node in the fx_module."""
         for node in self.graph_module.graph.nodes:
+            if node.op == 'output':
+                break
             node.partition_ids = self.node_to_partitions[node]
         return
 

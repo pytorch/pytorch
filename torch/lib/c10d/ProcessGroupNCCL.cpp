@@ -242,8 +242,8 @@ std::ostream& operator<<(
                 << ", Timeout(ms)=" << workNCCL.opTimeout_.count() << ")";
 }
 
-ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
-    : devices_(devices), workStartTime_(std::chrono::steady_clock::now()) {
+ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType)
+    : Work(rank, opType), devices_(devices), workStartTime_(std::chrono::steady_clock::now()) {
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
@@ -386,7 +386,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
                     << "] Wrote aborted communicator id to store: " << storeKey;
         }
         LOG(INFO) << "[Rank " << rank_
-                  << "] Caught collective operation timeout for work: " << (*this);
+                  << "] Caught collective operation timeout for work: "
+                  << (*this);
         throw std::runtime_error("Operation timed out!");
       }
       // Check for errors and throw appropriate exception.
@@ -598,9 +599,10 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
         // Check for Timeouts in the WorkNCCL Operations, and abort all
         // communicators accordingly.
         if (work.timedOut()) {
-          LOG(INFO) << "[Rank " << rank_
-                    << "] Watchdog caught collective operation timeout for work: "
-                    << work;
+          LOG(INFO)
+              << "[Rank " << rank_
+              << "] Watchdog caught collective operation timeout for work: "
+              << work;
           std::exception_ptr exception_ptr = std::make_exception_ptr(
               std::runtime_error("NCCL Operation Timed Out"));
           work.setException(exception_ptr);
@@ -945,8 +947,10 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
 } // namespace
 
 std::shared_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
-    std::vector<at::Device> devices) {
-  return std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
+    std::vector<at::Device> devices,
+    int rank,
+    OpType opType) {
+  return std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices, rank, opType);
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
@@ -999,7 +1003,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
 
   // Work itself will create the CUDA events on all GPUs of tensors
-  auto work = initWork(devices);
+  auto work = initWork(devices, rank_, opType);
 
   // Store references to outputs and futureNCCLCallbackStream to be used by
   // WorkNCCL::getFuture.
@@ -1049,8 +1053,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   work->blockingWait_ = blockingWait_;
   work->opTimeout_ = opTimeout_;
   work->store_ = store_;
-  work->rank_ = rank_;
-  work->opType_ = opType;
 
   if (asyncErrorHandling_) {
     workEnqueue(work);
