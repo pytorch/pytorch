@@ -274,33 +274,6 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
-    int64_t k,
-    int64_t dim,
-    bool keepdim) {
-  auto result = [&]() {
-    NoNamesGuard guard;
-    return kthvalue_out_impl_cpu(values, indices, self, k, dim, keepdim);
-  }();
-  namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
-  namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
-  return result;
-}
-
-std::tuple<Tensor, Tensor> kthvalue(
-    const Tensor& self,
-    int64_t k,
-    int64_t dim,
-    bool keepdim) {
-  Tensor values = at::empty({0}, self.options());
-  Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  at::kthvalue_out(values, indices, self, k, dim, keepdim);
-  return std::make_tuple(values, indices);
-}
-
 Tensor& quantile_out(
     Tensor& out,
     const Tensor& self,
@@ -395,6 +368,52 @@ Tensor nanquantile(
       self, at::scalar_tensor(q, self.options()), std::move(_dim), keepdim);
 }
 
+std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t k,
+    int64_t dim,
+    bool keepdim) {
+  auto result = [&]() {
+    NoNamesGuard guard;
+    return kthvalue_out_impl_cpu(values, indices, self, k, dim, keepdim);
+  }();
+  namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
+  namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
+  return result;
+}
+
+std::tuple<Tensor&, Tensor&> kthvalue_out(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t k,
+    Dimname dim,
+    bool keepdim) {
+  return at::kthvalue_out(
+      values, indices, self, k, dimname_to_position(self, dim), keepdim);
+}
+
+std::tuple<Tensor, Tensor> kthvalue(
+    const Tensor& self,
+    int64_t k,
+    int64_t dim,
+    bool keepdim) {
+  Tensor values = at::empty({0}, self.options());
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  at::kthvalue_out(values, indices, self, k, dim, keepdim);
+  return std::make_tuple(values, indices);
+}
+
+std::tuple<Tensor, Tensor> kthvalue(
+    const Tensor& self,
+    int64_t k,
+    Dimname dim,
+    bool keepdim) {
+  return at::kthvalue(self, k, dimname_to_position(self, dim), keepdim);
+}
+
 std::tuple<Tensor&, Tensor&> topk_out_cpu(
     Tensor& values,
     Tensor& indices,
@@ -432,64 +451,6 @@ std::tuple<Tensor, Tensor> topk(
   return std::make_tuple(values, indices);
 }
 
-std::tuple<Tensor&, Tensor&> median_out(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
-    int64_t dim,
-    bool keepdim) {
-  // note: kthvalue counts from 1..n
-  int64_t k = self.dim() > 0 ? (self.size(dim) + 1) / 2 : 1;
-  at::kthvalue_out(values, indices, self, k, dim, keepdim);
-  return std::forward_as_tuple(values, indices);
-}
-
-std::tuple<Tensor, Tensor> median(
-    const Tensor& self,
-    int64_t dim,
-    bool keepdim) {
-  Tensor values = at::empty({0}, self.options());
-  Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  at::median_out(values, indices, self, dim, keepdim);
-  return std::make_tuple(values, indices);
-}
-
-std::tuple<Tensor&, Tensor&> median_out(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
-    Dimname dim,
-    bool keepdim) {
-  return at::median_out(
-      values, indices, self, dimname_to_position(self, dim), keepdim);
-}
-
-std::tuple<Tensor, Tensor> median(
-    const Tensor& self,
-    Dimname dim,
-    bool keepdim) {
-  return at::median(self, dimname_to_position(self, dim), keepdim);
-}
-
-std::tuple<Tensor&, Tensor&> kthvalue_out(
-    Tensor& values,
-    Tensor& indices,
-    const Tensor& self,
-    int64_t k,
-    Dimname dim,
-    bool keepdim) {
-  return at::kthvalue_out(
-      values, indices, self, k, dimname_to_position(self, dim), keepdim);
-}
-
-std::tuple<Tensor, Tensor> kthvalue(
-    const Tensor& self,
-    int64_t k,
-    Dimname dim,
-    bool keepdim) {
-  return at::kthvalue(self, k, dimname_to_position(self, dim), keepdim);
-}
-
 // this does not reduce to median with dim because we don't want to copy twice
 Tensor median_cpu(const Tensor& self) {
   NoNamesGuard guard;
@@ -515,6 +476,45 @@ Tensor median_cpu(const Tensor& self) {
     result.fill_(tmp_values[k]);
   });
   return result.view({});
+}
+
+std::tuple<Tensor&, Tensor&> median_out(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim) {
+  // note: kthvalue counts from 1..n
+  int64_t k = self.dim() > 0 ? (self.size(dim) + 1) / 2 : 1;
+  at::kthvalue_out(values, indices, self, k, dim, keepdim);
+  return std::forward_as_tuple(values, indices);
+}
+
+std::tuple<Tensor&, Tensor&> median_out(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    Dimname dim,
+    bool keepdim) {
+  return at::median_out(
+      values, indices, self, dimname_to_position(self, dim), keepdim);
+}
+
+std::tuple<Tensor, Tensor> median(
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim) {
+  Tensor values = at::empty({0}, self.options());
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  at::median_out(values, indices, self, dim, keepdim);
+  return std::make_tuple(values, indices);
+}
+
+std::tuple<Tensor, Tensor> median(
+    const Tensor& self,
+    Dimname dim,
+    bool keepdim) {
+  return at::median(self, dimname_to_position(self, dim), keepdim);
 }
 
 std::tuple<Tensor&, Tensor&> sort_out_cpu(

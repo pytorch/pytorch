@@ -1,10 +1,10 @@
 #pragma once
 
-#include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/dim_arg.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 #include <functional>
@@ -91,7 +91,7 @@ class Reducer {
   Reducer(ExprHandle init, ReduceInteraction& interaction)
       : init_(init.node()), interaction_(interaction) {}
 
-  Reducer(ExprHandle init, ReduceInteraction& interaction, Buffer& buf)
+  Reducer(ExprHandle init, ReduceInteraction& interaction, Placeholder& buf)
       : init_(init.node()), interaction_(interaction) {}
 
   template <typename RI>

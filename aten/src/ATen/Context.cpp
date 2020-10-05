@@ -64,6 +64,11 @@ bool Context::deterministic() const {
 }
 
 void Context::setDeterministic(bool b) {
+  if (b) {
+    TORCH_WARN_ONCE("torch.set_deterministic is in beta, and its design and "
+      " functionality may change in the future.");
+  }
+
   _deterministic = b;
 }
 

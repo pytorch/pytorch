@@ -640,6 +640,20 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
         self.run_test(ScriptModel(), (x1, x2, x3), atol=10e-5)
 
+    def test_conv_shape_inference(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.conv2 = torch.nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
+
+            def forward(self, input):
+                return self.conv2(input) + 2
+
+        x = torch.randn(20, 16, 50, 100)
+        self.run_test(Model(), x, atol=10e-5,
+                      input_names=['x'],
+                      dynamic_axes={'x': [0]})
+
     def test_conv_transpose(self):
         class TraceModel(torch.nn.Module):
             def __init__(self):
@@ -899,7 +913,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_div(self):
         class DivModule(torch.nn.Module):
             def forward(self, x, y):
-                return x / y
+                return x / y, torch.true_divide(x, y)
 
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
@@ -913,7 +927,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_div_promotion_trace(self):
         class DivModule(torch.nn.Module):
             def forward(self, x, y):
-                return x / y
+                return x / y, torch.true_divide(x, y)
 
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
@@ -931,14 +945,14 @@ class TestONNXRuntime(unittest.TestCase):
     # In scripting x, y do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
     @skipIfONNXShapeInference(False)
-    def test_true_div_script(self):
-        class TrueDivModule(torch.nn.Module):
+    def test_div_promotion_script(self):
+        class DivModule(torch.nn.Module):
             def forward(self, x, y):
                 # Add transpose to hide shape/type information
                 # Otherwise shape and type are still avaiable from input.
                 x = x.transpose(1, 2)
                 y = y.transpose(1, 2)
-                return torch.true_divide(x, y)
+                return x / y, torch.true_divide(x, y)
 
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
@@ -949,20 +963,20 @@ class TestONNXRuntime(unittest.TestCase):
         #    This can be handled by the default case, where both are cast to float.
         #    It works even if type of x, y are unknown.
         torch.set_default_dtype(torch.float)
-        self.run_test(torch.jit.script(TrueDivModule()), (x, y))
+        self.run_test(torch.jit.script(DivModule()), (x, y))
 
         # 2. x,y are int, and output is double.
         #    This can be handled by the default case, where both are cast to double.
         #    It works even if type of x, y are unknown.
         torch.set_default_dtype(torch.double)
-        self.run_test(torch.jit.script(TrueDivModule()), (x, y))
+        self.run_test(torch.jit.script(DivModule()), (x, y))
 
         # 3. x is int, y is double, and output is double.
         #    This can only be handled when both type of x and y are known.
         torch.set_default_dtype(prev_default)
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.double)
-        self.run_test(torch.jit.script(TrueDivModule()), (x, y))
+        self.run_test(torch.jit.script(DivModule()), (x, y))
 
     def test_slice_trace(self):
         class MyModule(torch.nn.Module):
@@ -2656,6 +2670,17 @@ class TestONNXRuntime(unittest.TestCase):
         shape = torch.randn(6, 4)
         self.run_test(ViewModel(), (x, shape))
 
+    def test_view_dynamic_zero_dim(self):
+        class ViewModel(torch.nn.Module):
+            def forward(self, input):
+                input = input.view(-1, 2)
+                return input.view(1, -1)
+
+        x = torch.ones(2)
+        another_x = torch.empty((0,))
+        self.run_test(ViewModel(), x, test_with_inputs=[another_x],
+                      input_names=['input_1'], dynamic_axes={'input_1': [0, ]})
+
     def test_view_as(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input, other):
@@ -2788,7 +2813,7 @@ class TestONNXRuntime(unittest.TestCase):
         class LenListModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, input):
-                return torch.ones(len(input.shape)) 
+                return torch.ones(len(input.shape))
 
         x = torch.randn(4, 5)
         self.run_test(LenListModel(), x)
@@ -3479,28 +3504,9 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([False, True, True])
         self.run_test(model, x)
 
-    @unittest.skip("Enable once jit trace Tensor.numel as constant is fixed.")
-    def test_embedding_bag_dynamic(self):
-        class EmbeddingModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.embeddingbag = torch.nn.EmbeddingBag(40, 12, mode='sum')
-
-            def forward(self, input):
-                return self.embeddingbag(input)
-
-        model = EmbeddingModel()
-        x = torch.randint(7, (10, 5))
-        y = torch.randint(10, (20, 5))
-        self.run_test(model, x, test_with_inputs=[y],
-                      input_names=['input'],
-                      output_names=['output'],
-                      dynamic_axes={'input': [0],
-                                    'output': [0]
-                                    })
-
-    @disableScriptTest()  # error in propagate as assign input shapes
+    @disableScriptTest()  # error in propagate as assign input shape
     @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedOpsetVersion([12])  # Due to ONNX Loop shape inference issue
     def test_embedding_bag(self):
         model = torch.nn.EmbeddingBag(10, 5, mode='sum', scale_grad_by_freq=True)
         input = torch.randint(10, (7,))
@@ -3516,27 +3522,29 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.randint(10, (7, 5))
         self.run_test(model, (input))
 
-    @disableScriptTest()  # error in propagate as assign input shapes
+    @disableScriptTest()  # scripting prim::Uninitialized, prim::dtype, prim::unchecked_cast
     @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedOpsetVersion([12])  # Due to ONNX Loop shape inference issue
     def test_embedding_bag_1d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, offset, weights):
-                return torch.nn.functional.embedding_bag(embedding_matrix, input, offsets=offset,
+                return torch.nn.functional.embedding_bag(input, embedding_matrix, offsets=offset,
                                                          mode='sum', per_sample_weights=weights)
 
         model = EmbeddingModel()
         x = torch.randint(7, (6,))
-        w = torch.randn(6,)
+        w = torch.randn(6, )
         offset = torch.tensor([0, 2, 5])
         embedding_matrix = torch.rand(10, 15)
         self.run_test(model, (embedding_matrix, x, offset, w))
 
-    @disableScriptTest()  # error in propagate as assign input shapes
+    @disableScriptTest()  # scripting prim::Uninitialized, prim::dtype, prim::unchecked_cast
     @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedOpsetVersion([12])  # Due to ONNX Loop shape inference issue
     def test_embedding_bag_2d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, weights):
-                return torch.nn.functional.embedding_bag(embedding_matrix, input,
+                return torch.nn.functional.embedding_bag(input, embedding_matrix,
                                                          mode='sum', per_sample_weights=weights)
 
         embedding_matrix = torch.rand(10, 15)
@@ -3544,6 +3552,46 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(7, (2, 3))
         w = torch.randn(2, 3)
         self.run_test(model, (embedding_matrix, x, w))
+
+    @disableScriptTest()  # scripting prim::Uninitialized, prim::dtype, prim::unchecked_cast
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @unittest.skip("Due to ONNX Loop shape inference issue.")
+    def test_embedding_bag_dynamic_input(self):
+        class EmbeddingModel1D(torch.nn.Module):
+            def forward(self, embedding_matrix, input, weights, offsets):
+                return torch.nn.functional.embedding_bag(input, embedding_matrix, offsets=offsets,
+                                                         mode='sum', per_sample_weights=weights)
+
+        model = EmbeddingModel1D()
+        x = torch.randint(7, (6,))
+        w = torch.randn(6, )
+        offsets = torch.tensor([0, 2, 5], dtype=torch.long)
+        embedding_matrix = torch.rand(10, 15)
+        x2 = torch.randint(7, (2,))
+        w2 = torch.randn(2, )
+        embedding_matrix2 = torch.rand(12, 25)
+        offsets2 = torch.tensor([0, ], dtype=torch.long)
+        self.run_test(model, (embedding_matrix, x, w, offsets),
+                      test_with_inputs=[(embedding_matrix2, x2, w2, offsets2)],
+                      input_names=['embedding_matrix', 'x', 'offsets', 'w'],
+                      dynamic_axes={'embedding_matrix': [0, 1], 'x': [0], 'offsets': [0], 'w': [0]})
+
+        class EmbeddingModel2D(torch.nn.Module):
+            def forward(self, embedding_matrix, input, weights):
+                return torch.nn.functional.embedding_bag(input, embedding_matrix,
+                                                         mode='sum', per_sample_weights=weights)
+
+        model = EmbeddingModel2D()
+        x = torch.randint(7, (2, 3))
+        w = torch.randn(2, 3)
+        embedding_matrix = torch.rand(10, 15)
+        x2 = torch.randint(7, (3, 5))
+        w2 = torch.randn(3, 5)
+        embedding_matrix2 = torch.rand(12, 25)
+        self.run_test(model, (embedding_matrix, x, w),
+                      test_with_inputs=[(embedding_matrix2, x2, w2)],
+                      input_names=['embedding_matrix', 'x', 'w'],
+                      dynamic_axes={'embedding_matrix': [0, 1], 'x': [0, 1], 'w': [0, 1]})
 
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_meshgrid(self):

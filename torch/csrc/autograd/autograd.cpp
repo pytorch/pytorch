@@ -75,10 +75,6 @@ variable_list run_backward(
   for (size_t i = 0; i < num_tensors; i++) {
     const Variable& output = outputs[i];
     auto gradient_edge = impl::gradient_edge(output);
-    if(output.is_complex()) {
-      TORCH_WARN_ONCE("Complex backward is not fully supported yet and could lead to wrong ",
-                      "gradients for functions we have not fixed yet");
-    }
     TORCH_CHECK(
         gradient_edge.function,
         "element ", i, " of tensors does not require grad and does not have a grad_fn");

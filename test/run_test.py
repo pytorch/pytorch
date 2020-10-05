@@ -110,7 +110,6 @@ ROCM_BLOCKLIST = [
     'test_determination',
     'test_multiprocessing',
     'test_jit_legacy',
-    'test_tensorexpr',
     'test_type_hints',
     'test_openmp',
 ]
@@ -451,6 +450,14 @@ def parse_args():
         nargs='*',
         help='additional arguments passed through to unittest, e.g., '
              'python run_test.py -i sparse -- TestSparse.test_factory_size_check')
+    parser.add_argument(
+        '--shard',
+        nargs=2,
+        type=int,
+        help='runs a shard of the tests (taking into account other selections), e.g., '
+        '--shard 2 3 will break up the selected tests into 3 shards and run the tests '
+        'in the 2nd shard (the number of shards will be whichever argument is greater)',
+    )
     return parser.parse_args()
 
 
@@ -517,6 +524,14 @@ def get_selected_tests(options):
     if options.last:
         last_index = find_test_index(options.last, selected_tests, find_last_index=True)
         selected_tests = selected_tests[:last_index + 1]
+
+    if options.shard:
+        assert len(options.shard) == 2, "Unexpected shard format"
+        assert min(options.shard) > 0, "Shards must be positive numbers"
+        which_shard, num_shards = options.shard
+        assert which_shard <= num_shards, "Selected shard must be less or equal that total number of shards"
+        assert num_shards <= len(selected_tests), f"Number of shards must be less than {len(selected_tests)}"
+        selected_tests = selected_tests[which_shard - 1 :: num_shards]
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 

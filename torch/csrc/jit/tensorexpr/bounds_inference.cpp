@@ -31,8 +31,7 @@ void BoundsInference::visit(const Load* v) {
 }
 
 void BoundsInference::visit(const FunctionCall* v) {
-  accesses_[v->tensor()->func_var()].push_back(
-      {kLoad, v->params(), v->params()});
+  accesses_[v->tensor()->buf()].push_back({kLoad, v->params(), v->params()});
 }
 
 void BoundsInference::visit(const Store* v) {
