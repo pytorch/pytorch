@@ -25,6 +25,9 @@ from torch.quantization import (
     float_qparams_dynamic_qconfig,
     register_observed_custom_module_mapping,
     register_quantized_custom_module_mapping,
+    PerChannelMinMaxObserver,
+    QConfigDynamic,
+    default_dynamic_quant_observer
 )
 
 from torch.testing._internal.common_quantization import (
@@ -538,42 +541,49 @@ class TestPostTrainingStatic(QuantizationTestCase):
         r""" Test the post-training quantization flow, serialization and scripting
         of embedding_bag modules
         """
-        model = EmbeddingBagModule().eval()
         indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
         offsets = torch.tensor([0, 19, 20, 28, 28, 32])
         weights = torch.randn(10, 12, dtype=torch.float32)
 
-        model.qconfig = float_qparams_dynamic_qconfig
-        prepare(model, inplace=True)
-        quantized_model = convert(model)
+        for dtype in [torch.quint8, torch.quint4x2]:
+            model = EmbeddingBagModule().eval()
+            float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=dtype,
+                                                                        qscheme=torch.per_channel_affine_float_qparams,
+                                                                        ch_axis=0)
+            float_qparams_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+                                                   weight=float_qparams_observer)
+            model.qconfig = float_qparams_qconfig
 
-        per_sample_weights = torch.from_numpy(np.random.uniform(
-            low=0.01, high=0.5, size=[len(indices)]).astype(np.float32))
+            prepare(model, inplace=True)
+            quantized_model = convert(model)
 
-        # Test to make sure module is quantized correctly.
-        self.assertTrue('QuantizedEmbeddingBag' in str(quantized_model))
-        self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.EmbeddingBag, torch.quint8)
-        self.checkScriptable(quantized_model, [[indices, offsets, per_sample_weights]], check_save_load=True)
+            per_sample_weights = torch.from_numpy(np.random.uniform(
+                low=0.01, high=0.5, size=[len(indices)]).astype(np.float32))
 
-        class EmbeddingBagWithLinear(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
-                                                 include_last_offset=True, scale_grad_by_freq=False, mode='sum')
-                self.fc = torch.nn.Linear(5, 5)
+            # Test to make sure module is quantized correctly.
+            self.assertTrue('QuantizedEmbeddingBag' in str(quantized_model))
+            self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.EmbeddingBag, torch.quint8)
+            self.checkScriptable(quantized_model, [[indices, offsets, per_sample_weights]], check_save_load=True)
 
-            def forward(self, indices, offsets, per_sample_weights, linear_in):
-                return self.emb(indices, offsets, per_sample_weights), self.fc(linear_in)
+            class EmbeddingBagWithLinear(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
+                                                     include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+                    self.fc = torch.nn.Linear(5, 5)
 
-        # Test quantization of embedding_bag layer only
-        model = EmbeddingBagWithLinear().eval()
-        model.emb.qconfig = float_qparams_dynamic_qconfig
-        prepare(model, inplace=True)
-        quantized_model = convert(model)
+                def forward(self, indices, offsets, per_sample_weights, linear_in):
+                    return self.emb(indices, offsets, per_sample_weights), self.fc(linear_in)
 
-        self.assertTrue('QuantizedEmbeddingBag' in str(quantized_model))
-        self.checkLinear(model.fc)
-        self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.EmbeddingBag, torch.quint8)
+            # Test quantization of embedding_bag layer only
+            model2 = EmbeddingBagWithLinear().eval()
+            model2.emb.qconfig = float_qparams_qconfig
+            prepare(model2, inplace=True)
+            quantized_model = convert(model2)
+
+            self.assertTrue('QuantizedEmbeddingBag' in str(quantized_model))
+            self.checkLinear(model2.fc)
+            self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.EmbeddingBag, torch.quint8)
 
     @skipIfNoFBGEMM
     def test_custom_module_class(self):
