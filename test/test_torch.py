@@ -18735,6 +18735,87 @@ else:
                           [0, 0]], device=device, dtype=dtype)
         verify_against_numpy(t)
 
+    def _test_special_splits(self, begin_dim, end_dim, dim_to_test, fn, test_fn, device, dtype):
+
+        # Function that creates a random list of numbers of a given size with elements that sum to a target value
+        def get_valid_list(target, size, min_value=0, max_value=6):
+            valid_list = []
+            for i in range(size - 1, -1, -1):
+                curr_min = max(min_value, target - i * max_value)
+                curr_max = min(max_value, target - i * min_value)
+                valid_list.append(random.randint(curr_min, curr_max))
+                target -= valid_list[-1]
+            return valid_list
+
+        # Test 0-D
+        t = torch.tensor(random.uniform(0, 10), device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "expects at least a 1-dimensional tensor"):
+            fn(t, random.randint(1, 5))
+
+        for ndims in range(begin_dim, end_dim):
+            shape = self._rand_shape(ndims, min_size=1, max_size=5)
+            t = self._generate_input(shape, dtype, device, with_extremal=False)
+
+            # Test whether there are enough dimensions for dsplit
+            if fn is torch.dsplit and ndims <= dim_to_test:
+                split_size = random.randint(1, 5)
+                with self.assertRaises(IndexError):
+                    fn(t, split_size)
+                with self.assertRaises(IndexError):
+                    test_fn(t, split_size, dim_to_test)
+                continue
+
+            # Test valid integer split_size
+            split_size = random.randint(1, shape[dim_to_test])
+            actual = fn(t, split_size)
+            expected = test_fn(t, split_size, dim_to_test)
+            self.assertEqual(actual, expected)
+
+            split_size = random.randint(shape[dim_to_test] + 1, 10)
+            actual = fn(t, split_size)
+            expected = test_fn(t, split_size, dim_to_test)
+            self.assertEqual(actual, expected)
+
+            # Test invalid integer split_size
+            with self.assertRaises(RuntimeError):
+                actual = fn(t, 0)
+            with self.assertRaises(RuntimeError):
+                expected = test_fn(t, 0, dim_to_test)
+
+            # Test valid list split_size
+            for size in range(1, shape[dim_to_test] + 1):
+                split_sizes = get_valid_list(shape[dim_to_test], size)
+                actual = fn(t, split_sizes)
+                expected = test_fn(t, split_sizes, dim_to_test)
+                self.assertEqual(actual, expected)
+
+            # Test invalid list split_size
+            for size in range(1, shape[dim_to_test] + 1):
+                split_sizes = get_valid_list(random.randint(1, shape[dim_to_test] - 1), size)
+                with self.assertRaisesRegex(RuntimeError, 'split_with_sizes expects split_sizes to sum exactly to'):
+                    actual = fn(t, split_sizes)
+                with self.assertRaisesRegex(RuntimeError, 'split_with_sizes expects split_sizes to sum exactly to'):
+                    expected = test_fn(t, split_sizes, dim_to_test)
+
+                split_sizes = get_valid_list(random.randint(shape[dim_to_test] + 1, 6), size)
+                with self.assertRaisesRegex(RuntimeError, 'exceeds dimension size'):
+                    actual = fn(t, split_sizes)
+                with self.assertRaisesRegex(RuntimeError, 'exceeds dimension size'):
+                    expected = test_fn(t, split_sizes, dim_to_test)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_hsplit(self, device, dtype):
+        self._test_special_splits(1, 2, 0, torch.hsplit, torch.split, device, dtype)
+        self._test_special_splits(2, 6, 1, torch.hsplit, torch.split, device, dtype)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_vsplit(self, device, dtype):
+        self._test_special_splits(1, 6, 0, torch.vsplit, torch.split, device, dtype)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_dsplit(self, device, dtype):
+        self._test_special_splits(3, 6, 2, torch.dsplit, torch.split, device, dtype)
+
     def _test_special_stacks(self, dim, at_least_dim, torch_fn, np_fn, device, dtype):
         # Test error for non-tuple argument
         with self.assertRaisesRegex(TypeError, "must be tuple of Tensors, not Tensor"):
