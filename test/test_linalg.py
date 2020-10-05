@@ -206,6 +206,30 @@ class TestLinalg(TestCase):
         with self.assertRaises(RuntimeError):
             torch.linalg.eigh(t)
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @precisionOverride({torch.float32: 1e-3})
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_eigvalsh(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix
+
+        def run_test(shape, batch):
+            matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
+            expected_w = np.linalg.eigvalsh(matrix.cpu().numpy())
+            actual_w = torch.linalg.eigvalsh(matrix)
+            self.assertEqual(actual_w, expected_w)
+
+        shapes = (0, 3, 5)
+        batches = ((), (3, ), (2, 2))
+        for shape, batch in itertools.product(shapes, batches):
+            run_test(shape, batch)
+
+        # eigvalsh requires a square matrix
+        t = torch.randn(2, 3, device=device, dtype=dtype)
+        with self.assertRaises(RuntimeError):
+            torch.linalg.eigvalsh(t)
+
     # This test confirms that torch.linalg.norm's dtype argument works
     # as expected, according to the function's documentation
     @skipCUDAIfNoMagma
