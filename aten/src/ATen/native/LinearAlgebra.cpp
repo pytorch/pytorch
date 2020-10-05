@@ -1599,6 +1599,27 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, opt
   return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
 }
 
+// Numerical or None norms
+Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
+  optional<Scalar> ord = opt_ord.has_value() ? opt_ord : 2;
+  IntArrayRef dim{-2, -1};
+  Tensor self_inverse = at::inverse(self);
+  Tensor norm_self = at::linalg_norm(self, ord, dim);
+  Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
+  Tensor result = norm_self * norm_inverse;
+  return result;
+}
+
+// Frobenius norm
+Tensor linalg_cond(const Tensor& self, std::string ord) {
+  IntArrayRef dim{-2, -1};
+  Tensor self_inverse = at::inverse(self);
+  Tensor norm_self = at::linalg_norm(self, ord, dim);
+  Tensor norm_inverse = at::linalg_norm(self_inverse, ord, dim);
+  Tensor result = norm_self * norm_inverse;
+  return result;
+}
+
 static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {
   if (i == j)
     return matrices[i];

@@ -8263,6 +8263,14 @@
   python_module: linalg
   variants: function
 
+- func: linalg_cond(Tensor self, Scalar? ord=None) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_cond.ord_str(Tensor self, str ord) -> Tensor
+  python_module: linalg
+  variants: function
+
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
 - func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor

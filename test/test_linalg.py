@@ -313,6 +313,36 @@ class TestLinalg(TestCase):
                 for ord in ord_settings:
                     run_test_case(input, ord, dim, keepdim)
 
+    @precisionOverride({torch.float32: 1e-4})
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.float32, torch.float64)
+    def test_cond_matrix(self, device, dtype):
+        def run_test_case(input, ord):
+            result = torch.linalg.cond(input, ord)
+            input_numpy = input.cpu().numpy()
+            result_numpy = np.linalg.cond(input_numpy, ord)
+
+            self.assertEqual(result, result_numpy, rtol=1e-3, atol=self.precision)
+
+        ord_matrix = [1, -1, 2, -2, inf, -inf, 'fro', None]
+        S = 10
+        test_cases = [
+            # input size, p settings, dim
+            ((S, S), ord_matrix),
+            ((S, S), ord_matrix),
+            ((S, S), ord_matrix),
+            ((S, S, S, S), ord_matrix),
+            ((S, S, S, S), ord_matrix),
+            ((S, S, S, S), ord_matrix),
+            ((S, S, S, S), ord_matrix),
+        ]
+        for input_size, ord_settings in test_cases:
+            input = torch.randn(*input_size, dtype=dtype, device=device)
+            for ord in ord_settings:
+                run_test_case(input, ord)
+
     # Test autograd and jit functionality for linalg functions.
     # TODO: Once support for linalg functions is added to method_tests in common_methods_invocations.py,
     #       the `test_cases` entries below should be moved there. These entries are in a similar format,

@@ -140,3 +140,38 @@ Using the :attr:`dim` argument to compute matrix norms::
     >>> LA.norm(m[0, :, :]), LA.norm(m[1, :, :])
     (tensor(3.7417), tensor(11.2250))
 """)
+
+cond = _add_docstr(_linalg.linalg_cond, r"""
+linalg.norm(input, p=None) -> Tensor
+
+Returns the condition number of a matrix.
+
+.. note:: The condition number of :attr:`input` is defined as the norm of
+    :attr:`input` times the norm of the inverse of :attr:`input`.
+
+Args:
+    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
+                    batch dimensions.
+
+    p (int, float, inf, -inf, 'fro', optional): The order of norm.
+        inf refers to :attr:`float('inf')`, numpy's :attr:`inf` object, or any equivalent object.
+        The following norms can be used:
+
+        =====  ============================
+        ord    norm for matrices
+        =====  ============================
+        None   2-norm, computed directly using the SVD
+        'fro'  Frobenius norm
+        inf    max(sum(abs(x), dim=1))
+        -inf   min(sum(abs(x), dim=1))
+        1      max(sum(abs(x), dim=0))
+        -1     min(sum(abs(x), dim=0))
+        2      2-norm (largest sing. value)
+        -2     smallest singular value
+        =====  ============================
+
+        Default: ``None``
+
+Returns:
+    (Tensor): the condition number of the matrix.
+""")
