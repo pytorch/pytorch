@@ -113,7 +113,7 @@ PyObject* faulty_agent_init(PyObject* /* unused */) {
 
 static PyMethodDef methods[] = { // NOLINT
     {"_faulty_agent_init",
-     (PyCFunction)faulty_agent_init,
+     faulty_agent_init,
      METH_NOARGS,
      nullptr},
     {nullptr, nullptr, 0, nullptr}};
