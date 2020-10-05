@@ -6,7 +6,11 @@ namespace jit {
 
 void initStaticRuntimeBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
-  py::class_<StaticRuntime>(m, "StaticRuntime").def("run", &StaticRuntime::run);
+  py::class_<StaticRuntime>(m, "StaticRuntime")
+      .def(
+          "run",
+          py::overload_cast<const std::vector<at::Tensor>&>(
+              &StaticRuntime::run, py::const_));
   m.def(
        "_jit_to_static_runtime",
        [](const std::shared_ptr<torch::jit::Graph>& g) {

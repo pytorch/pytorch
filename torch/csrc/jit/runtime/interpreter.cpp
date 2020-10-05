@@ -428,6 +428,16 @@ struct TLSCurrentInterpreterGuard {
   InterpreterStateImpl* prev_state_;
 };
 
+template <class Ttarget, class Tsource>
+Ttarget safe_narrow_cast(Tsource v) {
+  Ttarget res = static_cast<Ttarget>(v);
+  // Casting it back to check whether it overflew.
+  if (static_cast<Tsource>(res) != v) {
+    throw std::runtime_error("safe_narrow_cast<>() failed due to overflow");
+  }
+  return res;
+}
+
 struct CodeImpl {
   friend struct InterpreterState;
   std::vector<Instruction> instructions_;
@@ -535,7 +545,10 @@ struct CodeImpl {
   }
 
   void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
-    instructions_.emplace_back(op, X, N);
+    instructions_.emplace_back(
+        op,
+        safe_narrow_cast<int32_t, int64_t>(X),
+        safe_narrow_cast<int16_t, int64_t>(N));
     instructions_source_.emplace_back(current_node_);
 
     // check that we didn't accidentally emit nodes out of topological order
@@ -873,7 +886,11 @@ struct CodeImpl {
 
   void emitWarn(Node* node) {
     emitLoadInputs(node->inputs());
-    insertInstruction(WARN);
+    int32_t idx = -1;
+    if (node->hasAttribute(attr::warn_id)) {
+      idx = static_cast<int32_t>(node->i(attr::warn_id));
+    }
+    insertInstruction(WARN, idx);
   }
 
   void emitEnter(Node* node) {
@@ -1017,6 +1034,22 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
  private:
+  struct WarnedNodes {
+   public:
+    // Inserts idx into warned_nodes_, returns a boolean indicates whether
+    // insertion actually happened (idx wasn't originally in the set).
+    bool insert(int32_t idx) {
+      std::unique_lock<std::mutex> lock(mutex_);
+      return warned_nodes_.insert(idx).second;
+    }
+
+   private:
+    std::mutex mutex_;
+    std::unordered_set<int32_t> warned_nodes_;
+  };
+
+  WarnedNodes warned_nodes_;
+
   // if we need to suspend, where do we reset the stack?
   // answer: to where it was when we were called, not
   // including any inputs to this function
@@ -1487,21 +1520,35 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++frame.pc;
           } break;
           case WARN: {
-            Node* node = frame.function->instructions_source_.at(frame.pc);
+            // Keeps track of which WARN instruction has been executed before,
+            // we only want to execute each WARN once to match default Python
+            // warning behavior.
+            bool need_warn = true;
+            if (inst.X != -1) {
+              need_warn = warned_nodes_.insert(inst.X);
+            }
+
+            Node* node =
+                frames.back().function->instructions_source_.at(frame.pc);
             auto range = node->sourceRange().source();
             if (range->filename()) {
-              auto line = range->starting_line_no() +
-                  range->lineno_for_offset(node->sourceRange().start());
               drop(stack, 1);
-              c10::SourceLocation location{
-                  "", range->filename()->c_str(), uint32_t(line)};
-              // Sends the warning to the warning handler with the
-              // "verbatim" flag. This flag ensures the warning handler
-              // will print the exception as configured.
-              c10::Warning::warn(
-                  location, pop(stack).toStringRef(), /*verbatim=*/true);
+              const auto msg = pop(stack).toStringRef();
+              if (need_warn) {
+                auto line = range->starting_line_no() +
+                    range->lineno_for_offset(node->sourceRange().start());
+                c10::SourceLocation location{
+                    "", range->filename()->c_str(), uint32_t(line)};
+                // Sends the warning to the warning handler with the
+                // "verbatim" flag. This flag ensures the warning handler
+                // will print the exception as configured.
+                c10::Warning::warn(location, msg, /*verbatim=*/true);
+              }
             } else {
-              TORCH_WARN(pop(stack).toStringRef());
+              const auto msg = pop(stack).toStringRef();
+              if (need_warn) {
+                TORCH_WARN(msg);
+              }
             }
             ++frame.pc;
           } break;
