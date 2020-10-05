@@ -22,7 +22,7 @@ class Partition:
             f" partitions depenent on: {self.partitions_dependent_on},\n" \
             f" parition dependents: {self.partition_dependents}"
 
-# Creates subgraphs out of main graph 
+# Creates subgraphs out of main graph
 def split_module(
     m: GraphModule,
     root_m: torch.nn.Module,
@@ -55,6 +55,9 @@ def split_module(
         # rather they're added to the graphs where they are used down below
         if node.op in ["placeholder", "get_attr"]:
             continue
+        if node.op == 'output':
+            torch.fx.graph.map_arg(node.args[0], lambda n: record_cross_partition_use(n, None))
+            continue
         partition_name = str(split_callback(node))
 
         # add node to partitions
@@ -67,8 +70,6 @@ def split_module(
 
         torch.fx.graph.map_arg(node.args, lambda def_node: record_cross_partition_use(def_node, node))
         torch.fx.graph.map_arg(node.kwargs, lambda def_node: record_cross_partition_use(def_node, node))
-
-    torch.fx.graph.map_arg(m.graph.result, lambda n: record_cross_partition_use(n, None))
 
     # find partitions with no dependencies
     root_partitions : List[str] = []
@@ -168,7 +169,8 @@ def split_module(
         else:
             base_mod_env[list(partition.outputs)[0]] = output_val
 
-    # Set output value for base graph
-    base_mod_graph.output(torch.fx.graph.map_arg(m.graph.result, lambda n : base_mod_env[n.name]))
+    for node in m.graph.nodes:
+        if node.op == 'output':
+            base_mod_graph.output(torch.fx.graph.map_arg(node.args[0], lambda n : base_mod_env[n.name]))
 
     return torch.fx.graph_module.GraphModule(base_mod_attrs, base_mod_graph)
