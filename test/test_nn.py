@@ -4007,6 +4007,15 @@ class TestNN(NNTestCase):
             # but it should work with the same type
             nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
+    def test_Conv2d_1x1(self):
+        in_channels = 2
+        out_channels = 2
+        mod = torch.nn.Conv2d(2, 2, 1, bias=False).to(dtype=torch.double)
+        input = torch.randn(1, in_channels, 5, 5, requires_grad=True, dtype=torch.double)
+        for enabled in (False, True):
+            with torch.backends.mkldnn.flags(enabled=enabled):
+                gradcheck(F.conv2d, (input, mod.weight))
+
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_cudnn_non_contiguous(self):
@@ -7106,6 +7115,10 @@ class TestNN(NNTestCase):
             self.assertEqual(
                 torch.nn.L1Loss()(input, torch.zeros_like(input)),
                 input.abs().mean())
+
+    def test_smoothl1loss_negative_beta_not_supported(self):
+        with self.assertRaises(RuntimeError):
+            F.smooth_l1_loss(torch.randn(2, 2), torch.randn(2, 2), beta=-1.0)
 
     def test_cosine_similarity(self):
         input1 = torch.randn(4, 4, requires_grad=True)
