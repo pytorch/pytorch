@@ -32,6 +32,7 @@ from jit.test_with import TestWith  # noqa: F401
 from jit.test_enum import TestEnum  # noqa: F401
 from jit.test_profiler import TestProfiler  # noqa: F401
 from jit.test_slice import TestSlice  # noqa: F401
+from jit.test_warn import TestWarn  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -7204,6 +7205,20 @@ a")
         scripted_f = torch.jit.script(f)
         x = torch.rand(3, 4)
         self.assertEqual(scripted_f(x), f(x))
+
+    def test_multiline_string_dedents(self):
+        def foo() -> None:
+            multiline_string_dedent_1 = """
+This is a string dedent """
+            multiline_string_dedent_2 = """ This is a
+  string dedent """
+            multiline_string_dedent_3 = """
+            This is a string
+dedent """
+            multiline_string_dedent_4 = """ This is a string dedent """
+
+        scripted_foo = torch.jit.script(foo)
+        self.assertEqual(scripted_foo(), foo())
 
     # adapted from test in test_torch
     def test_tensor_to(self):

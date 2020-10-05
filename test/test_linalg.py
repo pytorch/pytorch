@@ -477,9 +477,6 @@ class TestLinalg(TestCase):
             unsupported_matrix_ords = [
                 (None, r'norm with p=2 not supported for complex tensors'),
                 ('fro', r'frobenius norm not supported for complex tensors'),
-                (2, r'"svd_cuda" not implemented for \'Complex'),
-                (-2, r'"svd_cuda" not implemented for \'Complex'),
-                ('nuc', r'"svd_cuda" not implemented for \'Complex'),
             ]
 
         # Test supported ords
