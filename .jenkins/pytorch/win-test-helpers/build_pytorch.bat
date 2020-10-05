@@ -95,7 +95,7 @@ if "%USE_CUDA%"=="1" (
   copy %TMP_DIR_WIN%\bin\sccache.exe %TMP_DIR_WIN%\bin\nvcc.exe
 
   :: randomtemp is used to resolve the intermittent build error related to CUDA.
-  :: code: https://github.com/peterjc123/randomtemp
+  :: code: https://github.com/peterjc123/randomtemp-rust
   :: issue: https://github.com/pytorch/pytorch/issues/25393
   ::
   :: Previously, CMake uses CUDA_NVCC_EXECUTABLE for finding nvcc and then
