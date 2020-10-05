@@ -131,8 +131,8 @@ class _BatchNorm(_NormBase):
         passed when the update should occur (i.e. in training mode when they are tracked), or when buffer stats are
         used for normalization (i.e. in eval mode when buffers are not None).
         """
-        assert isinstance(self.running_mean, torch.Tensor)
-        assert isinstance(self.running_var, torch.Tensor)
+        assert self.running_mean is None or isinstance(self.running_mean, torch.Tensor)
+        assert self.running_var is None or isinstance(self.running_var, torch.Tensor)
         return F.batch_norm(
             input,
             # If buffers are not to be tracked, ensure that they won't be updated
