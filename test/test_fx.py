@@ -184,9 +184,9 @@ class TestFX(JitTestCase):
 
         mrm = MyReluMod()
         sym = NoLeafModulesTracer().trace(mrm)
-        for node in sym.graph.nodes:
+        for node in sym.nodes:
             self.assertNotEqual(node.op, 'call_module')
-        sym.graph.lint(sym)
+        sym.lint(sym)
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
@@ -195,8 +195,9 @@ class TestFX(JitTestCase):
         m = M()
         g = symbolic_trace(m).graph
         new_g = torch.fx.Graph()
-        new_g.graph_copy(g)
-        t = Proxy(new_g.nodes[-1])
+        val_map : Dict[Node, Node] = {}
+        output_val = new_g.graph_copy(g, val_map)
+        t = Proxy(output_val)
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
         new_g.output((t + t).node)
         gm = GraphModule(m, new_g)
@@ -210,8 +211,9 @@ class TestFX(JitTestCase):
         m = M()
         g = symbolic_trace(m).graph
         new_g = torch.fx.Graph()
-        new_g.graph_copy(g)
-        t = Proxy(new_g.nodes[-1])
+        val_map : Dict[Node, Node] = {}
+        output_val = new_g.graph_copy(g, val_map)
+        t = Proxy(output_val)
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
         new_g.output((t + t).node)
         gm = GraphModule(m, new_g)
@@ -228,7 +230,8 @@ class TestFX(JitTestCase):
         d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
         graph.output(d)
         graph2 = torch.fx.Graph()
-        graph2.graph_copy(graph)
+        val_map : Dict[Node, Node] = {}
+        graph2.graph_copy(graph, val_map)
         seen_names : Set[str] = set()
         for node in graph2.nodes:
             assert node.name not in seen_names
@@ -326,6 +329,7 @@ class TestFX(JitTestCase):
                 operator.mul : "mul"
             }
 
+            output_node : Optional[Node] = None
             # For each instruction, create a triple
             # (instruction_name : str, inputs : List[str], output : str)
             # to feed into the C++ interpreter
@@ -352,9 +356,12 @@ class TestFX(JitTestCase):
                         else:
                             arg_names.append(arg.name)
                     instructions.append((target_to_name[target], arg_names, out_name))
-
+                elif n.op == 'output':
+                    if output_node is not None:
+                        raise RuntimeError('Multiple output nodes!')
+                    output_node = n
                 else:
-                    raise RuntimeError('Unsupported opcode' + n.op)
+                    raise RuntimeError('Unsupported opcode ' + n.op)
 
             interpreter = torch.classes._TorchScriptTesting._ElementwiseInterpreter()
             # Load constants
@@ -365,7 +372,8 @@ class TestFX(JitTestCase):
             # Load instructions
             interpreter.set_instructions(instructions)
             # Specify name for single output
-            interpreter.set_output_name(mod.graph.result.name)
+            assert isinstance(output_node.args[0], torch.fx.Node)
+            interpreter.set_output_name(output_node.args[0].name)
 
             # ===== Stage 3: Create a wrapper GraphModule around the interpreter =====
             class WrapperModule(torch.nn.Module):
@@ -450,7 +458,7 @@ class TestFX(JitTestCase):
                 return a + b
 
         m = M()
-        g = TaggingTracer().trace(m).graph
+        g = TaggingTracer().trace(m)
         g.lint(m)
         for n in g.nodes:
             self.assertTrue(hasattr(n, 'tag'))
@@ -532,9 +540,10 @@ class TestFX(JitTestCase):
 
         def transform(traced):
             new_graph = torch.fx.Graph()
-            new_graph.graph_copy(traced.graph)
+            val_map : Dict[Node, Node] = {}
+            output_value = new_graph.graph_copy(traced.graph, val_map)
             relu_out = new_graph.create_node(
-                op='call_method', target='neg', args=(new_graph.nodes[-1],), kwargs={})
+                op='call_method', target='neg', args=(output_value,), kwargs={})
             new_graph.output(relu_out)
             return GraphModule(traced, new_graph)
         transformed = transform(traced)
@@ -723,7 +732,8 @@ class TestFX(JitTestCase):
             0: [1],
             1: [3],
             2: [3],
-            3: []
+            3: [4],
+            4: [],
         }
         for i, node in enumerate(graph.nodes):
             user_indexes = GraphManipulation.get_all_users_of(gm, i)
@@ -762,16 +772,20 @@ class TestFX(JitTestCase):
         tc = TestCase()
         tc_traced = symbolic_trace(tc)
         ref_out = tc_traced(torch.rand(3, 4))
+        shape_prop.ShapeProp(tc_traced).propagate(torch.rand(3, 4))
 
         # Make sure we're testing all opcodes
         opcodes = set()
+        output_shape : Optional[torch.Shape] = None
         for node in tc_traced.graph.nodes:
             opcodes.add(node.op)
-        self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method', 'call_module']))
+            if node.op == 'output':
+                output_shape = node.args[0].shape
+        self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method',
+                                       'call_module', 'output']))
 
         # Test shape propogation and make sure results match actual
-        shape_prop.ShapeProp(tc_traced).propagate(torch.rand(3, 4))
-        self.assertEqual(tc_traced.graph.result.shape, ref_out.shape)
+        self.assertEqual(output_shape, ref_out.shape)
 
     def test_find_single_partition(self):
         class testModule(torch.nn.Module):
@@ -783,7 +797,7 @@ class TestFX(JitTestCase):
         devices = [{"name": "dev_0", "available_mem": float('inf')}]
         dag = partitioner.partition_graph(traced, devices)
         for node in traced.graph.nodes:
-            assert node.partition_ids == [1]
+            assert node.op == 'output' or node.partition_ids == [1]
         nodes = traced.graph.nodes
         res_dag = DAG()
         res_dag.create_node(0, [], [1], [], [])
