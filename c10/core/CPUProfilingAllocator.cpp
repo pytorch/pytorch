@@ -12,8 +12,7 @@ struct MemBlock {
   uint64_t start_offset, end_offset;
   MemBlock(uint64_t s, uint64_t e) : start_offset(s), end_offset(e) {}
   bool operator<(const MemBlock& other) const {
-    return (start_offset < other.start_offset &&
-        end_offset <= other.start_offset);
+    return end_offset <= other.start_offset;
   }
 };
 
