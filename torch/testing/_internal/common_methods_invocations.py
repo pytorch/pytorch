@@ -1398,12 +1398,6 @@ def method_tests():
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
-        ('fft.fftshift', (S,), NO_ARGS, '1d', (), (None, 0, -1)),
-        ('fft.fftshift', (S, S), NO_ARGS, '2d', (), (None, 0, (-1, -2))),
-        ('fft.fftshift', (S, S, S), NO_ARGS, '3d', (), (None, 1)),
-        ('fft.ifftshift', (S,), NO_ARGS, '1d', (), (None, 0, -1)),
-        ('fft.ifftshift', (S, S), NO_ARGS, '2d', (), (None, 0, (-1, -2))),
-        ('fft.ifftshift', (S, S, S), NO_ARGS, '3d', (), (None, 1)),
     ]
 
 def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
