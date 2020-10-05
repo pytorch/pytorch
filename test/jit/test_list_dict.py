@@ -420,35 +420,29 @@ class TestList(JitTestCase):
         def test_index_slice1(x):
             x = x[:, :, [0, 1]]
             return x
+        self.checkScript(test_index_slice1, (a,))
 
         def test_index_slice2(x):
             x = x[[2, 1, 0], :, :]
             return x
+        self.checkScript(test_index_slice2, (a,))
 
         def test_index_slice3(x):
             x = x[[0, 1], :, [1]]
             return x
-
-        def test_index_slice4(x):
-            x = x[[4], :, :]
-            return x
-
-        def test_index_slice5(x):
-            x = x[[], :, :]
-            return x
-
-        self.checkScript(test_index_slice1, (a,))
-        self.checkScript(test_index_slice2, (a,))
         self.checkScript(test_index_slice3, (a,))
 
-        with self.assertRaisesRegex(RuntimeError, "index 4 is out of bounds for dimension 0 with size 3"):
-            self.checkScript(test_index_slice4, (a,))
+        def test_index_slice_empty_list(x):
+            empty_list: List[int] = []
+            x = x[empty_list, :, :]
+            return x
+        self.checkScript(test_index_slice_empty_list, (a,))
 
-        with self.assertRaises(RuntimeError):
-            # using indexing with empty list resolves to tensor incorrectly,
-            # users need to add type annotations currently as a workaround
-            scripted = torch.jit.script(test_index_slice5)
-            scripted(a)
+        def test_index_slice_out_of_bounds_index(x):
+            x = x[[4], :, :]
+            return x
+        with self.assertRaisesRegex(RuntimeError, "index 4 is out of bounds for dimension 0 with size 3"):
+            self.checkScript(test_index_slice_out_of_bounds_index, (a,))
 
 
     def test_mutable_list_append(self):
