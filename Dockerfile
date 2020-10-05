@@ -8,7 +8,7 @@
 #       For reference: 
 #           https://docs.docker.com/develop/develop-images/build_enhancements/
 ARG BASE_IMAGE=ubuntu:18.04
-ARG PYTHON_VERSION=3.7
+ARG PYTHON_VERSION=3.8
 
 FROM ${BASE_IMAGE} as dev-base
 RUN --mount=type=cache,id=apt-dev,target=/var/cache/apt \
@@ -52,6 +52,7 @@ FROM conda as conda-installs
 ARG INSTALL_CHANNEL=pytorch-nightly
 RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y pytorch torchvision cudatoolkit=11.0.221 && \
     /opt/conda/bin/conda clean -ya
+RUN /opt/conda/bin/pip install torchelastic
 
 FROM ${BASE_IMAGE} as official
 LABEL com.nvidia.volumes.needed="nvidia_driver"
