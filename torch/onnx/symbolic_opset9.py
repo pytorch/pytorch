@@ -2210,7 +2210,7 @@ def gather(g, self, dim, index, sparse_grad=False):
 
 
 @parse_args('v', 'is', 'b', 'i')
-def _var(g, input, dim, unbiased, keepdim):
+def var_mean(g, input, dim, unbiased, keepdim):
     sqrd = g.op("Mul", input, input)
     if dim is None:
         sqrdmean = g.op("ReduceMean", sqrd, keepdims_i=0)
@@ -2233,51 +2233,18 @@ def _var(g, input, dim, unbiased, keepdim):
     return var, mean
 
 
-# Since position of optional arguments can change for std, this is a hack to find if first argument
-# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
-# torch.std(input, unbiased=True)
-# torch.std(input, dim, keepdim=False, unbiased=True)
-def std(g, input, *args):
-    if len(args) == 3:
-        var, _ = _var(g, input, *args)
-    else:
-        var, _ = _var(g, input, None, args[0], None)
+def std(g, *args):
+    var, _ = var_mean(g, *args)
     return g.op("Sqrt", var)
 
 
-# Since position of optional arguments can change for std, this is a hack to find if first argument
-# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
-# torch.var(input, unbiased=True)
-# torch.var(input, dim, keepdim=False, unbiased=True)
-def var(g, input, *args):
-    if len(args) == 3:
-        var, _ = _var(g, input, *args)
-    else:
-        var, _ = _var(g, input, None, args[0], None)
+def var(g, *args):
+    var, _ = var_mean(g, *args)
     return var
 
 
-# Since position of optional arguments can change for std, this is a hack to find if first argument
-# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
-# torch.var_mean(input, unbiased=True)
-# torch.var_mean(input, dim, keepdim=False, unbiased=True)
-def var_mean(g, input, *args):
-    if len(args) == 3:
-        var, mean = _var(g, input, *args)
-    else:
-        var, mean = _var(g, input, None, args[0], None)
-    return var, mean
-
-
-# Since position of optional arguments can change for std, this is a hack to find if first argument
-# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
-# torch.std_mean(input, unbiased=True)
-# torch.std_mean(input, dim, keepdim=False, unbiased=True)
-def std_mean(g, input, *args):
-    if len(args) == 3:
-        var, mean = _var(g, input, *args)
-    else:
-        var, mean = _var(g, input, None, args[0], None)
+def std_mean(g, *args):
+    var, mean = var_mean(g, *args)
     return g.op("Sqrt", var), mean
 
 
