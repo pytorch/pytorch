@@ -450,6 +450,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       opTimeout_(options.opTimeout),
       futureNCCLCallbackStreams_(c10::cuda::device_count()),
       isHighPriorityStream_(options.isHighPriorityStream) {
+  TORCH_CHECK(at::cuda::getNumGPUs() != 0,
+    "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   try {
     parseNcclBlockingWait();
   } catch (std::exception& e) {
