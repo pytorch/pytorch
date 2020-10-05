@@ -890,7 +890,7 @@ std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, boo
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, c10::optional<std::string> uplo_str, std::vector<int64_t>& infos) {
+static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, std::string uplo_str, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("syevd: LAPACK library not found in compilation");
 #else
@@ -904,7 +904,7 @@ static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, c10::optional<std:
   auto n = v.size(-1);
   auto lda = std::max(int64_t{1}, n);
 
-  char uplo = *uplo_str == "U" ? 'U' : 'L';
+  char uplo = uplo_str == "U" ? 'U' : 'L';
   char jobz = compute_v ? 'V' : 'N';
 
   int info;
@@ -946,7 +946,7 @@ static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, c10::optional<std:
 #endif
 }
 
-std::tuple<Tensor, Tensor> _syevd_helper_cpu(const Tensor& self, bool compute_v, c10::optional<std::string> uplo) {
+std::tuple<Tensor, Tensor> _syevd_helper_cpu(const Tensor& self, bool compute_v, std::string uplo) {
   std::vector<int64_t> infos(batchCount(self), 0);
 
   auto self_sizes = self.sizes().vec();
@@ -971,12 +971,12 @@ std::tuple<Tensor, Tensor> _syevd_helper_cpu(const Tensor& self, bool compute_v,
   }
 }
 
-std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& self, c10::optional<std::string> uplo) {
+std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& self, std::string uplo) {
   squareCheckInputs(self);
   return at::_syevd_helper(self, /*compute_v=*/true, uplo);
 }
 
-Tensor linalg_eigvalsh(const Tensor& self, c10::optional<std::string> uplo) {
+Tensor linalg_eigvalsh(const Tensor& self, std::string uplo) {
   squareCheckInputs(self);
   Tensor eigvals, eigvecs;
   std::tie(eigvals, eigvecs) = at::_syevd_helper(self, /*compute_v=*/false, uplo);
