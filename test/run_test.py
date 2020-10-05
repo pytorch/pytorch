@@ -200,6 +200,15 @@ or `conda install ninja`. Alternatively, disable said tests with
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 
+JIT_EXECUTOR_TESTS = [
+    'test_jit_cuda_fuser_profiling',
+    'test_jit_cuda_fuser_legacy',
+    'test_jit_profiling',
+    'test_jit_legacy',
+    'test_jit_fuser_legacy',
+    'test_jit_fuser_te',
+    'test_tensorexpr']
+
 def print_to_stderr(message):
     print(message, file=sys.stderr)
 
@@ -539,9 +548,7 @@ def get_selected_tests(options):
         selected_tests = selected_tests[which_shard - 1 :: num_shards]
 
     if options.exclude_jit_executor:
-        to_exclude = ['test_jit_cuda_fuser_profiling', 'test_jit_cuda_fuser_legacy', 'test_jit_profiling',
-                      'test_jit_legacy', 'test_jit_fuser_legacy', 'test_jit_fuser_te', 'test_tensorexpr']
-        options.exclude = list(set(options.exclude) | set(to_exclude))
+        options.exclude.extend(JIT_EXECUTOR_TESTS)
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
