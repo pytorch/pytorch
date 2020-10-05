@@ -145,6 +145,52 @@ Using the :attr:`dim` argument to compute matrix norms::
 
 _add_docstr(_linalg.linalg_eigh, r"""
 linalg.eigh(input, UPLO='L') -> tuple(Tensor, Tensor)
+
+This function returns eigenvalues and eigenvectors
+of a complex Hermitian (conjugate symmetric) or real symmetric matrix :attr:`input`
+represented by a namedtuple (eigenvalues, eigenvectors).
+
+This function calculates all eigenvalues (and vectors) of :attr:`input`
+such that :math:`\text{input} = V \text{diag}(e) V^H`.
+
+Since the input matrix :attr:`input` is supposed to be Hermitian,
+only the lower triangular portion is used by default
+and the imaginary part of the diagonal will always be treated as zero.
+
+.. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
+
+.. note:: The eigenvalues/eigenvectors are computed using LAPACK routines ``_syevd``, ``_heevd``.
+
+Args:
+    input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
+                    batch dimensions consisting of Hermitian matrices.
+    UPLO ('L', 'U', optional): controls whether to consider upper-triangular or lower-triangular part.
+        Default: ``'L'``
+
+Returns:
+    (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
+
+        - **eigenvalues** (*Tensor*): Shape :math:`(*, m)`.
+            The eigenvalues in ascending order, each repeated according to its multiplicity.
+        - **eigenvectors** (*Tensor*): Shape :math:`(*, m, m)`.
+            The orthonormal eigenvectors of the ``input``.
+
+Examples::
+
+    >>> import torch
+    >>> a = torch.randn(2, 2, dtype=torch.complex128)
+    >>> a = a + a.t().conj()  # To make a Hermitian
+    >>> a
+    tensor([[2.9228+0.0000j, 0.2029-0.0862j],
+            [0.2029+0.0862j, 0.3464+0.0000j]], dtype=torch.complex128)
+    >>> w, v = torch.linalg.eigh(a)
+    >>> w
+    tensor([0.3277, 2.9415], dtype=torch.float64)
+    >>> v
+    tensor([[-0.0846+-0.0000j, -0.9964+0.0000j],
+            [ 0.9170+0.3898j, -0.0779-0.0331j]], dtype=torch.complex128)
+    >>> torch.allclose(torch.matmul(v, torch.matmul(w.to(v.dtype).diag_embed(), v.transpose(-2, -1).conj())), a)
+    True
 """)
 
 _add_docstr(_linalg.linalg_eigvalsh, r"""
