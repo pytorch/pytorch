@@ -1420,17 +1420,8 @@ AT_ERROR("svd: MAGMA library not found in "
 
   magma_int_t* iwork;
   ALLOCATE_ARRAY(iwork, magma_int_t, 8 * mn);
-  // Copy-n-paste rwork size computation from BatchLinearAlgebra.cpp
   if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
-    auto mx = std::max(m, n);
-    int64_t lrwork; // These settings are valid for on LAPACK 3.6+
-    if (jobz == MagmaNoVec){
-      lrwork = 7 * mn;
-    } else if (mx > 10 * mn){
-      lrwork = 7 * mn * mn + 7 * mn;
-    } else {
-      lrwork = std::max(7 * mn * mn + 7 * mn, 2 * mx * mn + 2 *mn * mn + mn);
-    }
+    auto lrwork = computeLRWorkDim(jobchar, m, n);
     storage_rwork = pin_memory<value_t>(lrwork);
     rwork = static_cast<value_t*>(storage_rwork.data());
   }
