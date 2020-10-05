@@ -186,7 +186,7 @@ class EmbeddingBag(Module):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
     intermediate embeddings.
 
-    For bags of constant length and no :attr:`per_sample_weights`, this class
+    For bags of constant length and no :attr:`per_sample_weights` and 2D inputs, this class
 
         * with ``mode="sum"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.sum(dim=1)``,
         * with ``mode="mean"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.mean(dim=1)``,
