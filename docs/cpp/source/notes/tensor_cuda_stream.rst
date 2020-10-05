@@ -12,7 +12,7 @@ You can find them in `CUDAStream.h`_. This note provides more details on how to 
 Acquiring CUDA stream
 *********************
 
-Pytorch C++ API provides the following ways to acquire a CUDA stream:
+Pytorch C++ API provides the following ways to acquire CUDA stream:
 
 1. Acquire a new stream from the CUDA stream pool, streams are preallocated from the pool and returned in a round-robin fashion.
 
@@ -74,100 +74,204 @@ Pytorch C++ API provides the following ways to set CUDA stream:
 CUDA Stream Usage Examples
 **************************
 
-1. Acquiring and setting a CUDA stream
+1. Acquiring and setting CUDA stream on the same device
 
 .. code-block:: cpp
 
-  // acquire a new stream from CUDA stream pool on current device (device 0)
-  // set current stream with this new stream and acquire current stream
-  torch::cuda::CUDAStream myStream = at::cuda::getStreamFromPool();
-  torch::cuda::setCurrentCUDAStream(myStream);
-  torch::cuda::CUDAStream curStream = torch::cuda::getCurrentCUDAStream();
-  assert(curStream == myStream);
+  // This example shows how to acquire and set CUDA stream on the same device.
+  // `at::cuda::setCurrentCUDAStream` is used to set current CUDA stream
 
-  // acquire the default CUDA stream on current device (device 0)
-  // set current stream with default stream and acquire current stream
-  torch::cuda::CUDAStream defaultStream = torch::cuda::getDefaultCUDAStream();
-  torch::cuda::setCurrentCUDAStream(defaultStream);
-  curStream = torch::cuda::getCurrentCUDAStream();
-  assert(curStream == defaultStream);
-  assert(myStream != defaultStream)
+  // create a tensor on device 0
+  torch::Tensor tensor0 = torch::ones({2, 2}, torch.device(torch::kCUDA));
+  // get a new CUDA stream from CUDA stream pool on device 0 
+  at::cuda::CUDAStream myStream = at::cuda::getStreamFromPool();
+  // set current CUDA stream from default stream to `myStream` on device 0
+  at::cuda::setCurrentCUDAStream(myStream);
+  // sum() on tensor0 uses `myStream` as current CUDA stream
+  tensor0.sum();
+
+  // get the default CUDA stream on device 0 
+  at::cuda::CUDAStream defaultStream = at::cuda::getDefaultCUDAStream();
+  // set current CUDA stream back to default CUDA stream on devide 0
+  at::cuda::setCurrentCUDAStream(defaultStream);
+  // sum() on tensor0 uses `defaultStream` as current CUDA stream
+  tensor0.sum();
+
+.. code-block:: cpp
+
+  // This example is the same as previous example, but explicitly specify device
+  // index and use CUDA stream guard to set current CUDA stream
+
+  // create a tensor on device 0
+  torch::Tensor tensor0 = torch::ones({2, 2}, torch.device(torch::kCUDA));
+  // get a new stream from CUDA stream pool on device 0
+  at::cuda::CUDAStream myStream = at::cuda::getStreamFromPool(false, 0);
+  // set the current CUDA stream to `myStream` within the bracket scope using CUDA stream guard
+  {
+    at::cuda::CUDAStreamGuard guard(myStream);
+    // current CUDA stream is `myStream` from here till the end of bracket. 
+    // sum() on tensor0 uses `myStream` as current CUDA stream
+    tensor0.sum();
+  }
+  // current CUDA stream is reset to default CUDA stream after CUDA stream guard is destroyed
+  // sum() on tensor0 uses default CUDA stream on device 0 as current CUDA stream
+  tensor0.sum();
 
 .. attention::
   
-  Above code is running on the same device/gpu (say device 0). `setCurrentCUDAStream` works as expected and set current CUDA stream correctly
-  on device 0, this is because all the streams are on the same device. However, say above code is running on device 0 and we acquire `myStream`
-  from device 1, then `torch::cuda::setCurrentCUDAStream(myStream)` will set `myStream` as current stream on device 1, not device 0.
+  Above code is running on the same CUDA device. `setCurrentCUDAStream` will always set current CUDA stream on current device, but please
+  pay attention on that `setCurrentCUDASteram` actually set current stream on the device of passed in CUDA stream.
+  
 
-
-2. Use various CUDA Guard to set CUDA stream
+2. Acquiring and setting CUDA stream on multi-devices.
 
 .. code-block:: cpp
 
-   // create a vector of CUDA stream from current device (device 0)
-   std::vector<torch::cuda::CUDAStream> streams0 = {torch::cuda::getDefaultCUDAStream(), torch::cuda::getStreamFromPool()};
-   assert(streams0[0].device_index() == 0);
-   assert(streams0[1].device_index() == 0);
-   // set current stream as `streams0[0]` on `streams0[0]`'s current device (device 0)
-   torch::cuda::setCurrentCUDAStream(streams0[0]);
+  // This example shows how to acquire and set CUDA stream on two devices.
 
-   // create a vector of CUDA stream from device 1
-   std::vector<torch::cuda::CUDAStream> streams1;
+  // acquire new CUDA streams from CUDA stream pool on device 0 and device 1
+  at::cuda::CUDAStream myStream0 = at::cuda::getStreamFromPool(false, 0);
+  at::cuda::CUDAStream myStream1 = at::cuda::getStreamFromPool(false, 1);
+
+  // set current CUDA stream to `myStream0` on device 0
+  at::cuda::setCurrentCUDAStream(myStream0);
+  // set current CUDA stream to `myStream1` on device 1
+  at::cuda::setCurrentCUDAStream(myStream1);
+
+  // create a tensor on device 0, no need to specify device index since 
+  // current device index is 0
+  torch::Tensor tensor0 = torch::ones({2, 2}, torch::device(at::kCUDA));
+  // sum() on tensor0 use `myStream0` as current CUDA stream on device 0
+  tensor0.sum();
+
+  // change the current device index to 1 by using CUDA device guard within a braket scope
+  {
+    at::cuda::CUDAGuard device_guard{1};
+    // create a tensor on device 1
+    torch::Tensor tensor1 = torch::ones({2, 2}, torch::device(at::kCUDA));
+    // sum() on tensor 1 uses `myStream1` as current CUDA stream on device 1
+    tensor1.sum();
+  }
+
+  // current device is reset to device 0 after device_guard is destroyed
+  
+  // acquire a new CUDA stream on device 1
+  at::cuda::CUDAStream myStream1_1 = at::cuda::getStreamFromPool(false, 1);
+  // create a new tensor on device 1
+  torch::Tensor tensor1 = torch::ones({2, 2}, torch.device({torch::kCUDA, 1}));
+
+  // change the current device index to 1 and current CUDA stream on device 1 
+  // to `myStream1_1` using CUDA stream guard within bracket scope
+  {
+    at::cuda::CUDAStreamGuard stream_guard(myStream1_1);
+    // sum() on tensor1 use `myStream1_1` as current CUDA stream on device 1
+    tensor1.sum(); 
+  }
+
+  // current device is reset to device 0 and current CUDA stream on device 1 is 
+  // reset to `myStream1`
+  
+  // sum() on tensor1 uses `myStream1` as current CUDA stream on device 1
+  tensor1.sum();
+
+
+3. Working with CUDA multistream guard
+
+.. code-block:: cpp
+
+  // This example shows how to use CUDA multistream guard to set
+  // two streams on two devices at the same time.
+ 
+  // create two tensor, one on device 0, one on device 1
+  torch::Tensor tensor0 = torch::ones({2, 2}, torch::device({torch::kCUDA, 0}));
+  torch::Tensor tensor1 = torch::ones({2, 2}, torch::device({torch::kCUDA, 1}));
+
+  // acquire new CUDA streams from CUDA stream pool on device 0 and device 1
+  at::cuda::CUDAStream myStream0 = at::cuda::getStreamFromPool(false, 0);
+  at::cuda::CUDAStream myStream1 = at::cuda::getStreamFromPool(false, 1);
+
+  // set current CUDA stream on device 0 to `myStream0` and 
+  // set current CUDA stream on device 1 to `myStream1` CUDA using multistream guard
+  {
+    at::cuda::CUDAMultiStreamGuard multi_guard({myStream0, myStream1});
+
+    // sum() on tensor0 uses `myStream0` as current CUDA stream on device 0
+    tensor0.sum();
+    // sum() on tensor1 uses `myStream1` as current CUDA stream on device 1
+    tensor1.sum();
+  }
+
+  // current CUDA stream on device 0 is reset to default CUDA stream on device 0
+  // current CUDA stream on device 1 is reset to default CUDA stream on device 1 
+
+  // sum() on tensor0 uses default CUDA stream as current CUDA stream on device 0
+  tensor0.sum();
+  // sum() on tensor1 uses defualt CUDA stream as current CUDA stream on device 1
+  tensor1.sum();
+
+.. attention::
+  ``CUDAMultiStreamGuard`` does not change current device index, it only changes the stream on
+  each passed in stream's device. Other than scope controlling, this guard is equivalent to 
+  calling ``setCurrentCUDAStream`` on each passed in stream.
+
+4. A skeleton example for handling CUDA streams on multi-devices
+
+.. code-block:: cpp
+
+   // This is a skeleton example that shows how to handle CUDA streams on multi-devices
+   // Suppose you want to do work on the non-default stream on two devices simultaneously, and we
+   // already have streams on both devices in two vectors. The following code shows possible ways
+   // of acquiring, setting CUDA streams. You can use this example as a reference and find useful
+   // part for you.
+
+   // Usage 0: acquire CUDA stream and set current CUDA stream with `setCurrentCUDAStream`
+   // Create a CUDA stream vector `streams0` on device 0
+   std::vector<at::cuda::CUDAStream> streams0 = 
+     {at::cuda::getDefaultCUDAStream(), at::cuda::getStreamFromPool()};
+   // set current stream as `streams0[0]` on device 0 
+   at::cuda::setCurrentCUDAStream(streams0[0]);
+
+   // create a CUDA stream vector `streams1` on device using CUDA device guard
+   std::vector<at::cuda::CUDAStream> streams1;
    {
-     // create a CUDA Device guard within the scope to guard device 1
-     torch::cuda::CUDAGuard device_guard(1);
-     // acquire default CUDA stream from device 1
-     streams1.push_back(torch::cuda::getDefaultCUDAStream());
-     // acquire a new stream from CUDA stream pool on device 1
-     streams1.push_back(torch::cuda::getStreamFromPool());
+     // device index is set to 1 within this bracket scope
+     at::cuda::CUDAGuard device_guard(1);
+     streams1.push_back(at::cuda::getDefaultCUDAStream());
+     streams1.push_back(at::cuda::getStreamFromPool());
    }
-   assert(streams1[0].device_index() == 1);
-   assert(streams1[1].device_index() == 1);
-   // set current stream as `streams1[0]` on `streams1[0]`'s current device (device 1)
-   torch::cuda::setCurrentCUDAStream(streams1[0]);
-   // current device is still 0 out of the scope of previous device guard
-   assert(torch::cuda::current_device() == 0);
+   // device index is reset to 0 after device_guard is destroyed 
 
-   // use CUDAStreamGuard to set a stream, it changes the stream on curernt devide and also passed in stream's device
+   // set current stream as `streams1[0]` on device 1
+   at::cuda::setCurrentCUDAStream(streams1[0]);
+
+   
+   // Usage 1: use CUDA device guard to change the current device index only
+   { 
+     at::cuda::CUDAGuard device_guard(1);
+
+     // current device index is changed to 1 within scope
+     // current CUDA stream is still `streams1[0]` on device 1, no change
+   }
+   // current device index is reset to 0 after `device_guard` is destroyed
+   
+   
+   // Usage 2: use CUDA stream guard to change both current device index and current CUDA stream.
    {
-     torch::cuda::CUDAStreamGuard guard(streams1[1]);
-     // current device is 1 within this scope
-     assert(guard.current_device() == torch::Device(torch::kCUDA, 1));
-     assert(torch::cuda::current_device() == 1);
-     // current stream on device 1 is streams1[1], not streams1[0]
-     assert(torch::cuda::getCurrentCUDAStream(1) == streams1[1]);
+     at::cuda::CUDAStreamGuard stream_guard(streams1[1]);
+     
+     // current device index and current CUDA stream are set to 1 and `streams1[1]` within scope
    }
+   // current device index and current CUDA stream are reset to 0 and `streams0[0]` after 
+   // stream_guard is destroyed
+  
 
-   // device and stream are now back to the status before CUDAStreamGuard is created.
-   assert(torch::cuda::current_device() == 0);
-   assert(torch::cuda::getCurrentCUDAStream(1) == streams1[0]);
-
-   // CUDA Device guard on changes the current device, but not the stream
-   {
-     // change current device to device 1
-     torch::cuda::CUDAGuard guard(1);
-     // current device beccomes to 1 within this scope
-     assert(guard.current_device() == torch::Device(at::kCUDA, 1));
-     assert(torch::cuda::current_device() == 1);
-     // current stream on device 1 is still streams1[0] as what is set at the beginning, no change
-     assert(torch::cuda::getCurrentCUDAStream(1) == streams1[0]);
-   }
-
-   // device go back to the status before above CUDAGuard is created
-   assert(torch::cuda::current_device() == 0;
-
-   // CUDAMultiStreamGuard can be used to set multiple streams on different device
+   // Usage 3: use CUDA multi-stream guard to change multiple streams on multiple devices
    {
      // This is the same as calling `torch::cuda::setCurrentCUDAStream` on both streams
-     torch::cuda::CUDAMultiStreamGuard({streams0[0], streams1[0]});
-   }
+     at::cuda::CUDAMultiStreamGuard multi_guard({streams0[1], streams1[1]});
 
-   // CUDAMultiStreamGuard can be used to record original streams as well
-   {
-     torch::cuda::CUDAMultiStreamGuard guard;
-     // assume we have 2 devices
-     assert(guard.original_streams().size() == torch::cuda::getNumGPUs());
-     // all the streams before the guard is created are recorded
-     assert(guard.original_streams()[0] == streams0[0]);
-     assert(guard.original_streams()[1] == streams1[0]);
+     // current device index is not change, still 0
+     // current CUDA stream on device 0 and device 1 are set to `streams0[1]` and `streams1[1]`
    }
+   // current CUDA stream on device 0 and device 1 are reset to `streams0[0]` and `streams1[0]`
+   // after `multi_guard` is destroyed.

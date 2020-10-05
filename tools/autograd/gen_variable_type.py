@@ -145,7 +145,9 @@ DONT_REQUIRE_DERIVATIVE = {
     'quantize_per_tensor', 'quantize_per_channel',
     # Functions that return integers should not have output that require gradients
     'argmax', 'argmin', 'argsort', 'searchsorted',
-    'bucketize'
+    'bucketize',
+    # Functions that return booleans are not differentiable
+    'isnan', 'isposinf', 'isneginf', 'isinf'
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
@@ -160,8 +162,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'cosh', '__rmul__', 'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
-    'dot', 'vdot', 'cholesky', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
-    'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh'
+    'dot', 'vdot', 'cholesky'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
