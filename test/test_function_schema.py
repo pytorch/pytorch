@@ -63,9 +63,13 @@ class TestFunctionSchema(TestCase):
         # BC: A new schema where old kwargs becomes positional.
         new_schema = parse_schema('any(Tensor self, Tensor b, *, int c) -> Tensor')
         self.assertTrue(new_schema.is_backward_compatible_with(old_schema))
+        # BC: (the opposite case) A new schema where an old positional argument becomes kwarg.
+        self.assertFalse(old_schema.is_backward_compatible_with(new_schema))
         # BC: A new schema where all old kwargs become positional.
         new_schema = parse_schema('any(Tensor self, Tensor b, int c) -> Tensor')
         self.assertTrue(new_schema.is_backward_compatible_with(old_schema))
+        # BC: (the opposite case) A new schema where all old positional arguments become kwarg.
+        self.assertFalse(old_schema.is_backward_compatible_with(new_schema))
         # No-BC: A new schema where old kwargs appear in different order.
         new_schema = parse_schema('any(Tensor self, *, int c, Tensor b) -> Tensor')
         self.assertFalse(new_schema.is_backward_compatible_with(old_schema))
