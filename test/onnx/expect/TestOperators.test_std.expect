@@ -118,8 +118,15 @@ graph {
     }
   }
   node {
+    input: "10"
+    input: "11"
     output: "12"
-    name: "Constant_11"
+    name: "Mul_11"
+    op_type: "Mul"
+  }
+  node {
+    output: "13"
+    name: "Constant_12"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -131,21 +138,14 @@ graph {
     }
   }
   node {
-    input: "10"
     input: "11"
-    output: "13"
-    name: "Mul_12"
-    op_type: "Mul"
-  }
-  node {
-    input: "11"
-    input: "12"
+    input: "13"
     output: "14"
     name: "Sub_13"
     op_type: "Sub"
   }
   node {
-    input: "13"
+    input: "12"
     input: "14"
     output: "15"
     name: "Div_14"
