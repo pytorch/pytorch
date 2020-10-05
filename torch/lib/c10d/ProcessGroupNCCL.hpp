@@ -65,6 +65,11 @@ class ProcessGroupNCCL : public ProcessGroup {
    public:
     // Constructor takes a list of CUDA devices
     WorkNCCL(const std::vector<at::Device>& devices);
+    // Copy constructor doing partial copy without outputs_. Cleanup thread
+    // monitors and removes finished works. However it will deadlock when
+    // destructs outputs_ tensors who are view tensors in autograd graph.
+    WorkNCCL(const WorkNCCL& w);
+
     virtual ~WorkNCCL();
 
     // Checks if request has completed. In this specific case of NCCL, it checks
@@ -159,6 +164,13 @@ class ProcessGroupNCCL : public ProcessGroup {
         futureNCCLCallbackStreams_;
 
     friend class ProcessGroupNCCL;
+  };
+
+  struct Options {
+    explicit Options();
+
+    std::chrono::milliseconds opTimeout;
+    bool isHighPriorityStream;
   };
 
   // FutureNCCL is a subclass of ivalue's Future. The goal is to use
@@ -341,8 +353,7 @@ class ProcessGroupNCCL : public ProcessGroup {
       const std::shared_ptr<Store>& store,
       int rank,
       int size,
-      const std::chrono::milliseconds& opTimeout =
-          std::chrono::milliseconds(kProcessGroupNCCLOpTimeoutMillis));
+      Options options = Options());
 
   // This constructor includes the deprecated `groupName` argument.
   // If you have existing code that uses the `groupName`, you can replace
@@ -352,9 +363,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       int rank,
       int size,
       const std::string& groupName,
-      const std::chrono::milliseconds& opTimeout =
-          std::chrono::milliseconds(kProcessGroupNCCLOpTimeoutMillis))
-      : ProcessGroupNCCL(store, rank, size, opTimeout) {}
+      Options options = Options())
+      : ProcessGroupNCCL(store, rank, size, options) {}
 
   virtual ~ProcessGroupNCCL();
 
@@ -558,14 +568,14 @@ class ProcessGroupNCCL : public ProcessGroup {
   // Thread that removes NCCL Work upon timeout
   std::thread workCleanupThread_;
 
-  // Mutex to Guard workList_
-  std::mutex workListMutex_;
+  // Mutex to Guard workMetaList_
+  std::mutex workMetaListMutex_;
 
   // Condition Variable for timeout thread sleep
-  std::condition_variable workListCV_;
+  std::condition_variable workMetaListCV_;
 
   // Vector to Store WorkNCCL pointers
-  std::list<std::shared_ptr<ProcessGroupNCCL::WorkNCCL>> workList_;
+  std::list<ProcessGroupNCCL::WorkNCCL> workMetaList_;
 
   // Add Work Pointer to workVector
   void workEnqueue(std::shared_ptr<ProcessGroupNCCL::WorkNCCL>);
@@ -626,6 +636,9 @@ class ProcessGroupNCCL : public ProcessGroup {
   // of the corresponding device inside ProcessGroupNCCL::getNCCLComm if not set
   // before.
   std::vector<std::shared_ptr<at::cuda::CUDAStream>> futureNCCLCallbackStreams_;
+
+  // Schedule NCCL operations on high priority CUDA streams.
+  bool isHighPriorityStream_ = false;
 };
 
 } // namespace c10d

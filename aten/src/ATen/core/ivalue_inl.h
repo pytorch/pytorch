@@ -224,7 +224,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
   }
   std::shared_ptr<TupleType> type() const;
 
-  friend bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs);
+  CAFFE2_API friend bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs);
 
  private:
   Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)

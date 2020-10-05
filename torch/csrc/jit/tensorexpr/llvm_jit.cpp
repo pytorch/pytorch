@@ -2,7 +2,23 @@
 
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
+#include <llvm/ExecutionEngine/ExecutionEngine.h>
+#include <llvm/ExecutionEngine/JITSymbol.h>
+#include <llvm/ExecutionEngine/Orc/CompileUtils.h>
+#include <llvm/ExecutionEngine/Orc/ExecutionUtils.h>
+#include <llvm/ExecutionEngine/Orc/IRCompileLayer.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
+#include <llvm/ExecutionEngine/Orc/LambdaResolver.h>
+#include <llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h>
+#include <llvm/ExecutionEngine/Orc/SymbolStringPool.h>
+#include <llvm/ExecutionEngine/RTDyldMemoryManager.h>
+#include <llvm/ExecutionEngine/SectionMemoryManager.h>
+#include <llvm/IR/DataLayout.h>
+#include <llvm/IR/Mangler.h>
+#include <llvm/Support/DynamicLibrary.h>
+#include <llvm/Support/raw_ostream.h>
+#include <llvm/Target/TargetMachine.h>
+
 #include <sleef.h>
 #include <algorithm>
 #include <memory>
@@ -14,6 +30,7 @@ namespace orc {
 
 // Lightly modified implementation from LLVM's Kaleidoscope JIT tutorial:
 // https://llvm.org/docs/tutorial/BuildingAJIT1.html
+#if LLVM_VERSION_MAJOR == 9
 class TORCH_API PytorchLLVMJITImpl {
  private:
   std::unique_ptr<LLJIT> LLJ;
@@ -31,6 +48,8 @@ class TORCH_API PytorchLLVMJITImpl {
     // Register implementations of intrinsics
     cantFail(LLJ->defineAbsolute(
         *Mangle("log10f"), {llvm::pointerToJITTargetAddress(&log10f), {}}));
+    cantFail(LLJ->defineAbsolute(
+        *Mangle("log1pf"), {llvm::pointerToJITTargetAddress(&log1pf), {}}));
     cantFail(LLJ->defineAbsolute(
         *Mangle("logf"), {llvm::pointerToJITTargetAddress(&logf), {}}));
     cantFail(LLJ->defineAbsolute(
@@ -127,7 +146,7 @@ class TORCH_API PytorchLLVMJITImpl {
         *Mangle("Sleef_log10f4"),
         {llvm::pointerToJITTargetAddress(&Sleef_log10f4_u10), {}}));
     cantFail(LLJ->defineAbsolute(
-        *Mangle("Sleef_logf1pf4"),
+        *Mangle("Sleef_log1pf4"),
         {llvm::pointerToJITTargetAddress(&Sleef_log1pf4_u10), {}}));
     cantFail(LLJ->defineAbsolute(
         *Mangle("Sleef_sqrtf4"),
@@ -212,7 +231,7 @@ class TORCH_API PytorchLLVMJITImpl {
         *Mangle("Sleef_log10f8"),
         {llvm::pointerToJITTargetAddress(&Sleef_log10f8_u10), {}}));
     cantFail(LLJ->defineAbsolute(
-        *Mangle("Sleef_logf1pf8"),
+        *Mangle("Sleef_log1pf8"),
         {llvm::pointerToJITTargetAddress(&Sleef_log1pf8_u10), {}}));
     cantFail(LLJ->defineAbsolute(
         *Mangle("Sleef_sqrtf8"),
@@ -297,7 +316,7 @@ class TORCH_API PytorchLLVMJITImpl {
         *Mangle("Sleef_log10d2"),
         {llvm::pointerToJITTargetAddress(&Sleef_log10d2_u10), {}}));
     cantFail(LLJ->defineAbsolute(
-        *Mangle("Sleef_logf1pd2"),
+        *Mangle("Sleef_log1pd2"),
         {llvm::pointerToJITTargetAddress(&Sleef_log1pd2_u10), {}}));
     cantFail(LLJ->defineAbsolute(
         *Mangle("Sleef_sqrtd2"),
@@ -382,7 +401,7 @@ class TORCH_API PytorchLLVMJITImpl {
         *Mangle("Sleef_log10d4"),
         {llvm::pointerToJITTargetAddress(&Sleef_log10d4_u10), {}}));
     cantFail(LLJ->defineAbsolute(
-        *Mangle("Sleef_logf1pd4"),
+        *Mangle("Sleef_log1pd4"),
         {llvm::pointerToJITTargetAddress(&Sleef_log1pd4_u10), {}}));
     cantFail(LLJ->defineAbsolute(
         *Mangle("Sleef_sqrtd4"),
@@ -418,8 +437,9 @@ class TORCH_API PytorchLLVMJITImpl {
 #endif
   }
 
-  Error addModule(ThreadSafeModule M) {
-    if (auto Err = LLJ->addIRModule(std::move(M))) {
+  Error addModule(std::unique_ptr<Module> M, std::unique_ptr<LLVMContext> C) {
+    if (auto Err =
+            LLJ->addIRModule(ThreadSafeModule(std::move(M), std::move(C)))) {
       return Err;
     }
     return Error::success();
@@ -439,8 +459,10 @@ PytorchLLVMJIT::PytorchLLVMJIT()
 
 PytorchLLVMJIT::~PytorchLLVMJIT() = default;
 
-Error PytorchLLVMJIT::addModule(ThreadSafeModule M) {
-  return impl_->addModule(std::move(M));
+Error PytorchLLVMJIT::addModule(
+    std::unique_ptr<Module> M,
+    std::unique_ptr<LLVMContext> C) {
+  return impl_->addModule(std::move(M), std::move(C));
 }
 
 JITSymbol PytorchLLVMJIT::findSymbol(const std::string Name) {
@@ -450,6 +472,99 @@ JITSymbol PytorchLLVMJIT::findSymbol(const std::string Name) {
 const DataLayout& PytorchLLVMJIT::getDataLayout() {
   return impl_->getDataLayout();
 }
+
+#elif LLVM_VERSION_MAJOR == 8 && LLVM_VERSION_PATCH == 20181009
+
+class TORCH_API PytorchLLVMJITImpl {
+ private:
+  ExecutionSession ES;
+  std::shared_ptr<SymbolResolver> Resolver;
+  std::unique_ptr<TargetMachine> TM;
+  const DataLayout DL;
+  RTDyldObjectLinkingLayer ObjectLayer;
+  IRCompileLayer<decltype(ObjectLayer), SimpleCompiler> CompileLayer;
+
+ public:
+  PytorchLLVMJITImpl()
+      : Resolver(createLegacyLookupResolver(
+            ES,
+            [this](const std::string& Name) -> JITSymbol {
+              if (auto Sym = CompileLayer.findSymbol(Name, false))
+                return Sym;
+              else if (auto Err = Sym.takeError())
+                return std::move(Err);
+              if (auto SymAddr =
+                      RTDyldMemoryManager::getSymbolAddressInProcess(Name))
+                return JITSymbol(SymAddr, JITSymbolFlags::Exported);
+              return nullptr;
+            },
+            [](Error Err) { cantFail(std::move(Err), "lookupFlags failed"); })),
+        TM(EngineBuilder().selectTarget()),
+        DL(TM->createDataLayout()),
+        ObjectLayer(
+            ES,
+            [this](VModuleKey) {
+              return RTDyldObjectLinkingLayer::Resources{
+                  std::make_shared<SectionMemoryManager>(), Resolver};
+            }),
+        CompileLayer(ObjectLayer, SimpleCompiler(*TM)) {
+    llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
+  }
+
+  TargetMachine& getTargetMachine() {
+    return *TM;
+  }
+
+  VModuleKey addModule(std::unique_ptr<Module> M) {
+    // Add the module to the JIT with a new VModuleKey.
+    auto K = ES.allocateVModule();
+    cantFail(CompileLayer.addModule(K, std::move(M)));
+    return K;
+  }
+
+  JITSymbol findSymbol(const std::string Name) {
+    std::string MangledName;
+    raw_string_ostream MangledNameStream(MangledName);
+    Mangler::getNameWithPrefix(MangledNameStream, Name, DL);
+    return CompileLayer.findSymbol(MangledNameStream.str(), true);
+  }
+
+  JITTargetAddress getSymbolAddress(const std::string Name) {
+    return cantFail(findSymbol(Name).getAddress());
+  }
+
+  void removeModule(VModuleKey K) {
+    cantFail(CompileLayer.removeModule(K));
+  }
+
+  const DataLayout& getDataLayout() {
+    return DL;
+  }
+};
+
+PytorchLLVMJIT::PytorchLLVMJIT()
+    : impl_(std::make_unique<PytorchLLVMJITImpl>()) {}
+
+PytorchLLVMJIT::~PytorchLLVMJIT() = default;
+
+Error PytorchLLVMJIT::addModule(
+    std::unique_ptr<Module> M,
+    std::unique_ptr<LLVMContext> C) {
+  impl_->addModule(std::move(M));
+  return Error::success();
+}
+
+JITSymbol PytorchLLVMJIT::findSymbol(const std::string Name) {
+  return impl_->findSymbol(std::move(Name));
+}
+
+const DataLayout& PytorchLLVMJIT::getDataLayout() {
+  return impl_->getDataLayout();
+}
+
+#else // LLVM_VERSION_MAJOR
+#error Only LLVM versions 8 or 9 are supported.
+#endif
 
 } // end namespace orc
 } // end namespace llvm
