@@ -1155,6 +1155,11 @@ class TestList(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, r"Attempted to use List without a contained type"):
             torch.jit.script(annotated_fn)
 
+    def test_list_none(self):
+        with self.assertRaisesRegex(RuntimeError, "Can not create ListType with None type"):
+            x = torch._C.ListType(None)
+
+
 
 class TestDict(JitTestCase):
     def dict(self):
