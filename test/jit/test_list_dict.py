@@ -432,7 +432,7 @@ class TestList(JitTestCase):
         def test_index_slice4(x):
             x = x[[4], :, :]
             return x
-        
+
         def test_index_slice5(x):
             x = x[[], :, :]
             return x
@@ -440,10 +440,16 @@ class TestList(JitTestCase):
         self.checkScript(test_index_slice1, (a,))
         self.checkScript(test_index_slice2, (a,))
         self.checkScript(test_index_slice3, (a,))
-        # self.checkScript(test_index_slice5, (a,))
 
         with self.assertRaisesRegex(RuntimeError, "index 4 is out of bounds for dimension 0 with size 3"):
             self.checkScript(test_index_slice4, (a,))
+
+        with self.assertRaises(RuntimeError):
+            # using indexing with empty list resolves to tesor incorrectly,
+            # users need to add type annotations currently as a workaround
+            scripted = torch.jit.script(test_index_slice5)
+            scripted(a)
+
 
     def test_mutable_list_append(self):
         def test_append():

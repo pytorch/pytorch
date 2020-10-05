@@ -1,4 +1,5 @@
 import copy
+from collections import namedtuple
 import itertools
 import random
 import math
@@ -3423,3 +3424,47 @@ class DistributedTest:
                 # Synchronize since we run multiple iterations of this test, to
                 # isolate failure hangs.
                 torch.cuda.synchronize(device=self.rank)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_ddp_namedtuple(self):
+            expected_fields = ("a", "b")
+            TestNamedTupleInput_0 = namedtuple("NamedTuple", expected_fields)
+
+            batch = 5
+            dim = 10
+
+            class TestNamedTupleInput_1(NamedTuple):
+                a: torch.tensor
+                b: torch.tensor
+
+            a = torch.rand(batch, dim, device=self.rank)
+            b = torch.rand(batch, dim, device=self.rank)
+
+            class NamedTupleModule(torch.nn.Module):
+                def __init__(_self):  # noqa
+                    super().__init__()
+                    _self.lin = nn.Linear(10, 1)
+
+                def forward(_self, input, expected_type):  # noqa
+                    # Without NamedTuple support, this would be of type tuple.
+                    self.assertTrue(
+                        isinstance(input, expected_type),
+                        f"Expected type {expected_type} but got {type(input)}",
+                    )
+                    self.assertEqual(input._fields, expected_fields)
+                    self.assertEqual(a, input.a)
+                    self.assertEqual(b, input.b)
+                    return _self.lin(torch.mul(input.a, input.b))
+
+            model = torch.nn.parallel.DistributedDataParallel(
+                NamedTupleModule().cuda(self.rank), device_ids=[self.rank]
+            )
+            inp = TestNamedTupleInput_0(a, b)
+            # The following would fail if DDP does not propagate NamedTuples correctly.
+            model(inp, type(inp))
+
+            inp = TestNamedTupleInput_1(a, b)
+            model(inp, type(inp))

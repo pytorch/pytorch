@@ -39,6 +39,8 @@ class ShapeProp:
                 result = getattr(self_obj, node.target)(*args, **kwargs)
             elif node.op == 'call_module':
                 result = self.modules[node.target](*load_arg(node.args), **load_arg(node.kwargs))
+            elif node.op == 'output':
+                return load_arg(node.args[0])
 
             if isinstance(result, torch.Tensor):
                 node.shape = result.shape
@@ -46,4 +48,4 @@ class ShapeProp:
 
             env[node.name] = result
 
-        return load_arg(self.graph.result)
+        return None

@@ -846,22 +846,40 @@ void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
       uses_.end());
 }
 
-size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
-  auto name_str = name.toUnqualString();
+size_t findArgument(
+    const FunctionSchema& the_schema,
+    const std::string& unqualName) {
   for (size_t i = 0; i < the_schema.arguments().size(); ++i) {
     const Argument* arg = &the_schema.arguments()[i];
-    if (arg->name() == name_str) {
+    if (arg->name() == unqualName) {
       return i;
     }
   }
   throw std::runtime_error(
-      std::string("Couldn't find an argument called ") + name.toQualString());
+      std::string("Couldn't find an argument called ") + unqualName);
+}
+
+size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
+  const auto unqualName = name.toUnqualString();
+  return findArgument(the_schema, unqualName);
 }
 
 c10::optional<IValue> Node::get(Symbol name) const {
   return toIValue(namedInput(name));
 }
 
+bool Node::hasNamedInput(const std::string& name) const {
+  for (const auto& argument : schema().arguments()) {
+    if (argument.name() == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+Value* Node::namedInput(const std::string& unqualName) const {
+  return input(findArgument(schema(), unqualName));
+}
 Value* Node::namedInput(Symbol name) const {
   return input(findArgument(schema(), name));
 }
