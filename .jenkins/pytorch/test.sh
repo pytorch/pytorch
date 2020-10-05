@@ -126,18 +126,23 @@ if ([ -n "$CIRCLE_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]); 
   file_diff_from_base "$DETERMINE_FROM"
 fi
 
+NN_TESTS="test_nn"
+CPP_EXT_TESTS="test_cpp_extensions_aot_ninja"
+JIT_EXTRA_TESTS="test_jit_cuda_fuser_legacy test_jit_legacy test_jit_fuser_legacy test_jit_simple"
+TESTED_SEPARATELY="${NN_TESTS} ${CPP_EXT_TESTS} ${JIT_EXTRA_TESTS}"
+
 test_python_nn() {
   time python test/run_test.py --include test_nn --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
-test_python_legacy_jit() {
-  time python test/run_test.py --include test_jit_cuda_fuser_legacy test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
+test_python_legacy_simple_jit() {
+  time python test/run_test.py --include ${JIT_EXTRA_TESTS}  --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
-test_python_all_except_nn_and_cpp_extensions() {
-  time python test/run_test.py --exclude test_jit_cuda_fuser_profiling test_jit_cuda_fuser_legacy test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
+test_python_all_except_tested_separately() {
+  time python test/run_test.py --exclude $TESTED_SEPARATELY  --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -376,8 +381,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   install_torchvision
   test_xla
-elif [[ "${BUILD_ENVIRONMENT}" == *legacy_jit* || "${JOB_BASE_NAME}" == *legacy_jit* ]]; then
-  test_python_legacy_jit
+elif [[ "${BUILD_ENVIRONMENT}" == *jit-legacy-simple* || "${JOB_BASE_NAME}" == *jit-legacy-simple* ]]; then
+  test_python_legacy_simple_jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
@@ -386,7 +391,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   test_cpp_extensions
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   install_torchvision
-  test_python_all_except_nn_and_cpp_extensions
+  test_python_all_except_tested_separately
   test_aten
   test_libtorch
   test_custom_script_ops
@@ -403,7 +408,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4
 else
   install_torchvision
   test_python_nn
-  test_python_all_except_nn_and_cpp_extensions
+  test_python_all_except_tested_separately
   test_cpp_extensions
   test_aten
   test_vec256
