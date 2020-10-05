@@ -288,6 +288,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: divide_
    .. automethod:: dot
    .. automethod:: double
+   .. automethod:: dsplit
    .. automethod:: eig
    .. automethod:: element_size
    .. automethod:: eq
@@ -342,6 +343,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: hardshrink
    .. automethod:: heaviside
    .. automethod:: histc
+   .. automethod:: hsplit
    .. automethod:: hypot
    .. automethod:: hypot_
    .. automethod:: i0
@@ -611,6 +613,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: vdot
    .. automethod:: view
    .. automethod:: view_as
+   .. automethod:: vsplit
    .. automethod:: where
    .. automethod:: zero_
 
