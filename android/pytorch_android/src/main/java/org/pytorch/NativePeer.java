@@ -17,13 +17,18 @@ class NativePeer implements INativePeer {
 
   @DoNotStrip
   private static native HybridData initHybridAndroidAsset(
-      String assetName, /* android.content.res.AssetManager */ Object androidAssetManager, int deviceJniCode);
+      String assetName, /* android.content.res.AssetManager */
+      Object androidAssetManager,
+      int deviceJniCode);
 
   NativePeer(String moduleAbsolutePath, Device device) {
     mHybridData = initHybrid(moduleAbsolutePath, device.jniCode);
   }
 
-  NativePeer(String assetName, /* android.content.res.AssetManager */ Object androidAssetManager, Device device) {
+  NativePeer(
+      String assetName, /* android.content.res.AssetManager */
+      Object androidAssetManager,
+      Device device) {
     mHybridData = initHybridAndroidAsset(assetName, androidAssetManager, device.jniCode);
   }
 

@@ -172,6 +172,36 @@ class TestQuantizedTensor(TestCase):
                                  "quantization_scheme=torch.per_tensor_affine, " +
                                  "scale=1.0, zero_point=2)")
 
+    def test_qtensor_sub_byte(self):
+        num_elements = 10
+        scale = 1.0
+        zero_point = 2
+        for dtype in [torch.quint4x2]:
+            r = torch.ones((5, 2), dtype=torch.float)
+            qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+            self.assertEqual(qr.q_scale(), scale)
+            self.assertEqual(qr.q_zero_point(), zero_point)
+            self.assertTrue(qr.is_quantized)
+            self.assertFalse(r.is_quantized)
+            self.assertEqual(qr.storage().size(), 5)
+
+            int_repr = qr.int_repr()
+            for num in int_repr[0:5]:
+                self.assertEqual(num, 51)  # Packed entries, each of value 3, i.e. 00110011
+
+            # Test tensor creation
+            q = torch._empty_affine_quantized([num_elements], scale=scale, zero_point=zero_point,
+                                              dtype=torch.quint4x2)
+            self.assertEqual(q.storage().size(), 5)
+
+            # Test save/load
+            with tempfile.NamedTemporaryFile() as f:
+                torch.save(qr, f)
+                f.seek(0)
+                loaded_q = torch.load(f)
+                loaded_int_repr = loaded_q.int_repr()[0:5]
+                self.assertEqual(int_repr[0:5], loaded_int_repr)
+
     def test_qtensor_float_assignment(self):
         # Scalar Tensor
         # item
@@ -285,15 +315,10 @@ class TestQuantizedTensor(TestCase):
         r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
         scale = 0.2
         zero_point = 2
-        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint8)
-        rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.quint8)
-        rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.qint32)
-        rqr = qr.dequantize()
-        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
+        for dtype in [torch.qint8, torch.quint8, torch.qint32, torch.quint4x2]:
+            qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+            rqr = qr.dequantize()
+            self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
     def _test_quantize_per_channel(self, r, scales, zero_points, axis, float_params):
 
@@ -404,6 +429,52 @@ class TestQuantizedTensor(TestCase):
         zero_points = torch.tensor([0.1, 0.2, 1.], dtype=torch.float)
         self._test_quantize_per_channel(r, scales, zero_points, 0, True)
 
+    def test_quantize_per_channel_sub_byte(self):
+        """ Tests the per channel quantization scheme for 4-bit qtensors.
+        The scale and zero point for this have to be in floating point. """
+        r = torch.rand(3, 2, dtype=torch.float) * 4
+        scales = torch.tensor([0.2, 0.3, 0.1], dtype=torch.float)
+        zero_points = torch.tensor([0.1, 0.2, 0.3], dtype=torch.float)
+        qr = torch.quantize_per_channel(r, scales, zero_points, 0, torch.quint4x2)
+        dequant_tensor = qr.dequantize()
+
+        def _get_qranges(bit_width):
+            if bit_width == 4:
+                return 0, 15
+
+        def _quantize_per_channel_sub_byte_ref(data, scales, zero_points, axis, bit_width):
+            dims = data.size()
+            data = data.view(-1, dims[axis], np.prod(dims[axis + 1:]))
+            qtensor_size = math.ceil(data.numel() / 2)
+            res = torch.empty(qtensor_size, dtype=torch.uint8)
+            elem_per_byte = 8 / bit_width
+            quant_min, quant_max = _get_qranges(bit_width)
+            for i in range(data.size()[0]):
+                for j in range(data.size()[1]):
+                    for k in range(data.size()[2]):
+                        inv_scale = 1.0 / scales[j]
+                        index = i * data.size()[1] * data.size()[2] + j * data.size()[2] + k
+                        qvalue = np.clip(
+                            np.round(data[i][j][k] * inv_scale + zero_points[j]), quant_min, quant_max).to(dtype=torch.int)
+                        res_idx = int(index / elem_per_byte)
+                        if (index % elem_per_byte == 0):
+                            res[res_idx] = qvalue
+                        else:
+                            res[res_idx] |= (qvalue << ((index % elem_per_byte) * bit_width))
+            return res
+
+        ref_res = _quantize_per_channel_sub_byte_ref(r, scales, zero_points, 0, 4)
+        self.assertTrue(np.allclose(qr.int_repr(), ref_res))
+        self.assertTrue(np.allclose(r.numpy(), dequant_tensor.numpy(), atol=1 / np.min(scales.numpy())))
+
+        # Check 4D tensor with non-zero axis.
+        r = torch.rand(3, 2, 4, 5, dtype=torch.float) * 4
+        scales = torch.tensor([0.2, 0.03], dtype=torch.float)
+        zero_points = torch.tensor([0.1, 0.2], dtype=torch.float)
+        qr = torch.quantize_per_channel(r, scales, zero_points, axis=1, dtype=torch.quint4x2)
+        ref_res = _quantize_per_channel_sub_byte_ref(r, scales, zero_points, 1, 4)
+        self.assertTrue(np.allclose(qr.int_repr(), ref_res))
+
     def test_qtensor_permute(self):
         scale = 0.02
         zero_point = 1
@@ -491,7 +562,9 @@ class TestQuantizedTensor(TestCase):
         scales = torch.rand(10, dtype=torch.double) * 0.02 + 0.01
         zero_points = torch.round(torch.rand(10) * 20 + 1).to(torch.long)
         # quint32, cuda is not supported yet
-        for dtype in [torch.quint8, torch.qint8]:
+        for dtype in [torch.quint8, torch.qint8, torch.quint4x2]:
+            if dtype == torch.quint4x2:
+                zero_points = torch.ones(10, dtype=torch.float)
             qr = torch.quantize_per_channel(r, scales, zero_points, 1, dtype)
             with tempfile.NamedTemporaryFile() as f:
                 # Serializing and Deserializing Tensor

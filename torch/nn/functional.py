@@ -2851,6 +2851,8 @@ def multi_margin_loss(input, target, p=1, margin=1., weight=None, size_average=N
 
 
 pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""
+pixel_shuffle(input, upscale_factor) -> Tensor
+
 Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)` to a
 tensor of shape :math:`(*, C, H \times r, W \times r)`.
 
