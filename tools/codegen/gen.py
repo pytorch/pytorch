@@ -397,7 +397,8 @@ CAFFE2_API {cpp_returns_type} {cpp_name}({cpp_args_str});
             # For backward compatibility, we left it unchanged and added the scattered API on top of it.
             # Note that the scattered API cannot have default arguments or calls will be ambigious.
             if signature_group.gathered_signature is not None:
-                str_signatures += f"CAFFE2_API {cpp_returns_type} {cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)});\n"
+                cpp_args_str = signature_group.signature.cpp_arguments_str(with_defaults=False)
+                str_signatures += f"CAFFE2_API {cpp_returns_type} {cpp_name}({cpp_args_str});\n"
 
             return str_signatures
 
@@ -487,7 +488,8 @@ def compute_tensor_methods(native_functions: List[NativeFunction], *, target: Ta
             # For backward compatibility, we left it unchanged and added the scattered API on top of it.
             # Note that the scattered API cannot have default arguments or calls will be ambigious.
             if signature_group.gathered_signature is not None:
-                str_signatures += f"{cpp_returns_type} {cpp_name}({signature_group.signature.cpp_arguments_str(with_defaults=False)}) const;\n"
+                cpp_args_str = signature_group.signature.cpp_arguments_str(with_defaults=False)
+                str_signatures += f"{cpp_returns_type} {cpp_name}({cpp_args_str}) const;\n"
 
             return str_signatures
 
