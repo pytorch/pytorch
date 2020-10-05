@@ -478,13 +478,13 @@ if _enabled:
             r = self.forward.code_with_constants
             return (r[0], ConstMap(r[1]))
 
-        def save(self, *args, **kwargs):
+        def save(self, f, _extra_files={}):
             r"""
             save(f, _extra_files={})
 
             See :func:`torch.jit.save <torch.jit.save>` for details.
             """
-            return self._c.save(*args, **kwargs)
+            return self._c.save(str(f), _extra_files=_extra_files)
 
         def _save_for_lite_interpreter(self, *args, **kwargs):
             r"""
