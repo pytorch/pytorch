@@ -9554,20 +9554,26 @@ class TestTorchDeviceType(TestCase):
         assert m.dim() == 0, "m is intentionally a scalar"
         self.assertEqual(torch.pow(2, m), 2**m)
 
+    @precisionOverride({torch.float32: 1e-5, torch.complex64: 1e-5})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float32, torch.float64)
     def test_symeig(self, device, dtype):
-        from torch.testing._internal.common_utils import random_symmetric_matrix
+        from torch.testing._internal.common_utils import random_hermitian_matrix
 
         def run_test(dims, eigenvectors, upper):
-            x = random_symmetric_matrix(*dims, dtype=dtype, device=device)
-            oute = torch.empty(dims[1:] + dims[:1], dtype=dtype, device=device)
+            x = random_hermitian_matrix(*dims, dtype=dtype, device=device)
+            if dtype.is_complex:
+                real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+            else:
+                real_dtype = dtype
+            oute = torch.empty(dims[1:] + dims[:1], dtype=real_dtype, device=device)
             outv = torch.empty(dims[1:] + dims[:1] * 2, dtype=dtype, device=device)
             torch.symeig(x, eigenvectors=eigenvectors, upper=upper, out=(oute, outv))
 
             if eigenvectors:
-                x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute)), outv.transpose(-2, -1))
+                x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute.to(dtype))), outv.transpose(-2, -1).conj())
                 self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
             else:
                 eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
@@ -9579,14 +9585,14 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(resv, outv, msg="outputs of symeig and symeig with out don't match")
 
             # test non-contiguous
-            x = random_symmetric_matrix(*dims, dtype=dtype, device=device)
+            x = random_hermitian_matrix(*dims, dtype=dtype, device=device)
             n_dim = len(dims) + 1
             # Reverse the batch dimensions and the matrix dimensions and then concat them
             x = x.permute(tuple(range(n_dim - 3, -1, -1)) + (n_dim - 1, n_dim - 2))
             assert not x.is_contiguous(), "x is intentionally non-contiguous"
             rese, resv = torch.symeig(x, eigenvectors=eigenvectors, upper=upper)
             if eigenvectors:
-                x_recon = torch.matmul(torch.matmul(resv, torch.diag_embed(rese)), resv.transpose(-2, -1))
+                x_recon = torch.matmul(torch.matmul(resv, torch.diag_embed(rese.to(dtype))), resv.transpose(-2, -1).conj())
                 self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
             else:
                 eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
@@ -9596,6 +9602,25 @@ class TestTorchDeviceType(TestCase):
         batch_dims_set = [(), (3,), (3, 5), (5, 3, 5)]
         for batch_dims, eigenvectors, upper in product(batch_dims_set, (True, False), (True, False)):
             run_test((5,) + batch_dims, eigenvectors, upper)
+
+    # TODO: once there is more support for complex dtypes on GPU, they shall be added to above test
+    # particularly when RuntimeError: _th_bmm_out not supported on CUDAType for ComplexFloat is fixed
+    @unittest.expectedFailure
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.complex64, torch.complex128)
+    def test_symeig_complex_xfailed(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix
+
+        dims = (5, 3)
+        x = random_hermitian_matrix(*dims, dtype=dtype, device=device)
+        real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+        oute = torch.empty(dims[1:] + dims[:1], dtype=real_dtype, device=device)
+        outv = torch.empty(dims[1:] + dims[:1] * 2, dtype=dtype, device=device)
+        torch.symeig(x, eigenvectors=eigenvectors, upper=upper, out=(oute, outv))
+
+        x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute.to(dtype))), outv.transpose(-2, -1).conj())
+        self.assertEqual(x, x_recon, atol=1e-8, rtol=0)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -14720,8 +14745,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(sort_topk, topk[0])      # check values
         self.assertEqual(sort_topk, a[topk[1]])   # check indices
 
-    @dtypesIfCUDA(*([torch.half, torch.float, torch.double]
-                    + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     @dtypes(torch.float, torch.double)
     def test_topk_nonfinite(self, device, dtype):
         x = torch.tensor([float('nan'), float('inf'), 1e4, 0, -1e4, -float('inf')], device=device, dtype=dtype)
@@ -20312,11 +20336,11 @@ tensor_op_tests = [
     ('transpose', 'neg_dim', _new_t((1, 2, 3, 4)), lambda t, d: [-1, -2], ),
     ('tolist', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('topk', 'dim_sort', _small_3d_unique, lambda t, d: [2, 1, False, True],
-        1e-5, 1e-5, 1e-5, _types2, _cpu_types, False),
+        1e-5, 1e-5, 1e-5, torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
     ('topk', 'neg_dim_sort', _small_3d_unique, lambda t, d: [2, -1, False, True],
-        1e-5, 1e-5, 1e-5, _types2, _cpu_types, False),
+        1e-5, 1e-5, 1e-5, torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
     ('topk', 'dim_desc_sort', _small_3d_unique, lambda t, d: [2, 1, True, True],
-        1e-5, 1e-5, 1e-5, _types2, _cpu_types, False),
+        1e-5, 1e-5, 1e-5, torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
     ('trace', '', _medium_2d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _types, _cpu_types, False),
     ('tril', '', _medium_2d, lambda t, d: [],),
     ('tril', 'zero_stride', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -20813,7 +20837,7 @@ class TestTensorDeviceOps(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(*_float_types_no_half)
+    @dtypes(*(_float_types_no_half + _complex_types))
     def test_svd_square(self, device, dtype):
         self._test_svd_helper((10, 10), True, False, device, dtype)
 
