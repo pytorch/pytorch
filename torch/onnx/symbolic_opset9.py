@@ -2210,7 +2210,7 @@ def gather(g, self, dim, index, sparse_grad=False):
 
 
 @parse_args('v', 'is', 'b', 'i')
-def var_mean(g, input, dim, unbiased, keepdim):
+def _var_mean(g, input, dim, unbiased, keepdim):
     sqrd = g.op("Mul", input, input)
     if dim is None:
         sqrdmean = g.op("ReduceMean", sqrd, keepdims_i=0)
@@ -2220,7 +2220,7 @@ def var_mean(g, input, dim, unbiased, keepdim):
         sqrdmean = g.op("ReduceMean", sqrd, axes_i=dim, keepdims_i=keepdim)
         mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
         redudced_dims = g.op("Shape", input)
-        # dim could contain one or more dimensions
+        # dim could contain one or multiple dimensions
         redudced_dims = g.op("Gather", redudced_dims, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
         num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
     meansqrd = g.op("Mul", mean, mean)
@@ -2234,18 +2234,51 @@ def var_mean(g, input, dim, unbiased, keepdim):
     return var, mean
 
 
-def std(g, *args):
-    var, _ = var_mean(g, *args)
+# Since position of optional arguments can change for std, this is a hack to find if first argument
+# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
+# at::std(input, unbiased)
+# at::std(input, dim, unbiased, keepdim)
+def std(g, input, *args):
+    if len(args) == 3:
+        var, _ = _var_mean(g, input, *args)
+    else:
+        var, _ = _var_mean(g, input, None, args[0], None)
     return g.op("Sqrt", var)
 
 
-def var(g, *args):
-    var, _ = var_mean(g, *args)
+# Since position of optional arguments can change for var, this is a hack to find if first argument
+# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
+# at::var(input, unbiased)
+# at::var(input, dim, unbiased, keepdim)
+def var(g, input, *args):
+    if len(args) == 3:
+        var, _ = _var_mean(g, input, *args)
+    else:
+        var, _ = _var_mean(g, input, None, args[0], None)
     return var
 
 
-def std_mean(g, *args):
-    var, mean = var_mean(g, *args)
+# Since position of optional arguments can change for var_mean, this is a hack to find if first argument
+# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
+# at::var_mean(input, unbiased)
+# at::var_mean(input, dim, unbiased, keepdim)
+def var_mean(g, input, *args):
+    if len(args) == 3:
+        var, mean = _var_mean(g, input, *args)
+    else:
+        var, mean = _var_mean(g, input, None, args[0], None)
+    return var, mean
+
+
+# Since position of optional arguments can change for std_mean, this is a hack to find if first argument
+# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
+# at::std_mean(input, unbiased)
+# at::std_mean(input, dim, unbiased, keepdim)
+def std_mean(g, input, *args):
+    if len(args) == 3:
+        var, mean = _var_mean(g, input, *args)
+    else:
+        var, mean = _var_mean(g, input, None, args[0], None)
     return g.op("Sqrt", var), mean
 
 
