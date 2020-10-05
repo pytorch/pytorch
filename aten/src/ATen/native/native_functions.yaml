@@ -8229,7 +8229,7 @@
   variants: function
   dispatch:
     CPU: _syevd_helper_cpu
-    # CUDA: _syevd_helper_cuda
+    CUDA: _syevd_helper_cuda
 
 - func: linalg_eigh(Tensor self, str uplo) -> (Tensor, Tensor)
   python_module: linalg
