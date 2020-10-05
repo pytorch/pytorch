@@ -6,7 +6,7 @@ import torch
 from .node import Argument
 from .graph import Graph
 from .graph_module import GraphModule
-from .proxy import Proxy, _create_proxy, TracerBase
+from .proxy import Proxy, TracerBase
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -119,7 +119,7 @@ class Tracer(TracerBase):
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
-    def trace(self, root: torch.nn.Module) -> GraphModule:
+    def trace(self, root: torch.nn.Module) -> Graph:
         self.root = root
         self.graph = Graph()
 
@@ -146,16 +146,16 @@ class Tracer(TracerBase):
             if not self.is_leaf_module(mod, module_qualified_name):
                 return orig_call(mod, *args, **kwargs)
             else:
-                return _create_proxy(self, 'call_module', module_qualified_name, args, kwargs)
+                return self.create_proxy('call_module', module_qualified_name, args, kwargs)
         try:
             torch.nn.Module.__call__ = module_call_wrapper
-            self.graph.output(self.create_arg(fn(*args)))
+            self.create_node('output', 'output', (self.create_arg(fn(*args)),), {})
         finally:
             torch.nn.Module.__call__ = orig_call
-        return GraphModule(root, self.graph)
+        return self.graph
 
     def _proxy_placeholder(self, name: str) -> Proxy:
-        return Proxy(self.create_node('placeholder', name, (), {}), self)
+        return self.create_proxy('placeholder', name, (), {})
 
 # Symbolic tracing API
 #
@@ -165,4 +165,4 @@ class Tracer(TracerBase):
 # Args:
 #   - root - the `nn.Module` instance to trace
 def symbolic_trace(root : torch.nn.Module) -> GraphModule:
-    return Tracer().trace(root)
+    return GraphModule(root, Tracer().trace(root))

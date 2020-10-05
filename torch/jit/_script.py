@@ -18,7 +18,7 @@ from typing import Any, Dict
 import torch
 import torch._jit_internal as _jit_internal
 from torch.utils import set_module
-from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module
+from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_methods_to_compile
 from torch.nn import Module
 from torch.jit._state import _enabled
 from torch.jit._builtins import _register_builtin
@@ -200,7 +200,10 @@ class ScriptMeta(type):
 
                 def make_stubs(module):
                     cls = type(module)
-                    return [v for k, v in sorted(cls._methods.items())]
+                    if hasattr(cls, "_methods"):
+                        return [v for k, v in sorted(cls._methods.items())]
+                    else:
+                        return infer_methods_to_compile(module)
 
                 self.__dict__[
                     "_actual_script_module"
@@ -273,7 +276,7 @@ if _enabled:
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """
-        __ignored_properties__ = ['code', 'code_with_constants', 'graph', 'inlined_graph', 'original_name']
+        __jit_unused_properties__ = ['code', 'code_with_constants', 'graph', 'inlined_graph', 'original_name']
 
         def __init__(self):
             super(ScriptModule, self).__init__()
