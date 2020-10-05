@@ -21,6 +21,7 @@ torch/csrc/jit/generated/
 import argparse
 import re
 from itertools import groupby
+from functools import reduce
 from ..autograd.gen_autograd import load_aten_declarations
 from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
 from ..autograd.utils import CodeTemplate, write, is_out_variant, op_name_without_overload
@@ -495,6 +496,15 @@ def gen_unboxing_wrappers(
             'constructors': shard,
         }
         write(out, 'generated_unboxing_wrappers_%d.cpp' % i, GENERATED_UNBOXING_WRAPPERS_CPP, env)
+
+    all_shards = reduce(
+        lambda lhs, rhs: lhs + rhs,
+        shards,
+    )
+    env = {
+        'constructors': all_shards,
+    }
+    write(out, 'generated_unboxing_wrappers_everything.cpp', GENERATED_UNBOXING_WRAPPERS_CPP, env)
 
 
 default_map = {'{}': 'None', 'nullptr': 'None', 'c10::nullopt': 'None'}
