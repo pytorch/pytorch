@@ -445,7 +445,7 @@ class TestList(JitTestCase):
             self.checkScript(test_index_slice4, (a,))
 
         with self.assertRaises(RuntimeError):
-            # using indexing with empty list resolves to tesor incorrectly,
+            # using indexing with empty list resolves to tensor incorrectly,
             # users need to add type annotations currently as a workaround
             scripted = torch.jit.script(test_index_slice5)
             scripted(a)
