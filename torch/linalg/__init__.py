@@ -195,6 +195,34 @@ Examples::
 
 _add_docstr(_linalg.linalg_eigvalsh, r"""
 linalg.eigvalsh(input, UPLO='L') -> Tensor
+
+This function returns eigenvalues of a complex Hermitian (conjugate symmetric)
+or real symmetric matrix :attr:`input`.
+
+.. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
+
+.. note:: The eigenvalues are computed using LAPACK routines ``_syevd``, ``_heevd``.
+
+Args:
+    input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
+                    batch dimensions consisting of Hermitian matrices.
+    UPLO ('L', 'U', optional): controls whether to consider upper-triangular or lower-triangular part.
+        Default: ``'L'``
+
+Returns:
+    (Tensor): Shape :math:`(*, m)`. The eigenvalues in ascending order, each repeated according to its multiplicity.
+
+Examples::
+
+    >>> import torch
+    >>> a = torch.randn(2, 2, dtype=torch.complex128)
+    >>> a = a + a.t().conj()  # To make a Hermitian
+    >>> a
+    tensor([[2.9228+0.0000j, 0.2029-0.0862j],
+            [0.2029+0.0862j, 0.3464+0.0000j]], dtype=torch.complex128)
+    >>> w = torch.linalg.eigvalsh(a)
+    >>> w
+    tensor([0.3277, 2.9415], dtype=torch.float64)
 """)
 
 @functools.wraps(_linalg.linalg_eigh)
