@@ -140,17 +140,17 @@ class TestQuantizedOps(TestCase):
             quantized_fn: a list of the quantized functions to be tested
             reference_fn: the original reference function to be called on the
             the dequantized X
-            inplace_kwarg: the additional inplace keyword argument to test in-place
+            extra_kwargs: the additional keyword arguments
             for each test entry in ops_under_test, it must have at least the fields
-            for quantized_fn and reference_fn. If inplace_kwarg is missing, the
-            quantized function is assumed to be either inplace by default or the
-            test is not testing an inplace function.
+            for quantized_fn and reference_fn.
             output_range: the output range the operator will map to. By default, if it is
             no specified, the range will not be controlled and depend on Xmin and Xmax.
             change_zero_point: a boolean flag indicating if the zero point parameter should
             be determined based on torch_type during quantization (see sigmoid/hardsigmoid for
             examples). By default, if it is not specified, change_zero_point is assumed to be
             False and zero point will just take on the default value from X.
+            `output_is_observed`: if specified and is True, we'll append extra
+             output_scale/output_zero_point keyword argument when calling quantized op
         """
         # Retrives the default parameters from X.
         X, (scale, zero_point, torch_type) = X
@@ -162,15 +162,15 @@ class TestQuantizedOps(TestCase):
         for op_group in test_configs:
             ref_op = op_group['reference_fn']
             for q_op in op_group['quantized_fn']:
+                # Retrieves the inplace keyword arguments
+                # some functions require inplace=True to test in-place.
+                extra_kwargs = op_group.get('extra_kwargs', dict())
+                output_is_observed = op_group.get('output_is_observed', False)
                 # Quantizes and dequantizes to account for max error.
                 qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                                dtype=torch_type)
                 dqX = qX.dequantize()
-                dqY_hat = ref_op(dqX.clone())
-
-                # Retrieves the inplace keyword arguments
-                # some functions require inplace=True to test in-place.
-                inplace_kwarg = op_group.get('inplace_kwarg', dict())
+                dqY_hat = ref_op(dqX.clone(), **extra_kwargs)
 
                 # Adjusts output_scale if needed.
                 # The output_scale determines the quantization scale for functions that
@@ -194,8 +194,11 @@ class TestQuantizedOps(TestCase):
                                                    zero_point=output_zero_point,
                                                    dtype=torch_type)
 
+                if output_is_observed:
+                    extra_kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
+
                 # Finds qY using in-place or non-in-place quantized operators.
-                qY = q_op(qX, **inplace_kwarg)
+                qY = q_op(qX, **extra_kwargs)
 
                 self.assertEqual(qY, qY_hat, msg='{} - {} failed: ({} vs. {})'.format(
                     fn_name, q_op, qY, qY_hat
@@ -222,7 +225,7 @@ class TestQuantizedOps(TestCase):
                     torch.nn.quantized.functional.relu,
                 ],
                 'reference_fn': torch.nn.functional.relu,
-                'inplace_kwarg': {
+                'extra_kwargs': {
                     'inplace': True
                 }
             }
@@ -280,11 +283,30 @@ class TestQuantizedOps(TestCase):
         ]
         self._test_activation_function(X, 'hardsigmoid', hardsigmoid_test_configs)
 
+    @override_qengines
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_leaky_relu_observed_output(self, X):
+        leaky_relu_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.ops.quantized.leaky_relu
+                ],
+                'reference_fn': torch.nn.functional.leaky_relu,
+                'extra_kwargs': {
+                    'negative_slope': 0.1,
+                    'inplace': False,
+                },
+                'output_is_observed': True,
+            }
+        ]
+        self._test_activation_function(X, 'leaky_relu', leaky_relu_test_configs)
+
     """Tests the correctness of the quantized::relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()),
            alpha=st.floats(0.0, 1.0, allow_nan=False, allow_infinity=False))
-    def test_qrelu_leaky(self, X, alpha):
+    def test_leaky_relu(self, X, alpha):
         X, (scale, zero_point, torch_type) = X
 
         X = torch.from_numpy(X)
