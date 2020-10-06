@@ -1,9 +1,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
-#include <algorithm>
-#include <cfloat>
-#include <cmath>
 namespace at { namespace native {
 
 template<template<class> class Op>

@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/native/ForeachUtils.h>
-#include <ATen/Dispatch.h>
+
 namespace at { namespace native {
 
 #define FOREACH_BINARY_OP_SCALAR(NAME)                                                                    \
