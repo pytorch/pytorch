@@ -1,6 +1,6 @@
 import torch
 import torch._C as _C
-from torch._C._functions import DelayedError
+from torch._C import _functions
 import torch.utils.hooks as hooks
 from torch._six import with_metaclass
 import functools
@@ -229,7 +229,7 @@ def once_differentiable(fn):
         if not isinstance(outputs, tuple):
             outputs = (outputs,)
 
-        err_fn = DelayedError(
+        err_fn = _functions.DelayedError(
             b"trying to differentiate twice a function that was marked"
             b"with @once_differentiable", len(outputs))
 
