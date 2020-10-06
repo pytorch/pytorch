@@ -99,7 +99,8 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
       std::vector<char> storageData(
           tensorData.data(), tensorData.data() + tensorData.sizeInBytes());
       tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
-          storageData.data(), storageData.size(), std::move(metadata)});
+          tensorpipe::CpuBuffer{storageData.data(), storageData.size()},
+          std::move(metadata)});
       buffers.copiedTensors.push_back(std::move(storageData));
     } else {
       // TensorPipe uses the same Message class for both reading and writing, so
@@ -107,7 +108,8 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       char* tensorPtr = const_cast<char*>(tensorData.data());
       tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
-          tensorPtr, tensorData.sizeInBytes(), std::move(metadata)});
+          tensorpipe::CpuBuffer{tensorPtr, tensorData.sizeInBytes()},
+          std::move(metadata)});
     }
   }
 
@@ -152,8 +154,8 @@ TensorpipeReadBuffers tensorpipeAllocate(tensorpipe::Message& tpMessage) {
 
   for (auto& tensor : tpMessage.tensors) {
     buffers.tensors.emplace_back(
-        at::getCPUAllocator()->allocate(tensor.length));
-    tensor.data = buffers.tensors.back().get();
+        at::getCPUAllocator()->allocate(tensor.buffer.cpu.length));
+    tensor.buffer.cpu.ptr = buffers.tensors.back().get();
   }
 
   return buffers;
