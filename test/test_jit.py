@@ -945,10 +945,9 @@ class TestJit(JitTestCase):
         checkBackwardScript(test_torch_autograd_backward, (inp,))
         checkBackwardScript(test_torch_autograd_backward_with_grad_tensors, (inp,))
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Testing differentiable graph")
     def test_script_backward_twice(self):
         def checkBackwardTwiceScript(fn, inputs, retain_graph_=False):
-            torch._C._jit_set_profiling_executor(False)
-
             with torch.jit.optimized_execution(True):
                 scripted_fn = torch.jit.script(fn, inputs)
                 FileCheck().check("prim::DifferentiableGraph").run(scripted_fn.graph_for(*inputs))
