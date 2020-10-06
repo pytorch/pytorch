@@ -36,25 +36,13 @@ struct Pipeline final {
   //
 
   struct Barrier final {
-    enum class Type {
-      Execution,
-      Buffer,
-      Image,
-    } type;
-
     struct Stage final {
       VkPipelineStageFlags src;
       VkPipelineStageFlags dst;
     } stage;
 
-    union {
-      Resource::Buffer::Barrier buffer;
-      Resource::Image::Barrier image;
-    } as;
-
-    Barrier(Stage stage);
-    Barrier(Stage stage, Resource::Buffer::Barrier buffer);
-    Barrier(Stage stage, Resource::Image::Barrier image);
+    c10::SmallVector<Resource::Buffer::Barrier, 1u> buffers;
+    c10::SmallVector<Resource::Image::Barrier, 1u> images;
   };
 
   //
@@ -152,8 +140,21 @@ struct Pipeline final {
     Cache
   */
 
-  typedef api::Cache<Factory> Cache;
-  Cache cache;
+  class Cache final {
+   public:
+    explicit Cache(Factory factory);
+    Cache(const Cache&) = delete;
+    Cache& operator=(const Cache&) = delete;
+    Cache(Cache&&) = default;
+    Cache& operator=(Cache&&) = default;
+    ~Cache() = default;
+
+    Object retrieve(const Descriptor& descriptor);
+    void purge();
+
+   private:
+    api::Cache<Factory> cache_;
+  } cache;
 
   explicit Pipeline(const GPU& gpu)
     : layout(gpu),
@@ -164,32 +165,6 @@ struct Pipeline final {
 //
 // Impl
 //
-
-inline Pipeline::Barrier::Barrier(const Stage stage)
-  : type(Type::Execution),
-    stage(stage),
-    as{} {
-}
-
-inline Pipeline::Barrier::Barrier(
-    const Stage stage,
-    const Resource::Buffer::Barrier barrier)
-  : type(Type::Buffer),
-    stage(stage),
-    as{
-      .buffer = barrier,
-    } {
-}
-
-inline Pipeline::Barrier::Barrier(
-    const Stage stage,
-    const Resource::Image::Barrier barrier)
-  : type(Type::Image),
-    stage(stage),
-    as{
-      .image = barrier,
-    } {
-}
 
 inline bool operator==(
     const Pipeline::Layout::Descriptor& _1,
@@ -218,6 +193,18 @@ inline size_t Pipeline::Factory::Hasher::operator()(
       descriptor.work_group.x,
       descriptor.work_group.y,
       descriptor.work_group.z);
+}
+
+inline Pipeline::Object Pipeline::Cache::retrieve(
+    const Descriptor& descriptor) {
+  return {
+    cache_.retrieve(descriptor),
+    descriptor.pipeline_layout,
+  };
+}
+
+inline void Pipeline::Cache::purge() {
+  cache_.purge();
 }
 
 inline Pipeline::Object::operator bool() const {
