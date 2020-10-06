@@ -173,7 +173,7 @@ class TestForeach(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
     def test_max(self, device, dtype):
-        for N in [30, 300]:
+        for N in N_values:
             tensors1 = self._get_test_data(device, dtype, N)
             tensors2 = self._get_test_data(device, dtype, N)
 
