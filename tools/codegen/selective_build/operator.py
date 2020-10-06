@@ -42,6 +42,16 @@ class SelectiveBuildOperator():
 
     @staticmethod
     def from_yaml_dict(op_name: str, op_info: Dict[str, object]) -> 'SelectiveBuildOperator':
+        allowed_keys = {'name', 'is_root_operator', 'is_used_for_training', 'include_all_overloads', 'debug_info'}
+
+        if len(set(op_info.keys()) - allowed_keys) > 0:
+            raise Exception("Got unexpected top level keys: {}".format(
+                ",".join(set(op_info.keys()) - allowed_keys),
+            ))
+
+        if 'name' in op_info:
+            assert op_name == op_info['name']
+
         is_root_operator = op_info.get('is_root_operator', True)
         assert isinstance(is_root_operator, bool)
 
