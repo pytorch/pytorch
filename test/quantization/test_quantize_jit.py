@@ -51,6 +51,7 @@ from torch.testing._internal.common_quantization import (
     SkipQuantModel,
     NestedModel,
     ConvModel,
+    ConvTransposeModel,
     default_per_channel_qconfig,
     test_only_eval_fn,
     ConvBnModel,
@@ -61,6 +62,7 @@ from torch.testing._internal.common_quantization import (
     AnnotatedSkipQuantModel,
     AnnotatedNestedModel,
     AnnotatedConvModel,
+    AnnotatedConvTransposeModel,
     AnnotatedConvBnModel,
 )
 
@@ -2730,11 +2732,11 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
             else:
                 # for input of FC for dynamic quant
                 assert len(attrs_with_prefix(m, '_observer_')) == 1
-                observer_name = 'DynamicQuantObserver = prim::GetAttr[name="_observer_'
+                observer_name = 'Observer = prim::GetAttr[name="_observer_'
                 FileCheck().check(observer_name) \
                            .check('prim::GetAttr[name="fc"]') \
                            .check('prim::CallMethod') \
-                           .check_not('Observer = prim::GetAttr[name="_observer_') \
+                           .check_not(observer_name) \
                            .run(m.graph)
 
 
@@ -2770,7 +2772,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
         assert len(attrs_with_prefix(m.sub.fc, '_observer_')) == 1
         FileCheck().check('prim::GetAttr[name="sub') \
                    .check('prim::CallMethod') \
-                   .check('DynamicQuantObserver = prim::GetAttr[name="_observer_') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
                    .check('prim::CallMethod') \
                    .check_not('Observer = prim::GetAttr[name="_observer_') \
                    .run(m.graph)
@@ -3170,6 +3172,35 @@ class TestQuantizeJit(QuantizationTestCase):
                 [self.img_data_2d],
                 inplace=False)
             self.assertEqual(model_quantized(self.img_data_2d[0][0]), result_eager)
+
+    @override_qengines
+    def test_conv_transpose(self):
+        r"""Compare the result of quantizing conv_transpose layer in
+        eager mode and graph mode
+        """
+        if not qengine_is_qnnpack():
+            return  # Currently only qnnpack is supported
+        # eager mode
+        annotated_conv_model = AnnotatedConvTransposeModel(
+            torch.backends.quantized.engine).eval()
+        conv_model = ConvTransposeModel().eval()
+        # copy the weight from eager mode so that we can
+        # compare the result of the two quantized models later
+        conv_model.conv.weight = torch.nn.Parameter(annotated_conv_model.conv.weight.detach())
+        model_eager = quantize(annotated_conv_model, test_only_eval_fn, self.img_data_2d)
+        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
+        model_traced = torch.jit.trace(conv_model, self.img_data_2d[0][0])
+        model_script = torch.jit.script(conv_model)
+        result_eager = model_eager(self.img_data_2d[0][0])
+        for model_under_test in [model_traced, model_script]:
+            model_quantized = quantize_jit(
+                model_under_test,
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.img_data_2d],
+                inplace=False)
+            self.assertEqual(model_quantized(self.img_data_2d[0][0]),
+                             result_eager)
 
     @override_qengines
     def test_conv_bn(self):

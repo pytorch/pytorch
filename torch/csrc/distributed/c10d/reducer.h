@@ -55,7 +55,7 @@ class Reducer {
     return backward_stats_;
   }
 
-  // Registeres a hook to the reducer. The hook is `CommHookInterface`
+  // Registers a hook to the reducer. The hook is `CommHookInterface`
   // type to allow both Python and CPP hooks. This function can only
   // be called once before calling backward.
   void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
@@ -104,6 +104,13 @@ class Reducer {
   struct VariableIndex {
     size_t replica_index;
     size_t variable_index;
+
+    VariableIndex() = default;
+
+    VariableIndex(size_t replica_index_, size_t variable_index_) {
+      replica_index = replica_index_;
+      variable_index = variable_index_;
+    }
   };
 
   void push_rebuilt_params(const VariableIndex& index);
@@ -281,6 +288,13 @@ class Reducer {
     size_t bucket_index;
     // Index of parameter in single bucket replica.
     size_t intra_bucket_index;
+
+    VariableLocator() = default;
+
+    VariableLocator(size_t bucket_index_, size_t intra_bucket_index_) {
+      bucket_index = bucket_index_;
+      intra_bucket_index = intra_bucket_index_;
+    }
   };
 
   // Map the index of a variable to its location in the bucket structure.

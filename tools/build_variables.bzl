@@ -148,6 +148,7 @@ core_sources_full = [
     "torch/csrc/jit/ir/scope.cpp",
     "torch/csrc/jit/ir/subgraph_matcher.cpp",
     "torch/csrc/jit/jit_log.cpp",
+    "torch/csrc/jit/passes/annotate_warns.cpp",
     "torch/csrc/jit/passes/bailout_graph.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
     "torch/csrc/jit/passes/canonicalize.cpp",
@@ -230,7 +231,6 @@ core_sources_full = [
     "torch/csrc/jit/tensorexpr/codegen.cpp",
     "torch/csrc/jit/tensorexpr/eval.cpp",
     "torch/csrc/jit/tensorexpr/expr.cpp",
-    "torch/csrc/jit/tensorexpr/function.cpp",
     "torch/csrc/jit/tensorexpr/hash_provider.cpp",
     "torch/csrc/jit/tensorexpr/ir.cpp",
     "torch/csrc/jit/tensorexpr/ir_mutator.cpp",
@@ -542,11 +542,14 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/disable_torch_function.cpp",
 ]
 
-libtorch_python_distributed_sources = [
-    "torch/csrc/distributed/autograd/init.cpp",
+libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/comm.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/reducer.cpp",
+]
+
+libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
+    "torch/csrc/distributed/autograd/init.cpp",
     "torch/csrc/distributed/rpc/init.cpp",
     "torch/csrc/distributed/rpc/process_group_agent.cpp",
     "torch/csrc/distributed/rpc/py_rref.cpp",

@@ -310,7 +310,13 @@ void pushPackingPastRnn(Block* b) {
       std::vector<int64_t> new_sizes;
       new_sizes.push_back(*oldType->sizes()[0]);
       new_sizes.push_back(*oldType->sizes()[1]);
-      new_sizes.push_back(rnn->i(attr::hidden_size));
+      if (next->kind() == onnx::Reshape) {
+        // bidirection
+        new_sizes.push_back(rnn->i(attr::hidden_size) * 2);
+      } else {
+        // unidirection
+        new_sizes.push_back(rnn->i(attr::hidden_size));
+      }
       TensorTypePtr newType = TensorType::createContiguous(
           *oldType->scalarType(), *oldType->device(), new_sizes);
       next->outputs().at(0)->setType(newType);
@@ -747,6 +753,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
               prim::ListConstruct);
           // make output of reshape the output of nllloss
           nllloss_output->replaceAllUsesWith(origNllLossNode);
+          origNllLossNode->output(0)->copyMetadata(nllloss_output->output(0));
         }
       } else {
         continue;
