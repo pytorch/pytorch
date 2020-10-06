@@ -113,15 +113,18 @@ enum class C10_API_ENUM ProfilerState {
 struct TORCH_API ProfilerConfig {
   ProfilerConfig(
       ProfilerState state,
-      bool report_input_shapes,
-      bool profile_memory)
+      bool report_input_shapes = false,
+      bool profile_memory = false,
+      bool with_stack = false)
       : state(state),
         report_input_shapes(report_input_shapes),
-        profile_memory(profile_memory) {}
+        profile_memory(profile_memory),
+        with_stack(with_stack) {}
   ~ProfilerConfig();
   ProfilerState state;
   bool report_input_shapes;
   bool profile_memory;
+  bool with_stack;
 
   // Returns IValues corresponding to ProfilerConfig struct, to be used for
   // serialization.
@@ -218,24 +221,29 @@ struct TORCH_API Event final {
   const char* name() const {
     return name_.str();
   }
-  uint16_t thread_id() const {
+
+  uint64_t threadId() const {
     return thread_id_;
   }
+
   std::vector<std::vector<int64_t>> shapes() const {
     return shapes_;
   }
-  double cpu_elapsed_us(const Event & e) const {
+
+  double cpuElapsedUs(const Event& e) const {
     return (e.cpu_ns_ - cpu_ns_)/(1000.0);
   }
 
-  double cpu_us() const {
+  double cpuUs() const {
     return cpu_ns_ / (1000.0);
   }
 
-  double cuda_elapsed_us(const Event & e) const;
-  bool has_cuda() const {
+  double cudaElapsedUs(const Event& e) const;
+
+  bool hasCuda() const {
     return cuda_event != nullptr || (isRemote() && device_ != -1);
   }
+
   int device() const {
     return device_;
   }
@@ -253,11 +261,11 @@ struct TORCH_API Event final {
     }
   }
 
-  int64_t cpu_memory_usage() const {
+  int64_t cpuMemoryUsage() const {
     return cpu_memory_usage_;
   }
 
-  int64_t cuda_memory_usage() const {
+  int64_t cudaMemoryUsage() const {
     return cuda_memory_usage_;
   }
 
@@ -266,7 +274,7 @@ struct TORCH_API Event final {
   }
 
   // Node ID corresponding to this event.
-  int node_id( ) const {
+  int nodeId( ) const {
     return node_id_;
   }
 
@@ -291,8 +299,32 @@ struct TORCH_API Event final {
     sequence_nr_ = sequence_nr;
   }
 
-  int64_t sequence_nr() const {
+  int64_t sequenceNr() const {
     return sequence_nr_;
+  }
+
+  const std::vector<std::string>& stack() const {
+    return stack_;
+  }
+
+  void setStack(const std::vector<std::string>& stack) {
+    stack_ = stack;
+  }
+
+  uint64_t fwdThreadId() const {
+    return fwd_thread_id_;
+  }
+
+  void setFwdThreadId(uint64_t fwd_thread_id) {
+    fwd_thread_id_ = fwd_thread_id;
+  }
+
+  uint8_t scope() const {
+    return scope_;
+  }
+
+  void setScope(uint8_t scope) {
+    scope_ = scope;
   }
 
  private:
@@ -300,7 +332,8 @@ struct TORCH_API Event final {
   int64_t cpu_ns_ = 0;
   at::StringView name_;
   EventKind kind_;
-  uint16_t thread_id_;
+  uint64_t thread_id_;
+  uint64_t fwd_thread_id_;
   at::RecordFunctionHandle handle_ {0};
   std::vector<std::vector<int64_t>> shapes_;
   int64_t cpu_memory_usage_ = 0;
@@ -311,6 +344,9 @@ struct TORCH_API Event final {
   bool is_remote_ = false;
   int64_t cuda_us_ = -1;
   int64_t sequence_nr_ = -1;
+
+  std::vector<std::string> stack_;
+  uint8_t scope_;
 };
 
 // a linked-list of fixed sized vectors, to avoid

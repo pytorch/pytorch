@@ -227,9 +227,29 @@ option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
+# On Windows platform, if user does not install libuv in build conda env and
+# does not set libuv_ROOT environment variable. Set USE_DISTRIBUTED to OFF.
 if(WIN32)
   set(USE_TENSORPIPE OFF)
   message(WARNING "TensorPipe cannot be used on Windows. Set it to OFF")
+
+  if(USE_DISTRIBUTED AND NOT DEFINED ENV{libuv_ROOT})
+    find_library(
+      libuv_tmp_LIBRARY
+      NAMES uv libuv
+      HINTS $ENV{CONDA_PREFIX}\\Library
+      PATH_SUFFIXES lib
+      REQUIRED
+      NO_DEFAULT_PATH)
+    if(NOT EXISTS ${libuv_tmp_LIBRARY})
+      set(USE_DISTRIBUTED OFF)
+      set(USE_GLOO OFF)
+      message(
+        WARNING "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF.")
+    else()
+      set(ENV{libuv_ROOT} $ENV{CONDA_PREFIX}\\Library)
+    endif()
+  endif()
 endif()
 
 # Linux distributions do not want too many embedded sources, in that sense we

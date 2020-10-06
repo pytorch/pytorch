@@ -678,7 +678,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 msg="InstanceNorm module API failed, qY_ref\n{} vs qY\n{}"
                 .format(qY_ref, qY))
 
-    def test_elu(self):
+    def _test_activation_module_impl(self, name, float_module_class, quantized_module_class, extra_kwargs):
         """Tests the correctness of the ELU module.
         The correctness is defined against the functional implementation.
         """
@@ -694,18 +694,26 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qX = torch.quantize_per_tensor(X, x_scale, x_zero_point, dtype=torch.quint8)
         dqX = qX.dequantize()
 
-        float_mod = torch.nn.ELU(alpha).float()
+        float_mod = float_module_class(**extra_kwargs).float()
 
         dqY_ref = float_mod(dqX)
         qY_ref = torch.quantize_per_tensor(
             dqY_ref, y_scale, y_zero_point, dtype=torch.quint8)
 
-        quant_mod = nnq.ELU(y_scale, y_zero_point, alpha)
+        quant_mod = quantized_module_class(y_scale, y_zero_point, **extra_kwargs)
         qY = quant_mod(qX)
-
         self.assertEqual(qY_ref.int_repr().numpy(), qY.int_repr().numpy(),
-                         msg="ELU module API failed, qY_ref\n{} vs qY\n{}"
-                         .format(qY_ref, qY))
+                         msg="{} module API failed, qY_ref\n{} vs qY\n{}"
+                         .format(name, qY_ref, qY))
+
+    def test_elu(self):
+        """Tests the correctness of the ELU module.
+        The correctness is defined against the functional implementation.
+        """
+        self._test_activation_module_impl("ELU", nn.ELU, nnq.ELU, {"alpha": 1.5})
+
+    def test_leaky_relu(self):
+        self._test_activation_module_impl("LeakyReLU", nn.LeakyReLU, nnq.LeakyReLU, {"negative_slope": 0.2})
 
     @given(
         num_embeddings=st.integers(10, 50),
