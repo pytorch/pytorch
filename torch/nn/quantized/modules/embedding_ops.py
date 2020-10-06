@@ -19,7 +19,7 @@ class EmbeddingPackedParams(torch.nn.Module):
                                                            axis=0, dtype=self.dtype)
             self.set_weight(wq)
         else:
-            raise RuntimeError('Unsupported dtype on quantized embedding!')
+            raise NotImplementedError('Unsupported dtype on quantized embedding! Supports quint8 and quint4x2.')
 
     @torch.jit.export
     def set_weight(self, weight):
@@ -27,7 +27,7 @@ class EmbeddingPackedParams(torch.nn.Module):
         if self.dtype in [torch.quint8, torch.quint4x2]:
             self._packed_weight = torch.ops.quantized.embedding_bag_prepack(weight)
         else:
-            raise RuntimeError('Unsupported dtype for quantized embedding prepack!')
+            raise NotImplementedError('Unsupported dtype for quantized embedding prepack! Supports quint8 and quint4x2.')
 
 
     @torch.jit.export
@@ -35,7 +35,7 @@ class EmbeddingPackedParams(torch.nn.Module):
         if self.dtype in [torch.quint8, torch.quint4x2]:
             return torch.ops.quantized.embedding_bag_unpack(self._packed_weight)
         else:
-            raise RuntimeError('Unsupported dtype for quantized embedding unpack!')
+            raise NotImplementedError('Unsupported dtype for quantized embedding unpack! Supports quint8 and quint4x2.')
 
     def forward(self, x):
         return x
