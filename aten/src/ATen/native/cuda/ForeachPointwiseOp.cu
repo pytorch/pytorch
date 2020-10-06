@@ -97,19 +97,16 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors1, TensorList tens
     tensor_lists.emplace_back(tensors1.vec());
     tensor_lists.emplace_back(tensors2.vec());
     tensor_lists.emplace_back(std::move(vec_res));
-    auto res = std::max<int> (2, 3); // WORKS
-    auto res2 = std::max<float> (2, 3); // WORKS
-    
-    
+
     AT_DISPATCH_ALL_TYPES_AND(kHalf, tensors1[0].scalar_type(), "foreach_pointwise_op_cuda", [&]() {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
-        auto op = []  __device__ (opmath_t a, opmath_t b) -> opmath_t { return std::max(a, b); };
+        auto op = []  GPU_LAMBDA (opmath_t a, opmath_t b) -> opmath_t { return std::max(a, b); };
         multi_tensor_apply<3>(tensor_lists,
                               BinaryOpListFunctor<scalar_t>(),
                               op);
     });
 
-    return tensor_lists[3];
+    return tensor_lists[2];
 }
 
 }} // namespace at::native
