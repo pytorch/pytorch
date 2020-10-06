@@ -32,8 +32,8 @@ void to_backend_selective_impl(
       if (submodule.isModule()) {
         // If this is the last atom, store a reference to the
         // parent of the module that is about to be lowered.
-        if (i == e-1) {
-            parent = current;
+        if (i == e - 1) {
+          parent = current;
         }
         current = submodule.toModule();
       } else {
@@ -297,12 +297,14 @@ void initJitBackendBindings(PyObject* module) {
           const std::vector<std::string>& modules_to_lower) {
         if (auto original_module =
                 as_module(py::cast<py::object>(orig_module))) {
-          // Clone the original module so that type modifications don't interfere with
-          // the changes that to_backend_selective_impl will make.
+          // Clone the original module so that type modifications don't
+          // interfere with the changes that to_backend_selective_impl will
+          // make.
           Module& mod = original_module.value();
           auto cloned_mod = mod.clone();
           to_backend_selective_impl(cloned_mod, to_backend, modules_to_lower);
-          // Wrap the result in a RecursiveScriptModule because that's what the caller passed in.
+          // Wrap the result in a RecursiveScriptModule because that's what the
+          // caller passed in.
           return py::module::import("torch.jit._recursive")
               .attr("wrap_cpp_module")(cloned_mod);
         }
