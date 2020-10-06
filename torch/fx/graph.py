@@ -1,4 +1,4 @@
-from .node import Node, Argument, Target
+from .node import Node, Argument, Target, map_arg
 
 from typing import Callable, Any, List, Dict, Optional, Tuple, Set
 import builtins
@@ -52,23 +52,22 @@ def _format_target(base: str, target: str) -> str:
             r = f'{r}.{e}'
     return r
 
-def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
-    """ apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
-    if isinstance(a, (tuple, list)):
-        return type(a)(map_arg(elem, fn) for elem in a)
-    elif isinstance(a, dict):
-        return {k: map_arg(v, fn) for k, v in a.items()}
-    elif isinstance(a, slice):
-        return slice(map_arg(a.start, fn), map_arg(a.stop, fn), map_arg(a.step, fn))
-    elif isinstance(a, Node):
-        return fn(a)
-    else:
-        return a
+class insert_before:
+    def __init__(self, n : Node):
+        self.n = n
+
+    def __enter__(self):
+        self.orig_insert_point = self.n.graph._insert_point
+        self.n.graph._insert_point = self.n
+
+    def __exit__(self, type, value, tb):
+        self.n.graph._insert_point = self.orig_insert_point
 
 class Graph:
     def __init__(self):
         self._nodes : List[Node] = []
         self._used_names : Dict[str, int] = {}  # base name -> number
+        self._insert_point : Optional[Node] = None
 
     @property
     def nodes(self):
@@ -105,8 +104,37 @@ class Graph:
         self._mark_uses(kwargs)
         sanitized_name = self._register_name_used(name) if name is not None else self._name(target)
         n = Node(self, sanitized_name, op, target, args, kwargs)
-        self._nodes.append(n)
+        if self._insert_point is not None:
+            before_idx = self._nodes.index(self._insert_point)
+            self._nodes.insert(before_idx, n)
+        else:
+            self._nodes.append(n)
         return n
+
+    def move_node_before(self, to_move : Node, before : Node):
+        """
+        Move node `to_move` before `before` in the Graph. Both `Node` arguments
+        must be present in this graph.
+        """
+        # TODO: Computationally inefficient
+        if to_move.graph != self or before.graph != self:
+            raise RuntimeError('Node arguments must belong to this Graph!')
+        node_idx = self._nodes.index(to_move)
+        before_idx = self._nodes.index(before)
+        self._nodes.insert(before_idx, self._nodes.pop(node_idx))
+
+
+    def erase_node(self, to_erase : Node):
+        """
+        Erases the node `to_erase` from the `Graph`. Throws an exception if
+        there are still uses of that node in the `Graph`.
+        """
+        if to_erase.uses > 0:
+            raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {to_erase.uses} uses in the graph!')
+
+        node_indices = [i for i, n in enumerate(self._nodes) if n == to_erase]
+        for idx in reversed(node_indices):
+            self._nodes.pop(idx)
 
     # sugar for above when you know the op
     def placeholder(self, name: str) -> Node:
