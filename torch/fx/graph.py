@@ -2,6 +2,7 @@ from .node import Node, Argument, Target
 
 from typing import Callable, Any, List, Dict, Optional, Tuple, Set
 import builtins
+import inspect
 import torch
 import keyword
 import re
@@ -66,9 +67,17 @@ def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
         return a
 
 class Graph:
-    def __init__(self):
+    def __init__(self, annotations_dict : Optional[Dict[str, Any]] = None):
+        """
+        Construct an empty Graph. `annotations_dict` is an optional argument that
+        takes the dict that would appear on `__annotations__` for the Python
+        function that corresponds to this Graph. The annotations will be
+        used during code generation to ensure that arguments and returns have
+        the correct type annotations.
+        """
         self._nodes : List[Node] = []
         self._used_names : Dict[str, int] = {}  # base name -> number
+        self.annotations = annotations_dict if annotations_dict else {}
 
     @property
     def nodes(self):
@@ -207,7 +216,16 @@ class Graph:
         for node in self._nodes:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
-                free_vars.append(node.target)
+                def class_repr(o : Any):
+                    if inspect.isclass(o):
+                        qualified_name = f'{o.__module__}.{o.__qualname__}'
+                        modules_used.add(o.__module__)
+                        return qualified_name
+                    else:
+                        return repr(o)
+                maybe_type_annotation = '' if node.target not in self.annotations else \
+                                        f' : {class_repr(self.annotations[node.target])}'
+                free_vars.append(f'{node.target}{maybe_type_annotation}')
                 raw_name = node.target.replace('*', '')
                 if raw_name != node.name:
                     body.append(f'{node.name} = {raw_name}\n')

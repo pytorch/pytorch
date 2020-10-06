@@ -121,9 +121,9 @@ class Tracer(TracerBase):
 
     def trace(self, root: torch.nn.Module) -> Graph:
         self.root = root
-        self.graph = Graph()
-
         fn = type(root).forward
+        self.graph = Graph(fn.__annotations__)
+
         assert isinstance(fn, FunctionType)
         co = fn.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
