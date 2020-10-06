@@ -123,7 +123,7 @@ const Expr* combineMultilane(const Expr* lhs, const Expr* rhs) {
         throw malformed_input("multilane lane mismatch");
       }
       const Expr* ret = new Ramp(
-          new Op(bc->value(), ramp->base()), ramp->stride(), ramp->lanes());
+          new Op(ramp->base(), bc->value()), ramp->stride(), ramp->lanes());
       return ret;
     }
   }
@@ -1503,9 +1503,23 @@ const Expr* TermExpander::mutate(const Term* v) {
     if (lastNode) {
       // We want to avoid a leaving a CastNode on the scalar, so handle that
       // now.
-      if (v->scalar()->dtype() != lastNode->dtype()) {
-        lastNode = new Mul(
-            evaluateOp(new Cast(lastNode->dtype(), v->scalar())), lastNode);
+      auto termDtype = v->scalar()->dtype();
+      auto lastNodeDtype = lastNode->dtype();
+      if (termDtype != lastNodeDtype) {
+        const Expr* castV = v->scalar();
+        // Take care of lane mismatch first.
+        if (termDtype.lanes() != lastNodeDtype.lanes()) {
+          castV = new Broadcast(v->scalar(), lastNodeDtype.lanes());
+        }
+        // Now take care of scalar type as well.
+        if (termDtype.scalar_type() != lastNodeDtype.scalar_type()) {
+          castV = new Cast(lastNode->dtype(), castV);
+          // For scalars, we can simplify the cast further.
+          if (lastNodeDtype.lanes() == 1) {
+            castV = evaluateOp(castV);
+          }
+        }
+        lastNode = new Mul(castV, lastNode);
       } else {
         lastNode = new Mul(v->scalar(), lastNode);
       }
@@ -1930,7 +1944,6 @@ Block* TermExpander::fuseConditions(Block* v) {
     // erase, which shortens the list.
     stmts.pop_back();
     stmts.push_back(prev_cond);
-
     did_anything = true;
   }
 
@@ -1948,6 +1961,51 @@ Block* TermExpander::fuseConditions(Block* v) {
   return new Block(stmts);
 }
 
+Stmt* TermExpander::fuseSyncThreads(Block* block) {
+  // only really first if highest level Block.
+  bool first = block->get_parent() == nullptr;
+  SyncThreads* last = nullptr;
+  std::vector<Stmt*> stmts;
+  bool did_anything = false;
+
+  for (auto* s : *block) {
+    SyncThreads* sync = dynamic_cast<SyncThreads*>(s);
+    if (!sync) {
+      first = false;
+      last = nullptr;
+      stmts.push_back(s);
+      continue;
+    }
+
+    if (first || last) {
+      did_anything = true;
+      continue;
+    }
+
+    last = sync;
+    first = false;
+    stmts.push_back(s);
+  }
+
+  if (last) {
+    stmts.pop_back();
+    did_anything = true;
+  }
+
+  if (!did_anything) {
+    return block;
+  }
+
+  // clean up parents.
+  for (auto* s : stmts) {
+    if (s->get_parent() == block) {
+      block->remove_stmt(s);
+    }
+  }
+
+  return new Block({stmts});
+}
+
 Stmt* TermExpander::mutate(const Block* v) {
   Stmt* new_stmt = IRSimplifierBase::mutate(v);
   Block* new_block = dynamic_cast<Block*>(new_stmt);
@@ -1956,7 +2014,9 @@ Stmt* TermExpander::mutate(const Block* v) {
   }
 
   // fuseConditions will return the original block if it cannot fuse.
-  return fuseConditions(new_block);
+  new_block = fuseConditions(new_block);
+  /// fuseSyncThreads too.
+  return fuseSyncThreads(new_block);
 }
 
 bool exprEquals(const Expr* A, const Expr* B) {
