@@ -2,6 +2,10 @@ import torch
 from torch.fx import GraphModule  # type: ignore
 from torch.fx import symbolic_trace  # type: ignore
 from torch.fx.symbolic_trace import Tracer  # type: ignore
+from .custom_module_class_mappings import (
+    register_observed_custom_module_mapping,
+    register_quantized_custom_module_mapping,
+)
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
 from .fx.utils import graph_pretty_str  # noqa: F401
@@ -12,6 +16,11 @@ def _check_is_graph_module(model):
             'input model must be a GraphModule, ' +
             'Got type:' + str(type(model)) + ' Please make ' +
             'sure to follow the tutorials.')
+
+def _register_custom_module_class(custom_module_config):
+    for custom, observed, quantized in custom_module_config:
+        register_observed_custom_module_mapping(custom, observed)
+        register_quantized_custom_module_mapping(custom, quantized)
 
 def fuse_fx(graph_module, inplace=False):
     r""" Fuse modules in preparation for quantization
@@ -36,11 +45,16 @@ forward graph of the parent module,
     """
     # symbolically trace the model
     standalone_modules = qconfig_dict.get('standalone_module_name', [])
+    custom_module_config = qconfig_dict.get('custom_module_class', [])
+    custom_module_class = [config[0] for config in custom_module_config]
+    _register_custom_module_class(custom_module_config)
+
     class CustomTracer(Tracer):
         def is_leaf_module(self, m, module_qualified_name):
             return (m.__module__.startswith('torch.nn') and \
                 not isinstance(m, torch.nn.Sequential)) or \
-                module_qualified_name in standalone_modules
+                module_qualified_name in standalone_modules or \
+                type(m) in custom_module_class
 
     if is_standalone_module:
         # standlone module is traced before quantizing standalone modules
@@ -106,6 +120,12 @@ def prepare_fx(model, qconfig_dict, inplace=False):
       # These modules are symbolically traced and quantized as one unit
       "standalone_module_name": [
          "submodule.standalone"
+      ],
+
+      # optional: specify the custom module class and provide the corresponding
+      # observed and quantized custom module classes
+      "custom_module_class": [
+         (CustomModuleClass, ObservedCustomModuleClass, QuantizedCustomModuleClass)
       ]
       }
       `inplace`: flag for carry out model transformations in-place,
