@@ -254,7 +254,8 @@ SugaredValuePtr ModuleValue::getitem(
       throw ErrorReport(loc) << "Key Error, " << idx_str;
     } else if (auto h = concreteType_->getHint()) {
       // There was a type hint provided for this ModuleDict, so we can emit code
-      // to do a dictionary lookup at runtime instead of desugaring at compile time.
+      // to do a dictionary lookup at runtime instead of desugaring at compile
+      // time.
       DictTypePtr dict_type = h->expect<DictType>();
 
       std::vector<Value*> keys, values;
@@ -279,7 +280,8 @@ SugaredValuePtr ModuleValue::getitem(
 
       // Create a Dict in the graph with the collected keys and values.
       // TODO: Emit dict only once and reuse it across multiple getitem calls.
-      auto* dict = m.graph()->insertNode(m.graph()->createDict(dict_type->getKeyType(), dict_type->getValueType(), keys, values));
+      auto* dict = m.graph()->insertNode(m.graph()->createDict(
+          dict_type->getKeyType(), dict_type->getValueType(), keys, values));
       // Emit the lookup.
       auto dictSimpleValue = SimpleValue(dict->output());
       return dictSimpleValue.getitem(loc, m, idx);

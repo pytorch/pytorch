@@ -1,8 +1,8 @@
 from typing import Dict, List
 from torch.fx.graph_module import GraphModule
 from typing import Any
-from torch.fx.node import Node, Target
-from torch.fx.graph import Graph, map_arg
+from torch.fx.node import Node, Target, map_arg
+from torch.fx.graph import Graph
 
 
 """find_use is used to find out if the node is another node's arg or kwargs."""
@@ -52,5 +52,4 @@ def replace_target_nodes_with(
             val_map[node] = new_graph.create_node(new_op, new_target, args, kwargs, node.name)
         else:
             val_map[node] = new_graph.node_copy(node, lambda n : val_map[n])
-    new_graph.output(map_arg(fx_module.graph.result, lambda n: val_map[n]))
     fx_module.graph = new_graph

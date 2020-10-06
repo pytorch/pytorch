@@ -758,7 +758,7 @@ class MultiLabelMarginLoss(_Loss):
 
 class SmoothL1Loss(_Loss):
     r"""Creates a criterion that uses a squared term if the absolute
-    element-wise error falls below 1 and an L1 term otherwise.
+    element-wise error falls below beta and an L1 term otherwise.
     It is less sensitive to outliers than the `MSELoss` and in some cases
     prevents exploding gradients (e.g. see `Fast R-CNN` paper by Ross Girshick).
     Also known as the Huber loss:
@@ -779,6 +779,9 @@ class SmoothL1Loss(_Loss):
     the sum operation still operates over all the elements, and divides by :math:`n`.
 
     beta is an optional parameter that defaults to 1.
+
+    Note: When beta is set to 0, this is equivalent to :class:`L1Loss`.
+    Passing a negative value in for beta will result in an exception.
 
     The division by :math:`n` can be avoided if sets ``reduction = 'sum'``.
 
@@ -861,7 +864,7 @@ class SoftMarginLoss(_Loss):
 
 
 class CrossEntropyLoss(_WeightedLoss):
-    r"""This criterion combines :func:`nn.LogSoftmax` and :func:`nn.NLLLoss` in one single class.
+    r"""This criterion combines :class:`~torch.nn.LogSoftmax` and :class:`~torch.nn.NLLLoss` in one single class.
 
     It is useful when training a classification problem with `C` classes.
     If provided, the optional argument :attr:`weight` should be a 1D `Tensor`

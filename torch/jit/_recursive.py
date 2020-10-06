@@ -107,6 +107,10 @@ def infer_concrete_type_builder(nn_module, share_types=True, hint=None):
 
     class_annotations = getattr(nn_module, '__annotations__', {})
 
+    if "self" in class_annotations:
+        self_type = torch.jit.annotations.ann_to_type(class_annotations["self"], _jit_internal.fake_range())
+        concrete_type_builder.set_hint(self_type)
+
     # try to infer the type from type annotation or from the object itself
     def infer_type(name, item):
         # The forward function from Module is special; never use this annotations; we

@@ -445,6 +445,9 @@ class TestModuleContainers(JitTestCase):
                 super().__init__()
 
             def forward(self, inp: Any) -> Any:
+                if isinstance(inp, torch.Tensor):
+                    return torch.max(inp, dim=0)
+
                 return inp
 
 
@@ -459,4 +462,17 @@ class TestModuleContainers(JitTestCase):
                 return self.d[key].forward(x)
 
         m = Mod()
+        self.checkModule(m, (torch.randn(2, 2), "module"))
+
+
+        class ModDict(torch.nn.ModuleDict):
+            __annotations__ = {"self": Dict[str, ModuleInterface]}
+
+            def __init__(self):
+                super().__init__({"module": MyModule()})
+
+            def forward(self, x: torch.Tensor, key: str) -> Any:
+                return self[key].forward(x)
+
+        m = ModDict()
         self.checkModule(m, (torch.randn(2, 2), "module"))

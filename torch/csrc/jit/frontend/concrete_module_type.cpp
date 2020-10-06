@@ -92,9 +92,7 @@ ConcreteModuleType::ConcreteModuleType(ConcreteModuleTypeBuilder data)
 bool operator==(
     const ConcreteModuleTypeBuilder::ModuleInfo& lhs,
     const ConcreteModuleTypeBuilder::ModuleInfo& rhs) {
-  bool equal = lhs.name_ == rhs.name_ && lhs.meta_->equals(*rhs.meta_);
-
-  return equal;
+  return lhs.name_ == rhs.name_ && lhs.meta_->equals(*rhs.meta_);
 }
 
 bool ConcreteModuleTypeBuilder::equals(
@@ -113,7 +111,6 @@ bool ConcreteModuleTypeBuilder::equals(
       overloads_ == other.overloads_ &&
       functionAttributes_ == other.functionAttributes_ &&
       builtinFunctions_ == other.builtinFunctions_;
-
   // clang-format on
   if (!equal) {
     return false;
