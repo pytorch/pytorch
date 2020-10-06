@@ -43,6 +43,7 @@ std::string opTypeToString(OpType opType) {
     default:
       TORCH_INTERNAL_ASSERT("Unknown op type!");
   }
+  return "UNKNOWN";
 }
 
 bool isP2POp(OpType opType) {
