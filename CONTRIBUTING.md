@@ -131,7 +131,10 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
 * If you run into errors when running `python setup.py develop`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
   your CMake works and can compile this simple Hello World program without errors.
-  2. If you have made edits to the PyTorch repo, commit any change you'd like to keep and clean the repo with the
+  2. Nuke your `build` directory. The `setup.py` script compiles binaries into the `build` folder and caches many
+  details along the way, which saves time the next time you build. If you're running into issues, you can always
+  `rm -rf build` from the toplevel `pytorch` directory and start over.
+  3. If you have made edits to the PyTorch repo, commit any change you'd like to keep and clean the repo with the
   following commands (note that clean _really_ removes all untracked files and changes.):
   ```bash
   git submodule deinit -f .
@@ -140,9 +143,6 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
   git submodule update --init --recursive # very important to sync the submodules
   python setup.py develop                 # then try running the command again
   ```
-  3. If you still get failures, nuke your `build` directory. The `setup.py` script compiles binaries into the
-  `build` folder and caches many details along the way, which saves time the next time you build. If you're running
-  into issues, you can always `rm -rf build` from the toplevel `pytorch` directory and start over.
   4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
   experiment with some environment variables, you can pass them into the command:
   ```bash
