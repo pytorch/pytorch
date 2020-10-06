@@ -1291,8 +1291,8 @@ class DistributedTest:
                     tensors = list(map(tensors, lambda t: t.cuda(rank_to_GPU[rank][0])))
                 dist.all_reduce_coalesced(tensors, op, group_id)
                 expected_tensors = [
-                        _build_tensor(src + 1, expected_value, dtype=dtype)
-                        for dtype, expected_value in zip(dtypes, expected_values)
+                    _build_tensor(src + 1, expected_value, dtype=dtype)
+                    for dtype, expected_value in zip(dtypes, expected_values)
                 ]
                 self.assertEqual(
                     tensors,
@@ -2088,7 +2088,7 @@ class DistributedTest:
         @unittest.skipIf(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @unittest.skipIf(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
         @skip_if_no_gpu
-        def test_all_reduce_multigpu(self):
+        def test_all_reduce_multigpu_complex(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
             self._test_all_reduce_multigpu_helper(
@@ -2097,9 +2097,9 @@ class DistributedTest:
                 rank,
                 rank_to_GPU,
                 dist.ReduceOp.SUM,
-                complex(2,3),
-                complex(10,11),
-                (complex(2,3) + complex(10,11) * (len(group) - 1)) * len(rank_to_GPU[0]),
+                complex(2, 3),
+                complex(10, 11),
+                (complex(2, 3) + complex(10, 11) * (len(group) - 1)) * len(rank_to_GPU[0]),
                 dtype=torch.cfloat,
             )
 
