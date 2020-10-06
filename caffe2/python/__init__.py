@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 from caffe2.proto import caffe2_pb2
 import os
 import sys
