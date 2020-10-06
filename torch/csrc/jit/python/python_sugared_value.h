@@ -144,8 +144,10 @@ struct SugaredDict;
 // holding the actual nn.Module class.
 
 struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
-  ModuleValue(Value* self, std::shared_ptr<ConcreteModuleType> concreteType)
-      : self_(self), concreteType_(std::move(concreteType)) {}
+  ModuleValue(
+      Value* self,
+      std::shared_ptr<ConcreteModuleType> concreteType,
+      TypePtr hint = nullptr);
 
   std::string kind() const override {
     return "module";
@@ -206,6 +208,13 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
  private:
   Value* self_;
   std::shared_ptr<ConcreteModuleType> concreteType_;
+  // A type hint for this Module that can unlock additional features not
+  // permitted for Modules without hints (e.g. indexing with non-static keys for
+  // ModuleDicts).
+  TypePtr hint_;
+  // If this is a ModuleDict with a hint_, this is a pointer to a dictionary in
+  // the graph that can be reused across lookups.
+  std::shared_ptr<SimpleValue> dict_{nullptr};
 };
 
 bool isNamedTupleClass(const py::object& obj);

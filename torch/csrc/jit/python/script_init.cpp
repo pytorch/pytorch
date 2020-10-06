@@ -1558,7 +1558,14 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "add_builtin_function",
           &ConcreteModuleTypeBuilder::addBuiltinFunction)
-      .def("add_module", &ConcreteModuleTypeBuilder::addModule)
+      .def(
+          "add_module",
+          [](ConcreteModuleTypeBuilder& self,
+             std::string name,
+             std::shared_ptr<ConcreteModuleType> meta,
+             TypePtr hint = nullptr) {
+            self.addModule(std::move(name), std::move(meta), hint);
+          })
       .def("add_overload", &ConcreteModuleTypeBuilder::addOverload)
       .def("set_poisoned", &ConcreteModuleTypeBuilder::setPoisoned)
       .def(

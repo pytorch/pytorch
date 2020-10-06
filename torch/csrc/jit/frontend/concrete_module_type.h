@@ -74,7 +74,10 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
       const TypePtr& type,
       py::object pyFunction);
 
-  void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
+  void addModule(
+      std::string name,
+      std::shared_ptr<ConcreteModuleType> meta,
+      TypePtr hint = nullptr);
 
   void addOverload(
       std::string methodName,
@@ -82,6 +85,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   void addBuiltinFunction(std::string name, std::string symbol_name);
   void addFailedAttribute(std::string name, std::string failureReason);
   void setIterableModuleKind(IterableModuleKind kind);
+  // Set a type hint on this Module (perhaps an InterfaceType).
   void setHint(TypePtr hint);
 
   // If a ConcreteModuleType is poisoned, it will never compare equal to any
@@ -124,13 +128,17 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   };
 
   struct ModuleInfo {
-    ModuleInfo(std::string name, std::shared_ptr<ConcreteModuleType> meta)
-        : name_(std::move(name)), meta_(std::move(meta)) {}
+    ModuleInfo(
+        std::string name,
+        std::shared_ptr<ConcreteModuleType> meta,
+        TypePtr hint = nullptr)
+        : name_(std::move(name)), meta_(std::move(meta)), hint_(hint) {}
 
     friend bool operator==(const ModuleInfo& lhs, const ModuleInfo& rhs);
 
     std::string name_;
     std::shared_ptr<ConcreteModuleType> meta_;
+    TypePtr hint_;
   };
 
  private:
@@ -169,6 +177,9 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // The original `nn.Module` class that we derived this ScriptModule from.
   py::object pyClass_;
 
+  // A type hint for this Module (most likely an InterfaceType or some related
+  // type). This can be used to unlock additional operations like indexing
+  // without a static key.
   TypePtr hint_{nullptr};
 
   // NOTE: If you ever add any more state to this struct, you need to make sure
@@ -194,6 +205,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   c10::optional<c10::Symbol> findBuiltinFunction(const std::string& name) const;
   std::shared_ptr<ConcreteModuleType> findSubmoduleConcreteType(
       const std::string& name) const;
+  TypePtr findSubmoduleHint(const std::string& name) const;
   c10::optional<std::string> findFailedAttribute(const std::string& name) const;
 
   // These getters are only here to return things as types that can be

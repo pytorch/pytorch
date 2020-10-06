@@ -92,7 +92,14 @@ ConcreteModuleType::ConcreteModuleType(ConcreteModuleTypeBuilder data)
 bool operator==(
     const ConcreteModuleTypeBuilder::ModuleInfo& lhs,
     const ConcreteModuleTypeBuilder::ModuleInfo& rhs) {
-  return lhs.name_ == rhs.name_ && lhs.meta_->equals(*rhs.meta_);
+  bool equals = lhs.name_ == rhs.name_;
+  equals &= lhs.meta_->equals(*rhs.meta_);
+
+  if (lhs.hint_ && rhs.hint_) {
+    equals &= *lhs.hint_ == *rhs.hint_;
+  }
+
+  return equals;
 }
 
 bool ConcreteModuleTypeBuilder::equals(
@@ -202,6 +209,17 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
   return it->meta_;
 }
 
+TypePtr ConcreteModuleType::findSubmoduleHint(const std::string& name) const {
+  const auto it = std::find_if(
+      data_.modules_.cbegin(),
+      data_.modules_.cend(),
+      [&](const ConcreteModuleTypeBuilder::ModuleInfo& info) {
+        return info.name_ == name;
+      });
+  TORCH_INTERNAL_ASSERT(it != data_.modules_.end());
+  return it->hint_;
+}
+
 void ConcreteModuleTypeBuilder::setHint(TypePtr hint) {
   hint_ = hint;
 }
@@ -272,9 +290,10 @@ void ConcreteModuleTypeBuilder::addBuiltinFunction(
 
 void ConcreteModuleTypeBuilder::addModule(
     std::string name,
-    std::shared_ptr<ConcreteModuleType> meta) {
-  modules_.emplace_back(
-      ConcreteModuleTypeBuilder::ModuleInfo{std::move(name), std::move(meta)});
+    std::shared_ptr<ConcreteModuleType> meta,
+    TypePtr hint) {
+  modules_.emplace_back(ConcreteModuleTypeBuilder::ModuleInfo{
+      std::move(name), std::move(meta), hint});
 }
 
 void ConcreteModuleTypeBuilder::addOverload(
