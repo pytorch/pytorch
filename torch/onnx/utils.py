@@ -533,18 +533,18 @@ def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=Traini
         the user for their runtime backend.
         Example graph::
 
-            graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
+            graph(%0 : Float(2, 3, 4, strides=[12, 4, 1], requires_grad=0, device=cpu)):
                 %6 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
                 %4 : None = prim::Constant()
-                %5 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
+                %5 : Float(2, 3, 4, strides=[12, 4, 1], requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
                 return (%5)
 
         is exported as::
 
-            graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
+            graph(%0 : Float(2, 3, 4, strides=[12, 4, 1], requires_grad=0, device=cpu)):
                 %6 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
                 %4 : None = prim::Constant()
-                %5 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
+                %5 : Float(2, 3, 4, strides=[12, 4, 1], requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
                 return (%5)
 
         In the above example, aten::cumsum in not implemented in opset 9, hence exporter falls
