@@ -381,15 +381,15 @@ def jacobian(func, inputs, create_graph=False, strict=False):
             Defaults to ``False``.
 
     Returns:
-        Jacobian (Tensor or nested tuple of Tensors): if there are a single
-            input and output, this will be a single Tensor containing the
-            Jacobian for the linearized inputs and output. If one of the two is
-            a tuple, then the Jacobian will be a tuple of Tensors. If both of
-            them are tuples, then the Jacobian will be a tuple of tuple of
-            Tensors where ``Jacobian[i][j]`` will contain the Jacobian of the
-            ``i``\th output and ``j``\th input and will have as size the
-            concatenation of the sizes of the corresponding output and the
-            corresponding input.
+        Jacobian (Tensor or nested tuple of Tensors): if there is a single
+        input and output, this will be a single Tensor containing the
+        Jacobian for the linearized inputs and output. If one of the two is
+        a tuple, then the Jacobian will be a tuple of Tensors. If both of
+        them are tuples, then the Jacobian will be a tuple of tuple of
+        Tensors where ``Jacobian[i][j]`` will contain the Jacobian of the
+        ``i``\th output and ``j``\th input and will have as size the
+        concatenation of the sizes of the corresponding output and the
+        corresponding input.
 
     Example:
 
@@ -476,12 +476,12 @@ def hessian(func, inputs, create_graph=False, strict=False):
             Defaults to ``False``.
 
     Returns:
-        Hessian (Tensor or a tuple of tuple of Tensors) if there are a single input,
-            this will be a single Tensor containing the Hessian for the input.
-            If it is a tuple, then the Hessian will be a tuple of tuples where
-            ``Hessian[i][j]`` will contain the Hessian of the ``i``\th input
-            and ``j``\th input with size the sum of the size of the ``i``\th input plus
-            the size of the ``j``\th input.
+        Hessian (Tensor or a tuple of tuple of Tensors): if there is a single input,
+        this will be a single Tensor containing the Hessian for the input.
+        If it is a tuple, then the Hessian will be a tuple of tuples where
+        ``Hessian[i][j]`` will contain the Hessian of the ``i``\th input
+        and ``j``\th input with size the sum of the size of the ``i``\th input plus
+        the size of the ``j``\th input.
 
     Example:
 
@@ -660,7 +660,9 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
             hvp for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
     Returns:
-        func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
+        output (tuple): tuple with:
+            func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
+
             hvp (tuple of Tensors or Tensor): result of the dot product with
             the same shape as the inputs.
 

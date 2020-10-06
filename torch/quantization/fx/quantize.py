@@ -3,12 +3,12 @@ from torch.fx import (
     GraphModule,
     Proxy,
     symbolic_trace,
+    map_arg
 )
 
 from torch.fx.graph import (
     Graph,
     Node,
-    map_arg,
 )
 
 from torch.quantization import (
