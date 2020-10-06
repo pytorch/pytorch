@@ -59,8 +59,25 @@ void FusionExecutor::debugCompileFusionFromStr(
               << std::endl;
   }
 
+  setUsedTVs();
+
   fusion_id_ = id;
   lowered_ = GpuLower(&fusion_);
+  const auto kernel = lowered_.kernel();
+
+  const auto& kernel_summary = kernel->summary();
+  has_block_reductions = kernel_summary.has_block_reductions;
+  has_grid_reductions = kernel_summary.has_grid_reductions;
+  has_block_broadcasts = kernel_summary.has_block_broadcasts;
+
+  if (!kernel_summary.static_smem_allocations.empty()) {
+    StatefulExpressionEvaluator static_evaluator(&fusion_);
+    unsigned static_smem_size = computeSharedMemory(
+        static_evaluator, kernel_summary.static_smem_allocations);
+    TORCH_INTERNAL_ASSERT(
+        static_smem_size < max_device_smem,
+        "The static shared memory allocation is larger than available memory.");
+  }
 
   compiled_kernel_ = executor_utils::nvrtcCompile(code, name, fusion_id_);
   TORCH_INTERNAL_ASSERT(
@@ -470,7 +487,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
         launch_params.bdimx(),
         launch_params.bdimy(),
         launch_params.bdimz(),
-        launch_params.smem(),
+        launch_params.smem() * 4,
         stream,
         kernel_arguments.getBuffer(),
         nullptr));
