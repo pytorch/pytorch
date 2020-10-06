@@ -10,7 +10,7 @@ These are the basic building block for graphs
     :depth: 2
     :local:
     :backlinks: top
-    
+
 
 .. currentmodule:: torch.nn
 
@@ -269,6 +269,7 @@ Loss Functions
     nn.CosineEmbeddingLoss
     nn.MultiMarginLoss
     nn.TripletMarginLoss
+    nn.TripletMarginWithDistanceLoss
 
 Vision Layers
 ----------------

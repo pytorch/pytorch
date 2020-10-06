@@ -7,9 +7,7 @@
 #include <test/cpp/tensorexpr/padded_buffer.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/bounds_inference.h>
-#include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
-#include <torch/csrc/jit/tensorexpr/function.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
@@ -577,11 +575,11 @@ void testExprSplitWithMask01() {
   KernelScope kernel_scope;
   const int M = 26;
   const int N = 5;
-  Buffer a_buf("a", kFloat, {M, N});
-  Buffer b_buf("b", kFloat, {M, N});
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {M, N});
   Tensor* tensor = Compute(
       "f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
-        return a_buf(m, n) + b_buf(m, n) + 1.0f;
+        return a_buf.load(m, n) + b_buf.load(m, n) + 1.0f;
       });
   For* n_outer;
   For* n_inner;
@@ -609,13 +607,47 @@ void testExprSplitWithMask01() {
   ExpectAllNear(c_v, c_ref, 1e-5);
 }
 
+// Tests the case where we split a loop cleanly multiple times, we should not
+// insert any masks.
+void testExprSplitWithMaskRepeatedNoMask() {
+  KernelScope kernel_scope;
+  const int M = 64;
+  Placeholder a_buf("a", kFloat, {M});
+  Placeholder b_buf("b", kFloat, {M});
+  Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
+    return a_buf.load(m) + b_buf.load(m) + 1.0f;
+  });
+
+  LoopNest l({tensor});
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+  For *outer, *mid, *inner;
+  l.splitWithMask(loops[0], 4, &outer, &inner);
+  l.splitWithMask(outer, 4, &outer, &mid);
+
+  Stmt* stmt1 = IRSimplifier::simplify(l.root_stmt());
+  std::ostringstream oss;
+  oss << *stmt1;
+
+  // Two splits mean 3 loops, but should need no masks in this case.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (
+# CHECK-NOT: if (
+# CHECK:   for (
+# CHECK-NOT: if (
+# CHECK:     for (
+# CHECK-NOT: if (
+# CHECK:       f[)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
 void testSplitWithTailWithLoopOptions() {
   KernelScope kernel_scope;
   const int M = 21;
-  Buffer a_buf("a", kFloat, {M});
-  Buffer b_buf("b", kFloat, {M});
+  Placeholder a_buf("a", kFloat, {M});
+  Placeholder b_buf("b", kFloat, {M});
   Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
-    return a_buf(m) + b_buf(m) + 1.0f;
+    return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
   For *outer, *inner, *tail;
 
@@ -642,10 +674,10 @@ void testSplitWithTailWithLoopOptions() {
 void testSplitWithMaskWithLoopOptions() {
   KernelScope kernel_scope;
   const int M = 21;
-  Buffer a_buf("a", kFloat, {M});
-  Buffer b_buf("b", kFloat, {M});
+  Placeholder a_buf("a", kFloat, {M});
+  Placeholder b_buf("b", kFloat, {M});
   Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
-    return a_buf(m) + b_buf(m) + 1.0f;
+    return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
   For *outer, *inner;
 
@@ -667,13 +699,13 @@ void testScheduleBroadcastAddBuffer() {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Buffer a_buf("a", kFloat, {M, N});
-  Buffer b_buf("b", kFloat, {N, K});
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {N, K});
   Tensor* c = Compute(
       "broadcast_add",
       {{M, "m"}, {N, "n"}, {K, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf(m, n) + b_buf(n, k);
+        return a_buf.load(m, n) + b_buf.load(n, k);
       });
   LoopNest l({c});
   Stmt* stmt = l.root_stmt();
@@ -716,13 +748,13 @@ void testScheduleFunctionCall01() {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Buffer a_buf("a", kFloat, {M, N});
-  Buffer b_buf("b", kFloat, {N, K});
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {N, K});
   Tensor* c = Compute(
       "broadcast_add",
       {{M, "m"}, {N, "n"}, {K, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf(m, n) + b_buf(n, k);
+        return a_buf.load(m, n) + b_buf.load(n, k);
       });
   Tensor* d = Compute(
       "d",
@@ -773,22 +805,22 @@ void testScheduleInlineSimple() {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Buffer a_buf("a", kFloat, {M, N});
-  Buffer b_buf("b", kFloat, {N, K});
-  Buffer c_buf("c", kFloat, {M, N});
-  Buffer d_buf("d", kFloat, {M, K});
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {N, K});
+  Placeholder c_buf("c", kFloat, {M, N});
+  Placeholder d_buf("d", kFloat, {M, K});
 
   Tensor* x = Compute(
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf(m, n) * b_buf(n, k);
+        return a_buf.load(m, n) * b_buf.load(n, k);
       });
   Tensor* y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c_buf(m, n) * d_buf(m, k) + x->call(m, n, k);
+        return c_buf.load(m, n) * d_buf.load(m, k) + x->call(m, n, k);
       });
 
   LoopNest l1({y});
@@ -854,22 +886,22 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Buffer a_buf("a", kFloat, {M, N});
-  Buffer b_buf("b", kFloat, {N, K});
-  Buffer c_buf("c", kFloat, {M, N});
-  Buffer d_buf("d", kFloat, {M, K});
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {N, K});
+  Placeholder c_buf("c", kFloat, {M, N});
+  Placeholder d_buf("d", kFloat, {M, K});
 
   Tensor* x = Compute(
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf(m, n) * b_buf(n, k);
+        return a_buf.load(m, n) * b_buf.load(n, k);
       });
   Tensor* y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c_buf(m, n) * d_buf(m, k) + x->call(m, n, k);
+        return c_buf.load(m, n) * d_buf.load(m, k) + x->call(m, n, k);
       });
   Tensor* z = Compute(
       "z",
@@ -942,8 +974,9 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
         "z",
         {{M, "m3"}, {N, "n3"}, {K, "k3"}},
         [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-          return a_buf(m, n) * b_buf(n, k) +
-              (c_buf(m, n) * d_buf(m, k) + a_buf(m, n) * b_buf(n, k));
+          return a_buf.load(m, n) * b_buf.load(n, k) +
+              (c_buf.load(m, n) * d_buf.load(m, k) +
+               a_buf.load(m, n) * b_buf.load(n, k));
         });
     LoopNest l2({z2});
     l2.prepareForCodegen();
@@ -1090,14 +1123,14 @@ void testScheduleInlineIntrinsics() {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Buffer a_buf("a", kFloat, {M, N});
-  Buffer b_buf("b", kFloat, {N, K});
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {N, K});
 
   Tensor* x = Compute(
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf(m, n) * b_buf(n, k);
+        return a_buf.load(m, n) * b_buf.load(n, k);
       });
   Tensor* y = Compute(
       "y",
@@ -1455,11 +1488,11 @@ void testScheduleFuserStyle() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
 
   Tensor* b = Compute(
       "f", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
-        return a_buf(axes[0]) + 11.0f;
+        return a_buf.load(axes[0]) + 11.0f;
       });
 
   Tensor* c = Compute(
@@ -1488,19 +1521,19 @@ void testScheduleFuserThreeArg() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Buffer b(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
-  Buffer c(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
-  Buffer d(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder a(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder b(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder c(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder d(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
 
   Tensor* e = Compute("e", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
-    return a(i) + b(i);
+    return a.load(i) + b.load(i);
   });
   Tensor* f = Compute("f", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
-    return (*e)(i) + c(i);
+    return e->call(i) + c.load(i);
   });
   Tensor* g = Compute("g", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
-    return (*f)(i) + d(i);
+    return f->call(i) + d.load(i);
   });
 
   LoopNest l({g});
@@ -1526,11 +1559,11 @@ void testScheduleDynamicShape2D() {
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
-    Buffer a(BufHandle("a", {m, n}, kFloat));
-    Buffer b(BufHandle("b", {m, n}, kFloat));
+    Placeholder a(BufHandle("a", {m, n}, kFloat));
+    Placeholder b(BufHandle("b", {m, n}, kFloat));
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
-          return a(i, j) + b(i, j);
+          return a.load(i, j) + b.load(i, j);
         });
     LoopNest l({c});
     Stmt* s = l.root_stmt();
@@ -2050,16 +2083,19 @@ void testLoopNestReorderExtraStatements() {
       });
   LoopNest l({tensor});
 
-  Buffer extra(BufHandle("res", {6, 3}, kFloat));
+  Placeholder extra(BufHandle("res", {6, 3}, kFloat));
 
   auto loops = l.getLoopStmtsFor(tensor);
 
   VarHandle i = VarHandle(loops[0]->var());
 
-  Stmt* store_1 = Store::make(extra, {i, 0}, ExprHandle(1.f), 1);
-  Stmt* store_2 = Store::make(extra, {i, 1}, ExprHandle(2.f), 1);
+  Stmt* store_1 =
+      Store::make(BufHandle(extra.data()), {i, 0}, ExprHandle(1.f), 1);
+  Stmt* store_2 =
+      Store::make(BufHandle(extra.data()), {i, 1}, ExprHandle(2.f), 1);
   // stmt 3 is the Function body.
-  Stmt* store_3 = Store::make(extra, {i, 2}, ExprHandle(4.f), 1);
+  Stmt* store_3 =
+      Store::make(BufHandle(extra.data()), {i, 2}, ExprHandle(4.f), 1);
 
   loops[0]->body()->prepend_stmt(store_1);
   loops[1]->body()->prepend_stmt(store_2);
@@ -2190,16 +2226,16 @@ void LoopNestReorderTestHelper(
       [](const std::vector<VarHandle>&) { return -1; });
   LoopNest l({c});
 
-  Buffer extra(BufHandle("extra", {5}, kInt));
+  Placeholder extra(BufHandle("extra", {5}, kInt));
 
   auto loops = l.getLoopStmtsFor(c);
   int j = 0;
   for (auto* l : loops) {
     // Add an increment at each layer of the loop which counts the number of
     // times the loop executes.
-    Load* load = new Load(extra, {new IntImm(j)}, new IntImm(1));
+    Load* load = new Load(extra.data(), {new IntImm(j)}, new IntImm(1));
     Add* add = new Add(load, new IntImm(1));
-    Stmt* store = Store::make(extra, {j}, ExprHandle(add), 1);
+    Stmt* store = new Store(extra.data(), {new IntImm(j)}, add, new IntImm(1));
     if (prepend) {
       l->body()->prepend_stmt(store);
     }
@@ -2301,22 +2337,22 @@ void testLoopNestReorderInternalLoopNest() {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Buffer a_buf("a", kFloat, {M, N});
-  Buffer b_buf("b", kFloat, {N, K});
-  Buffer c_buf("c", kFloat, {M, N});
-  Buffer d_buf("d", kFloat, {M, K});
+  Placeholder a_buf("a", kFloat, {M, N});
+  Placeholder b_buf("b", kFloat, {N, K});
+  Placeholder c_buf("c", kFloat, {M, N});
+  Placeholder d_buf("d", kFloat, {M, K});
 
   Tensor* x = Compute(
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf(m, n) * b_buf(n, k);
+        return a_buf.load(m, n) * b_buf.load(n, k);
       });
   Tensor* y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c_buf(m, n) * d_buf(m, k) + x->call(m, n, k);
+        return c_buf.load(m, n) * d_buf.load(m, k) + x->call(m, n, k);
       });
   Tensor* z = Compute(
       "z",
@@ -2824,9 +2860,9 @@ void testNormalizeAndSplitWithTail() {
 
   // Create a dummy tensor to construct LoopNest.
   ExprHandle n(100);
-  Buffer a(BufHandle("a", {n}, kFloat));
+  Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor* b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
+      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
 
   // Input IR:
@@ -2872,9 +2908,10 @@ void testDetectInlineRankMismatch() {
   KernelScope kernel_scope;
   const int kTotalSize = 8;
 
-  Buffer a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Tensor* a = Compute(
-      "a", {{kTotalSize, "i"}}, [&](const VarHandle& i) { return a_buf(i); });
+  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Tensor* a = Compute("a", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
+    return a_buf.load(i);
+  });
   Tensor* reshape = Compute(
       "reshape",
       {{kTotalSize / 2, "i"}, {2, "j"}},
@@ -2882,7 +2919,7 @@ void testDetectInlineRankMismatch() {
   LoopNest l({reshape});
   ASSERT_THROWS_WITH(
       l.computeInline(l.getLoopBodyFor(a)),
-      "Buffer indexed access is inconsistent with its rank");
+      "Placeholder indexed access is inconsistent with its rank");
 }
 
 } // namespace jit

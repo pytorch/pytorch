@@ -502,6 +502,7 @@ _(aten, multinomial) \
 _(aten, mv) \
 _(aten, mvlgamma) \
 _(aten, nansum) \
+_(aten, nan_to_num) \
 _(aten, narrow) \
 _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
@@ -611,6 +612,7 @@ _(aten, sigmoid) \
 _(aten, sign) \
 _(aten, signbit) \
 _(aten, silu) \
+_(aten, sgn) \
 _(aten, sin) \
 _(aten, sinh) \
 _(aten, size) \
