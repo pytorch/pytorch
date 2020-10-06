@@ -15,17 +15,14 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(qsigmoid_stub);
+DEFINE_DISPATCH(qsigmoid_observed_output_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
-// This ALWAYS outputs scale=1.0/256, dtype=quint8
-// The zero_point is 0 for qint32 and quint8, but -128 for qint8.
-Tensor qnnpack_sigmoid(Tensor input) {
+Tensor qnnpack_sigmoid_observed_output(
+    Tensor input, double output_scale, int64_t output_zero_point) {
   TORCH_CHECK(input.ndimension() > 0, "qnnpack_sigmoid(): Got empty input tensor");
 
   Tensor qy;
-  constexpr float output_scale = 1.0f / 256.0f;
-  constexpr int32_t output_zero_point = 0;
-
   initQNNPACK();
 
   Tensor input_contig = input.contiguous(input.suggest_memory_format());
@@ -76,6 +73,15 @@ Tensor qnnpack_sigmoid(Tensor input) {
     "failed to run QNNPACK sigmoid operator");
   return qy;
 }
+
+// This ALWAYS outputs scale=1.0/256, dtype=quint8
+// The zero_point is 0 for qint32 and quint8, but -128 for qint8.
+Tensor qnnpack_sigmoid(Tensor input) {
+  constexpr double output_scale = 1.0f / 256.0f;
+  constexpr int64_t output_zero_point = 0;
+  return qnnpack_sigmoid_observed_output(input, output_scale, output_zero_point);
+}
+
 #endif  // USE_PYTORCH_QNNPACK
 
 Tensor sigmoid_quantized_cpu(const Tensor& qx) {
@@ -89,4 +95,27 @@ Tensor sigmoid_quantized_cpu(const Tensor& qx) {
   qsigmoid_stub(qx.device().type(), qx, qy);
   return qy;
 }
+
+namespace {
+
+class QSigmoid final {
+ public:
+  static Tensor run(Tensor qx, double output_scale, int64_t output_zero_point) {
+#ifdef USE_PYTORCH_QNNPACK
+  if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
+      qx.scalar_type() == kQUInt8) {
+    return qnnpack_sigmoid_observed_output(qx, output_scale, output_zero_point);
+  }
+#endif  // USE_PYTORCH_QNNPACK
+  Tensor qy;
+  qsigmoid_observed_output_stub(qx.device().type(), qx, qy, output_scale, output_zero_point);
+  return qy;
+  }
+};
+
+TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("quantized::sigmoid"), TORCH_FN(QSigmoid::run));
+}
+} // namespace
+
 }}  // namespace at::native
