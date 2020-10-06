@@ -15,6 +15,7 @@ class Function {
  public:
   Function(c10::QualifiedName name);
   bool run(Stack& stack) const;
+  c10::IValue operator()(Stack& stack);
   const std::string& name() const;
   const c10::QualifiedName& qualname() const;
   void append_instruction(OpCode op, int X, int N);

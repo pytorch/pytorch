@@ -1,10 +1,6 @@
 """Provides an API for writing protocol buffers to event files to be
 consumed by TensorBoard for visualization."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import os
 import six
 import time
@@ -830,7 +826,7 @@ class SummaryWriter(object):
             metadata, label_img, fs, subdir, global_step, tag)
         self._projector_config.embeddings.extend([embedding_info])
 
-        from google.protobuf import text_format
+        from google.protobuf import text_format  # type: ignore
         config_pbtxt = text_format.MessageToString(self._projector_config)
         write_pbtxt(self._get_file_writer().get_logdir(), config_pbtxt)
 

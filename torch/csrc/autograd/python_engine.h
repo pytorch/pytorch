@@ -25,7 +25,7 @@ struct PythonEngine : public Engine {
       bool create_graph,
       const edge_list& outputs = {}) override;
 
-  std::shared_ptr<FutureVariableList> execute_with_graph_task(
+  std::shared_ptr<at::ivalue::Future> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
       std::shared_ptr<Node> graph_root) override;
 

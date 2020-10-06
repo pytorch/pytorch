@@ -4733,9 +4733,9 @@ class TestValidation(TestCase):
                 try:
                     with self.assertRaises(ValueError):
                         Dist(validate_args=True, **param)
-                except AssertionError:
+                except AssertionError as e:
                     fail_string = 'ValueError not raised for {} example {}/{}'
-                    raise AssertionError(fail_string.format(Dist.__name__, i + 1, len(params)))
+                    raise AssertionError(fail_string.format(Dist.__name__, i + 1, len(params))) from e
 
     def tearDown(self):
         super(TestValidation, self).tearDown()
@@ -4926,8 +4926,8 @@ class TestJit(TestCase):
 
             # check on different data
             values, sample = self._perturb(Dist, keys, values, sample)
-            expected = f(*values)
-            actual = traced_f(*values)
+            expected = f(*values).clone()
+            actual = traced_f(*values).clone()
             expected[expected == float('inf')] = 0.
             actual[actual == float('inf')] = 0.
             self.assertEqual(expected, actual,

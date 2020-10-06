@@ -9,17 +9,14 @@ from torch._jit_internal import (
     _overload,
     _overload_method,
     ignore,
+    is_scripting,
     export,
     unused,
-)
-from torch.jit._backends import (
-    selective_to_jit_backend,
 )
 from torch.jit._script import (
     script,
     Attribute,
     ScriptModule,
-    is_scripting,
     script_method,
     RecursiveScriptModule,
     ScriptWarning,

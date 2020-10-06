@@ -59,6 +59,9 @@ PyTorch, see the [Contributing Guide](docs/source/community/contribution_guide.r
 
 ## Developing PyTorch
 
+A full set of instructions on installing PyTorch from source is here:
+https://github.com/pytorch/pytorch#from-source
+
 To develop PyTorch on your machine, here are some tips:
 
 1. Uninstall all existing PyTorch installs:
@@ -88,8 +91,6 @@ If you want to have no-op incremental rebuilds (which are fast), see the section
 
 3. Install PyTorch in `develop` mode:
 
-A full set of instructions on installing PyTorch from source is here:
-https://github.com/pytorch/pytorch#from-source
 
 The change you have to make is to replace
 
@@ -488,8 +489,7 @@ only interested in a specific component.
 - Working on a test binary? Run `(cd build && ninja bin/test_binary_name)` to
   rebuild only that test binary (without rerunning cmake). (Replace `ninja` with
   `make` if you don't have ninja installed).
-- Don't need Caffe2?  Pass `BUILD_CAFFE2_OPS=0` to disable build of
-  Caffe2 operators.
+- Don't need Caffe2?  Pass `BUILD_CAFFE2=0` to disable Caffe2 build.
 
 On the initial build, you can also speed things up with the environment
 variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `BUILD_TEST`, `USE_FBGEMM`, `USE_NNPACK` and `USE_QNNPACK`.
@@ -824,8 +824,9 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
 
 [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
 linter and static analysis tool based on the clang compiler. We run clang-tidy
-in our CI to make sure that new C++ code is safe, sane and efficient. See our
-[.travis.yml](https://github.com/pytorch/pytorch/blob/master/.travis.yml) file
+in our CI to make sure that new C++ code is safe, sane and efficient. See the
+[`clang-tidy` job in our GitHub Workflow's
+lint.yml file](https://github.com/pytorch/pytorch/blob/master/.github/workflows/lint.yml)
 for the simple commands we use for this.
 
 To run clang-tidy locally, follow these steps:

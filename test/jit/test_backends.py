@@ -1,11 +1,19 @@
 from torch.testing._internal.jit_utils import JitTestCase
 import os
 import sys
+import unittest
 
 import torch
 import torch._C
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, skipIfRocm
-
+from pathlib import Path
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
+    TEST_WITH_ROCM,
+    skipIfRocm,
+)
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
@@ -24,6 +32,13 @@ def to_test_backend(module, method_compile_spec):
 
 def to_test_backend_multi(module, method_compile_spec):
     return torch._C._jit_to_backend("test_backend", module, method_compile_spec)
+
+
+def to_test_backend_selective(module, method_compile_spec, submodules):
+    def _to_test_backend(module):
+        return to_test_backend(module, method_compile_spec)
+
+    return torch._C._jit_to_backend_selective("test_backend", module, _to_test_backend, submodules)
 
 
 class BasicModule(torch.nn.Module):
@@ -52,6 +67,11 @@ class JitBackendTestCase(JitTestCase):
 
     def setUp(self):
         super().setUp()
+        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        torch_root = Path(__file__).resolve().parent.parent.parent
+        p = torch_root / 'build' / 'lib' / 'libjitbackend_test.so'
+        torch.ops.load_library(str(p))
         # Subclasses are expected to set up three variables in their setUp methods:
         # module - a regular, Python version of the module being tested
         # scripted_module - a scripted version of module
@@ -157,10 +177,6 @@ class NestedModuleTest(JitBackendTestCase):
             self.scripted_module, {"forward": {"": ""}}
         )
 
-        # Function for use with torch.jit.selective_to_jit_backend.
-        def to_backend_fn(mod):
-            return to_test_backend(mod, {"": ""})
-
         # First, script another instance of NestedModule with share_types=False so that it can be
         # selectively lowered without modifying the type of self.scripted_module.
         nested = torch.jit._recursive.create_script_module(
@@ -176,7 +192,7 @@ class NestedModuleTest(JitBackendTestCase):
 
         # self.lowered_module is a ScriptModule, but its submodule is a lowered module.
         modules_to_lower = ["submodule.submodule"]
-        torch.jit.selective_to_jit_backend(self.lowered_module, to_backend_fn, modules_to_lower)
+        to_test_backend_selective(self.lowered_module, {"":""}, modules_to_lower)
 
     def test_execution(self):
         # Test execution with backend against Python and JIT.

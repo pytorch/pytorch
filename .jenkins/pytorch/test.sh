@@ -13,7 +13,7 @@ echo "Testing pytorch"
 
 if [ -n "${IN_CIRCLECI}" ]; then
   # TODO move this to docker
-  pip_install unittest-xml-reporting
+  pip_install unittest-xml-reporting coverage
 
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
     # TODO: move this to Docker
@@ -25,13 +25,14 @@ if [ -n "${IN_CIRCLECI}" ]; then
     # TODO: move this to Docker
     sudo apt-get -qq update
     sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
-    sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
-    sudo mkdir -p /var/run/sshd
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
     export PYTORCH_TEST_WITH_SLOW=1
     export PYTORCH_TEST_SKIP_FAST=1
+  fi
+  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+    export PYTORCH_COLLECT_COVERAGE=1
   fi
 fi
 
@@ -120,7 +121,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
-if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+if ([ -n "$CIRCLE_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]); then
   DETERMINE_FROM=$(mktemp)
   file_diff_from_base "$DETERMINE_FROM"
 fi
@@ -337,8 +338,12 @@ test_benchmarks() {
     pip_install --user "requests"
     BENCHMARK_DATA="benchmarks/.data"
     mkdir -p ${BENCHMARK_DATA}
-    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns.json
-    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns.json
+    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_default.json --fuser=default --executor=default
+    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_default.json
+    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_legacy_old.json --fuser=old --executor=legacy
+    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_legacy_old.json
+    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_profiling_te.json --fuser=te --executor=profiling
+    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_profiling_te.json
     assert_git_not_dirty
   fi
 }
@@ -347,6 +352,22 @@ test_cpp_extensions() {
   # This is to test whether cpp extension build is compatible with current env. No need to test both ninja and no-ninja build
   time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
+}
+
+test_vec256() {
+  # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
+  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    echo "Testing vec256 instructions"
+    mkdir -p test/test-reports/vec256
+    pushd build/bin
+    vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
+    for vec256_exec in $vec256_tests
+    do
+      $vec256_exec --gtest_output=xml:test/test-reports/vec256/$vec256_exec.xml
+    done
+    popd
+    assert_git_not_dirty
+  fi
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
@@ -392,6 +413,7 @@ else
   test_python_all_except_nn_and_cpp_extensions
   test_cpp_extensions
   test_aten
+  test_vec256
   test_libtorch
   test_custom_script_ops
   test_custom_backend
@@ -399,4 +421,10 @@ else
   test_distributed
   test_benchmarks
   test_rpc
+  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+    pushd test
+    echo "Generating XML coverage report"
+    time python -mcoverage xml
+    popd
+  fi
 fi

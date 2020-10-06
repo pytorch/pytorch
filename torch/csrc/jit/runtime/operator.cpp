@@ -212,8 +212,8 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::TupleIndex,    prim::TupleSlice,    prim::TupleUnpack,
       prim::CreateObject,  prim::GetAttr,       prim::SetAttr,
       prim::CallFunction,  prim::isinstance,    prim::unchecked_cast,
-      prim::tolist,        prim::rpc_async,
-  };
+      prim::tolist,        prim::rpc_async,     prim::rpc_sync,
+      prim::rpc_remote};
 
   // WARNING: by adding a value to this set, you are asserting that your
   // primitive is only ever added during optimization and does not need
@@ -224,6 +224,8 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       c10::onnx::Shape, // only used in onnx
       prim::AutogradZero, // temporarily inserted by autograd
       prim::AutogradAnyNonZero, // temporarily inserted by autograd
+      prim::AutogradAllNonZero, // temporarily inserted by autograd
+      prim::AutogradAllZero, // temporarily inserted by autograd
       prim::AutogradAdd, // temporarily inserted by autograd
       prim::ConstantChunk, // optimization pass adds it
       prim::DifferentiableGraph, // optimization pass adds it,
@@ -234,12 +236,15 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::FusedConcat, // optimization pass adds it
       prim::FusionGroup, // optimization pass adds it
       prim::CudaFusionGroup, // optimization pass adds it
+      prim::TensorExprGroup, // optimization pass adds it
       prim::Load, // used in interpreter only
       prim::MMTreeReduce, // used as an optimization
       prim::MMBatchSide, // used as an optimization
       prim::Store, // used in interpreter only
       prim::profile, // used in interpreter only
+      prim::profile_optional, // used in interpreter only
       prim::TypeCheck, // used in interpreter only
+      prim::FallbackGraph, // converted into prim::CallFunction
 
   };
 
@@ -267,6 +272,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::FusionGroup,
       prim::CudaFusionGroup,
       prim::DifferentiableGraph,
+      prim::TensorExprGroup,
       prim::FunctionalGraph,
       prim::Constant,
       prim::Uninitialized,
@@ -294,6 +300,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::GetAttr,
       prim::SetAttr,
       prim::profile,
+      prim::profile_optional,
       prim::TypeCheck,
       prim::Print,
       prim::CallFunction,
@@ -303,8 +310,11 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::unchecked_cast,
       prim::tolist,
       prim::rpc_async,
+      prim::rpc_sync,
+      prim::rpc_remote,
       prim::Enter,
       prim::Exit,
+      prim::FallbackGraph,
   };
 
   // Operators that should not be used by alias analysis
@@ -380,36 +390,38 @@ std::shared_ptr<Operator> getOperatorForLiteral(const char* signature) {
 }
 
 std::string canonicalSchemaString(const FunctionSchema& schema) {
-  std::ostringstream out;
-
-  out << schema.name();
-  out << "(";
+  std::string out = schema.name();
+  out.push_back('(');
 
   bool seen_kwarg_only = false;
   for (size_t i = 0; i < schema.arguments().size(); ++i) {
-    if (i > 0)
-      out << ", ";
+    if (i > 0) {
+      out += ", ";
+    }
     if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
-      out << "*, ";
+      out += "*, ";
       seen_kwarg_only = true;
     }
     const auto& arg = schema.arguments()[i];
-    out << arg.type()->str() << " " << arg.name();
+    out += arg.type()->str();
+    out.push_back(' ');
+    out += arg.name();
   }
 
-  out << ") -> ";
+  out += ") -> ";
   if (schema.returns().size() == 1) {
-    out << schema.returns().at(0).type()->str();
+    out += schema.returns().at(0).type()->str();
   } else if (schema.returns().size() > 1) {
-    out << "(";
+    out.push_back('(');
     for (size_t i = 0; i < schema.returns().size(); ++i) {
-      if (i > 0)
-        out << ", ";
-      out << schema.returns()[i].type()->str();
+      if (i > 0) {
+        out += ", ";
+      }
+      out += schema.returns()[i].type()->str();
     }
-    out << ")";
+    out.push_back(')');
   }
-  return out.str();
+  return out;
 }
 
 } // namespace jit

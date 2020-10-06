@@ -123,8 +123,10 @@ struct CAFFE2_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
       c10::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
+      torch::List<int64_t> output_padding,
       torch::List<int64_t> dilation,
       int64_t groups,
+      uint8_t transpose,
       std::vector<int32_t> col_offsets,
       std::vector<int64_t> kernel,
       std::vector<float> w_scale,
@@ -134,8 +136,10 @@ struct CAFFE2_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
     bias(std::move(bias)),
     stride_(std::move(stride)),
     padding_(std::move(padding)),
+    output_padding_(std::move(output_padding)),
     dilation_(std::move(dilation)),
     groups_(groups),
+    transpose_(transpose),
     col_offsets(std::move(col_offsets)),
     kernel(std::move(kernel)),
     w_scale(std::move(w_scale)),
@@ -146,8 +150,10 @@ struct CAFFE2_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
   c10::optional<at::Tensor> bias;
   torch::List<int64_t> stride_;
   torch::List<int64_t> padding_;
+  torch::List<int64_t> output_padding_;
   torch::List<int64_t> dilation_;
   int64_t groups_;
+  uint8_t transpose_;
   std::vector<int32_t> col_offsets;
   std::vector<int64_t> kernel;
   std::vector<float> w_scale;
@@ -171,8 +177,10 @@ struct CAFFE2_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
       c10::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
+      torch::List<int64_t> output_padding,
       torch::List<int64_t> dilation,
-      int64_t groups);
+      int64_t groups,
+      bool transpose);
 
   const float* GetBiasData(at::Tensor* bias);
 
@@ -190,12 +198,20 @@ struct CAFFE2_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
     return padding_;
   }
 
+  torch::List<int64_t> output_padding() const override {
+    return output_padding_;
+  }
+
   torch::List<int64_t> dilation() const override {
     return dilation_;
   }
 
   int64_t groups() const override {
     return groups_;
+  }
+
+  bool transpose() const override {
+    return (bool)transpose_;
   }
 
  private:

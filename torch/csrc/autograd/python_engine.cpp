@@ -99,7 +99,7 @@ variable_list PythonEngine::execute(
   }
 }
 
-std::shared_ptr<FutureVariableList> PythonEngine::execute_with_graph_task(
+std::shared_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root) {
   try {
@@ -167,10 +167,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
         "vmapped tensors (output ", i, " is being vmapped over). Please "
         "call autograd.grad() outside torch.vmap or file a bug report "
         "with your use case.")
-    if(variable.is_complex()) {
-      TORCH_WARN_ONCE("Complex backward is not fully supported yet and could lead to wrong ",
-                      "gradients for functions we have not fixed yet");
-    }
     auto gradient_edge = torch::autograd::impl::gradient_edge(variable);
     THPUtils_assert(gradient_edge.function,
         "element %d of tensors does not require grad and does not have a grad_fn", i);

@@ -13,3 +13,4 @@ Functions
 ---------
 
 .. autofunction:: det
+.. autofunction:: norm

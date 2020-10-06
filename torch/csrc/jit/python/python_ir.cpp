@@ -236,8 +236,10 @@ void initPythonIRBindings(PyObject* module_) {
              bool use_external_data_format,
              const std::string& onnx_file_path) {
             std::string graph;
+            std::shared_ptr<::ONNX_NAMESPACE::ModelProto> model_proto;
             RawDataExportMap export_map;
-            std::tie(graph, export_map) = export_onnx(
+            SymbolDimMap symbol_map;
+            std::tie(model_proto, export_map, symbol_map) = export_onnx(
                 g,
                 initializers,
                 onnx_opset_version,
@@ -250,6 +252,7 @@ void initPythonIRBindings(PyObject* module_) {
                 add_node_names,
                 use_external_data_format,
                 onnx_file_path);
+            graph = serialize_model_proto_to_string(model_proto);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -261,6 +264,7 @@ void initPythonIRBindings(PyObject* module_) {
               python_serialized_export_map[kv.first] =
                   py::bytes(static_cast<const char*>(t.data_ptr()), copy_bytes);
             }
+            graph = serialize_model_proto_to_string(model_proto);
             return std::make_tuple(
                 py::bytes(graph), python_serialized_export_map);
           },
@@ -387,30 +391,7 @@ void initPythonIRBindings(PyObject* module_) {
           "insertConstant",
           [](Graph& g, IValue ival) { return g.insertConstant(ival); })
       .GS(lint)
-      .GS(insertNode)
-      .def(
-          "remapTypes",
-          [](Graph& g,
-             const std::vector<TypePtr>& from,
-             const std::vector<TypePtr>& to) {
-            std::unordered_map<TypePtr, TypePtr> type_map;
-
-            // Create a map of from -> to, elementwise.
-            for (size_t i = 0, e = from.size(); i < e; ++i) {
-              type_map[from[i]] = to[i];
-            }
-
-            // Remap types in g.
-            g.remapTypes([&type_map](TypePtr ty) {
-              if (type_map.count(ty)) {
-                return type_map[ty];
-              }
-
-              // If ty is not in type_map, assume that it should be
-              // returned as is.
-              return ty;
-            });
-          });
+      .GS(insertNode);
 #undef GS
 
 #define VS(name) def(#name, &Value ::name)
@@ -491,8 +472,14 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def("returnNode", [](Block& b) { return b.return_node(); })
       .def("paramNode", [](Block& b) { return b.param_node(); })
-      .def("addNode", [](Block& b, Value& input, const char* str) {
-        return addNodeToBlock(&b, &input, Symbol::fromQualString(str));
+      .def(
+          "addNode",
+          [](Block& b, const char* str, const std::vector<Value*>& inputs) {
+            return addNodeToBlock(&b, Symbol::fromQualString(str), inputs);
+          })
+      .def("addInputToBlock", [](Block& b) { return addInputToBlock(&b); })
+      .def("registerOutput", [](Block& b, Value* value) {
+        return b.registerOutput(value);
       });
 
 #define NS(name) def(#name, &Node ::name)
@@ -545,6 +532,8 @@ void initPythonIRBindings(PyObject* module_) {
       .NS(replaceAllUsesWith)
       .NS(insertBefore)
       .NS(insertAfter)
+      .NS(isBefore)
+      .NS(isAfter)
       .NS(moveAfter)
       .NS(moveBefore)
       .NS(removeInput)
@@ -812,19 +801,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
       }))
-      .def("name", [](ClassType& self) { return self.name()->name(); })
-      .def(
-          "add_attribute",
-          [](const std::shared_ptr<ClassType>& self,
-             const std::string& name,
-             const std::shared_ptr<ClassType>& other) {
-            return self->addAttribute(name, other);
-          })
-      .def(
-          "unsafe_remove_attribute",
-          [](const std::shared_ptr<ClassType>& self, const std::string& name) {
-            self->unsafeRemoveAttribute(name);
-          });
+      .def("name", [](ClassType& self) { return self.name()->name(); });
   py::class_<EnumType, Type, std::shared_ptr<EnumType>>(m, "EnumType")
       .def(py::init([](const std::string& qualified_name,
                        TypePtr value_type,

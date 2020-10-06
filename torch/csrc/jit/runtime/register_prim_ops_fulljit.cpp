@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
+#include <ATen/core/ivalue.h>
 #include <algorithm>
 #include <bitset>
 #include <cctype>
@@ -36,6 +37,16 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
+         prim::profile_optional,
+         [](const Node* node) -> Operation {
+           auto callback = node->cast<ProfileOptionalOp>()->getCallback();
+           return [](Stack* stack) {
+             AT_ERROR(
+                 "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
          prim::FusionGroup,
          [](const Node* node) -> Operation {
            const auto key = registerFusion(node);
@@ -50,6 +61,15 @@ RegisterOperators reg(
          [](const Node * /* node */) -> Operation {
            return [](Stack* /* stack */) {
              AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::FallbackGraph,
+         [](const Node* node) -> Operation {
+           return [](Stack* stack) {
+             AT_ERROR(
+                 "Must be converted to prim::FunctionCall by replaceFallbackGraphWithFallbackFunction"); // NOLINT
            };
          },
          aliasAnalysisSpecialCase()),
@@ -186,14 +206,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::str(t elem) -> str",
-         [](Stack* stack) {
-           std::stringstream ss;
-           ss << pop(stack);
-           push(stack, ss.str());
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "aten::device(str a) -> Device",
          [](Stack* stack) {
            push(stack, c10::Device(pop(stack).toStringRef()));
@@ -287,14 +299,6 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.layout());
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::cpu(Tensor(a) self) -> Tensor(a|b)",
-         [](Stack* stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.cpu());
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -431,6 +435,38 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::AutogradAllZero(...) -> bool",
+         [](Stack* stack) {
+           auto num_inputs = pop(stack).toInt();
+           bool result = true;
+           for (const IValue& v : last(stack, num_inputs)) {
+             TORCH_INTERNAL_ASSERT(v.isTensor());
+             if (v.toTensor().defined()) {
+               result = false;
+               break;
+             }
+           }
+           drop(stack, num_inputs);
+           stack->emplace_back(result);
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::AutogradAllNonZero(...) -> bool",
+         [](Stack* stack) {
+           auto num_inputs = pop(stack).toInt();
+           bool result = true;
+           for (const IValue& v : last(stack, num_inputs)) {
+             TORCH_INTERNAL_ASSERT(v.isTensor());
+             if (!v.toTensor().defined()) {
+               result = false;
+               break;
+             }
+           }
+           drop(stack, num_inputs);
+           stack->emplace_back(result);
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::AutogradAdd(Any a, Any b) -> Any",
          [](Stack* stack) {
            at::Tensor a, b;
@@ -473,80 +509,6 @@ RegisterOperators reg(
            }
          },
          aliasAnalysisFromSchema()),
-     Operator(
-         prim::tolist,
-         // This operator has to be unschematized because the return type
-         // depends on the type hint and input. The implementation of this
-         // operator below is intended to be as close to the Python
-         // implementation in torch/csrc/utils/tensor_list.cpp as possible.
-         [](const Node* node) -> Operation {
-           return [](Stack* stack) {
-             int elem_ty_val;
-             int dim_val;
-             at::Tensor t;
-
-             pop(stack, elem_ty_val);
-             pop(stack, dim_val);
-             pop(stack, t);
-
-             // If the Tensor is not on the CPU, transfer it.
-             if (!t.device().is_cpu()) {
-               t = t.cpu();
-             }
-
-             // Rebuild the output type using elem_ty_val and dim_val. Start
-             // with the element type corresponding to elem_ty_val.
-             TypePtr out_ty;
-             if (elem_ty_val == 0) {
-               out_ty = IntType::get();
-             } else if (elem_ty_val == 1) {
-               out_ty = FloatType::get();
-             } else if (elem_ty_val == 2) {
-               out_ty = BoolType::get();
-             } else {
-               TORCH_CHECK(
-                   false,
-                   "Unsupported element type for tolist; only int, float and bool are supported");
-             }
-
-             // Check that type of the Tensor matches that of the annotation.
-             // Make an exception for the case in which the annotated type is
-             // float and the Tensor data type is also float; the elements will
-             // be casted to double later.
-             TORCH_CHECK(
-                 (out_ty == FloatType::get() && t.is_floating_point()) ||
-                     tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
-                 "Output annotation element type and runtime tensor element type must match for tolist()");
-
-             // Check that the dimension of the Tensor matches that of the
-             // annotation.
-             TORCH_CHECK(
-                 dim_val == t.dim(),
-                 "Output annotation list dimension and runtime tensor dimension must match for tolist()");
-
-             // Wrap out_ty in a ListType dim times.
-             for (int i = 0; i < dim_val; ++i) {
-               out_ty = ListType::create(out_ty);
-             }
-
-             int64_t dim = t.dim();
-             auto sizes = t.sizes();
-             auto strides = t.strides();
-             size_t element_size = t.element_size();
-             char* data = static_cast<char*>(t.data_ptr());
-             auto result = tensorToListRecursive(
-                 data,
-                 0,
-                 dim,
-                 out_ty,
-                 t.scalar_type(),
-                 sizes,
-                 strides,
-                 element_size);
-             push(stack, std::move(result));
-           };
-         },
-         aliasAnalysisSpecialCase()),
      Operator(
          prim::ConstantChunk,
          [](const Node* node) -> Operation {
@@ -765,7 +727,6 @@ RegisterOperators reg2({
         "aten::sorted.str(str[](a) input) -> (str[])",
         listCopyAndSort<std::string>,
         aliasAnalysisFromSchema()),
-
     Operator(
         "aten::eq.float_list(float[] a, float[] b) -> bool",
         listEq<double>,
@@ -904,7 +865,6 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__rshift__, a >> b),
 
     DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
-    DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
     DEFINE_GENERIC_BINARY_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_SCALAR_SCALAR_BINARY_OP(
@@ -1126,65 +1086,105 @@ RegisterOperators reg2({
         aliasAnalysisFromSchema()),
 });
 
-bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
-  return arg.type() == type && !arg.kwarg_only() && !arg.default_value();
+bool isSortableTupleType(
+    const TupleTypePtr& tuple_type,
+    std::stringstream& why_not) {
+  for (const TypePtr& ele_type : tuple_type->containedTypes()) {
+    switch (ele_type->kind()) {
+      case TypeKind::IntType:
+      case TypeKind::BoolType:
+      case TypeKind::FloatType:
+      case TypeKind::StringType:
+      case TypeKind::TensorType:
+        continue;
+      case TypeKind::TupleType:
+        if (!isSortableTupleType(ele_type->expect<TupleType>(), why_not)) {
+          return false;
+        }
+        continue;
+      case TypeKind::ClassType:
+        if (!c10::checkObjectSortSchema(
+                ele_type->expect<ClassType>(), why_not)) {
+          return false;
+        }
+        continue;
+      default:
+        why_not << "Contained elements in " << *tuple_type
+                << " are not sortable. Only Int, Bool, Float, String, Tensor, "
+                << "a User Defined Class with __lt__ method defined or Tuples "
+                << "of aforementionted types can be sorted.";
+        return false;
+    }
+  }
+
+  return true;
 }
 
-Function* checkSortSchema(const c10::TypePtr& list_element_type) {
-  std::stringstream error_str;
-  if (auto class_type = list_element_type->cast<ClassType>()) {
-    if (auto method = class_type->findMethod("__lt__")) {
-      const auto& lt_schema = method->getSchema();
-      const auto& schema_args = lt_schema.arguments();
-      bool error =
-          (schema_args.size() != 2 ||
-           !simpleClassTypeArg(schema_args[0], class_type) ||
-           !simpleClassTypeArg(schema_args[1], class_type) ||
-           lt_schema.returns().size() != 1 ||
-           lt_schema.returns()[0].type() != BoolType::get());
-      if (!error) {
-        return method;
-      }
-    }
-    error_str << "To sort a list of " << class_type->repr_str()
-              << " it must define a "
-              << "__lt__ method with two inputs of type "
-              << class_type->repr_str() << " that "
-              << "returns a bool";
-  } else {
-    error_str << "To sort a list of " << list_element_type->repr_str()
-              << " must be of Tensors, ints, floats, bools, strs or "
-              << "a User Defined Class that defines the __lt__ compare method"
-              << ", got list of " << list_element_type->repr_str() << "\n";
+bool isSortableListOfObjectsOrTuples(
+    c10::List<IValue>& ivalues,
+    std::stringstream& why_not) {
+  if (ivalues.empty()) {
+    return true;
   }
-  throw std::runtime_error(error_str.str());
+
+  auto type = ivalues.get(0).type();
+  // We assume lists have homogenous types, use first element to determine
+  // best sorting methods. If in the future we need to support heterogenous
+  // types inside list, then sorting needs to have runtime sortable checks.
+  const size_t n = ivalues.size();
+  for (size_t i = 0; i < n; ++i) {
+    const IValue& v = ivalues.get(i);
+    auto curr_type = v.type();
+    if (*curr_type != *type) {
+      why_not << "Only values of same type can be compared. "
+              << "Found " << type->repr_str() << " and "
+              << curr_type->repr_str();
+      return false;
+    }
+  }
+
+  if (auto tuple_type = type->cast<TupleType>()) {
+    return isSortableTupleType(tuple_type, why_not);
+  }
+
+  if (auto class_type = type->cast<ClassType>()) {
+    return c10::checkObjectSortSchema(class_type, why_not) != nullptr;
+  }
+
+  // Basic types like tensors/ints/floats/bools/strs are not checked in this
+  // method because they should have been schema matched to specialized
+  // aten::sort kernels using listSort<T>.
+  why_not << "Only list of Tensors, ints, floats, bools, strs, "
+          << "a User Defined Class that defines the __lt__ compare method "
+          << "or Tuples of aforementioned types can be sorted, got list of "
+          << type->repr_str() << "\n";
+  return false;
 }
 
 template <bool has_reverse_arg, bool copy_return_list>
 void sort_op(Stack* stack) {
   bool reverse = has_reverse_arg ? pop(stack).toBool() : false;
   auto g_list = pop(stack).toList();
+
   if (copy_return_list) {
     g_list = g_list.copy();
   }
-  Stack sort_stack;
-  Function* lt_func = nullptr;
-  std::sort(
-      g_list.begin(),
-      g_list.end(),
-      [reverse, &sort_stack, &lt_func](IValue a, IValue b) -> bool {
-        // "strict weak ordering" issue - see other sort
-        if (a.is(b)) {
-          return false;
-        }
-        if (!lt_func) {
-          lt_func = checkSortSchema(a.type());
-        }
-        sort_stack.push_back(a);
-        sort_stack.push_back(b);
-        lt_func->run(sort_stack);
-        return pop(sort_stack).toBool() != reverse;
-      });
+
+  if (!g_list.empty()) {
+    std::stringstream error_str;
+    if (!isSortableListOfObjectsOrTuples(g_list, error_str)) {
+      throw std::runtime_error(error_str.str());
+    }
+
+    c10::IValueComparator comparator;
+    if (reverse) {
+      comparator = c10::getGreaterThanComparator(g_list.get(0));
+    } else {
+      comparator = c10::getLessThanComparator(g_list.get(0));
+    }
+    std::sort(g_list.begin(), g_list.end(), comparator);
+  }
+
   if (copy_return_list) {
     push(stack, g_list);
   }

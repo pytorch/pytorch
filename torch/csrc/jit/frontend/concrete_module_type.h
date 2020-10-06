@@ -58,9 +58,12 @@ class ConcreteModuleType;
 class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
  public:
   explicit ConcreteModuleTypeBuilder(py::object pyClass) {
+    TORCH_INTERNAL_ASSERT(pyClass);
     pyClass_ = std::move(pyClass);
   }
+
   void addConstant(std::string name, py::object value);
+  void addConstant(std::string name, IValue value);
   void addAttribute(
       std::string name,
       TypePtr type,
@@ -92,19 +95,6 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // used by ConcreteModuleType have been defined such that operator==
   // implements a meaningful comparison in that context.
   bool equals(const ConcreteModuleTypeBuilder& other) const;
-
-  struct Constant {
-    /* implicit */ Constant(py::object v) : v_(std::move(v)) {}
-    friend bool operator==(const Constant& lhs, const Constant& rhs) {
-      // Perform the equivalent of `lhs == rhs` in Python.
-      int rv = PyObject_RichCompareBool(lhs.v_.ptr(), rhs.v_.ptr(), Py_EQ);
-      if (rv == -1) {
-        throw py::error_already_set();
-      }
-      return rv == 1;
-    }
-    py::object v_;
-  };
 
   struct FunctionAttribute {
     FunctionTypePtr function_;
@@ -152,7 +142,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   bool isPoisoned_ = false;
 
   // The value of any constants defined by the module.
-  std::unordered_map<std::string, Constant> constants_;
+  std::unordered_map<std::string, IValue> constants_;
   // The types of any attributes
   OrderedDict<std::string, Attribute> attributes_;
   // Overloads, in the same format as `__overloads__` in Python
@@ -192,7 +182,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   static std::shared_ptr<ConcreteModuleType> fromJitType(TypePtr type);
 
   TypePtr getJitType() const;
-  py::object getPyClass() const;
+  c10::optional<py::object> getPyClass() const;
   IterableModuleKind getIterableModuleKind() const;
   c10::optional<std::vector<std::string>> findOverloads(
       const std::string& name) const;

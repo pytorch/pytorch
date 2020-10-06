@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/annotate_warns.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -57,7 +58,7 @@ struct Refinement {
 struct RefinementSet {
   // When a comparison like x is None is made, we associate type refinements
   // with its true value and its false value. If a boolean that has refinements
-  // associated with it is used in a conditional of an if statememt, the true
+  // associated with it is used in a conditional of an if statement, the true
   // and false refinements are inserted into the corresponding blocks
   using Refinements = std::vector<Refinement>;
 
@@ -205,7 +206,7 @@ static std::shared_ptr<MagicMethod> makeMagic(
 // The Environment keeps track of two tables, one for values which are not first
 // class and a type table for values which are. When a first class value
 // is set in the environment, we emit a prim::Store which sets the
-// name of the variable to approriate type, and when a first-class value is
+// name of the variable to appropriate type, and when a first-class value is
 // referenced we emit a prim::Load that generates a value of the appropriate
 // type.
 //
@@ -700,7 +701,7 @@ struct to_ir {
           def.range(), Expr(Compound::create(TK_NONE, def.range(), {}))));
     } else {
       // if we haven't seen any return statements, but the graph block exits
-      // (the funciton always throws) then we accept the declared return type if
+      // (the function always throws) then we accept the declared return type if
       // it exists or set it to none
       if (def_stack_.back().merged_return_type_ == nullptr) {
         def_stack_.back().merged_return_type_ =
@@ -943,9 +944,23 @@ struct to_ir {
       const SourceRange& val_range = subscript.value().range();
       Value* idx = emitExpr(subscript_exprs[0]);
       Value* val = sv->asValue(val_range, method);
-      auto node = graph->create(aten::Delete, {val, idx}, 0)
-                      ->setSourceRange(stmt.range());
-      graph->insertNode(node);
+
+      // If val is a class instance, this is a method call to a type-specific
+      // implementation of del defined in a __delitem__ method.
+      if (auto cls = val->type()->cast<ClassType>()) {
+        if (!cls->findMethod("__delitem__")) {
+          throw ErrorReport(stmt.range())
+              << "Class does not define __delitem__";
+        }
+
+        // Use MethodValue to call the method to handle recursion.
+        MethodValue(val, "__delitem__")
+            .call(stmt.range(), method, {idx}, {}, 0);
+      } else {
+        auto node = graph->create(aten::Delete, {val, idx}, 0)
+                        ->setSourceRange(stmt.range());
+        graph->insertNode(node);
+      }
     } else if (stmt.expr().kind() == TK_VAR) {
       Var var(stmt.expr());
       environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
@@ -996,7 +1011,17 @@ struct to_ir {
       result_type = merged_result_type.value();
     }
     AT_ASSERT(result_type);
+
     def_stack_.back().merged_return_type_ = result_type;
+
+    // If the annotated return type is Any and the result type is not Any,
+    // cast the result to Any to facilitate type unification between return
+    // statements on different code paths (e.g. different branches of an if,
+    // body and containing scope of a loop).
+    if (result_type == AnyType::get() && result->type() != AnyType::get()) {
+      result = graph->insertUncheckedCast(result, result_type);
+    }
+
     graph->insertNode(graph->create(prim::ReturnStmt, {result}, 0));
     exit_blocks.insert(environment_stack->block());
   }
@@ -1058,6 +1083,10 @@ struct to_ir {
           throw ErrorReport(stmt)
               << "Unrecognized statement kind " << kindToString(stmt.kind());
       }
+      // Found an exit statement in this block. The remaining statements aren't
+      // reachable so we don't emit them.
+      if (exit_blocks.count(environment_stack->block()))
+        return;
     }
   }
 
@@ -1404,7 +1433,7 @@ struct to_ir {
     // the scope of the if statement (all variables are scoped to the function).
     // Script is a subset of python: we consider variables to be in scope
     // as long as there is a definition of the variable along all paths
-    // through the if statemnent
+    // through the if statement
     // ----
     // if ...:
     //   a =
@@ -2161,13 +2190,13 @@ struct to_ir {
   NamedValue emitValueToTensor(
       const NamedValue& value,
       const NamedValue& matchTypeOf) {
-    // Add implicit conversion of int/float/bool types to tensors
+    // Add implicit conversion of int/float/bool/number types to tensors
     // Used in emitSubscriptAssign to convert:
     //   `tensor(...)[x] = 99` to `tensor(...)[x] = tensor(99)`
     // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
     const auto kind = value.type()->kind();
-    if (kind == c10::TypeKind::IntType || kind == c10::TypeKind::BoolType ||
-        kind == c10::TypeKind::FloatType) {
+    if (kind == c10::TypeKind::NumberType || kind == c10::TypeKind::IntType ||
+        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType) {
       auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
       auto device = graph->insert(prim::device, {matchTypeOf}, {});
       auto converted = graph->insert(
@@ -2239,6 +2268,10 @@ struct to_ir {
             << "Sliced expression not yet supported for"
             << " subscripted assignment. "
             << "File a bug if you want this";
+      }
+      if (sliceable->type()->isSubtypeOf(AnyTupleType::get())) {
+        throw ErrorReport(lhs) << sliceable->type()->repr_str()
+                               << " does not support subscripted assignment";
       }
 
       std::vector<NamedValue> args;
@@ -2683,8 +2716,10 @@ struct to_ir {
 
         return std::make_shared<SimpleValue>(expr);
       }
-      case prim::rpc_async: {
-        return emitRpcAsyncExpr(apply);
+      case prim::rpc_async:
+      case prim::rpc_sync:
+      case prim::rpc_remote: {
+        return emitRpcExpr(apply, form);
       }
       case prim::unchecked_cast: {
         checkApplyNumInputs(apply, 2);
@@ -2961,29 +2996,31 @@ struct to_ir {
     return std::make_shared<SimpleValue>(node_output);
   }
 
-  std::shared_ptr<SugaredValue> emitRpcAsyncExpr(const Apply& apply) {
+  std::shared_ptr<SugaredValue> emitRpcExpr(const Apply& apply, Symbol rpc_op) {
     // TODO: This is a temporary apporoach to enable calling user fucntion
     // through RPC in TorchScript,
     // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
     auto rpcMinInputs = 2;
     auto rpcMaxInputs = 5; // NOLINT
+    std::string op_name = rpc_op.toUnqualString();
     if (apply.inputs().size() < rpcMinInputs ||
         apply.inputs().size() > rpcMaxInputs) {
       throw ErrorReport(apply)
-          << "Possible forms of call to rpc_async(..) are\n"
-          << "rpc_async(dst_worker_name, user_callable, args, kwargs, timeout)\n"
-          << "rpc_async(dst_worker_name, user_callable, args, kwargs)\n"
-          << "rpc_async(dst_worker_name, user_callable, args)\n"
-          << "rpc_async(dst_worker_name, user_callable)\n"
+          << "Possible forms of call to " << op_name << "(..) are\n"
+          << op_name
+          << "(dst_worker_name, user_callable, args, kwargs, timeout)\n"
+          << op_name << "(dst_worker_name, user_callable, args, kwargs)\n"
+          << op_name << "(dst_worker_name, user_callable, args)\n"
+          << op_name << "(dst_worker_name, user_callable)\n"
           << "Now the number of arguments is " << apply.inputs().size();
     }
     if (apply.attributes().size() != 0) {
       throw ErrorReport(apply)
-          << "rpc_async(dst_worker_name, user_callable, args, kwargs)"
+          << op_name << "(dst_worker_name, user_callable, args, kwargs)"
           << "does not support kwargs yet";
     }
-    // TODO: Make rpc_async(..) support taking kwargs,
+    // TODO: Make rpc_op(..) support taking kwargs,
     // like rpc_async(to="worker1", func=my_func, args=(), kwargs={})
 
     auto& input_trees = apply.inputs().tree()->trees();
@@ -3036,12 +3073,12 @@ struct to_ir {
             args_tree->range(),
             entrie_sugared_value->asValue(args_tree->range(), method));
       }
-      // NB: Can't do schema check on kwargs, given the async RPC API is
-      // rpc_async(to, user_callable, args, kwargs),
+      // NB: Can't do schema check on kwargs, given the RPC API is
+      // rpc_op(to, user_callable, args, kwargs),
       // users can construct kwargs = {"first" + "_arg" : 1}.
       // Notice the key is determined at run time.
       // We can do it at compile time, unless one day the RPC API is
-      // rpc_async(to, user_callable, arg_0, arg_1, kwarg_0="foo",
+      // rpc_op(to, user_callable, arg_0, arg_1, kwarg_0="foo",
       // kwarg_1="bar")
     }
     matchSchema(functionSchema, loc, *graphPtr, args, kwargs);
@@ -3052,28 +3089,39 @@ struct to_ir {
     Value* userCallableQualNameValue =
         graphPtr->insertConstant(userCallableQualNameIValue, loc);
 
-    // Graph insert a Node, prim::rpc_async jit::Operator, to the Graph.
-    Node* rpc_async_node =
-        graphPtr->insertNode(graphPtr->create(prim::rpc_async, 1))
-            ->setSourceRange(loc);
+    // Graph insert the corresponding RPC node to the graph.
+    Node* rpc_node =
+        graphPtr->insertNode(graphPtr->create(rpc_op, 1))->setSourceRange(loc);
     {
-      WithInsertPoint insert(rpc_async_node);
-      rpc_async_node->addInput(dst_worker_name_value);
-      rpc_async_node->addInput(userCallableQualNameValue);
+      WithInsertPoint insert(rpc_node);
+      rpc_node->addInput(dst_worker_name_value);
+      rpc_node->addInput(userCallableQualNameValue);
 
       for (const auto& tree : args_kwargs_timeout_trees) {
-        rpc_async_node->addInput(emitExpr(Expr(tree)));
+        rpc_node->addInput(emitExpr(Expr(tree)));
       }
     }
-    Value* rpc_async_node_output = rpc_async_node->output();
+    Value* rpc_node_output = rpc_node->output();
 
-    // Set output type from FunctionSchema.
+    // Set output type from FunctionSchema and corresponding rpc_op.
     const std::vector<Argument>& returns = functionSchema.returns();
     TORCH_INTERNAL_ASSERT(returns.size() == 1);
-    auto output_type = returns[0].type();
-    rpc_async_node_output->setType(FutureType::create(output_type));
-
-    return std::make_shared<SimpleValue>(rpc_async_node_output);
+    TypePtr output_type = nullptr;
+    if (rpc_op == prim::rpc_async) {
+      // rpc_async returns FutureType of the functionSchema's return type
+      output_type = FutureType::create(returns[0].type());
+    } else if (rpc_op == prim::rpc_sync) {
+      // rpc_sync returns the functionSchema's return type
+      output_type = returns[0].type();
+    } else if (rpc_op == prim::rpc_remote) {
+      // rpc_remote returns RRefType of the functionSchema's return type
+      output_type = RRefType::create(returns[0].type());
+    } else {
+      throw ErrorReport(apply)
+          << rpc_op.toDisplayString() << " is not supported in TorchScript!'";
+    }
+    rpc_node_output->setType(output_type);
+    return std::make_shared<SimpleValue>(rpc_node_output);
   }
 
   Value* emitSimpleExpr(
@@ -3287,6 +3335,57 @@ struct to_ir {
     return emitBuiltinCall(loc, *graph, aten::select, {input, dim, index}, {});
   }
 
+  Value* emitSliceOp(
+      const SourceRange& loc,
+      Value* sliceable,
+      Value* dim,
+      Value* start,
+      Value* end,
+      Value* step) {
+    std::vector<NamedValue> args;
+    args.reserve(4);
+    args.emplace_back(loc, "self", sliceable);
+
+    // XXX: If list slicing becomes more complicated or stops using
+    // aten::slice, we should separate it from this function.
+    if (dim) {
+      AT_ASSERT(sliceable->type()->isSubtypeOf(TensorType::get()));
+
+      args.emplace_back(dim);
+    } else {
+      AT_ASSERT(!sliceable->type()->isSubtypeOf(TensorType::get()));
+    }
+
+    // Default value for start is 0.
+    if (!start) {
+      start = graph->insertConstant(0, loc);
+    }
+    args.emplace_back(loc, "start", start);
+
+    if (end) {
+      args.emplace_back(loc, "end", end);
+    }
+    if (sliceable->type()->cast<TupleType>()) {
+      if (step) {
+        // TODO: add support for slicing tuples with a step
+        throw ErrorReport(loc)
+            << "Unsupported operation: slicing tuples with a step isn't supported";
+      }
+
+      if (end) {
+        return emitTupleSlice(loc, args[0], args[1], /*end*/ args[2]);
+      } else {
+        return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
+      }
+    }
+
+    if (!step) {
+      step = graph->insertConstant(1, loc);
+    }
+    NamedValue step_nv = NamedValue(loc, "step", step);
+    return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
+  }
+
   // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end,
   // 1)
   Value* emitSlice(
@@ -3294,43 +3393,19 @@ struct to_ir {
       Value* input,
       Value* dim, // Only used for tensor slicing
       const SliceExpr& slice) {
-    std::vector<NamedValue> args;
-    args.reserve(4);
-    args.emplace_back(loc, "self", input);
-
-    // XXX: If list slicing becomes more complicated or stops using
-    // aten::slice, we should separate it from this function.
-    if (dim) {
-      AT_ASSERT(input->type()->isSubtypeOf(TensorType::get()));
-
-      args.emplace_back(dim);
-    } else {
-      AT_ASSERT(!input->type()->isSubtypeOf(TensorType::get()));
+    Value* start = nullptr;
+    Value* end = nullptr;
+    Value* step = nullptr;
+    if (slice.start().present()) {
+      start = emitExpr(Expr(slice.start().get()));
     }
-
-    args.emplace_back(loc, "begin", emitExpr(Expr(slice.startOr(0))));
-    const auto has_end = slice.end().present();
-    if (has_end) {
-      args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
+    if (slice.end().present()) {
+      end = emitExpr(Expr(slice.end().get()));
     }
-    if (input->type()->cast<TupleType>()) {
-      auto has_step = slice.step().present();
-      if (has_step) {
-        // TODO: add support for slicing tuples with a step
-        throw ErrorReport(loc)
-            << "Unsupported operation: slicing tuples with a step isn't supported";
-      }
-
-      if (has_end) {
-        return emitTupleSlice(loc, args[0], args[1], /*end*/ args[2]);
-      } else {
-        return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
-      }
+    if (slice.step().present()) {
+      step = emitExpr(Expr(slice.step().get()));
     }
-
-    auto step = emitExpr(Expr(slice.stepOr(1)));
-    NamedValue step_nv = NamedValue(loc, "step", step);
-    return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
+    return emitSliceOp(loc, input, dim, start, end, step);
   }
 
   Value* emitUnsqueeze(const SourceRange& loc, Value* input, Value* dim_val) {
@@ -3388,6 +3463,8 @@ struct to_ir {
                                int64_t dim,
                                bool is_reverse = false) {
       dims[expr_idx] = dim;
+
+      // Slice expression case, does not represent a single index.
       if (subscript_expr.kind() == TK_SLICE_EXPR) {
         if (is_reverse) {
           return dim - 1;
@@ -3395,6 +3472,17 @@ struct to_ir {
           return dim + 1;
         }
       }
+
+      // Slice object case, does not represent a single index.
+      auto subscript_sv = emitSugaredExpr(subscript_expr, 1);
+      if (dynamic_cast<SliceValue*>(subscript_sv.get())) {
+        if (is_reverse) {
+          return dim - 1;
+        } else {
+          return dim + 1;
+        }
+      }
+
       TypePtr type_hint;
       if (subscript_expr.kind() == TK_NONE) {
         type_hint = NoneType::get();
@@ -3485,7 +3573,25 @@ struct to_ir {
               sliceable,
               insert_value_for_dim(dims[i]),
               SliceExpr(subscript_exprs[i]));
+          continue;
         }
+
+        if (subscript_exprs[i].kind() == TK_DOTS) {
+          continue;
+        }
+
+        auto subscript_sv = emitSugaredExpr(subscript_exprs[i], 1);
+        if (const auto slice_value =
+                dynamic_cast<SliceValue*>(subscript_sv.get())) {
+          sliceable = emitSliceOp(
+              loc,
+              sliceable,
+              insert_value_for_dim(dims[i]),
+              slice_value->start(),
+              slice_value->stop(),
+              slice_value->step());
+        }
+
         continue;
       }
       auto expr = exprs[i].value();
@@ -3695,17 +3801,39 @@ struct to_ir {
             range, sv->asValue(val_range, method), subscript_exprs));
       }
     } else {
-      // Desugars gather syntactic sugar foo[i]
-      Value* idx = emitExpr(subscript_exprs[0]);
-      Value* val = sv->asValue(val_range, method);
       AT_ASSERT(subscript_exprs.size() == 1);
+      Value* sliceable = sv->asValue(val_range, method);
 
-      if (val->type()->cast<TupleType>()) {
+      // In case of subscript expression being a Python Slice object.
+      auto subscript_sv = emitSugaredExpr(subscript_exprs[0], 1);
+      if (const auto slice_value =
+              dynamic_cast<SliceValue*>(subscript_sv.get())) {
+        Value* dim = nullptr;
+        // aten::slice.tensor needs an additional `dim` input.
+        if (sliceable->type()->isSubtypeOf(TensorType::get())) {
+          dim = method.graph()->insertConstant(0, val_range);
+        }
+
+        Value* sliced = emitSliceOp(
+            val_range,
+            sliceable,
+            dim,
+            slice_value->start(),
+            slice_value->stop(),
+            slice_value->step());
+        return std::make_shared<SimpleValue>(sliced);
+      }
+
+      // subscript is not a slice object, then it must be convertible to
+      // a normal value.
+      // Desugars gather syntactic sugar foo[i]
+      Value* idx = subscript_sv->asValue(val_range, method);
+      if (sliceable->type()->cast<TupleType>()) {
         return std::make_shared<SimpleValue>(
             emitTupleIndex(range, sv->asValue(val_range, method), idx));
-      } else if (val->type()->isSubtypeOf(TensorType::get())) {
+      } else if (sliceable->type()->isSubtypeOf(TensorType::get())) {
         return std::make_shared<SimpleValue>(
-            emitMultidimSlicing(range, val, subscript_exprs));
+            emitMultidimSlicing(range, sliceable, subscript_exprs));
       } else {
         return sv->getitem(range, method, idx);
       }
@@ -3963,6 +4091,10 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
 
   // For jitter
   CanonicalizeOutputs(to_clean);
+
+  // Annotate aten::warns so that each has its unique ID. This enables us to
+  // mimic Python behavior of only emitting each warning only once.
+  AnnotateWarns(to_clean);
 }
 
 // we consider _N where N is a number, to be a non-meaningful name
