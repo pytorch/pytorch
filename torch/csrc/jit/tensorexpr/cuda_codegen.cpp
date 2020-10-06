@@ -436,6 +436,7 @@ void CudaPrinter::visit(const Store* v) {
     os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
   }
   os() << *v->value() << ";";
+  os() << std::endl;
 }
 
 void CudaPrinter::visit(const AtomicAdd* v) {
@@ -452,7 +453,11 @@ void CudaPrinter::visit(const AtomicAdd* v) {
 }
 
 void CudaPrinter::visit(const Max* v) {
-  os() << "maximum(";
+  if (is_integral(v->dtype().scalar_type())) {
+    os() << "max(";
+  } else {
+    os() << "maximum(";
+  }
   v->lhs()->accept(this);
   os() << ",";
   v->rhs()->accept(this);
@@ -460,7 +465,11 @@ void CudaPrinter::visit(const Max* v) {
 }
 
 void CudaPrinter::visit(const Min* v) {
-  os() << "minimum(";
+  if (is_integral(v->dtype().scalar_type())) {
+    os() << "min(";
+  } else {
+    os() << "minimum(";
+  }
   v->lhs()->accept(this);
   os() << ",";
   v->rhs()->accept(this);
@@ -503,6 +512,9 @@ class PrioritizeLoad : public IRMutator {
   const Expr* mutate(const Load* v) override {
     // Look at the declaration of this variable for more details.
     if (nested_if_then_else_ > 0) {
+      return IRMutator::mutate(v);
+    }
+    if (nested_let_) {
       return IRMutator::mutate(v);
     }
     if (thread_local_bufs_.count(v->base_handle()) > 0) {
@@ -563,6 +575,13 @@ class PrioritizeLoad : public IRMutator {
     nested_store_ = v;
     Stmt* s = IRMutator::mutate(v);
     nested_store_ = last;
+    return s;
+  }
+
+  Stmt* mutate(const Let* v) override {
+    nested_let_ = true;
+    Stmt* s = IRMutator::mutate(v);
+    nested_let_ = false;
     return s;
   }
 
@@ -631,8 +650,9 @@ class PrioritizeLoad : public IRMutator {
   //   v = false_v;
   // }
   // int v2 = v + 2;
-  int nested_if_then_else_ = 0;
+  int nested_if_then_else_{0};
   const Store* nested_store_{nullptr};
+  bool nested_let_{false};
   std::unordered_set<const Var*> thread_local_bufs_;
 };
 
@@ -703,13 +723,6 @@ Stmt* GPUMetaVarRewriter::mutate(const For* v) {
           IRSimplifier::simplify(new Max(old_reach, v->stop(), true));
     }
 
-    // If a thread dimension has changed, insert a syncThreads in the enclosing
-    // Block.
-    if (last_thread_dim_ && !exprEquals(last_thread_dim_, v->stop())) {
-      need_sync_ = true;
-    }
-    last_thread_dim_ = v->stop();
-
     const Var* metaVar = gpu_thread_vars_[gpu_thread_index];
     body = Substitute(Stmt::clone(body), {{v->var(), metaVar}});
   }
@@ -750,16 +763,6 @@ Stmt* GPUMetaVarRewriter::mutate(const Block* v) {
       stmt_new = Stmt::clone(stmt_new);
     }
 
-    if (need_sync_) {
-      // sync is special, we never want to mask it and it is never part of
-      // another segment.
-      pushAndReset(false);
-      current.stmts().push_back(new SyncThreads());
-      pushAndReset(true);
-
-      need_sync_ = false;
-    }
-
     // Likewise, Allocate and Free should never be masked.
     if (dynamic_cast<Allocate*>(stmt) || dynamic_cast<Free*>(stmt)) {
       pushAndReset(false);
@@ -796,8 +799,8 @@ Stmt* GPUMetaVarRewriter::mutate(const Block* v) {
   }
 
   std::vector<Stmt*> stmts;
-  int rsqi = 0;
   for (auto& segment : innerSegments) {
+    bool need_sync = false;
     // We never mask loops, they'll mask their contents.
     if (!segment.mask()) {
       TORCH_INTERNAL_ASSERT(segment.stmts().size() == 1);
@@ -812,6 +815,7 @@ Stmt* GPUMetaVarRewriter::mutate(const Block* v) {
     auto& thread_extents = cuda_analysis_->gpu_thread_extents();
     for (size_t i = 0; i < gpu_thread_vars_.size(); ++i) {
       if (!exprEquals(current_thread_reach_[i], thread_extents[i])) {
+        need_sync = true;
         // Mask it against the current dimensions.
         inner = new Cond(
             new CompareSelect(
@@ -836,7 +840,13 @@ Stmt* GPUMetaVarRewriter::mutate(const Block* v) {
       }
     }
 
+    if (need_sync) {
+      stmts.push_back(new SyncThreads());
+    }
     stmts.push_back(inner);
+    if (need_sync) {
+      stmts.push_back(new SyncThreads());
+    }
   }
 
   return new Block(stmts);
@@ -855,18 +865,30 @@ static std::ostream& operator<<(
   return out;
 }
 
-static const char* resource_string = R"(
+#ifdef USE_ROCM
+static const char* device_resource_string = R"(
+#include <hip/hip_runtime.h>
+#define POS_INFINITY INFINITY
+#define NEG_INFINITY -INFINITY
+
+)";
+#else
+static const char* device_resource_string = R"(
 #define NAN __int_as_float(0x7fffffff)
 #define POS_INFINITY __int_as_float(0x7f800000)
 #define NEG_INFINITY __int_as_float(0xff800000)
 
+)";
+#endif
+
+static const char* shared_resource_string = R"(
 template<typename T>
-T maximum(T a, T b) {
+__device__ T maximum(T a, T b) {
   return isnan(a) ? a : (a > b ? a : b);
 }
 
 template<typename T>
-T minimum(T a, T b) {
+__device__ T minimum(T a, T b) {
   return isnan(a) ? a : (a < b ? a : b);
 }
 
@@ -888,7 +910,7 @@ void CudaCodeGen::Initialize() {
   metavar_rewriter_ =
       std::make_unique<GPUMetaVarRewriter>(cuda_analysis_.get());
 
-  os() << resource_string;
+  os() << device_resource_string << shared_resource_string;
 
   if (has_random_) {
     os() << philox_random_string << std::endl;
@@ -904,7 +926,19 @@ void CudaCodeGen::Initialize() {
   }
 
   std::string func_name = GetUniqueFuncName("func");
-  os() << "extern \"C\" __global__" << std::endl << "void " << func_name << "(";
+  os() << "extern \"C\" __global__" << std::endl;
+#ifdef USE_ROCM
+  // CUDA has a default limit of threads per block (=flat work group size)
+  // of 1024, but ROCm uses 256 by default. At the time of writing
+  // (#45506), I am unaware of a stricter limit that TensorExpr imposes
+  // (maybe for perf),so I use 1024 as maximum flat work group size.
+  // We put a minimum value of 1, this is also used by hip (ROCm 3.8) in
+  // the __launch_bound__ implementation. The arguments for the attribute
+  // are (min, max), for details see the documentation at
+  // https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
+  os() << "__attribute__((amdgpu_flat_work_group_size(1, 1024)))" << std::endl;
+#endif
+  os() << "void " << func_name << "(";
   const std::vector<BufferArg> buffer_args = this->buffer_args();
   for (size_t i = 0; i < buffer_args.size(); i++) {
     if (i > 0) {

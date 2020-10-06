@@ -114,6 +114,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       // We are tracking the parents to track multiple backward operations.
       assign_parent();
     }
+
+    if (profiler::profilerEnabled()) {
+      thread_id_ = at::RecordFunction::currentThreadId();
+    }
   }
 
   explicit Node(edge_list&& next_edges = edge_list())
@@ -129,8 +133,21 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
   variable_list operator()(variable_list&& inputs) {
-    RECORD_FUNCTION(
-        name(), std::vector<c10::IValue>(inputs.begin(), inputs.end()), sequence_nr());
+    // Using RecordFunction to trogger observers in the backward pass
+    at::RecordFunction guard(at::RecordScope::BACKWARD_FUNCTION);
+    if (guard.active) {
+      // Using sequence number and thread id to correlate with
+      // the forward pass function
+      guard.setForwardThreadId(thread_id_);
+      if (guard.needs_inputs) {
+        guard.before(
+          name(),
+          std::vector<c10::IValue>(inputs.begin(), inputs.end()),
+          sequence_nr());
+      } else {
+        guard.before(name(), sequence_nr());
+      }
+    }
     // In the first iteration of named tensors, autograd ignores names and
     // operates on unnamed tensors. In the long term, autograd should
     // probably operate with names.
@@ -240,6 +257,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   // assigning a node as a parent to this node
   void assign_parent();
+
+  /// Id of the thread that created Node
+  uint64_t thread_id() const noexcept {
+    return thread_id_;
+  }
 
   /// Returns the name of the dynamic type of the function, for debugging.
   virtual std::string name() const;
@@ -361,6 +383,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // Since `Node`s are neither copyable nor moveable, we can have const
   // fields.
   const uint64_t sequence_nr_;
+
+  // Id of the thread that created the instance
+  uint64_t thread_id_ = 0;
 
   // Note [Thread Safety on Autograd Node]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

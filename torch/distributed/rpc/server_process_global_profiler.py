@@ -113,8 +113,10 @@ class _server_process_global_profile(profile):
             else torch.autograd.ProfilerState.CPU
         )
         profiler_config = torch.autograd.ProfilerConfig(
-            profiler_kind, self.record_shapes, self.profile_memory
-        )
+            profiler_kind,
+            self.record_shapes,
+            self.profile_memory,
+            False)
         _enable_server_process_global_profiler(profiler_config)
         return self
 
@@ -143,7 +145,7 @@ class _server_process_global_profile(profile):
         process_global_function_events = []
         for thread_local_events in process_global_events:
             # Parse from ``Event``s to ``FunctionEvent``s.
-            thread_local_function_events = torch.autograd.profiler.parse_cpu_trace(
+            thread_local_function_events = torch.autograd.profiler.parse_event_records(
                 thread_local_events
             )
             thread_local_function_events.sort(
