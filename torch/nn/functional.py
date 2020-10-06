@@ -1289,8 +1289,7 @@ In-place version of :func:`~celu`.
 """)
 
 
-def leaky_relu(input, negative_slope=0.01, inplace=False):
-    # type: (Tensor, float, bool) -> Tensor
+def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = False) -> Tensor:
     r"""
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
 
@@ -2826,6 +2825,8 @@ def multi_margin_loss(input, target, p=1, margin=1., weight=None, size_average=N
 
 
 pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""
+pixel_shuffle(input, upscale_factor) -> Tensor
+
 Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)` to a
 tensor of shape :math:`(*, C, H \times r, W \times r)`.
 

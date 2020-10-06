@@ -114,7 +114,7 @@ Tensor* Reduce(
       func_name,
       dim_args,
       reducer,
-      [&](ParameterList& p) { return buffer.call(p); },
+      [&](ParameterList& p) { return buffer.load(p); },
       reduce_args);
 }
 

@@ -348,7 +348,7 @@ class Flattener : public IRMutator {
     for (size_t i = 0; i < params.size(); i++) {
       params_expr[i] = ExprHandle(params[i]);
     }
-    return buffer(params_expr).node();
+    return buffer.load(params_expr).node();
   }
 };
 

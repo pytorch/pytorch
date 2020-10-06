@@ -7,6 +7,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/api/object.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <cstdint>
@@ -192,6 +193,9 @@ struct WithNestedTracingFrame {
 };
 TORCH_API void recordSourceLocation(Node* n);
 TORCH_API void setRecordSourceLocation(void (*v)(Node*));
+
+TORCH_API std::vector<StackEntry> pythonCallstack();
+TORCH_API void setPythonCallstack(std::vector<StackEntry> (*v)());
 
 // Having finished adding a new 'node' to the graph IR 'setValueTrace'
 // associates this node with an output variable, so that further operations
