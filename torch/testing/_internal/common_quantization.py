@@ -653,12 +653,6 @@ class QuantizationTestCase(TestCase):
         result = qgraph(*inputs)
         result_debug = qgraph_debug(*inputs)
 
-        # numeric match for debug option for dynamic
-        # quantized op is not needed right now
-        if quant_type != QuantType.DYNAMIC:
-            self.assertEqual((result - result_debug).abs().max(), 0), \
-                'Expecting debug and non-debug option to produce identical result'
-
         qgraph_to_check = qgraph_debug if debug else qgraph
         if print_debug_info:
             print()
