@@ -15429,7 +15429,8 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    def test_lu(self, device):
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    def test_lu(self, device, dtype):
         from torch.testing._internal.common_utils import random_matrix
 
         def run_test(device, pivot):
@@ -15439,7 +15440,7 @@ class TestTorchDeviceType(TestCase):
                 else:
                     rows, columns = matrix_size
                 if a is None:
-                    a = random_matrix(rows, columns, *batches, **dict(singular=singular)).to(device)
+                    a = random_matrix(rows, columns, *batches, **dict(singular=singular, dtype=dtype)).to(device)
                 a_LU_info, pivots_info, info_ = a.lu(pivot=pivot, get_infos=True)
                 self.assertEqual(a_LU_info.size(), torch.Size(batches + (rows, columns)))
                 self.assertEqual(pivots_info.size(), torch.Size(batches + (min(rows, columns),)))
