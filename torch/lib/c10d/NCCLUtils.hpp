@@ -18,6 +18,7 @@
 #endif
 
 // Fix build issues with NCCL P2P - until then disable NCCL send/recv.
+#define ENABLE_NCCL_A2A 1
 #if defined(ENABLE_NCCL_A2A) && (ENABLE_NCCL_A2A == 1)
 // P2P is enabled only for NCCL versions 2.7+ since ncclSend()
 // and ncclRecv() are not supported in earlier versions.
