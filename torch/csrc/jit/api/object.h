@@ -2,7 +2,6 @@
 
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/jit/api/method.h>
 
 namespace torch {
