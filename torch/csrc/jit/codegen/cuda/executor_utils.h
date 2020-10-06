@@ -1,10 +1,11 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
+
+#include <cuda.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 

@@ -11,7 +11,8 @@ public class Module {
   private INativePeer mNativePeer;
 
   /**
-   * Loads a serialized TorchScript module from the specified path on the disk to run on specified device.
+   * Loads a serialized TorchScript module from the specified path on the disk to run on specified
+   * device.
    *
    * @param modelPath path to file that contains the serialized TorchScript module.
    * @param device {@link org.pytorch.Device} to use for running specified module.

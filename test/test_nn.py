@@ -3932,6 +3932,15 @@ class TestNN(NNTestCase):
             # but it should work with the same type
             nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
+    def test_Conv2d_1x1(self):
+        in_channels = 2
+        out_channels = 2
+        mod = torch.nn.Conv2d(2, 2, 1, bias=False).to(dtype=torch.double)
+        input = torch.randn(1, in_channels, 5, 5, requires_grad=True, dtype=torch.double)
+        for enabled in (False, True):
+            with torch.backends.mkldnn.flags(enabled=enabled):
+                gradcheck(F.conv2d, (input, mod.weight))
+
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_cudnn_non_contiguous(self):
@@ -7032,6 +7041,10 @@ class TestNN(NNTestCase):
                 torch.nn.L1Loss()(input, torch.zeros_like(input)),
                 input.abs().mean())
 
+    def test_smoothl1loss_negative_beta_not_supported(self):
+        with self.assertRaises(RuntimeError):
+            F.smooth_l1_loss(torch.randn(2, 2), torch.randn(2, 2), beta=-1.0)
+
     def test_cosine_similarity(self):
         input1 = torch.randn(4, 4, requires_grad=True)
         input2 = torch.randn(4, 4, requires_grad=True)
@@ -9136,6 +9149,18 @@ class TestFusionEval(TestCase):
         Y_hat = conv_bn_fused(inputs)
 
         self.assertEqual(Y_ref, Y_hat, msg="Conv+BN fusion results are off")
+
+        na_bn_ref = torch.nn.BatchNorm2d(oC, affine=False)
+        na_bn_ref.running_mean = torch.from_numpy(running_mean[0]).to(torch.double)
+        na_bn_ref.running_var = torch.from_numpy(running_var[0]).to(torch.double)
+        na_bn_ref.eval()
+
+        Y_ref = na_bn_ref(conv_ref(inputs))
+        conv_na_bn_fused = torch.nn.utils.fusion.fuse_conv_bn_eval(conv_ref,
+                                                                   na_bn_ref)
+        Y_hat = conv_na_bn_fused(inputs)
+
+        self.assertEqual(Y_ref, Y_hat, msg="Conv+BN(non-affine) fusion results are off")
 
 
 class TestAddRelu(TestCase):
