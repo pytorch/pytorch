@@ -373,6 +373,9 @@ op_db = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=(IS_MACOS or IS_WINDOWS)),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.float64],
+                                active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
@@ -1656,10 +1659,6 @@ EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
 def exclude_tensor_method(name, test_name):
     # there are no tensor equivalents for these (inplace or out)
     exclude_all_tensor_method_by_test_name = {
-        'test_clamp_min',
-        'test_clamp_max',
-        'test_clamp_min_scalar',
-        'test_clamp_max_scalar',
         'test_slice',
         'test_where',
         'test_where_broadcast_all',

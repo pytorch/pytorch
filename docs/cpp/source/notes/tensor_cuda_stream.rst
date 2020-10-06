@@ -12,7 +12,7 @@ You can find them in `CUDAStream.h`_. This note provides more details on how to 
 Acquiring CUDA stream
 *********************
 
-Pytorch C++ API provides the following ways to acquire CUDA stream:
+Pytorch's C++ API provides the following ways to acquire CUDA stream:
 
 1. Acquire a new stream from the CUDA stream pool, streams are preallocated from the pool and returned in a round-robin fashion.
 
@@ -25,7 +25,7 @@ Pytorch C++ API provides the following ways to acquire CUDA stream:
   You can request a stream from the high priority pool by setting isHighPriority to true, or a stream for a specific device
   by setting device index (defaulting to the current CUDA stream's device index).
 
-2. Acquire the default CUDA stream, for the passed CUDA device, or for the current device if no device index is passed.
+2. Acquire the default CUDA stream for the passed CUDA device, or for the current device if no device index is passed.
 
 .. code-block:: cpp
   
@@ -51,7 +51,7 @@ Pytorch C++ API provides the following ways to acquire CUDA stream:
 Set CUDA stream
 ***************
 
-Pytorch C++ API provides the following ways to set CUDA stream:
+Pytorch's C++ API provides the following ways to set CUDA stream:
 
 1. Set the current stream on the device of the passed in stream to be the passed in stream.
 
@@ -106,7 +106,7 @@ CUDA Stream Usage Examples
   torch::Tensor tensor0 = torch::ones({2, 2}, torch.device(torch::kCUDA));
   // get a new stream from CUDA stream pool on device 0
   at::cuda::CUDAStream myStream = at::cuda::getStreamFromPool(false, 0);
-  // set the current CUDA stream to `myStream` within the bracket scope using CUDA stream guard
+  // set the current CUDA stream to `myStream` within the scope using CUDA stream guard
   {
     at::cuda::CUDAStreamGuard guard(myStream);
     // current CUDA stream is `myStream` from here till the end of bracket. 
@@ -119,11 +119,11 @@ CUDA Stream Usage Examples
 
 .. attention::
   
-  Above code is running on the same CUDA device. `setCurrentCUDAStream` will always set current CUDA stream on current device, but please
-  pay attention on that `setCurrentCUDASteram` actually set current stream on the device of passed in CUDA stream.
+  Above code is running on the same CUDA device. `setCurrentCUDAStream` will always set current CUDA stream on current device,
+  but note that `setCurrentCUDASteram` actually set current stream on the device of passed in CUDA stream.
   
 
-2. Acquiring and setting CUDA stream on multi-devices.
+2. Acquiring and setting CUDA streams on multiple devices.
 
 .. code-block:: cpp
 
@@ -161,7 +161,7 @@ CUDA Stream Usage Examples
   torch::Tensor tensor1 = torch::ones({2, 2}, torch.device({torch::kCUDA, 1}));
 
   // change the current device index to 1 and current CUDA stream on device 1 
-  // to `myStream1_1` using CUDA stream guard within bracket scope
+  // to `myStream1_1` using CUDA stream guard within a scope
   {
     at::cuda::CUDAStreamGuard stream_guard(myStream1_1);
     // sum() on tensor1 use `myStream1_1` as current CUDA stream on device 1
@@ -214,15 +214,14 @@ CUDA Stream Usage Examples
   each passed in stream's device. Other than scope controlling, this guard is equivalent to 
   calling ``setCurrentCUDAStream`` on each passed in stream.
 
-4. A skeleton example for handling CUDA streams on multi-devices
+4. A skeleton example for handling CUDA streams on multiple devices
 
 .. code-block:: cpp
 
-   // This is a skeleton example that shows how to handle CUDA streams on multi-devices
+   // This is a skeleton example that shows how to handle CUDA streams on multiple devices
    // Suppose you want to do work on the non-default stream on two devices simultaneously, and we
-   // already have streams on both devices in two vectors. The following code shows possible ways
-   // of acquiring, setting CUDA streams. You can use this example as a reference and find useful
-   // part for you.
+   // already have streams on both devices in two vectors. The following code shows three ways
+   // of acquiring and setting the streams.
 
    // Usage 0: acquire CUDA stream and set current CUDA stream with `setCurrentCUDAStream`
    // Create a CUDA stream vector `streams0` on device 0
@@ -234,7 +233,7 @@ CUDA Stream Usage Examples
    // create a CUDA stream vector `streams1` on device using CUDA device guard
    std::vector<at::cuda::CUDAStream> streams1;
    {
-     // device index is set to 1 within this bracket scope
+     // device index is set to 1 within this scope
      at::cuda::CUDAGuard device_guard(1);
      streams1.push_back(at::cuda::getDefaultCUDAStream());
      streams1.push_back(at::cuda::getStreamFromPool());
