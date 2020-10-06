@@ -118,8 +118,8 @@ For example:
 - modify your Python file `torch/__init__.py`
 - test functionality
 
-You do not need to repeatedly install after modifying Python files. Note that this is only true
-after modifying Python files and you would need to reinstall if you modify other files.
+You do not need to repeatedly install after modifying Python files (`.py`). However, you would need to reinstall
+if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
 In case you want to reinstall, make sure that you uninstall PyTorch first by running `pip uninstall torch`
 and `python setup.py clean`. Then you can install in `develop` mode again.
@@ -127,8 +127,7 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
 ### Tips and Debugging
 * A prerequisite to installing PyTorch is CMake. We recommend installing it with [Homebrew](https://brew.sh/)
 with `brew install cmake` if you are developing on MacOS or Linux system.
-* Our `setup.py` requires Python 3. Python 2 is deprecated anyway, so you should definitely get with the times
-and install Python 3.
+* Our `setup.py` requires Python >= 3.6
 * If you run into errors when running `python setup.py develop`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
   your CMake works and can compile this simple Hello World program without errors.
@@ -144,11 +143,10 @@ and install Python 3.
   3. If you still get failures, nuke your `build` directory. The `setup.py` script compiles binaries into the
   `build` folder and caches many details along the way, which saves time the next time you build. If you're running
   into issues, you can always `rm -rf build` from the toplevel `pytorch` directory and start over.
-  4. `python setup.py develop` is equivalent to running `make` from the `build` directory. If you want more detailed
-  error messages, run the following:
+  4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
+  experiment with some environment variables, you can pass them into the command:
   ```bash
-  cd build
-  make
+  ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
   ```
 
 ## Nightly Checkout & Pull
