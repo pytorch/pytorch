@@ -3609,6 +3609,34 @@ class DistributedTest:
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
+        def test_ddp_unused_params_rebuild_buckets_exception(self):
+            class ToyModel(nn.Module):
+                def __init__(self):
+                    super(ToyModel, self).__init__()
+                    self.net1 = nn.Linear(10, 10, bias=False)
+                    self.net2 = nn.Linear(10, 10, bias=False)
+
+                def forward(self, x):
+                    return self.net1(x)
+
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                ToyModel().cuda(self.rank), device_ids=[self.rank]
+            )
+            for i in range(2):
+                inp = torch.rand(1, 10)
+                if i > 0:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Expected to have finished reduction in the prior iteration",
+                    ):
+                        ddp(inp).sum().backward()
+                else:
+                    ddp(inp).sum().backward()
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
         def test_ddp_namedtuple(self):
             expected_fields = ("a", "b")
             TestNamedTupleInput_0 = namedtuple("NamedTuple", expected_fields)
