@@ -85,6 +85,14 @@ Workspace* GetCurrentWorkspace() {
   return gWorkspace;
 }
 
+Workspace* GetWorkspaceByName(const std::string &name) {
+  if (gWorkspaces.count(name)) {
+    return gWorkspaces[name].get();
+  }
+  return nullptr;
+}
+
+
 class StringFetcher : public BlobFetcherBase {
  public:
   py::object Fetch(const Blob& blob) override {
@@ -361,10 +369,18 @@ class BackgroundPlan {
 };
 
 void addObjectMethods(py::module& m) {
-  py::class_<NetBase>(m, "Net").def("run", [](NetBase* net) {
-    py::gil_scoped_release g;
-    CAFFE_ENFORCE(net->Run());
-  });
+  py::class_<NetBase>(m, "Net")
+      .def(
+          "run",
+          [](NetBase* net) {
+            py::gil_scoped_release g;
+            CAFFE_ENFORCE(net->Run());
+          })
+      .def("cancel",
+          [](NetBase* net) {
+            py::gil_scoped_release g;
+            net->Cancel();
+      });
 
   py::class_<ObserverBase<NetBase>>(m, "Observer")
       .def(

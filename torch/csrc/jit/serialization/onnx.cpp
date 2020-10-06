@@ -58,8 +58,26 @@ void dump(const onnx::TypeProto_Tensor& tensor_type, std::ostream& stream) {
   }
 }
 
+void dump(const onnx::TypeProto& type, std::ostream& stream);
+
+void dump(const onnx::TypeProto_Sequence& sequence_type, std::ostream& stream) {
+  stream << "Sequence<";
+  if (sequence_type.has_elem_type()) {
+    dump(sequence_type.elem_type(), stream);
+  } else {
+    stream << "None";
+  }
+  stream << ">";
+}
+
 void dump(const onnx::TypeProto& type, std::ostream& stream) {
-  dump(type.tensor_type(), stream);
+  if (type.has_tensor_type()) {
+    dump(type.tensor_type(), stream);
+  } else if (type.has_sequence_type()) {
+    dump(type.sequence_type(), stream);
+  } else {
+    stream << "None";
+  }
 }
 
 void dump(const onnx::ValueInfoProto& value_info, std::ostream& stream) {

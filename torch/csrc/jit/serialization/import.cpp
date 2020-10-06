@@ -3,7 +3,7 @@
 #include <ATen/core/ivalue_inl.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
-#ifndef C10_MOBILE
+#if !defined(C10_MOBILE) && !defined(C10_DISABLE_LEGACY_IMPORT)
 #include <torch/csrc/jit/serialization/import_legacy.h>
 #endif
 #include <torch/csrc/jit/frontend/script_type_parser.h>
@@ -256,7 +256,7 @@ Module ScriptModuleDeserializer::deserialize(
     }
   }
   if (reader_->hasRecord("model.json")) {
-#ifndef C10_MOBILE
+#if !defined(C10_MOBILE) && !defined(C10_DISABLE_LEGACY_IMPORT)
     return torch::jit::LEGACY_deserialize(
         compilation_unit_, std::move(reader_), device_);
 #else

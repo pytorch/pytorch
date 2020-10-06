@@ -239,6 +239,13 @@ public:
     // Specifically map() does not perform the type conversion needed by abs.
     return map([](T x) { return static_cast<T>(std::abs(x)); });
   }
+
+  template <typename other_t_sgn = T,
+            typename std::enable_if<c10::is_complex<other_t_sgn>::value, int>::type = 0>
+  Vec256<T> sgn() const {
+    return map(at::native::sgn_impl);
+  }
+
   template <typename other_t_angle = T,
             typename std::enable_if<!c10::is_complex<other_t_angle>::value, int>::type = 0>
   Vec256<T> angle() const {
@@ -383,6 +390,9 @@ public:
       ret[i] = std::hypot(values[i], b[i]);
     }
     return ret;
+  }
+  Vec256<T> i0() const {
+    return map(calc_i0);
   }
   Vec256<T> neg() const {
     // NB: the trailing return type is needed because we need to coerce the
@@ -725,6 +735,14 @@ inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
 }
 
 #endif
+
+template<class T, typename std::enable_if_t<!std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+inline Vec256<T> operator~(const Vec256<T>& a) {
+  Vec256<T> ones;  // All bits are 1
+  memset((T*) ones, 0xFF, 32);
+  return a ^ ones;
+}
+
 
 template <typename T>
 inline Vec256<T>& operator += (Vec256<T>& a, const Vec256<T>& b) {

@@ -1,5 +1,3 @@
-from __future__ import division
-
 import torch
 from torch import Tensor
 from ._functions import SyncBatchNorm as sync_batch_norm
@@ -116,7 +114,8 @@ class _BatchNorm(_NormBase):
                 else:  # use exponential moving average
                     exponential_average_factor = self.momentum
 
-        """ Decide whether the mini-batch stats should be used for normalization rather than the buffers.
+        r"""
+        Decide whether the mini-batch stats should be used for normalization rather than the buffers.
         Mini-batch stats are used in training mode, and in eval mode when buffers are None.
         """
         if self.training:
@@ -124,7 +123,8 @@ class _BatchNorm(_NormBase):
         else:
             bn_training = (self.running_mean is None) and (self.running_var is None)
 
-        """Buffers are only updated if they are to be tracked and we are in training mode. Thus they only need to be
+        r"""
+        Buffers are only updated if they are to be tracked and we are in training mode. Thus they only need to be
         passed when the update should occur (i.e. in training mode when they are tracked), or when buffer stats are
         used for normalization (i.e. in eval mode when buffers are not None).
         """
@@ -184,8 +184,10 @@ class BatchNorm1d(_BatchNorm):
             learnable affine parameters. Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
-            this module does not track such statistics and uses batch statistics instead
-            in both training and eval modes if the running mean and variance are ``None``. Default: ``True``
+            this module does not track such statistics, and initializes statistics
+            buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
+            When these buffers are ``None``, this module always uses batch statistics.
+            in both training and eval modes. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C)` or :math:`(N, C, L)`
@@ -255,8 +257,10 @@ class BatchNorm2d(_BatchNorm):
             learnable affine parameters. Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
-            this module does not track such statistics and uses batch statistics instead
-            in both training and eval modes if the running mean and variance are ``None``. Default: ``True``
+            this module does not track such statistics, and initializes statistics
+            buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
+            When these buffers are ``None``, this module always uses batch statistics.
+            in both training and eval modes. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C, H, W)`
@@ -327,8 +331,10 @@ class BatchNorm3d(_BatchNorm):
             learnable affine parameters. Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
-            this module does not track such statistics and uses batch statistics instead
-            in both training and eval modes if the running mean and variance are ``None``. Default: ``True``
+            this module does not track such statistics, and initializes statistics
+            buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
+            When these buffers are ``None``, this module always uses batch statistics.
+            in both training and eval modes. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C, D, H, W)`
@@ -381,7 +387,7 @@ class SyncBatchNorm(_BatchNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momentum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
@@ -407,8 +413,10 @@ class SyncBatchNorm(_BatchNorm):
             learnable affine parameters. Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
-            this module does not track such statistics and uses batch statistics instead
-            in both training and eval modes if the running mean and variance are ``None``. Default: ``True``
+            this module does not track such statistics, and initializes statistics
+            buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
+            When these buffers are ``None``, this module always uses batch statistics.
+            in both training and eval modes. Default: ``True``
         process_group: synchronization of stats happen within each process group
             individually. Default behavior is synchronization across the whole
             world
@@ -485,7 +493,25 @@ class SyncBatchNorm(_BatchNorm):
             else:  # use exponential moving average
                 exponential_average_factor = self.momentum
 
-        need_sync = self.training or not self.track_running_stats
+        r"""
+        Decide whether the mini-batch stats should be used for normalization rather than the buffers.
+        Mini-batch stats are used in training mode, and in eval mode when buffers are None.
+        """
+        if self.training:
+            bn_training = True
+        else:
+            bn_training = (self.running_mean is None) and (self.running_var is None)
+
+        r"""
+        Buffers are only updated if they are to be tracked and we are in training mode. Thus they only need to be
+        passed when the update should occur (i.e. in training mode when they are tracked), or when buffer stats are
+        used for normalization (i.e. in eval mode when buffers are not None).
+        """
+        # If buffers are not to be tracked, ensure that they won't be updated
+        running_mean = self.running_mean if not self.training or self.track_running_stats else None
+        running_var = self.running_var if not self.training or self.track_running_stats else None
+
+        need_sync = bn_training
         if need_sync:
             process_group = torch.distributed.group.WORLD
             if self.process_group:
@@ -496,15 +522,15 @@ class SyncBatchNorm(_BatchNorm):
         # fallback to framework BN when synchronization is not necessary
         if not need_sync:
             return F.batch_norm(
-                input, self.running_mean, self.running_var, self.weight, self.bias,
-                self.training or not self.track_running_stats,
-                exponential_average_factor, self.eps)
+                input, running_mean, running_var, self.weight, self.bias,
+                bn_training, exponential_average_factor, self.eps)
         else:
             if not self.ddp_gpu_size:
                 raise AttributeError('SyncBatchNorm is only supported within torch.nn.parallel.DistributedDataParallel')
 
+            assert bn_training
             return sync_batch_norm.apply(
-                input, self.weight, self.bias, self.running_mean, self.running_var,
+                input, self.weight, self.bias, running_mean, running_var,
                 self.eps, exponential_average_factor, process_group, world_size)
 
     @classmethod
@@ -550,6 +576,8 @@ class SyncBatchNorm(_BatchNorm):
             module_output.running_mean = module.running_mean
             module_output.running_var = module.running_var
             module_output.num_batches_tracked = module.num_batches_tracked
+            if hasattr(module, "qconfig"):
+                module_output.qconfig = module.qconfig
         for name, child in module.named_children():
             module_output.add_module(name, cls.convert_sync_batchnorm(child, process_group))
         del module
