@@ -1,8 +1,8 @@
 #include <benchmark/benchmark.h>
-#include "torch/torch.h"
 #include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
+#include "torch/torch.h"
 
 namespace te = torch::jit::tensorexpr;
 
@@ -18,9 +18,9 @@ class Gemm : public benchmark::Fixture {
   }
 
   void TearDown(benchmark::State& state) {
-    state.counters["GFLOPS"] =
-      benchmark::Counter(uint64_t(state.iterations()) * 2 * M * N * K,
-                         benchmark::Counter::kIsRate);
+    state.counters["GFLOPS"] = benchmark::Counter(
+        uint64_t(state.iterations()) * 2 * M * N * K,
+        benchmark::Counter::kIsRate);
   }
 
   int M;
@@ -46,9 +46,9 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprNoopt)(benchmark::State& state) {
       "gemm",
       {{M, "M"}, {N, "N"}},
       te::Sum(),
-      [&](const te::ExprHandle& m, const te::ExprHandle& n, const te::ExprHandle& k) {
-        return AP.load(m, k) * BP.load(k, n);
-      },
+      [&](const te::ExprHandle& m,
+          const te::ExprHandle& n,
+          const te::ExprHandle& k) { return AP.load(m, k) * BP.load(k, n); },
       {{K, "K"}});
   te::LoopNest loop({CT});
   loop.prepareForCodegen();
@@ -70,9 +70,9 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile32x32)(benchmark::State& state) {
       "gemm",
       {{M, "M"}, {N, "N"}},
       te::Sum(),
-      [&](const te::ExprHandle& m, const te::ExprHandle& n, const te::ExprHandle& k) {
-        return AP.load(m, k) * BP.load(k, n);
-      },
+      [&](const te::ExprHandle& m,
+          const te::ExprHandle& n,
+          const te::ExprHandle& k) { return AP.load(m, k) * BP.load(k, n); },
       {{K, "K"}});
   te::LoopNest loop({CT});
 
