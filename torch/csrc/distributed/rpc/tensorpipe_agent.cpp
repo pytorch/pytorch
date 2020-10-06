@@ -703,7 +703,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
           << messageId << " to " << clientPipe.pipe_->getRemoteName();
 
   // Increase clientActiveCalls_ and pass it to pipeWrite and pipeRead
-  // callbacks. It will decrease clientActiveCalls_ accordingly on destrution.
+  // callbacks. It will decrease clientActiveCalls_ accordingly on destruction.
   auto clientCallCounter =
       std::make_shared<CallCounter>(*this, clientActiveCalls_);
 
