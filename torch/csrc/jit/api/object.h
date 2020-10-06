@@ -2,8 +2,8 @@
 
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/api/method.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/jit/api/method.h>
 
 namespace torch {
 namespace jit {
@@ -68,10 +68,8 @@ struct TORCH_API Object {
       return _ivalue()->type()->getConstant(*r);
     }
     std::stringstream err;
-    err << _ivalue()->type()->repr_str()
-        << " does not have a field with name '"
-        << name.c_str()
-        << "'";
+    err << _ivalue()->type()->repr_str() << " does not have a field with name '"
+        << name.c_str() << "'";
     throw ObjectAttributeError(err.str());
   }
 
