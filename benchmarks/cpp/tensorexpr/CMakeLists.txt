@@ -1,3 +1,2 @@
-list(APPEND TENSOREXPR_BENCHMARK_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/tensorexpr.cpp)
-list(APPEND TENSOREXPR_BENCHMARK_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/tensorexpr.cpp)
-set(TENSOREXPR_BENCHMARK_SRCS ${TENSOREXPR_BENCHMARK_SRCS} PARENT_SCOPE)
+add_executable(tensorexpr_bench tensorexpr.cpp)
+target_link_libraries(tensorexpr_bench PRIVATE torch_library benchmark)

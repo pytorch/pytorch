@@ -1262,9 +1262,7 @@ if(BUILD_STATIC_RUNTIME_BENCHMARK)
 endif()
 
 if(BUILD_TENSOREXPR_BENCHMARK)
-  add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/tensorexpr ${PROJECT_BINARY_DIR}/bin)
-  add_executable(tensorexpr_bench "${TENSOREXPR_BENCHMARK_SRCS}")
-  target_link_libraries(tensorexpr_bench torch_library benchmark)
+  add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/tensorexpr ${CMAKE_BINARY_DIR}/tensorexpr_bench)
 endif()
 
 if(BUILD_MOBILE_BENCHMARK)
