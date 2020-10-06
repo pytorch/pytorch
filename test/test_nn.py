@@ -10131,6 +10131,34 @@ class TestNNDeviceType(NNTestCase):
                 self._test_module_empty_input(mod, inp)
 
     @onlyOnCPUAndCUDA
+    def test_ReplicationPad_empty(self, device):
+        for mod, inp in [
+                (torch.nn.ReplicationPad1d(3), torch.randn(0, 3, 10, device=device)),
+                (torch.nn.ReplicationPad2d(3), torch.randn(0, 3, 10, 10, device=device)),
+                (torch.nn.ReplicationPad3d(3), torch.randn(0, 3, 10, 10, 10, device=device))]:
+            self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(NotImplementedError, 'Only 3D'):
+            mod = torch.nn.ReplicationPad1d(2)
+            inp = torch.randn(3, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected 2D or 3D'):
+            mod = torch.nn.ReplicationPad1d(2)
+            inp = torch.randn(3, 0, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected 3D or 4D'):
+            mod = torch.nn.ReplicationPad2d((2, 2, 2, 2))
+            inp = torch.randn(43, 0, 10, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected 4D or 5D'):
+            mod = torch.nn.ReplicationPad3d((2, 2, 2, 2, 2, 2))
+            inp = torch.randn(3, 0, 10, 10, 10, device=device)
+            mod(inp)
+
+    @onlyOnCPUAndCUDA
     def test_ReflectionPad_empty(self, device):
         for mod, inp in [
                 (torch.nn.ReflectionPad1d(2), torch.randn(0, 3, 10, device=device)),
