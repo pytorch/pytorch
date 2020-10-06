@@ -869,6 +869,8 @@ def all_reduce_multigpu(tensor_list,
     After the call, all ``tensor`` in ``tensor_list`` is going to be bitwise
     identical in all processes.
 
+    Complex tensors are supported.
+
     Only nccl and gloo backend is currently supported
     tensors should only be GPU tensors
 
@@ -918,6 +920,8 @@ def all_reduce(tensor,
 
     After the call ``tensor`` is going to be bitwise identical in all processes.
 
+    Complex tensors are supported.
+
     Arguments:
         tensor (Tensor): Input and output of the collective. The function
             operates in-place.
@@ -930,6 +934,25 @@ def all_reduce(tensor,
     Returns:
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
+
+    Example:
+        Tensors are all of dtype torch.int64.
+        We have 2 process groups, 2 ranks.
+        rank 0 passes:
+            tensor = [[1, 1], [2, 2]]
+        rank 1 passes:
+            tensor = [[3, 3], [4, 4]]
+        both rank 0 and 1 get:
+            tensor = [[4, 4], [6, 6]]
+
+        Tensors are all of dtype torch.complex64.
+        We have 2 process groups, 2 ranks.
+        rank 0 passes:
+            tensor = [[1+i, 1+i], [2+2i, 2+2i]]
+        rank 1 passes:
+            tensor = [[3+3i, 3+3i], [4+4i, 4+4i]]
+        both rank 0 and 1 get:
+            tensor = [[4+4i, 4+4i], [6+6i, 6+6i]]
 
     """
     _check_single_tensor(tensor, "tensor")
@@ -970,6 +993,8 @@ def all_reduce_coalesced(tensors,
 
     After the call each tensor in tensors is going to bitwise identical
     in all processes.
+
+    Complex tensors are supported.
 
     Arguments:
         tensors (List[Tensor]): Input and output of the collective. The function
@@ -1119,6 +1144,8 @@ def all_gather_multigpu(output_tensor_lists,
 
     Only nccl backend is currently supported
     tensors should only be GPU tensors
+
+    Complex tensors are supported.
 
     Arguments:
         output_tensor_lists (List[List[Tensor]]): Output lists. It should
@@ -1406,6 +1433,8 @@ def all_gather(tensor_list,
     """
     Gathers tensors from the whole group in a list.
 
+    Complex tensors are supported.
+
     Arguments:
         tensor_list (list[Tensor]): Output list. It should contain
             correctly-sized tensors to be used for output of the collective.
@@ -1416,6 +1445,41 @@ def all_gather(tensor_list,
     Returns:
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
+
+    Example:
+        Tensors are all of dtype torch.int64.
+        We have 2 process groups, 2 ranks.
+        rank 0 passes:
+            tensor_list =
+               [[[-1, -1], [-1, -1]],
+                [[-1, -1], [-1, -1]]]
+            tensor = [[1, 1], [2, 2]]
+        rank 1 passes:
+            tensor_list =
+               [[[-1, -1], [-1, -1]],
+                [[-1, -1], [-1, -1]]]
+            tensor = [[3, 3], [4, 4]]
+        both rank 0 and 1 get:
+            tensor_list =
+               [[[1, 1], [2, 2]],
+                [[3, 3], [4, 4]]]
+
+        Tensors are all of dtype torch.complex64.
+        We have 2 process groups, 2 ranks.
+        rank 0 passes:
+            tensor_list =
+               [[[0+0i, 0+0i], [0+0i, 0+0i]],
+                [[0+0i, 0+0i], [0+0i, 0+0i]]]
+            tensor = [[1+i, 1+i], [2+2i, 2+2i]]
+        rank 1 passes:
+            tensor_list =
+               [[[0+0i, 0+0i], [0+0i, 0+0i]],
+                [[0+0i, 0+0i], [0+0i, 0+0i]]]
+            tensor = [[3+3i, 3+3i], [4+4i, 4+4i]]
+        both rank 0 and 1 get:
+            tensor_list =
+               [[[1+i, 1+i], [2+2i, 2+2i]],
+                [[3+3i, 3+3i], [4+4i, 4+4i]]]
 
     """
     _check_tensor_list(tensor_list, "tensor_list")
@@ -1443,6 +1507,8 @@ def all_gather_coalesced(output_tensor_lists,
                          async_op=False):
     """
     Gathers input tensors from the whole group in a list in a coalesced manner.
+
+    Complex tensors are supported.
 
     Arguments:
         output_tensor_lists (list[list[Tensor]]): Output list. It should contain
