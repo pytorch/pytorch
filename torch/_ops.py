@@ -84,7 +84,7 @@ class _Ops(types.ModuleType):
         Loads a shared library from the given path into the current process.
 
         The library being loaded may run global initialization code to register
-        custom operators with the PyTorch JIT runtime. This allows dynamically
+        custom operators with the PyTorch JIT runtime. This allows dynamically longer than lines
         loading custom operators. For this, you should compile your operator
         and the static registration code into a shared library object, and then
         call ``torch.ops.load_library('path/to/libcustom.so')`` to load the
