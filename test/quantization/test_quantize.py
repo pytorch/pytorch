@@ -1228,6 +1228,9 @@ class TestEagerModeOps(QuantizationTestCase):
     def test_leaky_relu(self):
         self._test_activation_op_impl(nn.LeakyReLU, nnq.LeakyReLU, {'negative_slope': 0.1, 'inplace': False})
 
+    def test_sigmoid(self):
+        self._test_activation_op_impl(nn.Sigmoid, nnq.Sigmoid, {})
+
 class TestFunctionalModule(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
     @given(train_mode=st.booleans())

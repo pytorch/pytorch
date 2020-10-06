@@ -19,6 +19,7 @@ STATIC_QUANT_MODULE_MAPPINGS = {
     nn.Hardswish: nnq.Hardswish,
     nn.ELU: nnq.ELU,
     nn.LeakyReLU: nnq.LeakyReLU,
+    nn.Sigmoid: nnq.Sigmoid,
     nn.Conv1d: nnq.Conv1d,
     nn.Conv2d: nnq.Conv2d,
     nn.Conv3d: nnq.Conv3d,
