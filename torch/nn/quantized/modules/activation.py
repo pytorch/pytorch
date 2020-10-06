@@ -124,3 +124,28 @@ class ELU(torch.nn.ELU):
     def from_float(mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return ELU(float(scale), int(zero_point), mod.alpha)
+
+class LeakyReLU(torch.nn.LeakyReLU):
+    r"""This is the quantized equivalent of :class:`~torch.nn.LeakyReLU`.
+
+    Args:
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
+        negative_slope: Controls the angle of the negative slope. Default: 1e-2
+    """
+    def __init__(self, scale: float, zero_point: int, negative_slope: float = 1e-2, inplace: bool = False):
+        super().__init__(negative_slope, inplace)
+        self.scale = scale
+        self.zero_point = zero_point
+
+    def forward(self, input):
+        return torch.ops.quantized.leaky_relu(
+            input, self.negative_slope, self.inplace, self.scale, self.zero_point)
+
+    def _get_name(self):
+        return 'QuantizedLeakyReLU'
+
+    @classmethod
+    def from_float(cls, mod):
+        scale, zero_point = mod.activation_post_process.calculate_qparams()
+        return cls(float(scale), int(zero_point), mod.negative_slope, mod.inplace)
