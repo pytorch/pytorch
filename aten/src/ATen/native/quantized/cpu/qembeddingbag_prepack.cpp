@@ -28,16 +28,12 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
   at::Tensor weight_contig =
       qweight.contiguous(qweight.suggest_memory_format());
 
-  uint8_t* weight_data;
   int bit_width, scale_bias_bytes;
+  uint8_t* weight_data = static_cast<uint8_t*>(weight_contig.data_ptr());
   if (qweight.scalar_type() == c10::kQUInt8) {
-    weight_data =
-        reinterpret_cast<uint8_t*>(weight_contig.data_ptr<c10::quint8>());
     bit_width = 8;
     scale_bias_bytes = 8; // extra 8 bytes to store FP scale and bias per row.
   } else {
-    weight_data =
-        reinterpret_cast<uint8_t*>(weight_contig.data_ptr<c10::quint4x2>());
     bit_width = 4;
     scale_bias_bytes =
         4; // extra 4 bytes to store at::Half scale and bias per row.
