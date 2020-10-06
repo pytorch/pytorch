@@ -746,7 +746,7 @@ void initJitScriptBindings(PyObject* module) {
                 try {
                   return toPyObject(self.attr(name));
                 } catch (ObjectAttributeError err) {
-                  throw AttributeError(err.what());
+                  throw AttributeError("%s", err.what());
                 }
               })
           .def(
@@ -761,7 +761,7 @@ void initJitScriptBindings(PyObject* module) {
                   }
                   return toPyObject(self.attr(name));
                 } catch (ObjectAttributeError err) {
-                  throw AttributeError(err.what());
+                  throw AttributeError("%s", err.what());
                 }
               })
           .def(
