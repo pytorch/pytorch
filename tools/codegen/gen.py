@@ -5,7 +5,7 @@ import itertools
 from typing import List, Dict, Optional, Iterator, Tuple, Set, Callable, Any, TypeVar, Union, Sequence
 import yaml
 from enum import Enum
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 import argparse
 import pathlib
 import functools
@@ -909,6 +909,17 @@ def main() -> None:
         op_registration_whitelist = None
 
     native_functions = parse_native_yaml(os.path.join(options.source_path, 'native/native_functions.yaml'))
+
+    pre_grouped_native_functions: Dict[FunctionSchema, Dict[SchemaKind, NativeFunction]]
+    pre_grouped_native_functions = defaultdict(dict)
+    for f in native_functions:
+        d = pre_grouped_native_functions[f.func.signature()]
+        assert f.func.kind() not in d
+        d[f.func.kind()] = f
+    grouped_native_functions = list(map(NativeFunctionGroup.from_dict, pre_grouped_native_functions.values()))
+    # NB: At the moment, grouped_native_functions isn't used by anything,
+    # this code lives here to help potential future consumers; for a live
+    # example see https://github.com/pytorch/pytorch/pull/45277
 
     template_dir = os.path.join(options.source_path, "templates")
 

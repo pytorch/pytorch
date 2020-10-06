@@ -199,6 +199,54 @@ class NativeFunction:
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
+# Represents a bundle of native functions that are semantically related.
+@dataclass(frozen=True)
+class NativeFunctionGroup:
+    functional: Optional[NativeFunction]
+    inplace: Optional[NativeFunction]
+    out: Optional[NativeFunction]
+
+    def __post_init__(self) -> None:
+        test_sig: Optional[FunctionSchema] = None
+        for f in self.functions():
+            if test_sig is None:
+                test_sig = f.func.signature()
+            else:
+                if test_sig != f.func.signature():
+                    raise AssertionError(
+                        "NativeFunctionGroup constructed from two NativeFunctions "
+                        f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
+                    )
+
+    def signature(self) -> 'FunctionSchema':
+        if self.out is not None:
+            return self.out.func.signature()
+        elif self.functional is not None:
+            return self.functional.func.signature()
+        elif self.inplace is not None:
+            return self.inplace.func.signature()
+        else:
+            raise AssertionError("invalid NativeFunctionGroup has no NativeFunctions")
+
+    def functions(self) -> Iterator[NativeFunction]:
+        if self.out is not None:
+            yield self.out
+        if self.functional is not None:
+            yield self.functional
+        if self.inplace is not None:
+            yield self.inplace
+
+    @staticmethod
+    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> 'NativeFunctionGroup':
+        functional = d.get(SchemaKind.functional)
+        inplace = d.get(SchemaKind.inplace)
+        out = d.get(SchemaKind.out)
+        return NativeFunctionGroup(
+            functional=functional,
+            inplace=inplace,
+            out=out,
+        )
+
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,
 # and most of the code generation we do is type directed (e.g., look at
