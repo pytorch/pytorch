@@ -1182,7 +1182,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 extra_kwargs, extra_kwargs)
 
     def test_sigmoid(self):
-        # self._test_activation_impl(nn.Sigmoid, F.sigmoid, nnq.Sigmoid, torch.ops.quantized.sigmoid)
+        self._test_activation_impl(nn.Sigmoid, F.sigmoid, nnq.Sigmoid, torch.ops.quantized.sigmoid)
 
         class M(torch.nn.Module):
             def __init__(self):
