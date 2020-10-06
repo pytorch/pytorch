@@ -87,10 +87,10 @@ def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
 def sum(input: Tensor, dim: DimOrDims = None,
         dtype: Optional[DType] = None) -> Tensor:
     r"""
-    Returns the sum of each row of sparse tensor :attr:`input` in the given
+    Returns the sum of each row of the sparse tensor :attr:`input` in the given
     dimensions :attr:`dim`. If :attr:`dim` is a list of dimensions,
     reduce over all of them. When sum over all ``sparse_dim``, this method
-    returns a dense tensor instead of sparse tensor.
+    returns a dense tensor instead of a sparse tensor.
 
     All summed :attr:`dim` are squeezed (see :func:`torch.squeeze`), resulting an output
     tensor having :attr:`dim` fewer dimensions than :attr:`input`.

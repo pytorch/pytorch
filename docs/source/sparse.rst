@@ -23,7 +23,7 @@ in-between algorithms of different fields and applications. The most
 commonly assumed fill value is zero and it is assumed for all tools
 that are available via :mod:`torch` namespace. When some sparse tensor
 functionality assumes a non-zero or indefinite fill value, the
-corresponding tools are provided via :mod:`torch.sparse`
+corresponding tools are provided via the :mod:`torch.sparse`
 namespace. Please see the documentation strings of the corresponding
 functions for a particular definition of the fill value.
 
@@ -51,7 +51,7 @@ Torch supported sparse storage formats are:
 - COO(rdinate) format where tensor elements are stored using the lists
   of indices and the corresponding values. Unspecified elements have
   values equal to the fill value. To construct a sparse tensor in COO
-  format, use :func:`torch.sparse_coo_tensor` function.
+  format, use the :func:`torch.sparse_coo_tensor` function.
 
 .. _sparse-coo-docs:
 
