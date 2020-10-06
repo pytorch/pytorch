@@ -793,14 +793,15 @@ class TestFX(JitTestCase):
 
     def test_fn_type_annotations(self):
         class Foo(torch.nn.Module):
-            def forward(self, p : Pair, z : torch.Tensor, i : int):
-                return p.x + p.y + z + i
+            def forward(self, p : Pair, z : torch.Tensor, i : int) -> Dict[str, torch.Tensor]:
+                return {'a': p.x + p.y + z + i}
 
         foo_scripted = torch.jit.script(Foo())
         foo_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
 
         fxed = symbolic_trace(Foo())
         fxed_scripted = torch.jit.script(fxed)
+        print(fxed_scripted.code)
         fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
 
     def test_find_single_partition(self):

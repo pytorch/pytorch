@@ -211,20 +211,21 @@ class Graph:
 
     def python_code(self, root_module: str) -> str:
         free_vars: List[str] = []
-        modules_used : Set[str] = set()
+        modules_used : Set[str] = set(['typing'])
         body: List[str] = []
+
+        def type_repr(o : Any):
+            if inspect.isclass(o):
+                qualified_name = f'{o.__module__}.{o.__qualname__}'
+                modules_used.add(o.__module__)
+                return qualified_name
+            else:
+                return repr(o)
         for node in self._nodes:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
-                def class_repr(o : Any):
-                    if inspect.isclass(o):
-                        qualified_name = f'{o.__module__}.{o.__qualname__}'
-                        modules_used.add(o.__module__)
-                        return qualified_name
-                    else:
-                        return repr(o)
                 maybe_type_annotation = '' if node.target not in self.annotations else \
-                                        f' : {class_repr(self.annotations[node.target])}'
+                                        f' : {type_repr(self.annotations[node.target])}'
                 free_vars.append(f'{node.target}{maybe_type_annotation}')
                 raw_name = node.target.replace('*', '')
                 if raw_name != node.name:
@@ -269,13 +270,18 @@ class Graph:
                 continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
+        if 'return' in self.annotations:
+            maybe_return_annotation = f" -> {type_repr(self.annotations['return'])}"
+        else:
+            maybe_return_annotation = ''
+
         import_block = '\n'.join(f'import {name}' for name in sorted(modules_used))
 
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n')) + '\n'
         fn_code = f"""\
 {import_block}
-def forward(self, {', '.join(free_vars)}):
+def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
 {code}
 """
         return fn_code
