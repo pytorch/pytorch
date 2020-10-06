@@ -700,6 +700,21 @@ else()
   caffe2_update_option(USE_FAKELOWP OFF)
 endif()
 
+# ---[ Kineto
+if(USE_KINETO)
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+  set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto" CACHE STRING "Kineto source directory")
+  if(USE_KINETO AND NOT TARGET kineto)
+    set(KINETO_BUILD_TESTS OFF CACHE BOOL "")
+    set(KINETO_LIBRARY_TYPE "default" CACHE STRING "")
+
+    add_subdirectory("${KINETO_SOURCE_DIR}")
+    # set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
+    message(STATUS "Configured libkineto.")
+  endif()
+
+  list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
+endif()
 
 # ---[ LMDB
 if(USE_LMDB)
