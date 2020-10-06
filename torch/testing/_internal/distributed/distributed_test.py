@@ -3625,6 +3625,9 @@ class DistributedTest:
             for i in range(2):
                 inp = torch.rand(1, 10)
                 if i > 0:
+                    # On 2nd iteration, this will fail during rebuild_buckets,
+                    # but we should report an error regarding unused parameters
+                    # since that is the underlying root cause.
                     with self.assertRaisesRegex(
                         RuntimeError,
                         "Expected to have finished reduction in the prior iteration",
