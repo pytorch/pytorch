@@ -24,20 +24,19 @@ at::Tensor embedding_bag_4bit_helper(
       offsets_in.has_value(),
       "embedding_bag_4bit_rowwise_offsets expects offsets to be set");
 
-  TORCH_CHECK(weight.ndimension() == 2);
-  TORCH_CHECK(indices.ndimension() == 1);
+  TORCH_CHECK(weight.dim() == 2);
+  TORCH_CHECK(indices.dim() == 1);
 
   auto offsets = offsets_in.value();
-  TORCH_CHECK(offsets.ndimension() == 1);
+  TORCH_CHECK(offsets.dim() == 1);
 
   // FBGEMM expects the offsets to be of int type.
   at::Tensor offsets_new = offsets.toType(at::ScalarType::Int);
 
   auto offsets_data = offsets_new.data_ptr<int>();
   const auto weight_data = weight.data_ptr<uint8_t>();
-  uint8_t* input_data = nullptr;
   auto weight_contig = weight.contiguous();
-  input_data = weight_contig.data_ptr<uint8_t>();
+  uint8_t* input_data = weight_contig.data_ptr<uint8_t>();
 
   // Get compressed indices for sparse op.
   int32_t* compressed_indices_mapping_data = nullptr;
@@ -345,7 +344,7 @@ Tensor embedding_bag_byte_rowwise_offsets(
     const c10::optional<Tensor>& per_sample_weights_,
     bool include_last_offset) {
   TORCH_CHECK(weight.scalar_type() == at::kByte);
-  TORCH_CHECK(weight.ndimension() == 2);
+  TORCH_CHECK(weight.dim() == 2);
   return embedding_bag_byte_helper(
       weight,
       indices,
