@@ -6970,7 +6970,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: leaky_relu
-    QuantizedCPU: heaky_relu_quantized_cpu
+    QuantizedCPU: leaky_relu_quantized_cpu
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, bool self_is_result) -> Tensor
   use_c10_dispatcher: full
