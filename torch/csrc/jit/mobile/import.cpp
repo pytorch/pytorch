@@ -83,7 +83,12 @@ void print_unsupported_ops_and_throw(
     error_message += op_name + ", ";
   }
   error_message += "}";
-  TORCH_CHECK(false, "Following ops cannot be found:", error_message);
+  TORCH_CHECK(
+      false,
+      "Following ops cannot be found. ",
+      "May need to add them explicitly to the selective build operator whitelist, ",
+      "or re-run the export_opnames to update the whitelist:",
+      error_message);
 }
 
 void parseMethods(
@@ -223,10 +228,14 @@ class BytecodeDeserializer final {
  public:
   explicit BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader);
   mobile::Module deserialize(c10::optional<at::Device> device);
+  std::unordered_map<std::string, std::string> deserializeMetadata(
+      c10::optional<at::Device> device);
 
  private:
   c10::IValue readArchive(
       const std::string& archive_name,
+      std::shared_ptr<mobile::CompilationUnit> mcu);
+  std::unordered_map<std::string, std::string> readMobileMetadata(
       std::shared_ptr<mobile::CompilationUnit> mcu);
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
@@ -239,6 +248,13 @@ BytecodeDeserializer::BytecodeDeserializer(
     : compilation_unit_(std::make_shared<CompilationUnit>()),
       reader_(std::move(reader)) {}
 
+std::unordered_map<std::string, std::string> BytecodeDeserializer::
+    deserializeMetadata(c10::optional<at::Device> device) {
+  device_ = device;
+  auto mcu = std::make_shared<mobile::CompilationUnit>();
+  return readMobileMetadata(mcu);
+}
+
 mobile::Module BytecodeDeserializer::deserialize(
     c10::optional<at::Device> device) {
   device_ = device;
@@ -250,8 +266,23 @@ mobile::Module BytecodeDeserializer::deserialize(
     debug_info_bvals = readArchive("mobile_debug", mcu).toTuple()->elements();
   }
   parseMethods(bvals, debug_info_bvals, *mcu);
+  auto meta_dict = readMobileMetadata(mcu);
+  return mobile::Module(readArchive("data", mcu).toObject(), meta_dict, mcu);
+}
 
-  return mobile::Module(readArchive("data", mcu).toObject(), mcu);
+std::unordered_map<std::string, std::string> BytecodeDeserializer::
+    readMobileMetadata(std::shared_ptr<mobile::CompilationUnit> mcu) {
+  std::unordered_map<std::string, std::string> res;
+  if (!reader_->hasRecord("metadata.pkl")) {
+    return res;
+  }
+  auto ivalue_dict = readArchive("metadata", mcu).toGenericDict();
+  for (auto it = ivalue_dict.begin(); it != ivalue_dict.end(); ++it) {
+    auto key = it->key().toString()->string();
+    auto value = it->value().toString()->string();
+    res[key] = value;
+  }
+  return res;
 }
 
 c10::IValue BytecodeDeserializer::readArchive(
@@ -372,29 +403,52 @@ mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
   auto observer = torch::observerConfig().getModuleObserver();
+  auto instance_key = std::rand();
   if (observer) {
-    observer->onEnterLoadModel();
+    observer->onEnterLoadModel(instance_key);
   }
+  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  BytecodeDeserializer deserializer(std::move(reader));
   try {
-    auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-    BytecodeDeserializer deserializer(std::move(reader));
     mobile::Module result = deserializer.deserialize(std::move(device));
-    std::string name = result.name();
+    std::unordered_map<std::string, std::string> copied_metadata =
+        result.metadata();
+    if (result.metadata().find("model_name") == result.metadata().end()) {
+      copied_metadata["model_name"] = result.name();
+    }
     if (observer) {
-      observer->onExitLoadModel(name);
+      observer->onExitLoadModel(instance_key, copied_metadata);
     }
     return result;
-  } catch (const std::exception& ex) {
+  } catch (c10::Error& error) {
     if (observer) {
       observer->onFailLoadModel(
-          "Error occured during loading model: " + (std::string)ex.what());
+          instance_key,
+          error.what(),
+          deserializer.deserializeMetadata(std::move(device)));
     }
-    TORCH_CHECK(false, ex.what());
+    TORCH_RETHROW(error);
   } catch (...) {
-    if (observer) {
-      observer->onFailLoadModel("unknown exception");
+    auto currentException = std::current_exception();
+    try {
+      if (!currentException) {
+        TORCH_CHECK(false, "Unknown exception");
+      } else {
+        try {
+          std::rethrow_exception(currentException);
+        } catch (const std::exception& e) {
+          TORCH_CHECK(false, e.what());
+        }
+      }
+    } catch (c10::Error& error) {
+      if (observer) {
+        observer->onFailLoadModel(
+            instance_key,
+            error.what(),
+            deserializer.deserializeMetadata(std::move(device)));
+      }
+      TORCH_RETHROW(error);
     }
-    TORCH_CHECK(false, "unknown exception");
   }
 }
 

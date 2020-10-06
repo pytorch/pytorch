@@ -1,11 +1,19 @@
 from torch.testing._internal.jit_utils import JitTestCase
 import os
 import sys
+import unittest
 
 import torch
 import torch._C
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, skipIfRocm
-
+from pathlib import Path
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
+    TEST_WITH_ROCM,
+    skipIfRocm,
+)
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
@@ -52,6 +60,11 @@ class JitBackendTestCase(JitTestCase):
 
     def setUp(self):
         super().setUp()
+        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        torch_root = Path(__file__).resolve().parent.parent.parent
+        p = torch_root / 'build' / 'lib' / 'libjitbackend_test.so'
+        torch.ops.load_library(str(p))
         # Subclasses are expected to set up three variables in their setUp methods:
         # module - a regular, Python version of the module being tested
         # scripted_module - a scripted version of module

@@ -12,15 +12,6 @@
 #include <ATen/quantized/Quantizer.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#ifdef USE_STATIC_DISPATCH
-#include <ATen/TypeDefault.h>
-#include <ATen/CPUType.h>
-#include <ATen/QuantizedCPUType.h>
-#ifdef USE_VULKAN
-#include <ATen/VulkanType.h>
-#endif
-#endif
-
 namespace at {
 
 Tensor Tensor::cpu() const {

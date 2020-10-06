@@ -12,6 +12,7 @@
 
 using at::Tensor;
 using at::Scalar;
+using at::ScalarType;
 using at::MemoryFormat;
 using at::Generator;
 using at::IntArrayRef;

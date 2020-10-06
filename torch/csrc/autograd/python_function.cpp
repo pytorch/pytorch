@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 
@@ -610,6 +611,13 @@ PyObject* process_outputs(PyObject *op_obj, const std::shared_ptr<PyNode>& cdata
   return outputs.release();
 }
 
+PyObject* THPFunction_name(THPFunction *self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto cdata = self->cdata.lock();
+  return THPUtils_packString(cdata->name());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 {
   HANDLE_TH_ERRORS
@@ -1004,6 +1012,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
 };
 
 static struct PyMethodDef THPFunction_methods[] = {
+  {(char*)"name", (PyCFunction)THPFunction_name, METH_NOARGS, nullptr},
   {(char*)"apply", (PyCFunction)THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
   {(char*)"_do_backward", (PyCFunction)THPFunction_do_backward, METH_VARARGS, nullptr},
   {(char*)"_register_hook_dict", (PyCFunction)THPFunction__register_hook_dict, METH_O, nullptr},

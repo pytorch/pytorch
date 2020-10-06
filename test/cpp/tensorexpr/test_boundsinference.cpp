@@ -7,15 +7,12 @@
 #include <test/cpp/tensorexpr/padded_buffer.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/bounds_inference.h>
-#include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
-#include <torch/csrc/jit/tensorexpr/function.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
-#include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
 namespace jit {
@@ -50,9 +47,9 @@ void testBoundsInference_1() {
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 99}}
   KernelScope kernel_scope;
   ExprHandle n(100);
-  Buffer a(BufHandle("a", {n}, kFloat));
+  Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor* b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
+      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
   auto bounds_info = inferBounds(l.root_stmt());
 
@@ -75,9 +72,9 @@ void testBoundsInference_2() {
   // {{b, kStore, 0, n-1}, {a, kLoad, 0, n-1}}
   KernelScope kernel_scope;
   VarHandle n("n", kInt);
-  Buffer a(BufHandle("a", {n}, kFloat));
+  Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor* b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
+      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
   auto bounds_info = inferBounds(l.root_stmt());
 
@@ -100,9 +97,10 @@ void testBoundsInference_3() {
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 109}}
   KernelScope kernel_scope;
   ExprHandle n(100);
-  Buffer a(BufHandle("a", {n + 10}, kFloat));
-  Tensor* b = Compute(
-      "b", {{n, "i"}}, [&](const VarHandle& i) { return a(i) * a(i + 10); });
+  Placeholder a(BufHandle("a", {n + 10}, kFloat));
+  Tensor* b = Compute("b", {{n, "i"}}, [&](const VarHandle& i) {
+    return a.load(i) * a.load(i + 10);
+  });
   LoopNest l({b});
   auto bounds_info = inferBounds(l.root_stmt());
 
@@ -129,14 +127,14 @@ void testBoundsInference_4() {
   KernelScope kernel_scope;
   ExprHandle W(320);
   ExprHandle H(200);
-  Buffer a(BufHandle("a", {H, W}, kFloat));
+  Placeholder a(BufHandle("a", {H, W}, kFloat));
   Tensor* b = Compute(
       "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
         return x * y;
       });
   Tensor* c = Compute(
       "c", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return a(y, x) * b->call(y, x);
+        return a.load(y, x) * b->call(y, x);
       });
   LoopNest l({c});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
@@ -208,9 +206,9 @@ void testBoundsInference_5() {
   //   b[i_tail + (100/16)*16] = a[i_tail + (100/16)*16];
   KernelScope kernel_scope;
   ExprHandle n(100);
-  Buffer a(BufHandle("a", {n}, kFloat));
+  Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor* b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
+      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
 
   For* outer;
@@ -261,14 +259,14 @@ void testBoundsInference_6() {
   ExprHandle H(200);
   ExprHandle CW(32);
   ExprHandle CH(20);
-  Buffer a(BufHandle("a", {H, W}, kFloat));
+  Placeholder a(BufHandle("a", {H, W}, kFloat));
   Tensor* b = Compute(
       "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
         return x * y;
       });
   Tensor* c = Compute(
       "c", {{CH, "y"}, {CW, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return a(y + 100, x + 100) * b->call(y * 2, x * 5);
+        return a.load(y + 100, x + 100) * b->call(y * 2, x * 5);
       });
   LoopNest l({c});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
@@ -329,11 +327,11 @@ void testBoundsInference_6() {
 void testBoundsInferenceNonOverlapping() {
   KernelScope kernel_scope;
   ExprHandle H(3);
-  Buffer a(BufHandle("a", {10}, kFloat));
+  Placeholder a(BufHandle("a", {10}, kFloat));
   Tensor* b =
-      Compute("b", {{H, "x"}}, [&](const VarHandle& x) { return a(x); });
+      Compute("b", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x); });
   Tensor* c = Compute(
-      "c", {{H, "x"}}, [&](const VarHandle& x) { return a(x + H + 1); });
+      "c", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x + H + 1); });
   LoopNest l({b, c});
   std::vector<For*> loops = NodeFinder<For>::find(l.root_stmt());
 
@@ -390,11 +388,11 @@ void testBoundsInferenceNonOverlapping() {
 void testBoundsInferenceAdjacent() {
   KernelScope kernel_scope;
   ExprHandle H(6);
-  Buffer a(BufHandle("a", {20}, kFloat));
+  Placeholder a(BufHandle("a", {20}, kFloat));
   Tensor* b =
-      Compute("b", {{H, "x"}}, [&](const VarHandle& x) { return a(x); });
-  Tensor* c =
-      Compute("c", {{H, "x"}}, [&](const VarHandle& x) { return a(x + H); });
+      Compute("b", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x); });
+  Tensor* c = Compute(
+      "c", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x + H); });
   LoopNest l({b, c});
   std::vector<For*> loops = NodeFinder<For>::find(l.root_stmt());
 
@@ -449,7 +447,7 @@ void testBoundsInferenceAdjacent() {
 
 void testMergeInferredBounds() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("a", {10}, kFloat));
+  Placeholder a(BufHandle("a", {10}, kFloat));
 
   // There are seven cases to consider in mergeTensorAccesses(A, B)
   //   * A is lower than B and does not overlap.
@@ -519,7 +517,7 @@ void testMergeInferredBounds() {
 
 void testMergeInferredLoadStoreDiff() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("a", {10}, kFloat));
+  Placeholder a(BufHandle("a", {10}, kFloat));
 
   // Loads and Stores do not merge:
   BoundsInfo info;
@@ -550,7 +548,7 @@ void testMergeInferredLoadStoreDiff() {
 
 void testMergeInferred2DBounds() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("a", {10, 10}, kFloat));
+  Placeholder a(BufHandle("a", {10, 10}, kFloat));
 
   // Non overlapping in both dimensions:
   BoundsInfo info;
@@ -608,7 +606,7 @@ void testMergeInferred2DBounds() {
 
 void testMergeAdjacentBounds() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("a", {10}, kFloat));
+  Placeholder a(BufHandle("a", {10}, kFloat));
 
   // Adjacent but not overlapping bounds can be merged.
   // e.g. {1-4} | {5-9} => {1-9}
@@ -648,7 +646,7 @@ std::pair<std::string, std::string> boundAsStringPair(
 
 void testMergeSymbolicBounds() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("a", {10}, kFloat));
+  Placeholder a(BufHandle("a", {10}, kFloat));
   VarHandle W("W", kInt);
   VarHandle X("X", kInt);
   VarHandle Y("Y", kInt);
@@ -713,7 +711,7 @@ void testMergeSymbolicBounds() {
   res = mergeTensorAccesses(info);
   ASSERT_EQ(res[a.data()].size(), 1);
   pair = boundAsStringPair(res[a.data()][0]);
-  ASSERT_EQ(pair.first, "Min(Z, X, 1)");
+  ASSERT_EQ(pair.first, "Min(X, Z, 1)");
   ASSERT_EQ(pair.second, "Y");
 
   // If either side is only one apart, they must be adjacent.
@@ -734,7 +732,7 @@ void testMergeSymbolicBounds() {
   res = mergeTensorAccesses(info);
   ASSERT_EQ(res[a.data()].size(), 1);
   pair = boundAsStringPair(res[a.data()][0]);
-  ASSERT_EQ(pair.first, "Min(Z, X, 1)");
+  ASSERT_EQ(pair.first, "Min(X, Z, 1)");
   ASSERT_EQ(pair.second, "Y");
 
   // If either side is 2 apart, they may not be overlapping.
@@ -758,7 +756,7 @@ void testMergeSymbolicBounds() {
 
 void testMergeSymbolicAdjacent() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("a", {10}, kFloat));
+  Placeholder a(BufHandle("a", {10}, kFloat));
   VarHandle X("X", kInt);
   VarHandle Y("Y", kInt);
 
@@ -813,7 +811,7 @@ void testMergeSymbolicAdjacent() {
   ASSERT_EQ(res[a.data()].size(), 1);
   pair = boundAsStringPair(res[a.data()][0]);
   ASSERT_EQ(pair.first, "5");
-  ASSERT_EQ(pair.second, "Max(Y, X, 1)");
+  ASSERT_EQ(pair.second, "Max(X, Y, 1)");
 
   info.clear();
   info[a.data()].push_back({kLoad, {X.node()}, {new IntImm(6)}});
@@ -821,7 +819,7 @@ void testMergeSymbolicAdjacent() {
   res = mergeTensorAccesses(info);
   ASSERT_EQ(res[a.data()].size(), 1);
   pair = boundAsStringPair(res[a.data()][0]);
-  ASSERT_EQ(pair.first, "Min(Y, X, 1)");
+  ASSERT_EQ(pair.first, "Min(X, Y, 1)");
   ASSERT_EQ(pair.second, "6");
 }
 

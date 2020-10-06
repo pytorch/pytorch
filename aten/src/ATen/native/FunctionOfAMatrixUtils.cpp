@@ -81,6 +81,7 @@ Tensor& _compute_linear_combination_out(Tensor& output, const Tensor& input, con
   );
 
   auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // Output is intentionally 0 strided above
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(output_restrided)

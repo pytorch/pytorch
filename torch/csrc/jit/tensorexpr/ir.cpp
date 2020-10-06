@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 
-#include <torch/csrc/jit/tensorexpr/buffer.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
 namespace jit {
@@ -39,15 +39,20 @@ static bool indicesValid(const std::vector<const Expr*>& indices) {
   return true;
 }
 
-Load::Load(
-    const Buffer& buffer,
-    const std::vector<const Expr*>& indices,
-    const Expr* mask)
-    : Load(
-          ChooseDtype(buffer.dtype(), dtypeOfIndices(indices)),
-          buffer.data(),
-          indices,
-          mask) {}
+void Load::verify_dtypes() const {
+  if (indices_.size() > 0 && buf_->base_handle()->dtype() != kHandle) {
+    throw malformed_input(
+        "Load base handle dtype must be Handle", buf_->base_handle());
+  }
+
+  if (!indicesValid(indices_)) {
+    throw malformed_input("invalid indices in Load");
+  }
+  Dtype index_dtype = dtypeOfIndices(indices_);
+  if (index_dtype.lanes() != mask_->dtype().lanes()) {
+    throw malformed_input("lane mismatch in Load mask");
+  }
+}
 
 Load::Load(
     Dtype dtype,
@@ -55,27 +60,19 @@ Load::Load(
     const std::vector<const Expr*>& indices,
     const Expr* mask)
     : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {
-  if (indices_.size() > 0 && buf->base_handle()->dtype() != kHandle) {
-    throw malformed_input(
-        "Load base handle dtype must be Handle", buf->base_handle());
-  }
-
-  if (!indicesValid(indices)) {
-    throw malformed_input("invalid indices in Load");
-  }
-  Dtype index_dtype = dtypeOfIndices(indices);
-  if (index_dtype.lanes() != mask->dtype().lanes()) {
-    throw malformed_input("lane mismatch in Load mask");
-  }
+  verify_dtypes();
 }
 
-ExprHandle Load::make(
-    const Buffer& buffer,
-    const std::vector<ExprHandle>& indices,
-    const ExprHandle& mask) {
-  return ExprHandle(
-      new Load(buffer, ExprHandleVectorToExprVector(indices), mask.node()));
-}
+Load::Load(
+    const Buf* buf,
+    const std::vector<const Expr*>& indices,
+    const Expr* mask)
+    : Load(
+          ChooseDtype(buf->dtype(), dtypeOfIndices(indices)),
+          buf,
+          indices,
+          mask) {}
+
 ExprHandle Load::make(
     Dtype dtype,
     const BufHandle& buf,
@@ -85,15 +82,11 @@ ExprHandle Load::make(
       dtype, buf.node(), ExprHandleVectorToExprVector(indices), mask.node()));
 }
 
-Store::Store(
-    const Buffer& buffer,
-    const std::vector<const Expr*>& indices,
-    const Expr* value,
-    const Expr* mask)
-    : Store(buffer.data(), indices, value, mask) {
-  if (buffer.dtype().scalar_type() != value->dtype().scalar_type()) {
-    throw malformed_input("invalid dtype in Store");
-  }
+ExprHandle Load::make(
+    const BufHandle& buf,
+    const std::vector<ExprHandle>& indices,
+    const ExprHandle& mask) {
+  return Load::make(buf.dtype(), buf, indices, mask);
 }
 
 Store::Store(
@@ -126,15 +119,6 @@ Store::Store(
     throw malformed_input();
   }
   */
-}
-
-Store* Store::make(
-    const Buffer& buffer,
-    const std::vector<ExprHandle>& indices,
-    const ExprHandle& value,
-    const ExprHandle& mask) {
-  return new Store(
-      buffer, ExprHandleVectorToExprVector(indices), value.node(), mask.node());
 }
 
 Store* Store::make(

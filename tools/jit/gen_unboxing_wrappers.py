@@ -45,6 +45,7 @@ TYPE_MAP = {
     'std::array<bool,3>': 'bool[3]',
     'std::array<bool,4>': 'bool[4]',
     'std::string': 'str',
+    'std::string?': 'str?',
     'Scalar': 'Scalar',
     'MemoryFormat': 'MemoryFormat',
     'MemoryFormat?': 'MemoryFormat?',
@@ -135,6 +136,7 @@ FROM_IVALUE = {
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
     'std::string': '{}.toStringRef()',
+    'std::string?': '{}.toOptional<std::string>()',
     'Generator?': '{}.toOptional<at::Generator>()',
     'std::array<bool,2>': 'as_bool_array<2>({}.toBoolList())',
     'std::array<bool,3>': 'as_bool_array<3>({}.toBoolList())',
@@ -166,11 +168,7 @@ const auto options = TensorOptions()
         .layout(${layout})
         .device(${device})
         .pinned_memory(${pin_memory});
-#ifdef USE_STATIC_DISPATCH
-    auto result_ = at::${name}(${args_with_tensor_options});
-#else
     auto result_ = torch::${name}(${args_with_tensor_options});
-#endif
 """)
 CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
