@@ -94,8 +94,8 @@ class TestForeach(TestCase):
 
             for values in [value, [value for _ in range(N)]]:
                 # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-                control_dtype = torch.float32 if (self.device_type == 'cuda' and
-                                                (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
+                control_dtype = torch.float32 if (self.device_type == 'cuda' and 
+                                                  (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
                 expected = [torch_op(tensors[i].to(dtype=control_dtype),
                                      tensors1[i].to(dtype=control_dtype),
                                      tensors2[i].to(dtype=control_dtype),
@@ -116,9 +116,9 @@ class TestForeach(TestCase):
 
         for op in [torch._foreach_addcmul, torch._foreach_addcmul_, torch._foreach_addcdiv, torch._foreach_addcdiv_]:
             with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
-                torch._foreach_addcmul(tensors, tensors1, tensors2, [value for _ in range(N+1)])
+                torch._foreach_addcmul(tensors, tensors1, tensors2, [value for _ in range(N + 1)])
             with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
-                torch._foreach_addcmul(tensors, tensors1, tensors2, [value for _ in range(N-1)])
+                torch._foreach_addcmul(tensors, tensors1, tensors2, [value for _ in range(N - 1)])
 
     def _test_bin_op_list_alpha(self, device, dtype, foreach_op, foreach_op_, torch_op):
         for N in [30, 300]:
