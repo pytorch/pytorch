@@ -198,6 +198,8 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 // Hence, the following macros adjust the input values from the user to resolve potential warnings.
 #if __CUDA_ARCH__ == 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
+#elif __CUDA_ARCH__ == 860
+constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1536;
 #else
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
 #endif
