@@ -58,6 +58,11 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
                                        : weight.size(1) * groups;
   const int output_channels = transpose ? weight.size(1) * groups
                                         : weight.size(0);
+  const int input_channels_per_group = input_channels / groups;
+  const int output_channels_per_group = output_channels / groups;
+  const int output_channels_num_elements = transpose ? output_channels_per_group
+                                                     : output_channels;
+
   const int kernel_d = kSpatialDim == 2 ? 1 : weight.size(2);
   const int kernel_h = weight.size(kSpatialDim);
   const int kernel_w = weight.size(kSpatialDim + 1);
@@ -88,15 +93,15 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
     int64_t axis = weight.q_per_channel_axis();
     TORCH_CHECK(
         axis == int(transpose),  // 0 for non-transposed, 1 for transposed
-        "Only per output channel quantization is supported for the weights");
-    zero_points.resize(output_channels);
-    for (int i = 0; i < output_channels; ++i) {
+        "Only per output channel quantization is supported for the weights: ",
+        "axis: ", axis, " transpose: ", int(transpose));
+    zero_points.resize(output_channels_num_elements);
+    for (int i = 0; i < output_channels_num_elements; ++i) {
       zero_points[i] = weight.q_per_channel_zero_points()[i].item<int32_t>();
     }
   } else {
     TORCH_CHECK(false, "Unsupported qscheme: ", toString(qtype));
   }
-
   // FBGEMM expects weights to be in channels last
   // TODO: Change this when ChannelsLast3d is ready.
   const at::Tensor weight_nhwc = kSpatialDim == 2
@@ -109,13 +114,14 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   // fbgemm::col_offsets_with_zero_pt_s8acc32_ref) please note that offsets
   // include the sum of columns as well as the scalar term weight_zero_point *
   // KDim
-  const int input_channels_per_group = input_channels / groups;
-  const int output_channels_per_group = output_channels / groups;
-  const int inner_size =
-      kernel_d * kernel_h * kernel_w * input_channels_per_group;
+  const int inner_channels = transpose ? output_channels_per_group
+                                       : input_channels_per_group;
+  const int outer_channels = transpose ? input_channels_per_group
+                                       : output_channels_per_group;
+  const int inner_size = kernel_d * kernel_h * kernel_w * inner_channels;
   for (int g = 0; g < groups; ++g) {
-    for (int i = 0; i < output_channels_per_group; ++i) {
-      const int c = g * output_channels_per_group + i;
+    for (int i = 0; i < outer_channels; ++i) {
+      const int c = g * outer_channels + i;
       int32_t sum = 0;
       for (int j = 0; j < inner_size; ++j) {
         sum += static_cast<int32_t>(weight_data_int8[c * inner_size + j]);
@@ -132,8 +138,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   if (qtype == c10::kPerTensorAffine) {
     scales = {static_cast<float>(weight.q_scale())};
   } else if (qtype == c10::kPerChannelAffine) {
-    scales.resize(output_channels);
-    for (int i = 0; i < output_channels; ++i) {
+    scales.resize(output_channels_num_elements);
+    for (int i = 0; i < output_channels_num_elements; ++i) {
       scales[i] = weight.q_per_channel_scales()[i].item<float>();
     }
   }
