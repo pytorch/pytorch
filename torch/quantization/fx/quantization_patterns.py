@@ -391,6 +391,7 @@ ARGS_TO_SKIP = {
 }
 @register_quant_pattern(torch.nn.ELU)
 @register_quant_pattern(torch.nn.LeakyReLU)
+@register_quant_pattern(torch.nn.Sigmoid)
 @register_quant_pattern(torch.nn.Hardswish)
 @register_quant_pattern(torch.nn.InstanceNorm1d)
 @register_quant_pattern(torch.nn.InstanceNorm2d)
@@ -400,14 +401,18 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.functional.instance_norm)
 @register_quant_pattern(torch.nn.functional.layer_norm)
 @register_quant_pattern(torch.nn.functional.leaky_relu)
+@register_quant_pattern(torch.sigmoid)
+@register_quant_pattern('sigmoid')
+@register_quant_pattern('sigmoid_')
 class DefaultNode(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
     def convert(self, quantizer, node, load_arg, debug=False):
         if not self.all_nodes:
             return NotImplemented
-        assert node.op in ['call_module', 'call_function'], 'Only call_module and ' + \
-            'call_function are handled in DefaultNode'
+        assert node.op in ['call_module', 'call_function', 'call_method'], 'Only call_module and ' + \
+            'call_function are handled in DefaultNode ' + \
+            'found:' + node.op + ' ' + node.target
         activation_post_process = quantizer.activation_post_process_map[node.name]
         if node.op == 'call_module':
             module = quantizer.modules[node.target]
@@ -422,7 +427,7 @@ class DefaultNode(QuantizeHandler):
                 load_arg(quantized=[0])(node.args),
                 load_arg(quantized=False)(node.kwargs))
         else:
-            # call_function
+            # call_function or call_method
             scale, zero_point = activation_post_process.calculate_qparams()
             scale = float(scale)
             zero_point = int(zero_point)
@@ -470,7 +475,6 @@ class ELU(QuantizeHandler):
 @register_quant_pattern(torch.nn.MaxPool3d)
 @register_quant_pattern(torch.nn.ReLU)
 @register_quant_pattern(torch.nn.ReLU6)
-@register_quant_pattern(torch.nn.Sigmoid)
 @register_quant_pattern(torch.nn.Tanh)
 @register_quant_pattern(torch.adaptive_avg_pool1d)
 @register_quant_pattern(torch.nn.functional.adaptive_avg_pool2d)
@@ -496,7 +500,6 @@ class ELU(QuantizeHandler):
 @register_quant_pattern(torch.mean)
 @register_quant_pattern(torch.min)
 @register_quant_pattern(torch.repeat_interleave)
-@register_quant_pattern(torch.sigmoid)
 @register_quant_pattern(torch.sort)
 @register_quant_pattern(torch.squeeze)
 @register_quant_pattern(torch.stack)
@@ -521,8 +524,6 @@ class ELU(QuantizeHandler):
 @register_quant_pattern('reshape')
 @register_quant_pattern('resize_')
 @register_quant_pattern('shape')
-@register_quant_pattern('sigmoid')
-@register_quant_pattern('sigmoid_')
 @register_quant_pattern('size')
 @register_quant_pattern('squeeze')
 @register_quant_pattern('squeeze_')

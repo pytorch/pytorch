@@ -86,6 +86,9 @@ _INCLUDE_QCONFIG_PROPAGATE_LIST = {
 FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS = {
     F.elu: torch._ops.ops.quantized.elu,
     F.leaky_relu: torch._ops.ops.quantized.leaky_relu,
+    F.sigmoid: torch._ops.ops.quantized.sigmoid,
+    'sigmoid': torch._ops.ops.quantized.sigmoid,
+    'sigmoid_': torch._ops.ops.quantized.sigmoid,
     F.hardswish: torch._ops.ops.quantized.hardswish,
     F.instance_norm: torch._ops.ops.quantized.instance_norm,
     F.layer_norm: torch._ops.ops.quantized.layer_norm,

@@ -1120,17 +1120,23 @@ class TestQuantizeFxOps(QuantizationTestCase):
                     quantized_nodes[dim])
 
     def _test_activation_impl(
-            self, float_module, float_op, quantized_module, quantized_op):
-        ''' Test for activation op(with inplace options), float_op can be
+            self, float_module, float_op,
+            quantized_module, quantized_op,
+            extra_module_kwargs=None, extra_op_kwargs=None):
+        r"""Test for activation op(with inplace options), float_op can be
         torch op or functional op
-        '''
+        """
+        if extra_module_kwargs is None:
+            extra_module_kwargs = {}
+        if extra_op_kwargs is None:
+            extra_op_kwargs = {}
+
         class M(torch.nn.Module):
-            def __init__(self, is_module, inplace):
-                super(M, self).__init__()
+            def __init__(self, is_module):
+                super().__init__()
                 self.is_module = is_module
-                self.inplace = inplace
                 if self.is_module:
-                    self.op = float_module(self.inplace)
+                    self.op = float_module(**extra_module_kwargs)
                 else:
                     self.op = float_op
 
@@ -1138,28 +1144,62 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 if self.is_module:
                     return self.op(input)
                 else:
-                    return self.op(input, self.inplace)
+                    return self.op(input, **extra_op_kwargs)
 
-        options = itertools.product([True, False], [True, False], self.static_quant_types)
+        options = itertools.product([True, False], self.static_quant_types)
         quantized_nodes = {
             # is_module
             True: ns.call_module(quantized_module),
             False: ns.call_function(quantized_op),
         }
 
-        for is_module, is_inplace, quant_type in options:
+        for is_module, quant_type in options:
             self.checkGraphModeFxOp(
-                M(is_module, is_inplace), self.img_data_2d,
+                M(is_module), self.img_data_2d,
                 quant_type, quantized_nodes[is_module])
 
     def test_hardswish(self):
-        self._test_activation_impl(nn.Hardswish, F.hardswish, nnq.Hardswish, torch.ops.quantized.hardswish)
+        for inplace in [True, False]:
+            extra_kwargs = {'inplace': inplace}
+            self._test_activation_impl(
+                nn.Hardswish, F.hardswish,
+                nnq.Hardswish, torch.ops.quantized.hardswish,
+                extra_kwargs, extra_kwargs)
 
     def test_elu(self):
-        self._test_activation_impl(nn.ELU, F.elu, nnq.ELU, torch.ops.quantized.elu)
+        for inplace in [True, False]:
+            extra_kwargs = {'inplace': inplace}
+            self._test_activation_impl(
+                nn.ELU, F.elu, nnq.ELU, torch.ops.quantized.elu,
+                extra_kwargs, extra_kwargs)
 
     def test_leaky_relu(self):
-        self._test_activation_impl(nn.LeakyReLU, F.leaky_relu, nnq.LeakyReLU, torch.ops.quantized.leaky_relu)
+        # TODO: inplace=True is not supported yet
+        for inplace in [False]:
+            extra_kwargs = {'inplace': inplace}
+            self._test_activation_impl(
+                nn.LeakyReLU, F.leaky_relu, nnq.LeakyReLU, torch.ops.quantized.leaky_relu,
+                extra_kwargs, extra_kwargs)
+
+    def test_sigmoid(self):
+        # self._test_activation_impl(nn.Sigmoid, F.sigmoid, nnq.Sigmoid, torch.ops.quantized.sigmoid)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+            def forward(self, x):
+                x = x.sigmoid()
+                x.sigmoid_()
+                return x
+
+        node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.sigmoid),
+            ns.call_function(torch.ops.quantized.sigmoid),
+            ns.call_method('dequantize'),
+        ]
+        for quant_type in self.static_quant_types:
+            self.checkGraphModeFxOp(M(), self.img_data_2d, quant_type, expected_node_list=node_list)
 
     def _test_norm_impl(
             self, float_module, float_op, op_args, data, quantized_module, quantized_op,

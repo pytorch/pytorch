@@ -552,6 +552,7 @@ class QuantizationTestCase(TestCase):
                     nodes_in_graph[n] = 1
 
         if expected_node is not None:
+            print('nodes in graph;', nodes_in_graph)
             self.assertTrue(expected_node in nodes_in_graph, 'node:' + str(expected_node) +
                             ' not found in the graph module')
 
@@ -653,20 +654,16 @@ class QuantizationTestCase(TestCase):
         result = qgraph(*inputs)
         result_debug = qgraph_debug(*inputs)
 
-        # numeric match for debug option for dynamic
-        # quantized op is not needed right now
-        if quant_type != QuantType.DYNAMIC:
-            self.assertEqual((result - result_debug).abs().max(), 0), \
-                'Expecting debug and non-debug option to produce identical result'
-
         qgraph_to_check = qgraph_debug if debug else qgraph
         if print_debug_info:
             print()
             print('quant type:', quant_type)
-            print('origianl graph module:', type(model))
+            print('origianl graph module type:', type(original))
+            print('origianl graph module:', original)
             self.printGraphModule(original)
             print()
-            print('quantized graph module:', type(qgraph_to_check))
+            print('quantized graph module type:', type(qgraph_to_check))
+            print('quantized graph module:', qgraph_to_check)
             self.printGraphModule(qgraph_to_check)
             print()
         self.checkGraphModuleNodes(
