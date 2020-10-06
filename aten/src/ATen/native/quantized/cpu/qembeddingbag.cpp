@@ -36,12 +36,8 @@ at::Tensor embedding_bag_4bit_helper(
   auto offsets_data = offsets_new.data_ptr<int>();
   const auto weight_data = weight.data_ptr<uint8_t>();
   uint8_t* input_data = nullptr;
-  if (!weight.is_contiguous()) {
-    auto weight_contig = weight.contiguous();
-    input_data = weight_contig.data_ptr<uint8_t>();
-  } else {
-    input_data = weight.data_ptr<uint8_t>();
-  }
+  auto weight_contig = weight.contiguous();
+  input_data = weight_contig.data_ptr<uint8_t>();
 
   // Get compressed indices for sparse op.
   int32_t* compressed_indices_mapping_data = nullptr;
@@ -54,8 +50,9 @@ at::Tensor embedding_bag_4bit_helper(
 
   const auto indices_data = indices.data_ptr<int64_t>();
   const int64_t N = weight.size(0);
+  const int64_t weight_size = weight.size(1);
   const int64_t D =
-      (weight.size(1) - 4) * 2; // NB: 2-byte fp16 scale and 2-byte zero_offset
+      (weight_size - 4) * 2; // NB: 2-byte fp16 scale and 2-byte zero_offset
   const int64_t M = offsets.size(0);
 
   int64_t output_size = M - 1;
@@ -122,7 +119,7 @@ at::Tensor embedding_bag_4bit_helper(
         /*output_size=*/output_size,
         /*index_size=*/index_size,
         /*data_size=*/compressed_index_size,
-        /*input=*/weight_data,
+        /*input=*/input_data,
         /*indices=*/indices_data,
         /*offsets=*/offsets_data,
         /*weights=*/
@@ -176,7 +173,7 @@ at::Tensor embedding_bag_4bit_helper(
         }
       }
       const at::Half* scale_bias = reinterpret_cast<const at::Half*>(
-          input_data + (idx + 1) * weight.size(1) - 2 * sizeof(at::Half));
+          input_data + (idx + 1) * weight_size - 2 * sizeof(at::Half));
 
       float weight_val = 1.0f;
       if (per_sample_weights_.has_value()) {
@@ -187,7 +184,7 @@ at::Tensor embedding_bag_4bit_helper(
 
       for (int j = 0; j < block_size; ++j) {
         uint8_t quantized =
-            input_data[idx * weight.size(1) + j / /*NUM_ELEM_PER_BYTE*/ 2];
+            input_data[idx * weight_size + j / /*NUM_ELEM_PER_BYTE*/ 2];
         quantized >>= (j % 2) * 4;
         quantized &= (1 << 4) - 1;
 
