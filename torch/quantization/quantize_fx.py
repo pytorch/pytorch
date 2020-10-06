@@ -1,14 +1,17 @@
+import torch
+from torch.fx import GraphModule  # type: ignore
+from torch.fx import symbolic_trace  # type: ignore
+from torch.fx.symbolic_trace import Tracer  # type: ignore
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
-from torch.fx import GraphModule  # type: ignore
 from .fx.utils import graph_pretty_str  # noqa: F401
 
 def _check_is_graph_module(model):
     if not isinstance(model, GraphModule):
         raise ValueError(
             'input model must be a GraphModule, ' +
-            'please run torch.fx.symbolic_trace on your model before using ' +
-            'quantize_fx. Got type:' + str(type(model)))
+            'Got type:' + str(type(model)) + ' Please make ' +
+            'sure to follow the tutorials.')
 
 def fuse_fx(graph_module, inplace=False):
     r""" Fuse modules in preparation for quantization
@@ -20,10 +23,10 @@ def fuse_fx(graph_module, inplace=False):
     fuser = Fuser()
     return fuser.fuse(graph_module, inplace)
 
-def _prepare_fx(graph_module, qconfig_dict, inplace, is_standalone_module=False):
+def _prepare_fx(model, qconfig_dict, inplace, is_standalone_module=False):
     r""" Internal helper function for prepare_fx
     Args:
-      `graph_modul`e, `qconfig_dict`, `inplace`: see docs for :func:`~torch.quantization.prepare_fx`
+      `model`, `qconfig_dict`, `inplace`: see docs for :func:`~torch.quantization.prepare_fx`
       `is_standalone_module`: a boolean flag indicates whether we are
       quantizing a standalone module or not, a standalone module
       is a submodule of the parent module that is not inlined in the
@@ -31,12 +34,25 @@ forward graph of the parent module,
       the way we quantize standalone module is described in:
       :func:`~torch.quantization._prepare_standalone_module_fx`
     """
-    _check_is_graph_module(graph_module)
+    # symbolically trace the model
+    standalone_modules = qconfig_dict.get('standalone_module_name', [])
+    class CustomTracer(Tracer):
+        def is_leaf_module(self, m, module_qualified_name):
+            return (m.__module__.startswith('torch.nn') and \
+                not isinstance(m, torch.nn.Sequential)) or \
+                module_qualified_name in standalone_modules
+
+    if is_standalone_module:
+        # standlone module is traced before quantizing standalone modules
+        graph_module = symbolic_trace(model)
+    else:
+        # skipping tracing standalone modules when tracing top level module
+        graph_module = GraphModule(model, CustomTracer().trace(model))
     graph_module = fuse_fx(graph_module, inplace)
     quantizer = Quantizer()
     return quantizer.prepare(graph_module, qconfig_dict, inplace=True, is_standalone_module=is_standalone_module)
 
-def _prepare_standalone_module_fx(graph_module, qconfig_dict, inplace=False):
+def _prepare_standalone_module_fx(model, qconfig_dict, inplace=False):
     r""" [Internal use only] Prepare a standalone module, so that it can be used when quantizing the
     parent module.
     standalone_module means it a submodule that is not inlined in parent module,
@@ -51,14 +67,13 @@ def _prepare_standalone_module_fx(graph_module, qconfig_dict, inplace=False):
                                    custom module is observed or not
 
     """
-    return _prepare_fx(graph_module, qconfig_dict, inplace, is_standalone_module=True)
+    return _prepare_fx(model, qconfig_dict, inplace, is_standalone_module=True)
 
-def prepare_fx(graph_module, qconfig_dict, inplace=False):
+def prepare_fx(model, qconfig_dict, inplace=False):
     r""" Prepare a model for post training static quantization
 
     Args:
-      `graph_module`: model from symbolic_tracing (torch.fx.symbolic_trace), must be
-      an eval model
+      `model`: torch.nn.Module model, must be in eval mode
       `qconfig_dict`: qconfig_dict is a dictionary with the following configurations:
       qconfig_dict = {
       # optional, global config
@@ -89,9 +104,6 @@ def prepare_fx(graph_module, qconfig_dict, inplace=False):
 
       # optional: specify the path for standalone modules
       # These modules are symbolically traced and quantized as one unit
-      # User should also skip symbolic tracing through these modules
-      # so that the call to the submodule appears as one call_module
-      # node in the forward graph of the GraphModule
       "standalone_module_name": [
          "submodule.standalone"
       ]
@@ -123,20 +135,14 @@ def prepare_fx(graph_module, qconfig_dict, inplace=False):
     # Run calibration
     calibrate(prepared_model, sample_inference_data)
     """
-    assert not graph_module.training, 'prepare_fx only works for models in' + \
+    assert not model.training, 'prepare_fx only works for models in' + \
         'eval mode'
-    return _prepare_fx(graph_module, qconfig_dict, inplace)
+    return _prepare_fx(model, qconfig_dict, inplace)
 
-def prepare_static_fx(graph_module, qconfig_dict, inplace=False):
-    assert not graph_module.training, 'prepare_static_fx only works for models in ' + \
-        'eval mode'
-    return prepare_fx(graph_module, qconfig_dict, inplace)
-
-def prepare_qat_fx(graph_module, qconfig_dict, inplace=False):
+def prepare_qat_fx(model, qconfig_dict, inplace=False):
     r""" Prepare a model for quantization aware training
     Args:
-      `graph_module`: model from symbolic_tracing (torch.fx.symbolic_trace), must be
-       a train model
+      `model`: torch.nn.Module model, must be in train mode
       `qconfig_dict`: see :func:`~torch.quantization.prepare_fx`
       `inplace`: flag for carry out model transformations in-place,
        the original module is mutated
@@ -151,22 +157,21 @@ def prepare_qat_fx(graph_module, qconfig_dict, inplace=False):
     from torch.quantization import get_default_qat_qconfig
     from torch.quantization import prepare_fx
 
-    float_model.train()
-    graph_module = torch.fx.symbolic_trace(float_model)
     qconfig = get_default_qat_qconfig('fbgemm')
     def train_loop(model, train_data):
         model.train()
         for image, target in data_loader:
             ...
 
+    float_model.train()
     qconfig_dict = {"": qconfig}
-    prepared_model = prepare_fx(graph_module, qconfig_dict)
+    prepared_model = prepare_fx(float_model, qconfig_dict)
     # Run calibration
     train_loop(prepared_model, train_loop)
     """
-    assert graph_module.training, 'prepare_qat_fx only works for models in ' + \
+    assert model.training, 'prepare_qat_fx only works for models in ' + \
         'train mode'
-    return _prepare_fx(graph_module, qconfig_dict, inplace)
+    return _prepare_fx(model, qconfig_dict, inplace)
 
 def _convert_fx(graph_module, inplace, debug, is_standalone_module=False):
     """ `is_standalone_module`: see docs in :func:`~torch.quantization.prepare_standalone_module_fx`

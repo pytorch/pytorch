@@ -413,9 +413,8 @@ class Quantizer:
                 if isinstance(obj, StandaloneModuleQuantizeHandler):
                     # observe standalone module
                     standalone_module = self.modules[node.target]
-                    traced_standalone_module = symbolic_trace(standalone_module)
                     prepare = torch.quantization.quantize_fx._prepare_standalone_module_fx
-                    observed_standalone_module = prepare(traced_standalone_module, {'': qconfig})
+                    observed_standalone_module = prepare(standalone_module, {'': qconfig})
                     observed_standalone_module.qconfig = qconfig
                     standalone_module_input_idxs = observed_standalone_module._standalone_module_observed_input_idxs
                     observed_standalone_module = mark_observed_standalone_module(observed_standalone_module)
