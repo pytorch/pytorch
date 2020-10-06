@@ -87,6 +87,14 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
   return tensor;
 }
 
+Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result) {
+  if (!at::isComplexType(self_st) && gradient_result.is_complex()) {
+    // R -> C
+    return at::real(gradient_result);
+  }
+  return gradient_result;
+}
+
 Tensor restore_reduced_dims(const Tensor &output, IntArrayRef dims, bool keepdim) {
   if (keepdim) {
     return output;
@@ -648,11 +656,11 @@ Tensor var_backward(Tensor grad, const Tensor & self, IntArrayRef dim, bool unbi
 }
 
 Tensor std_backward(const Tensor & result, const Tensor & grad, const Tensor & self, bool unbiased) {
-  return var_backward(grad / (result * 2), self, unbiased);
+  return var_backward((grad / (result * 2)).masked_fill_(result == 0, 0), self, unbiased);
 }
 
 Tensor std_backward(const Tensor & result, Tensor grad, const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return var_backward(grad / (result * 2), self, dim, unbiased, keepdim);
+  return var_backward((grad / (result * 2)).masked_fill_(result == 0, 0), self, dim, unbiased, keepdim);
 }
 
 Tensor mean_backward(Tensor grad, const IntArrayRef sizes, IntArrayRef dim, bool keepdim) {
