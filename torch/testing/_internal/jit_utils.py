@@ -24,6 +24,7 @@ from contextlib import contextmanager
 from functools import reduce
 from itertools import chain
 from torch._six import StringIO
+from typing import Any, Dict
 
 import inspect
 import io
@@ -148,14 +149,14 @@ class JitTestCase(TestCase):
             self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
             files = list(filter(lambda x: x.startswith('archive/code/'), archive.namelist()))
             # unwrap all the code files into strings
-            code_files = filter(lambda x: x.endswith('.py'), files)
-            code_files = map(lambda f: archive.open(f), code_files)
-            code_files = map(lambda file: "".join([line.decode() for line in file]), code_files)
+            code_files_str = filter(lambda x: x.endswith('.py'), files)
+            code_files_stream = map(lambda f: archive.open(f), code_files_str)
+            code_files = map(lambda file: "".join([line.decode() for line in file]), code_files_stream)
 
             # unpickled all the debug files
-            debug_files = filter(lambda f: f.endswith('.debug_pkl'), files)
-            debug_files = map(lambda f: archive.open(f), debug_files)
-            debug_files = map(lambda f: pickle.load(f), debug_files)
+            debug_files_str = filter(lambda f: f.endswith('.debug_pkl'), files)
+            debug_files_stream = map(lambda f: archive.open(f), debug_files_str)
+            debug_files = map(lambda f: pickle.load(f), debug_files_stream)
             return code_files, debug_files
 
         # disable the hook while we parse code, otherwise we will re-enter the hook
@@ -336,11 +337,15 @@ class JitTestCase(TestCase):
 
     def get_frame_vars(self, frames_up):
         frame = inspect.currentframe()
+        if not frame:
+            raise RuntimeError("failed to inspect frame")
         i = 0
         while i < frames_up + 1:
             frame = frame.f_back
+            if not frame:
+                raise RuntimeError("failed to get frame")
             i += 1
-        defined_vars = {}
+        defined_vars: Dict[str, Any] = {}
         defined_vars.update(frame.f_locals)
         defined_vars.update(frame.f_globals)
         return defined_vars
@@ -408,7 +413,7 @@ class JitTestCase(TestCase):
                     # outputs
 
                     frame = self.get_frame_vars(frames_up)
-                    the_locals = {}
+                    the_locals: Dict[str, Any] = {}
                     execWrapper(script, glob=frame, loc=the_locals)
                     frame.update(the_locals)
 

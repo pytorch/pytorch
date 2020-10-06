@@ -930,6 +930,35 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(get_op(0), in_dims=(0, 0)),
              (torch.rand(B1, 2), torch.rand(B0, B1, 3)), in_dims=(None, 0))
 
+    def test_conj(self):
+        op = torch.conj
+
+        def run_test(dtype):
+            def get(shape):
+                return torch.randn(shape, dtype=dtype)
+            B0, B1 = 7, 11
+            test = self._vmap_test
+
+            # Single vmap, various in_dims / out_dims
+            test(op, [get([B0, 3])])
+            test(op, [get([2, 5, B0, 3])], in_dims=2)
+            test(op, [get([2, 5, B0, 3])], in_dims=2, out_dims=2)
+
+            # Doubly nested vmap
+            test(vmap(op), [get([B0, B1])])
+            test(vmap(op), [get([B1, 2, 5, B0, 3])], in_dims=2)
+            test(vmap(op, in_dims=2), [get([2, 5, B0, B1, 3])],
+                 in_dims=2, out_dims=2)
+
+        # correctness tests
+        run_test(torch.float)
+        run_test(torch.cfloat)
+
+        # check that torch.conj on a non-complex tensor returns the same tensor
+        real_tensor = torch.randn(3)
+        result = vmap(op)(real_tensor)
+        self.assertEqual(result.data_ptr(), real_tensor.data_ptr())
+
     def test_chunk(self):
         test = self._vmap_view_test
         op = torch.chunk
@@ -996,6 +1025,19 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op), (torch.rand(B0, B1, 1, 5), torch.rand(B1, B0, 2, 3, 5)), in_dims=(0, 1))
         test(vmap(op), (torch.rand(B0, B1), torch.rand(B1, 2, 3, 5)), in_dims=(0, None))
         test(vmap(vmap(op)), (torch.rand(B0, B1, B2), torch.rand(B0, B1, B2, 2, 3, 5)))
+
+    def test_is_complex(self):
+        ctensor = torch.randn(3, dtype=torch.cfloat)
+        tensor = torch.randn(3)
+
+        def foo(x):
+            if x.is_complex():
+                return torch.tensor(1)
+            else:
+                return torch.tensor(0)
+
+        self.assertEqual(vmap(foo)(ctensor), torch.tensor([1, 1, 1]))
+        self.assertEqual(vmap(foo)(tensor), torch.tensor([0, 0, 0]))
 
     def test_movedim(self):
         op = torch.movedim

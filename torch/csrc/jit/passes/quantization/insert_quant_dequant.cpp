@@ -291,9 +291,13 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   auto observer_out = observer->output();
 
   std::string prepack_fn, quant_fn;
+  std::vector<Value*> prepack_inputs = {observer_out};
   if (op_name == "embedding_bag_4bit") {
+    bool optimized_qparams = false;
+    Value* optimized_qparams_false = g->insertConstant(optimized_qparams);
     prepack_fn = "quantized::embedding_bag_4bit_prepack";
     quant_fn = "quantized::embedding_bag_4bit_rowwise_offsets";
+    prepack_inputs.push_back(optimized_qparams_false);
   } else if (op_name == "embedding_bag_byte") {
     prepack_fn = "quantized::embedding_bag_byte_prepack";
     quant_fn = "quantized::embedding_bag_byte_rowwise_offsets";
@@ -302,7 +306,6 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
         "Graph Mode Quantization currently supports 4-bit and 8-bit embedding bag quantization.");
   }
 
-  std::vector<Value*> prepack_inputs = {observer_out};
   std::vector<Use> uses = observer_out->uses();
   Node* embedding_bag_float_op;
   // We expect that the output of the weight observer will be consumed by the
@@ -985,8 +988,14 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
 
   auto observer_module = module.attr(observer_name.value()).toModule();
   auto scalar_type = observer_module.attr("dtype");
-  if (isPlaceholderObserver(n->input(0)) ||
-      scalar_type == at::ScalarType::Half) {
+  if (isPlaceholderObserver(n->input(0))) {
+    // get compute_dtype for dynamic quantization
+    if (observer_module.hasattr("compute_dtype")) {
+      qparams.push_back(std::make_pair(
+          "_scalar_type", observer_module.attr("compute_dtype")));
+    }
+    return std::make_tuple(qscheme, qparams);
+  } else if (scalar_type == at::ScalarType::Half) {
     return std::make_tuple(qscheme, qparams);
   }
   auto calculate_qparams = observer_module.get_method("calculate_qparams");

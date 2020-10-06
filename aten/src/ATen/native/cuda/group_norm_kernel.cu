@@ -489,7 +489,7 @@ void GroupNormBackwardKernelImplInternal(
   ComputeInternalGradientsCUDAKernel<T>
       <<<N * C, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
           HxW, dY_data, X_data, ds_data, db_data);
-  if (dX != nullptr) {
+  if (dX_data != nullptr) {
     Tensor c1 = at::empty({N, C}, X.options().dtype(kAccType));
     Tensor c2 = at::empty({N, G}, X.options().dtype(kAccType));
     Tensor c3 = at::empty({N, G}, X.options().dtype(kAccType));
@@ -525,6 +525,7 @@ void GroupNormBackwardKernelImplInternal(
           <<<N * C, kCUDANumThreads, 0, cuda_stream>>>(
               C, HxW, G, dY_data, X_data, c1_data, c2_data, c3_data, dX_data);
     }
+    AT_CUDA_CHECK(cudaGetLastError());
   }
   if (dgamma->defined() || dbeta->defined()) {
     T* dgamma_data = dgamma->defined() ? dgamma->data_ptr<T>() : nullptr;

@@ -164,7 +164,7 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     "int? max_iter = -1, "
     "int? num_iter = 0, "
     "float? start_multiplier = 0, "
-    "float? end_mulitplier = 0, "
+    "float? end_multiplier = 0, "
     "float? multiplier = 0.5, "
     "float? multiplier_1 = 1.0, "
     "float? multiplier_2 = 1.0, "
@@ -184,5 +184,6 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     "float? cosine_max_lr = 0.05, "
     "int? cosine_period = 50, "
     "float? cosine_t_mult = 1.0, "
-    "float? cosine_lr_shrink = 0.99) -> Tensor output",
+    "float? cosine_lr_shrink = 0.99, "
+    "float? decay = 1.0) -> Tensor output",
     LearningRateOpFloatCPU);

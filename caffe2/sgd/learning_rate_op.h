@@ -62,7 +62,7 @@ class LearningRateOp final : public Operator<Context> {
           active_period, inactive_period, active_first);
     } else if (policy == "hill") {
       int64_t num_iter =
-          this->template GetSingleArgument<int>(arg_prefix + "num_iter", 0);
+          this->template GetSingleArgument<int64_t>(arg_prefix + "num_iter", 0);
       DCHECK_GT(num_iter, 0);
       T start_multiplier = this->template GetSingleArgument<float>(
           arg_prefix + "start_multiplier", 0.);
@@ -81,13 +81,13 @@ class LearningRateOp final : public Operator<Context> {
       return new HillLearningRate<T>(
           num_iter, start_multiplier, gamma, power, end_multiplier);
     } else if (policy == "slope") {
-      int64_t num_iter_1 =
-          this->template GetSingleArgument<int64_t>(arg_prefix + "num_iter_1", 0);
+      int64_t num_iter_1 = this->template GetSingleArgument<int64_t>(
+          arg_prefix + "num_iter_1", 0);
       DCHECK_GT(num_iter_1, 0);
       T multiplier_1 = this->template GetSingleArgument<float>(
           arg_prefix + "multiplier_1", 0.);
-      int64_t num_iter_2 =
-          this->template GetSingleArgument<int64_t>(arg_prefix + "num_iter_2", 0);
+      int64_t num_iter_2 = this->template GetSingleArgument<int64_t>(
+          arg_prefix + "num_iter_2", 0);
       DCHECK_GT(num_iter_1, 0);
       T multiplier_2 = this->template GetSingleArgument<float>(
           arg_prefix + "multiplier_2", 0.);
@@ -191,16 +191,16 @@ class LearningRateOp final : public Operator<Context> {
       int stepsize =
           this->template GetSingleArgument<int>(arg_prefix + "stepsize", 0);
       T decay =
-          this->template GetSingleArgument<int>(arg_prefix + "decay", 1.0);
+          this->template GetSingleArgument<float>(arg_prefix + "decay", 1.0);
       DCHECK_GT(stepsize, 0);
       DCHECK_GE(max_lr, base_lr_);
       return new CyclicalLearningRate<T>(base_lr_, max_lr, stepsize, decay);
     } else if (policy == "constantThenLinearWarmup") {
       T start_warmup_multiplier = this->template GetSingleArgument<float>(
           arg_prefix + "start_warmup_multiplier", 0.1);
-      int64_t constant_warmup_num_iter = this->template GetSingleArgument<int>(
+      int64_t constant_warmup_num_iter = this->template GetSingleArgument<int64_t>(
           arg_prefix + "constant_warmup_num_iter", 10000000);
-      int64_t linear_warmup_num_iter = this->template GetSingleArgument<int>(
+      int64_t linear_warmup_num_iter = this->template GetSingleArgument<int64_t>(
           arg_prefix + "linear_warmup_num_iter", 10000000);
       return new ConstantThenLinearWarmupLearningRate<T>(
           start_warmup_multiplier,
@@ -209,9 +209,9 @@ class LearningRateOp final : public Operator<Context> {
     } else if (policy == "compositeCyclical") {
       T start_warmup_multiplier = this->template GetSingleArgument<float>(
           arg_prefix + "start_warmup_multiplier", 0.1);
-      int64_t constant_warmup_num_iter = this->template GetSingleArgument<int>(
+      int64_t constant_warmup_num_iter = this->template GetSingleArgument<int64_t>(
           arg_prefix + "constant_warmup_num_iter", 10000000);
-      int64_t linear_warmup_num_iter = this->template GetSingleArgument<int>(
+      int64_t linear_warmup_num_iter = this->template GetSingleArgument<int64_t>(
           arg_prefix + "linear_warmup_num_iter", 10000000);
       T cyclical_max_lr = this->template GetSingleArgument<float>(
           arg_prefix + "cyclical_max_lr", 0.05);
@@ -245,9 +245,9 @@ class LearningRateOp final : public Operator<Context> {
     } else if (policy == "compositeCosine") {
       T start_warmup_multiplier = this->template GetSingleArgument<float>(
           arg_prefix + "start_warmup_multiplier", 0.1);
-      int64_t constant_warmup_num_iter = this->template GetSingleArgument<int>(
+      int64_t constant_warmup_num_iter = this->template GetSingleArgument<int64_t>(
           arg_prefix + "constant_warmup_num_iter", 10000000);
-      int64_t linear_warmup_num_iter = this->template GetSingleArgument<int>(
+      int64_t linear_warmup_num_iter = this->template GetSingleArgument<int64_t>(
           arg_prefix + "linear_warmup_num_iter", 10000000);
       T cosine_max_lr = this->template GetSingleArgument<float>(
           arg_prefix + "cosine_max_lr", 0.5);
