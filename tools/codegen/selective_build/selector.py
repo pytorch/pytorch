@@ -127,12 +127,13 @@ class SelectiveBuilder:
         return base_op.include_all_overloads and base_op.is_root_operator
 
     def to_dict(self) -> Dict[str, object]:
-        ret = {
+        ret: Dict[str, object] = {
             'include_all_operators': self.include_all_operators,
-            'operators': {},
         }
+        operators = {}
         for (op_name, op) in self.operators.items():
-            ret['operators'][op_name] = op.to_dict()
+            operators[op_name] = op.to_dict()
+        ret['operators'] = operators
 
         if self.debug_info is not None:
             ret['debug_info'] = self.debug_info

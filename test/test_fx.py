@@ -9,7 +9,7 @@ from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
 from torch.fx.experimental.Partitioner import DAG, Partitioner
-from torch.fx.experimental.subgraph_creation_example import split_module 
+from torch.fx.experimental.subgraph_creation_example import split_module
 
 from torch.fx.proxy import TraceError
 
@@ -29,6 +29,9 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 class SimpleTest(torch.nn.Module):
     def forward(self, x):
         return torch.relu(x + 3.0)
+
+def a_non_torch_leaf(a, b):
+    return a + b
 
 class TestFX(JitTestCase):
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
@@ -83,6 +86,17 @@ class TestFX(JitTestCase):
 
         t = T()
         symbolic_trace(t)
+
+    def test_custom_import(self):
+        graph = torch.fx.Graph()
+        a = graph.placeholder('x')
+        b = graph.placeholder('y')
+        c = graph.call_function(a_non_torch_leaf, (a, b))
+        d = graph.call_function(torch.sin, (c,))
+        graph.output(d)
+        gm = GraphModule(torch.nn.Module(), graph)
+        x, y = torch.rand(1), torch.rand(1)
+        self.assertEqual(torch.sin(x + y), gm(x, y))
 
     def test_args_kwargs(self):
         class T(torch.nn.Module):
@@ -170,9 +184,9 @@ class TestFX(JitTestCase):
 
         mrm = MyReluMod()
         sym = NoLeafModulesTracer().trace(mrm)
-        for node in sym.graph.nodes:
+        for node in sym.nodes:
             self.assertNotEqual(node.op, 'call_module')
-        sym.graph.lint(sym)
+        sym.lint(sym)
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
@@ -181,8 +195,9 @@ class TestFX(JitTestCase):
         m = M()
         g = symbolic_trace(m).graph
         new_g = torch.fx.Graph()
-        new_g.graph_copy(g)
-        t = Proxy(new_g.nodes[-1])
+        val_map : Dict[Node, Node] = {}
+        output_val = new_g.graph_copy(g, val_map)
+        t = Proxy(output_val)
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
         new_g.output((t + t).node)
         gm = GraphModule(m, new_g)
@@ -196,8 +211,9 @@ class TestFX(JitTestCase):
         m = M()
         g = symbolic_trace(m).graph
         new_g = torch.fx.Graph()
-        new_g.graph_copy(g)
-        t = Proxy(new_g.nodes[-1])
+        val_map : Dict[Node, Node] = {}
+        output_val = new_g.graph_copy(g, val_map)
+        t = Proxy(output_val)
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
         new_g.output((t + t).node)
         gm = GraphModule(m, new_g)
@@ -214,7 +230,8 @@ class TestFX(JitTestCase):
         d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
         graph.output(d)
         graph2 = torch.fx.Graph()
-        graph2.graph_copy(graph)
+        val_map : Dict[Node, Node] = {}
+        graph2.graph_copy(graph, val_map)
         seen_names : Set[str] = set()
         for node in graph2.nodes:
             assert node.name not in seen_names
@@ -312,6 +329,7 @@ class TestFX(JitTestCase):
                 operator.mul : "mul"
             }
 
+            output_node : Optional[Node] = None
             # For each instruction, create a triple
             # (instruction_name : str, inputs : List[str], output : str)
             # to feed into the C++ interpreter
@@ -338,9 +356,12 @@ class TestFX(JitTestCase):
                         else:
                             arg_names.append(arg.name)
                     instructions.append((target_to_name[target], arg_names, out_name))
-
+                elif n.op == 'output':
+                    if output_node is not None:
+                        raise RuntimeError('Multiple output nodes!')
+                    output_node = n
                 else:
-                    raise RuntimeError('Unsupported opcode' + n.op)
+                    raise RuntimeError('Unsupported opcode ' + n.op)
 
             interpreter = torch.classes._TorchScriptTesting._ElementwiseInterpreter()
             # Load constants
@@ -351,7 +372,8 @@ class TestFX(JitTestCase):
             # Load instructions
             interpreter.set_instructions(instructions)
             # Specify name for single output
-            interpreter.set_output_name(mod.graph.result.name)
+            assert isinstance(output_node.args[0], torch.fx.Node)
+            interpreter.set_output_name(output_node.args[0].name)
 
             # ===== Stage 3: Create a wrapper GraphModule around the interpreter =====
             class WrapperModule(torch.nn.Module):
@@ -436,7 +458,7 @@ class TestFX(JitTestCase):
                 return a + b
 
         m = M()
-        g = TaggingTracer().trace(m).graph
+        g = TaggingTracer().trace(m)
         g.lint(m)
         for n in g.nodes:
             self.assertTrue(hasattr(n, 'tag'))
@@ -518,9 +540,10 @@ class TestFX(JitTestCase):
 
         def transform(traced):
             new_graph = torch.fx.Graph()
-            new_graph.graph_copy(traced.graph)
+            val_map : Dict[Node, Node] = {}
+            output_value = new_graph.graph_copy(traced.graph, val_map)
             relu_out = new_graph.create_node(
-                op='call_method', target='neg', args=(new_graph.nodes[-1],), kwargs={})
+                op='call_method', target='neg', args=(output_value,), kwargs={})
             new_graph.output(relu_out)
             return GraphModule(traced, new_graph)
         transformed = transform(traced)
@@ -709,7 +732,8 @@ class TestFX(JitTestCase):
             0: [1],
             1: [3],
             2: [3],
-            3: []
+            3: [4],
+            4: [],
         }
         for i, node in enumerate(graph.nodes):
             user_indexes = GraphManipulation.get_all_users_of(gm, i)
@@ -748,16 +772,20 @@ class TestFX(JitTestCase):
         tc = TestCase()
         tc_traced = symbolic_trace(tc)
         ref_out = tc_traced(torch.rand(3, 4))
+        shape_prop.ShapeProp(tc_traced).propagate(torch.rand(3, 4))
 
         # Make sure we're testing all opcodes
         opcodes = set()
+        output_shape : Optional[torch.Shape] = None
         for node in tc_traced.graph.nodes:
             opcodes.add(node.op)
-        self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method', 'call_module']))
+            if node.op == 'output':
+                output_shape = node.args[0].shape
+        self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method',
+                                       'call_module', 'output']))
 
         # Test shape propogation and make sure results match actual
-        shape_prop.ShapeProp(tc_traced).propagate(torch.rand(3, 4))
-        self.assertEqual(tc_traced.graph.result.shape, ref_out.shape)
+        self.assertEqual(output_shape, ref_out.shape)
 
     def test_find_single_partition(self):
         class testModule(torch.nn.Module):
@@ -769,7 +797,7 @@ class TestFX(JitTestCase):
         devices = [{"name": "dev_0", "available_mem": float('inf')}]
         dag = partitioner.partition_graph(traced, devices)
         for node in traced.graph.nodes:
-            assert node.partition_ids == [1]
+            assert node.op == 'output' or node.partition_ids == [1]
         nodes = traced.graph.nodes
         res_dag = DAG()
         res_dag.create_node(0, [], [1], [], [])
@@ -789,8 +817,8 @@ class TestFX(JitTestCase):
                 self.linear = torch.nn.Linear(4, 5)
 
             def forward(self, x, y):
-                z = self.linear(x + self.param).clamp(min=0.0, max=1.0) 
-                w = self.linear(y).clamp(min=0.0, max=1.0) 
+                z = self.linear(x + self.param).clamp(min=0.0, max=1.0)
+                w = self.linear(y).clamp(min=0.0, max=1.0)
                 return z + w
 
         # symbolically trace model
@@ -807,7 +835,7 @@ class TestFX(JitTestCase):
             partition_counter = (partition_counter + 1) % NPARTITIONS
             return partition
 
-        # split module in module with submodules 
+        # split module in module with submodules
         module_with_submodules = split_module(my_module_traced, my_module, mod_partition)
 
         x = torch.rand(3, 4)
@@ -817,6 +845,108 @@ class TestFX(JitTestCase):
         submodules_out = module_with_submodules(x, y)
 
         self.assertEqual(orig_out, submodules_out)
+
+    @skipIfNoTorchVision
+    def test_replace_uses(self):
+        rn18 = resnet18()
+
+        class LowerReluTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m : torch.nn.Module, qualname : str):
+                if isinstance(m, torch.nn.ReLU):
+                    return False
+                return super().is_leaf_module(m, qualname)
+
+        rn18_traced = GraphModule(rn18, LowerReluTracer().trace(rn18))
+
+        to_erase = []
+        for node in rn18_traced.graph.nodes:
+            if node.op == 'call_function' and node.target in [torch.relu, torch.nn.functional.relu]:
+                kwargs = node.kwargs
+                # Neg doesn't have in-place
+                kwargs.pop('inplace')
+                with torch.fx.graph.insert_before(node):
+                    new_node = rn18_traced.graph.call_function(
+                        the_function=torch.neg, args=node.args, kwargs=node.kwargs)
+                node.replace_all_uses_with(replace_with=new_node)
+                to_erase.append(node)
+
+        for node in to_erase:
+            rn18_traced.graph.erase_node(node)
+
+    def test_insertion_point(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
+        output : torch.fx.Node = graph.output(b)
+
+        with torch.fx.graph.insert_before(b):
+            neg : torch.fx.Node = graph.call_function(the_function=torch.neg, args=(x,))
+            _, *relu_args = b.args
+            b.args = (neg, *relu_args)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        input = torch.randn(33, 44)
+        self.assertEqual(gm(input), torch.relu(torch.neg(input)))
+
+
+    def test_move_before(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
+        output : torch.fx.Node = graph.output(b)
+
+        neg : torch.fx.Node = graph.call_function(the_function=torch.neg, args=(x,))
+        _, *relu_args = b.args
+        b.args = (neg, *relu_args)
+        graph.move_node_before(to_move=neg, before=b)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        input = torch.randn(33, 44)
+        self.assertEqual(gm(input), torch.relu(torch.neg(input)))
+
+    def test_erase_node_error(self):
+        st = SimpleTest()
+        traced = symbolic_trace(st)
+
+        for node in traced.graph.nodes:
+            # Test deleting with uses both in another Node and at the output
+            if node.target in [operator.add, torch.relu]:
+                with self.assertRaisesRegex(RuntimeError, 'but it still had .* uses in the graph!'):
+                    traced.graph.erase_node(node)
+
+    def test_find_uses(self):
+        graph = torch.fx.Graph()
+        x = torch.fx.Proxy(graph.placeholder('x'))
+
+        y = torch.relu(x)
+        z = x + x
+        u = torch.neg(x)
+        graph.output((y + z + u).node)
+        graph.lint()
+
+        uses_of_x = x.node.find_uses()
+        self.assertEqual(len(uses_of_x), 3)
+        expected_ops = ['relu', 'add', 'neg']
+        for node, expected in zip(uses_of_x, expected_ops):
+            assert expected in node.name
+
+    def test_multi_insert_point(self):
+        graph = torch.fx.Graph()
+        x = torch.fx.Proxy(graph.placeholder('x'))
+        relu = torch.relu(x)
+
+        with torch.fx.graph.insert_before(relu.node):
+            y = torch.neg(x)
+            z = torch.tanh(y)
+
+        graph.output((relu.node, z.node))
+        graph.lint()
+
+        expected_ops = ['x', 'neg', 'tanh', 'relu']
+        for node, expected in zip(graph.nodes, expected_ops):
+            assert expected in node.name
 
 if __name__ == '__main__':
     run_tests()
