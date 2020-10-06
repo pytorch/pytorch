@@ -18,6 +18,17 @@
 
 namespace pytorch_jni {
 
+c10::DeviceType deviceJniCodeToDeviceType(jint deviceJniCode) {
+  if (deviceJniCode == kDeviceCPU) {
+    return at::kCPU;
+  } else if (deviceJniCode == kDeviceVulkan) {
+    return at::kVulkan;
+  }
+
+  facebook::jni::throwNewJavaException(
+      facebook::jni::gJavaLangIllegalArgumentException, "Unknown device");
+}
+
 bool Trace::is_initialized_ = false;
 
 #if defined(TRACE_ENABLED) && defined(__ANDROID__)

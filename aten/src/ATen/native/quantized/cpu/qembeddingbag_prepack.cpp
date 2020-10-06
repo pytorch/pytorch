@@ -104,8 +104,6 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
       embedding_rows,
       embedding_cols +
           8}; // extra 8 bytes to store FP scale and zero_point per row.
-  size_t output_columns = output_shape[1];
-  constexpr float kEpsilon = 1e-8f;
 
   // Allocate output packed weights
   auto output = at::empty(
@@ -114,6 +112,12 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
       weight_contig.suggest_memory_format());
   auto* output_data = output.data_ptr<uint8_t>();
 
+#ifdef USE_FBGEMM
+  fbgemm::FloatToFused8BitRowwiseQuantizedSBFloat(
+      weight_data, embedding_rows, embedding_cols, output_data);
+#else
+  size_t output_columns = output_shape[1];
+  constexpr float kEpsilon = 1e-8f;
   for (std::size_t row = 0; row < embedding_rows; ++row) {
     const float* input_row = weight_data + row * embedding_cols;
     std::uint8_t* output_row = output_data + row * output_columns;
@@ -134,10 +138,15 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
           lrintf((input_row[col] - minimum_element) * inverse_scale);
     } // embedding_cols
   } // embedding_rows
+#endif // USE_FBGEMM
+
   return output;
 }
 
-Tensor _qembeddingbag_nbit_prepack_helper(const Tensor& weight, int BIT_RATE) {
+Tensor _qembeddingbag_nbit_prepack_helper(
+    const Tensor& weight,
+    int bit_width,
+    bool optimized_qparams) {
   int64_t embedding_rows = weight.size(0);
   int64_t embedding_cols = weight.size(1);
 
@@ -145,16 +154,16 @@ Tensor _qembeddingbag_nbit_prepack_helper(const Tensor& weight, int BIT_RATE) {
 
   const auto weight_data = weight.data_ptr<float>();
   TORCH_CHECK(
-    BIT_RATE == 4 || BIT_RATE == 2,
-    "BIT_RATE must be either 2 or 4 to use 'qembeddingbag_nbit_prepack'."
-    "For 8bit, consider using 'embedding_bag_byte_prepack'.");
+      bit_width == 4 || bit_width == 2,
+      "bit_width must be either 2 or 4 to use 'qembeddingbag_nbit_prepack'."
+      "For 8bit, consider using 'embedding_bag_byte_prepack'.");
 
-  int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
+  int NUM_ELEM_PER_BYTE = 8 / bit_width;
   TORCH_CHECK(
       weight_contig.size(weight.dim() - 1) % NUM_ELEM_PER_BYTE == 0,
-      "qembeddingbag_" + c10::to_string(BIT_RATE) +
-      "bit_prepack only works for the number of columns a multiple of "
-      + c10::to_string(NUM_ELEM_PER_BYTE));
+      "qembeddingbag_" + c10::to_string(bit_width) +
+          "bit_prepack only works for the number of columns a multiple of " +
+          c10::to_string(NUM_ELEM_PER_BYTE));
 
   // The "fused" representation stores the scale and bias with the
   // row-wise quantized data in one tensor.
@@ -172,55 +181,75 @@ Tensor _qembeddingbag_nbit_prepack_helper(const Tensor& weight, int BIT_RATE) {
       weight_contig.options().dtype(at::kByte),
       weight_contig.suggest_memory_format());
   auto* output_data = output.data_ptr<uint8_t>();
-  const auto output_columns = output.size(output.dim() - 1);
 
-  for (int row = 0; row < embedding_rows; ++row) {
-    const float* input_row = weight_data + row * embedding_cols;
-    std::uint8_t* output_row = output_data + row * output_columns;
+#ifdef USE_FBGEMM
+  if (!optimized_qparams) {
+    fbgemm::FloatToFusedNBitRowwiseQuantizedSBHalf(
+        bit_width, weight_data, embedding_rows, embedding_cols, output_data);
+  } else {
+#endif // USE_FBGEMM
+    const auto output_columns = output.size(output.dim() - 1);
 
-    float Xmin = *std::min_element(input_row, input_row + embedding_cols);
-    float Xmax = *std::max_element(input_row, input_row + embedding_cols);
+    for (int row = 0; row < embedding_rows; ++row) {
+      const float* input_row = weight_data + row * embedding_cols;
+      std::uint8_t* output_row = output_data + row * output_columns;
 
-    Xmin = static_cast<at::Half>(Xmin);
-    const float range = Xmax - Xmin;
-
-    // Set scale to 1.0f for the corner case of Xmax == Xmin .
-    // Any non-zero scale would work because during quantization
-    // (X - Xmin) / scale will be 0 for all X unless scale is 0.
-    at::Half scale = range == 0 ? 1.0f : range / ((1 << BIT_RATE) - 1);
-    float inverse_scale = scale == 0 ? 1.0f : 1.0f / scale;
-    if (scale == 0 || std::isinf(inverse_scale)) {
-      // Corner case handling when Xmax == Xmin
-      // Any scale would work because X - Xmin will be 0 for all X
-      scale = 1.0f;
-      inverse_scale = 1.0f;
-    }
-
-    // Update the scale and zero_point of each row.
-    at::Half* output_row_scale_zp = reinterpret_cast<at::Half*>(
-        output_row +
-        (embedding_cols + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE);
-
-    output_row_scale_zp[0] = scale;
-    output_row_scale_zp[1] = Xmin;
-
-    // Pack the weight values.
-    for (int col = 0; col < embedding_cols; ++col) {
-      float X = input_row[col];
-      std::uint8_t quantized = std::max(
-          0,
-          std::min<int>(
-              lrintf((X - Xmin) * inverse_scale), (1 << BIT_RATE) - 1));
-      // We pack 2 4-bit values in a byte. Index 0 is packed in the lower 4-bits
-      // and index 1 is packed in the upper 4-bits.
-      if (col % NUM_ELEM_PER_BYTE == 0) {
-        output_row[col / NUM_ELEM_PER_BYTE] = quantized;
+      float Xmin, Xmax;
+      if (optimized_qparams) {
+        at::Tensor xmax_tensor, xmin_tensor;
+        std::tie(xmax_tensor, xmin_tensor) = at::choose_qparams_optimized(
+            weight_contig[row], embedding_cols, 200, 0.16, bit_width);
+        TORCH_CHECK(
+            xmax_tensor.numel() == 1 && xmin_tensor.numel() == 1,
+            "Expected choose_qparams_optimized to return min/max tensors of size 1");
+        Xmax = xmax_tensor.item<float>();
+        Xmin = xmin_tensor.item<float>();
       } else {
-        output_row[col / NUM_ELEM_PER_BYTE] |=
-            (quantized << ((col % NUM_ELEM_PER_BYTE) * BIT_RATE));
+        Xmin = *std::min_element(input_row, input_row + embedding_cols);
+        Xmax = *std::max_element(input_row, input_row + embedding_cols);
       }
-    } // embedding_cols
-  } // embedding_rows
+      Xmin = static_cast<at::Half>(Xmin);
+      float range = Xmax - Xmin;
+      // Set scale to 1.0f for the corner case of Xmax == Xmin .
+      // Any non-zero scale would work because during quantization
+      // (X - Xmin) / scale will be 0 for all X unless scale is 0.
+      at::Half scale = range == 0 ? 1.0f : range / ((1 << bit_width) - 1);
+      float inverse_scale = scale == 0 ? 1.0f : 1.0f / scale;
+      if (scale == 0 || std::isinf(inverse_scale)) {
+        // Corner case handling when Xmax == Xmin
+        // Any scale would work because X - Xmin will be 0 for all X
+        scale = 1.0f;
+        inverse_scale = 1.0f;
+      }
+      // Update the scale and zero_point of each row.
+      at::Half* output_row_scale_zp = reinterpret_cast<at::Half*>(
+          output_row +
+          (embedding_cols + NUM_ELEM_PER_BYTE - 1) / NUM_ELEM_PER_BYTE);
+
+      output_row_scale_zp[0] = scale;
+      output_row_scale_zp[1] = Xmin;
+
+      // Pack the weight values.
+      for (int col = 0; col < embedding_cols; ++col) {
+        float X = input_row[col];
+        std::uint8_t quantized = std::max(
+            0,
+            std::min<int>(
+                lrintf((X - Xmin) * inverse_scale), (1 << bit_width) - 1));
+        // We pack 2 4-bit values in a byte. Index 0 is packed in the lower
+        // 4-bits and index 1 is packed in the upper 4-bits.
+        if (col % NUM_ELEM_PER_BYTE == 0) {
+          output_row[col / NUM_ELEM_PER_BYTE] = quantized;
+        } else {
+          output_row[col / NUM_ELEM_PER_BYTE] |=
+              (quantized << ((col % NUM_ELEM_PER_BYTE) * bit_width));
+        }
+      } // embedding_cols
+    } // embedding_rows
+#ifdef USE_FBGEMM
+  }
+#endif // USE_FBGEMM
+
   return output;
 }
 
@@ -231,8 +260,11 @@ Tensor _qembeddingbag_nbit_prepack_helper(const Tensor& weight, int BIT_RATE) {
 // To later de-quantize values, the scale (range / 15) and zero_point
 // are stored alongside the data. More precisely, each row first has quantized
 // values, and then 2-byte fp16 scale and 2-byte zero_offset.
-Tensor qembeddingbag_4bit_prepack(const Tensor& weight) {
-  return _qembeddingbag_nbit_prepack_helper(weight, 4 /*BIT_RATE*/);
+Tensor qembeddingbag_4bit_prepack(
+    const Tensor& weight,
+    bool optimized_qparams) {
+  return _qembeddingbag_nbit_prepack_helper(
+      weight, 4 /*bit_width*/, optimized_qparams);
 }
 
 // Applies 2-bit row-wise quantization by determining the range
@@ -243,8 +275,11 @@ Tensor qembeddingbag_4bit_prepack(const Tensor& weight) {
 // are stored alongside the data. More precisely, each row first has quantized
 // values, and then 2-byte fp16 scale and 2-byte zero_offset.
 // TODO() - Add 2Bit Embedding Lookup operator.
-Tensor qembeddingbag_2bit_prepack(const Tensor& weight) {
-  return _qembeddingbag_nbit_prepack_helper(weight, 2 /*BIT_RATE*/);
+Tensor qembeddingbag_2bit_prepack(
+    const Tensor& weight,
+    bool optimized_qparams) {
+  return _qembeddingbag_nbit_prepack_helper(
+      weight, 2 /*bit_width*/, optimized_qparams);
 }
 
 class QEmbeddingPackWeights final {
@@ -255,13 +290,13 @@ class QEmbeddingPackWeights final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl("embedding_bag_byte_prepack", qembeddingbag_byte_prepack);
-  m.impl("embedding_bag_4bit_prepack", qembeddingbag_4bit_prepack);
-  m.impl("embedding_bag_2bit_prepack", qembeddingbag_2bit_prepack);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_bag_byte_prepack"), TORCH_FN(qembeddingbag_byte_prepack));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_bag_4bit_prepack"), TORCH_FN(qembeddingbag_4bit_prepack));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_bag_2bit_prepack"), TORCH_FN(qembeddingbag_2bit_prepack));
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("embedding_bag_prepack", TORCH_FN(QEmbeddingPackWeights::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::embedding_bag_prepack"), TORCH_FN(QEmbeddingPackWeights::run));
 }
 
 } // namespace

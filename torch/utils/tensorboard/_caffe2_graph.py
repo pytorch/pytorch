@@ -12,8 +12,10 @@ from builtins import bytes
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 
+from typing import Set, Dict, Tuple, List
 
-def _make_unique_name(seen, name, min_version=0):
+
+def _make_unique_name(seen: Set[str], name: str, min_version: int = 0):
     '''
     Make the name unique by appending a unique number to the name. Used for SSA.
 
@@ -91,12 +93,12 @@ def _convert_to_ssa(shapes, blob_name_tracker, ops):
         None. Modifies blob_name_tracker and ops in-place.
     '''
     ir = core.IR(ops)
-    seen = set()
-    versioned = {}
+    seen: Set[str] = set()
+    versioned: Dict[Tuple[str, int], int] = {}
     new_shapes = {}
     new_blob_name_tracker = {}
 
-    def ssa_name(name, versions):
+    def ssa_name(name: str, versions: Dict[str, int]) -> int:
         assert name in versions
         version = versions[name]
         if (name, version) in versioned:
@@ -180,8 +182,8 @@ def _rename_all(shapes, blob_name_tracker, ops, rename_fn):
         None. Modifies shapes, blob_name_tracker and ops in-place using the
             specified 'rename_fn'.
     '''
-    seen = set()
-    renamed = {}
+    seen: Set[str] = set()
+    renamed: Dict[Tuple[str, int], int] = {}
 
     def g(name):
         """ Collision-free version of f.
@@ -683,7 +685,7 @@ def _operators_to_graph_def(
     _fill_missing_operator_names(ops)
     if show_simplified:  # use_tensorflow_naming
         _rename_tensorflow_style(shapes, blob_name_tracker, ops)
-    producing_ops = {}
+    producing_ops: Dict[caffe2_pb2.OperatorDef, List] = {}
     blobs = set()
     input_blobs, inter_blobs, _ = _compute_in_out(ops)
     current_graph = GraphDef()

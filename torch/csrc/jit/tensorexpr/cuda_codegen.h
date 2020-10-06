@@ -138,8 +138,6 @@ class GPUMetaVarRewriter : public IRMutator {
   std::vector<const Expr*> current_block_reach_;
   std::vector<const Expr*> current_thread_reach_;
 
-  bool need_sync_ = false;
-  const Expr* last_thread_dim_ = nullptr;
   const CudaAnalysis* cuda_analysis_;
 };
 
