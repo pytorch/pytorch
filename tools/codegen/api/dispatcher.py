@@ -1,13 +1,13 @@
 from tools.codegen.model import *
 
 from tools.codegen.api.types import CppArgument, DispatcherExpr, TensorOptionsArguments, \
-    DispatcherArgument, ThisArgument, LegacyDispatcherArgument
-from tools.codegen.api import cpp
+    DispatcherArgument, ThisArgument, LegacyDispatcherArgument, CppTensorOptionsArguments, CppThisArgument
+import tools.codegen.api.cpp as cpp
 import tools.codegen.api.legacy_dispatcher as legacy_dispatcher
 import tools.codegen.local as local
-from enum import Enum
+
 import itertools
-from typing import Sequence, Optional
+from typing import Sequence, Optional, Union
 
 # This file describes the translation of JIT schema to the dispatcher
 # API, the *unboxed* calling convention by which invocations through
@@ -75,73 +75,76 @@ def arguments(func: FunctionSchema) -> Sequence[DispatcherArgument]:
             for la in legacy_dispatcher.arguments(func)
         ]
 
-# TODO GATHER is only needed for non-c10-full ops, remove later.
-ProcessTensoroptions = Enum('ProcessTensoroptions', ('GATHER', 'SCATTER', 'PASS_THROUGH'))
-
-
 # Given a set of CppArguments in scope, return a sequence of dispatcher
 # expressions that translate the cpp API into dispatcher API
-def cppargument_exprs(a: CppArgument,
-                      *,
-                      tensor_options: Optional[CppArgument],
-                      process_tensoroptions: ProcessTensoroptions = ProcessTensoroptions.PASS_THROUGH
-                      ) -> Sequence[DispatcherExpr]:
-    if isinstance(a.argument, TensorOptionsArguments):
-        if process_tensoroptions == ProcessTensoroptions.SCATTER:
-            ta = a.argument
-            return [
-                DispatcherExpr(type=argument_type(ta.dtype), expr=f'optTypeMetaToScalarType({a.name}.dtype_opt())'),
-                DispatcherExpr(type=argument_type(ta.layout), expr=f'{a.name}.layout_opt()'),
-                DispatcherExpr(type=argument_type(ta.device), expr=f'{a.name}.device_opt()'),
-                DispatcherExpr(type=argument_type(ta.pin_memory), expr=f'{a.name}.pinned_memory_opt()'),  # weird discrep
-            ]
-        elif process_tensoroptions == ProcessTensoroptions.GATHER:
-            return [
-                DispatcherExpr(
-                    type='const TensorOptions &',
-                    expr="TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory)")]
+#
+# WARNING: This is unsound if you pass it CppArgument when you were
+# supposed to pass it CppTensorOptionsArguments, it will directly
+# translate device to device, which will give you the wrong signature
+# for dispatcher.  If Argument "knew" that it was part of a
+# TensorOptions that would help us dynamically test for this case
+def cppargument_exprs(
+    a: Union[CppArgument, CppTensorOptionsArguments, CppThisArgument],
+    *, tensor_options: Optional[CppArgument]
+) -> Sequence[DispatcherExpr]:
+    if isinstance(a, CppArgument):
+        if isinstance(a.argument, TensorOptionsArguments):
+            if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+                # Scatter
+                ta = a.argument
+                return [
+                    DispatcherExpr(type=argument_type(ta.dtype), expr=f'optTypeMetaToScalarType({a.name}.dtype_opt())'),
+                    DispatcherExpr(type=argument_type(ta.layout), expr=f'{a.name}.layout_opt()'),
+                    DispatcherExpr(type=argument_type(ta.device), expr=f'{a.name}.device_opt()'),
+                    DispatcherExpr(type=argument_type(ta.pin_memory), expr=f'{a.name}.pinned_memory_opt()'),  # weird discrep
+                ]
+            else:
+                # No-op
+                return [DispatcherExpr(type='const TensorOptions &', expr=a.name)]
+        elif isinstance(a.argument, Argument):
+            if a.name == 'memory_format' and tensor_options is not None and local.use_c10_dispatcher() is UseC10Dispatcher.full:
+                return [DispatcherExpr(
+                    type=argument_type(a.argument),
+                    expr=f'c10::impl::check_tensor_options_and_extract_memory_format({tensor_options.name}, {a.name})')
+                ]
+            else:
+                return [DispatcherExpr(type=argument_type(a.argument), expr=a.name)]
         else:
-            assert process_tensoroptions == ProcessTensoroptions.PASS_THROUGH
-            return [DispatcherExpr(type='const TensorOptions &', expr=a.name)]
-    elif isinstance(a.argument, ThisArgument):
-        return [DispatcherExpr(type=argument_type(a.argument.argument), expr=a.name)]
-    elif isinstance(a.argument, Argument):
-        if a.name == 'memory_format' and tensor_options is not None and local.use_c10_dispatcher() is UseC10Dispatcher.full:
+            assert_never(a.argument)
+    elif isinstance(a, CppTensorOptionsArguments):
+        if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+            # No-op
+            return [
+                expr
+                for sub_a in a.explicit_arguments()  # NB: don't really care about explicitness here
+                for expr in cppargument_exprs(sub_a, tensor_options=tensor_options)
+            ]
+        else:
+            # Gather
             return [DispatcherExpr(
-                type=argument_type(a.argument),
-                expr=f'c10::impl::check_tensor_options_and_extract_memory_format({tensor_options.name}, {a.name})')
-            ]
-        else:
-            return [DispatcherExpr(type=argument_type(a.argument), expr=a.name)]
+                type='const TensorOptions &',
+                expr=f'TensorOptions().dtype({a.dtype.name}).layout({a.layout.name})'
+                     f'.device({a.device.name}).pinned_memory({a.pin_memory.name})',
+            )]
+    elif isinstance(a, CppThisArgument):
+        return [DispatcherExpr(
+            type=a.type,
+            expr='const_cast<Tensor&>(*this)',
+        )]
     else:
-        assert_never(a.argument)
+        assert_never(a)
 
-def cpparguments_exprs(args: Sequence[CppArgument], process_tensoroptions: ProcessTensoroptions) -> Sequence[DispatcherExpr]:
-    tensor_options = next((a for a in args if isinstance(a.argument, TensorOptionsArguments)), None)
-    return [r for a in args for r in cppargument_exprs(a,
-                                                       tensor_options=tensor_options,
-                                                       process_tensoroptions=process_tensoroptions)]
+def cpparguments_exprs(args: Sequence[Union[CppArgument, CppTensorOptionsArguments, CppThisArgument]]) -> Sequence[DispatcherExpr]:
+    tensor_options = next(
+        (a for a in args if isinstance(a, CppArgument) and isinstance(a.argument, TensorOptionsArguments)),
+        None
+    )
+    return [r for a in args for r in cppargument_exprs(a, tensor_options=tensor_options)]
 
 # I don't think this is entirely sound, but it should be reasonably
 # close
 def legacydispatcherarguments_exprs(args: Sequence[LegacyDispatcherArgument]) -> Sequence[DispatcherExpr]:
-    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-        process_tensoroptions = ProcessTensoroptions.SCATTER
-    else:
-        process_tensoroptions = ProcessTensoroptions.PASS_THROUGH
-    return cpparguments_exprs([CppArgument(type=a.type,
-                                           name=a.name,
-                                           default=None,
-                                           argument=a.argument) for a in args],
-                              process_tensoroptions=process_tensoroptions)
+    return cpparguments_exprs([CppArgument(type=a.type, name=a.name, default=None, argument=a.argument) for a in args])
 
 def exprs(args: Sequence[DispatcherArgument]) -> Sequence[DispatcherExpr]:
-    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-        process_tensoroptions = ProcessTensoroptions.SCATTER
-    else:
-        process_tensoroptions = ProcessTensoroptions.PASS_THROUGH
-    return cpparguments_exprs([CppArgument(type=a.type,
-                                           name=a.name,
-                                           default=None,
-                                           argument=a.argument) for a in args],
-                              process_tensoroptions=process_tensoroptions)
+    return cpparguments_exprs([CppArgument(type=a.type, name=a.name, default=None, argument=a.argument) for a in args])
