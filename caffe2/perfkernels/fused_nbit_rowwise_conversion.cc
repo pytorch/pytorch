@@ -6,6 +6,10 @@
 
 #include "common.h"
 
+#ifdef USE_FBGEMM
+#include "fbgemm/QuantUtils.h"
+#endif
+
 namespace caffe2 {
 
 void FloatToFused8BitRowwiseQuantized__base(
@@ -58,46 +62,32 @@ void Fused8BitRowwiseQuantizedToFloat__base(
   }
 }
 
-decltype(FloatToFused8BitRowwiseQuantized__base)
-    FloatToFused8BitRowwiseQuantized__avx2_fma;
 void FloatToFused8BitRowwiseQuantized(
     const float* input,
     int input_rows,
     int input_columns,
     std::uint8_t* output) {
-  AVX2_FMA_DO(
-      FloatToFused8BitRowwiseQuantized,
-      input,
-      input_rows,
-      input_columns,
-      output);
-  BASE_DO(
-      FloatToFused8BitRowwiseQuantized,
-      input,
-      input_rows,
-      input_columns,
-      output);
+#ifdef USE_FBGEMM
+  fbgemm::FloatToFused8BitRowwiseQuantizedSBFloat(
+      input, input_rows, input_columns, output);
+#else
+  FloatToFused8BitRowwiseQuantized__base(
+      input, input_rows, input_columns, output);
+#endif
 }
 
-decltype(Fused8BitRowwiseQuantizedToFloat__base)
-    Fused8BitRowwiseQuantizedToFloat__avx2_fma;
 void Fused8BitRowwiseQuantizedToFloat(
     const std::uint8_t* input,
     int input_rows,
     int input_columns,
     float* output) {
-  AVX2_FMA_DO(
-      Fused8BitRowwiseQuantizedToFloat,
-      input,
-      input_rows,
-      input_columns,
-      output);
-  BASE_DO(
-      Fused8BitRowwiseQuantizedToFloat,
-      input,
-      input_rows,
-      input_columns,
-      output);
+#ifdef USE_FBGEMM
+  fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloat(
+      input, input_rows, input_columns, output);
+#else
+  Fused8BitRowwiseQuantizedToFloat__base(
+      input, input_rows, input_columns, output);
+#endif
 }
 
 void FloatToFusedNBitRowwiseQuantizedSBHalf__base(
@@ -184,52 +174,34 @@ void FusedNBitRowwiseQuantizedSBHalfToFloat__base(
   }
 }
 
-decltype(FloatToFusedNBitRowwiseQuantizedSBHalf__base)
-    FloatToFusedNBitRowwiseQuantizedSBHalf__avx2_fma;
 void FloatToFusedNBitRowwiseQuantizedSBHalf(
     int bit_rate,
     const float* input,
     int input_rows,
     int input_columns,
     std::uint8_t* output) {
-  AVX2_FMA_DO(
-      FloatToFusedNBitRowwiseQuantizedSBHalf,
-      bit_rate,
-      input,
-      input_rows,
-      input_columns,
-      output);
-  BASE_DO(
-      FloatToFusedNBitRowwiseQuantizedSBHalf,
-      bit_rate,
-      input,
-      input_rows,
-      input_columns,
-      output);
+#ifdef USE_FBGEMM
+  fbgemm::FloatToFusedNBitRowwiseQuantizedSBHalf(
+      bit_rate, input, input_rows, input_columns, output);
+#else
+  FloatToFusedNBitRowwiseQuantizedSBHalf__base(
+      bit_rate, input, input_rows, input_columns, output);
+#endif
 }
 
-decltype(FusedNBitRowwiseQuantizedSBHalfToFloat__base)
-    FusedNBitRowwiseQuantizedSBHalfToFloat__avx2_fma;
 void FusedNBitRowwiseQuantizedSBHalfToFloat(
     int bit_rate,
     const std::uint8_t* input,
     int input_rows,
     int input_columns,
     float* output) {
-  AVX2_FMA_DO(
-      FusedNBitRowwiseQuantizedSBHalfToFloat,
-      bit_rate,
-      input,
-      input_rows,
-      input_columns,
-      output);
-  BASE_DO(
-      FusedNBitRowwiseQuantizedSBHalfToFloat,
-      bit_rate,
-      input,
-      input_rows,
-      input_columns,
-      output);
+#ifdef USE_FBGEMM
+  fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloat(
+      bit_rate, input, input_rows, input_columns, output);
+#else
+  FusedNBitRowwiseQuantizedSBHalfToFloat__base(
+      bit_rate, input, input_rows, input_columns, output);
+#endif
 }
 
 } // namespace caffe2

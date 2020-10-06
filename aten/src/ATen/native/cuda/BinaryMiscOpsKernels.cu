@@ -19,11 +19,12 @@ void atan2_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void smooth_l1_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "smooth_l1_cuda", [&]() {
-    gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
+void smooth_l1_kernel_cuda(TensorIterator& iter, double beta) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "smooth_l1_cuda", [&iter, beta]() {
+    scalar_t beta_val(beta);
+    gpu_kernel(iter, [beta_val] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
       auto z = ::abs(a - b);
-      return z < scalar_t(1.) ? scalar_t(0.5) * z * z : z - scalar_t(0.5);
+      return z < beta_val ? scalar_t(0.5) * z * z / beta_val : z - scalar_t(0.5) * beta_val;
     });
   });
 }
@@ -31,11 +32,9 @@ void smooth_l1_kernel_cuda(TensorIterator& iter) {
 
 void mse_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "mse_cuda", [&]() {
-    AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "mse_cuda", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        auto diff = a - b;
-        return diff * diff;
-      });
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      auto diff = a - b;
+      return diff * diff;
     });
   });
 }
