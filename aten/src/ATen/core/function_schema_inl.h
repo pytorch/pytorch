@@ -111,69 +111,35 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
     return false;
   }
   for (size_t i = 0; i < returns().size(); ++i) {
-    // functions are covariant in arguments but contravariant in returns
+    // Backwards compatibility requires covariance on argument types
+    // (i.e. more generic), and contravariance on return types (i.e.
+    //  more specific).
     if (!old.returns().at(i).isBackwardCompatibleWith(
           returns().at(i),
           why_not)) {
       return false;
     }
   }
-  std::vector<const Argument*> args, old_args;
-  std::map<std::string, const Argument*> kwargs, old_kwargs;
-  auto split_func = [](const std::vector<Argument>& arguments,
-      std::vector<const Argument*>* positionals,
-      std::map<std::string, const Argument*>* nameds) {
-    for (const Argument& arg : arguments) {
-      if (!arg.kwarg_only()) {
-        positionals->emplace_back(&arg);
-      }
-      nameds->emplace(arg.name(), &arg);
-    }
-  };
-  // we split args into positional and keyward parts,
-  split_func(arguments(), &args, &kwargs);
-  split_func(old.arguments(), &old_args, &old_kwargs);
-  if (old_args.size() > args.size()) {
-    return false;
-  }
-  // make sure that all the old positional args have their corresponding
-  // backward compatible positional args in this schema
-  for (size_t i = 0; i < old_args.size(); ++i) {
-    if (!args.at(i)->isBackwardCompatibleWith(
-          *old_args.at(i),
-          why_not)) {
+
+  // Make sure that all the old arguments have their corresponding backward
+  // compatible arguments in this schema.
+  for (size_t i = 0; i < old.arguments().size(); ++i) {
+    if (!arguments().at(i).isBackwardCompatibleWith(
+          old.arguments().at(i), why_not)) {
       return false;
     }
   }
-  // check the extra positional args in this schema either has corresponding
-  // backward compatible keyward args since positional args also can be used as
-  // a keyward arg, or provided default values
-  for (size_t i = old_args.size(); i < args.size(); ++i) {
-    if (!args.at(i)->default_value()) {
-      auto it = old_kwargs.find(args.at(i)->name());
-      if (it == old_kwargs.end() ||
-          !args.at(i)->isBackwardCompatibleWith(
-            *it->second,
-            why_not)) {
-        return false;
+
+  // Validate that all new arguments provided a default value.
+  for (size_t i = old.arguments().size(); i < arguments().size(); ++i) {
+    if (!arguments().at(i).default_value()) {
+      if (why_not) {
+        *why_not
+            << "Function schema not backward compatible since the new argument '"
+            << arguments().at(i).name() << "' of type "
+            << arguments().at(i).type()->str()
+            << " did not provide a default value.";
       }
-    }
-  }
-  // make sure that all the keyword args in the old schema have their
-  // corresponding backward compatible keyward args in this schema
-  for (auto& kv : old_kwargs) {
-    auto it = kwargs.find(kv.first);
-    if (it == kwargs.end() ||
-        !it->second->isBackwardCompatibleWith(
-          *kv.second,
-          why_not)) {
-      return false;
-    }
-    kwargs.erase(it);
-  }
-  // check all the extra keyword args in this schema provide default values
-  for (auto& kv : kwargs) {
-    if (!kv.second->default_value()) {
       return false;
     }
   }
@@ -186,7 +152,6 @@ inline void FunctionSchema::checkArg(
     const Argument& argument,
     optional<size_t> pos) const {
   if (!value.type()->isSubtypeOf(argument.type())) {
-    std::string position = pos ? ::c10::str(" in position ", *pos) : "";
     TORCH_CHECK(
         false,
         formatTypeMismatchMsg(
