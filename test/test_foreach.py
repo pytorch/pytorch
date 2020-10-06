@@ -128,6 +128,7 @@ class TestForeach(TestCase):
                 self.assertEqual(tensors1, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
             else:
                 self.assertEqual(tensors1, expected)
+
     #
     # Unary ops
     #
