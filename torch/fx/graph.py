@@ -74,13 +74,19 @@ class Graph:
     def nodes(self):
         return tuple(self._nodes)
 
-    def graph_copy(self, g : 'Graph'):
+    def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node]) -> Optional[Argument]:
         """
-        Append all nodes from graph `g` to this graph
+        Append all nodes from graph `g` to this graph. `val_map` should be a dictionary
+        that maps nodes in `g` to nodes in `self. `val_map` will be populated with more
+        items by this function. Returns the equivalent output value of `g` with
+        Nodes switched to refer to nodes in `self`.
         """
-        val_map : Dict[Node, Node] = {}
         for node in g._nodes:
+            if node.op == 'output':
+                rv = map_arg(node.args[0], lambda n: val_map[n])
+                return rv
             val_map[node] = self.node_copy(node, lambda n : val_map[n])
+        return None
 
     def _mark_uses(self, a: Argument):
         def add_use(n: Node):
@@ -92,7 +98,7 @@ class Graph:
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None,
                     name: Optional[str] = None) -> Node:
-        assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder')
+        assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
         self._mark_uses(args)
@@ -157,8 +163,8 @@ class Graph:
         return self.create_node(node.op, node.target, args, kwargs, name)
 
     def output(self, result: Argument):
-        self.result = result
         self._mark_uses(result)
+        return self.create_node(op='output', target='output', args=(result,))
 
     def _name(self, target: Target) -> str:
         if callable(target):
@@ -194,7 +200,7 @@ class Graph:
         i = self._used_names[op] = self._used_names[op] + 1
         return f'{op}_{i}'
 
-    def python_code(self, root_module: str) -> Tuple[str, str, List[str]]:
+    def python_code(self, root_module: str) -> str:
         free_vars: List[str] = []
         body: List[str] = []
         for node in self._nodes:
@@ -236,10 +242,18 @@ class Graph:
                 assert isinstance(node.target, str)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}\n')
                 continue
+            elif node.op == 'output':
+                body.append(f'return {node.args[0]}')
+                continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
-        src = ''.join(body)
-        return src, str(self.result), free_vars
+        code = ''.join(body)
+        code = '\n'.join('    ' + line for line in code.split('\n')) + '\n'
+        fn_code = f"""\
+def forward(self, {', '.join(free_vars)}):
+{code}
+"""
+        return fn_code
 
     def __str__(self) -> str:
         placeholder_names : List[str] = []
@@ -268,6 +282,8 @@ class Graph:
                 return None
             elif n.op == 'get_attr':
                 return f'%{n.name} : [uses={n.uses}] = self.{n.target}'
+            elif n.op == 'output':
+                return f'return {n.args[0]}'
             else:
                 return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
@@ -279,8 +295,6 @@ class Graph:
         for node_str in node_strs:
             if node_str:
                 s += '\n    ' + node_str
-        if hasattr(self, 'result'):
-            s += f'\n    return {format_arg(self.result)}'
         return s
 
     def lint(self, root : Optional[torch.nn.Module] = None):
@@ -306,7 +320,7 @@ class Graph:
         seen_names : Set[str] = set()
         seen_values : Set[Node] = set()
         for node in self._nodes:
-            if node.op not in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr']:
+            if node.op not in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output']:
                 raise RuntimeError(f'Node {node} had unknown opcode {node.op}!')
             if node.graph is not self:
                 raise RuntimeError(f'Node \'{node}\' does not belong to this Graph!')
@@ -317,9 +331,6 @@ class Graph:
             if node.name in seen_names:
                 raise RuntimeError(f'Node redefined name {node.name}!')
             seen_names.add(node.name)
-
-        if hasattr(self, 'result'):
-            map_arg(self.result, check_arg)
 
         # Check targets are legit
         if root:
