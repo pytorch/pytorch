@@ -3024,6 +3024,9 @@ class TestQuantizedEmbeddingOps(TestCase):
 class TestQuantizedConv(TestCase):
     def _test_qconv_unpack_impl(self, qconv_prepack_fn, qconv_unpack_fn, inputs,
                                 strides, i_pads, o_pads, channelwise):
+        if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
+            return
+
         (X_data, W_data, bias_data, groups, transposed) = inputs
         (X, (X_scale, X_zero_point, X_qtype)) = X_data
         (W, (W_scale, W_zero_point, W_qtype)) = W_data
@@ -3161,6 +3164,8 @@ class TestQuantizedConv(TestCase):
         dilations, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
         Y_zero_point, use_bias, use_relu, use_channelwise, use_transpose
     ):
+        if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
+            return
         (X, W), (X_q, W_q), bias_float = self._make_qconv_tensors(
             batch_size, input_channels_per_group, input_feature_map_shape,
             output_channels_per_group, groups, kernels,
@@ -3621,7 +3626,7 @@ class TestQuantizedConv(TestCase):
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         if torch.backends.quantized.engine == 'qnnpack':
-            use_channelwise = False
+            assume(not use_channelwise)
         true_conv1d = torch.nn.Conv1d(
             input_channels,
             output_channels,
