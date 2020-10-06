@@ -122,7 +122,8 @@ class Adam(Optimizer):
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
-                [torch.max(a, b, out=a) for a, b in zip(max_exp_avg_sq, exp_avg_sq)]
+                max_exp_avg_sq = torch._foreach_max(max_exp_avg_sq, exp_avg_sq)
+
                 # Use the max. for normalizing running avg. of gradient
                 max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sq)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]

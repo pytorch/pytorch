@@ -128,7 +128,6 @@ class TestForeach(TestCase):
                 self.assertEqual(tensors1, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
             else:
                 self.assertEqual(tensors1, expected)
-
     #
     # Unary ops
     #
@@ -170,6 +169,22 @@ class TestForeach(TestCase):
                                             torch._foreach_addcdiv_, torch.addcdiv)
                 return
         self._test_pointwise_op(device, dtype, torch._foreach_addcdiv, torch._foreach_addcdiv_, torch.addcdiv)
+
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False, include_complex=False))
+    def test_max(self, device, dtype):
+        for N in [30, 300]:
+            tensors1 = self._get_test_data(device, dtype, N)
+            tensors2 = self._get_test_data(device, dtype, N)
+
+            # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
+            control_dtype = torch.float32 if (self.device_type == 'cuda' and
+                                              (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
+
+            expected = [torch.max(tensors1[i].to(dtype=control_dtype),
+                                  tensors2[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
+
+            res = torch._foreach_max(tensors1, tensors2)
+            self.assertEqual(res, expected)
 
     #
     # Ops with scalar

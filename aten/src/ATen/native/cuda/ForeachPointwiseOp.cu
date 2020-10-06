@@ -82,7 +82,7 @@ FOREACH_POINTWISE_OP(addcdiv, std::divides);
 std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors1, TensorList tensors2) {
     TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
-
+    
     if (!can_use_fast_route(tensors1, tensors2)) {
         return at::native::foreach_tensor_max_slow(tensors1, tensors2);
     }
@@ -97,7 +97,7 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors1, TensorList tens
     tensor_lists.emplace_back(tensors1.vec());
     tensor_lists.emplace_back(tensors2.vec());
     tensor_lists.emplace_back(std::move(vec_res));
-
+    
     AT_DISPATCH_ALL_TYPES_AND(kHalf, tensors1[0].scalar_type(), "foreach_pointwise_op_cuda", [&]() {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
         auto op = []  GPU_LAMBDA (opmath_t a, opmath_t b) -> opmath_t { return std::max(a, b); };
