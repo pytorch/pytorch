@@ -20,14 +20,14 @@ struct Command final {
     Buffer(VkDevice device, VkCommandPool command_pool);
     Buffer(const Buffer&) = delete;
     Buffer& operator=(const Buffer&) = delete;
-    Buffer(Buffer&&) = default;
-    Buffer& operator=(Buffer&&) = default;
+    Buffer(Buffer&&);
+    Buffer& operator=(Buffer&&);
     ~Buffer() = default;
 
     void begin();
     void end();
     void barrier(const Pipeline::Barrier& barrier);
-    void bind(Pipeline::Object pipeline);
+    void bind(const Pipeline::Object& pipeline);
     void bind(const Descriptor::Set& set);
     void copy(VkBuffer source, VkBuffer destination, size_t size);
     void dispatch(const Shader::WorkGroup& work_group);
@@ -50,8 +50,8 @@ struct Command final {
     explicit Pool(const GPU& gpu);
     Pool(const Pool&) = delete;
     Pool& operator=(const Pool&) = delete;
-    Pool(Pool&&) = default;
-    Pool& operator=(Pool&&) = default;
+    Pool(Pool&&);
+    Pool& operator=(Pool&&);
     ~Pool() = default;
 
     Buffer allocate();
@@ -66,6 +66,27 @@ struct Command final {
     : pool(gpu) {
   }
 };
+
+//
+// Impl
+//
+
+inline Command::Buffer::Buffer(Buffer&& buffer)
+  : command_buffer_(std::move(buffer.command_buffer_)),
+    bound_(std::move(buffer.bound_)) {
+  buffer.command_buffer_ = VK_NULL_HANDLE;
+}
+
+inline Command::Buffer& Command::Buffer::operator=(Buffer&& buffer) {
+  if (&buffer != this) {
+    command_buffer_ = std::move(buffer.command_buffer_);
+    bound_ = std::move(buffer.bound_);
+
+    buffer.command_buffer_ = VK_NULL_HANDLE;
+  };
+
+  return *this;
+}
 
 } // namespace api
 } // namespace vulkan

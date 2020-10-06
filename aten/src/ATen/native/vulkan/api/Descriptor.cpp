@@ -8,6 +8,10 @@ namespace {
 
 VkDescriptorPool create_descriptor_pool(
     const VkDevice device) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device,
+      "Invalid Vulkan device!");
+
   const struct {
     uint32_t capacity;
     c10::SmallVector<VkDescriptorPoolSize, 8u> sizes;
@@ -53,7 +57,7 @@ VkDescriptorPool create_descriptor_pool(
   const VkDescriptorPoolCreateInfo descriptor_pool_create_info{
     VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
     nullptr,
-    0u, /* Do not use VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT */
+    0u, /* Do not use VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT. */
     descriptor.capacity,
     static_cast<uint32_t>(descriptor.sizes.size()),
     descriptor.sizes.data(),
@@ -128,6 +132,11 @@ Descriptor::Set::Set(
 }
 
 void Descriptor::Set::update(const Stream& source) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_,
+      "Invalid Vulkan device! "
+      "Potential reason: This descriptor set is moved from.");
+
   const auto stream_itr = std::find_if(
       bindings_.streams.begin(),
       bindings_.streams.end(),
@@ -149,6 +158,11 @@ Descriptor::Set& Descriptor::Set::bind(
     const uint32_t binding,
     const VkDescriptorType type,
     const Resource::Buffer& buffer) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_,
+      "Invalid Vulkan device! "
+      "Potential reason: This descriptor set is moved from.");
+
   update(Stream{
       binding,
       type,
@@ -168,6 +182,11 @@ Descriptor::Set& Descriptor::Set::bind(
     const uint32_t binding,
     const VkDescriptorType type,
     const Resource::Image& image) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_,
+      "Invalid Vulkan device! "
+      "Potential reason: This descriptor set is moved from.");
+
   update(Stream{
       binding,
       type,
@@ -184,6 +203,11 @@ Descriptor::Set& Descriptor::Set::bind(
 }
 
 VkDescriptorSet Descriptor::Set::handle() const {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_,
+      "Invalid Vulkan device! "
+      "Potential reason: This descriptor set is moved from.");
+
   if (bindings_.dirty) {
     const auto is_buffer = [](const VkDescriptorType type) {
       switch (type) {
@@ -267,9 +291,31 @@ Descriptor::Pool::Pool(const GPU& gpu)
       "Invalid Vulkan descriptor pool!");
 }
 
+Descriptor::Pool::Pool(Pool&& pool)
+  : device_(std::move(pool.device_)),
+    descriptor_pool_(std::move(pool.descriptor_pool_)) {
+  pool.device_ = VK_NULL_HANDLE;
+}
+
+Descriptor::Pool& Descriptor::Pool::operator=(Pool&& pool) {
+  if (&pool != this) {
+    device_ = std::move(pool.device_);
+    descriptor_pool_ = std::move(pool.descriptor_pool_);
+
+    pool.device_ = VK_NULL_HANDLE;
+  };
+
+  return *this;
+}
+
 Descriptor::Set Descriptor::Pool::allocate(
     const VkDescriptorSetLayout descriptor_set_layout)
 {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && descriptor_pool_,
+      "Invalid Vulkan device and / or descriptor pool! "
+      "Potential reason: This descriptor pool is moved from.");
+
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       descriptor_set_layout,
       "Invalid Vulkan descriptor set layout!");
@@ -281,6 +327,11 @@ Descriptor::Set Descriptor::Pool::allocate(
 }
 
 void Descriptor::Pool::purge() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && descriptor_pool_,
+      "Invalid Vulkan device and / or descriptor pool! "
+      "Potential reason: This descriptor pool is moved from.");
+
   VK_CHECK(vkResetDescriptorPool(device_, descriptor_pool_.get(), 0u));
 }
 

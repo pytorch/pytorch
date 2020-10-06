@@ -1,5 +1,5 @@
 import sys
-sys.argv.append("--ge_config=legacy")
+sys.argv.append("--jit_executor=legacy")
 
 import os
 os.environ['PYTORCH_CUDA_FUSER_DISABLE_FALLBACK'] = '1'

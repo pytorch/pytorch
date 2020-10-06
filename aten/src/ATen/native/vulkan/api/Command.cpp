@@ -79,6 +79,11 @@ Command::Buffer::Buffer(
 }
 
 void Command::Buffer::Buffer::begin() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      command_buffer_,
+      "Invalid Vulkan command buffer! "
+      "Potential reason: This command buffer is moved from.");
+
   const VkCommandBufferBeginInfo command_buffer_begin_info{
     VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
     nullptr,
@@ -92,45 +97,48 @@ void Command::Buffer::Buffer::begin() {
 }
 
 void Command::Buffer::Buffer::end() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      command_buffer_,
+      "Invalid Vulkan command buffer! "
+      "Potential reason: This command buffer is moved from.");
+
   VK_CHECK(vkEndCommandBuffer(command_buffer_));
 }
 
 void Command::Buffer::barrier(
     const Pipeline::Barrier& barrier) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      command_buffer_,
+      "Invalid Vulkan command buffer! "
+      "Potential reason: This command buffer is moved from.");
+
   c10::SmallVector<VkMemoryBarrier, 1u> global_memory_barriers;
   c10::SmallVector<VkImageMemoryBarrier, 1u> image_memory_barriers;
 
-  switch(barrier.type) {
-    case Pipeline::Barrier::Type::Execution:
-      break;
+  for (const Resource::Buffer::Barrier& barrier : barrier.buffers) {
+    // Using global memory barriers instead of buffer memory barriers for
+    // buffers.  The consensus seems to be that there is no advantage in
+    // using the latter.
 
-    case Pipeline::Barrier::Type::Buffer:
-      // Using global memory barriers for buffers.  The consensus seems to be
-      // that there is no advantage in using the latter.
-      global_memory_barriers.push_back({
+    global_memory_barriers.push_back({
           VK_STRUCTURE_TYPE_MEMORY_BARRIER,
           nullptr,
-          barrier.as.buffer.memory.src,
-          barrier.as.buffer.memory.dst,
+          barrier.memory.src,
+          barrier.memory.dst,
         });
-      break;
+  }
 
-    case Pipeline::Barrier::Type::Image:
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-          barrier.as.image.handle,
-          "Invalid Vulkan image!");
-
-
-      image_memory_barriers.push_back({
+  for (const Resource::Image::Barrier& barrier : barrier.images) {
+    image_memory_barriers.push_back({
           VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
           nullptr,
-          barrier.as.image.memory.src,
-          barrier.as.image.memory.dst,
-          barrier.as.image.layout.src,
-          barrier.as.image.layout.dst,
+          barrier.memory.src,
+          barrier.memory.dst,
+          barrier.layout.src,
+          barrier.layout.dst,
           VK_QUEUE_FAMILY_IGNORED,
           VK_QUEUE_FAMILY_IGNORED,
-          barrier.as.image.handle,
+          barrier.handle,
           VkImageSubresourceRange{
             VK_IMAGE_ASPECT_COLOR_BIT,
             0u,
@@ -139,13 +147,7 @@ void Command::Buffer::barrier(
             VK_REMAINING_ARRAY_LAYERS,
           },
         });
-      break;
-
-    default:
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-          false,
-          "Invalid Vulkan barrier type!");
-  };
+  }
 
   vkCmdPipelineBarrier(
       command_buffer_,
@@ -161,7 +163,12 @@ void Command::Buffer::barrier(
 }
 
 void Command::Buffer::bind(
-    const Pipeline::Object pipeline) {
+    const Pipeline::Object& pipeline) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      command_buffer_,
+      "Invalid Vulkan command buffer! "
+      "Potential reason: This command buffer is moved from.");
+
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       pipeline,
       "Invalid Vulkan pipeline!");
@@ -178,6 +185,11 @@ void Command::Buffer::bind(
 
 void Command::Buffer::bind(
     const Descriptor::Set& set) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      command_buffer_,
+      "Invalid Vulkan command buffer! "
+      "Potential reason: This command buffer is moved from.");
+
   const VkDescriptorSet descriptor_set = set.handle();
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -204,6 +216,11 @@ void Command::Buffer::copy(
     const VkBuffer destination,
     const size_t size) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      command_buffer_,
+      "Invalid Vulkan command buffer! "
+      "Potential reason: This command buffer is moved from.");
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       source,
       "Invalid Vulkan source buffer!");
 
@@ -227,6 +244,11 @@ void Command::Buffer::copy(
 
 void Command::Buffer::dispatch(
     const Shader::WorkGroup& work_group) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      command_buffer_,
+      "Invalid Vulkan command buffer! "
+      "Potential reason: This command buffer is moved from.");
+
   vkCmdDispatch(
       command_buffer_,
       work_group.x,
@@ -237,6 +259,11 @@ void Command::Buffer::dispatch(
 void Command::Buffer::submit(
     const VkQueue queue,
     const VkFence fence) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      command_buffer_,
+      "Invalid Vulkan command buffer! "
+      "Potential reason: This command buffer is moved from.");
+
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       queue,
       "Invalid Vulkan queue!");
@@ -270,11 +297,38 @@ Command::Pool::Pool(const GPU& gpu)
       "Invalid Vulkan command pool!");
 }
 
+Command::Pool::Pool(Pool&& pool)
+  : device_(std::move(pool.device_)),
+    command_pool_(std::move(pool.command_pool_)) {
+  pool.device_ = VK_NULL_HANDLE;
+}
+
+Command::Pool& Command::Pool::operator=(Pool&& pool) {
+  if (&pool != this) {
+    device_ = std::move(pool.device_);
+    command_pool_ = std::move(pool.command_pool_);
+
+    pool.device_ = VK_NULL_HANDLE;
+  };
+
+  return *this;
+}
+
 Command::Buffer Command::Pool::allocate() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && command_pool_,
+      "Invalid Vulkan command pool! "
+      "Potential reason: This command pool is moved from.");
+
   return Buffer(device_, command_pool_.get());
 }
 
 void Command::Pool::purge() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && command_pool_,
+      "Invalid Vulkan command pool! "
+      "Potential reason: This command pool is moved from.");
+
   VK_CHECK(vkResetCommandPool(device_, command_pool_.get(), 0u));
 }
 

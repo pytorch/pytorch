@@ -61,8 +61,8 @@ struct Descriptor final {
         VkDescriptorSetLayout descriptor_set_layout);
     Set(const Set&) = delete;
     Set& operator=(const Set&) = delete;
-    Set(Set&&) = default;
-    Set& operator=(Set&&) = default;
+    Set(Set&&);
+    Set& operator=(Set&&);
     ~Set() = default;
 
     Set& bind(
@@ -108,8 +108,8 @@ struct Descriptor final {
     explicit Pool(const GPU& gpu);
     Pool(const Pool&) = delete;
     Pool& operator=(const Pool&) = delete;
-    Pool(Pool&&) = default;
-    Pool& operator=(Pool&&) = default;
+    Pool(Pool&&);
+    Pool& operator=(Pool&&);
     ~Pool() = default;
 
     Set allocate(VkDescriptorSetLayout descriptor_set_layout);
@@ -124,6 +124,31 @@ struct Descriptor final {
     : pool(gpu) {
   }
 };
+
+//
+// Impl
+//
+
+inline Descriptor::Set::Set(Set&& set)
+  : device_(set.device_),
+    descriptor_set_(set.descriptor_set_),
+    bindings_(set.bindings_) {
+  set.device_ = VK_NULL_HANDLE;
+  set.descriptor_set_ = VK_NULL_HANDLE;
+}
+
+inline Descriptor::Set& Descriptor::Set::operator=(Set&& set) {
+  if (&set != this) {
+    device_ = std::move(set.device_);
+    descriptor_set_ = std::move(set.descriptor_set_);
+    bindings_ = std::move(set.bindings_);
+
+    set.device_ = VK_NULL_HANDLE;
+    set.descriptor_set_ = VK_NULL_HANDLE;
+  };
+
+  return *this;
+}
 
 } // namespace api
 } // namespace vulkan

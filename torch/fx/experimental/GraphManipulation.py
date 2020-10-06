@@ -1,8 +1,8 @@
 from typing import Dict, List
 from torch.fx.graph_module import GraphModule
 from typing import Any
-from torch.fx.node import Node, Target
-from torch.fx.graph import Graph, map_arg
+from torch.fx.node import Node, Target, map_arg
+from torch.fx.graph import Graph
 
 
 """find_use is used to find out if the node is another node's arg or kwargs."""
