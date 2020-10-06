@@ -42,7 +42,14 @@ class AttributePropagator {
     // explicitly.
     auto checkName = [this](std::string& name) {
       if (module_.hasattr(name)) {
-        insertMutableAttr(name, module_.attr(name), module_._ivalue());
+        auto attr = module_.attr(name);
+
+        // Freezing client wants to presever this submodule. When cleaning
+        // the frozen module, make sure it will be preserved entirely.
+        if (attr.isModule()) {
+          preservedSubModule_.insert(attr.toModule()._ivalue());
+        }
+        insertMutableAttr(name, attr, module_._ivalue());
         return true;
       }
 
@@ -97,12 +104,7 @@ class AttributePropagator {
       auto graph = function->graph();
       optimizeSubGraphs(graph, applyInline);
       if (freezeInterfaces_) {
-        optimizeSubGraphs(
-            graph,
-            std::bind(
-                &AttributePropagator::inlineInterfaceCalls,
-                *this,
-                std::placeholders::_1));
+        inlineInterfaceCalls(graph);
       }
       // Record Attributes that are explicitly set in the module.
       // They cannot be folded.
@@ -379,6 +381,14 @@ class AttributePropagator {
           inlineInterfaceCall(n, attr);
           // Reset the GetAttr to concrete module type.
           n->output()->setType(attr.type());
+        } else if (n->kind() == prim::fork) {
+          applyToForkSubgraph(
+              n,
+              graph,
+              std::bind(
+                  &AttributePropagator::inlineInterfaceCalls,
+                  *this,
+                  std::placeholders::_1));
         }
       }
     }
@@ -476,18 +486,20 @@ class AttributePropagator {
     auto node = n->inputs()[0]->node();
     // Check if first parameter of fork is a module. This module is used
     // as the base module (similar to 'self' in forward) to resolve GetAttrs.
-    if (node->kind() != prim::GetAttr) {
-      return;
+    //  Otherwise freezing is applied using module_
+    if (node->kind() == prim::GetAttr &&
+        node->output()->type()->cast<ClassType>()) {
+      auto name = node->s(attr::name);
+      auto input = node->inputs()[0];
+      if (!findConstantAttr(input, name, attrModule, graph)) {
+        // Module needs to be preserved.
+        return;
+      }
+      attrModule = attrModule.attr(name).toModule();
+      std::swap(module_, attrModule);
     }
-    auto name = node->s(attr::name);
-    auto input = node->inputs()[0];
-    if (!findConstantAttr(input, name, attrModule, graph)) {
-      // Module needs to be preserved.
-      return;
-    }
-    attrModule = attrModule.attr(name).toModule();
+
     auto subgraph = n->g(attr::Subgraph);
-    std::swap(module_, attrModule);
     func(subgraph);
     module_ = attrModule;
   }
@@ -498,7 +510,32 @@ class AttributePropagator {
         return true;
       }
     }
-    return false;
+    return preservedSubModule_.count(subModule._ivalue());
+  }
+
+  void removeExtraWaitCalls(Block* b) {
+    auto nodes = b->nodes();
+    for (auto it = nodes.begin(); it != nodes.end(); it++) {
+      auto node = *it;
+      if (node->kind() != aten::wait) {
+        continue;
+      }
+      TORCH_INTERNAL_ASSERT(node->inputs().size() == 1);
+      TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
+      // If input type is not a from aten::fork call then the
+      // aten::wait operator can be deleted.
+      if (node->input()->type()->kind() != TypeKind::FutureType) {
+        node->output()->replaceAllUsesWith(node->input());
+        it.destroyCurrent();
+      }
+    }
+    // For the remaining nodes, recurse.
+    for (auto it = nodes.begin(); it != nodes.end(); it++) {
+      auto node = *it;
+      for (auto sub_b : node->blocks()) {
+        removeExtraWaitCalls(sub_b);
+      }
+    }
   }
 
   // cleanupFrozenModule function cleans up the Frozen module. It performs the
@@ -511,6 +548,7 @@ class AttributePropagator {
       auto graph = function->graph();
       recordReferencedAttrs(graph);
       handleSharedClassType(module_, graph);
+      removeExtraWaitCalls(graph->block());
     }
     removeUnusedAttrs();
   }
@@ -651,6 +689,9 @@ class AttributePropagator {
 
   // Contains user specified methods to be preserved in frozen module.
   std::unordered_set<Function*> preservedMethods_;
+
+  // Contains user specified sub module to be preserve in frozen module.
+  std::unordered_set<ModulePtr> preservedSubModule_;
 
   // Track all used attributes ivalues that can be aliased.
   IValue::HashAliasedIValues usedAttrs_;

@@ -29,12 +29,12 @@ namespace fuser {
  *     if( i * 4 + 3 < I && j * 128 + 127 < J ){
  *       for( k : I0i{4} )
  *         for( l : I1i{128} )
- *           T0[ ( i * 4 + k ) * J + j * 128 + l ] = …
+ *           T0[ ( i * 4 + k ) * J + j * 128 + l ] = ...
  *     } else {
  *       for( k : I0i{4} )
  *         for( l : I1i{128} )
  *           if( i * 4 + k < I && j * 128 + l < J)
- *              T0[ ( i * 4 + k ) * J + j * 128 + l ] = …
+ *              T0[ ( i * 4 + k ) * J + j * 128 + l ] = ...
  *     }
  *
  *   }
@@ -50,7 +50,7 @@ namespace fuser {
 
 class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
  private:
-  // Wrapper to access thread_predicates_
+  // Wrapper to access thread_predicates_ based on an output TV
   kir::Bool* getThreadPredicate(TensorView*);
 
   // We will track which loops in the incomming IR will be replaced and by what
@@ -92,7 +92,7 @@ class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
       : fusion_(_fusion),
         incoming_exprs_(_incoming_exprs),
         thread_predicates_(_thread_predicates) {
-    auto p2c_root_map = loop_utils::p2cRootMap(_fusion->exprs(true));
+    p2c_root_map = loop_utils::p2cRootMap(_fusion->exprs(true));
   }
 
   // Generate the for Expr replacement map

@@ -2689,7 +2689,8 @@ void dequantize_per_channel_affine_kernel(
       Tensor rtensor,
       Tensor scales,
       Tensor zero_points,
-      int64_t axis) {
+      int64_t axis,
+      int bit_width=8) {
 
   // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
   // For channels_last/3d however axis == 0 or 1.
@@ -2708,6 +2709,7 @@ void dequantize_per_channel_affine_kernel(
   check_tensor_memory_format(qtensor, rtensor);
   const auto* qd = qtensor.data_ptr<Q>();
   float* rd = rtensor.data_ptr<float>();
+  const auto elem_per_byte = 8 / bit_width;
   if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
       rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
     for (auto b = 0; b < batches; ++b) {
@@ -2716,8 +2718,12 @@ void dequantize_per_channel_affine_kernel(
           auto i = b * channel * elements_per_channel + e * channel + c;
           // We need to convert the qint8 value to float to ensure the
           // subtraction subexpression returns a float
-          rd[i] = (static_cast<float>(qd[i].val_) - zero_points_data[c]) *
-              scales_data[c];
+          auto qvalue = qd[i / elem_per_byte].val_;
+          if (bit_width < 8) {
+            qvalue >>= (i % elem_per_byte) * bit_width;
+            qvalue &= (1 << bit_width) - 1;
+          }
+          rd[i] = (static_cast<float>(qvalue) - zero_points_data[c]) * scales_data[c];
         }
       }
     }
@@ -2729,8 +2735,12 @@ void dequantize_per_channel_affine_kernel(
               c * elements_per_channel + e;
           // We need to convert the qint8 value to float to ensure the
           // subtraction subexpression returns a float
-          rd[i] = (static_cast<float>(qd[i].val_) - zero_points_data[c]) *
-              scales_data[c];
+          auto qvalue = qd[i / elem_per_byte].val_;
+          if (bit_width < 8) {
+            qvalue >>= (i % elem_per_byte) * bit_width;
+            qvalue &= (1 << bit_width) - 1;
+          }
+          rd[i] = (static_cast<float>(qvalue) - zero_points_data[c]) * scales_data[c];
         }
       }
     }
@@ -2764,7 +2774,7 @@ void quantize_tensor_per_channel_float_qparams_cpu(
   TORCH_CHECK(rtensor.is_contiguous() || (axis <=1),
       "If tensor is channels_last contig then per channel quantization "
       "is supported only for axis = 0 or 1.");
-  AT_DISPATCH_QINT_TYPES(
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_channel_float_qparams_cpu", [&]() {
         int64_t batches = size_to_dim_(axis, rtensor.sizes());
         int64_t elements_per_channel =
@@ -2774,15 +2784,22 @@ void quantize_tensor_per_channel_float_qparams_cpu(
         auto zero_points_data = zero_points.data_ptr<float>();
         check_tensor_memory_format(rtensor, qtensor);
         const float* rdata = rtensor.data_ptr<float>();
-        auto qdata = qtensor.data_ptr<scalar_t>();
+        auto qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
+        const auto elem_per_byte = CHAR_BIT / bit_width;
+        int qvalue = 0;
         if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
             rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
           for (auto b = 0; b < batches; ++b) {
             for (auto e = 0; e < elements_per_channel; ++e) {
               for (auto c = 0; c < channel; ++c) {
                 auto i = b * channel * elements_per_channel + e * channel + c;
-                qdata[i] = quantize_val_float_qparams<scalar_t>(
-                    scales_data[c], zero_points_data[c], rdata[i]);
+                qvalue = quantize_val_float_qparams(
+                    scales_data[c], zero_points_data[c], rdata[i], quant_min, quant_max);
+                if (i % elem_per_byte == 0) {
+                  qdata[i / elem_per_byte] = static_cast<underlying_t>(qvalue);
+                } else {
+                  qdata[i / elem_per_byte] |= static_cast<underlying_t>(qvalue << ((i % elem_per_byte) * bit_width));
+                }
               }
             }
           }
@@ -2792,8 +2809,13 @@ void quantize_tensor_per_channel_float_qparams_cpu(
               for (auto e = 0; e < elements_per_channel; ++e) {
                 auto i = b * channel * elements_per_channel +
                     c * elements_per_channel + e;
-                qdata[i] = quantize_val_float_qparams<scalar_t>(
-                    scales_data[c], zero_points_data[c], rdata[i]);
+                qvalue = quantize_val_float_qparams(
+                    scales_data[c], zero_points_data[c], rdata[i], quant_min, quant_max);
+                if (i % elem_per_byte == 0) {
+                  qdata[i / elem_per_byte] = static_cast<underlying_t>(qvalue);
+                } else {
+                  qdata[i / elem_per_byte] |= static_cast<underlying_t>(qvalue << ((i % elem_per_byte) * bit_width));
+                }
               }
             }
           }
@@ -2807,10 +2829,64 @@ void dequantize_tensor_per_channel_float_qparams_cpu(
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
-  AT_DISPATCH_QINT_TYPES(
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_channel_float_qparams_cpu", [&]() {
-        dequantize_per_channel_affine_kernel<float, float, scalar_t>(qtensor, rtensor, scales, zero_points, axis);
+        dequantize_per_channel_affine_kernel<float, float, scalar_t>(qtensor, rtensor, scales, zero_points, axis, bit_width);
       });
+}
+
+void quantize_tensor_per_tensor_affine_sub_byte_cpu(
+    Tensor rtensor,
+    Tensor qtensor,
+    float scale,
+    float zero_point) {
+  // TODO Use fbgemm kernel to pack values
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
+    qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_sub_byte_cpu", [&]() {
+      check_tensor_memory_format(rtensor, qtensor);
+      const float* const rdata = rtensor.data_ptr<float>();
+      auto qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
+      auto numel = rtensor.numel();
+      const auto elem_per_byte = CHAR_BIT / bit_width;
+      for (int i = 0; i < numel; ++i) {
+        float inv_scale = scale == 0 ? 1.0f : 1.0f / scale;
+        int qvalue = lrintf(std::nearbyint(rdata[i] * inv_scale) + zero_point);
+        qvalue = std::max(quant_min, std::min(qvalue, quant_max));
+
+        // We pack sub_byte values and align them to a byte.
+        // Eg. for 4-bits Index 0 is packed in the lower 4-bits
+        // and index 1 is packed in the upper 4-bits.
+        if (i % elem_per_byte == 0) {
+          qdata[i / elem_per_byte] = static_cast<underlying_t>(qvalue);
+        } else {
+          qdata[i / elem_per_byte] |= static_cast<underlying_t>(qvalue << ((i % elem_per_byte) * bit_width));
+        }
+      } // for numel
+    });
+}
+
+void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
+    Tensor qtensor,
+    Tensor rtensor,
+    float scale,
+    float zero_point) {
+  // TODO Use fbgemm kernel to pack values
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
+    qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_sub_byte_cpu", [&]() {
+      check_tensor_memory_format(rtensor, qtensor);
+      auto rdata = rtensor.data_ptr<float>();
+      const underlying_t* qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
+      auto numel = rtensor.numel();
+      const auto elem_per_byte = CHAR_BIT / bit_width;
+
+      for (int i = 0; i < numel; ++i) {
+        underlying_t qvalue = qdata[i / elem_per_byte];
+        qvalue >>= (i % elem_per_byte) * bit_width;
+        qvalue &= (1 << bit_width) - 1;
+        rdata[i] = (static_cast<float>(qvalue) - zero_point) * scale;
+      }
+  });
+
 }
 
 } // namespace
@@ -2872,6 +2948,13 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(quantized_normalize_stub, &quantized_normalize_kernel);
 REGISTER_DISPATCH(qupsample_bilinear2d_nhwc_stub,
                   &qupsample_bilinear2d_nhwc_kernel);
+REGISTER_DISPATCH(
+    quantize_tensor_per_tensor_affine_sub_byte_stub,
+    &quantize_tensor_per_tensor_affine_sub_byte_cpu);
+REGISTER_DISPATCH(
+    dequantize_tensor_per_tensor_affine_sub_byte_stub,
+    &dequantize_tensor_per_tensor_affine_sub_byte_cpu);
+
 
 } // namespace native
 } // namespace at

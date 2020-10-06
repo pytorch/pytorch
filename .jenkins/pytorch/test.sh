@@ -131,12 +131,7 @@ test_python_nn() {
   assert_git_not_dirty
 }
 
-test_python_ge_config_profiling() {
-  time python test/run_test.py --include test_jit_cuda_fuser_profiling test_jit_profiling test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
-  assert_git_not_dirty
-}
-
-test_python_ge_config_legacy() {
+test_python_legacy_jit() {
   time python test/run_test.py --include test_jit_cuda_fuser_legacy test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
@@ -338,6 +333,8 @@ test_benchmarks() {
     pip_install --user "requests"
     BENCHMARK_DATA="benchmarks/.data"
     mkdir -p ${BENCHMARK_DATA}
+    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_default.json --fuser=default --executor=default
+    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_default.json
     pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_legacy_old.json --fuser=old --executor=legacy
     python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_legacy_old.json
     pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_profiling_te.json --fuser=te --executor=profiling
@@ -352,6 +349,22 @@ test_cpp_extensions() {
   assert_git_not_dirty
 }
 
+test_vec256() {
+  # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
+  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    echo "Testing vec256 instructions"
+    mkdir -p test/test-reports/vec256
+    pushd build/bin
+    vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
+    for vec256_exec in $vec256_tests
+    do
+      $vec256_exec --gtest_output=xml:test/test-reports/vec256/$vec256_exec.xml
+    done
+    popd
+    assert_git_not_dirty
+  fi
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -363,10 +376,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   install_torchvision
   test_xla
-elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_legacy* || "${JOB_BASE_NAME}" == *ge_config_legacy* ]]; then
-  test_python_ge_config_legacy
-elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_profiling* || "${JOB_BASE_NAME}" == *ge_config_profiling* ]]; then
-  test_python_ge_config_profiling
+elif [[ "${BUILD_ENVIRONMENT}" == *legacy_jit* || "${JOB_BASE_NAME}" == *legacy_jit* ]]; then
+  test_python_legacy_jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
@@ -395,6 +406,7 @@ else
   test_python_all_except_nn_and_cpp_extensions
   test_cpp_extensions
   test_aten
+  test_vec256
   test_libtorch
   test_custom_script_ops
   test_custom_backend

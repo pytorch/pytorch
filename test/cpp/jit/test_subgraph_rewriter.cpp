@@ -1,4 +1,5 @@
-#include <test/cpp/jit/test_base.h>
+#include <gtest/gtest.h>
+
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -8,7 +9,7 @@ namespace torch {
 namespace jit {
 using namespace testing;
 
-void testFilterMatch() {
+TEST(SubgraphRewriterTest, FilterMatch) {
   auto graph = std::make_shared<Graph>();
 
   parseIR(
@@ -80,7 +81,7 @@ graph(%a, %b):
   }
 }
 
-void testFilterNoMatch() {
+TEST(SubgraphRewriterTest, FilterNoMatch) {
   auto graph = std::make_shared<Graph>();
   parseIR(
       R"IR(
@@ -119,11 +120,6 @@ graph(%a, %b):
   rewriter.runOnGraph(graph, filter);
 
   FileCheck().check("c::ccc")->check_not("d::ddd")->run(*graph);
-}
-
-void testSubgraphRewriter() {
-  testFilterMatch();
-  testFilterNoMatch();
 }
 
 } // namespace jit
