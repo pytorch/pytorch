@@ -199,6 +199,14 @@ class DistributedC10d {
   int64_t getGroupSize(std::shared_ptr<ProcessGroup> group) const;
   int64_t getBackend(std::shared_ptr<ProcessGroup> group);
 
+  void newProcessGroupHelper(const int64_t work_size,
+                             const int64_t rank,
+                             const std::unordered_map<std::shared_ptr<ProcessGroup>, std::vector<int64_t>>& pg_group_ranks_,
+                             const std::string& backend,
+                             std::shared_ptr<Store> store,
+                             c10::optional<std::string> group_name,
+                             std::chrono::milliseconds timeout);
+
   std::string backend_;
   // TODO: Ask Alex what kind of equality we need. It determine whether we
   // need to use ProcessGroup or ProcesGroup* as key.
