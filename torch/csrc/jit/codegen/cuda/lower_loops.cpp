@@ -14,6 +14,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 LoopNestGenerator::LoopNestGenerator(
     Fusion* fusion,
@@ -731,6 +732,7 @@ bool LoopNestGenerator::isModifiedSharedMemory(Val* key) const {
   return false;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

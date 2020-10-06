@@ -13,7 +13,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
-
+namespace cuda {
 namespace scope_utils {
 
 // START SCOPE HELPER SYSTEMS
@@ -717,7 +717,7 @@ IterDomain* getTermIDInMap(
 }
 
 } // namespace loop_utils
-
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

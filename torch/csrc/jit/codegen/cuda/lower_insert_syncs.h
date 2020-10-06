@@ -10,6 +10,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // Insert sync at end of for-loops to prevent write-after-read race condition.
 // WAR race condition occurs when the next iteration of the loop overwrites
@@ -46,6 +47,7 @@ std::vector<Expr*> insertThreadSynchronization(
     Fusion* fusion,
     const std::vector<Expr*>& exprs);
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

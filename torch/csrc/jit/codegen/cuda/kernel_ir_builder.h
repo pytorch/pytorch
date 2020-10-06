@@ -10,6 +10,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 namespace kir {
 
 // Simple classification helpers
@@ -76,6 +77,7 @@ class IrBuilder {
 };
 
 } // namespace kir
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

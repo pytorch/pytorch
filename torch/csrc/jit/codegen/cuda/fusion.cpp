@@ -15,6 +15,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 static thread_local Fusion* ACTIVE_FUSION = nullptr;
 
@@ -625,6 +626,7 @@ std::vector<Val*> Fusion::getTerminatingOutputs() {
   return terminating_outputs;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

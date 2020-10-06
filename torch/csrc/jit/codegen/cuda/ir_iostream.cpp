@@ -8,6 +8,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // Make sure we can inline something, before we attempt to.
 static void checkInlineable(const Expr* expr) {
@@ -440,6 +441,7 @@ std::ostream& operator<<(std::ostream& os, Fusion& f) {
   return os << &f;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

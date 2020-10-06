@@ -9,6 +9,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 void StatefulExpressionEvaluator::safeBind(
     Val* value,
@@ -219,6 +220,7 @@ void StatefulExpressionEvaluator::handle(kir::BinaryOp* bop) {
   }
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

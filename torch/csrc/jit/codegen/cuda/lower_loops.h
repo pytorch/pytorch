@@ -11,6 +11,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 /*
  * Loop nest generator pass will get IR that looks something like:
@@ -111,6 +112,7 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   kir::IrBuilder ir_builder_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

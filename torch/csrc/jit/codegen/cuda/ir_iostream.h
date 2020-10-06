@@ -10,6 +10,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 //! Define pretty printing functions for IR nodes
 //!
@@ -113,6 +114,7 @@ TORCH_CUDA_API std::ostream& operator<<(
 TORCH_CUDA_API std::ostream& operator<<(std::ostream& os, Fusion* f);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream& os, Fusion& f);
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch
