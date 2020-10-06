@@ -1,11 +1,9 @@
 from torch.fx import (
-    GraphModule
+    GraphModule,
+    map_arg
 )
 
-from torch.fx.graph import (
-    Graph,
-    map_arg,
-)
+from torch.fx.graph import Graph
 
 from .pattern_utils import (
     is_match,
