@@ -107,29 +107,55 @@ void foreach_tensor_##NAME##_slow_(TensorList tensors) {                   \
   }                                                                        \
 }
 
-#define FOREACH_POINTWISE_OP(NAME)                                                                                            \
-std::vector<Tensor> foreach_tensor_##NAME##_slow(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) { \
-  TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");                                                \
-  TORCH_CHECK(input.size() == tensors1.size(), "Tensor lists must be of the same length.");                                   \
-  TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must be of the same length.");                                \
-                                                                                                                              \
-  std::vector<Tensor> result;                                                                                                 \
-  for (int i = 0; i < input.size(); i++) {                                                                                    \
-    result.emplace_back(input[i].NAME(tensors1[i], tensors2[i], scalar));                                                     \
-  }                                                                                                                           \
-                                                                                                                              \
-  return result;                                                                                                              \
-}                                                                                                                             \
-                                                                                                                              \
-void foreach_tensor_##NAME##_slow_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {               \
-  TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");                                                \
-  TORCH_CHECK(input.size() == tensors1.size(), "Tensor lists must be of the same length.");                                   \
-  TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must be of the same length.");                                \
-                                                                                                                              \
-  for (int i = 0; i < input.size(); i++) {                                                                                    \
-    input[i].NAME##_(tensors1[i], tensors2[i], scalar);                                                                       \
-  }                                                                                                                           \
-}                                                                                                                             \
+#define FOREACH_POINTWISE_OP_SCALAR(NAME)                                                                                            \
+std::vector<Tensor> foreach_tensor_##NAME##_scalar_slow(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) { \
+  TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");                                                       \
+  TORCH_CHECK(input.size() == tensors1.size(), "Tensor lists must be of the same length.");                                          \
+  TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must be of the same length.");                                       \
+                                                                                                                                     \
+  std::vector<Tensor> result;                                                                                                        \
+  for (int i = 0; i < input.size(); i++) {                                                                                           \
+    result.emplace_back(input[i].NAME(tensors1[i], tensors2[i], scalar));                                                            \
+  }                                                                                                                                  \
+                                                                                                                                     \
+  return result;                                                                                                                     \
+}                                                                                                                                    \
+                                                                                                                                     \
+void foreach_tensor_##NAME##_scalar_slow_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {               \
+  TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");                                                       \
+  TORCH_CHECK(input.size() == tensors1.size(), "Tensor lists must be of the same length.");                                          \
+  TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must be of the same length.");                                       \
+                                                                                                                                     \
+  for (int i = 0; i < input.size(); i++) {                                                                                           \
+    input[i].NAME##_(tensors1[i], tensors2[i], scalar);                                                                              \
+  }                                                                                                                                  \
+}                                                                                                                                    \
+
+#define FOREACH_POINTWISE_OP_SCALARLIST(NAME)                                                                                                           \
+std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_slow(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<double> scalars) { \
+  TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");                                                                          \
+  TORCH_CHECK(input.size() == tensors1.size(), "Tensor lists must be of the same length.");                                                             \
+  TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must be of the same length.");                                                          \
+  check_foreach_api_restrictions(tensors1, scalars);                                                                                                    \
+                                                                                                                                                        \
+  std::vector<Tensor> result;                                                                                                                           \
+  for (int i = 0; i < input.size(); i++) {                                                                                                              \
+    result.emplace_back(input[i].NAME(tensors1[i], tensors2[i], scalars[i]));                                                                           \
+  }                                                                                                                                                     \
+                                                                                                                                                        \
+  return result;                                                                                                                                        \
+}                                                                                                                                                       \
+                                                                                                                                                        \
+void foreach_tensor_##NAME##_scalarlist_slow_(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<double> scalars) {               \
+  TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");                                                                          \
+  TORCH_CHECK(input.size() == tensors1.size(), "Tensor lists must be of the same length.");                                                             \
+  TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must be of the same length.");                                                          \
+  check_foreach_api_restrictions(tensors1, scalars);                                                                                                    \
+                                                                                                                                                        \
+  for (int i = 0; i < input.size(); i++) {                                                                                                              \
+    input[i].NAME##_(tensors1[i], tensors2[i], scalars[i]);                                                                                             \
+  }                                                                                                                                                     \
+}                                                                                                                                                       \
 
 FOREACH_BINARY_OP_LIST_ALPHA(add);
 FOREACH_BINARY_OP_LIST_ALPHA(sub);
@@ -145,8 +171,10 @@ FOREACH_BINARY_OP_LIST(mul);
 FOREACH_BINARY_OP_LIST(div);
 FOREACH_UNARY_OP(sqrt);
 FOREACH_UNARY_OP(exp);
-FOREACH_POINTWISE_OP(addcdiv);
-FOREACH_POINTWISE_OP(addcmul);
+FOREACH_POINTWISE_OP_SCALAR(addcdiv);
+FOREACH_POINTWISE_OP_SCALAR(addcmul);
+FOREACH_POINTWISE_OP_SCALARLIST(addcdiv);
+FOREACH_POINTWISE_OP_SCALARLIST(addcmul);
 
 #define FOREACH_MAXIMUM_MINIMUM_OP(NAME)                                                     \
 std::vector<Tensor> foreach_tensor_##NAME##_slow(TensorList tensors1, TensorList tensors2) { \

@@ -92,20 +92,22 @@ class TestForeach(TestCase):
             tensors2 = self._get_test_data(device, dtype, N)
             value = 2
 
-            # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-            control_dtype = torch.float32 if (self.device_type == 'cuda' and
-                                              (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
-            expected = [torch_op(tensors[i].to(dtype=control_dtype),
-                                 tensors1[i].to(dtype=control_dtype),
-                                 tensors2[i].to(dtype=control_dtype), value=value).to(dtype=dtype) for i in range(N)]
+            for values in [value, [value for _ in range(N)]]:
+                # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
+                control_dtype = torch.float32 if (self.device_type == 'cuda' and
+                                                (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
+                expected = [torch_op(tensors[i].to(dtype=control_dtype),
+                                     tensors1[i].to(dtype=control_dtype),
+                                     tensors2[i].to(dtype=control_dtype),
+                                     value=value).to(dtype=dtype) for i in range(N)]
 
-            res = foreach_op(tensors, tensors1, tensors2, value)
-            foreach_op_(tensors, tensors1, tensors2, value)
-            self.assertEqual(res, tensors)
-            if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                self.assertEqual(tensors, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
-            else:
-                self.assertEqual(tensors, expected)
+                res = foreach_op(tensors, tensors1, tensors2, values)
+                foreach_op_(tensors, tensors1, tensors2, values)
+                self.assertEqual(res, tensors)
+                if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
+                    self.assertEqual(tensors, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
+                else:
+                    self.assertEqual(tensors, expected)
 
     def _test_bin_op_list_alpha(self, device, dtype, foreach_op, foreach_op_, torch_op):
         for N in [30, 300]:
