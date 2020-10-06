@@ -114,9 +114,6 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
            int kW, int kH,
            int dW, int dH,
            int padW, int padH) {
-  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
-  TORCH_CHECK(false, "SpatialConvolutionMM_updateOutput not suppported with BFloat16");
-  #else
   THCUNN_assertSameGPU(state, 5, input, output, weight, columns, ones);
   if (bias) {
     THCUNN_assertSameGPU(state, 2, weight, bias);
@@ -213,16 +210,18 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
       THCTensor_(zero)(state, output_n);
     }
 
-    // Extract columns:
-    at::native::im2col<scalar_t>(
-      c10::cuda::getCurrentCUDAStream(),
-      THCTensor_(data)(state, input_n),
-      nInputPlane, inputHeight, inputWidth,
-      outputHeight, outputWidth,
-      kH, kW, padH, padW, dH, dW,
-      1, 1,
-      columns->data<scalar_t>()
-    );
+    if (kW != 1 || kH != 1) {
+      // Extract columns:
+      at::native::im2col<scalar_t>(
+        c10::cuda::getCurrentCUDAStream(),
+        THCTensor_(data)(state, input_n),
+        nInputPlane, inputHeight, inputWidth,
+        outputHeight, outputWidth,
+        kH, kW, padH, padW, dH, dW,
+        1, 1,
+        columns->data<scalar_t>()
+      );
+    }
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
@@ -231,6 +230,8 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
     int64_t k = nInputPlane*kH*kW;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
+    auto gemm_in_ptr = (kW != 1 || kH != 1) ?
+        THCTensor_(data)(state, columns) : THCTensor_(data)(state, input_n);
     #ifdef THC_REAL_IS_FLOAT
     THCudaBlas_Sgemm(
     #elif defined(THC_REAL_IS_HALF)
@@ -244,7 +245,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
         'n', 'n',
         n, m, k,
         ScalarConvert<int, scalar_t>::to(1),
-        THCTensor_(data)(state, columns), n,
+        gemm_in_ptr, n,
         THCTensor_(data)(state, weight), k,
         ScalarConvert<int, scalar_t>::to(1),
         THCTensor_(data)(state, output_n), n
@@ -263,7 +264,6 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, weight);
-  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 void THNN_(SpatialConvolutionMM_updateGradInput)(
@@ -277,10 +277,6 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
            int kW, int kH,
            int dW, int dH,
            int padW, int padH) {
-
-  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
-  TORCH_CHECK(false, "SpatialConvolutionMM_updateGradInput not suppported with BFloat16");
-  #else
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
                        gradColumns, gradInput);
   weight = THNN_(newViewWeightMM2d)(state, weight);
@@ -376,7 +372,6 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, gradOutput);
-  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 void THNN_(SpatialConvolutionMM_accGradParameters)(
@@ -391,10 +386,6 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
            int dW, int dH,
            int padW, int padH,
            accreal scale_) {
-
-  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
-  TORCH_CHECK(false, "SpatialConvolutionMM_updateGradParameters not suppported with BFloat16");
-  #else
   scalar_t scale = ScalarConvert<accreal, scalar_t>::to(scale_);
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, gradBias, columns, ones);
   if (gradWeight) {
@@ -456,16 +447,18 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
       // Matrix mulitply per output:
       THCTensor_(select)(state, input_n, input, 0, elt);
 
-      // Extract columns:
-      at::native::im2col<scalar_t>(
-        c10::cuda::getCurrentCUDAStream(),
-        THCTensor_(data)(state, input_n),
-        nInputPlane, inputHeight, inputWidth,
-        outputHeight, outputWidth,
-        kH, kW, padH, padW, dH, dW,
-        1, 1,
-        columns->data<scalar_t>()
-      );
+      if (kW != 1 || kH != 1) {
+        // Extract columns:
+        at::native::im2col<scalar_t>(
+          c10::cuda::getCurrentCUDAStream(),
+          THCTensor_(data)(state, input_n),
+          nInputPlane, inputHeight, inputWidth,
+          outputHeight, outputWidth,
+          kH, kW, padH, padW, dH, dW,
+          1, 1,
+          columns->data<scalar_t>()
+        );
+      }
 
       // M,N,K are dims of matrix A and B
       // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
@@ -474,6 +467,8 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
       int64_t k = columns->size(1);
 
       // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
+      auto gemm_in_ptr = (kW != 1 || kH != 1) ?
+          THCTensor_(data)(state, columns) : THCTensor_(data)(state, input_n);
       #ifdef THC_REAL_IS_FLOAT
       THCudaBlas_Sgemm(
       #elif defined(THC_REAL_IS_HALF)
@@ -487,7 +482,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
           't', 'n',
           n, m, k,
           scale,
-          THCTensor_(data)(state, columns), k,
+          gemm_in_ptr, k,
           THCTensor_(data)(state, gradOutput_n), k,
           ScalarConvert<int, scalar_t>::to(1),
           THCTensor_(data)(state, gradWeight), n
@@ -546,7 +541,6 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, gradOutput);
-  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 #endif

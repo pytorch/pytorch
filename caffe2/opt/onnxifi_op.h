@@ -263,10 +263,13 @@ class OnnxifiOp final : public Operator<Context> {
         defered_blob_reader = ws->GetBlob("__DEFERRED_BLOB_READER__");
       }
       onnxGraph graph{nullptr};
+
+      static const uint64_t auxPropertiesListAOT[] = {
+          ONNXIFI_OPTIMIZATION_AOT, ONNXIFI_GRAPH_PROPERTY_NONE};
       CAFFE_ENFORCE_EQ(
           lib_->onnxInitGraph(
               backend,
-              nullptr,
+              use_glow_aot_ ? auxPropertiesListAOT : nullptr,
               onnx_model_str.size(),
               (const void*)(onnx_model_str.c_str()),
               weight_descs.size(),

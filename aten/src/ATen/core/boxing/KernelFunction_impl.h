@@ -83,6 +83,14 @@ inline KernelFunction KernelFunction::makeFallthrough() {
     );
 }
 
+inline KernelFunction KernelFunction::makeAmbiguousAutogradOther() {
+    return KernelFunction(
+        nullptr,  // no functor_ object
+        &ambiguous_autogradother_kernel,
+        nullptr  // no unboxed function pointer
+    );
+}
+
 inline KernelFunction KernelFunction::makeNamedNotSupported() {
     return KernelFunction(
         nullptr,  // no functor_ object
