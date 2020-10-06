@@ -24,7 +24,7 @@ from ._utils_internal import get_file_path, prepare_multiprocessing_environment,
 from .version import __version__
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type, TYPE_CHECKING
+from typing import Set, Type, TYPE_CHECKING, _GenericAlias
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
@@ -244,6 +244,9 @@ def typename(o):
         class_name = o.__name__
     else:
         class_name = o.__class__.__name__
+
+    if isinstance(o, _GenericAlias):
+        return str(o)
 
     return module + class_name
 

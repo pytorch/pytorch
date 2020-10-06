@@ -862,5 +862,107 @@ class TestFX(JitTestCase):
 
         self.assertEqual(orig_out, submodules_out)
 
+    @skipIfNoTorchVision
+    def test_replace_uses(self):
+        rn18 = resnet18()
+
+        class LowerReluTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m : torch.nn.Module, qualname : str):
+                if isinstance(m, torch.nn.ReLU):
+                    return False
+                return super().is_leaf_module(m, qualname)
+
+        rn18_traced = GraphModule(rn18, LowerReluTracer().trace(rn18))
+
+        to_erase = []
+        for node in rn18_traced.graph.nodes:
+            if node.op == 'call_function' and node.target in [torch.relu, torch.nn.functional.relu]:
+                kwargs = node.kwargs
+                # Neg doesn't have in-place
+                kwargs.pop('inplace')
+                with torch.fx.graph.insert_before(node):
+                    new_node = rn18_traced.graph.call_function(
+                        the_function=torch.neg, args=node.args, kwargs=node.kwargs)
+                node.replace_all_uses_with(replace_with=new_node)
+                to_erase.append(node)
+
+        for node in to_erase:
+            rn18_traced.graph.erase_node(node)
+
+    def test_insertion_point(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
+        output : torch.fx.Node = graph.output(b)
+
+        with torch.fx.graph.insert_before(b):
+            neg : torch.fx.Node = graph.call_function(the_function=torch.neg, args=(x,))
+            _, *relu_args = b.args
+            b.args = (neg, *relu_args)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        input = torch.randn(33, 44)
+        self.assertEqual(gm(input), torch.relu(torch.neg(input)))
+
+
+    def test_move_before(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
+        output : torch.fx.Node = graph.output(b)
+
+        neg : torch.fx.Node = graph.call_function(the_function=torch.neg, args=(x,))
+        _, *relu_args = b.args
+        b.args = (neg, *relu_args)
+        graph.move_node_before(to_move=neg, before=b)
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        input = torch.randn(33, 44)
+        self.assertEqual(gm(input), torch.relu(torch.neg(input)))
+
+    def test_erase_node_error(self):
+        st = SimpleTest()
+        traced = symbolic_trace(st)
+
+        for node in traced.graph.nodes:
+            # Test deleting with uses both in another Node and at the output
+            if node.target in [operator.add, torch.relu]:
+                with self.assertRaisesRegex(RuntimeError, 'but it still had .* uses in the graph!'):
+                    traced.graph.erase_node(node)
+
+    def test_find_uses(self):
+        graph = torch.fx.Graph()
+        x = torch.fx.Proxy(graph.placeholder('x'))
+
+        y = torch.relu(x)
+        z = x + x
+        u = torch.neg(x)
+        graph.output((y + z + u).node)
+        graph.lint()
+
+        uses_of_x = x.node.find_uses()
+        self.assertEqual(len(uses_of_x), 3)
+        expected_ops = ['relu', 'add', 'neg']
+        for node, expected in zip(uses_of_x, expected_ops):
+            assert expected in node.name
+
+    def test_multi_insert_point(self):
+        graph = torch.fx.Graph()
+        x = torch.fx.Proxy(graph.placeholder('x'))
+        relu = torch.relu(x)
+
+        with torch.fx.graph.insert_before(relu.node):
+            y = torch.neg(x)
+            z = torch.tanh(y)
+
+        graph.output((relu.node, z.node))
+        graph.lint()
+
+        expected_ops = ['x', 'neg', 'tanh', 'relu']
+        for node, expected in zip(graph.nodes, expected_ops):
+            assert expected in node.name
+
 if __name__ == '__main__':
     run_tests()
