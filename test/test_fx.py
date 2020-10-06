@@ -801,7 +801,6 @@ class TestFX(JitTestCase):
 
         fxed = symbolic_trace(Foo())
         fxed_scripted = torch.jit.script(fxed)
-        print(fxed_scripted.code)
         fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
 
     def test_find_single_partition(self):
