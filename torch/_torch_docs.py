@@ -4304,16 +4304,15 @@ Example::
 
 add_docstr(torch.matrix_exp,
            r"""
-matrix_power(input) -> Tensor
-
 Returns the matrix exponential. Supports batched input.
 For a matrix ``A``, the matrix exponential is defined as
 
 .. math::
-    \exp^A = \sum_{k=0}^\infty A^k / k!.
+    \mathrm{e}^A = \sum_{k=0}^\infty A^k / k!
 
 """ + r"""
 The implementation is based on:
+
 Bader, P.; Blanes, S.; Casas, F.
 Computing the Matrix Exponential with an Optimized Taylor Polynomial Approximation.
 Mathematics 2019, 7, 1174.
