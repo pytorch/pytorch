@@ -344,6 +344,21 @@ class TensorPipeAgent : public RpcAgent {
   // Mutex to guard networkData_
   std::mutex networkDataMutex_;
 
+  struct CallCounter final {
+    CallCounter(TensorPipeAgent& agent, int32_t& counter)
+        : agent_(agent), counter_(counter) {
+      agent_.increaseCallCount(counter_);
+    }
+
+    ~CallCounter() {
+      agent_.decreaseCallCount(counter_);
+    }
+
+   private:
+    TensorPipeAgent& agent_;
+    int32_t& counter_;
+  };
+
   // A mutex and a cv to guard access to the call counts and watch for changes.
   std::mutex callCountMutex_;
   std::condition_variable callCountCV_;

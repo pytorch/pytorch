@@ -702,10 +702,19 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is sending request #"
           << messageId << " to " << clientPipe.pipe_->getRemoteName();
 
+  // Increase clientActiveCalls_ and pass it to pipeWrite and pipeRead
+  // callbacks. It will decrease clientActiveCalls_ accordingly on destrution.
+  auto clientCallCounter =
+      std::make_shared<CallCounter>(*this, clientActiveCalls_);
+
   pipeWrite(
       clientPipe.pipe_,
       std::move(requestMessage),
-      [this, &clientPipe, messageId](const tensorpipe::Error& error) mutable {
+      [this,
+       &clientPipe,
+       messageId,
+       clientCallCounter=std::move(clientCallCounter)](
+          const tensorpipe::Error& error) mutable {
         if (error) {
           if (error.isOfType<tensorpipe::PipeClosedError>() &&
               !rpcAgentRunning_.load()) {
@@ -730,7 +739,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
 
         pipeRead(
             clientPipe.pipe_,
-            [this, &clientPipe](
+            [this, &clientPipe, clientCallCounter=std::move(clientCallCounter)](
                 const tensorpipe::Error& error, Message&& responseMessage) {
               if (error) {
                 if (error.isOfType<tensorpipe::PipeClosedError>() &&
@@ -796,8 +805,6 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
               }
             });
       });
-
-  increaseCallCount(clientActiveCalls_);
 
   return std::shared_ptr<FutureMessage>(
       futureResponseMessage, &futureResponseMessage->futMsg);
@@ -1057,10 +1064,6 @@ void TensorPipeAgent::markFutureAsComplete(
                      futureMessage{std::move(futureMessage)},
                      message{std::move(message)}]() mutable {
       futureMessage->futMsg.markCompleted(std::move(message));
-      // The future's callbacks may schedule further RPCs, increasing the count.
-      // Thus we must decrease it after completing the future, otherwise it may
-      // briefly dip to zero and trick join into thinking all work is done.
-      decreaseCallCount(clientActiveCalls_);
     });
   }
 }
@@ -1076,10 +1079,6 @@ void TensorPipeAgent::markFutureWithError(
                      futureMessage{std::move(futureMessage)},
                      errorMsg{std::move(errorMsg)}]() mutable {
       futureMessage->futMsg.setError(std::move(errorMsg));
-      // The future's callbacks may schedule further RPCs, increasing the count.
-      // Thus we must decrease it after completing the future, otherwise it may
-      // briefly dip to zero and trick join into thinking all work is done.
-      decreaseCallCount(clientActiveCalls_);
     });
   }
 }
