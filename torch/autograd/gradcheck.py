@@ -105,6 +105,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, grad_out=1.0):
             # dL_dz_conj = 0.5 * [grad_out.conj() * ds_dx + grad_out * ds_dx.conj()]
             #            = 0.5 * [grad_out.conj() * ds_dx + (grad_out.conj() * ds_dx).conj()]
             #            = 0.5 * 2 * real(grad_out.conj() * ds_dx)
+            #            = real(grad_out.conj() * ds_dx)
             d[d_idx] = torch.real(grad_out.conjugate() * ds_dx)
         else:   # R -> R
             d[d_idx] = ds_dx * grad_out

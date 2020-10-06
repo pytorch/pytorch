@@ -360,7 +360,8 @@ namespace c10 {
   _(attr, scope)                     \
   _(attr, keepdims)                  \
   _(attr, cache_id)                  \
-  _(attr, new_axis)
+  _(attr, new_axis)                  \
+  _(attr, warn_id)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
