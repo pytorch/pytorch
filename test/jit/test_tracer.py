@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import suppress_warnings, \
     IS_SANDCASTLE, IS_WINDOWS
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, \
     _tmp_donotuse_dont_inline_everything, _trace, RUN_CUDA, RUN_CUDA_MULTI_GPU
+from torch.testing._internal.common_cuda import with_tf32_off
 from typing import List, Tuple
 from torch import Tensor
 
@@ -900,6 +901,9 @@ class TestTracer(JitTestCase):
         self.assertEqual(foo(x), x + x + x)
 
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")
+    # By default, on Ampere or later GPUs, nn.Linear computes float tensors at TF32 precision.
+    # We want float tensors to be computed at full precision in order to use the default precision
+    @with_tf32_off
     def test_traced_module_cuda(self):
         class Model(nn.Module):
             def __init__(self, num_features, num_layers):
@@ -1309,6 +1313,39 @@ class TestTracer(JitTestCase):
 
         imported = self.getExportImportCopy(traced)
         check(imported.foo)
+
+        # Note that Bar's forward can only be traced, but not scripted
+        class Bar(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch.jit.export
+            def addTwo(self, x):
+                return x + 2
+
+            def forward(self, input):
+                return (lambda a: a + 1)(input)
+
+        # When tracing Bar as a submodule, we only want to script the
+        # exported methods, and we want to keep the forwards still
+        # being traced.
+        class WrapperExports(torch.nn.Module):
+            def __init__(self):
+                super(WrapperExports, self).__init__()
+                self.bar = Bar()
+
+            @torch.jit.export
+            def addOne(self, x):
+                return x + 1
+
+            def forward(self, x):
+                return self.bar(x)
+
+        f = WrapperExports()
+
+        traced = torch.jit.trace(f, (torch.rand(3, 4),))
+        expected_names = ['addOne']
+        check(traced)
 
     def test_trace_autograd_function(self):
         class TestFunc(torch.autograd.Function):

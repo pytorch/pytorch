@@ -4,6 +4,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <ATen/InferSize.h>
 
 #include <ATen/native/vulkan/Vulkan.h>
 #include <ATen/native/vulkan/VulkanCommon.h>
@@ -78,15 +79,8 @@ void upsample_nearest2d(
 VulkanTensor reshape_copy(
     const VulkanTensor& input,
     std::vector<int64_t> shape) {
-  const auto shapeNumel = std::accumulate(
-      std::begin(shape), std::end(shape), 1, std::multiplies<int64_t>());
-  TORCH_INTERNAL_ASSERT(
-      shapeNumel == input.numel(),
-      "reshape_copy expects shape with equal number of elements with input Vulkan tensor");
-
   input.sync_image_to_buffer();
-
-  VulkanTensor output{shape};
+  VulkanTensor output{infer_size(shape, input.numel())};
   copy_buffer_to_buffer(
       *(input.buffer()), *(output.buffer()), input.buffer()->sizeBytes());
   return output;

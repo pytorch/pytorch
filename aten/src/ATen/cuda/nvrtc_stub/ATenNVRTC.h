@@ -42,6 +42,7 @@ namespace at { namespace cuda {
   _(nvrtcGetProgramLog)                          \
   _(nvrtcGetLoweredName)                         \
   _(cuModuleLoadData)                            \
+  _(cuModuleLoadDataEx)                          \
   _(cuModuleGetFunction)                         \
   _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
   _(cuGetErrorString)                            \

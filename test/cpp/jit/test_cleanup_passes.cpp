@@ -1,19 +1,19 @@
+#include <gtest/gtest.h>
+
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/testing/file_check.h>
-#include "test/cpp/jit/test_base.h"
 
 namespace torch {
 namespace jit {
 
-void testCleanUpPasses() {
+TEST(CleanupPassTest, Basic) {
   // Tests stability of clean up passes when dealing with constant pooling
   // and constant propagation.
-  {
-    auto graph = std::make_shared<Graph>();
-    parseIR(
-        R"IR(
+  auto graph = std::make_shared<Graph>();
+  parseIR(
+      R"IR(
 graph(%cond.1 : Tensor,
       %suffix.1 : str):
   %3 : bool = aten::Bool(%cond.1) # o.py:6:7
@@ -31,20 +31,19 @@ graph(%cond.1 : Tensor,
       -> (%12)
   return (%25)
   )IR",
-        &*graph);
-    runCleanupPasses(graph);
-    testing::FileCheck()
-        .check_count(
-            "prim::Constant[value=\"same string with a twist\"]",
-            1,
-            /*exactly=*/true)
-        ->run(*graph);
+      &*graph);
+  runCleanupPasses(graph);
+  testing::FileCheck()
+      .check_count(
+          "prim::Constant[value=\"same string with a twist\"]",
+          1,
+          /*exactly=*/true)
+      ->run(*graph);
 
-    auto graph_after_pass_once = graph->toString();
-    runCleanupPasses(graph);
-    auto graph_after_pass_twice = graph->toString();
-    ASSERT_EQ(graph_after_pass_once, graph_after_pass_twice);
-  }
+  auto graph_after_pass_once = graph->toString();
+  runCleanupPasses(graph);
+  auto graph_after_pass_twice = graph->toString();
+  ASSERT_EQ(graph_after_pass_once, graph_after_pass_twice);
 }
 } // namespace jit
 } // namespace torch

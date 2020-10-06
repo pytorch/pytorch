@@ -171,6 +171,8 @@ def _is_none(x):
 def _is_value(x):
     return isinstance(x, torch._C.Value)
 
+def _is_tensor(x):
+    return x.type().isSubtypeOf(torch._C.TensorType.get())
 
 def _is_tensor_list(x):
     return isinstance(x.type(), torch._C.ListType) and isinstance(x.type().getElementType(), torch._C.TensorType)
@@ -222,8 +224,12 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
 
 def _is_fp(value):
     if value:
-        type = value.type().scalarType()
-        return (type == 'Float') or (type == 'Double') or (type == 'Half')
+        if isinstance(value, torch.Tensor):
+            type = value.dtype
+            return (type == 'torch.float32') or (type == 'torch.float64') or (type == 'torch.float16')
+        else:
+            type = value.type().scalarType()
+            return (type == 'Float') or (type == 'Double') or (type == 'Half')
     return False
 
 

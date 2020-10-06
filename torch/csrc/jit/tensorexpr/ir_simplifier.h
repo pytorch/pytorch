@@ -570,6 +570,7 @@ class TORCH_API TermExpander : public IRSimplifierBase {
 
   // Override to enable condition fusing.
   Block* fuseConditions(Block* v);
+  Stmt* fuseSyncThreads(Block* block);
   Stmt* mutate(const Block* v) override;
 };
 
