@@ -84,11 +84,6 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
     # Have to use string annotations because  PEP-0563 is not available in 3.6
     def add_done_callback(self, callback):  # type: (Callable[[Future[T]], None]) -> None
         r"""
-        Add a callback to this ``Future``.
-        Multiple callbacks can be added to the same ``Future``, and all
-        added callbacks will be executed once the future completes.
-        If the future has already completed, the callback will be executed immediately.
-
         Append the given callback function to this ``Future``, which will be run
         when the ``Future`` is completed.  Multiple callbacks can be added to
         the same ``Future``, and will be invoked in the same order as they were
@@ -112,7 +107,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             >>> # Outputs are:
             >>> # This will run after the future has finished.
         """
-        cast(None, super().then(callback))
+        cast(None, super().add_done_callback(callback))
 
     def set_result(self, result: T) -> None:
         r"""

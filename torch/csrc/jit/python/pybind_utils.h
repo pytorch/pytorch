@@ -151,6 +151,20 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
           try {
             pybind11::gil_scoped_acquire ag;
             pf->func_(pyFut);
+          } catch (py::error_already_set& e) {
+            {
+              pybind11::gil_scoped_acquire ag;
+              // Release ownership on py::objects and also restore Python
+              // Error Indicator.
+              e.restore();
+              // Clear the Python Error Indicator as we has recorded the
+              // exception in the response message.
+              PyErr_Clear();
+            }
+            // Log and ignore exceptions raised through the callback
+            std::cout << "Got the following error when running the callback: "
+                      << e.what() << std::endl;
+
           } catch (std::exception& e) {
             // Log and ignore exceptions raised through the callback
             std::cout << "Got the following error when running the callback: "

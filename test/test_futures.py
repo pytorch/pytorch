@@ -169,6 +169,19 @@ class TestFuture(TestCase):
         fut.add_done_callback(raise_value_error)
         fut.set_result(torch.ones(2, 2))
 
+        # error msg logged to stdout
+        self.assertEqual(fut.wait(), torch.ones(2, 2))
+
+    def test_add_done_callback_no_arg_error_is_ignored(self):
+
+        def no_arg():
+            return True
+
+        fut = Future[torch.Tensor]()
+        fut.add_done_callback(no_arg)
+        fut.set_result(torch.ones(2, 2))
+
+        # error msg logged to stdout
         self.assertEqual(fut.wait(), torch.ones(2, 2))
 
     def test_interleaving_then_and_add_done_callback_maintains_callback_order(self):
