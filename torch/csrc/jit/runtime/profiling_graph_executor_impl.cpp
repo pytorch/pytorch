@@ -50,7 +50,7 @@ static std::atomic<bool> profiling_mode{true};
 #endif
 
 static std::atomic<size_t> num_profiled_runs{1};
-static std::atomic<size_t> bailout_depth{1};
+static std::atomic<size_t> bailout_depth{20}; // NOLINT
 
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
