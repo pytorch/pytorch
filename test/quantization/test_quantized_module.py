@@ -715,6 +715,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
     def test_leaky_relu(self):
         self._test_activation_module_impl("LeakyReLU", nn.LeakyReLU, nnq.LeakyReLU, {"negative_slope": 0.2})
 
+    def test_sigmoid(self):
+        self._test_activation_module_impl("Sigmoid", nn.Sigmoid, nnq.Sigmoid, {})
+
     @given(
         num_embeddings=st.integers(10, 50),
         embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
