@@ -192,7 +192,7 @@ class NestedModuleTest(JitBackendTestCase):
 
         # self.lowered_module is a ScriptModule, but its submodule is a lowered module.
         modules_to_lower = ["submodule.submodule"]
-        to_test_backend_selective(self.lowered_module, {"":""}, modules_to_lower)
+        to_test_backend_selective(self.lowered_module, {"": ""}, modules_to_lower)
 
     def test_execution(self):
         # Test execution with backend against Python and JIT.
