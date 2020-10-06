@@ -24,10 +24,14 @@ if __name__ == "__main__":
 
 class TestTorchbind(JitTestCase):
     def setUp(self):
-        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
+        if IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
             raise unittest.SkipTest("non-portable load_library call used in test")
-        torch_root = Path(__file__).resolve().parent.parent.parent
-        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
+        if TEST_WITH_ROCM:
+            torch_root = Path(torch.__file__).resolve().parent
+            p = torch_root / 'lib' / 'libtorchbind_test.so'
+        else:
+            torch_root = Path(__file__).resolve().parent.parent.parent
+            p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
         torch.ops.load_library(str(p))
 
     def test_torchbind(self):

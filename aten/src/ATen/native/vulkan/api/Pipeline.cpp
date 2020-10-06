@@ -172,6 +172,10 @@ typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
   };
 }
 
+Pipeline::Cache::Cache(Factory factory)
+  : cache_(std::move(factory)) {
+}
+
 } // namespace api
 } // namespace vulkan
 } // namespace native

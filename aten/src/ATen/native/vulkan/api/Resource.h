@@ -218,6 +218,11 @@ struct Resource final {
   class Pool final {
    public:
     explicit Pool(const GPU& gpu);
+    Pool(const Pool&) = delete;
+    Pool& operator=(const Pool&) = delete;
+    Pool(Pool&&);
+    Pool& operator=(Pool&&);
+    ~Pool() = default;
 
     Buffer buffer(const Buffer::Descriptor& descriptor);
     Image image(const Image::Descriptor& descriptor);
