@@ -976,7 +976,6 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   auto S_stride = S.size(-1);
   auto VT_stride = matrixStride(VT);
   auto batchsize = batchCount(self);
-  auto self_stype = at::typeMetaToScalarType(self.dtype());
 
   int info;
   auto m = self.size(-2);
