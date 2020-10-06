@@ -295,7 +295,7 @@ this API (for instance, `state_steps` for each parameter need to be updated befo
 call to :func:`torch.optim.functional.adagrad`).
 
 .. warning::
-    The functional optimizer API is a Beta level feature and subject to change. We are
+    The functional optimizer API is a prototype feature and subject to change. We are
     expanding the coverage of the functional APIs to all optimizers in future releases.
 
 .. currentmodule:: torch.optim.functional
