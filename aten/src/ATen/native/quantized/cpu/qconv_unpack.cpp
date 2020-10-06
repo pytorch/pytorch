@@ -72,7 +72,7 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
               sizes2d,
               scales.toType(c10::kDouble),
               zero_points.toType(c10::kLong),
-              int(transpose()), //0, /* The output channel axis is 0 */
+              int(transpose()), /* The output channel axis is 0 */
               device(c10::kCPU).dtype(c10::kQInt8),
               c10::MemoryFormat::ChannelsLast)
         : at::native::fbgemm_utils::
