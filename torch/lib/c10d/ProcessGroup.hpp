@@ -15,7 +15,7 @@ constexpr auto kNoTimeout = std::chrono::milliseconds(0);
 
 namespace c10d {
 
-enum OpType {
+enum class OpType : std::uint8_t {
   BROADCAST = 0,
   ALLREDUCE = 1,
   ALLREDUCE_COALESCED = 2,
@@ -35,7 +35,11 @@ enum OpType {
   UNKNOWN = 100,
 };
 
+// Converts OpType to human readable string.
 std::string opTypeToString(OpType opType);
+
+// Whether or not an OP is an p2p op (SEND, RECV, RECVANYSOURCE)
+bool isP2POp(OpType opType);
 
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.

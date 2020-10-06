@@ -6,43 +6,47 @@ namespace c10d {
 
 std::string opTypeToString(OpType opType) {
   switch (opType) {
-    case BROADCAST:
+    case OpType::BROADCAST:
       return "BROADCAST";
-    case ALLREDUCE:
+    case OpType::ALLREDUCE:
       return "ALLREDUCE";
-    case ALLREDUCE_COALESCED:
+    case OpType::ALLREDUCE_COALESCED:
       return "ALLREDUCE_COALESCED";
-    case REDUCE:
+    case OpType::REDUCE:
       return "REDUCE";
-    case ALLGATHER:
+    case OpType::ALLGATHER:
       return "ALLGATHER";
-    case ALLGATHER_BASE:
+    case OpType::ALLGATHER_BASE:
       return "ALLGATHER_BASE";
-    case ALLGATHER_COALESCED:
+    case OpType::ALLGATHER_COALESCED:
       return "ALLGATHER_COALESCED";
-    case GATHER:
+    case OpType::GATHER:
       return "GATHER";
-    case SCATTER:
+    case OpType::SCATTER:
       return "SCATTER";
-    case REDUCE_SCATTER:
+    case OpType::REDUCE_SCATTER:
       return "REDUCE_SCATTER";
-    case ALLTOALL_BASE:
+    case OpType::ALLTOALL_BASE:
       return "ALLTOALL_BASE";
-    case ALLTOALL:
+    case OpType::ALLTOALL:
       return "ALLTOALL";
-    case SEND:
+    case OpType::SEND:
       return "SEND";
-    case RECV:
+    case OpType::RECV:
       return "RECV";
-    case RECVANYSOURCE:
+    case OpType::RECVANYSOURCE:
       return "RECVANYSOURCE";
-    case BARRIER:
+    case OpType::BARRIER:
       return "BARRIER";
-    case UNKNOWN:
+    case OpType::UNKNOWN:
       return "UNKNOWN";
     default:
       TORCH_INTERNAL_ASSERT("Unknown op type!");
   }
+}
+
+bool isP2POp(OpType opType) {
+  return opType == OpType::SEND || opType == OpType::RECV || opType == OpType::RECVANYSOURCE;
 }
 
 ProcessGroup::Work::Work() : rank_(-1), opType_(OpType::UNKNOWN) {}
