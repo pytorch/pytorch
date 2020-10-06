@@ -23,7 +23,7 @@
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
-#define DEBUG_PRINT 1
+#define DEBUG_PRINT 0
 
 using namespace torch::jit::tensorexpr;
 
@@ -174,7 +174,6 @@ static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
   // once LLVM 10 is available.
   return llvm::cantFail(llvm::orc::JITTargetMachineBuilder::detectHost());
 #else
-  std::cerr << llvm::sys::getProcessTriple() << "\n";
   llvm::orc::JITTargetMachineBuilder JTMB(
       (llvm::Triple(llvm::sys::getProcessTriple())));
 
@@ -185,15 +184,14 @@ static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
   llvm::StringMap<bool> FeatureMap;
   llvm::sys::getHostCPUFeatures(FeatureMap);
   for (auto& Feature : FeatureMap) {
-    std::cerr << Feature.first().str() << ": " << Feature.second << "\n";
     SubtargetFeatures.AddFeature(Feature.first(), Feature.second);
   }
-
-  JTMB.getOptions().AllowFPOpFusion = llvm::FPOpFusion::Fast;
 
   JTMB.setCodeGenOptLevel(llvm::CodeGenOpt::Default);
   JTMB.setCPU(llvm::sys::getHostCPUName());
   JTMB.addFeatures(SubtargetFeatures.getFeatures());
+  JTMB.getOptions().AllowFPOpFusion = llvm::FPOpFusion::Fast;
+
   return JTMB;
 #endif
 }
