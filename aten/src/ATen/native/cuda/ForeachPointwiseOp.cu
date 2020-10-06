@@ -124,6 +124,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_cuda(TensorList input, Te
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");                                                        \
                                                                                                                                                          \
     if (!can_use_fast_route(tensors1, tensors2) ||                                                                                                       \
+        !can_use_fast_route(tensors1, scalars)  ||                                                                                                       \
         !can_use_fast_route(input, tensors1)) {                                                                                                          \
         return at::native::foreach_tensor_##NAME##_scalarlist_slow(input, tensors1, tensors2, scalars);                                                  \
     }                                                                                                                                                    \
@@ -137,7 +138,8 @@ void foreach_tensor_##NAME##_scalarlist_cuda_(TensorList input, TensorList tenso
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");                                                        \
                                                                                                                                                          \
     if (!can_use_fast_route(tensors1, tensors2) ||                                                                                                       \
-        !can_use_fast_route(input, tensors1)) {                                                                                                          \
+        !can_use_fast_route(input, tensors1) ||                                                                                                          \
+        !can_use_fast_route(tensors1, scalars)) {                                                                                                        \
         return at::native::foreach_tensor_##NAME##_scalarlist_slow_(input, tensors1, tensors2, scalars);                                                 \
     }                                                                                                                                                    \
                                                                                                                                                          \

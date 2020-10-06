@@ -86,11 +86,11 @@ class TestForeach(TestCase):
                 self.assertEqual(tensors1, expected)
 
     def _test_pointwise_op(self, device, dtype, foreach_op, foreach_op_, torch_op):
+        value = 2
         for N in N_values:
             tensors = self._get_test_data(device, dtype, N)
             tensors1 = self._get_test_data(device, dtype, N)
             tensors2 = self._get_test_data(device, dtype, N)
-            value = 2
 
             for values in [value, [value for _ in range(N)]]:
                 # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
@@ -108,6 +108,17 @@ class TestForeach(TestCase):
                     self.assertEqual(tensors, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
                 else:
                     self.assertEqual(tensors, expected)
+
+        # test error cases
+        tensors = self._get_test_data(device, dtype, N)
+        tensors1 = self._get_test_data(device, dtype, N)
+        tensors2 = self._get_test_data(device, dtype, N)
+
+        for op in [torch._foreach_addcmul, torch._foreach_addcmul_, torch._foreach_addcdiv, torch._foreach_addcdiv_]:
+            with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
+                torch._foreach_addcmul(tensors, tensors1, tensors2, [value for _ in range(N+1)])
+            with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
+                torch._foreach_addcmul(tensors, tensors1, tensors2, [value for _ in range(N-1)])
 
     def _test_bin_op_list_alpha(self, device, dtype, foreach_op, foreach_op_, torch_op):
         for N in [30, 300]:
