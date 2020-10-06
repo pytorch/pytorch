@@ -892,6 +892,8 @@ def all_reduce_multigpu(tensor_list,
     if _rank_not_in_group(group):
         return
 
+    tensor_list = [t if not t.is_complex() else torch.view_as_real(t) for t in tensor_list]
+
     opts = AllreduceOptions()
     opts.reduceOp = op
     if group == GroupMember.WORLD:
@@ -933,6 +935,8 @@ def all_reduce(tensor,
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
+
+    tensor = tensor if not tensor.is_complex() else torch.view_as_real(tensor)
 
     opts = AllreduceOptions()
     opts.reduceOp = op
@@ -984,6 +988,8 @@ def all_reduce_coalesced(tensors,
     _check_tensor_list(tensors, "tensor")
     if _rank_not_in_group(group):
         return
+
+    tensors = [t if not t.is_complex() else torch.view_as_real(t) for t in tensors]
 
     opts = AllreduceCoalescedOptions()
     opts.reduceOp = op
@@ -1148,6 +1154,9 @@ def all_gather_multigpu(output_tensor_lists,
     """
     if _rank_not_in_group(group):
         return
+
+    output_tensor_lists = [[t if not t.is_complex() else torch.view_as_real(t) for t in l] for l in output_tensor_lists]
+    input_tensor_list = [t if not t.is_complex() else torch.view_as_real(t) for t in input_tensor_list]
 
     if group == GroupMember.WORLD:
         _check_default_pg()
@@ -1414,6 +1423,9 @@ def all_gather(tensor_list,
     if _rank_not_in_group(group):
         return
 
+    tensor_list = [t if not t.is_complex() else torch.view_as_real(t) for t in tensor_list]
+    tensor = tensor if not tensor.is_complex() else torch.view_as_real(tensor)
+
     if group == GroupMember.WORLD:
         _check_default_pg()
         work = _default_pg.allgather([tensor_list], [tensor])
@@ -1479,6 +1491,9 @@ def all_gather_coalesced(output_tensor_lists,
                            "output_tensor_lists should be a list")
     for output_tensor_list in output_tensor_lists:
         _check_tensor_list(output_tensor_list, "output_tensor_lists")
+
+    output_tensor_lists = [[t if not t.is_complex() else torch.view_as_real(t) for t in l] for l in output_tensor_lists]
+    input_tensor_list = [t if not t.is_complex() else torch.view_as_real(t) for t in input_tensor_list]
 
     if group == GroupMember.WORLD:
         _check_default_pg()
