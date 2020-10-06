@@ -12,7 +12,7 @@ from typing import List, Tuple, Dict, Any
 from torch.testing import \
     (make_non_contiguous, _dispatch_dtypes,
      floating_types, floating_types_and, floating_and_complex_types,
-     floating_and_complex_types_and, all_types_and_complex_and)
+     floating_and_complex_types_and, all_types_and_complex_and, all_types_and)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
      expectedAlertNondeterministic, precisionOverride)
@@ -373,6 +373,9 @@ op_db = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=(IS_MACOS or IS_WINDOWS)),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.float64],
+                                active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
@@ -388,6 +391,11 @@ op_db = [
     UnaryUfuncInfo('exp2',
                    ref=np.exp2,
                    dtypes=floating_types_and(torch.half),
+                   dtypesIfCPU=None,
+                   dtypesIfCUDA=None),
+    UnaryUfuncInfo('nan_to_num',
+                   ref=np.nan_to_num,
+                   dtypes=all_types_and(torch.half),
                    dtypesIfCPU=None,
                    dtypesIfCUDA=None)
 ]

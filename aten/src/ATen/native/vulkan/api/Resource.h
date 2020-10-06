@@ -252,8 +252,8 @@ struct Resource final {
     explicit Pool(const GPU& gpu);
     Pool(const Pool&) = delete;
     Pool& operator=(const Pool&) = delete;
-    Pool(Pool&&) = default;
-    Pool& operator=(Pool&&) = default;
+    Pool(Pool&&);
+    Pool& operator=(Pool&&);
     ~Pool();
 
     Buffer buffer(const Buffer::Descriptor& descriptor);

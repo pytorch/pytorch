@@ -51,6 +51,7 @@ struct Shader::Factory::Compiler final {
   shaderc::CompileOptions options;
 
   Compiler() {
+    options.SetNanClamp(/*enable =*/ true);
     options.SetSourceLanguage(shaderc_source_language_glsl);
     options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_0);
     options.SetWarningsAsErrors();

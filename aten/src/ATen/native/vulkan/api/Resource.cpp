@@ -228,8 +228,30 @@ Resource::Pool::~Pool() {
   }
 }
 
+Resource::Pool::Pool(Pool&& pool)
+  : device_(std::move(pool.device_)),
+    allocator_(std::move(pool.allocator_)) {
+  pool.device_ = VK_NULL_HANDLE;
+}
+
+Resource::Pool& Resource::Pool::operator=(Pool&& pool) {
+  if (&pool != this) {
+    device_ = std::move(pool.device_);
+    allocator_ = std::move(pool.allocator_);
+
+    pool.device_ = VK_NULL_HANDLE;
+  };
+
+  return *this;
+}
+
 Resource::Buffer Resource::Pool::buffer(
     const Buffer::Descriptor& descriptor) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && allocator_,
+      "Invalid Vulkan device and / or allocator! ",
+      "Potential reason: This resource pool is moved from.");
+
   const VkBufferCreateInfo buffer_create_info{
     VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
     nullptr,
@@ -278,6 +300,11 @@ Resource::Buffer Resource::Pool::buffer(
 
 Resource::Image Resource::Pool::image(
     const Image::Descriptor& descriptor) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && allocator_,
+      "Invalid Vulkan device and / or allocator! ",
+      "Potential reason: This resource pool is moved from.");
+
   const VkImageCreateInfo image_create_info{
     VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
     nullptr,
@@ -394,6 +421,11 @@ Resource::Fence Resource::Pool::fence() {
 }
 
 void Resource::Pool::purge() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && allocator_,
+      "Invalid Vulkan device and / or allocator! ",
+      "Potential reason: This resource pool is moved from.");
+
   if (!fence_.waitlist.empty()) {
     VK_CHECK(vkWaitForFences(
         device_,
