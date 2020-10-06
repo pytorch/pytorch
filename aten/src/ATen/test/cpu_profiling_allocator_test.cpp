@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <c10/core/CPUProfilingAllocator.h>
+#include <c10/mobile/CPUProfilingAllocator.h>
 #include <ATen/ATen.h>
 
 at::Tensor run_with_control_flow(

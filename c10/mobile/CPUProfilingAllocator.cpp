@@ -1,6 +1,6 @@
 #include <climits>
 
-#include <c10/core/CPUProfilingAllocator.h>
+#include <c10/mobile/CPUProfilingAllocator.h>
 
 namespace c10 {
 
