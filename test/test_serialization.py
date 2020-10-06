@@ -112,7 +112,6 @@ class SerializationMixin(object):
         rootview = c[8]
         self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
 
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_zipfile_utils(self):
         data = {
             'a': b'12039810948234589',
@@ -192,7 +191,6 @@ class SerializationMixin(object):
             c = torch.load(f)
         self._test_serialization_assert(b, c)
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_serialization_fake_zip(self):
         data = [
             ord('P'),
@@ -277,7 +275,6 @@ class SerializationMixin(object):
         self.assertTrue(torch.equal(a, b))
         self.assertEqual(i, j)
 
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_sparse(self):
         x = torch.zeros(3, 3)
         x[1][1] = 1
@@ -288,7 +285,6 @@ class SerializationMixin(object):
             y = torch.load(f)
             self.assertEqual(x, y["tensor"])
 
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_sparse_invalid(self):
         x = torch.zeros(3, 3)
         x[1][1] = 1
@@ -704,7 +700,6 @@ class TestOldSerialization(TestCase, SerializationMixin):
 
 
 class TestSerialization(TestCase, SerializationMixin):
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_zipfile(self):
         data = self._test_serialization_data()
 
@@ -726,7 +721,6 @@ class TestSerialization(TestCase, SerializationMixin):
 
         test(io.BytesIO())
 
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_zipfile_actually_jit(self):
         with tempfile.NamedTemporaryFile() as f:
             torch.jit.save(torch.jit.script(torch.nn.Linear(3, 4)), f)
