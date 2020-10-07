@@ -312,6 +312,7 @@ Pointwise Ops
     mul
     multiply
     mvlgamma
+    nan_to_num
     neg
     negative
     nextafter

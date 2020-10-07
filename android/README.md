@@ -15,8 +15,8 @@ repositories {
 }
 
 dependencies {
-    implementation 'org.pytorch:pytorch_android:1.5.0'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.5.0'
+    implementation 'org.pytorch:pytorch_android:1.6.0'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.6.0'
 }
 ```
 
@@ -34,12 +34,12 @@ repositories {
 
 dependencies {
     ...
-    implementation 'org.pytorch:pytorch_android:1.7.0-SNAPSHOT'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.7.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android:1.8.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.8.0-SNAPSHOT'
     ...
 }
 ```
-The current nightly(snapshots) version is the value of `VERSION_NAME` in `gradle.properties` in current folder, at this moment it is `1.7.0-SNAPSHOT`.
+The current nightly(snapshots) version is the value of `VERSION_NAME` in `gradle.properties` in current folder, at this moment it is `1.8.0-SNAPSHOT`.
 
 ## Building PyTorch Android from Source
 

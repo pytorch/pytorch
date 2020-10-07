@@ -139,6 +139,13 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_remove_print", RemovePrintOps)
       .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
+      .def(
+          "_jit_pass_onnx_assign_output_shape",
+          [](std::shared_ptr<Graph>& graph,
+             const std::vector<at::Tensor>& tensors,
+             bool onnx_shape_inference = false) {
+            ONNXAssignOutputShape(graph, tensors, onnx_shape_inference);
+          })
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def(
@@ -188,7 +195,17 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_prepare_inplace_ops_for_onnx",
           PrepareInplaceOpsForONNX)
-      .def("_jit_pass_onnx_node_shape_type_inference", ONNXShapeTypeInference)
+      .def(
+          "_jit_pass_onnx_node_shape_type_inference",
+          [](Node* n, int opset_version) {
+            ONNXShapeTypeInference(n, opset_version);
+          })
+      .def(
+          "_jit_pass_onnx_graph_shape_type_inference",
+          [](std::shared_ptr<Graph>& graph, int opset_version) {
+            ONNXShapeTypeInference(graph, opset_version);
+          })
+      .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
