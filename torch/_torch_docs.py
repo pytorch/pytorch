@@ -1651,18 +1651,12 @@ Keyword args:
 add_docstr(torch.clamp, r"""
 clamp(input, min, max, *, out=None) -> Tensor
 
-Clamp all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]` and return
-a resulting tensor:
+Clamp all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]`.
+Let min_value and max_value be :attr:`min` and :attr:`max`, respectively, this returns:
 
 .. math::
-    y_i = \begin{cases}
-        \text{min} & \text{if } x_i < \text{min} \\
-        x_i & \text{if } \text{min} \leq x_i \leq \text{max} \\
-        \text{max} & \text{if } x_i > \text{max}
-    \end{cases}
+    y_i = \min(\max(x_i, \text{min\_value}), \text{max\_value})
 """ + r"""
-If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, args :attr:`min`
-and :attr:`max` must be real numbers, otherwise they should be integers.
 
 Args:
     {input}
@@ -1684,9 +1678,6 @@ Example::
 
 Clamps all elements in :attr:`input` to be larger or equal :attr:`min`.
 
-If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`value`
-should be a real number, otherwise it should be an integer.
-
 Args:
     {input}
 
@@ -1705,9 +1696,6 @@ Example::
 .. function:: clamp(input, *, max, out=None) -> Tensor
 
 Clamps all elements in :attr:`input` to be smaller or equal :attr:`max`.
-
-If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`value`
-should be a real number, otherwise it should be an integer.
 
 Args:
     {input}

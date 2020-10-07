@@ -15,10 +15,9 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(qsigmoid_stub);
-DEFINE_DISPATCH(qsigmoid_observed_output_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
-Tensor qnnpack_sigmoid_observed_output(
+Tensor qnnpack_sigmoid(
     Tensor input, double output_scale, int64_t output_zero_point) {
   TORCH_CHECK(input.ndimension() > 0, "qnnpack_sigmoid(): Got empty input tensor");
 
@@ -74,25 +73,36 @@ Tensor qnnpack_sigmoid_observed_output(
   return qy;
 }
 
-// This ALWAYS outputs scale=1.0/256, dtype=quint8
-// The zero_point is 0 for qint32 and quint8, but -128 for qint8.
-Tensor qnnpack_sigmoid(Tensor input) {
-  constexpr double output_scale = 1.0f / 256.0f;
-  constexpr int64_t output_zero_point = 0;
-  return qnnpack_sigmoid_observed_output(input, output_scale, output_zero_point);
-}
-
 #endif  // USE_PYTORCH_QNNPACK
 
+// This ALWAYS outputs scale=1.0/256, dtype=quint8
+// The zero_point is 0 for qint32 and quint8, but -128 for qint8.
 Tensor sigmoid_quantized_cpu(const Tensor& qx) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {
-    return qnnpack_sigmoid(qx);
+    constexpr double output_scale = 1.0f / 256.0f;
+    constexpr int64_t output_zero_point = 0;
+    return qnnpack_sigmoid(qx, output_scale, output_zero_point);
   }
 #endif  // USE_PYTORCH_QNNPACK
   Tensor qy;
-  qsigmoid_stub(qx.device().type(), qx, qy);
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qsigmoid", [&]() {
+    // Naive implemenentation: uses dequantize/execute/quantize routine
+    // - Output scale is set to 1.0 / 2^(BIT_NUM)
+    // - For signed types output zero point is set to 0
+    // - For unsigned types output zero point is set to (qmax + qmin) / 2.0
+    // See https://stackoverflow.com/a/34448562/3606192 for potential
+    // optimizations
+    double output_scale = 0.00390625;  // 1.0 / 2^8
+    int64_t output_zero_point = 0;
+    if (SCALAR_TYPE == at::kQInt32) {
+      output_scale = 2.3283064365386963e-10;  // 1.0 / 2^32
+    } else if (SCALAR_TYPE == at::kQInt8) {
+      output_zero_point = -128;
+    }
+    qsigmoid_stub(qx.device().type(), qx, qy, output_scale, output_zero_point);
+  });
   return qy;
 }
 
@@ -104,11 +114,11 @@ class QSigmoid final {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {
-    return qnnpack_sigmoid_observed_output(qx, output_scale, output_zero_point);
+    return qnnpack_sigmoid(qx, output_scale, output_zero_point);
   }
 #endif  // USE_PYTORCH_QNNPACK
   Tensor qy;
-  qsigmoid_observed_output_stub(qx.device().type(), qx, qy, output_scale, output_zero_point);
+  qsigmoid_stub(qx.device().type(), qx, qy, output_scale, output_zero_point);
   return qy;
   }
 };
