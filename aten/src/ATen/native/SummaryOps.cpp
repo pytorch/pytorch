@@ -92,9 +92,7 @@ Tensor _histogram_cpu_template_uniformbins(
   TORCH_CHECK(min < max, "max must be larger than min");
 
   bool has_weights = weights.defined();
-  if (has_weights && weights.size(0) != self.size(0)) {
-    AT_ERROR("input and weights should have the same length");
-  }
+
   Tensor output;
   int64_t self_size = self.size(0);
 
