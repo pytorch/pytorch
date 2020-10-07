@@ -39,6 +39,66 @@ void format(Stack& stack, size_t num_inputs) {
   push(stack, ss.str());
 }
 
+// IValue tags are intentionally private, so we need additional logic to cast the
+// IValue type to the specified format.
+std::string getFormattedArg(char key, IValue ival) {
+  std::stringstream ss;
+  ss << ival;
+  switch (key) {
+    case 'd':
+    case 'i': {
+      if (!ival.isScalar()) {
+        //AT_ERROR("%" + key + " A number is required, not " + ival.tagKind(), format);
+        AT_ERROR(" A number is required", format);
+      }
+      else if (ival.isDouble()) {
+        std::stringstream().swap(ss);
+        ss << (int)ival.toDouble();
+      }
+      break;
+    }
+    case 'f': {
+      if (!ival.isScalar()) {
+        //AT_ERROR("%" + key + " A number is required, not " + ival.tagKind(), format);
+        AT_ERROR(" A number is required", format);
+      }
+      else if (ival.isInt()) {
+        std::stringstream().swap(ss);
+        ss << (double)ival.toInt();
+      }
+      break;
+    }
+  }
+  return ss.str();
+}
+
+void percentFormat(Stack& stack, size_t num_inputs) {
+  // TODO: add support for more specifiers
+  std::vector<char> specifiers = { 'd', 'i', 'f', 's'};
+  auto format = peek(stack, 0, num_inputs).toStringRef();
+  auto args = last(stack, num_inputs - 1);
+  std::stringstream ss;
+  for (size_t begin = 0, used_args = 0; true; ++used_args) {
+    size_t loc = format.find("%", begin);
+    if (loc >= format.length() - 1) {
+      ss << format.substr(begin);
+      break;
+    }
+    ss << format.substr(begin, loc - begin);
+    if (used_args >= args.size()) {
+      AT_ERROR("Too few arguments for format string: ", format);
+    }
+    char key = format.at(loc + 1);
+    if (std::find(specifiers.begin(), specifiers.end(), key) != specifiers.end()) {
+      auto ins = getFormattedArg(key, args[used_args]);
+      ss << ins;
+      begin = loc + 2;
+    }
+  }
+  drop(stack, num_inputs);
+  push(stack, ss.str());
+}
+
 void listUnpack(Stack& stack, size_t num_outputs) {
   auto list = pop(stack).toList();
   TORCH_CHECK(

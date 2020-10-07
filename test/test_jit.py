@@ -2585,6 +2585,49 @@ class TestFrontend(JitTestCase):
 
 
 class TestScript(JitTestCase):
+    def test_percent_operator_overloading(self):
+        """
+        Test that the '%' token can be parsed as both the modulo operator and as the string formatting operator
+        """
+        def test_str_format():
+            @torch.jit.script
+            def fn(arg1: str) -> str:
+                return "This is my {} in my template".format(arg1)
+            self.assertEqual("This is my string in my cool template", fn("string"))
+            print(fn.graph)
+
+        def test_modulo_operator():
+            @torch.jit.script
+            def fn(dividend: int, divisor: int) -> int:
+                return dividend % divisor
+            self.assertEqual(1, fn(5, 2))
+            print(fn.graph)
+
+        def test_string_interpolation_with_string_variable():
+            @torch.jit.script
+            def fn(arg1: str) -> str:
+                return "This is my %s in template" % arg1
+            print(fn.graph)
+            self.assertEqual("This is my string in template", fn("string"))
+
+        def test_string_interpolation_with_digit_variable():
+            @torch.jit.script
+            def fn(arg1: int) -> str:
+                return "This is my %d in template" % arg1
+            self.assertEqual("This is my 1 in template", fn(1))
+
+        def test_string_interpolation_with_float_variable():
+            @torch.jit.script
+            def fn(arg1: int) -> str:
+                return "This is my %f in template" % arg1
+            self.assertEqual("This is my 1.0 in template", fn(1.0))
+
+        #test_str_format()
+        #test_modulo_operator()
+        test_string_interpolation_with_string_variable()
+        #test_string_interpolation_with_digit_variable()
+        #test_string_interpolation_with_float_variable()
+
     def test_pretty_print_function(self):
         @torch.jit.script
         def foo(x):
