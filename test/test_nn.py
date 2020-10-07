@@ -604,25 +604,6 @@ class TestNN(NNTestCase):
                 self.assertIs(m2, m2.to(dtype=torch.float32))
                 self.assertEqual(m2.double(), m2.to(dtype=torch.float64))
 
-    def test_to_complex(self):
-        m = nn.Linear(3, 5)
-        self.assertIs(m, m.to('cpu'))
-        m.to(torch.complex64)
-        self.assertIs(m.weight.dtype, torch.complex64)
-        m.to(torch.complex128)
-        self.assertIs(m.weight.dtype, torch.complex128)
-        m.to(torch.float32)
-        self.assertIs(m.weight.dtype, torch.float32)
-
-        if torch.cuda.is_available():
-            for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
-                m2 = m.cuda(device=cuda)
-                self.assertIs(m2, m2.to(cuda))
-                m2.to(torch.complex64)
-                self.assertIs(m2.weight.dtype, torch.complex64)
-                m2.to(torch.complex128)
-                self.assertIs(m2.weight.dtype, torch.complex128)
-
     def test_zero_grad(self):
         i = torch.randn(2, 5, requires_grad=True)
         module = nn.Linear(5, 5)
@@ -12184,6 +12165,16 @@ class TestNNDeviceType(NNTestCase):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         F.threshold(x, 0.5, 0.5, inplace=True)
         F.threshold_(x, 0.5, 0.5)
+
+    def test_to_complex(self, device):
+        m = nn.Linear(3, 5).to(device)
+        self.assertIs(m, m.to(device))
+        m.to(torch.complex64)
+        self.assertIs(m.weight.dtype, torch.complex64)
+        m.to(torch.complex128)
+        self.assertIs(m.weight.dtype, torch.complex128)
+        m.to(torch.float32)
+        self.assertIs(m.weight.dtype, torch.float32)
 
 class TestModuleGlobalHooks(TestCase):
 
