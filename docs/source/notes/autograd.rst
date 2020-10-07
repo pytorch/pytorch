@@ -242,12 +242,13 @@ the value of limit computed for a real and imaginary step (:math:`h`) must be eq
     .. math::
         f'(z) = \lim_{h \to 0, h \in C} \frac{f(z+h) - f(z)}{h}
 
-The complex differentiable functions are commonly known as holomorphic functions. Practically, many of the functions
-used in loss functions for real world applications do not satisfy these conditions. One of the common important non
-holomorphic functions is conjugate operator. Conjugate operation is defined as:
+The complex differentiable functions are commonly known as holomorphic functions. Practically, none of the
+loss functions used in real world applications satisfy these conditions.
+
+One of the common important non holomorphic functions is conjugate operator. Conjugate operation is defined as:
 
     .. math::
-        f(z) = f(x+yj) = x - yj
+        f(z) = f(x+yj) = z^* = x - yj
 
 For a real step :math:`h`,
 
