@@ -2158,12 +2158,18 @@
 - func: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    DefaultBackend: nan_to_num
 
 - func: nan_to_num_(Tensor(a!) self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    DefaultBackend: nan_to_num_
 
 - func: nan_to_num.out(Tensor self, float? nan=None, float? posinf=None, float? neginf=None, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    DefaultBackend: nan_to_num_out
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   use_c10_dispatcher: full
@@ -2908,9 +2914,9 @@
 
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
   use_c10_dispatcher: full
-  variants: method
+  variants: method # This is method-only to match the previous tensor API. In the future we could make this a function too.
   dispatch:
-    DefaultBackend: permute # This is method-only to match the previous tensor API. In the future we could make this a function too.
+    DefaultBackend: permute
 
 - func: movedim.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)
   use_c10_dispatcher: full
@@ -3121,9 +3127,9 @@
 
 - func: repeat(Tensor self, int[] repeats) -> Tensor
   use_c10_dispatcher: full
-  variants: method
+  variants: method # This is method-only to match the previous tensor API. In the future we could make this a function too.
   dispatch:
-    DefaultBackend: repeat # This is method-only to match the previous tensor API. In the future we could make this a function too.
+    DefaultBackend: repeat
 
 - func: repeat_interleave.Tensor(Tensor repeats) -> Tensor
   use_c10_dispatcher: full

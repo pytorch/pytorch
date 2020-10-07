@@ -746,6 +746,13 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
 
         # See Note [Manual catchAll kernels]
         assert (declaration['name'] in MANUAL_CATCHALL) == declaration['manual_kernel_registration']
+        # If you want to register a kernel to Autograd, you must make the op abstract.
+        # In other words, this op must have dispatch section in native_functions.yaml.
+        if declaration['name'] in MANUAL_AUTOGRAD_AND_TRACER and declaration['derivative']:
+            msg = "Did you add a formula for {}(or its functional variant) in derivatives.yaml? \
+                   If so please add a dispatch section for it with DefaultBackend in \
+                   native_functions.yaml.".format(declaration['name'])
+            assert declaration['abstract'], msg
 
         # Emit TraceType code
         if declaration['name'] not in MANUAL_TRACER:
