@@ -163,7 +163,7 @@ cublasStatus_t cublasGemmStridedBatchedExFix(cublasHandle_t &handle,
 {
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major != 7) {
-    return cublasGemmStridedBatchedExFix(handle, transa, transb, m, n, k, alpha, A, Atype, lda, strideA, B, Btype, ldb, strideB, beta, C, Ctype, ldc, strideC, batchCount, computeType, algo);
+    return cublasGemmStridedBatchedEx(handle, transa, transb, m, n, k, alpha, A, Atype, lda, strideA, B, Btype, ldb, strideB, beta, C, Ctype, ldc, strideC, batchCount, computeType, algo);
   }
   cublasStatus_t result;
   for(int64_t i = 0; i < batchCount; i += 65535) {
