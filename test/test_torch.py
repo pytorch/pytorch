@@ -15503,7 +15503,7 @@ class TestTorchDeviceType(TestCase):
                         # with pivoting is. Therefore, we require the
                         # equality of info-s only for non-singular
                         # matrices.
-                        self.assertEqual(info_ if info_.dim() > 0 else info_.unsqueeze(0), info_nopiv)
+                        self.assertEqual(info_.view(info_nopiv.shape) if info_.dim() > 0 else info_.unsqueeze(0), info_nopiv)
 
             for ms, batch in product([3, 5, 7, (4, 2), (3, 4)], [(), (2,), (3,), (3, 5)]):
                 run_subtest(ms, batch, device, pivot)
