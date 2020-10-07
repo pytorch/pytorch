@@ -250,13 +250,13 @@ def _check_op(op):
 
 def _check_p2p_op_list(p2p_op_list):
     """
-    Helper to check that the ``p2p_op_list`` is a list of _P2POp instances and
+    Helper to check that the ``p2p_op_list`` is a list of P2POp instances and
     all ops use the same backend.
     """
     if not isinstance(p2p_op_list, list) or \
-       not all(isinstance(p2p_op, _P2POp) for p2p_op in p2p_op_list):
+       not all(isinstance(p2p_op, P2POp) for p2p_op in p2p_op_list):
         raise RuntimeError("Invalid ``p2p_op_list``. Each op is expected to "
-                           "to be of type ``torch.distributed._P2POp``.")
+                           "to be of type ``torch.distributed.P2POp``.")
 
 
     backend = get_backend(p2p_op_list[0].group)
@@ -770,13 +770,13 @@ def recv(tensor,
         return src
 
 
-class _P2POp(object):
+class P2POp(object):
     """
-    A class to build point-to-point operations for ``_batch_isend_irecv``.
+    A class to build point-to-point operations for ``batch_isend_irecv``.
 
     This class builds the type of P2P operation, communication buffer, peer rank,
     Process Group group, and tag. Instances of this class will be passed to
-    ``_batch_isend_irecv`` for point-to-point communications.
+    ``batch_isend_irecv`` for point-to-point communications.
 
     Arguments:
         op (callable): A function to send data to or receive data from a peer process.
@@ -811,7 +811,7 @@ def _batch_p2p_manager(backend):
             ProcessGroupNCCL._group_end()
 
 
-def _batch_isend_irecv(p2p_op_list):
+def batch_isend_irecv(p2p_op_list):
     """
     Send or Receive a batch of tensors asynchronously and return a list of requests.
 
@@ -820,7 +820,7 @@ def _batch_isend_irecv(p2p_op_list):
 
     Arguments:
         p2p_op_list: A list of point-to-point operations(type of each operator is
-            ``torch.distributed._P2POp``). The order of the isend/irecv in the list
+            ``torch.distributed.P2POp``). The order of the isend/irecv in the list
             matters and it needs to match with corresponding isend/irecv on the
             remote end.
 
@@ -831,9 +831,9 @@ def _batch_isend_irecv(p2p_op_list):
     Examples:
         >>> send_tensor = torch.arange(2) + 2 * rank
         >>> recv_tensor = torch.randn(2)
-        >>> send_op = dist._P2POp(dist.isend, send_tensor, (rank + 1)%world_size)
-        >>> recv_op = dist._P2POp(dist.irecv, recv_tensor, (rank + 1)%world_size)
-        >>> reqs = _batch_isend_irecv([send_op, recv_op])
+        >>> send_op = dist.P2POp(dist.isend, send_tensor, (rank + 1)%world_size)
+        >>> recv_op = dist.P2POp(dist.irecv, recv_tensor, (rank + 1)%world_size)
+        >>> reqs = batch_isend_irecv([send_op, recv_op])
         >>> for req in reqs:
         >>>     req.wait()
         >>> recv_tensor
