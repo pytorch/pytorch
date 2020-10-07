@@ -87,13 +87,6 @@ class Graph:
             val_map[node] = self.node_copy(node, lambda n : val_map[n])
         return None
 
-    def _mark_uses(self, use_node : Node):
-        def add_use(def_node: Node):
-            def_node.users.add(use_node)
-            return def_node
-        map_arg(use_node.args, add_use)
-        map_arg(use_node.kwargs, add_use)
-
     def create_node(self, op: str, target: Target,
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None,
