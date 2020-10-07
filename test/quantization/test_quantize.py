@@ -1198,6 +1198,36 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         torch.quantization.convert(model, inplace=True)
         checkHooksIsPresent(model, False)
 
+class TestEagerModeOps(QuantizationTestCase):
+    def _test_activation_op_impl(
+            self, float_module_class, quantized_module_class, extra_module_kwargs):
+        """ Implementation for testing common activation ops like leaky relu
+        Args:
+            extra_module_kwargs: keyword args to instantiate the float module
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.activation_op = float_module_class(**extra_module_kwargs)
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.activation_op(x)
+                x = self.dequant(x)
+                return x
+
+        m = M().eval()
+        m.qconfig = default_qconfig
+        m = prepare(m)
+        self.checkObservers(m)
+        m = convert(m)
+        self.assertEqual(type(m.activation_op), quantized_module_class)
+
+    def test_leaky_relu(self):
+        self._test_activation_op_impl(nn.LeakyReLU, nnq.LeakyReLU, {'negative_slope': 0.1, 'inplace': False})
+
 class TestFunctionalModule(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
     @given(train_mode=st.booleans())
