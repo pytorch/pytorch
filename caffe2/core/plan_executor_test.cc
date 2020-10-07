@@ -67,29 +67,6 @@ class ErrorOp final : public Operator<CPUContext> {
 REGISTER_CPU_OPERATOR(Error, ErrorOp);
 OPERATOR_SCHEMA(Error).NumInputs(0).NumOutputs(0);
 
-static std::atomic<int> blockingErrorRuns{0};
-class BlockingErrorOp final : public Operator<CPUContext> {
- public:
-  BlockingErrorOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws) {}
-
-  bool RunOnDevice() override {
-    // First n op executions should block and then start throwing errors.
-    if (blockingErrorRuns.fetch_sub(1) >= 1) {
-      LOG(INFO) << "blocking";
-      while (true) {
-        std::this_thread::sleep_for(std::chrono::hours(10));
-      }
-    } else {
-      LOG(INFO) << "throwing";
-      throw TestError();
-    }
-  }
-};
-
-REGISTER_CPU_OPERATOR(BlockingError, BlockingErrorOp);
-OPERATOR_SCHEMA(BlockingError).NumInputs(0).NumOutputs(0);
-
 PlanDef parallelErrorPlan() {
   PlanDef plan_def;
 
@@ -124,12 +101,10 @@ PlanDef parallelErrorPlan() {
 }
 
 struct HandleExecutorThreadExceptionsGuard {
-  HandleExecutorThreadExceptionsGuard(int timeout = 60) {
+  HandleExecutorThreadExceptionsGuard() {
     globalInit({
         "caffe2",
         "--caffe2_handle_executor_threads_exceptions=1",
-        "--caffe2_plan_executor_exception_timeout=" +
-            caffe2::to_string(timeout),
     });
   }
 
@@ -162,38 +137,6 @@ TEST(PlanExecutorTest, ErrorAsyncPlan) {
   Workspace ws;
   ASSERT_THROW(ws.RunPlan(plan_def), TestError);
   ASSERT_EQ(cancelCount, 1);
-}
-
-TEST(PlanExecutorTest, BlockingErrorPlan) {
-  ASSERT_DEATH(
-      [] {
-        HandleExecutorThreadExceptionsGuard guard(/*timeout=*/1);
-
-        PlanDef plan_def;
-
-        std::string plan_def_template = R"DOC(
-          network {
-            name: "net"
-            op {
-              type: "BlockingError"
-            }
-          }
-          execution_step {
-            num_concurrent_instances: 2
-            substep {
-              network: "net"
-            }
-          }
-        )DOC";
-
-        CAFFE_ENFORCE(
-            TextFormat::ParseFromString(plan_def_template, &plan_def));
-        Workspace ws;
-        blockingErrorRuns = 1;
-        ws.RunPlan(plan_def);
-        FAIL() << "shouldn't have reached this point";
-      }(),
-      "failed to stop concurrent workers after exception: test error");
 }
 
 } // namespace caffe2
