@@ -15474,7 +15474,7 @@ class TestTorchDeviceType(TestCase):
                 # no bmm_out for CUDA yet,
                 # NOTE: replace with
                 # self.assertEqual(P.matmul(L.matmul(U)), a)
-                # once bmm_out is implemented for CUDA
+                # once bmm_out is implemented for CUDA complex types
                 for i in range(a.size(0)):
                     self.assertEqual(
                         P.select(0, i) @ L.select(0, i) @ U.select(0, i),
@@ -15487,7 +15487,7 @@ class TestTorchDeviceType(TestCase):
                     P_nopiv, L_nopiv, U_nopiv = torch.lu_unpack(a_LU_info_nopiv, nopiv)
                     # NOTE: replace with
                     # self.assertEqual(P_nopiv.matmul(L_nopiv.matmul(U_nopiv)), a)
-                    # once bmm_out supports CUDA
+                    # once bmm_out supports CUDA complex types
                     for i in range(a.size(0)):
                         self.assertEqual(
                             P_nopiv.select(0, i) @ L_nopiv.select(0, i) @ U_nopiv.select(0, i),
