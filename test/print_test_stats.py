@@ -43,7 +43,7 @@ class TestSuite:
         self.skipped_count += 1 if test_case.skipped else 0
         self.errored_count += 1 if test_case.errored else 0
 
-    def print_report(self, num_longest):
+    def print_report(self, num_longest=3):
         sorted_tests = sorted(self.test_cases, key=lambda x: x.time)
         test_count = len(sorted_tests)
         print(f"class {self.name}:")
