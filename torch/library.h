@@ -646,7 +646,7 @@ public:
   static torch::detail::TorchLibraryInit TORCH_LIBRARY_static_init_ ## ns ( \
     torch::Library::DEF, \
     &TORCH_LIBRARY_init_ ## ns, \
-    #ns, c10::nullopt, __FILE__, __LINE__ \
+    #ns, c10::DispatchKey::Math, __FILE__, __LINE__ \
   ); \
   void TORCH_LIBRARY_init_ ## ns (torch::Library& m)
 

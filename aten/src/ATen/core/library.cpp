@@ -64,7 +64,7 @@ Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, c
           "Did you mean to use TORCH_LIBRARY_IMPL instead?  "
           ERROR_CONTEXT
         );
-        TORCH_INTERNAL_ASSERT(!dispatch_key_.has_value(), ERROR_CONTEXT);
+        //TORCH_INTERNAL_ASSERT(!dispatch_key_.has_value(), ERROR_CONTEXT);
         break;
       case IMPL:
         // Nothing to do, everything is OK
@@ -84,7 +84,7 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
     ERROR_CONTEXT
   );
   TORCH_INTERNAL_ASSERT(ns_.has_value(), ERROR_CONTEXT);
-  TORCH_INTERNAL_ASSERT(!dispatch_key_.has_value(), ERROR_CONTEXT);
+  //TORCH_INTERNAL_ASSERT(!dispatch_key_.has_value(), ERROR_CONTEXT);
   auto ns_opt = schema.getNamespace();
   if (ns_opt.has_value()) {
     // Note [Redundancy in registration code is OK]
