@@ -45,14 +45,16 @@ CONFIG_TREE_DATA = [
             ]),
             ("10.2", [
                 ("3.6", [
-                    ("important", [X(True)]),
+                    ("shard_test", [XImportant(True)]),
                     ("libtorch", [X(True)]),
                 ]),
             ]),
             ("11.0", [
                 ("3.8", [
                     X(True),
-                    ("libtorch", [XImportant(True)])
+                    ("libtorch", [
+                        ("shard_test", [XImportant(True)]),
+                    ])
                 ]),
             ]),
         ]),
@@ -158,6 +160,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
             "build_only": BuildOnlyConfigNode,
+            "shard_test": ShardTestConfigNode,
             "cuda_gcc_override": CudaGccOverrideConfigNode,
             "coverage": CoverageConfigNode,
             "pure_torch": PureTorchConfigNode,
@@ -261,16 +264,20 @@ class CudaGccOverrideConfigNode(TreeConfigNode):
         return ExperimentalFeatureConfigNode
 
 class BuildOnlyConfigNode(TreeConfigNode):
-
     def init2(self, node_name):
         self.props["build_only"] = node_name
 
     def child_constructor(self):
         return ExperimentalFeatureConfigNode
 
+class ShardTestConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["shard_test"] = node_name
+
+    def child_constructor(self):
+        return ExperimentalFeatureConfigNode
 
 class CoverageConfigNode(TreeConfigNode):
-
     def init2(self, node_name):
         self.props["is_coverage"] = node_name
 
@@ -290,7 +297,6 @@ class ImportantConfigNode(TreeConfigNode):
 
 
 class XenialCompilerConfigNode(TreeConfigNode):
-
     def modify_label(self, label):
         return label or "<unspecified>"
 
@@ -304,7 +310,6 @@ class XenialCompilerConfigNode(TreeConfigNode):
 
 
 class BionicCompilerConfigNode(TreeConfigNode):
-
     def modify_label(self, label):
         return label or "<unspecified>"
 

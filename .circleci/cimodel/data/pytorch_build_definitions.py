@@ -288,7 +288,6 @@ def instantiate_configs():
         rocm_version = None
         if compiler_name == "cuda":
             cuda_version = fc.find_prop("compiler_version")
-            restrict_phases = ["build", "test1", "test2"]
 
         elif compiler_name == "rocm":
             rocm_version = fc.find_prop("compiler_version")
@@ -328,7 +327,11 @@ def instantiate_configs():
         parallel_backend = fc.find_prop("parallel_backend") or None
         build_only = fc.find_prop("build_only") or False
         is_coverage = fc.find_prop("is_coverage") or False
+        shard_test = fc.find_prop("shard_test") or False
         # TODO: fix pure_torch python test packaging issue.
+        if shard_test:
+            restrict_phases = ["build"] if restrict_phases is None else restrict_phases
+            restrict_phases.extend(["test1", "test2"])
         if build_only or is_pure_torch:
             restrict_phases = ["build"]
         if is_coverage and restrict_phases is None:
