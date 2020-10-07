@@ -30,6 +30,9 @@ class SimpleTest(torch.nn.Module):
     def forward(self, x):
         return torch.relu(x + 3.0)
 
+def a_non_torch_leaf(a, b):
+    return a + b
+
 class TestFX(JitTestCase):
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
         """Check that an nn.Module's results match the GraphModule version
@@ -83,6 +86,17 @@ class TestFX(JitTestCase):
 
         t = T()
         symbolic_trace(t)
+
+    def test_custom_import(self):
+        graph = torch.fx.Graph()
+        a = graph.placeholder('x')
+        b = graph.placeholder('y')
+        c = graph.call_function(a_non_torch_leaf, (a, b))
+        d = graph.call_function(torch.sin, (c,))
+        graph.output(d)
+        gm = GraphModule(torch.nn.Module(), graph)
+        x, y = torch.rand(1), torch.rand(1)
+        self.assertEqual(torch.sin(x + y), gm(x, y))
 
     def test_args_kwargs(self):
         class T(torch.nn.Module):
@@ -923,11 +937,11 @@ class TestFX(JitTestCase):
 
         # zed = z + z + z -> zed = z + z + x
         zed.node.args = (zed.node.args[0], x.node)
-        self.assertEqual(x.node.users, set([z.node, zed.node]))
+        self.assertEqual(x.node.users.keys(), [z.node, zed.node])
 
         # z = x + y -> z = y + y
         z.node.args = (y.node, y.node)
-        self.assertEqual(x.node.users, set([zed.node]))
+        self.assertEqual(x.node.users.keys(), [zed.node])
 
 if __name__ == '__main__':
     run_tests()

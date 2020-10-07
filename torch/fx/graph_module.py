@@ -28,9 +28,7 @@ def patched_getline(*args, **kwargs):
 linecache.getlines = patched_getline
 
 def _forward_from_src(src : str):
-    gbls: Dict[str, Any] = {
-        'torch': torch
-    }
+    gbls: Dict[str, Any] = {}
     exec_with_source(src, gbls)
     return gbls['forward']
 

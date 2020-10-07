@@ -709,6 +709,8 @@ class EnumType(JitType):
 class TensorType(JitType):
     @classmethod
     def get(cls) -> TensorType: ...
+    @classmethod
+    def getInferred(cls) -> TensorType: ...
 
 # Defined in torch/csrc/jit/python/python_tree_views.cpp
 class SourceRange:

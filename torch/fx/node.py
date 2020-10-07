@@ -36,7 +36,9 @@ class Node:
         # All of the nodes that use the value produced by this Node
         # Note one user may correspond to several uses, e.g. the node fo `x + x`
         # would appear once here, but represents two uses.
-        self.users : Set['Node'] = set()
+        #
+        # Is a dict to act as an "ordered set". Keys are significant, value dont-care
+        self.users : Dict['Node', None] = {}
 
     @property
     def args(self) -> Tuple[Argument, ...]:
@@ -60,9 +62,9 @@ class Node:
         self._kwargs = new_kwargs
         new_defs = self._collect_all_defs()
         for to_remove in old_defs - new_defs:
-            to_remove.users.remove(self)
+            to_remove.users.pop(self)
         for to_add in new_defs - old_defs:
-            to_add.users.add(self)
+            to_add.users.setdefault(self)
 
     def _collect_all_defs(self) -> Set['Node']:
         defs = set()
@@ -87,13 +89,12 @@ class Node:
                     return n
 
             new_args = map_arg(use_node.args, maybe_replace_node)
-            assert isinstance(new_args, tuple)
-            use_node.args = new_args
             new_kwargs = map_arg(use_node.kwargs, maybe_replace_node)
+            assert isinstance(new_args, tuple)
             assert isinstance(new_kwargs, dict)
-            use_node.kwargs = new_kwargs
+            use_node._update_args_kwargs(new_args, new_kwargs)
 
-        self.users.clear()
+        assert len(self.users) == 0
         return to_process
 
 
