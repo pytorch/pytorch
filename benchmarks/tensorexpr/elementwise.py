@@ -208,3 +208,21 @@ class SimpleElementBench(benchmark.Benchmark):
         return [[1 << 25]]
 
 benchmark.register_benchmark_class(SimpleElementBench)
+
+class DynamicSimpleElementBench(benchmark.DynamicShape,SimpleElementBench):
+    def __init__(self, mode, device, dtype, N):
+        benchmark.DynamicShape.__init__(self)
+        SimpleElementBench.__init__(self,mode, device, dtype, N)
+        
+        self.load_inputs()
+    
+    @classmethod
+    def module(cls):
+        return "dynamic_simple_element"
+    
+    def instantiate_input(self):
+        N, = self.rand_shape([self.N])
+        data = self.rand([N], device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
+        self.inputs = [data]
+
+benchmark.register_benchmark_class(DynamicSimpleElementBench)
