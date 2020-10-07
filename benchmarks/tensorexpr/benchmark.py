@@ -280,6 +280,8 @@ class DynamicShape(object):
 
     # returns a randomized shape
     def rand_shape(self, shape):
+        if os.environ['PYTORCH_CUDA_FUSER_NO_DYNSHAPE'] =='1':
+            return shape
         ratios = np.random.uniform(self._dynamic_range,1.0,len(shape))
         dyn_shape = list(
             np.multiply(shape,ratios).astype(int)
