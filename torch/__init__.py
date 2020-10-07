@@ -245,8 +245,13 @@ def typename(o):
     else:
         class_name = o.__class__.__name__
 
+    # Sometimes we want to get the typename of type aliases from the Typing
+    # package. These type aliases don't have a descriptive classname (e.g.
+    # typing._GenericAlias, and also that's not stable across versions) so
+    # we use the repr of the type alias instead.
+    #
     # TODO: There's gotta be a better way to do this
-    if o.__module__ == 'typing':
+    if module == 'typing.':
         return str(o)
 
     return module + class_name
