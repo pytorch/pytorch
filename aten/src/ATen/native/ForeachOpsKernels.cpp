@@ -148,17 +148,20 @@ FOREACH_UNARY_OP(exp);
 FOREACH_POINTWISE_OP(addcdiv);
 FOREACH_POINTWISE_OP(addcmul);
 
+#define FOREACH_MAX_MIN_OP(NAME)                                                             \
+std::vector<Tensor> foreach_tensor_##NAME##_slow(TensorList tensors1, TensorList tensors2) { \
+  check_foreach_api_restrictions(tensors1, tensors2);                                        \
+                                                                                             \
+  std::vector<Tensor> result;                                                                \
+  result.reserve(tensors1.size());                                                           \
+  for (int i = 0; i < tensors1.size(); i++) {                                                \
+    result.emplace_back(at::NAME(tensors1[i], tensors2[i]));                                 \
+  }                                                                                          \
+                                                                                             \
+  return result;                                                                             \
+}                                                                                            \
 
-std::vector<Tensor> foreach_tensor_max_slow(TensorList tensors1, TensorList tensors2) {
-  check_foreach_api_restrictions(tensors1, tensors2);
-
-  std::vector<Tensor> result;
-  result.reserve(tensors1.size());
-  for (int i = 0; i < tensors1.size(); i++) {
-    result.emplace_back(at::max(tensors1[i], tensors2[i]));
-  }
-
-  return result;
-}
+FOREACH_MAX_MIN_OP(max)
+FOREACH_MAX_MIN_OP(min)
 
 }} // namespace at::native
