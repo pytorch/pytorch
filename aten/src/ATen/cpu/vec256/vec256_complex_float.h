@@ -457,6 +457,32 @@ Vec256<c10::complex<float>> inline minimum(const Vec256<c10::complex<float>>& a,
 }
 
 template <>
+Vec256<c10::complex<float>> inline clamp(const Vec256<c10::complex<float>>& a, const Vec256<c10::complex<float>>& min, const Vec256<c10::complex<float>>& max) {
+  auto abs_a = a.abs_2_();
+  auto abs_min = min.abs_2_();
+  auto max_mask = _mm256_cmp_ps(abs_a, abs_min, _CMP_LT_OQ);
+  auto abs_max = max.abs_2_();
+  auto min_mask = _mm256_cmp_ps(abs_a, abs_max, _CMP_GT_OQ);
+  return _mm256_blendv_ps(_mm256_blendv_ps(a, min, max_mask), max, min_mask);
+}
+
+template <>
+Vec256<c10::complex<float>> inline clamp_min(const Vec256<c10::complex<float>>& a, const Vec256<c10::complex<float>>& min) {
+  auto abs_a = a.abs_2_();
+  auto abs_min = min.abs_2_();
+  auto max_mask = _mm256_cmp_ps(abs_a, abs_min, _CMP_LT_OQ);
+  return _mm256_blendv_ps(a, min, max_mask);
+}
+
+template <>
+Vec256<c10::complex<float>> inline clamp_max(const Vec256<c10::complex<float>>& a, const Vec256<c10::complex<float>>& max) {
+  auto abs_a = a.abs_2_();
+  auto abs_max = max.abs_2_();
+  auto min_mask = _mm256_cmp_ps(abs_a, abs_max, _CMP_GT_OQ);
+  return _mm256_blendv_ps(a, max, min_mask);
+}
+
+template <>
 Vec256<c10::complex<float>> inline operator&(const Vec256<c10::complex<float>>& a, const Vec256<c10::complex<float>>& b) {
   return _mm256_and_ps(a, b);
 }

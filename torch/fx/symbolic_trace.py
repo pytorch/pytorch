@@ -130,6 +130,7 @@ class Tracer(TracerBase):
         names_iter = iter(co.co_varnames)
         next(names_iter)  # skip self
         args : List[Any] = [root]
+
         def make_proxy_placeholder():
             name = next(names_iter)
             return self._proxy_placeholder(name, fn.__annotations__.get(name, None))
@@ -158,7 +159,7 @@ class Tracer(TracerBase):
             torch.nn.Module.__call__ = orig_call
         return self.graph
 
-    def _proxy_placeholder(self, name: str, type_expr: Optional[Any]=None) -> Proxy:
+    def _proxy_placeholder(self, name: str, type_expr: Optional[Any] = None) -> Proxy:
         return Proxy(self.create_node('placeholder', name, (), {}, type_expr=type_expr), self)
 
 # Symbolic tracing API

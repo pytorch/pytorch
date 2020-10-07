@@ -6386,96 +6386,85 @@ class TestTorchDeviceType(TestCase):
     def test_logical_or(self, device, dtypes):
         self._test_logical(device, dtypes, 'logical_or', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 1, 1])
 
-    def generate_clamp_baseline(self, device, dtype, *, min_vals, max_vals, with_nans):
-        """
-        Creates a random tensor for a given device and dtype, and computes the expected clamped
-        values given the min_vals and/or max_vals.
-        If with_nans is provided, then some values are randomly set to nan.
-        """
-        X = torch.rand(100, device=device).mul(50).add(-25)  # uniform in [-25, 25]
-        X = X.to(dtype)
-        if with_nans:
-            mask = torch.randint(0, 2, X.shape, dtype=torch.bool, device=device)
-            X[mask] = nan
-
-        if isinstance(min_vals, torch.Tensor):
-            min_vals = min_vals.cpu().numpy()
-
-        if isinstance(max_vals, torch.Tensor):
-            max_vals = max_vals.cpu().numpy()
-
-        # Use NumPy implementation as reference
-        X_clamped = torch.tensor(np.clip(X.cpu().numpy(), a_min=min_vals, a_max=max_vals), device=device)
-        return X, X_clamped
-
     # Tests clamp and its alias, clip
-    @dtypes(torch.int64, torch.float32)
-    def test_clamp(self, device, dtype):
-        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_, 
-                   torch.clip, torch.Tensor.clip, torch.Tensor.clip_)
+    def test_clamp(self, device):
+        op_list = ((torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_),
+                   (torch.clip, torch.Tensor.clip, torch.Tensor.clip_))
+        for op, method_op, inplace_op in op_list:
 
-        # min/max argument product
-        args = product((-10, None), (10, None))
+            m1 = torch.rand(100, device=device).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
+            # just in case we're extremely lucky.
+            min_val = -1
+            max_val = 1
+            m1[1] = min_val
+            m1[2] = max_val
 
-        for op in op_list:
-            for min_val, max_val in args:
-                if min_val is None and max_val is None:
-                    continue
+            res1 = m1.clone()
+            inplace_op(res1, min_val, max_val)
+            res2 = m1.clone()
+            for i in iter_indices(res2):
+                res2[i] = max(min_val, min(max_val, res2[i]))
+            self.assertEqual(res1, res2)
 
-                X, Y_expected = self.generate_clamp_baseline(device, dtype,
-                                                             min_vals=min_val,
-                                                             max_vals=max_val,
-                                                             with_nans=False)
+            out = m1.clone()
+            op(m1, min=min_val, max=max_val, out=out)
+            self.assertEqual(out, res1)
 
-                # Test op
-                X1 = X.clone()  # So that the in-place ops do not change X
-                Y_actual = op(X1, min_val, max_val)
-                self.assertEqual(Y_expected, Y_actual)
+            res1 = op(m1, min=min_val)
+            res2 = m1.clone()
+            for i in iter_indices(res2):
+                res2[i] = max(min_val, res2[i])
+            self.assertEqual(res1, res2)
 
-                # Test op-out behavior (out does not exist for method versions)
-                if op in (torch.clamp, torch.clip):
-                    Y_out = torch.empty_like(X)
-                    op(X, min=min_val, max=max_val, out=Y_out)
-                    self.assertEqual(Y_expected, Y_out)
+            op(m1, min=min_val, out=out)
+            self.assertEqual(out, res1)
 
-    def test_clamp_propagates_nans(self, device):
-        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_, 
-                   torch.clip, torch.Tensor.clip, torch.Tensor.clip_)
+            res1 = op(m1, max=max_val)
+            res2 = m1.clone()
+            for i in iter_indices(res2):
+                res2[i] = min(max_val, res2[i])
+            self.assertEqual(res1, res2)
 
-        # min/max argument product
-        args = product((-10, None), (10, None))
+            op(m1, max=max_val, out=out)
+            self.assertEqual(out, res1)
 
-        for op in op_list:
-            for min_val, max_val in args:
-                if min_val is None and max_val is None:
-                    continue
+            # if the tensor contains nan case
+            test_tens = torch.tensor([nan], device=device)
 
-                X, Y_expected = self.generate_clamp_baseline(device, torch.float, 
-                                                             min_vals=min_val, 
-                                                             max_vals=max_val, 
-                                                             with_nans=True)
-                Y_expected = torch.isnan(Y_expected)
+            res1 = test_tens.clone()
+            inplace_op(res1, min_val, max_val)
+            res2 = test_tens.clone()
+            for i in iter_indices(res2):
+                res2[i] = max(min(res2[i], max_val), min_val)
+            self.assertEqual(torch.isnan(res1), torch.isnan(res2))
 
-                # Test op
-                X1 = X.clone()  # So that the in-place ops do not change X
-                Y_actual = op(X1, min_val, max_val)
-                self.assertEqual(Y_expected, torch.isnan(Y_actual))
+            out = test_tens.clone()
+            op(test_tens, min=min_val, max=max_val, out=out)
+            self.assertEqual(torch.isnan(out), torch.isnan(res1))
 
-                # Test op-out behavior (out does not exist for method versions)
-                if op in (torch.clamp, torch.clip):
-                    Y_out = torch.empty_like(X)
-                    op(X, min_val, max_val, out=Y_out)
-                    self.assertEqual(Y_expected, torch.isnan(Y_out))
+            res1 = op(test_tens, min=min_val)
+            res2 = test_tens.clone()
+            for i in iter_indices(res2):
+                res2[i] = max(res2[i], min_val)
+            self.assertEqual(torch.isnan(res1), torch.isnan(res2))
 
-    def test_clamp_raises_arg_errors(self, device):
-        X = torch.randn(100, dtype=torch.float, device=device)
-        error_msg = 'At least one of \'min\' or \'max\' must not be None'
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            X.clamp()
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            X.clamp_()
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            torch.clamp(X)
+            op(test_tens, min=min_val, out=out)
+            self.assertEqual(torch.isnan(out), torch.isnan(res1))
+
+            res1 = op(test_tens, max=max_val)
+            res2 = test_tens.clone()
+            for i in iter_indices(res2):
+                res2[i] = min(res2[i], max_val)
+            self.assertEqual(torch.isnan(res1), torch.isnan(res2))
+
+            op(test_tens, max=max_val, out=out)
+            self.assertEqual(torch.isnan(out), torch.isnan(res1))
+
+            error_msg = 'At least one of \'min\' or \'max\' must not be None'
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                method_op(m1)
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                inplace_op(m1)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64)

@@ -2,7 +2,6 @@ from .node import Node, Argument, Target, map_arg
 
 from typing import Callable, Any, List, Dict, Optional, Tuple, Set
 import builtins
-import inspect
 import torch
 import keyword
 import re
@@ -196,7 +195,7 @@ class Graph:
                 except ValueError:
                     pass
             name = self._name(sanitized_name)
-        return self.create_node(node.op, node.target, args, kwargs, name, node.type_expr)
+        return self.create_node(node.op, node.target, args, kwargs, name, node.type)
 
     def output(self, result: Argument, type_expr: Optional[Any] = None):
         self._mark_uses(result)

@@ -411,33 +411,36 @@ static void nan_to_num_kernel(
 }
 
 static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
+    c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
     auto min = min_scalar.to<scalar_t>();
     auto max = max_scalar.to<scalar_t>();
     auto min_vec = Vec256<scalar_t>(min);
     auto max_vec = Vec256<scalar_t>(max);
     cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return std::min(std::max(a, min), max); },
+     [=](scalar_t a) -> scalar_t { return zabs_(a) < zabs_(min) ? min : (zabs_(a) > zabs_(max) ? max : a); },
      [=](Vec256<scalar_t> a) { return vec256::clamp(a, min_vec, max_vec); });
   });
 }
 
 static void clamp_max_kernel(TensorIterator& iter, Scalar max_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
+    c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
     auto max = max_scalar.to<scalar_t>();
     auto max_vec = Vec256<scalar_t>(max);
     cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return std::min(a, max); },
+     [=](scalar_t a) -> scalar_t { return zabs_(a) > zabs_(max) ? max : a; },
      [=](Vec256<scalar_t> a) { return vec256::clamp_max(a, max_vec); });
   });
 }
 
 static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
+    c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
     auto min = min_scalar.to<scalar_t>();
     auto min_vec = Vec256<scalar_t>(min);
     cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return std::max(a, min); },
+     [=](scalar_t a) -> scalar_t { return zabs_(a) < zabs_(min) ? min : a; },
      [=](Vec256<scalar_t> a) { return vec256::clamp_min(a, min_vec); });
   });
 }
