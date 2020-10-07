@@ -263,7 +263,12 @@ struct SingleElementType : public Type {
   }
 
  protected:
-  SingleElementType(TypePtr elem) : Type(Kind), elem(std::move(elem)) {}
+  SingleElementType(TypePtr elem) : Type(Kind), elem(std::move(elem)) {
+    if (!this->elem) {
+      throw std::runtime_error(c10::str(
+            "Can not create ", typeKindToString(Kind), " with None type"));
+    }
+  }
 
  private:
   TypePtr elem;
@@ -458,6 +463,20 @@ struct CAFFE2_API SymbolicShape {
     dims_ = shape_symbols;
   }
 
+  // Mix of known and unknown ranks
+  SymbolicShape(const std::vector<c10::optional<int64_t>> dims) {
+    std::vector<ShapeSymbol> shape_symbols;
+    shape_symbols.reserve(dims.size());
+    for(c10::optional<int64_t> dim: dims) {
+      if(!dim) {
+        shape_symbols.push_back(ShapeSymbol::newSymbol());
+      } else {
+        shape_symbols.push_back(ShapeSymbol::fromStaticSize(*dim));
+      }
+    }
+    dims_ = shape_symbols;
+  }
+
   SymbolicShape(const std::vector<ShapeSymbol> dims) : dims_(dims) {}
 
   SymbolicShape(c10::IntArrayRef dims) {
@@ -467,6 +486,13 @@ struct CAFFE2_API SymbolicShape {
       shape_symbols.push_back(ShapeSymbol::fromStaticSize(dim));
     }
     dims_ = shape_symbols;
+  }
+
+  ShapeSymbol operator[](size_t i) const {
+    if (!dims_) {
+      throw std::runtime_error("Rank isn't fixed");
+    }
+    return (*dims_).at(i);
   }
 
   // Returns rank or nullopt in case of unranked shape.
@@ -507,7 +533,7 @@ struct CAFFE2_API SymbolicShape {
 };
 
 template <typename T>
-struct CAFFE2_API VaryingShape {
+struct VaryingShape {
   using ListOfOptionalElements = std::vector<c10::optional<T>>;
   VaryingShape(const std::vector<T>& vec)
       : VaryingShape(ListOfOptionalElements(vec.begin(), vec.end())) {}
@@ -529,7 +555,7 @@ struct CAFFE2_API VaryingShape {
     return dims_ == other.dims_;
   }
 
-  const c10::optional<T>& operator[](int i) const {
+  const c10::optional<T> &operator[](size_t i) const {
     if (!dims_) {
       throw std::runtime_error("Rank isn't fixed");
     }
@@ -548,7 +574,7 @@ struct CAFFE2_API VaryingShape {
     return dims_;
   }
 
-  VaryingShape merge(const VaryingShape& other) const;
+  CAFFE2_API VaryingShape merge(const VaryingShape& other) const;
 
   c10::optional<std::vector<T>> concrete_sizes() const {
     if (!dims_) {
@@ -975,6 +1001,16 @@ struct CAFFE2_API FutureType
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
     return create(contained_types.at(0));
+  }
+
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+    if (Type::isSubtypeOfExt(rhs, why_not)) {
+      return true;
+    }
+    if (auto rhs_ = rhs->cast<FutureType>()) {
+      return getElementType()->isSubtypeOfExt(rhs_->getElementType(), why_not);
+    }
+    return false;
   }
 
  private:

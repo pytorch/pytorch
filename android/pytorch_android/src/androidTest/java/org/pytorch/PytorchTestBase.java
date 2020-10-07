@@ -311,5 +311,83 @@ public abstract class PytorchTestBase {
     assertArrayEquals(new long[] {100, 300}, value.getDataAsLongArray());
   }
 
+  @Test
+  public void testChannelsLast() throws IOException {
+    long[] inputShape = new long[] {1, 3, 2, 2};
+    long[] data = new long[] {1, 11, 101, 2, 12, 102, 3, 13, 103, 4, 14, 104};
+    Tensor inputNHWC = Tensor.fromBlob(data, inputShape, MemoryFormat.CHANNELS_LAST);
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final IValue outputNCHW = module.runMethod("contiguous", IValue.from(inputNHWC));
+    assertIValueTensor(
+        outputNCHW,
+        MemoryFormat.CONTIGUOUS,
+        new long[] {1, 3, 2, 2},
+        new long[] {1, 2, 3, 4, 11, 12, 13, 14, 101, 102, 103, 104});
+    final IValue outputNHWC = module.runMethod("contiguousChannelsLast", IValue.from(inputNHWC));
+    assertIValueTensor(outputNHWC, MemoryFormat.CHANNELS_LAST, inputShape, data);
+  }
+
+  @Test
+  public void testChannelsLast3d() throws IOException {
+    long[] shape = new long[] {1, 2, 2, 2, 2};
+    long[] dataNCHWD = new long[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+    long[] dataNHWDC = new long[] {1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15, 8, 16};
+
+    Tensor inputNHWDC = Tensor.fromBlob(dataNHWDC, shape, MemoryFormat.CHANNELS_LAST_3D);
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+    final IValue outputNCHWD = module.runMethod("contiguous", IValue.from(inputNHWDC));
+    assertIValueTensor(outputNCHWD, MemoryFormat.CONTIGUOUS, shape, dataNCHWD);
+
+    Tensor inputNCHWD = Tensor.fromBlob(dataNCHWD, shape, MemoryFormat.CONTIGUOUS);
+    final IValue outputNHWDC =
+        module.runMethod("contiguousChannelsLast3d", IValue.from(inputNCHWD));
+    assertIValueTensor(outputNHWDC, MemoryFormat.CHANNELS_LAST_3D, shape, dataNHWDC);
+  }
+
+  @Test
+  public void testChannelsLastConv2d() throws IOException {
+    long[] inputShape = new long[] {1, 3, 2, 2};
+    long[] dataNCHW = new long[] {1, 2, 3, 4, 11, 12, 13, 14, 101, 102, 103, 104};
+    Tensor inputNCHW = Tensor.fromBlob(dataNCHW, inputShape, MemoryFormat.CONTIGUOUS);
+    long[] dataNHWC = new long[] {1, 11, 101, 2, 12, 102, 3, 13, 103, 4, 14, 104};
+    Tensor inputNHWC = Tensor.fromBlob(dataNHWC, inputShape, MemoryFormat.CHANNELS_LAST);
+
+    long[] weightShape = new long[] {3, 3, 1, 1};
+    long[] dataWeightOIHW = new long[] {2, 0, 0, 0, 1, 0, 0, 0, -1};
+    Tensor wNCHW = Tensor.fromBlob(dataWeightOIHW, weightShape, MemoryFormat.CONTIGUOUS);
+    long[] dataWeightOHWI = new long[] {2, 0, 0, 0, 1, 0, 0, 0, -1};
+    Tensor wNHWC = Tensor.fromBlob(dataWeightOHWI, weightShape, MemoryFormat.CHANNELS_LAST);
+
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+
+    final IValue outputNCHW =
+        module.runMethod("conv2d", IValue.from(inputNCHW), IValue.from(wNCHW), IValue.from(false));
+    assertIValueTensor(
+        outputNCHW,
+        MemoryFormat.CONTIGUOUS,
+        new long[] {1, 3, 2, 2},
+        new long[] {2, 4, 6, 8, 11, 12, 13, 14, -101, -102, -103, -104});
+
+    final IValue outputNHWC =
+        module.runMethod("conv2d", IValue.from(inputNHWC), IValue.from(wNHWC), IValue.from(true));
+    assertIValueTensor(
+        outputNHWC,
+        MemoryFormat.CHANNELS_LAST,
+        new long[] {1, 3, 2, 2},
+        new long[] {2, 11, -101, 4, 12, -102, 6, 13, -103, 8, 14, -104});
+  }
+
+  static void assertIValueTensor(
+      final IValue ivalue,
+      final MemoryFormat memoryFormat,
+      final long[] expectedShape,
+      final long[] expectedData) {
+    assertTrue(ivalue.isTensor());
+    Tensor t = ivalue.toTensor();
+    assertEquals(memoryFormat, t.memoryFormat());
+    assertArrayEquals(expectedShape, t.shape());
+    assertArrayEquals(expectedData, t.getDataAsLongArray());
+  }
+
   protected abstract String assetFilePath(String assetName) throws IOException;
 }

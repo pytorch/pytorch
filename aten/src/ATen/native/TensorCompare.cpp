@@ -13,6 +13,7 @@ namespace at { namespace native {
 DEFINE_DISPATCH(where_kernel);
 DEFINE_DISPATCH(max_stub);
 DEFINE_DISPATCH(min_stub);
+DEFINE_DISPATCH(_aminmax_stub);
 DEFINE_DISPATCH(isposinf_stub);
 DEFINE_DISPATCH(isneginf_stub);
 
@@ -343,6 +344,40 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
     Tensor min = at::empty({0}, self.options());
     return at::native::min_out(min, min_indices, self, dim, keepdim);
   }
+}
+
+static std::tuple<Tensor &, Tensor &> _aminmax_out_impl(Tensor& min, Tensor& max,
+                                                  const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "min_max_val only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "min_max only supports strided layout, got: ", self.layout());
+  TORCH_CHECK(self.device() == min.device(),
+              "expected device ", self.device(), " but got ",
+              min.device(), " for min values output");
+  TORCH_CHECK(self.device() == max.device(),
+              "expected device ", self.device(), " but got ",
+              max.device(), " for max values output");
+  dim = maybe_wrap_dim(dim, self.dim());
+  if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min") &&
+      _dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
+    return std::forward_as_tuple(min, max);
+  } else {
+    _aminmax_stub(self.device().type(), min, max, self, dim, keepdim);
+    return std::tuple<Tensor &, Tensor &>{min, max};
+  }
+}
+
+std::tuple<Tensor, Tensor> _aminmax(const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "min_max is not yet implemented for complex tensors.");
+  TORCH_CHECK(!self.is_quantized(), "min is not yet implemented for quantized tensors.");
+
+  Tensor min = at::empty({0}, self.options());
+  Tensor max = at::empty({0}, self.options());
+
+  auto result = _aminmax_out_impl(min, max, self, dim, keepdim);
+  return result;
 }
 
 static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indices,

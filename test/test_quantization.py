@@ -13,7 +13,7 @@ from quantization.test_quantized_op import TestQuantizedConv  # noqa: F401
 from quantization.test_quantized_op import TestDynamicQuantizedLinear  # noqa: F401
 from quantization.test_quantized_op import TestComparatorOps  # noqa: F401
 from quantization.test_quantized_op import TestPadding  # noqa: F401
-from quantization.test_quantized_op import TestQuantizedEmbeddingBag  # noqa: F401
+from quantization.test_quantized_op import TestQuantizedEmbeddingOps  # noqa: F401
 
 # Quantized Functional
 from quantization.test_quantized_functional import TestQuantizedFunctional  # noqa: F401
@@ -45,6 +45,7 @@ from quantization.test_workflow_module import TestDistributed  # noqa: F401
 from quantization.test_quantize import TestPostTrainingStatic  # noqa: F401
 from quantization.test_quantize import TestPostTrainingDynamic  # noqa: F401
 from quantization.test_quantize import TestQuantizationAwareTraining  # noqa: F401
+from quantization.test_quantize import TestEagerModeOps  # noqa: F401
 
 # TODO: merge with other tests in test_quantize.py?
 from quantization.test_quantize import TestFunctionalModule  # noqa: F401

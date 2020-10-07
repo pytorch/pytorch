@@ -272,6 +272,10 @@ public:
     return operatorIterator_->op.dumpState();
   }
 
+  std::string dumpComputedTable() const {
+    return operatorIterator_->op.dumpComputedTable();
+  }
+
   void checkInvariants() const {
     return operatorIterator_->op.checkInvariants();
   }

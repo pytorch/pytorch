@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 
-#include <torch/csrc/jit/tensorexpr/function.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -315,6 +314,36 @@ void IRPrinter::visit(const RoundOff* v) {
   v->lhs()->accept(this);
   os() << ", ";
   v->rhs()->accept(this);
+  os() << ")";
+}
+
+void IRPrinter::visit(const MaxTerm* v) {
+  os() << "MaxTerm(";
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+    os() << ", ";
+  }
+  for (size_t i = 0; i < v->variables().size(); ++i) {
+    v->variables()[i]->accept(this);
+    if (i < v->variables().size() - 1) {
+      os() << ", ";
+    }
+  }
+  os() << ")";
+}
+
+void IRPrinter::visit(const MinTerm* v) {
+  os() << "MinTerm(";
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+    os() << ", ";
+  }
+  for (size_t i = 0; i < v->variables().size(); ++i) {
+    v->variables()[i]->accept(this);
+    if (i < v->variables().size() - 1) {
+      os() << ", ";
+    }
+  }
   os() << ")";
 }
 
