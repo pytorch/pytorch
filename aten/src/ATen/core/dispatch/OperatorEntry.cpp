@@ -186,10 +186,13 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //          separate registration for Autograd keys to support training.
   //    (2.2) Use kernel from DispatchKey::Math if available.
   //          For autograd keys, we only use kernel from Math when there's no direct registration
-  //          to its corresponding backend key.
+  //          to its corresponding backend key or DefaultBackend. See Note [DefaultBackend and Math].
   //          For AutogradOther, we eagerly return ambiguousAutogradOtherKernel_ if there's registration to any of
   //          its backends and ask backend extender to request a decicated Autograd key for the backend.
   //          See Note [Ambiguity in AutogradOther kernel] for more details.
+  //          A DefaultBackend kernel prevents Math kernel being used for Autograd keys, but it doesn't
+  //          cause confusion for AutogradOther. It's pretty straightforward to use Autograd (if available)
+  //          in this case.
   //    (2.3) Use kernel from DispatchKey::Autograd if available
   //    (2.4) Special logic to handle catchAll for Autograd keys
   //          For autograd backend keys, we use kernel from alias Math key (catchAll will be moved to Math)
@@ -205,6 +208,10 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //  (4) Use catchAll kernel if available
   // Alias Key Precedence:
   //   DefaultBackend > Math > Autograd
+  // Note [DefaultBackend and Math]
+  //   When there're registrations to both DefaultBackend & Math & Autograd, from (2.2) we know DefaultBackend
+  //   and Autograd kernels will be picked up and Math is overriden.
+  //   This is fine since in practice DefaultBackend and Math shouldn't co-exist for an op.
   // TODO: Update alias key precedence after we add new alias keys AutogradDispatchCPUOrCUDA .
   // TODO: we can remove (2.4) and (4) after TypeDefault registrations are moved from catchAll to Math
   //       so that Math can populate to Autograd backend keys before fallback kernels.
@@ -222,14 +229,15 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   }
 
   bool is_autograd_key_with_backend_kernel =
-    hasKernelForDispatchKeySet(getBackendKeySetFromAutograd(dispatch_key));
+    hasKernelForDispatchKeySet(getBackendKeySetFromAutograd(dispatch_key).add(DispatchKey::DefaultBackend));
   // 2.2. Use Math kernel if available. For autograd keys, we only use kernel from Math
-  //      when there's no direct registration to its corresponding backend key.
+  //      when there's no direct registration to its corresponding backend key or DefaultBackend.
   //      For AutogradOther, we return ambiguousAutogradOtherKernel_ if there's registration
   //      to any of its backends.
   if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::Math)) {
     if (auto math_registration = getKernelForDispatchKey(DispatchKey::Math)) {
-      if (dispatch_key == DispatchKey::AutogradOther && is_autograd_key_with_backend_kernel) {
+      if (dispatch_key == DispatchKey::AutogradOther
+          && hasKernelForDispatchKeySet(c10::autogradother_backends)) {
         return {ambiguousAutogradOtherKernel_, "ambiguous autogradother"};
       } else if (!is_autograd_key_with_backend_kernel) {
         return {*math_registration.value(), "math kernel"};
@@ -245,7 +253,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   }
 
   // 2.4. For autograd backend keys, we use kernel from catchAll if there's no direct
-  //      registration to the backend key. Once CatchAll is moved to Math, this should
+  //      registration to the backend key or DefaultBackend. Once CatchAll is moved to Math, this should
   //      fit 2.1 and we can remove 2.3 entirely.
   if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)
       && !is_autograd_key_with_backend_kernel && !catchAllKernel_.empty()) {
