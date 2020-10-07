@@ -245,7 +245,8 @@ def typename(o):
     else:
         class_name = o.__class__.__name__
 
-    if isinstance(o, _GenericAlias):
+    # TODO: There's gotta be a better way to do this
+    if o.__module__ == 'typing':
         return str(o)
 
     return module + class_name
