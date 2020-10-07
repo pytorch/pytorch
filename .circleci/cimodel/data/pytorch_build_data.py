@@ -52,9 +52,7 @@ CONFIG_TREE_DATA = [
             ("11.0", [
                 ("3.8", [
                     X(True),
-                    ("libtorch", [
-                        ("shard_test", [XImportant(True)]),
-                    ])
+                    ("libtorch", [XImportant(True)]),
                 ]),
             ]),
         ]),
@@ -275,7 +273,7 @@ class ShardTestConfigNode(TreeConfigNode):
         self.props["shard_test"] = node_name
 
     def child_constructor(self):
-        return ExperimentalFeatureConfigNode
+        return ImportantConfigNode
 
 class CoverageConfigNode(TreeConfigNode):
     def init2(self, node_name):
