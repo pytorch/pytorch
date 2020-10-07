@@ -12,7 +12,6 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/NumericUtils.h>
 #include <c10/cuda/CUDAMathCompat.h>
-#include <ATen/NumericUtils.h>
 #include <c10/util/complex.h>
 
 namespace at {
@@ -159,12 +158,7 @@ void clamp_kernel_cuda(TensorIterator& iter, Scalar min_value, Scalar max_value)
     auto lower = min_value.to<scalar_t>();
     auto upper = max_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
-      // Propagate nan, which doesn't propagate automatically for ROCm
-      if (_isnan(v)) {
-        return v;
-      } else {
-        return ::min(::max(v, lower), upper);
-      }
+      return (v < lower) ? lower : (v > upper ? upper : v);
     });
   });
 }
@@ -173,12 +167,7 @@ void clamp_min_kernel_cuda(TensorIterator& iter, Scalar min_value) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_min_cuda", [&]() {
     auto lower = min_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
-      // Propagate nan, which doesn't propagate automatically for ROCm
-      if (_isnan(v)) {
-        return v;
-      } else {
-        return ::max(v, lower);
-      }
+      return v < lower ? lower : v;
     });
   });
 }
@@ -187,12 +176,7 @@ void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
   AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_max_cuda", [&]() {
     auto upper = max_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
-      // Propagate nan, which doesn't propagate automatically for ROCm
-      if (_isnan(v)) {
-        return v;
-      } else {
-        return ::min(v, upper);
-      }
+      return v > upper ? upper : v;
     });
   });
 }
