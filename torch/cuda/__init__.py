@@ -100,6 +100,7 @@ If you want to use the {} GPU with PyTorch, please check the instructions at htt
         supported = any([sm // 10 == cap_major for sm in supported_sm])
         if not supported:
             device_name = get_device_name(idx)
+            capability = cap_major * 10 + cap_minor
             warnings.warn(incompatible_device_warn.format(device_name, capability, " ".join(arch_list), device_name))
 
 

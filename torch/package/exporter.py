@@ -8,11 +8,12 @@ from ._custom_import_pickler import CustomImportPickler
 from ._importlib import _normalize_path
 import types
 import importlib
-from typing import List, Any, Callable, Dict
+from typing import List, Any, Callable, Dict, Tuple
 from distutils.sysconfig import get_python_lib
 from pathlib import Path
 import linecache
 import sys
+from urllib.parse import quote
 
 class PackageExporter:
     """ Exporters allow you to write packages of code, pickled python data, and
@@ -70,6 +71,7 @@ class PackageExporter:
         self.provided : Dict[str, bool] = {}
         self.verbose = verbose
         self.importers = [importlib.import_module]
+        self.debug_deps : List[Tuple[str, str]] = []
 
     def save_source_file(self, module_name: str, file_or_directory: str, dependencies=True):
         """Adds the local file system `file_or_directory` to the source package to provide the code
@@ -131,15 +133,9 @@ class PackageExporter:
         self._write(filename, src)
         if dependencies:
             package = module_name if is_package else module_name.rsplit('.', maxsplit=1)[0]
-            dep_list = find_files_source_depends_on(src, package)
-            if self.verbose:
-                def fmt_dep(mod, obj):
-                    return f'{mod}' if obj is None else f'{mod}.{obj}'
-                dep_str = ''.join(f'  {fmt_dep(mod, obj)}\n' for mod, obj in dep_list)
-                file_info = f'(from file {orig_file_name}) ' if orig_file_name is not None else ''
-                print(f"{module_name} {file_info}depends on:\n{dep_str}\n")
-
-            for dep_module_name, dep_module_obj in dep_list:
+            dep_pairs = find_files_source_depends_on(src, package)
+            dep_list = {}
+            for dep_module_name, dep_module_obj in dep_pairs:
                 # handle the case where someone did something like `from pack import sub`
                 # where `sub` is a submodule. In this case we don't have to save pack, just sub.
                 # this ensures we don't pick up additional dependencies on pack.
@@ -148,25 +144,53 @@ class PackageExporter:
                 if dep_module_obj is not None:
                     possible_submodule = f'{dep_module_name}.{dep_module_obj}'
                     if self._module_exists(possible_submodule):
-                        self.require_module_if_not_provided(possible_submodule)
+                        dep_list[possible_submodule] = True
                         # we don't need to save `pack`
                         continue
                 if self._module_exists(dep_module_name):
-                    self.require_module_if_not_provided(dep_module_name)
+                    dep_list[dep_module_name] = True
+
+            for dep in dep_list.keys():
+                self.debug_deps.append((module_name, dep))
+
+            if self.verbose:
+                dep_str = ''.join(f'  {dep}\n' for dep in dep_list.keys())
+                file_info = f'(from file {orig_file_name}) ' if orig_file_name is not None else ''
+                print(f"{module_name} {file_info}depends on:\n{dep_str}\n")
+
+            for dep in dep_list.keys():
+                self.require_module_if_not_provided(dep)
 
     def _module_exists(self, module_name: str) -> bool:
         try:
             self._import_module(module_name)
             return True
-        except ModuleNotFoundError:
+        except Exception:
             return False
+
+    def _write_dep_graph(self, failing_module=None):
+        edges = '\n'.join(f'"{f}" -> "{t}";' for f, t in self.debug_deps)
+        failing = '' if failing_module is None else f'{failing_module} [color=red];'
+        template = f"""\
+digraph G {{
+rankdir = LR;
+node [shape=box];
+{failing}
+{edges}
+}}
+"""
+        arg = quote(template, safe='')
+        return f'https://dreampuf.github.io/GraphvizOnline/#{arg}'
 
     def _get_source_of_module(self, module: types.ModuleType) -> str:
         filename = getattr(module, '__file__', None)
-        result = None if filename is None else linecache.getlines(filename, module.__dict__)
+        result = None if filename is None or not filename.endswith('.py') else linecache.getlines(filename, module.__dict__)
         if result is None:
+            extra = ''
+            if self.verbose:
+                extra = f' See the dependency graph for more info: {self._write_dep_graph(module.__name__)}'
             raise ValueError(f'cannot save source for module "{module.__name__}" because '
-                             f'its source file "{filename}" could not be found.')
+                             f'its source file "{filename}" could not be found.{extra}')
         return ''.join(result)
 
     def require_module_if_not_provided(self, module_name: str, dependencies=True):
@@ -211,6 +235,7 @@ class PackageExporter:
                 return import_module(module_name)
             except ModuleNotFoundError as err:
                 last_err = err
+
         if last_err is not None:
             raise last_err
         else:
@@ -257,6 +282,9 @@ class PackageExporter:
                     module, field = arg.split(' ')
                     if module not in all_dependencies:
                         all_dependencies.append(module)
+
+            for dep in all_dependencies:
+                self.debug_deps.append((package + '.' + resource, dep))
 
             if self.verbose:
                 dep_string = ''.join(f'  {dep}\n' for dep in all_dependencies)
@@ -377,6 +405,9 @@ class PackageExporter:
             with PackageExporter("file.zip") as e:
                 ...
         """
+        if self.verbose:
+            print(f"Dependency graph for exported package: {self._write_dep_graph()}")
+
         # Write each tensor to a file named tensor/the_tensor_key in the zip archive
         for key in sorted(self.serialized_storages.keys()):
             name = 'data/{}'.format(key)
@@ -395,6 +426,7 @@ class PackageExporter:
         self._write('extern_modules', contents)
         del self.zip_file
 
+
     def _filename(self, package, resource):
         package_path = package.replace('.', '/')
         resource = _normalize_path(resource)
@@ -412,7 +444,7 @@ _DISALLOWED_MODULES = ['sys', 'io']
 def _is_builtin_or_stdlib_module(module: types.ModuleType) -> bool:
     if module.__name__ in sys.builtin_module_names:
         return True
-    filename = module.__file__
+    filename = getattr(module, '__file__', None)
     if filename is None:
         return False
     standard_lib = get_python_lib(standard_lib=True)
