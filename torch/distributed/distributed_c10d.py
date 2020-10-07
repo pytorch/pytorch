@@ -933,6 +933,7 @@ def all_reduce(tensor,
     After the call ``tensor`` is going to be bitwise identical in all processes.
 
     Complex tensors are supported.
+    They are not supported for the Max and Min ReduceOps, however.
 
     Arguments:
         tensor (Tensor): Input and output of the collective. The function
@@ -1014,6 +1015,7 @@ def all_reduce_coalesced(tensors,
     in all processes.
 
     Complex tensors are supported.
+    They are not supported for the Max and Min ReduceOps, however.
 
     Arguments:
         tensors (List[Tensor]): Input and output of the collective. The function
