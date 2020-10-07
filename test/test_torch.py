@@ -15440,7 +15440,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    @dtypes(torch.double, torch.complex64, torch.complex128)
     def test_lu(self, device, dtype):
         from torch.testing._internal.common_utils import random_matrix
 
@@ -15466,14 +15466,34 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(a_LU, a_LU_info)
                 self.assertEqual(pivots_info, pivots)
 
+                a = a.view(-1, a.size(-2), a.size(-1))
+                a_LU = a_LU.view(-1, a_LU.size(-2), a_LU.size(-1))
+                pivots = pivots.view(-1, pivots.size(-1))
+
                 P, L, U = torch.lu_unpack(a_LU, pivots)
-                self.assertEqual(P.matmul(L.matmul(U)), a)
+                # no bmm_out for CUDA yet,
+                # NOTE: replace with
+                # self.assertEqual(P.matmul(L.matmul(U)), a)
+                # once bmm_out is implemented for CUDA
+                for i in range(a.size(0)):
+                    self.assertEqual(
+                        P.select(0, i) @ L.select(0, i) @ U.select(0, i),
+                        a.select(0, i)
+                    )
 
                 if self.device_type == 'cuda':
                     # lu without pivoting is implemented only for cuda device
                     a_LU_info_nopiv, nopiv, info_nopiv = a.lu(pivot=False, get_infos=True)
                     P_nopiv, L_nopiv, U_nopiv = torch.lu_unpack(a_LU_info_nopiv, nopiv)
-                    self.assertEqual(P_nopiv.matmul(L_nopiv.matmul(U_nopiv)), a)
+                    # NOTE: replace with
+                    # self.assertEqual(P_nopiv.matmul(L_nopiv.matmul(U_nopiv)), a)
+                    # once bmm_out supports CUDA
+                    for i in range(a.size(0)):
+                        self.assertEqual(
+                            P_nopiv.select(0, i) @ L_nopiv.select(0, i) @ U_nopiv.select(0, i),
+                            a.select(0, i)
+                        )
+
                     k = min(rows, columns)
                     self.assertEqual(nopiv, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(a.shape[:-2] + (k, )))
                     if not singular:
@@ -15483,7 +15503,7 @@ class TestTorchDeviceType(TestCase):
                         # with pivoting is. Therefore, we require the
                         # equality of info-s only for non-singular
                         # matrices.
-                        self.assertEqual(info_, info_nopiv)
+                        self.assertEqual(info_ if info_.dim() > 0 else info_.unsqueeze(0), info_nopiv)
 
             for ms, batch in product([3, 5, 7, (4, 2), (3, 4)], [(), (2,), (3,), (3, 5)]):
                 run_subtest(ms, batch, device, pivot)
