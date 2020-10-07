@@ -245,48 +245,49 @@ class DynamicShape(object):
     Pre-computes input with random shapes and also computes
     with random shapes
     '''
-    
+
     # number of random inputs in an instance
     SAMPLE_SIZE = 100
-    
+
     def __init__(self, dynamic_range=1.2):
         self._input_samples = []
         self._input_sample_index = 0
-        self._dynamic_range = 1./dynamic_range if dynamic_range>1.0 else dynamic_range
+        self._dynamic_range = 1. / dynamic_range if dynamic_range > 1.0 else dynamic_range
 
-    # returns the input test case that current index points to 
+    # returns the input test case that current index points to
     @property
     def inputs(self):
         return self._input_samples[self._input_sample_index]
 
     # an inputs assignment actually adds a test case in the class buffer
     @inputs.setter
-    def inputs(self,val):
+    def inputs(self, val):
         self._input_samples.append(val)
-    
+
     # runs normal compute while increment test case index
     def compute(self):
         super().compute()
-        self._input_sample_index = (self._input_sample_index +1) % self.SAMPLE_SIZE
-    
+        self._input_sample_index = (self._input_sample_index + 1) % self.SAMPLE_SIZE
+
     # defined by benchmark
     def instantiate_input(self):
         raise NotImplementedError
 
     # pre-compute inputs so the creations
     def load_inputs(self):
-        for i in range(self.SAMPLE_SIZE-1):
+        for i in range(self.SAMPLE_SIZE - 1):
             self.instantiate_input()
 
     # returns a randomized shape
     def rand_shape(self, shape):
         if 'PYTORCH_CUDA_FUSER_NO_DYNSHAPE' in os.environ:
             return shape
-        ratios = np.random.uniform(self._dynamic_range,1.0,len(shape))
+        ratios = np.random.uniform(self._dynamic_range, 1.0, len(shape))
         dyn_shape = list(
-            np.multiply(shape,ratios).astype(int)
+            np.multiply(shape, ratios).astype(int)
         )
         return dyn_shape
+
 
 benchmark_classes = []
 

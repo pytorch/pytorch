@@ -67,16 +67,15 @@ class RNNEltwise(benchmark.Benchmark):
 benchmark.register_benchmark_class(RNNEltwise)
 
 
-
-class DynamicLSTM(benchmark.DynamicShape,RNNEltwise):
+class DynamicLSTM(benchmark.DynamicShape, RNNEltwise):
     def __init__(self, mode, device, dtype, b, hs):
         benchmark.DynamicShape.__init__(self)
-        RNNEltwise.__init__(self,mode, device, dtype, b, hs)
-        
+        RNNEltwise.__init__(self, mode, device, dtype, b, hs)
+
         self.load_inputs()
-        
+
     def instantiate_input(self):
-        b,hs = self.rand_shape([self.b,self.hs])
+        b, hs = self.rand_shape([self.b, self.hs])
 
         self.input = self.rand(
             [b, 4 * hs], device=self.device, dtype=self.dtype, requires_grad=self.requires_grad

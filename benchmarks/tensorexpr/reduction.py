@@ -156,26 +156,28 @@ benchmark.register_benchmark_class(Reduce2DInnerBench)
 benchmark.register_benchmark_class(Reduce2DOuterBench)
 
 
-class DynamicReduce2DBench(benchmark.DynamicShape,Reduce2DBench):
+class DynamicReduce2DBench(benchmark.DynamicShape, Reduce2DBench):
     '''
     A benchmark class to validate 2 dimensional reduction performance.
     Only a simple add is fused to induce the fuser and isolate reduction perf.
     '''
+
     def __init__(self, mode, device, dtype, red_dim, dim0, dim1):
         benchmark.DynamicShape.__init__(self)
-        Reduce2DBench.__init__(self,mode,device, dtype, red_dim, dim0, dim1)
+        Reduce2DBench.__init__(self, mode, device, dtype, red_dim, dim0, dim1)
         self.load_inputs()
 
     def instantiate_input(self):
-        dim0,dim1 = self.rand_shape([self.dim0,self.dim1])
+        dim0, dim1 = self.rand_shape([self.dim0, self.dim1])
 
         self.inputs = [self.randn(
-                [dim0, dim1], device=self.device, dtype=self.dtype, requires_grad=self.requires_grad
-            )]
+            [dim0, dim1], device=self.device, dtype=self.dtype, requires_grad=self.requires_grad
+        )]
 
     @staticmethod
     def module():
         return "dynamic_reduce2d"
+
 
 class DynamicReduce2DInnerBench(DynamicReduce2DBench):
     def __init__(self, mode, device, dtype, dim0, dim1):
@@ -184,6 +186,7 @@ class DynamicReduce2DInnerBench(DynamicReduce2DBench):
     @staticmethod
     def module():
         return "dynamic_reduce2d_inner"
+
 
 class DynamicReduce2DOuterBench(DynamicReduce2DBench):
     def __init__(self, mode, device, dtype, dim0, dim1):
