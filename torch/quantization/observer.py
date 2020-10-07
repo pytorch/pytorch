@@ -136,7 +136,8 @@ class _ObserverBase(ObserverBase):
         assert self.dtype in (
             torch.qint8,
             torch.quint8,
-        ), "Default Observer only works for qint8 and quint8 data type"
+            torch.quint4x2,
+        ), "Default Observer only works for qint8, quint8 and quint4x2 data type"
         self.has_customized_qrange = (quant_min is not None) and (quant_max is not None)
         if self.has_customized_qrange:
             self._validate_qmin_qmax(quant_min, quant_max)
@@ -208,11 +209,13 @@ class _ObserverBase(ObserverBase):
                     quant_min, quant_max = -64, 63
                 else:
                     quant_min, quant_max = -128, 127
-            else:
+            elif self.dtype == torch.quint8:
                 if self.reduce_range:
                     quant_min, quant_max = 0, 127
                 else:
                     quant_min, quant_max = 0, 255
+            else:
+                quant_min, quant_max = 0, 15
         return quant_min, quant_max
 
     @torch.jit.export
