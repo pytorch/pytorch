@@ -946,10 +946,6 @@ void Reducer::prepare_for_backward(
   std::unordered_set<torch::autograd::Node*> seen;
   std::vector<torch::autograd::Node*> queue;
 
-  // Ensure that previous backward pass communication has finished before
-  // kicking off the next backward.
-  ensure_prior_reduction_finished();
-
   // Reset accounting.
   expect_autograd_hooks_ = true;
   next_bucket_ = 0;
@@ -1304,16 +1300,15 @@ void Reducer::sync_bucket_indices(
 }
 
 bool Reducer::rebuild_buckets() {
+  // Ensure reduction for previous backwards pass is finished. If user's model
+  // has unused parameters for example, this will raise an error recommending to
+  // run with find_unused_parameters=True, instead of the size mismatch
+  // exception below.
+  ensure_prior_reduction_finished();
   std::lock_guard<std::mutex> lock(mutex_);
   if (!should_rebuild_buckets() || rebuilt_params_.empty()) {
     return false;
   }
-
-  // Ensure reduction for previous backwards pass is finished. If user's model
-  // has unused parameters for example, this will raise an error recommending to
-  // run with find_unused_parameters=True, instead of the size mismatch exception
-  // below.
-  ensure_prior_reduction_finished();
 
   TORCH_INTERNAL_ASSERT(
       rebuilt_params_.size() == rebuilt_param_indices_.size(),
