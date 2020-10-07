@@ -2914,7 +2914,7 @@
 
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
   use_c10_dispatcher: full
-  variants: method # This is method-only to match the previous tensor API. In the future we could make this a function too.
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   dispatch:
     DefaultBackend: permute
 
@@ -3127,7 +3127,7 @@
 
 - func: repeat(Tensor self, int[] repeats) -> Tensor
   use_c10_dispatcher: full
-  variants: method # This is method-only to match the previous tensor API. In the future we could make this a function too.
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   dispatch:
     DefaultBackend: repeat
 

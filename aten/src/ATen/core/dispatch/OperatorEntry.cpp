@@ -211,7 +211,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // Note [DefaultBackend and Math]
   //   When there're registrations to both DefaultBackend & Math & Autograd, from (2.2) we know DefaultBackend
   //   and Autograd kernels will be picked up and Math is overriden.
-  //   This is fine since in practice DefaultBackend and Math shouldn't co-exist for an op.
+  //   This is fine and in practice DefaultBackend and Math shouldn't co-exist for an op.
   // TODO: Update alias key precedence after we add new alias keys AutogradDispatchCPUOrCUDA .
   // TODO: we can remove (2.4) and (4) after TypeDefault registrations are moved from catchAll to Math
   //       so that Math can populate to Autograd backend keys before fallback kernels.
