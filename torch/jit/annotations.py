@@ -6,6 +6,7 @@ import torch
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore
+from ._state import _get_script_class
 
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
@@ -320,12 +321,13 @@ def try_ann_to_type(ann, loc):
             torch.jit._script._recursive_compile_class(ann, loc)
         return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc), list(ann))
     if inspect.isclass(ann):
-        if hasattr(ann, "__torch_script_class__") and len(ann.mro()) <= 2:
-            return ClassType(_qualified_name(ann))
+        qualified_name = _qualified_name(ann)
+        if _get_script_class(qualified_name) is not None:
+            return ClassType(qualified_name)
         ignored_builtin_classes = (torch.nn.Module, tuple, list, Exception)
         if torch._jit_internal.can_compile_class(ann) and not issubclass(ann, ignored_builtin_classes):
             torch.jit._script._recursive_compile_class(ann, loc)
-            return ClassType(_qualified_name(ann))
+            return ClassType(qualified_name)
 
     # Maybe resolve a NamedTuple to a Tuple Type
     def fake_rcb(key):
