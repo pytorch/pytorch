@@ -21,20 +21,19 @@ convolution_notes = \
 
         * At groups=1, all inputs are convolved to all outputs.
         * At groups=2, the operation becomes equivalent to having two conv
-          layers side by side, each seeing half the input channels,
+          layers side by side, each seeing half the input channels
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
           its own set of filters (of size
-          : math: `\left\lfloor\\frac{out\_channels}{in\_channels}\\right\\rfloor`).""",  # noqa: W605
+          :math:`\\frac{\\text{out\_channels}}{\\text{in\_channels}}`).""",  # noqa: W605
 
         "depthwise_separable_note": """When `groups == in_channels` and `out_channels == K * in_channels`,
-        where `K` is a positive integer, this operation is also termed in
-        literature as depthwise convolution.
+        where `K` is a positive integer, this operation is also known as a "depthwise convolution".
 
         In other words, for an input of size :math:`(N, C_{in}, L_{in})`,
-        a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
-        :math:`(C_\\text{in}=C_{in}, C_\\text{out}=C_{in} \\times K, ..., \\text{groups}=C_{in})`."""}
+        a depthwise convolution with a depthwise multiplier `K` can be performed with the arguments
+        :math:`(C_\\text{in}=C_\\text{in}, C_\\text{out}=C_\\text{in} \\times \\text{K}, ..., \\text{groups}=C_\\text{in})`."""}  # noqa: W605
 
 
 
