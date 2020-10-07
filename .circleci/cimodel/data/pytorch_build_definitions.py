@@ -310,7 +310,6 @@ def instantiate_configs():
             parms_list.append("asan")
             python_version = fc.find_prop("pyver")
             parms_list[0] = fc.find_prop("abbreviated_pyver")
-            restrict_phases = ["build", "test1", "test2"]
 
         if is_onnx:
             parms_list.append("onnx")

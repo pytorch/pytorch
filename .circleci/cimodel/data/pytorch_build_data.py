@@ -18,7 +18,9 @@ CONFIG_TREE_DATA = [
         ("clang", [
             ("5", [
                 ("3.6", [
-                    ("asan", [XImportant(True)]),
+                    ("asan", [
+                        ("shard_test", [XImportant(True)]),
+                    ]),
                 ]),
             ]),
             ("7", [
@@ -196,7 +198,7 @@ class AsanConfigNode(TreeConfigNode):
         self.props["is_asan"] = node_name
 
     def child_constructor(self):
-        return ImportantConfigNode
+        return ShardTestConfigNode
 
 
 class ONNXConfigNode(TreeConfigNode):
@@ -261,6 +263,7 @@ class CudaGccOverrideConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ExperimentalFeatureConfigNode
 
+
 class BuildOnlyConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["build_only"] = node_name
@@ -268,12 +271,14 @@ class BuildOnlyConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ExperimentalFeatureConfigNode
 
+
 class ShardTestConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["shard_test"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode
+
 
 class CoverageConfigNode(TreeConfigNode):
     def init2(self, node_name):
