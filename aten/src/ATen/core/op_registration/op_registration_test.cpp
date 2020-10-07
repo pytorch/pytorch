@@ -1831,7 +1831,7 @@ TEST(NewOperatorRegistrationTest, dispatchWithDefaultBackendKernel) {
 
   {
     called = false;
-    // AutogradCPU is fallthrough, calls CPU kernel
+    // AutogradXLA is fallthrough, calls XLA kernel
     callOp(*op, dummyTensor(c10::DispatchKey::XLA, /*requires_grad=*/true));
     ASSERT_TRUE(called);
   }
@@ -1869,9 +1869,10 @@ TEST(NewOperatorRegistrationTest, dispatchWithDefaultBackendAndMathKernel) {
 
   {
     backend_called = math_called = false;
+    // AutogradCPU is fallthrough, calls CPU kernel
     callOp(*op, dummyTensor(c10::DispatchKey::CPU, /*requires_grad=*/true));
-    ASSERT_TRUE(math_called);
-    ASSERT_FALSE(backend_called);
+    ASSERT_FALSE(math_called);
+    ASSERT_TRUE(backend_called);
   }
 
   {
@@ -1883,9 +1884,10 @@ TEST(NewOperatorRegistrationTest, dispatchWithDefaultBackendAndMathKernel) {
 
   {
     backend_called = math_called = false;
+    // AutogradXLA is fallthrough, calls XLA kernel
     callOp(*op, dummyTensor(c10::DispatchKey::XLA, /*requires_grad=*/true));
-    ASSERT_TRUE(math_called);
-    ASSERT_FALSE(backend_called);
+    ASSERT_FALSE(math_called);
+    ASSERT_TRUE(backend_called);
   }
 
   {
@@ -1897,9 +1899,10 @@ TEST(NewOperatorRegistrationTest, dispatchWithDefaultBackendAndMathKernel) {
 
   {
     backend_called = math_called = false;
+    // AutogradOther is fallthrough, calls SparseCPU kernel
     callOp(*op, dummyTensor(c10::DispatchKey::SparseCPU, /*requires_grad=*/true));
-    ASSERT_TRUE(math_called);
-    ASSERT_FALSE(backend_called);
+    ASSERT_FALSE(math_called);
+    ASSERT_TRUE(backend_called);
   }
 }
 
