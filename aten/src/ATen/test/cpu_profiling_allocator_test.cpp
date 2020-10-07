@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <c10/core/CPUAllocator.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
 #include <ATen/ATen.h>
+#include <ATen/Context.h>
 
 at::Tensor run_with_control_flow(
     at::Tensor input,
@@ -158,10 +160,12 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
 }
 
 int main(int argc, char* argv[]) {
-// At the moment caching allocator is only exposed to mobile cpu allocator.
-#ifdef C10_MOBILE
+  c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator());
+  // Need to disable mkldnn for this test since it allocatred memory
+  // via raw_allocate inteface which requires context pointer and raw
+  // pointer to be the same. Tis is not true for mobile allocator.
+  at::globalContext().setUserEnabledMkldnn(false);
   ::testing::InitGoogleTest(&argc, argv);
   at::manual_seed(42);
   return RUN_ALL_TESTS();
-#endif /* C10_Mobile */
 }
