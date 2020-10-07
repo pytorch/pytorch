@@ -16819,8 +16819,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         a = torch.rand(65537, 22, 64).cuda().half()
         b = torch.rand(65537, 64, 22).cuda().half()
         c = torch.full((65537, 22, 22), math.nan, dtype=torch.half, device='cuda')
+        cpu_result = torch.matmul(a.cpu().float(), b.cpu().float()).cuda().half()
         torch.matmul(a, b, out=c)
-        self.assertFalse(c.isnan().any().item())
+        self.assertEqual(c, cpu_result)
 
     def _test_dot_vdot_vs_numpy(self, device, dtype, torch_fn, np_fn):
         def compare_with_numpy_bin_op(torch_fn, np_fn, x, y):
