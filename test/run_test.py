@@ -139,6 +139,7 @@ PYTEST_TESTS = [
 # These tests are slow enough that it's worth calculating whether the patch
 # touched any related files first.
 SLOW_TESTS = [
+    'distributions/test_distributions',
     'test_nn',
     'test_autograd',
     'test_cpp_extensions_jit',
@@ -159,7 +160,6 @@ SLOW_TESTS = [
     'test_cpp_extensions_aot_ninja',
     'test_cpp_extensions_aot_no_ninja',
     'test_serialization',
-    'test_distributions',
     'test_optim',
     'test_utils',
     'test_multiprocessing',
