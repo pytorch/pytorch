@@ -7,14 +7,27 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/utils/python_arg_parsing.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/structseq.h"
+#include "torch/csrc/utils/cuda_lazy_init.h"
+
+#include <ATen/ATen.h>
 
 using at::Tensor;
+using at::Device;
+using at::Layout;
 using at::Scalar;
-using at::MemoryFormat;
-using at::Generator;
+using at::ScalarType;
+using at::Backend;
+using at::OptionalDeviceGuard;
+using at::DeviceGuard;
+using at::TensorOptions;
 using at::IntArrayRef;
+using at::Generator;
+using at::TensorList;
+using at::Dimname;
+using at::DimnameList;
 
 using namespace torch::autograd::utils;
 

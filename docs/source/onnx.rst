@@ -649,16 +649,16 @@ This mode is used to export all operators as regular ONNX operators. This is the
 
   Example torch ir graph:
 
-    graph(%0 : Float(2:12, 3:4, 4:1)):
-      %3 : Float(2:12, 3:4, 4:1) = aten:exp(%0)
-      %4 : Float(2:12, 3:4, 4:1) = aten:div(%0, %3)
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %3 : Float(2, 3, 4, strides=[12, 4, 1]) = aten:exp(%0)
+      %4 : Float(2, 3, 4, strides=[12, 4, 1]) = aten:div(%0, %3)
       return (%4)
 
   Is exported as:
 
-    graph(%0 : Float(2:12, 3:4, 4:1)):
-      %1 : Float(2:12, 3:4, 4:1) = onnx:Exp(%0)
-      %2 : Float(2:12, 3:4, 4:1) = onnx:Div(%0, %1)
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %1 : Float(2, 3, 4, strides=[12, 4, 1]) = onnx:Exp(%0)
+      %2 : Float(2, 3, 4, strides=[12, 4, 1]) = onnx:Div(%0, %1)
       return (%2)
 
 
@@ -668,16 +668,16 @@ This mode is used to export all operators as ATen ops, and avoid conversion to O
 
   Example torch ir graph:
 
-    graph(%0 : Float(2:12, 3:4, 4:1)):
-      %3 : Float(2:12, 3:4, 4:1) = aten::exp(%0)
-      %4 : Float(2:12, 3:4, 4:1) = aten::div(%0, %3)
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %3 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::exp(%0)
+      %4 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::div(%0, %3)
       return (%4)
 
   Is exported as:
 
-    graph(%0 : Float(2:12, 3:4, 4:1)):
-      %1 : Float(2:12, 3:4, 4:1) = aten::ATen[operator="exp"](%0)
-      %2 : Float(2:12, 3:4, 4:1) = aten::ATen[operator="div"](%0, %1)
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %1 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::ATen[operator="exp"](%0)
+      %2 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::ATen[operator="div"](%0, %1)
       return (%2)
 
 ONNX_ATEN_FALLBACK
@@ -707,7 +707,7 @@ To export a raw ir. ::
 
   Example torch ir graph:
 
-    graph(%x.1 : Float(1:1)):
+    graph(%x.1 : Float(1, strides=[1])):
       %1 : Tensor = aten::exp(%x.1)
       %2 : Tensor = aten::div(%x.1, %1)
       %y.1 : Tensor[] = prim::ListConstruct(%2)
@@ -715,7 +715,7 @@ To export a raw ir. ::
 
   is exported as:
 
-    graph(%x.1 : Float(1:1)):
+    graph(%x.1 : Float(1, strides=[1])):
       %1 : Tensor = aten::exp(%x.1)
       %2 : Tensor = aten::div(%x.1, %1)
       %y.1 : Tensor[] = prim::ListConstruct(%2)
@@ -729,18 +729,18 @@ enables users to register and implement the operator as part of their runtime ba
 
   Example torch ir graph:
 
-    graph(%0 : Float(2:12, 3:4, 4:1),
-          %1 : Float(2:12, 3:4, 4:1)):
-      %6 : Float(2:12, 3:4, 4:1) = foo_namespace::bar(%0, %1) # custom op
-      %7 : Float(2:12, 3:4, 4:1) = aten::div(%6, %0) # registered op
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1]),
+          %1 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %6 : Float(2, 3, 4, strides=[12, 4, 1]) = foo_namespace::bar(%0, %1) # custom op
+      %7 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::div(%6, %0) # registered op
       return (%7))
 
   is exported as:
 
-    graph(%0 : Float(2:12, 3:4, 4:1),
-          %1 : Float(2:12, 3:4, 4:1)):
-      %2 : Float(2:12, 3:4, 4:1) = foo_namespace::bar(%0, %1) # custom op
-      %3 : Float(2:12, 3:4, 4:1) = onnx::Div(%2, %0) # registered op
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1]),
+          %1 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %2 : Float(2, 3, 4, strides=[12, 4, 1]) = foo_namespace::bar(%0, %1) # custom op
+      %3 : Float(2, 3, 4, strides=[12, 4, 1]) = onnx::Div(%2, %0) # registered op
       return (%3
 
 

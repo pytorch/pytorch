@@ -1985,6 +1985,16 @@
     CPU: layer_norm_backward_cpu
     CUDA: layer_norm_backward_cuda
 
+- func: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: nan_to_num_(Tensor(a!) self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: nan_to_num.out(Tensor self, float? nan=None, float? posinf=None, float? neginf=None, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
@@ -5506,15 +5516,15 @@
 
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_take_out
-    CUDA: legacy::cuda::_th_take_out
+    CPU: take_out_cpu
+    CUDA: take_out_cuda
 
 - func: take(Tensor self, Tensor index) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_take
-    CUDA: legacy::cuda::_th_take
+    CPU: take_cpu
+    CUDA: take_cuda
 
 - func: take_backward(Tensor grad, Tensor input, Tensor index) -> Tensor
   use_c10_dispatcher: full
@@ -6799,13 +6809,13 @@
   dispatch:
     CPU, CUDA: smooth_l1_loss
 
-- func: smooth_l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta=1.0, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: smooth_l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: smooth_l1_loss_backward_out
     CUDA: smooth_l1_loss_backward_out
 
-- func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta=1.0) -> Tensor
+- func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
 
@@ -6964,7 +6974,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: leaky_relu
-    QuantizedCPU: heaky_relu_quantized_cpu
+    QuantizedCPU: leaky_relu_quantized_cpu
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, bool self_is_result) -> Tensor
   use_c10_dispatcher: full
@@ -8201,6 +8211,26 @@
   variants: function
 
 - func: fft_irfftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_fftfreq(int n, float d=1.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_rfftfreq(int n, float d=1.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_fftshift(Tensor self, int[1]? dim=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_ifftshift(Tensor self, int[1]? dim=None) -> Tensor
   python_module: fft
   use_c10_dispatcher: full
   variants: function

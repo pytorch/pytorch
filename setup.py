@@ -346,7 +346,7 @@ def build_deps():
 install_requires = [
     'future',
     'typing_extensions',
-    'dataclasses; python_version < "3.8"'
+    'dataclasses; python_version < "3.7"'
 ]
 
 missing_pydep = '''
