@@ -1154,18 +1154,28 @@ dist(other, p=2) -> Tensor
 See :func:`torch.dist`
 """)
 
-add_docstr_all('div',
-               r"""
+add_docstr_all('div', r"""
 div(value) -> Tensor
 
 See :func:`torch.div`
 """)
 
-add_docstr_all('div_',
-               r"""
+add_docstr_all('div_', r"""
 div_(value) -> Tensor
 
 In-place version of :meth:`~Tensor.div`
+""")
+
+add_docstr_all('divide', r"""
+divide(value) -> Tensor
+
+See :func:`torch.divide`
+""")
+
+add_docstr_all('divide_', r"""
+divide_(value) -> Tensor
+
+In-place version of :meth:`~Tensor.divide`
 """)
 
 add_docstr_all('dot',
@@ -2244,18 +2254,28 @@ movedim(source, destination) -> Tensor
 See :func:`torch.movedim`
 """)
 
-add_docstr_all('mul',
-               r"""
+add_docstr_all('mul', r"""
 mul(value) -> Tensor
 
-See :func:`torch.mul`
+See :func:`torch.mul`.
 """)
 
-add_docstr_all('mul_',
-               r"""
-mul_(value)
+add_docstr_all('mul_', r"""
+mul_(value) -> Tensor
 
-In-place version of :meth:`~Tensor.mul`
+In-place version of :meth:`~Tensor.mul`.
+""")
+
+add_docstr_all('multiply', r"""
+multiply(value) -> Tensor
+
+See :func:`torch.multiply`.
+""")
+
+add_docstr_all('multiply_', r"""
+multiply_(value) -> Tensor
+
+In-place version of :meth:`~Tensor.multiply`.
 """)
 
 add_docstr_all('multinomial',
@@ -2320,6 +2340,18 @@ add_docstr_all('ndimension',
 ndimension() -> int
 
 Alias for :meth:`~Tensor.dim()`
+""")
+
+add_docstr_all('nan_to_num', r"""
+nan_to_num(nan=0.0, posinf=None, neginf=None) -> Tensor
+
+See :func:`torch.nan_to_num`.
+""")
+
+add_docstr_all('nan_to_num_', r"""
+nan_to_num_(nan=0.0, posinf=None, neginf=None) -> Tensor
+
+In-place version of :meth:`~Tensor.nan_to_num`.
 """)
 
 add_docstr_all('ne', r"""
@@ -2542,6 +2574,13 @@ add_docstr_all('quantile',
 quantile(q, dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.quantile`
+""")
+
+add_docstr_all('nanquantile',
+               r"""
+nanquantile(q, dim=None, keepdim=False) -> Tensor
+
+See :func:`torch.nanquantile`
 """)
 
 add_docstr_all('q_scale',
@@ -2934,7 +2973,7 @@ Args:
     value (float): the source element(s) to scatter,
       incase `src` is not specified
     reduce (string): reduction operation to apply,
-      can be either 'add', 'subtract', 'multiply' or 'divide'.
+      can be either 'add' or 'multiply'.
 
 Example::
 
@@ -3092,6 +3131,20 @@ add_docstr_all('signbit',
 signbit() -> Tensor
 
 See :func:`torch.signbit`
+""")
+
+add_docstr_all('sgn',
+               r"""
+sgn() -> Tensor
+
+See :func:`torch.sgn`
+""")
+
+add_docstr_all('sgn_',
+               r"""
+sgn_() -> Tensor
+
+In-place version of :meth:`~Tensor.sgn`
 """)
 
 add_docstr_all('sin',

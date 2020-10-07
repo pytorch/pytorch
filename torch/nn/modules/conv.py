@@ -129,6 +129,8 @@ class Conv1d(_ConvNd):
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
     :math:`L` is a length of signal sequence.
 
+    This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a one-element tuple.
 
@@ -274,6 +276,8 @@ class Conv2d(_ConvNd):
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
     :math:`H` is a height of input planes in pixels, and :math:`W` is
     width in pixels.
+
+    This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a tuple.
@@ -430,6 +434,8 @@ class Conv3d(_ConvNd):
                                 \sum_{k = 0}^{C_{in} - 1} weight(C_{out_j}, k) \star input(N_i, k)
 
     where :math:`\star` is the valid 3D `cross-correlation`_ operator
+
+    This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
@@ -629,6 +635,8 @@ class ConvTranspose1d(_ConvTransposeNd):
     It is also known as a fractionally-strided convolution or
     a deconvolution (although it is not an actual deconvolution operation).
 
+    This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
@@ -680,6 +688,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         a performance cost) by setting ``torch.backends.cudnn.deterministic =
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
+
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -761,6 +770,8 @@ class ConvTranspose2d(_ConvTransposeNd):
     This module can be seen as the gradient of Conv2d with respect to its input.
     It is also known as a fractionally-strided convolution or
     a deconvolution (although it is not an actual deconvolution operation).
+
+    This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
@@ -927,6 +938,8 @@ class ConvTranspose3d(_ConvTransposeNd):
     This module can be seen as the gradient of Conv3d with respect to its input.
     It is also known as a fractionally-strided convolution or
     a deconvolution (although it is not an actual deconvolution operation).
+
+    This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
     * :attr:`stride` controls the stride for the cross-correlation.
 

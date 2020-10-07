@@ -62,6 +62,7 @@ std::ostream& operator<<(std::ostream & out, const ConvParams& params) {
       << "  benchmark = " << params.benchmark
       << "  deterministic = " << params.deterministic
       << "  cudnn_enabled = " << params.cudnn_enabled
+      << "  allow_tf32 = " << params.allow_tf32
       << "}";
   return out;
 }
@@ -196,6 +197,9 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
     return false;
   }
   if (!input.is_cuda() || !cudnn_enabled) {
+    return false;
+  }
+  if (input.scalar_type() == at::kBFloat16 || weight.scalar_type() == at::kBFloat16) {
     return false;
   }
   if (!cudnn_conv_use_channels_last(input, weight)) { // bypass dilation checks for channels-last convolution

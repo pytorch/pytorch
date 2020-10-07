@@ -1,0 +1,2 @@
+add_executable(tensorexpr_bench tensorexpr.cpp)
+target_link_libraries(tensorexpr_bench PRIVATE torch_library benchmark)

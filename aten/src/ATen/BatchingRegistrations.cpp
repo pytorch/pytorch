@@ -522,6 +522,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
 
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
+  m.impl("is_complex", native::is_complex);
+  m.impl("conj", native::conj);
 
   // view operations
   m.impl("chunk", chunk_batching_rule);
@@ -560,6 +562,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   UNARY_POINTWISE(ceil);
   UNARY_POINTWISE(cos);
   UNARY_POINTWISE(cosh);
+  UNARY_POINTWISE(_conj);
   UNARY_POINTWISE(digamma);
   UNARY_POINTWISE(exp);
   UNARY_POINTWISE(expm1);
