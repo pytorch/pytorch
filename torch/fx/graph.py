@@ -90,12 +90,6 @@ class Graph:
             val_map[node] = self.node_copy(node, lambda n : val_map[n])
         return None
 
-    def _mark_uses(self, a: Argument):
-        def add_use(n: Node):
-            n.uses += 1
-            return n
-        map_arg(a, add_use)
-
     def create_node(self, op: str, target: Target,
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None,
@@ -104,8 +98,6 @@ class Graph:
         assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
-        self._mark_uses(args)
-        self._mark_uses(kwargs)
         sanitized_name = self._register_name_used(name) if name is not None else self._name(target)
         n = Node(self, sanitized_name, op, target, args, kwargs, type_expr)
         if self._insert_point is not None:
@@ -131,10 +123,11 @@ class Graph:
     def erase_node(self, to_erase : Node):
         """
         Erases the node `to_erase` from the `Graph`. Throws an exception if
-        there are still uses of that node in the `Graph`.
+        there are still users of that node in the `Graph`.
         """
-        if to_erase.uses > 0:
-            raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {to_erase.uses} uses in the graph!')
+        if len(to_erase.users) > 0:
+            raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.users)} '
+                               f'users in the graph: {to_erase.users}!')
 
         node_indices = [i for i, n in enumerate(self._nodes) if n == to_erase]
         for idx in reversed(node_indices):
@@ -198,7 +191,6 @@ class Graph:
         return self.create_node(node.op, node.target, args, kwargs, name, node.type)
 
     def output(self, result: Argument, type_expr: Optional[Any] = None):
-        self._mark_uses(result)
         return self.create_node(op='output', target='output', args=(result,), type_expr=type_expr)
 
     def _name(self, target: Target) -> str:
@@ -342,15 +334,15 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
                 placeholder_names.append(arg_str)
                 return None
             elif n.op == 'get_attr':
-                maybe_typename = f', type={torch.typename(n.type)}' if n.type is not None else ''
-                return f'%{n.name} : [uses={n.uses}{maybe_typename}] = self.{n.target}'
+                maybe_typename = f'{torch.typename(n.type)} ' if n.type is not None else ''
+                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = self.{n.target}'
             elif n.op == 'output':
                 if n.type is not None:
                     maybe_return_typename[0] = f' -> {torch.typename(n.type)}'
                 return f'return {n.args[0]}'
             else:
-                maybe_typename = f', type={torch.typename(n.type)}' if n.type is not None else ''
-                return f'%{n.name} : [uses={n.uses}{maybe_typename}] = {n.op}[target={n.target}](' \
+                maybe_typename = f'{torch.typename(n.type)} ' if n.type is not None else ''
+                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = {n.op}[target={n.target}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
 
 

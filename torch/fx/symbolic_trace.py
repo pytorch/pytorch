@@ -137,6 +137,7 @@ class Tracer(TracerBase):
         args.extend(make_proxy_placeholder() for _ in range(1, total_args))
 
         if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
+            # TODO: type annotations for *args and **kwargs
             if co.co_flags & inspect.CO_VARARGS:
                 args.append(self._proxy_placeholder('*' + next(names_iter)))
             if co.co_flags & inspect.CO_VARKEYWORDS:

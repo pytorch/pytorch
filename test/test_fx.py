@@ -15,7 +15,7 @@ from torch.fx.proxy import TraceError
 
 from fx.quantization import Quantizer
 
-from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple, Union
+from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -665,7 +665,7 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(st)
         traced.graph.lint(traced)
         stringed = str(traced.graph)
-        for s in ['args', 'kwargs', 'uses']:
+        for s in ['args', 'kwargs', '#users']:
             assert s in stringed
 
     def test_graph_fns(self):
@@ -722,28 +722,6 @@ class TestFX(JitTestCase):
         traced(torch.rand(4, 5))
         with self.assertRaisesRegex(AssertionError, message):
             traced(torch.rand(4, 3))
-
-    def test_get_all_users_of(self):
-        graph : torch.fx.Graph = torch.fx.Graph()
-        a : torch.fx.Node = graph.create_node('placeholder', 'x')
-        b : torch.fx.Node = graph.create_node('call_module', 'linear_mod', args=(a,))
-        c : torch.fx.Node = graph.create_node('get_attr', 'y_attr')
-        d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
-        graph.output(d)
-        linear_mod : torch.nn.Module = torch.nn.Linear(3, 4)
-        add_param : torch.Tensor = torch.rand(3, 4)
-        gm : torch.fx.GraphModule = torch.fx.GraphModule(
-            {'linear_mod': linear_mod, 'y_attr' : add_param}, graph)
-        expected_uses: Dict[int, List[int]] = {
-            0: [1],
-            1: [3],
-            2: [3],
-            3: [4],
-            4: [],
-        }
-        for i, node in enumerate(graph.nodes):
-            user_indexes = GraphManipulation.get_all_users_of(gm, i)
-            assert user_indexes == expected_uses[i]
 
     def test_copy_no_remap(self):
         traced = symbolic_trace(SimpleTest())
@@ -804,6 +782,14 @@ class TestFX(JitTestCase):
         fxed = symbolic_trace(Foo())
         fxed_scripted = torch.jit.script(fxed)
         fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
+
+    def test_typename_print(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,),
+                                              type_expr=List[float])
+        output : torch.fx.Node = graph.output(b)
+        self.assertTrue('typing.List[float]' in str(graph))
 
     def test_find_single_partition(self):
         class testModule(torch.nn.Module):
@@ -931,7 +917,7 @@ class TestFX(JitTestCase):
         for node in traced.graph.nodes:
             # Test deleting with uses both in another Node and at the output
             if node.target in [operator.add, torch.relu]:
-                with self.assertRaisesRegex(RuntimeError, 'but it still had .* uses in the graph!'):
+                with self.assertRaisesRegex(RuntimeError, 'but it still had .* users in the graph'):
                     traced.graph.erase_node(node)
 
     def test_find_uses(self):
@@ -944,11 +930,12 @@ class TestFX(JitTestCase):
         graph.output((y + z + u).node)
         graph.lint()
 
-        uses_of_x = x.node.find_uses()
-        self.assertEqual(len(uses_of_x), 3)
-        expected_ops = ['relu', 'add', 'neg']
-        for node, expected in zip(uses_of_x, expected_ops):
-            assert expected in node.name
+        users_of_x = x.node.users
+        self.assertEqual(len(users_of_x), 3)
+        expected_ops = set(['relu', 'add', 'neg'])
+        for use in users_of_x:
+            assert any(use.name.startswith(prefix) for prefix in expected_ops)
+
 
     def test_multi_insert_point(self):
         graph = torch.fx.Graph()
@@ -965,6 +952,22 @@ class TestFX(JitTestCase):
         expected_ops = ['x', 'neg', 'tanh', 'relu']
         for node, expected in zip(graph.nodes, expected_ops):
             assert expected in node.name
+
+    def test_reassign_args_kwargs_uses(self):
+        graph = torch.fx.Graph()
+        x, y = Proxy(graph.placeholder('x')), Proxy(graph.placeholder('y'))
+        z = x + y
+        zed = z + z + z
+        graph.output(zed.node)
+        graph.lint()
+
+        # zed = z + z + z -> zed = z + z + x
+        zed.node.args = (zed.node.args[0], x.node)
+        self.assertEqual(x.node.users.keys(), [z.node, zed.node])
+
+        # z = x + y -> z = y + y
+        z.node.args = (y.node, y.node)
+        self.assertEqual(x.node.users.keys(), [zed.node])
 
 if __name__ == '__main__':
     run_tests()
