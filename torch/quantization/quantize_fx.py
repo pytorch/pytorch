@@ -13,8 +13,8 @@ def _check_is_graph_module(model):
             'Got type:' + str(type(model)) + ' Please make ' +
             'sure to follow the tutorials.')
 
-def fuse_fx(graph_module, inplace=False):
-    r""" Fuse modules in preparation for quantization
+def _fuse_fx(graph_module, inplace=False):
+    r""" Internal helper function to fuse modules in preparation for quantization
 
     Args:
         graph_module: GraphModule object from symbolic tracing (torch.fx.symbolic_trace)
@@ -48,7 +48,7 @@ forward graph of the parent module,
     else:
         # skipping tracing standalone modules when tracing top level module
         graph_module = GraphModule(model, CustomTracer().trace(model))
-    graph_module = fuse_fx(graph_module, inplace)
+    graph_module = _fuse_fx(graph_module, inplace)
     quantizer = Quantizer()
     return quantizer.prepare(graph_module, qconfig_dict, inplace=True, is_standalone_module=is_standalone_module)
 
@@ -68,6 +68,25 @@ def _prepare_standalone_module_fx(model, qconfig_dict, inplace=False):
 
     """
     return _prepare_fx(model, qconfig_dict, inplace, is_standalone_module=True)
+
+
+def fuse_fx(model, inplace=False):
+    r""" Fuse modules like conv+bn, conv+bn+relu etc, model must be in eval mode.
+    Fusion rules are defined in torch.quantization.fx.fusion_pattern.py
+    Args:
+        `model`: a torch.nn.Module model
+        `inplace`: flag for whether we fuse modules inplace or out of place
+
+    Example:
+    ```python
+    from torch.quantization import fuse_fx
+    m = Model().eval()
+    m = fuse_fx(m)
+    ```
+    """
+    assert not model.training, 'fuse_fx only works on models in eval mode'
+    graph_module = torch.fx.symbolic_trace(model)
+    return _fuse_fx(graph_module, inplace)
 
 def prepare_fx(model, qconfig_dict, inplace=False):
     r""" Prepare a model for post training static quantization
@@ -134,6 +153,7 @@ def prepare_fx(model, qconfig_dict, inplace=False):
     prepared_model = prepare_fx(graph_module, qconfig_dict)
     # Run calibration
     calibrate(prepared_model, sample_inference_data)
+    ```
     """
     assert not model.training, 'prepare_fx only works for models in' + \
         'eval mode'
@@ -168,6 +188,7 @@ def prepare_qat_fx(model, qconfig_dict, inplace=False):
     prepared_model = prepare_fx(float_model, qconfig_dict)
     # Run calibration
     train_loop(prepared_model, train_loop)
+    ```
     """
     assert model.training, 'prepare_qat_fx only works for models in ' + \
         'train mode'
