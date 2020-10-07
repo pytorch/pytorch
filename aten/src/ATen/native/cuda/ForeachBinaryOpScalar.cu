@@ -8,8 +8,9 @@ template<template<class> class Op>
 std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar) {
     check_foreach_api_restrictions(tensors);
 
-    std::vector<std::vector<at::Tensor>> tensor_lists; 
+    std::vector<std::vector<at::Tensor>> tensor_lists;
     std::vector<at::Tensor> vec_res;
+    vec_res.reserve(tensors.size());
     for (const auto& t: tensors) {
         vec_res.emplace_back(at::native::empty_like(t));
     }
@@ -18,7 +19,11 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar) {
     tensor_lists.emplace_back(std::move(vec_res));
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_binary_op_scalar_cuda", [&]() {
-        multi_tensor_apply<2>(tensor_lists, BinaryOpScalarFunctor<scalar_t, Op>(), scalar.to<scalar_t>());
+        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+        multi_tensor_apply<2>(tensor_lists,
+                              BinaryOpScalarFunctor<scalar_t>(),
+                              Op<opmath_t>(),
+                              scalar.to<opmath_t>());
     });
     return tensor_lists[1];
 }
@@ -27,11 +32,15 @@ template<template<class> class Op>
 void foreach_binary_op_(TensorList tensors, Scalar scalar) {
     check_foreach_api_restrictions(tensors);
 
-    std::vector<std::vector<at::Tensor>> tensor_lists; 
+    std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(tensors.vec());
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors[0].scalar_type(), "foreach_binary_op_scalar_cuda_", [&]() {
-        multi_tensor_apply<1>(tensor_lists, BinaryOpScalarFunctor_<scalar_t, Op>(), scalar.to<scalar_t>());
+        using opmath_t = get_opmath_t<scalar_t>::opmath_t;
+        multi_tensor_apply<1>(tensor_lists,
+                              BinaryOpScalarFunctor_<scalar_t>(),
+                              Op<opmath_t>(),
+                              scalar.to<opmath_t>());
     });
 }
 
