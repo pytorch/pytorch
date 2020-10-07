@@ -156,7 +156,7 @@ const KernelFunction& OperatorEntry::computeDispatchTableEntry(const c10::Dispat
   return computeDispatchTableEntryWithDebug(dispatcher, dispatch_key).first.kernel;
 }
 
-bool OperatorEntry::hasKernelForDispatchKeySet(DispatchKeySet ks) const {
+bool OperatorEntry::hasKernelForAnyDispatchKey(DispatchKeySet ks) const {
   TORCH_INTERNAL_ASSERT(kernels_.find(DispatchKey::Undefined) == kernels_.end());
   for (auto& kv : kernels_) {
     if (ks.has(kv.first)) return true;
@@ -229,7 +229,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   }
 
   bool is_autograd_key_with_backend_kernel =
-    hasKernelForDispatchKeySet(getBackendKeySetFromAutograd(dispatch_key).add(DispatchKey::DefaultBackend));
+    hasKernelForAnyDispatchKey(getBackendKeySetFromAutograd(dispatch_key).add(DispatchKey::DefaultBackend));
   // 2.2. Use Math kernel if available. For autograd keys, we only use kernel from Math
   //      when there's no direct registration to its corresponding backend key or DefaultBackend.
   //      For AutogradOther, we return ambiguousAutogradOtherKernel_ if there's registration
@@ -237,7 +237,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   if (isIncludedInAlias(dispatch_key, DispatchKey::Math)) {
     if (auto math_registration = getKernelForDispatchKey(DispatchKey::Math)) {
       if (dispatch_key == DispatchKey::AutogradOther
-          && hasKernelForDispatchKeySet(c10::autogradother_backends)) {
+          && hasKernelForAnyDispatchKey(c10::autogradother_backends)) {
         return {ambiguousAutogradOtherKernel_, "ambiguous autogradother"};
       } else if (!is_autograd_key_with_backend_kernel) {
         return {*math_registration.value(), "math kernel"};
