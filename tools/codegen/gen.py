@@ -897,7 +897,7 @@ def compute_registration_declarations(f: NativeFunction) -> str:
     comment_data : Dict[str, str] = {
         'schema': f'aten::{f.func}',
         'dispatch': str(f.dispatch is not None),
-        'math': str(f.dispatch is not None and 'Math' in f.dispatch)
+        'default': str(f.dispatch is not None and ('Math' in f.dispatch or 'DefaultBackend' in f.dispatch))
     }
     return f"""{returns_type} {name}({args_str}); // {json.dumps(comment_data)}
 """
