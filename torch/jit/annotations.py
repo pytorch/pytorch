@@ -320,7 +320,7 @@ def try_ann_to_type(ann, loc):
             torch.jit._script._recursive_compile_class(ann, loc)
         return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc), list(ann))
     if inspect.isclass(ann):
-        if hasattr(ann, "__torch_script_class__"):
+        if hasattr(ann, "__torch_script_class__") and len(ann.mro()) <= 2:
             return ClassType(_qualified_name(ann))
         ignored_builtin_classes = (torch.nn.Module, tuple, list, Exception)
         if torch._jit_internal.can_compile_class(ann) and not issubclass(ann, ignored_builtin_classes):
