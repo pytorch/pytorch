@@ -102,14 +102,20 @@ class SelectiveBuilder:
         if self.include_all_operators:
             return True
 
+        not_training_op = SelectiveBuildOperator('', False, False, False, None)
+        op = not_training_op
         if name in self.operators:
-            op: SelectiveBuildOperator = self.operators[name]
-            return op.is_used_for_training
+            op = self.operators[name]
+
         name = strip_operator_overload_name(name)
-        if name not in self.operators:
-            return False
-        base_op: SelectiveBuildOperator = self.operators[name]
-        return base_op.include_all_overloads and base_op.is_used_for_training
+        base_op = not_training_op
+        if name in self.operators:
+            base_op = self.operators[name]
+
+        return (
+            op.is_used_for_training or
+            (base_op.include_all_overloads and base_op.is_used_for_training)
+        )
 
     def is_root_operator(self, name: str) -> bool:
         if not self.is_operator_selected(name):

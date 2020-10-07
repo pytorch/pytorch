@@ -20,14 +20,16 @@ class SelectiveBuildOperator():
     # True if this is a root operator (i.e. called directly from a
     # TorchScript model, etc...). An operator is considered to be a
     # root operator if it is called directly from any one of the models
-    # that this app was built for, so it may not be a root operator
-    # in all of the models that are used in this app.
+    # that this instance of the pytorch library was built for. Hence, it
+    # may not be a root operator in all of the models that are used in
+    # this instance of the pytorch library.
     is_root_operator: bool
 
     # Is this operator used for on-device training? If True, then we need to
     # use the information to generate code in VariableType_N.cpp for registration
     # of training related operators. Again, this is True if this operator
-    # is used for training in one or more models used by this app.
+    # is used for training in one or more models used by this instance of the
+    # pytorch library.
     is_used_for_training: bool
 
     # If True, it indicates that this operator instance (object) refers to an
@@ -35,6 +37,11 @@ class SelectiveBuildOperator():
     # which have this operator name as the base name. This flag is applicable
     # only for objects that have operator names without a DOT (period) character
     # in them.
+    #
+    # Note: This flag is a temporary workaround to grandfather in the current
+    # static selective (custom) build mechanism, which largely ignores overload
+    # names when determining whether to select operators for registration
+    # purposes.
     include_all_overloads: bool
 
     # Debug Information at the operator level
@@ -125,11 +132,12 @@ def combine_operators(
     return SelectiveBuildOperator(
         lhs.name,
         # Consider this operator to be a root operator if it is a
-        # root operator in any of the models used in this app.
+        # root operator in any of the models used in this instance of
+        # the pytorch library.
         lhs.is_root_operator or rhs.is_root_operator,
         # Consider this operator to be a training operator if it is
         # an operator used for training in any of the models used
-        # in this app.
+        # in this instance of the pytorch library.
         lhs.is_used_for_training or rhs.is_used_for_training,
         lhs.include_all_overloads or rhs.include_all_overloads,
         merge_debug_info(lhs.debug_info, rhs.debug_info),
