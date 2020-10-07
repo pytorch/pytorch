@@ -266,7 +266,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
 }
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
-    : std::enable_shared_from_this<WorkNCCL>(w),
+    : Work(w.rank_, w.opType_),
+      std::enable_shared_from_this<WorkNCCL>(w),
       devices_(w.devices_),
       cudaEvents_(w.cudaEvents_),
       ncclComms_(w.ncclComms_),
