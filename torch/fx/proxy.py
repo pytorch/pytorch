@@ -11,7 +11,8 @@ class TracerBase:
     graph: Graph
 
     def create_node(self, kind : str, target : Union[str, Callable],
-                    args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None) -> Node:
+                    args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None,
+                    type_expr : Optional[Any] = None) -> Node:
         """
         Inserts a graph node given target, args, kwargs, and name.
 
@@ -19,7 +20,7 @@ class TracerBase:
         modification of values used in node creation. For example, one might
         want to disallow in-place operations from being recorded.
         """
-        return self.graph.create_node(kind, target, args, kwargs, name)
+        return self.graph.create_node(kind, target, args, kwargs, name, type_expr)
 
     def create_arg(self, a: Any) -> Argument:
         """

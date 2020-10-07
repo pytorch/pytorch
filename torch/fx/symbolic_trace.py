@@ -122,7 +122,7 @@ class Tracer(TracerBase):
     def trace(self, root: torch.nn.Module) -> Graph:
         self.root = root
         fn = type(root).forward
-        self.graph = Graph(fn.__annotations__)
+        self.graph = Graph()
 
         assert isinstance(fn, FunctionType)
         co = fn.__code__
@@ -130,7 +130,10 @@ class Tracer(TracerBase):
         names_iter = iter(co.co_varnames)
         next(names_iter)  # skip self
         args : List[Any] = [root]
-        args.extend(self._proxy_placeholder(next(names_iter)) for name in range(1, total_args))
+        def make_proxy_placeholder():
+            name = next(names_iter)
+            return self._proxy_placeholder(name, fn.__annotations__.get(name, None))
+        args.extend(make_proxy_placeholder() for _ in range(1, total_args))
 
         if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
             if co.co_flags & inspect.CO_VARARGS:
@@ -149,13 +152,14 @@ class Tracer(TracerBase):
                 return _create_proxy(self, 'call_module', module_qualified_name, args, kwargs)
         try:
             torch.nn.Module.__call__ = module_call_wrapper
-            self.create_node('output', 'output', (self.create_arg(fn(*args)),), {})
+            self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
+                             type_expr=fn.__annotations__.get('return', None))
         finally:
             torch.nn.Module.__call__ = orig_call
         return self.graph
 
-    def _proxy_placeholder(self, name: str) -> Proxy:
-        return Proxy(self.create_node('placeholder', name, (), {}), self)
+    def _proxy_placeholder(self, name: str, type_expr: Optional[Any]=None) -> Proxy:
+        return Proxy(self.create_node('placeholder', name, (), {}, type_expr=type_expr), self)
 
 # Symbolic tracing API
 #

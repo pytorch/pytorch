@@ -65,18 +65,13 @@ class insert_before:
         self.n.graph._insert_point = self.orig_insert_point
 
 class Graph:
-    def __init__(self, annotations_dict : Optional[Dict[str, Any]] = None):
+    def __init__(self):
         """
-        Construct an empty Graph. `annotations_dict` is an optional argument that
-        takes the dict that would appear on `__annotations__` for the Python
-        function that corresponds to this Graph. The annotations will be
-        used during code generation to ensure that arguments and returns have
-        the correct type annotations.
+        Construct an empty Graph.
         """
         self._nodes : List[Node] = []
         self._used_names : Dict[str, int] = {}  # base name -> number
         self._insert_point : Optional[Node] = None
-        self.annotations = annotations_dict if annotations_dict else {}
 
     @property
     def nodes(self):
@@ -105,14 +100,15 @@ class Graph:
     def create_node(self, op: str, target: Target,
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None,
-                    name: Optional[str] = None) -> Node:
+                    name: Optional[str] = None,
+                    type_expr: Optional[Any] = None) -> Node:
         assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
         self._mark_uses(args)
         self._mark_uses(kwargs)
         sanitized_name = self._register_name_used(name) if name is not None else self._name(target)
-        n = Node(self, sanitized_name, op, target, args, kwargs)
+        n = Node(self, sanitized_name, op, target, args, kwargs, type_expr)
         if self._insert_point is not None:
             before_idx = self._nodes.index(self._insert_point)
             self._nodes.insert(before_idx, n)
@@ -146,29 +142,32 @@ class Graph:
             self._nodes.pop(idx)
 
     # sugar for above when you know the op
-    def placeholder(self, name: str) -> Node:
-        return self.create_node('placeholder', name)
+    def placeholder(self, name: str, type_expr: Optional[Any] = None) -> Node:
+        return self.create_node('placeholder', name, type_expr=type_expr)
 
-    def get_attr(self, name: str) -> Node:
-        return self.create_node('get_attr', name)
+    def get_attr(self, name: str, type_expr: Optional[Any] = None) -> Node:
+        return self.create_node('get_attr', name, type_expr=type_expr)
 
     def call_module(self,
                     module_name: str,
                     args: Optional[Tuple[Argument, ...]] = None,
-                    kwargs: Optional[Dict[str, Argument]] = None) -> Node:
-        return self.create_node('call_module', module_name, args, kwargs)
+                    kwargs: Optional[Dict[str, Argument]] = None,
+                    type_expr: Optional[Any] = None) -> Node:
+        return self.create_node('call_module', module_name, args, kwargs, type_expr=type_expr)
 
     def call_method(self,
                     method_name: str,
                     args: Optional[Tuple[Argument, ...]] = None,
-                    kwargs: Optional[Dict[str, Argument]] = None) -> Node:
-        return self.create_node('call_method', method_name, args, kwargs)
+                    kwargs: Optional[Dict[str, Argument]] = None,
+                    type_expr: Optional[Any] = None) -> Node:
+        return self.create_node('call_method', method_name, args, kwargs, type_expr=type_expr)
 
     def call_function(self,
                       the_function: Callable[..., Any],
                       args: Optional[Tuple[Argument, ...]] = None,
-                      kwargs: Optional[Dict[str, Argument]] = None) -> Node:
-        return self.create_node('call_function', the_function, args, kwargs)
+                      kwargs: Optional[Dict[str, Argument]] = None,
+                      type_expr: Optional[Any] = None) -> Node:
+        return self.create_node('call_function', the_function, args, kwargs, type_expr=type_expr)
 
     def node_copy(self, node: Node, arg_transform: Callable[[Node], Argument] = lambda x: x) -> Node:
         """ copy a node from one graph into another. arg_transform needs to transform arguments from the graph of node
@@ -197,11 +196,11 @@ class Graph:
                 except ValueError:
                     pass
             name = self._name(sanitized_name)
-        return self.create_node(node.op, node.target, args, kwargs, name)
+        return self.create_node(node.op, node.target, args, kwargs, name, node.type_expr)
 
-    def output(self, result: Argument):
+    def output(self, result: Argument, type_expr: Optional[Any] = None):
         self._mark_uses(result)
-        return self.create_node(op='output', target='output', args=(result,))
+        return self.create_node(op='output', target='output', args=(result,), type_expr=type_expr)
 
     def _name(self, target: Target) -> str:
         if callable(target):
@@ -241,6 +240,7 @@ class Graph:
         free_vars: List[str] = []
         modules_used : Set[str] = set(['typing'])
         body: List[str] = []
+        maybe_return_annotation : str = ''
 
         def register_modules_used(qualified_name : str):
             if '.' in qualified_name:
@@ -255,8 +255,7 @@ class Graph:
         for node in self._nodes:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
-                maybe_type_annotation = '' if node.target not in self.annotations else \
-                                        f' : {type_repr(self.annotations[node.target])}'
+                maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
                 free_vars.append(f'{node.target}{maybe_type_annotation}')
                 raw_name = node.target.replace('*', '')
                 if raw_name != node.name:
@@ -295,14 +294,11 @@ class Graph:
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}\n')
                 continue
             elif node.op == 'output':
+                if node.type is not None:
+                    maybe_return_annotation = f" -> {type_repr(node.type)}"
                 body.append(f'return {node.args[0]}')
                 continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
-
-        if 'return' in self.annotations:
-            maybe_return_annotation = f" -> {type_repr(self.annotations['return'])}"
-        else:
-            maybe_return_annotation = ''
 
         import_block = '\n'.join(f'import {name}' for name in sorted(modules_used))
 
@@ -313,10 +309,14 @@ class Graph:
 def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
 {code}
 """
+
         return fn_code
 
     def __str__(self) -> str:
         placeholder_names : List[str] = []
+        # This is a one-element array just so `format_node` can modify the closed
+        # over value
+        maybe_return_typename : List[str] = ['']
 
         def format_arg(arg) -> str:
             if isinstance(arg, list):
@@ -338,20 +338,26 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
         def format_node(n : Node) -> Optional[str]:
             if n.op == 'placeholder':
                 assert isinstance(n.target, str)
-                placeholder_names.append(n.target)
+                arg_str = n.target
+                arg_str = arg_str + f': {torch.typename(n.type)}' if n.type is not None else ''
+                placeholder_names.append(arg_str)
                 return None
             elif n.op == 'get_attr':
-                return f'%{n.name} : [uses={n.uses}] = self.{n.target}'
+                maybe_typename = f', type={torch.typename(n.type)}' if n.type is not None else ''
+                return f'%{n.name} : [uses={n.uses}{maybe_typename}] = self.{n.target}'
             elif n.op == 'output':
+                if n.type is not None:
+                    maybe_return_typename[0] = f' -> {torch.typename(n.type)}'
                 return f'return {n.args[0]}'
             else:
-                return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}](' \
+                maybe_typename = f', type={torch.typename(n.type)}' if n.type is not None else ''
+                return f'%{n.name} : [uses={n.uses}{maybe_typename}] = {n.op}[target={n.target}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
 
 
         node_strs = [format_node(node) for node in self._nodes]
         param_str = ', '.join(placeholder_names)
-        s = f'graph({param_str}):'
+        s = f'graph({param_str}){maybe_return_typename[0]}:'
         for node_str in node_strs:
             if node_str:
                 s += '\n    ' + node_str
