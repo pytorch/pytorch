@@ -71,8 +71,8 @@ struct EndsWith {
   std::string suffix_;
 };
 
-struct Equals {
-  explicit Equals(OperatorBase& op)
+struct StrEquals {
+  explicit StrEquals(OperatorBase& op)
       : text_(op.GetSingleArgument<std::string>("text", "")) {}
   bool operator()(const std::string& str) {
     return str == text_;
@@ -121,7 +121,7 @@ REGISTER_CPU_OPERATOR(
     StringElementwiseOp<EndsWith, FixedType<bool>>);
 REGISTER_CPU_OPERATOR(
     StringEquals,
-    StringElementwiseOp<Equals, FixedType<bool>>);
+    StringElementwiseOp<StrEquals, FixedType<bool>>);
 REGISTER_CPU_OPERATOR(StringJoin, StringJoinOp<CPUContext>);
 
 OPERATOR_SCHEMA(StringPrefix)

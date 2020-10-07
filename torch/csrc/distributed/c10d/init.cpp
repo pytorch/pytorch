@@ -949,6 +949,12 @@ Arguments:
       .def(py::init<>())
       .def_readwrite("is_high_priority", &::c10d::ProcessGroupNCCL::Options::isHighPriorityStream)
       .def_readwrite("op_timeout", &::c10d::ProcessGroupNCCL::Options::opTimeout);
+  processGroupNCCL.def_static("_group_start", []() {
+    ::c10d::ProcessGroupNCCL::groupStart();
+  });
+  processGroupNCCL.def_static("_group_end", []() {
+    ::c10d::ProcessGroupNCCL::groupEnd();
+  });
 #endif
 
 #ifdef USE_C10D_MPI
