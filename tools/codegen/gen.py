@@ -316,7 +316,7 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
         sig_group = CppSignatureGroup.from_schema(f.func, method=False)
 
         if target is Target.DECLARATION:
-            result = f"\nCAFFE2_API {sig_group.signature.decl()};\n"
+            result = f"CAFFE2_API {sig_group.signature.decl()};\n"
             if sig_group.faithful_signature is not None:
                 result += f"CAFFE2_API {sig_group.faithful_signature.decl()};\n"
             return result
@@ -342,9 +342,7 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
         result = generate_defn(sig_group.signature)
         if sig_group.faithful_signature is not None:
             if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-                result = f"{generate_defn(sig_group.faithful_signature)}\n{result}"
-            else:
-                result = f"{result}\n{generate_defn(sig_group.faithful_signature)}"
+                result += generate_defn(sig_group.faithful_signature)
 
         return result
 
@@ -391,12 +389,9 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
 }}
 """
 
-        result = f"{generate_defn(sig_group.signature)}"
+        result = generate_defn(sig_group.signature)
         if sig_group.faithful_signature is not None:
-            if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-                result = f"{generate_defn(sig_group.faithful_signature)}\n{result}"
-            else:
-                result = f"{result}\n{generate_defn(sig_group.faithful_signature)}"
+            result += generate_defn(sig_group.faithful_signature)
 
         return result
 
