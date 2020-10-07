@@ -8,11 +8,11 @@ from torch._six import PY37
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, _list_with_default
 
 from collections import OrderedDict
+from typing import Dict, Optional
 
+_builtin_table: Optional[Dict[int, str]] = None
 
-_builtin_table = None
-
-_modules_containing_builtins = (torch, torch._C._nn, torch._C._fft, torch._C._linalg)
+_modules_containing_builtins = (torch, torch._C._nn, torch._C._fft, torch._C._linalg)  # type: ignore
 
 _builtin_ops = [
     # Pairs of (function, op_name)
@@ -70,7 +70,7 @@ _builtin_ops = [
     (torch.autograd.grad, "aten::grad"),
     (torch.autograd.backward, "aten::backward"),
     (torch._C._infer_size, "aten::_infer_size"),
-    (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
+    (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),  # type: ignore
     (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
     (torch.nn.init._no_grad_fill_, "aten::_no_grad_fill_"),
     (torch.nn.init._no_grad_normal_, "aten::_no_grad_normal_"),
@@ -78,14 +78,14 @@ _builtin_ops = [
     (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
     (torch._C._get_tracing_state, "aten::_get_tracing_state"),
     (warnings.warn, "aten::warn"),
-    (torch._VF.stft, "aten::stft"),
-    (torch._VF.istft, "aten::istft"),
-    (torch._VF.cdist, "aten::cdist"),
-    (torch._VF.norm, "aten::norm"),
-    (torch._VF.unique_dim, "aten::unique_dim"),
-    (torch._VF.unique_consecutive, "aten::unique_consecutive"),
-    (torch._VF.nuclear_norm, "aten::nuclear_norm"),
-    (torch._VF.frobenius_norm, "aten::frobenius_norm"),
+    (torch._VF.stft, "aten::stft"),  # type: ignore
+    (torch._VF.istft, "aten::istft"),  # type: ignore
+    (torch._VF.cdist, "aten::cdist"),  # type: ignore
+    (torch._VF.norm, "aten::norm"),  # type: ignore
+    (torch._VF.unique_dim, "aten::unique_dim"),  # type: ignore
+    (torch._VF.unique_consecutive, "aten::unique_consecutive"),  # type: ignore
+    (torch._VF.nuclear_norm, "aten::nuclear_norm"),  # type: ignore
+    (torch._VF.frobenius_norm, "aten::frobenius_norm"),  # type: ignore
 ]
 
 # ops in torch.functional are bound to torch
@@ -123,12 +123,12 @@ def _get_builtin_table():
     _builtin_ops.append((math.gcd, "aten::gcd"))
     _builtin_ops.append((math.isfinite, "aten::isfinite"))
     if PY37:
-        _builtin_ops.append((math.remainder, "aten::mathremainder"))
+        _builtin_ops.append((math.remainder, "aten::mathremainder"))  # type: ignore
 
     import torch.distributed.autograd as dist_autograd
     if dist_autograd.is_available():
-        _builtin_ops.append((dist_autograd.get_gradients, "aten::get_gradients"))
-        _builtin_ops.append((dist_autograd.backward, "aten::dist_backward"))
+        _builtin_ops.append((dist_autograd.get_gradients, "aten::get_gradients"))  # type: ignore
+        _builtin_ops.append((dist_autograd.backward, "aten::dist_backward"))  # type: ignore
 
     # populate the _builtin_table from _builtin_ops
     for builtin, aten_op in _builtin_ops:

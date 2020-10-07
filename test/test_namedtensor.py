@@ -146,16 +146,18 @@ class TestNamedTensor(TestCase):
             names65 = ['A' * i for i in range(1, 66)]
             x = factory([1] * 65, names=names64, device=device)
 
-    def test_none_names_refcount(self):
+    def test_none_names_refcount(self, N=10):
         def scope():
             unnamed = torch.empty(2, 3)
             unnamed.names  # materialize [None, None]
 
         prev_none_refcnt = sys.getrefcount(None)
-        scope()
-        self.assertEqual(sys.getrefcount(None), prev_none_refcnt,
-                         msg='Using tensor.names should not change '
-                             'the refcount of Py_None')
+        # Ran it N times to reduce flakiness
+        [scope() for i in range(N)]
+        after_none_refcnt = sys.getrefcount(None)
+        self.assertTrue(after_none_refcnt - prev_none_refcnt < N / 2,
+                        msg='Using tensor.names should not change '
+                            'the refcount of Py_None')
 
     def test_has_names(self):
         unnamed = torch.empty(2, 3)
@@ -840,7 +842,7 @@ class TestNamedTensor(TestCase):
                 out = testcase.lambd(tensor)
             except RuntimeError as err:
                 # Get a better error message by catching the error and asserting.
-                raise RuntimeError('{}: {}'.format(testcase.name, err))
+                raise RuntimeError('{}: {}'.format(testcase.name, err)) from err
             self.assertEqual(out.names, tensor.names,
                              msg=testcase.name)
 

@@ -391,10 +391,23 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
     return _VF.meshgrid(tensors)  # type: ignore
 
 
-def stft(input, n_fft, hop_length=None, win_length=None, window=None,
-         center=True, pad_mode='reflect', normalized=False, onesided=True):
-    # type: (Tensor, int, Optional[int], Optional[int], Optional[Tensor], bool, str, bool, bool) -> Tensor
+def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
+         win_length: Optional[int] = None, window: Optional[Tensor] = None,
+         center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
+         onesided: Optional[bool] = None,
+         return_complex: Optional[bool] = None) -> Tensor:
     r"""Short-time Fourier transform (STFT).
+
+    .. warning::
+        Setting :attr:`return_complex` explicitly will be required in a future
+        PyTorch release. Set it to False to preserve the current behavior or
+        True to return a complex output.
+
+    The STFT computes the Fourier transform of short overlapping windows of the
+    input. This giving frequency components of the signal as they change over
+    time. The interface of this function is modeled after the librosa_ stft function.
+
+    .. _librosa: https://librosa.org/doc/latest/generated/librosa.stft.html
 
     Ignoring the optional batch dimension, this method computes the following
     expression:
@@ -432,20 +445,27 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
       :attr:`center` is ``True``. See :meth:`torch.nn.functional.pad` for
       all available options. Default is ``"reflect"``.
 
-    * If :attr:`onesided` is ``True`` (default), only values for :math:`\omega`
-      in :math:`\left[0, 1, 2, \dots, \left\lfloor \frac{\text{n\_fft}}{2} \right\rfloor + 1\right]`
-      are returned because the real-to-complex Fourier transform satisfies the
-      conjugate symmetry, i.e., :math:`X[m, \omega] = X[m, \text{n\_fft} - \omega]^*`.
+    * If :attr:`onesided` is ``True`` (default for real input), only values for
+      :math:`\omega` in :math:`\left[0, 1, 2, \dots, \left\lfloor
+      \frac{\text{n\_fft}}{2} \right\rfloor + 1\right]` are returned because
+      the real-to-complex Fourier transform satisfies the conjugate symmetry,
+      i.e., :math:`X[m, \omega] = X[m, \text{n\_fft} - \omega]^*`.
+      Note if the input or window tensors are complex, then :attr:`onesided`
+      output is not possible.
 
     * If :attr:`normalized` is ``True`` (default is ``False``), the function
       returns the normalized STFT results, i.e., multiplied by :math:`(\text{frame\_length})^{-0.5}`.
 
-    Returns the real and the imaginary parts together as one tensor of size
-    :math:`(* \times N \times T \times 2)`, where :math:`*` is the optional
-    batch size of :attr:`input`, :math:`N` is the number of frequencies where
-    STFT is applied, :math:`T` is the total number of frames used, and each pair
-    in the last dimension represents a complex number as the real part and the
-    imaginary part.
+    * If :attr:`return_complex` is ``True`` (default if input is complex), the
+      return is a ``input.dim() + 1`` dimensional complex tensor. If ``False``,
+      the output is a ``input.dim() + 2`` dimensional real tensor where the last
+      dimension represents the real and imaginary components.
+
+    Returns either a complex tensor of size :math:`(* \times N \times T)` if
+    :attr:`return_complex` is true, or a real tensor of size :math:`(* \times N
+    \times T \times 2)`. Where :math:`*` is the optional batch size of
+    :attr:`input`, :math:`N` is the number of frequencies where STFT is applied
+    and :math:`T` is the total number of frames used.
 
     .. warning::
       This function changed signature at version 0.4.1. Calling with the
@@ -468,7 +488,11 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         normalized (bool, optional): controls whether to return the normalized STFT results
              Default: ``False``
         onesided (bool, optional): controls whether to return half of results to
-            avoid redundancy Default: ``True``
+            avoid redundancy for real inputs.
+            Default: ``True`` for real :attr:`input` and :attr:`window`, ``False`` otherwise.
+        return_complex (bool, optional): whether to return a complex tensor, or
+            a real tensor with an extra last dimension for the real and
+            imaginary components.
 
     Returns:
         Tensor: A tensor containing the STFT result with shape described above
@@ -479,7 +503,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
             return handle_torch_function(
                 stft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length,
                 window=window, center=center, pad_mode=pad_mode, normalized=normalized,
-                onesided=onesided)
+                onesided=onesided, return_complex=return_complex)
     # TODO: after having proper ways to map Python strings to ATen Enum, move
     #       this and F.pad to ATen.
     if center:
@@ -488,11 +512,14 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         pad = int(n_fft // 2)
         input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
         input = input.view(input.shape[-signal_dim:])
-    return _VF.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)  # type: ignore
+    return _VF.stft(input, n_fft, hop_length, win_length, window,  # type: ignore
+                    normalized, onesided, return_complex)
 
-def istft(input, n_fft, hop_length=None, win_length=None, window=None,
-          center=True, normalized=False, onesided=True, length=None):
-    # type: (Tensor, int, Optional[int], Optional[int], Optional[Tensor], bool, bool, bool, Optional[int]) -> Tensor
+def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
+          win_length: Optional[int] = None, window: Optional[Tensor] = None,
+          center: bool = True, normalized: bool = False,
+          onesided: Optional[bool] = None, length: Optional[int] = None,
+          return_complex: bool = False) -> Tensor:
     r"""Inverse short time Fourier Transform. This is expected to be the inverse of :func:`~torch.stft`.
     It has the same parameters (+ additional optional parameter of :attr:`length`) and it should return the
     least squares estimation of the original signal. The algorithm will check using the NOLA condition (
@@ -500,7 +527,7 @@ def istft(input, n_fft, hop_length=None, win_length=None, window=None,
 
     Important consideration in the parameters :attr:`window` and :attr:`center` so that the envelop
     created by the summation of all the windows is never zero at certain point in time. Specifically,
-    :math:`\sum_{t=-\infty}^{\infty} w^2[n-t\times hop\_length] \cancel{=} 0`.
+    :math:`\sum_{t=-\infty}^{\infty} |w|^2[n-t\times hop\_length] \cancel{=} 0`.
 
     Since :func:`~torch.stft` discards elements at the end of the signal if they do not fit in a frame,
     ``istft`` may return a shorter signal than the original signal (can occur if :attr:`center` is False
@@ -523,7 +550,9 @@ def istft(input, n_fft, hop_length=None, win_length=None, window=None,
 
     Arguments:
         input (Tensor): The input tensor. Expected to be output of :func:`~torch.stft`,
-            either 3D (``fft_size``, ``n_frame``, 2) or 4D (``channel``, ``fft_size``, ``n_frame``, 2).
+            can either be complex (``channel``, ``fft_size``, ``n_frame``), or real
+            (``channel``, ``fft_size``, ``n_frame``, 2) where the ``channel``
+            dimension is optional.
         n_fft (int): Size of Fourier transform
         hop_length (Optional[int]): The distance between neighboring sliding window frames.
             (Default: ``n_fft // 4``)
@@ -534,9 +563,15 @@ def istft(input, n_fft, hop_length=None, win_length=None, window=None,
             centered at time :math:`t \times \text{hop\_length}`.
             (Default: ``True``)
         normalized (bool): Whether the STFT was normalized. (Default: ``False``)
-        onesided (bool): Whether the STFT is onesided. (Default: ``True``)
+        onesided (Optional[bool]): Whether the STFT was onesided.
+            (Default: ``True`` if ``n_fft != fft_size`` in the input size)
         length (Optional[int]): The amount to trim the signal by (i.e. the
             original signal length). (Default: whole signal)
+        return_complex (Optional[bool]):
+            Whether the output should be complex, or if the input should be
+            assumed to derive from a real signal and window.
+            Note that this is incompatible with ``onesided=True``.
+            (Default: ``False``)
 
     Returns:
         Tensor: Least squares estimation of the original signal of size (..., signal_length)
@@ -546,9 +581,10 @@ def istft(input, n_fft, hop_length=None, win_length=None, window=None,
             return handle_torch_function(
                 istft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length,
                 window=window, center=center, normalized=normalized, onesided=onesided,
-                length=length)
+                length=length, return_complex=return_complex)
 
-    return _VF.istft(input, n_fft, hop_length, win_length, window, center, normalized, onesided, length)  # type: ignore
+    return _VF.istft(input, n_fft, hop_length, win_length, window, center,  # type: ignore
+                     normalized, onesided, length, return_complex)
 
 
 del torch.unique_dim
@@ -848,7 +884,7 @@ def tensordot(a, b, dims=2):
     Args:
       a (Tensor): Left tensor to contract
       b (Tensor): Right tensor to contract
-      dims (int or tuple of two lists of integers): number of dimensions to
+      dims (int or Tuple[List[int]] containing two lists): number of dimensions to
          contract or explicit lists of dimensions for :attr:`a` and
          :attr:`b` respectively
 
@@ -883,6 +919,12 @@ def tensordot(a, b, dims=2):
                 [ 3.3161,  0.0704,  5.0187, -0.4079, -4.3126,  4.8744],
                 [ 0.8223,  3.9445,  3.2168, -0.2400,  3.4117,  1.7780]])
 
+        >>> a = torch.randn(3, 5, 4, 6)
+        >>> b = torch.randn(6, 4, 5, 3)
+        >>> torch.tensordot(a, b, dims=([2, 1, 3], [1, 2, 0]))
+        tensor([[  7.7193,  -2.4867, -10.3204],
+                [  1.5513, -14.4737,  -6.5113],
+                [ -0.2850,   4.2573,  -3.5997]])
     """
     if not torch.jit.is_scripting():
         if (type(a) is not Tensor or type(b) is not Tensor) and has_torch_function((a, b)):
@@ -894,7 +936,7 @@ def tensordot(a, b, dims=2):
         if isinstance(dims, torch.Tensor):
             dims = dims.item()
         if dims < 0:
-            raise RuntimeError("tensordot expects dims >= 0, but got dims={}".format(dims))
+            raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
     return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore
@@ -1020,7 +1062,7 @@ def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
     elif compute_mode == 'donot_use_mm_for_euclid_dist':
         return _VF.cdist(x1, x2, p, 2)  # type: ignore
     else:
-        raise ValueError("{} is not a valid value for compute_mode".format(compute_mode))
+        raise ValueError(f"{compute_mode} is not a valid value for compute_mode")
 
 def atleast_1d(*tensors):
     r"""
@@ -1175,6 +1217,13 @@ else:
 def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
     r"""Returns the matrix norm or vector norm of a given tensor.
 
+    .. warning::
+
+        torch.norm is deprecated and may be removed in a future PyTorch release.
+        Use :func:`torch.linalg.norm` instead, but note that :func:`torch.linalg.norm`
+        has a different signature and slightly different behavior that is
+        more consistent with NumPy's numpy.linalg.norm.
+
     Args:
         input (Tensor): the input tensor
         p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
@@ -1232,6 +1281,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         (tensor(3.7417), tensor(11.2250))
     """
+
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
@@ -1283,7 +1333,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
                     return _VF.nuclear_norm(input, _dim, keepdim=keepdim)  # type: ignore
                 else:
                     return _VF.nuclear_norm(input, _dim, keepdim=keepdim, out=out)  # type: ignore
-        raise RuntimeError("only valid string values are 'fro' and 'nuc', found {}".format(p))
+        raise RuntimeError(f"only valid string values are 'fro' and 'nuc', found {p}")
     else:
         if _dim is None:
             _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
@@ -1417,11 +1467,9 @@ else:
 def _check_list_size(out_len: int, get_infos: bool, out: _ListOrSeq) -> None:
     get_infos_int = 1 if get_infos else 0
     if out_len - get_infos_int != 2:
-        raise TypeError("expected tuple of {} elements but got {}"
-                        .format(2 + int(get_infos), out_len))
+        raise TypeError(f"expected tuple of {2 + int(get_infos)} elements but got {out_len}")
     if not isinstance(out, (tuple, list)):
-        raise TypeError("argument 'out' must be tuple of Tensors, not {}"
-                        .format(type(out).__name__))
+        raise TypeError(f"argument 'out' must be tuple of Tensors, not {type(out).__name__}")
 
 def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
     # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor, Tensor]]) -> Tuple[Tensor, Tensor, Tensor]

@@ -1,6 +1,7 @@
 import pickle
 import torch
 import warnings
+import contextlib
 from torch._six import string_classes
 from datetime import timedelta
 
@@ -159,8 +160,7 @@ _group_count = 0
 
 def _rank_not_in_group(group):
     """
-    Helper that checks if the current process's rank is not in a given group
-
+    Helper that checks if the current process's rank is not in a given group.
     """
     if group == GroupMember.WORLD:
         return False
@@ -170,8 +170,7 @@ def _rank_not_in_group(group):
 def _get_group_rank(group, rank):
     """
     Helper that gets a given group's local rank in the group from a given global
-    rank
-
+    rank.
     """
     if group is GroupMember.WORLD:
         raise RuntimeError("group.WORLD does not have local rank to global "
@@ -188,8 +187,7 @@ def _get_group_rank(group, rank):
 def _get_global_rank(group, group_rank):
     """
     Helper that gets a given group's global rank from a given local rank in the
-    group
-
+    group.
     """
     if group is GroupMember.WORLD:
         raise RuntimeError("group.WORLD does not have local rank to global "
@@ -204,8 +202,7 @@ def _get_global_rank(group, group_rank):
 def _check_default_pg():
     """
     Helper that checks if the default ProcessGroup has been initialized, with
-    assertion
-
+    assertion.
     """
     assert _default_pg is not None, \
         "Default process group is not initialized"
@@ -213,8 +210,7 @@ def _check_default_pg():
 
 def _get_group_size(group):
     """
-    Helper that gets a given group's world size
-
+    Helper that gets a given group's world size.
     """
     if group is GroupMember.WORLD:
         _check_default_pg()
@@ -227,7 +223,6 @@ def _get_group_size(group):
 def _check_single_tensor(param, param_name):
     """
     Helper to check that the parameter ``param_name`` is a single tensor.
-
     """
     if not isinstance(param, torch.Tensor):
         raise RuntimeError("Invalid function argument. Expected parameter `{}` "
@@ -237,7 +232,6 @@ def _check_single_tensor(param, param_name):
 def _check_tensor_list(param, param_name):
     """
     Helper to check that the parameter ``param_name`` is a list of tensors.
-
     """
     if not isinstance(param, list) or \
        not all(isinstance(p, torch.Tensor) for p in param):
@@ -245,10 +239,34 @@ def _check_tensor_list(param, param_name):
                            "to be of type List[torch.Tensor].".format(param_name))
 
 
+def _check_op(op):
+    """
+    Helper to check that the ``op`` is either isend or irecv.
+    """
+    if op not in [isend, irecv]:
+        raise RuntimeError("Invalid ``op``. Expected ``op`` "
+                           "to be of type ``torch.distributed.isend`` or "
+                           "``torch.distributed.irecv``.")
+
+def _check_p2p_op_list(p2p_op_list):
+    """
+    Helper to check that the ``p2p_op_list`` is a list of _P2POp instances and
+    all ops use the same backend.
+    """
+    if not isinstance(p2p_op_list, list) or \
+       not all(isinstance(p2p_op, _P2POp) for p2p_op in p2p_op_list):
+        raise RuntimeError("Invalid ``p2p_op_list``. Each op is expected to "
+                           "to be of type ``torch.distributed._P2POp``.")
+
+
+    backend = get_backend(p2p_op_list[0].group)
+    if not all(backend == get_backend(p2p_op.group) for p2p_op in p2p_op_list):
+        raise RuntimeError("All groups need to use the same backend.")
+
+
 def is_mpi_available():
     """
     Checks if the MPI backend is available.
-
     """
     return _MPI_AVAILABLE
 
@@ -256,7 +274,6 @@ def is_mpi_available():
 def is_nccl_available():
     """
     Checks if the NCCL backend is available.
-
     """
     return _NCCL_AVAILABLE
 
@@ -264,7 +281,6 @@ def is_nccl_available():
 def is_gloo_available():
     """
     Checks if the Gloo backend is available.
-
     """
     return _GLOO_AVAILABLE
 
@@ -272,7 +288,6 @@ def is_gloo_available():
 def is_initialized():
     """
     Checking if the default process group has been initialized
-
     """
     return _default_pg is not None
 
@@ -280,7 +295,6 @@ def is_initialized():
 def _get_default_group():
     """
     Getting the default process group created by init_process_group
-
     """
     if not is_initialized():
         raise RuntimeError("Default process group has not been initialized, "
@@ -291,7 +305,6 @@ def _get_default_group():
 def _get_default_store():
     """
     Getting the default store created by init_process_group
-
     """
     if not is_initialized():
         raise RuntimeError("Default process group has not been initialized, "
@@ -436,6 +449,10 @@ def init_process_group(backend,
     _backend = _pg_map[_default_pg][0]
     _default_pg_init_method = init_method
 
+    # barrier at the end to ensure that once we return from this method, all
+    # process groups including global variables are updated correctly on all
+    # ranks.
+    barrier()
 
 def _new_process_group_helper(world_size,
                               rank,
@@ -751,6 +768,94 @@ def recv(tensor,
             group_src_rank = _get_group_rank(pg, src)
             pg.recv([tensor], group_src_rank, tag).wait()
         return src
+
+
+class _P2POp(object):
+    """
+    A class to build point-to-point operations for ``_batch_isend_irecv``.
+
+    This class builds the type of P2P operation, communication buffer, peer rank,
+    Process Group group, and tag. Instances of this class will be passed to
+    ``_batch_isend_irecv`` for point-to-point communications.
+
+    Arguments:
+        op (callable): A function to send data to or receive data from a peer process.
+            The type of ``op`` is either ``torch.distributed.isend`` or
+            ``torch.distributed.irecv``.
+        tensor (Tensor): Tensor to send or receive.
+        peer (int): Destination or source rank.
+        group (ProcessGroup, optional): The process group to work on.
+        tag (int, optional): Tag to match send with recv.
+    """
+    def __init__(self, op, tensor, peer, group=group.WORLD, tag=0):
+        self.op = op
+        self.tensor = tensor
+        self.peer = peer
+        self.group = group
+        self.tag = tag
+
+    def __new__(cls, op, tensor, peer, group=group.WORLD, tag=0):
+        _check_op(op)
+        _check_single_tensor(tensor, "tensor")
+        return object.__new__(cls)
+
+
+@contextlib.contextmanager
+def _batch_p2p_manager(backend):
+    if backend == Backend.NCCL:
+        ProcessGroupNCCL._group_start()
+    try:
+        yield
+    finally:
+        if backend == Backend.NCCL:
+            ProcessGroupNCCL._group_end()
+
+
+def _batch_isend_irecv(p2p_op_list):
+    """
+    Send or Receive a batch of tensors asynchronously and return a list of requests.
+
+    Process each of the operations in p2p_op_list and return the corresponding
+    requests. NCCL and Gloo backend are currently supported.
+
+    Arguments:
+        p2p_op_list: A list of point-to-point operations(type of each operator is
+            ``torch.distributed._P2POp``). The order of the isend/irecv in the list
+            matters and it needs to match with corresponding isend/irecv on the
+            remote end.
+
+    Returns:
+        A list of distributed request objects returned by calling the corresponding
+        op in the op_list.
+
+    Examples:
+        >>> send_tensor = torch.arange(2) + 2 * rank
+        >>> recv_tensor = torch.randn(2)
+        >>> send_op = dist._P2POp(dist.isend, send_tensor, (rank + 1)%world_size)
+        >>> recv_op = dist._P2POp(dist.irecv, recv_tensor, (rank + 1)%world_size)
+        >>> reqs = _batch_isend_irecv([send_op, recv_op])
+        >>> for req in reqs:
+        >>>     req.wait()
+        >>> recv_tensor
+        tensor([2, 3])     # Rank 0
+        tensor([0, 1])     # Rank 1
+    """
+    _check_p2p_op_list(p2p_op_list)
+    backend = get_backend(p2p_op_list[0].group)
+    reqs = []
+    with _batch_p2p_manager(backend):
+        for p2p_op in p2p_op_list:
+            op = p2p_op.op
+            tensor = p2p_op.tensor
+            peer = p2p_op.peer
+            curr_group = p2p_op.group
+            tag = p2p_op.tag
+
+            ret = op(tensor, peer, curr_group, tag)
+
+            if ret is not None:
+                reqs.append(ret)
+    return reqs
 
 
 def broadcast_multigpu(tensor_list,
@@ -1318,6 +1423,72 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
         tensor = tensor.type(torch.ByteTensor)
         tensor_size = object_size_list[i]
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
+
+
+def broadcast_object_list(object_list, src, group=group.WORLD):
+    """
+    Broadcasts picklable objects in ``object_list`` to the whole group. Similar
+    to :func:`broadcast`, but Python objects can be passed in.
+    Note that all objects in ``object_list`` must be picklable in order to be
+    broadcasted.
+
+    Arguments:
+        object_list (List[Any]): List of input objects to broadcast.
+            Each object must be picklable. Only objects on the ``src`` rank will
+            be broadcast, but each rank must provide lists of equal sizes.
+        src (int): Source rank from which to broadcast ``object_list``.
+        group: (ProcessGroup, optional): The process group to work on.
+
+    Returns:
+        ``None``. If rank is part of the group, ``object_list`` will contain the
+        broadcasted objects from ``src`` rank.
+
+    .. note:: Note that this API differs slightly from the broadcast collective
+        since it does not provide an ``async_op`` handle and thus will be a
+        blocking call.
+
+    .. warning::
+        :func:`broadcast_object_list` uses ``pickle`` module implicitly, which
+        is known to be insecure. It is possible to construct malicious pickle
+        data which will execute arbitrary code during unpickling. Only call this
+        function with data you trust.
+    """
+    if _rank_not_in_group(group):
+        return
+
+    my_rank = get_rank()
+    # Serialize object_list elements to tensors on src rank.
+    if my_rank == src:
+        tensor_list, size_list = zip(*[_object_to_tensor(obj) for obj in object_list])
+        object_sizes_tensor = torch.cat(size_list)
+    else:
+        object_sizes_tensor = torch.LongTensor(len(object_list))
+
+    group_backend = get_backend(group)
+    is_nccl_backend = group_backend == Backend.NCCL
+    if is_nccl_backend:
+        object_sizes_tensor = object_sizes_tensor.to(my_rank)
+
+    # Broadcast object sizes
+    broadcast(object_sizes_tensor, src=src, group=group)
+
+    # Concatenate and broadcast serialized object tensors
+    if my_rank == src:
+        object_tensor = torch.cat(tensor_list)
+    else:
+        object_tensor = torch.ByteTensor(torch.sum(object_sizes_tensor).item())
+
+    if is_nccl_backend:
+        object_tensor = object_tensor.to(my_rank)
+    broadcast(object_tensor, src=src, group=group)
+    # Deserialize objects using their stored sizes.
+    offset = 0
+    if my_rank != src:
+        for i, obj_size in enumerate(object_sizes_tensor):
+            obj_view = object_tensor[offset : offset + obj_size]
+            obj_view = obj_view.type(torch.ByteTensor)
+            offset += obj_size
+            object_list[i] = _tensor_to_object(obj_view, obj_size)
 
 
 def all_gather(tensor_list,
@@ -1894,7 +2065,8 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     should be created in the same order in all processes.
 
     Arguments:
-        ranks (list[int]): List of ranks of group members.
+        ranks (list[int]): List of ranks of group members. If ``None``, will be
+            set to all ranks. Default is ``None``.
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value equals 30 minutes.
             This is only applicable for the ``gloo`` backend.
@@ -1957,5 +2129,10 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
         global_rank: group_rank
         for group_rank, global_rank in enumerate(ranks)
     }
+
+    # barrier at the end to ensure that once we return from this method, all
+    # process groups including global variables are updated correctly on all
+    # ranks.
+    barrier()
 
     return pg

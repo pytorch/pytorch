@@ -36,6 +36,8 @@ enum IRNodeType {
   kPolynomial,
   kTerm,
   kRoundOff,
+  kMaxTerm,
+  kMinTerm,
   kNone,
   kExtra
 };
@@ -206,7 +208,6 @@ class TORCH_API Buf : public ExprNode<Buf> {
   std::vector<const Expr*> dims_;
 };
 
-// TODO: Merge this class with 'Buffer'
 class TORCH_API BufHandle : public ExprHandle {
  public:
   BufHandle(

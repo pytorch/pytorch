@@ -1,213 +1,92 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <ATen/core/interned_strings.h>
+#include <caffe2/core/timer.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch {
 namespace jit {
 
-using c10::DispatchKey;
-using c10::RegisterOperators;
+std::shared_ptr<torch::jit::Graph> PrepareForStaticRuntime(
+    std::shared_ptr<torch::jit::Graph> g) {
+  Inline(*g);
+  ConstantPropagation(g);
+  Canonicalize(g);
+  ConstantPropagation(g);
+  RemoveTensorMutation(g);
+  ConstantPropagation(g);
 
-static auto reg =
-    RegisterOperators()
-        .op("static::add(Tensor a, Tensor b) -> Tensor",
-            RegisterOperators::options().kernel(
-                DispatchKey::CPU,
-                [](at::Tensor a, at::Tensor b) -> at::Tensor { return a + b; }))
-        .op("static::mul.a(Tensor a, Tensor b) -> Tensor",
-            RegisterOperators::options().kernel(
-                DispatchKey::CPU,
-                [](at::Tensor a, at::Tensor b) -> at::Tensor { return a * b; }))
-        .op("static::mul.b(Tensor a, int b) -> Tensor",
-            RegisterOperators::options().kernel(
-                DispatchKey::CPU,
-                [](at::Tensor a, int64_t b) -> at::Tensor { return a * b; }));
-
-#define SUPPORTED_OPS(F) \
-  F(aten::__getitem__)   \
-  F(aten::add)           \
-  F(aten::addmm)         \
-  F(aten::bmm)           \
-  F(aten::cat)           \
-  F(aten::clamp)         \
-  F(aten::contiguous)    \
-  F(aten::div)           \
-  F(aten::flatten)       \
-  F(aten::index_put_)    \
-  F(aten::isnan)         \
-  F(aten::matmul)        \
-  F(aten::mul)           \
-  F(aten::permute)       \
-  F(aten::relu)          \
-  F(aten::sigmoid)       \
-  F(aten::size)          \
-  F(aten::softmax)       \
-  F(aten::t)             \
-  F(aten::to)            \
-  F(aten::transpose)     \
-  F(aten::view)          \
-  F(prim::Constant)      \
-  F(prim::ListConstruct) \
-  F(prim::TupleConstruct)
-
-StaticRuntime::StaticRuntime(const torch::jit::Module& m)
-    : module_(m.copy()), graph_(nullptr) {
-  module_.eval();
-  module_ = freeze_module(module_);
-  graph_ = module_.get_method("forward").graph();
-
-  Inline(*graph_);
-  ConstantPropagation(graph_);
-  Canonicalize(graph_);
-  ConstantPropagation(graph_);
-  RemoveTensorMutation(graph_);
-  ConstantPropagation(graph_);
-
-  for (auto n : graph_->nodes()) {
+  for (auto n : g->nodes()) {
     if (n->kind() == c10::Symbol::fromQualString("prim::GetAttr")) {
       throw std::runtime_error("Cannot accelerate unfrozen graphs");
     }
-    bool supported = false;
-#define X(_)                                          \
-  if (n->kind() == c10::Symbol::fromQualString(#_)) { \
-    supported = true;                                 \
   }
-    SUPPORTED_OPS(X)
-#undef X
-    if (!supported) {
-      throw std::runtime_error(
-          std::string("Unsupported operation: ") + n->kind().toQualString());
-    }
-  }
-
-  SubgraphRewriter sr;
-  sr.RegisterRewritePattern(
-      R"IR(
-  graph(%x, %w, %s):
-    %r = aten::add(%x, %w, %s)
-    return (%r))IR",
-      R"IR(
-  graph(%x, %w, %s):
-    %y = static::add(%x, %w)
-    %r = static::mul(%y, %s)
-    return (%r))IR");
-  sr.runOnGraph(graph_);
 
   // remove unused input 0 from graph
-  if (graph_->inputs().at(0)->type()->is_module()) {
-    if (!graph_->inputs().at(0)->hasUses()) {
-      graph_->eraseInput(0);
-    }
+  if (g->inputs().at(0)->type()->is_module()) {
+    TORCH_INTERNAL_ASSERT(!g->inputs().at(0)->hasUses());
+    g->eraseInput(0);
   }
 
-  // fill constant_table_ and operator_table_
+  return g;
+}
+
+std::shared_ptr<torch::jit::Graph> PrepareForStaticRuntime(
+    const torch::jit::Module& m) {
+  auto module = m.copy();
+  module.eval();
+  module = freeze_module(module);
+  auto g = module.get_method("forward").graph();
+  return PrepareForStaticRuntime(g);
+}
+
+StaticRuntime::StaticRuntime(std::shared_ptr<torch::jit::Graph> g)
+    : StaticRuntime(g, c10::nullopt) {}
+
+StaticRuntime::StaticRuntime(const torch::jit::Module& m)
+    : StaticRuntime(PrepareForStaticRuntime(m), m) {}
+
+StaticRuntime::StaticRuntime(
+    std::shared_ptr<torch::jit::Graph> g,
+    c10::optional<torch::jit::Module> m)
+    : graph_(g) {
+  // fill workspace_ with constants
   for (Node* node : graph_->nodes()) {
-    switch (node->kind()) {
-      case prim::Constant:
-        CHECK(node->output()->type()->kind() != FunctionType::Kind);
-        constant_table_[node->output()] = toIValue(node->output()).value();
-        break;
-      case prim::ListConstruct:
-        nodes_.emplace_back(node, nullptr);
-        break;
-      case prim::TupleConstruct:
-        nodes_.emplace_back(node, nullptr);
-        break;
-      default: {
-        const Operator& op = node->getOperator();
-        CHECK(op.hasOperation());
-        nodes_.emplace_back(node, op.getOperation(node));
-      }
-    }
-  }
-}
-
-void StaticRuntime::getInputIValues(
-    Node* node,
-    const ConstantMap& ws,
-    std::vector<IValue>& stack) const {
-  const size_t size = node->inputs().size();
-  stack.reserve(size);
-  for (size_t i = 0; i < size; i++) {
-    Value* v = node->inputs()[i];
-    auto f = constant_table_.find(v);
-    if (f == constant_table_.end()) {
-      auto f_ws = ws.find(v);
-      TORCH_CHECK(
-          f_ws != ws.end(),
-          "Workspace does not contain Value ",
-          v->debugName());
-      stack.emplace_back(f_ws->second);
+    if (node->kind() == prim::Constant) {
+      CHECK(node->output()->type()->kind() != FunctionType::Kind);
+      workspace_[node->output()] = toIValue(node->output()).value();
     } else {
-      stack.emplace_back(f->second);
+      nodes_.emplace_back(node);
     }
   }
-}
+  if (m) {
+    Method method = m->get_method("forward");
+    const c10::FunctionSchema& schema = method.function().getSchema();
 
-void StaticRuntime::runNodes(ConstantMap& workspace) const {
-  std::vector<IValue> stack;
-  for (const auto& p : nodes_) {
-    Node* node = p.first;
-    const Operation& op = p.second;
-    getInputIValues(node, workspace, stack);
-    VLOG(1) << node->kind().toDisplayString();
-
-    switch (node->kind()) {
-      case prim::ListConstruct: {
-        listConstruct(
-            stack,
-            node->output()->type()->expect<ListType>(),
-            node->inputs().size());
-      } break;
-      case prim::TupleConstruct: {
-        bool named =
-            node->output()->type()->expect<TupleType>()->name().has_value();
-        if (named) {
-          namedTupleConstruct(
-              stack,
-              node->output()->type()->expect<TupleType>(),
-              node->inputs().size());
-        } else {
-          tupleConstruct(stack, node->inputs().size());
-        }
-      } break;
-      default: {
-        DCHECK(op);
-        op(&stack);
-        break;
-      }
-    }
-
-    DCHECK_EQ(stack.size(), node->outputs().size());
-    for (auto i = 0; i < node->outputs().size(); i++) {
-      workspace[node->outputs()[i]] = stack[i];
-    }
-    stack.clear();
+    // remove "self" from function schema
+    TORCH_INTERNAL_ASSERT(
+        schema.arguments().size() >= 1 &&
+        schema.arguments()[0].name() == "self");
+    std::vector<Argument> args(
+        {schema.arguments().begin() + 1, schema.arguments().end()});
+    schema_ =
+        std::make_unique<c10::FunctionSchema>(schema.cloneWithArguments(args));
   }
 }
 
 std::vector<at::Tensor> StaticRuntime::run(
     const std::vector<at::Tensor>& inps) const {
-  // Container for inputs, outputs, and activations (excluding parameters)
-  ConstantMap workspace_;
-
-  int start = 0;
-  if (graph_->inputs().size() != inps.size()) {
-    start = 1;
-    CHECK_EQ(graph_->inputs().size(), inps.size() + 1);
-    CHECK((graph_->inputs().at(0)->type()->is_module()));
-    workspace_.emplace(graph_->inputs()[0], module_._ivalue());
-  }
-
   for (size_t i = 0; i < inps.size(); i++) {
-    workspace_.emplace(graph_->inputs()[i + start], inps[i]);
+    workspace_[graph_->inputs()[i]] = inps[i];
   }
 
-  runNodes(workspace_);
+  for (const auto& n : nodes_) {
+    n.run(workspace_);
+  }
 
   std::vector<at::Tensor> out;
   for (Value* output : graph_->outputs()) {
@@ -223,5 +102,207 @@ std::vector<at::Tensor> StaticRuntime::run(
   }
   return out;
 }
+
+c10::IValue StaticRuntime::run(
+    const std::vector<c10::IValue>& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs) const {
+  std::vector<IValue> stack(args);
+  if (!kwargs.empty()) {
+    // This is not ideal
+    TORCH_INTERNAL_ASSERT(
+        schema_ != nullptr,
+        "Schema is not available. Consider creating the Static Runtime "
+        "with StaticRuntime(const torch::jit::Module& m) instead.");
+    schema_->checkAndNormalizeInputs(stack, kwargs);
+  }
+  for (size_t i = 0; i < stack.size(); i++) {
+    workspace_[graph_->inputs()[i]] = stack[i];
+  }
+
+  for (const auto& n : nodes_) {
+    n.run(workspace_);
+  }
+
+  return workspace_[graph_->outputs().at(0)];
+}
+
+void StaticRuntime::benchmark(
+    const std::vector<c10::IValue>& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs,
+    const int warmup_runs,
+    const int main_runs) const {
+  float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
+  std::cout << "Static runtime ms per iter: " << time_per_iter
+            << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
+
+  IndividualMetrics results =
+      benchmark_individual_ops(args, kwargs, warmup_runs, main_runs);
+  std::cout << "Setting up took " << results.setup_time << " ms" << std::endl;
+
+  for (size_t i = 0; i < nodes_.size(); i++) {
+    const Node* node = nodes_[i].get_node();
+    std::cout << "Node #" << i << ": " << results.time_per_node[i]
+              << " ms/iter, ";
+    node->print(std::cout, 0, nullptr, false);
+  }
+
+  std::vector<std::pair<std::string, double>> time_per_node_type_vec{
+      results.time_per_node_type.begin(), results.time_per_node_type.end()};
+  std::sort(
+      time_per_node_type_vec.begin(),
+      time_per_node_type_vec.end(),
+      [](auto& left, auto& right) { return left.second > right.second; });
+
+  std::cout << "Time per node type:" << std::endl;
+  for (const auto& p : time_per_node_type_vec) {
+    const std::string& kind = p.first;
+    const double ms = p.second;
+    std::cout << std::setw(15) << ms << " ms. " << std::setw(10)
+              << results.percent_per_node_type[kind] << "%. " << kind << " ("
+              << results.instances_per_node_type[kind] << " nodes)"
+              << std::endl;
+  }
+  std::cout << std::setw(15) << results.total_time << " ms. in Total"
+            << std::endl;
+}
+
+float StaticRuntime::benchmark_model(
+    const std::vector<c10::IValue>& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs,
+    const int warmup_runs,
+    const int main_runs) const {
+  TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
+
+  for (int i = 0; i < warmup_runs; i++) {
+    run(args, kwargs);
+  }
+  caffe2::Timer timer;
+  for (int i = 0; i < main_runs; i++) {
+    run(args, kwargs);
+  }
+  float millis = timer.MilliSeconds();
+  return millis / static_cast<float>(main_runs);
+}
+
+StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
+    const std::vector<c10::IValue>& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs,
+    const int warmup_runs,
+    const int main_runs) const {
+  TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
+
+  IndividualMetrics results;
+  results.total_time = 0.0;
+  results.time_per_node.resize(nodes_.size(), 0);
+
+  // setup time
+  caffe2::Timer timer;
+  std::vector<IValue> stack(args);
+  if (!kwargs.empty()) {
+    // This is not ideal
+    TORCH_INTERNAL_ASSERT(
+        schema_ != nullptr,
+        "Schema is not available. Consider creating the Static Runtime "
+        "with StaticRuntime(const torch::jit::Module& m) instead.");
+    schema_->checkAndNormalizeInputs(stack, kwargs);
+  }
+  for (size_t i = 0; i < stack.size(); i++) {
+    workspace_[graph_->inputs()[i]] = stack[i];
+  }
+  results.setup_time = timer.MilliSeconds();
+
+  // warmup runs
+  for (int i = 0; i < warmup_runs; i++) {
+    run(args, kwargs);
+  }
+
+  // main runs
+  for (int i = 0; i < main_runs; i++) {
+    for (size_t j = 0; j < nodes_.size(); j++) {
+      timer.Start();
+      nodes_[j].run(workspace_);
+      float millis = timer.MilliSeconds();
+      results.time_per_node[j] += millis;
+    }
+  }
+
+  // post processing
+  for (size_t i = 0; i < nodes_.size(); i++) {
+    const Node* node = nodes_[i].get_node();
+    std::string kind = std::string(node->kind().toQualString());
+    results.time_per_node[i] /= static_cast<float>(main_runs);
+    results.time_per_node_type[kind] += results.time_per_node[i];
+    results.instances_per_node_type[kind]++;
+    results.total_time += results.time_per_node[i];
+  }
+  for (const auto& p : results.time_per_node_type) {
+    const std::string& kind = p.first;
+    results.percent_per_node_type[kind] = p.second / results.total_time * 100;
+  }
+  return results;
+}
+
+ProcessedNode::ProcessedNode(Node* node) : node_(node) {
+  if (node->kind() != prim::ListConstruct &&
+      node->kind() != prim::TupleConstruct &&
+      node->kind() != prim::ListUnpack) {
+    const Operator& op = node->getOperator();
+    CHECK(op.hasOperation());
+    op_ = op.getOperation(node);
+  }
+  if (canRunOutOfPlace(node)) {
+    fn_ = getOutOfPlaceOperation(node);
+  }
+}
+
+void ProcessedNode::run(StaticRuntime::ConstantMap& workspace) const {
+  if (!fn_) {
+    std::vector<IValue> stack;
+    const size_t size = node_->inputs().size();
+    stack.reserve(size);
+    for (size_t i = 0; i < size; i++) {
+      Value* v = node_->inputs()[i];
+      auto f = workspace.find(v);
+      TORCH_CHECK(
+          f != workspace.end(),
+          "Workspace does not contain Value ",
+          v->debugName());
+      stack.emplace_back(f->second);
+    }
+    if (op_) {
+      op_->operator()(&stack);
+    } else {
+      if (node_->kind() == prim::ListConstruct) {
+        listConstruct(
+            stack,
+            node_->output()->type()->expect<ListType>(),
+            node_->inputs().size());
+      } else if (node_->kind() == prim::TupleConstruct) {
+        bool named =
+            node_->output()->type()->expect<TupleType>()->name().has_value();
+        if (named) {
+          namedTupleConstruct(
+              stack,
+              node_->output()->type()->expect<TupleType>(),
+              node_->inputs().size());
+        } else {
+          tupleConstruct(stack, node_->inputs().size());
+        }
+      } else if (node_->kind() == prim::ListUnpack) {
+        size_t num_outputs = node_->outputs().size();
+        listUnpack(stack, num_outputs);
+      } else {
+        TORCH_CHECK(0, "Unhandled operation!", node_->kind().toQualString());
+      }
+    }
+    DCHECK_EQ(stack.size(), node_->outputs().size());
+    for (auto i = 0; i < node_->outputs().size(); i++) {
+      workspace[node_->outputs()[i]] = stack[i];
+    }
+  } else {
+    fn_->operator()(workspace);
+  }
+}
+
 } // namespace jit
 } // namespace torch

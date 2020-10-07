@@ -349,7 +349,7 @@ class Module:
         elif hasattr(self, name) and name not in self._modules:
             raise KeyError("attribute '{}' already exists".format(name))
         elif '.' in name:
-            raise KeyError("module name can't contain \".\"")
+            raise KeyError("module name can't contain \".\", got: {}".format(name))
         elif name == '':
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
@@ -1313,8 +1313,14 @@ class Module:
             p.requires_grad_(requires_grad)
         return self
 
-    def zero_grad(self) -> None:
-        r"""Sets gradients of all model parameters to zero."""
+    def zero_grad(self, set_to_none: bool = False) -> None:
+        r"""Sets gradients of all model parameters to zero. See similar function
+        under :class:`torch.optim.Optimizer` for more context.
+
+        Arguments:
+            set_to_none (bool): instead of setting to zero, set the grads to None.
+                See :meth:`torch.optim.Optimizer.zero_grad` for details.
+        """
         if getattr(self, '_is_replica', False):
             warnings.warn(
                 "Calling .zero_grad() from a module created with nn.DataParallel() has no effect. "
@@ -1324,11 +1330,14 @@ class Module:
 
         for p in self.parameters():
             if p.grad is not None:
-                if p.grad.grad_fn is not None:
-                    p.grad.detach_()
+                if set_to_none:
+                    p.grad = None
                 else:
-                    p.grad.requires_grad_(False)
-                p.grad.zero_()
+                    if p.grad.grad_fn is not None:
+                        p.grad.detach_()
+                    else:
+                        p.grad.requires_grad_(False)
+                    p.grad.zero_()
 
     def share_memory(self: T) -> T:
         return self._apply(lambda t: t.share_memory_())

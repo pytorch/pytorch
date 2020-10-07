@@ -26,9 +26,10 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
       });
     } else if (isComplexType(dtype)) {
       AT_DISPATCH_COMPLEX_TYPES(dtype, "copy_kernel", [&] {
-          cpu_kernel(
+          cpu_kernel_vec(
             iter,
-            [=](scalar_t a) -> scalar_t { return a; });
+            [=](scalar_t a) -> scalar_t { return a; },
+            [=](Vec256<scalar_t> a) -> Vec256<scalar_t> { return a; });
         });
     } else {
       AT_DISPATCH_ALL_TYPES_AND(

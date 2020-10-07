@@ -176,7 +176,7 @@ struct ProfilingRecord {
   ProfilingRecord(ProfilingRecord&&) noexcept = delete;
   TORCH_API static std::unique_ptr<ProfilingRecord> instrumentGraph(
       const std::shared_ptr<Graph>& graph);
-
+  TORCH_API static void removeProfilingNodes(Block* b);
   TORCH_API static void removeProfileCounter(Block* b);
 
   std::shared_ptr<Graph> profiled_graph_;

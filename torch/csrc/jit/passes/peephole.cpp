@@ -172,8 +172,9 @@ struct PeepholeOptimizeImpl {
             }
           }
         }
-      } else if (node->matches(
-                     "aten::is_floating_point(Tensor self) -> bool")) {
+      } else if (
+          node->matches("aten::is_floating_point(Tensor self) -> bool") &&
+          shape_peepholes_) {
         auto ptt = node->inputs().at(0)->type()->cast<TensorType>();
         if (auto maybe_dtype = ptt->scalarType()) {
           c10::ScalarType dtype = *maybe_dtype;
@@ -251,7 +252,8 @@ struct PeepholeOptimizeImpl {
               " as input type subtypes output type");
           node->output()->replaceAllUsesWith(node->input());
         }
-      } else if (node->matches("prim::dtype(Tensor a) -> int")) {
+      } else if (
+          node->matches("prim::dtype(Tensor a) -> int") && shape_peepholes_) {
         auto ptt = node->input()->type()->expect<TensorType>();
         if (ptt->scalarType()) {
           WithInsertPoint guard(node);
@@ -264,7 +266,9 @@ struct PeepholeOptimizeImpl {
               output->debugName());
           node->output()->replaceAllUsesWith(output);
         }
-      } else if (node->matches("prim::device(Tensor a) -> Device")) {
+      } else if (
+          node->matches("prim::device(Tensor a) -> Device") &&
+          shape_peepholes_) {
         auto ptt = node->input()->type()->expect<TensorType>();
         if (ptt->device()) {
           WithInsertPoint guard(node);
@@ -290,7 +294,9 @@ struct PeepholeOptimizeImpl {
               output->debugName());
           node->output()->replaceAllUsesWith(output);
         }
-      } else if (node->matches("prim::is_cuda(Tensor a) -> bool")) {
+      } else if (
+          node->matches("prim::is_cuda(Tensor a) -> bool") &&
+          shape_peepholes_) {
         auto ptt = node->input()->type()->expect<TensorType>();
         if (ptt->device()) {
           WithInsertPoint guard(node);
