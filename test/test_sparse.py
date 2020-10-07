@@ -1080,6 +1080,46 @@ class TestSparse(TestCase):
         test_shape(1000, 0, 100, 0)
         test_shape(1000, 100, 0, 0)
 
+    @cpu_only
+    def test_sspaddmm(self):
+
+        def test_shape(di, dj, dk, nnz):
+            x = self._gen_sparse(2, nnz, [di, dj])[0]
+            t = self._gen_sparse(2, nnz, [di, dk])[0]
+            y = torch.randn(dj, dk)
+            alpha = random.random()
+            beta = random.random()
+
+            res = t.sspaddmm(x, y, beta=beta, alpha=alpha)
+            expected = torch.addmm(self.safeToDense(t), self.safeToDense(x), y, beta=beta, alpha=alpha)
+            self.assertEqual(self.safeToDense(res), expected)
+
+            res = t.sspaddmm(x, y)
+            expected = torch.addmm(self.safeToDense(t), self.safeToDense(x), y)
+            self.assertEqual(self.safeToDense(res), expected)
+
+        test_shape(7, 5, 3, 20)
+        test_shape(1000, 100, 100, 20)
+        test_shape(3000, 64, 300, 20)
+        test_shape(0, 100, 100, 0)
+        test_shape(1000, 0, 100, 0)
+        test_shape(1000, 100, 0, 0)        
+
+        # Test issue https://github.com/pytorch/pytorch/issues/45113
+        batch_size, input_size, hidden_size = 5, 3, 7
+        weight = torch.randn(hidden_size, input_size).to_sparse()        
+        bias = torch.randn((hidden_size, 1)).to_sparse()
+        bias = torch.cat([bias] * batch_size, dim=1)
+        if not self.is_uncoalesced:
+            weight = weight.coalesce()
+            bias = bias.coalesce()
+
+        x = torch.randn(batch_size, input_size)        
+        y = bias.sspaddmm(weight, x.t())
+
+        y_bis = (bias.to_dense() + torch.matmul(weight.to_dense(), x.t())).to_sparse()
+        self.assertLess((y.to_dense() - y_bis.to_dense()).abs().max().item(), 1e-6)
+
     def test_sparse_addmm(self):
         def test_shape(m, n, p, nnz, broadcast):
             if broadcast:
