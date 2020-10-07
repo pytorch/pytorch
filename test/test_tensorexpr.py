@@ -1097,18 +1097,18 @@ class TestTensorExprFuser(BaseTestClass):
         # FIXME: interp.elapsed_value() also increments due to simplifier
         assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
-    def test_unsqueeze(self):
+    def test_unsqueeze(self, N=256):
         def easy(x, y):
             a = torch.unsqueeze(x, 0)
             b = torch.unsqueeze(y, 0)
             return a + b
 
-        traced = torch.jit.trace(easy, (torch.ones(1024, 1024), torch.zeros(1024, 1024)))
+        traced = torch.jit.trace(easy, (torch.ones(N, N), torch.zeros(N, N)))
 
         llvm = LLVMCodeGenExecuted()
         interp = SimpleIREvalExecuted()
 
-        a = torch.rand(1024, 1024)
+        a = torch.rand(N, N)
         x = traced(a, a)
         npr = np.expand_dims(a, 0)
         npr = npr + npr
