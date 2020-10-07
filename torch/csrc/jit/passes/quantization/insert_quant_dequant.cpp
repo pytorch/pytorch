@@ -330,6 +330,8 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   // Create and insert quantized embedding op.
   Value* none = g->insertConstant(IValue());
   Value* zero = g->insertConstant(IValue(0));
+  bool sparse_param = false;
+  auto sparse_const = g->insertConstant(sparse_param);
 
   if (is_aten_op) {
     TORCH_CHECK(
@@ -340,6 +342,8 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     for (auto i = 1; i < inputs_size - 1; ++i) {
       qembedding_bag_inputs.push_back(embedding_bag_inputs[i]);
     }
+    // Set the sparse field to 0 for inference.
+    qembedding_bag_inputs[5] = sparse_const;
   } else {
     TORCH_CHECK(
         inputs_size == 11,
@@ -348,8 +352,8 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     qembedding_bag_inputs.push_back(embedding_bag_inputs[3]); // offsets
     qembedding_bag_inputs.push_back(
         embedding_bag_inputs[6]); // scale_grad_by_freq
-    qembedding_bag_inputs.push_back(zero); // zero
-    qembedding_bag_inputs.push_back(embedding_bag_inputs[8]); // sparse
+    qembedding_bag_inputs.push_back(zero); // mode
+    qembedding_bag_inputs.push_back(sparse_const); // sparse
     qembedding_bag_inputs.push_back(
         embedding_bag_inputs[9]); // per_sample_weights
   }
