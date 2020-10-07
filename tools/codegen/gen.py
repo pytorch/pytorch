@@ -953,6 +953,32 @@ class FileManager:
             filename,
             ''.join(name + ";" for name in sorted(self.filenames)))
 
+def get_custom_build_selector(
+        provided_op_registration_allowlist: Optional[List[str]],
+        op_selection_yaml_path: Optional[str]) -> SelectiveBuilder:
+    assert not (
+        provided_op_registration_allowlist is not None and
+        op_selection_yaml_path is not None), (
+            "Both provided_op_registration_allowlist and " +
+            "op_selection_yaml_path can NOT be provided at the " +
+            "same time.")
+
+    op_registration_allowlist: Optional[Set[str]] = None
+    if provided_op_registration_allowlist is not None:
+        op_registration_allowlist = set(provided_op_registration_allowlist)
+
+    selector: SelectiveBuilder = SelectiveBuilder.get_nop_selector()
+    if op_registration_allowlist is not None:
+        selector = SelectiveBuilder.from_legacy_op_registration_allow_list(
+            op_registration_allowlist,
+            True,
+            False,
+        )
+    elif op_selection_yaml_path is not None:
+        selector = SelectiveBuilder.from_yaml_path(op_selection_yaml_path)
+
+    return selector
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate ATen source files')
     parser.add_argument(
@@ -976,12 +1002,22 @@ def main() -> None:
         '--vulkan',
         action='store_true',
         help='Generate Vulkan backend functions')
+    # TODO: --op_registration_whitelist will be removed when all call-sites
+    # for gen.py are moved over to using the operator YAML file for mobile
+    # custom build.
     parser.add_argument(
         '--op_registration_whitelist',
         nargs='*',
         help='filter op registrations by the whitelist (if set); '
              'each item is `namespace`::`operator name` without overload name; '
              'e.g.: aten::empty aten::conv2d ...')
+    parser.add_argument(
+        '--op_selection_yaml_path',
+        help='Provide a path to the operator selection (for custom build) YAML '
+             'that contains the information about the set of selected operators '
+             'and their categories (training, ...). Each operator is either a '
+             'full operator name with overload or just a bare operator name. '
+             'The operator names also contain the namespace prefix (e.g. aten::)')
     parser.add_argument(
         '--backend_whitelist',
         nargs='*',
@@ -994,19 +1030,10 @@ def main() -> None:
              'those that are not listed on --op_registration_whitelist')
     options = parser.parse_args()
 
-    op_registration_whitelist: Optional[Set[str]]
-    if options.op_registration_whitelist is not None:
-        op_registration_whitelist = set(options.op_registration_whitelist)
-    else:
-        op_registration_whitelist = None
-
-    selector: SelectiveBuilder = SelectiveBuilder.get_nop_selector()
-    if op_registration_whitelist is not None:
-        selector = SelectiveBuilder.from_legacy_op_registration_allow_list(
-            op_registration_whitelist,
-            True,
-            False,
-        )
+    selector = get_custom_build_selector(
+        options.op_registration_whitelist,
+        options.op_selection_yaml_path,
+    )
 
     native_functions = parse_native_yaml(os.path.join(options.source_path, 'native/native_functions.yaml'))
 
