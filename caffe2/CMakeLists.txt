@@ -841,7 +841,7 @@ endif()
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 
-  if(BUILD_TEST AND NOT USE_ROCM)
+  if(BUILD_TEST)
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
     add_subdirectory(${TORCH_ROOT}/test/cpp/tensorexpr ${CMAKE_BINARY_DIR}/test_tensorexpr)
     if(USE_DISTRIBUTED AND NOT WIN32)
@@ -1259,6 +1259,10 @@ if(BUILD_STATIC_RUNTIME_BENCHMARK)
   add_executable(static_runtime_test "${STATIC_RUNTIME_TEST_SRCS}")
   target_link_libraries(static_runtime_bench torch_library benchmark)
   target_link_libraries(static_runtime_test torch_library gtest_main)
+endif()
+
+if(BUILD_TENSOREXPR_BENCHMARK)
+  add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/tensorexpr ${CMAKE_BINARY_DIR}/tensorexpr_bench)
 endif()
 
 if(BUILD_MOBILE_BENCHMARK)
