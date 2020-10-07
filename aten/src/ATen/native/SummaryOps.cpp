@@ -213,10 +213,15 @@ std::tuple<Tensor, Tensor> histogram(
     bool density) {
 
   TORCH_CHECK(bins.dim() == 1, "bins must be 1d, when a tensor");
-  TORCH_CHECK(
-      at::all(bins.slice(0, 1, bins.numel()) >= bins.slice(0, 0, -1))
-          .item<bool>(),
-      "bins must increase monotonically");
+
+  //Skip the input check for CUDA to avoid device synchronization.
+  if (self.device().type() == kCPU) {
+    TORCH_CHECK(
+        at::all(bins.slice(0, 1, bins.numel()) >= bins.slice(0, 0, -1))
+            .item<bool>(),
+        "bin edges must increase monotonically"); 
+  }
+
   Tensor flattened_weights;
   if (weights.defined()) {
     TORCH_CHECK(

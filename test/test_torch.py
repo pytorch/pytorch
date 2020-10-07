@@ -4246,6 +4246,13 @@ class TestTorchDeviceType(TestCase):
     def test_histogram_alert_nondeterministic(self, device):
         torch.histogram(torch.tensor([], device=device))
 
+    @onlyCPU
+    def test_histogram_bin_edges_sorted(self, device):
+        # bins not sorted - the check is only performed on the CPU to avoid device synchronization
+        with self.assertRaisesRegex(RuntimeError, 'bin edges must increase monotonically'):
+            torch.histogram(torch.tensor([1], dtype=torch.float, device=device),
+                            bins=torch.tensor([2, 1], dtype=torch.float, device=device))
+
     def test_histogram(self, device):
         # negative bins
         with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
@@ -4254,10 +4261,7 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'bins must be 1d, when a tensor'):
             torch.histogram(torch.tensor([1], dtype=torch.float, device=device),
                             bins=torch.tensor([[1, 2], [3, 4]], dtype=torch.float, device=device))
-        # bins not sorted
-        with self.assertRaisesRegex(RuntimeError, 'bins must increase monotonically'):
-            torch.histogram(torch.tensor([1], dtype=torch.float, device=device),
-                            bins=torch.tensor([2, 1], dtype=torch.float, device=device))
+
         # empty tensor
         actual = torch.histogram(torch.tensor([], device=device), range=(0, 3))[0]
         expected = torch.zeros(10, dtype=torch.long, device=device)
