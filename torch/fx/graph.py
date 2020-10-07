@@ -350,7 +350,7 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
             if n.op == 'placeholder':
                 assert isinstance(n.target, str)
                 arg_str = n.target
-                arg_str = arg_str + f': {_type_repr(n.type)}' if n.type is not None else ''
+                arg_str += arg_str + f': {_type_repr(n.type)}' if n.type is not None else ''
                 placeholder_names.append(arg_str)
                 return None
             elif n.op == 'get_attr':
