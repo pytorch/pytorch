@@ -8,6 +8,47 @@ Tensor = torch.Tensor
 # Note: This not only adds doc strings for functions in the linalg namespace, but
 # also connects the torch.linalg Python namespace to the torch._C._linalg builtins.
 
+cholesky = _add_docstr(_linalg.linalg_cholesky, r"""
+linalg.cholesky(input) -> Tensor
+
+Returns the Cholesky decomposition.
+
+Computes the Cholesky decomposition of a Hermitian positive-definite
+matrix :math:`A` or for batches of Hermitian positive-definite matrices.
+The returned matrix ``L`` is lower-triangular, and
+the decomposition has the form:
+
+.. math::
+
+    A = LL^H
+
+If :attr:`input` is a batch of Hermitian positive-definite
+matrices, then the returned tensor will be composed of lower-triangular Cholesky factors
+of each of the individual matrices.
+
+Args:
+    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
+                batch dimensions consisting of symmetric positive-definite matrices.
+
+Example::
+
+    >>> a = torch.randn(2, 2, dtype=torch.complex128)
+    >>> a = a + a.t().conj()  # To make a Hermitian
+    >>> l = torch.cholesky(a)
+    >>> a
+    tensor([[ 2.4112, -0.7486,  1.4551],
+            [-0.7486,  1.3544,  0.1294],
+            [ 1.4551,  0.1294,  1.6724]])
+    >>> l
+    tensor([[ 1.5528,  0.0000,  0.0000],
+            [-0.4821,  1.0592,  0.0000],
+            [ 0.9371,  0.5487,  0.7023]])
+    >>> torch.mm(l, l.t().conj())
+    tensor([[ 2.4112, -0.7486,  1.4551],
+            [-0.7486,  1.3544,  0.1294],
+            [ 1.4551,  0.1294,  1.6724]])
+""")
+
 det = _add_docstr(_linalg.linalg_det, r"""
 linalg.det(input) -> Tensor
 

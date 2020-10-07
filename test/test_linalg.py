@@ -678,6 +678,40 @@ class TestLinalg(TestCase):
         expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
         self.assertEqual(result, expected)
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_cholesky(self, device, dtype):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value, random_symmetric_pd_matrix
+
+        def run_test(shape, batch):
+            # matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
+            # matrix = matrix + 1e-5*torch.eye(shape, device=device)
+            # matrix = (shape, *batch, dtype=dtype, device=device)
+            # matrix = matrix @ matrix.transpose(-2, -1).conj()
+            if dtype.is_complex:
+                real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+                A_real = random_fullrank_matrix_distinct_singular_value(shape, *batch, dtype=real_dtype, device=device)
+                A_imag = random_fullrank_matrix_distinct_singular_value(shape, *batch, dtype=real_dtype, device=device)
+                A = A_real + 1j * A_imag
+                A = A @ A.transpose(-2, -1).conj()
+            else:
+                A = random_symmetric_pd_matrix(shape, *batch, dtype=dtype, device=device)
+            expected_L = np.linalg.cholesky(A.cpu().numpy())
+            actual_L = torch.linalg.cholesky(A)
+            self.assertEqual(actual_L, expected_L)
+
+        shapes = (0, 3, 5)
+        batches = ((), (3, ), (2, 2))
+        for shape, batch in itertools.product(shapes, batches):
+            run_test(shape, batch)
+
+        # cholesky requires a square matrix
+        t = torch.randn(2, 3, device=device, dtype=dtype)
+        with self.assertRaises(RuntimeError):
+            torch.linalg.cholesky(t)
+
 instantiate_device_type_tests(TestLinalg, globals())
 
 if __name__ == '__main__':

@@ -8244,6 +8244,11 @@
 #
 # See linalg_det as an example.
 
+- func: linalg_cholesky(Tensor self) -> Tensor
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+
 # torch.linalg.det, alias for torch.det
 - func: linalg_det(Tensor self) -> Tensor
   python_module: linalg
