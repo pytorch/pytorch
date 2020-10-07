@@ -427,7 +427,7 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors)
       tensors_to_compute.begin(), tensors_to_compute.end());
   for (Tensor* t : tensors_to_compute) {
     if (!output_tensors_.count(t)) {
-      intermediate_tensors_.insert(t);
+      intermediate_bufs_.insert(t->buf());
     }
   }
 
@@ -679,19 +679,7 @@ void LoopNest::computeInline(const Buf* b) {
   root_stmt_ = root_stmt_->accept_mutator(&inliner);
 
   // No longer computing this intermediate tensor, so don't alloc it.
-  for (auto* t : intermediate_tensors_) {
-    if (b == t->buf()) {
-      intermediate_tensors_.erase(t);
-      break;
-    }
-  }
-
-  for (auto it = temp_bufs_.begin(); it != temp_bufs_.end(); ++it) {
-    if (b == *it) {
-      temp_bufs_.erase(it);
-      break;
-    }
-  }
+  intermediate_bufs_.erase(b);
 }
 
 // TODO: Unify with DepTracker
@@ -788,9 +776,7 @@ Block* findLowestContainingBlock(const std::vector<BufUse>& uses) {
 }
 
 Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
-  // Add allocs and frees for intermediate buffers at the global level.
-  // TODO: move allocs and frees to the imemediate areas to reuse buffers.
-  if (intermediate_tensors_.size() == 0ULL && temp_bufs_.size() == 0ULL) {
+  if (intermediate_bufs_.size() == 0ULL) {
     return stmt;
   }
 
@@ -799,31 +785,17 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
     b = new Block({stmt});
   }
 
-  // TODO: Fix the traversal, currently the order is non-deterministic
-  for (Tensor* tensor : intermediate_tensors_) {
-    if (output_tensors_.count(tensor) > 0) {
-      // No need to allocate memory if the tensors are given as input/output.
-      continue;
-    }
-    Stmt* alloc = new Allocate(
-        tensor->buf()->base_handle(), tensor->body()->dtype(), tensor->dims());
-    Stmt* free = new Free(tensor->buf()->base_handle());
-    b->prepend_stmt(alloc);
-    b->append_stmt(free);
-  }
-
-  // Now insert allocations and frees for temporary buffers. Do that in the
-  // innermost possible scope.
   std::unordered_map<const Buf*, std::vector<BufUse>> uses = findUses(stmt);
-
-  for (const auto& buf : temp_bufs_) {
+  // Insert allocations and frees for temporary buffers in the innermost
+  // possible scope.
+  for (const Buf* buf : intermediate_bufs_) {
     Stmt* alloc = new Allocate(buf->base_handle(), buf->dtype(), buf->dims());
     Stmt* free = new Free(buf->base_handle());
-
     Block* alloc_block = findLowestContainingBlock(uses.at(buf));
     alloc_block->prepend_stmt(alloc);
     alloc_block->append_stmt(free);
   }
+
   return b;
 }
 
@@ -1655,7 +1627,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
   // Mark the new temp buffer as requiring an alloc (it will be inserted as a
   // part of prepareForCodegen).
-  temp_bufs_.emplace_back(temp_buf);
+  intermediate_bufs_.insert(temp_buf);
 }
 
 class SwapReduce : public IRMutator {
@@ -1933,7 +1905,7 @@ void LoopNest::rfactor(
   }
 
   tmp_buf->set_dims(tmp_dims);
-  temp_bufs_.emplace_back(tmp_buf);
+  intermediate_bufs_.insert(tmp_buf);
 }
 
 } // namespace tensorexpr
