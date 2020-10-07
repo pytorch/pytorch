@@ -745,7 +745,7 @@ void initJitScriptBindings(PyObject* module) {
               [](Object& self, const std::string& name) {
                 try {
                   return toPyObject(self.attr(name));
-                } catch (ObjectAttributeError err) {
+                } catch (const ObjectAttributeError& err) {
                   throw AttributeError("%s", err.what());
                 }
               })
@@ -760,7 +760,7 @@ void initJitScriptBindings(PyObject* module) {
                     return py::cast(*method);
                   }
                   return toPyObject(self.attr(name));
-                } catch (ObjectAttributeError err) {
+                } catch (const ObjectAttributeError& err) {
                   throw AttributeError("%s", err.what());
                 }
               })
