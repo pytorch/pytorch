@@ -12175,6 +12175,12 @@ class TestNNDeviceType(NNTestCase):
         self.assertIs(m.weight.dtype, torch.complex128)
         m.to(torch.float32)
         self.assertIs(m.weight.dtype, torch.float32)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            m.to(torch.complex64)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("Complex modules are a new feature" in str(w[-1].message))
 
 class TestModuleGlobalHooks(TestCase):
 

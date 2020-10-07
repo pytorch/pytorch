@@ -603,6 +603,10 @@ class Module:
             if not (dtype.is_floating_point or dtype.is_complex):
                 raise TypeError('nn.Module.to only accepts floating point or complex '
                                 'dtypes, but got desired dtype={}'.format(dtype))
+            if dtype.is_complex:
+                warnings.warn(
+                    "Complex modules are a new feature, and some modules might not work as expected "
+                    "when using complex tensors as parameters or buffers. ")
 
         def convert(t):
             if convert_to_format is not None and t.dim() == 4:
