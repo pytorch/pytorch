@@ -93,8 +93,14 @@ Tensor quantized_clamp_impl(
 #endif
     qclamp_stub(qx.device().type(), qx, *min, *max, qy);
   } else if (max) {
+#ifdef USE_PYTORCH_QNNPACK
+    TORCH_CHECK(false, "Both min and max should be specified for quantized clamp!");
+#endif
     qclamp_max_stub(qx.device().type(), qx, *max, qy);
   } else if (min) {
+#ifdef USE_PYTORCH_QNNPACK
+    TORCH_CHECK(false, "Both min and max should be specified for quantized clamp!");
+#endif
     qclamp_min_stub(qx.device().type(), qx, *min, qy);
   } else {
     TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
