@@ -272,7 +272,6 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::Loop,
       prim::FusionGroup,
       prim::CudaFusionGroup,
-      prim::CudaFusionGuard,
       prim::DifferentiableGraph,
       prim::TensorExprGroup,
       prim::FunctionalGraph,

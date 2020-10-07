@@ -497,7 +497,6 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Function:
     case prim::CreateObject:
     case prim::tolist:
-    case prim::CudaFusionGuard:
       return analyzeCreator(node);
     case prim::TupleConstruct:
     case prim::DictConstruct:

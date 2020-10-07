@@ -2,6 +2,7 @@
 #include <ATen/core/dispatch/OperatorOptions.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 namespace torch {
 namespace jit {
@@ -180,12 +181,12 @@ RegisterOperators reg_fusion({
             fuser::cuda::runFusionGroup(node, *stack);
           };
         },
-        c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
+        aliasAnalysisSpecialCase()),
 });
 
 RegisterOperators reg_guard({
     Operator(
-        prim::CudaFusionGuard,
+        "prim::CudaFusionGuard(...) -> bool",
         // prim::CudaFusionGuard returns a fresh Boolean type without aliasing.
         // if we would ever return refined tensor, which would change aliasing
         // analysis, we should update aliasdb pass.
@@ -223,7 +224,7 @@ RegisterOperators reg_guard({
             return;
           };
         },
-        c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
+        aliasAnalysisFromSchema()),
 });
 } // namespace
 
