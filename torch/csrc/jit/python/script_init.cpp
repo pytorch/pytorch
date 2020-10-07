@@ -1565,6 +1565,17 @@ void initJitScriptBindings(PyObject* module) {
           "add_failed_attribute",
           &ConcreteModuleTypeBuilder::addFailedAttribute)
       .def(
+          "add_ignored_attribute",
+          &ConcreteModuleTypeBuilder::addIgnoredAttribute)
+      .def(
+          "add_ignored_attributes",
+          [](ConcreteModuleTypeBuilder& self,
+             const std::vector<std::string>& names) {
+            for (auto& name : names) {
+              self.addIgnoredAttribute(name);
+            }
+          })
+      .def(
           "set_module_dict",
           [](ConcreteModuleTypeBuilder& self) {
             self.setIterableModuleKind(IterableModuleKind::DICT);
@@ -1589,6 +1600,7 @@ void initJitScriptBindings(PyObject* module) {
       .def("get_attributes", &ConcreteModuleType::getAttributesPy)
       .def("get_modules", &ConcreteModuleType::getModulesPy)
       .def("dump", &ConcreteModuleType::dump)
+      .def("is_ignored_attribute", &ConcreteModuleType::isIgnoredAttribute)
       .def(
           "equals",
           [](const ConcreteModuleType& self, const ConcreteModuleType& other) {
