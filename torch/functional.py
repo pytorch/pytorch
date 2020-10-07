@@ -510,7 +510,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         signal_dim = input.dim()
         extended_shape = [1] * (3 - signal_dim) + list(input.size())
         pad = int(n_fft // 2)
-        input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
+        input = F.pad(input.view(extended_shape), [pad, pad], pad_mode)
         input = input.view(input.shape[-signal_dim:])
     return _VF.stft(input, n_fft, hop_length, win_length, window,  # type: ignore
                     normalized, onesided, return_complex)
