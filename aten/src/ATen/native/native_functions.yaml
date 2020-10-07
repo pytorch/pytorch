@@ -8224,7 +8224,7 @@
   use_c10_dispatcher: full
   variants: function, method
 
-- func: _syevd_helper(Tensor self, bool compute_v, str uplo) -> (Tensor, Tensor)
+- func: _syevd_helper(Tensor self, bool compute_eigenvectors, str uplo) -> (Tensor, Tensor)
   use_c10_dispatcher: full
   variants: function
   dispatch:

@@ -949,7 +949,7 @@ static void apply_syevd(Tensor& w, Tensor& v, bool compute_v, std::string uplo_s
 #endif
 }
 
-std::tuple<Tensor, Tensor> _syevd_helper_cpu(const Tensor& self, bool compute_v, std::string uplo) {
+std::tuple<Tensor, Tensor> _syevd_helper_cpu(const Tensor& self, bool compute_eigenvectors, std::string uplo) {
   std::vector<int64_t> infos(batchCount(self), 0);
 
   auto self_sizes = self.sizes().vec();
@@ -959,7 +959,7 @@ std::tuple<Tensor, Tensor> _syevd_helper_cpu(const Tensor& self, bool compute_v,
 
   auto eigvecs = cloneBatchedColumnMajor(self);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "syevd_cpu", [&]{
-    apply_syevd<scalar_t>(eigvals, eigvecs, compute_v, uplo, infos);
+    apply_syevd<scalar_t>(eigvals, eigvecs, compute_eigenvectors, uplo, infos);
   });
 
   if (self.dim() > 2) {
@@ -967,7 +967,7 @@ std::tuple<Tensor, Tensor> _syevd_helper_cpu(const Tensor& self, bool compute_v,
   } else {
     singleCheckErrors(infos[0], "syevd_cpu");
   }
-  if (compute_v) {
+  if (compute_eigenvectors) {
     return std::tuple<Tensor, Tensor>(eigvals, eigvecs);
   } else {
     return std::tuple<Tensor, Tensor>(eigvals, at::empty({0}, self.options()));
@@ -976,13 +976,13 @@ std::tuple<Tensor, Tensor> _syevd_helper_cpu(const Tensor& self, bool compute_v,
 
 std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& self, std::string uplo) {
   squareCheckInputs(self);
-  return at::_syevd_helper(self, /*compute_v=*/true, uplo);
+  return at::_syevd_helper(self, /*compute_eigenvectors=*/true, uplo);
 }
 
 Tensor linalg_eigvalsh(const Tensor& self, std::string uplo) {
   squareCheckInputs(self);
   Tensor eigvals, eigvecs;
-  std::tie(eigvals, eigvecs) = at::_syevd_helper(self, /*compute_v=*/false, uplo);
+  std::tie(eigvals, eigvecs) = at::_syevd_helper(self, /*compute_eigenvectors=*/false, uplo);
   return eigvals;
 }
 

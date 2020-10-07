@@ -1391,9 +1391,9 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-std::tuple<Tensor, Tensor> _syevd_helper_cuda(const Tensor& self, bool compute_v, std::string uplo) {
+std::tuple<Tensor, Tensor> _syevd_helper_cuda(const Tensor& self, bool compute_eigenvectors, std::string uplo) {
   bool upper = uplo == "U" ? true : false;
-  return _symeig_helper_cuda(self, compute_v, upper);
+  return _symeig_helper_cuda(self, compute_eigenvectors, upper);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
