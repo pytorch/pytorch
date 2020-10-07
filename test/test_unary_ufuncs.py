@@ -444,12 +444,6 @@ class TestUnaryUfuncs(TestCase):
         input = make_tensor((64, 64), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
 
-        # TODO(kshitij12345): Fix the behavior for following Op
-        SKIP_LIST = [torch.nan_to_num]
-
-        if op.op in SKIP_LIST:
-            return None
-
         for out_dtype in all_types_and_complex_and(torch.bool, torch.half):
             out = torch.empty_like(input, dtype=out_dtype)
             if op.promotes_integers_to_float:

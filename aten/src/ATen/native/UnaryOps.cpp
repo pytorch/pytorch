@@ -406,6 +406,12 @@ Tensor& nan_to_num_out(
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
     c10::optional<double> neg_inf) {
+  TORCH_CHECK(
+      self.scalar_type() == result.scalar_type(),
+      "nan_to_num: dtype of out: ",
+      result.scalar_type(),
+      " should be same as input: ",
+      self.scalar_type());
 
   if (c10::isIntegralType(self.scalar_type())) {
     result.resize_as_(self);
