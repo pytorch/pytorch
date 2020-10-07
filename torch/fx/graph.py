@@ -249,7 +249,7 @@ class Graph:
 
     def python_code(self, root_module: str) -> str:
         free_vars: List[str] = []
-        modules_used : Set[str] = set(['typing'])
+        modules_used : Set[str] = set()
         body: List[str] = []
         maybe_return_annotation : str = ''
 
