@@ -91,7 +91,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         this ``Future``. The callback function can use the ``Future.wait()`` API
         to get the value.
 
-	We recommend that you use the ``then`` API as it provides a way to synchronize
+        We recommend that you use the ``then`` API as it provides a way to synchronize
         after your callback has completed. But both ``then`` and ``add_done_callback``
         use the same callback registration API under the hood, and thus the order of
         their callbacks will be maintained even if their calls are interleaved.
