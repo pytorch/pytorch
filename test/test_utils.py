@@ -8,6 +8,7 @@ import textwrap
 import unittest
 import torch
 import torch.nn as nn
+from torch import distributed as dist
 import torch.utils.data
 import torch.cuda
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
@@ -41,21 +42,42 @@ class RandomDatasetMock(object):
 class TestStateDict(TestCase):
     def test_state_dict(self):
         """"""
-        model = nn.Sequential(nn.Conv2d(1, 1, 1, bias=False),
-                              nn.BatchNorm2d(1))
+        model = nn.Sequential(nn.Linear(32, 32),
+                              nn.ReLU(),
+                              nn.Linear(32, 16),
+                              nn.ReLU())
         model.train()
-        # quantize
-        torch.quantization.fuse_modules(model, ["0", "1"], inplace=True)
+        # Quantize
+        torch.quantization.fuse_modules(model, [["0", "1"], ["2", "3"]], inplace=True)
         model = torch.quantization.QuantWrapper(model)
         torch.backends.quantized.engine = "qnnpack"
         model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
         torch.quantization.prepare_qat(model, inplace=True)
-        # Make dataparallel
-        dist_model = nn.DataParallel(model)
-        state_dict = remove_prefix_from_state_dict_if_exists(dist_model.state_dict(),
-                                                             prefix='module.')
-        self.assertEqual(model.state_dict().keys(), state_dict.keys())
-        self.assertEqual(model.state_dict()._metadata.keys(), state_dict._metadata.keys())
+
+        # Setup/Cleanup:
+        def setup(backend, rank, world_size):
+            os.environ['MASTER_ADDR'] = 'localhost'
+            os.environ['MASTER_PORT'] = '29500'
+            dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
+
+        def cleanup():
+            dist.destroy_process_group()
+
+        # DataParallel model:
+        setup("mpi", rank=8, world_size=1)
+        dp_model = nn.DataParallel(model)
+        dp_state_dict = remove_prefix_from_state_dict_if_exists(dp_model.state_dict(), prefix='module.')
+        self.assertEqual(model.state_dict().keys(), dp_state_dict.keys())
+        self.assertEqual(model.state_dict()._metadata.keys(), dp_state_dict._metadata.keys())
+        cleanup()
+
+        # Distributed DataParallel model:
+        setup("mpi", rank=8, world_size=1)
+        ddp_model = nn.parallel.DistributedDataParallel(model)
+        ddp_state_dict = remove_prefix_from_state_dict_if_exists(ddp_model.state_dict(), prefix='module.')
+        self.assertEqual(model.state_dict().keys(), ddp_state_dict.keys())
+        self.assertEqual(model.state_dict()._metadata.keys(), dp_state_dict._metadata.keys())
+        cleanup()
 
 
 class TestCheckpoint(TestCase):
