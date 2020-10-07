@@ -87,9 +87,9 @@ bool getAutodiffSubgraphInlining() {
 
 // for debugging it is helpful to be able to force fusion groups
 // to be created
-thread_local bool fusion_group_inlining = true;
+static std::atomic<bool> fusion_group_inlining(true);
 void debugSetFusionGroupInlining(bool state) {
-  autodiff_subgraph_inlining = state;
+  fusion_group_inlining = state;
 }
 
 bool getFusionGroupInlining() {

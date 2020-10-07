@@ -298,7 +298,8 @@ namespace jit {
   _(FuserPass_UnknownShapesIgnored)         \
   _(FuserPass_Multidevice)                  \
   _(FuserPass_MergeGroups)                  \
-  _(TrainBasic)
+  _(TrainBasic)                             \
+  _(Conv2D)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
   _(LLVMByteImmTest)                       \
