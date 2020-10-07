@@ -1071,6 +1071,12 @@ class DistributedTest:
                 dtype=torch.cfloat,
             )
 
+        @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        def test_all_reduce_max_complex_unsupported(self):
+            group, group_id, rank = self._init_global_test()
+            with self.assertRaisesRegex(RuntimeError, "is unsupported on complex tensors"):
+                dist.all_reduce(_build_tensor(1, dtype=torch.cfloat), dist.ReduceOp.MAX, group_id)
+
         @unittest.skipIf(
             BACKEND != "gloo",
             "Only Gloo backend will have CUDA allReduce tested",
@@ -1262,6 +1268,12 @@ class DistributedTest:
                 [2, 4],
                 [torch.float, torch.float],
             )
+
+        @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        def test_all_reduce_coalesced_max_complex_unsupported(self):
+            group, group_id, rank = self._init_global_test()
+            with self.assertRaisesRegex(RuntimeError, "is unsupported on complex tensors"):
+                dist.all_reduce_coalesced([_build_tensor(1, dtype=torch.cfloat)], dist.ReduceOp.MAX, group_id)
 
         def _test_all_reduce_coalesced_helper(
             self,

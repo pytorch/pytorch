@@ -43,6 +43,18 @@ try:
 except ImportError:
     _GLOO_AVAILABLE = False
 
+# Some reduce ops are not supported by complex numbers.
+# We currently provide complex support to the distributed API by viewing
+# complex tensors as real (torch.view_as_real), meaning that calling
+# these unsupported ops will return garbage values rather than error out.
+# (e.g. max(2+3i, 3+2i) = 3+3i)
+# We'd like calls to unsupported ops to error out accordingly,
+# rather than returning garbage values.
+def supports_complex(reduceOp: ReduceOp) -> bool:
+    if reduceOp == ReduceOp.MAX or reduceOp == ReduceOp.MIN:
+        return False
+    return True
+
 
 class Backend(object):
     """
@@ -936,7 +948,7 @@ def all_reduce(tensor,
         None, if not async_op or if not part of the group
 
     Examples:
-        >>> # Tensors are all of dtype torch.int64.
+        >>> # All tensors below are of torch.int64 type.
         >>> # We have 2 process groups, 2 ranks.
         >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
         >>> tensor
@@ -947,9 +959,9 @@ def all_reduce(tensor,
         tensor([4, 6]) # Rank 0
         tensor([4, 6]) # Rank 1
 
-        >>> # Tensors are all of dtype torch.complex64.
+        >>> # All tensors below are of torch.cdouble type.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor = torch.tensor([complex(1, 1), complex(2, 2)], dtype=torch.complex64) + 2 * complex(rank, rank)
+        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cdouble) + 2 * rank * (1+1j)
         >>> tensor
         tensor([1.+1.j, 2.+2.j]) # Rank 0
         tensor([3.+3.j, 4.+4.j]) # Rank 1
@@ -963,7 +975,10 @@ def all_reduce(tensor,
     if _rank_not_in_group(group):
         return
 
-    tensor = tensor if not tensor.is_complex() else torch.view_as_real(tensor)
+    if tensor.is_complex():
+        if not supports_complex(op):
+            raise RuntimeError(f"{op} is unsupported on complex tensors")
+        tensor = torch.view_as_real(tensor)
 
     opts = AllreduceOptions()
     opts.reduceOp = op
@@ -1017,6 +1032,9 @@ def all_reduce_coalesced(tensors,
     _check_tensor_list(tensors, "tensor")
     if _rank_not_in_group(group):
         return
+
+    if any([t.is_complex() for t in tensors]) and not supports_complex(op):
+        raise RuntimeError(f"{op} is unsupported on complex tensors")
 
     tensors = [t if not t.is_complex() else torch.view_as_real(t) for t in tensors]
 
@@ -1451,7 +1469,7 @@ def all_gather(tensor_list,
         None, if not async_op or if not part of the group
 
     Examples:
-        >>> # Tensors are all of dtype torch.int64.
+        >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
         >>> tensor_list = [torch.zero(2, dtype=torch.int64) for _ in range(2)]
         >>> tensor_list
@@ -1465,12 +1483,12 @@ def all_gather(tensor_list,
         [tensor([1, 2]), tensor([3, 4])] # Rank 0
         [tensor([1, 2]), tensor([3, 4])] # Rank 1
 
-        >>> # Tensors are all of dtype torch.complex64.
+        >>> # All tensors below are of torch.cdouble dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_list = [torch.zero(2, dtype=torch.complex64) for _ in range(2)]
+        >>> tensor_list = [torch.zero(2, dtype=torch.cdouble) for _ in range(2)]
         >>> tensor_list
         [tensor([0.+0.j, 0.+0.j]), tensor([0.+0.j, 0.+0.j])] # Rank 0 and 1
-        >>> tensor = torch.tensor([complex(1, 1), complex(2, 2)], dtype=torch.complex64) + 2 * complex(rank, rank)
+        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cdouble) + 2 * rank * (1+1j)
         >>> tensor
         tensor([1.+1.j, 2.+2.j]) # Rank 0
         tensor([3.+3.j, 4.+4.j]) # Rank 1
