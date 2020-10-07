@@ -2793,23 +2793,24 @@ class TestQuantizedEmbeddingOps(TestCase):
     def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate, optimized_qparams):
         weights = torch.from_numpy((np.random.random_sample((
             num_embeddings, embedding_dim)) + 1).astype(np.float32))
-
+        qtype = torch.quint8
         if bit_rate == 8:
             w_packed = pack_fn(weights)
         else:
             w_packed = pack_fn(weights, optimized_qparams=optimized_qparams)
         w_unpacked = unpack_fn(w_packed)
 
-        if bit_rate == 8:
+        if bit_rate == 8 or bit_rate == 4:
             # Check numerics of prepack function that accepts qtensor as input.
             # We use min-max observer to mimic the quantization performed in the original function.
             obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
             obs(weights)
             # Get the scale and zero point for the weight tensor
             qparams = obs.calculate_qparams()
-
+            if bit_rate == 4:
+                qtype = torch.quint4x2
             # Quantize the weights to 8bits
-            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=qtype)
             real_packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
             self.assertEqual(isinstance(real_packed_weight, torch._C.ScriptObject), True)
             unpacked_weight = torch.ops.quantized.embedding_bag_unpack(real_packed_weight)
