@@ -214,198 +214,249 @@ proper thread locking code to ensure the hooks are thread safe.
 .. _complex_autograd-doc:
 
 Autograd for Complex Numbers
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+----------------------------
 
-**What notion of complex derivative does PyTorch use?**
-*******************************************************
+tl;dr
+^^^^^
 
-PyTorch uses the Wirtinger Calculus to compute gradients for functions with complex valued input and (or)
-output. Wirtinger Calculus provides a means of computing gradients of real valued cost functions defined on
-complex domains(:math:`ℂ^n`) which are not holomorphic (complex differentiable). This comes in very handy since
-most of the commonly used linear algebraic functions are not holomorphic.
+- PyTorch Autograd returns gradients that are directly usable for optimization and gradient descent (no conjugation needed),
+  so existing optimizers work out of the box. We don’t make any attempt to support holomorphic functions specially;
+  in particular, derivatives are only well defined for real-valued loss functions.
+- The gradients returned correspond to “TensorFlow-style” complex gradients (as opposed to JAX-style complex gradients).
 
-PyTorch's autograd convention for complex numbers also allows gradient values to be used in
-Gradient Descent with the same update rule as that in the case of real numbers. This convention works for
-optimization problems where the objective function is real valued.
+What are complex derivatives?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Consider a function :math:`F: ℂ → ℂ`, which is a part of a :math:`G: ℂ → ℝ` function,
-and can be decomposed into functions :math:`u` and :math:`v` which compute the real and imaginary parts of
-the output of function :math:`F`:
-
-    .. code::
-
-        def F(z):
-            x, y = real(z), imag(z)
-            s = u(x, y) + v(x, y) * 1j
-            return s
-
-where :math:`1j` is a unit imaginary number and :math:`u` and :math:`v` are :math:`ℝ^{2} → ℝ` functions.
-
-According to Wirtinger calculus, we can define the following two derivatives for complex numbers:
-
-Wirtinger Derivative:
+Consider a function :math:`f: ℂ → ℂ`, :math:`f(z) = f(x+yj) = u(x, y) +v(x, y)j` where :math:`u` and :math:`v`
+are real valued functions. Any such function :math:`f` may be decomposed as a complex valued function or a
+vector valued function whose input lies in :math:`ℝ^2`, i.e.,
 
     .. math::
-        \frac{\partial s}{\partial z} = 1/2 * (\frac{\partial s}{\partial x} - \frac{\partial s}{\partial y} j)
+        f(z) = f(x+yj) = u(x, y) + v(x, y)j = (u(x, y), v(x, y))
+
+For a function :math:`f` to be complex differentiable, u and v must be real differentiable and f must satisfy the
+Cauchy-Riemann `equations <https://en.wikipedia.org/wiki/Cauchy%E2%80%93Riemann_equations>`_. The key condition
+used in obtaining the Cauchy-Riemann equations is that the below mentioned limit must exist, as a result of which
+the value of limit computed for a real and imaginary step (:math:`h`) must be equal.
+
+    .. math::
+        f'(z) = \lim_{h \to 0, h \in C} \frac{f(z+h) - f(z)}{h}
+
+The complex differentiable functions are commonly known as holomorphic functions. Practically, many of the functions
+used in loss functions for real world applications do not satisfy these conditions. One of the common important non
+holomorphic functions is conjugate operator. Conjugate operation is defined as:
+
+    .. math::
+        f(z) = f(x+yj) = x - yj
+
+For a real step :math:`h`,
+
+    .. math::
+        f’(z) = \lim_{h \to 0} \frac{(x+h - yj) - (x-yj)}{h} = 1
+
+For an imaginary step :math:`h*1j`,
+
+    .. math::
+        \begin{aligned}
+        f’(z) &= \lim_{h \to 0} \frac{f(z+h*1j) - f(z)}{h*1j}       \\
+              &= \lim_{h \to 0} \frac{(x - (y+h)j) - (x-yj)}{h*1j}  \\
+              &= -1
+        \end{aligned}
+
+Wirtinger Calculus comes in picture ...
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+So, we have this great theory of complex differentiability and holomorphic functions, and we can’t use any of it at all,
+because many of the commonly used functions are not holomorphic. What’s a poor mathematician to do? Well, Wirtinger observed that even if
+:math:`f(z)` isn’t holomorphic, one could rewrite it as a two variable function :math:`f(z, z*)` which is always holomorphic. This is because
+real and imaginary of the components of :math:`z` can be expressed in terms of :math:`z` and :math:`z^*` as:
+
+    .. math::
+        \begin{aligned}
+            Re(z) &= \frac {z + z^*}{2} \\
+            Im(z) &= \frac {z - z^*}{2j}
+        \end{aligned}
+
+Wirtinger Calculus suggests to study :math:`f(z, z^*)` instead, which is guaranteed to be holomorphic, and has partial derivatives
+:math:`\frac{\partial }{\partial z}` and :math:`\frac{\partial }{\partial z^{*}}`. We can use the chain rule to establish a relationship
+between these partial derivatives and the partial derivatives w.r.t., the real and imaginary components of :math:`z`.
+
+    .. math::
+        \begin{aligned}
+            \frac{\partial }{\partial x} &= \frac{\partial z}{\partial x} * \frac{\partial }{\partial z} + \frac{\partial z^*}{\partial x} * \frac{\partial }{\partial z^*} \\
+                                         &= \frac{\partial }{\partial z} + \frac{\partial }{\partial z^*}   \\
+            \\
+            \frac{\partial }{\partial y} &= \frac{\partial z}{\partial y} * \frac{\partial }{\partial z} + \frac{\partial z^*}{\partial y} * \frac{\partial }{\partial z^*} \\
+                                         &= 1j * (\frac{\partial }{\partial z} - \frac{\partial }{\partial z^*})
+        \end{aligned}
+
+From the above equations, we get:
+
+    .. math::
+        \begin{aligned}
+            \frac{\partial }{\partial z} &= 1/2 * (\frac{\partial }{\partial x} - 1j * \frac{\partial z}{\partial y})   \\
+            \frac{\partial }{\partial z^*} &= 1/2 * (\frac{\partial }{\partial x} + 1j * \frac{\partial z}{\partial y})
+        \end{aligned}
+
+which is the classic definition of Wirtinger calculus that you would find on `Wikipedia <https://en.wikipedia.org/wiki/Wirtinger_derivatives>`_.
+
+There are a lot of beautiful consequences of this change.
+
+- For one, the Cauchy-Riemann equations translate into simply saying that :math:`\frac{\partial f}{\partial z^*} = 0` (that is to say, the function :math:`f` can be written
+  entirely in terms of :math:`z`, without making reference to :math:`z^*`).
+- Another important (and somewhat counterintuitive) result, as we’ll see later, is that when we do optimization on a real-valued loss, the step we should
+  take while making variable update is given by :math:`\frac{\partial Loss}{\partial z^*}` (not :math:`\frac{\partial Loss}{\partial z}`).
+
+For more reading, check out: https://arxiv.org/pdf/0906.4835.pdf
+
+How is Wirtinger Calculus useful in optimization?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Researchers in audio and other fields, more commonly, use Gradient Descent to optimize real valued loss functions with complex variables. Typically, these people
+treat the real and imaginary values as separate channels that can be updated. For a step size :math:`s/2` and loss :math:`L`, we can write the following equations in :math:`R^2`:
+
+    .. math::
+        \begin{aligned}
+            x_{n+1} &= x_n - (s/2) * \frac{\partial L}{\partial x}  \\
+            y_{n+1} &= y_n - (s/2) * \frac{\partial L}{\partial y}
+        \end{aligned}
+
+How do these equations translate into complex space :math:`C`?
+
+    .. math::
+        \begin{aligned}
+            z_{n+1} &= x_n - (s/2) * \frac{\partial L}{\partial x} + 1j * (y_n - (s/2) * \frac{\partial L}{\partial y})
+                    &= z_n - s * 1/2 * (\frac{\partial L}{\partial x} + j \frac{\partial L}{\partial y})
+                    &= z_n - s * \frac{\partial L}{\partial z^*}
+        \end{aligned}
+
+Something very interesting has happened: Wirtinger calculus tells us that we can simplify the complex variable update formula above to only refer to the
+Conjugate Wirtinger derivative :math:`\frac{\partial L}{\partial z^*}` and that gives us exactly the step we take in optimization.
+
+What does the PyTorch Autograd compute for complex functions?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+As we saw above, the conjugate Wirtinger derivative gives us exactly the correct step for a real valued loss function; so,
+when you ask PyTorch autograd to compute the derivative of a function, we give you the conjugate Wirtinger derivative :math:`\frac{\partial L}{\partial z^*}` as
+the output gradient, while making the assumption that the function in question is itself a :math:`C → R` function itself or part of a bigger real valued function. If that
+is all you care about, that’s the end of the story, and you can stop reading here.
+
+What derivative formulas should we write for complex functions?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Typically, the derivative formula takes in `grad_output` as an input, representing the
+incoming Vector-Jacobian product that we’ve already computed, aka, :math:`\frac{\partial L}{\partial s^*}`, where :math:`L` is the loss of the parent real
+valued function and s is the output of our function. The goal here is to compute :math:`\frac{\partial L}{\partial z^*}`, where :math:`z` is the input of the function.
+
+Let’s continue working with :math:`f: ℂ → ℂ` defined as :math:`f(z) = f(x+yj) = u(x, y) + v(x, y)j`. As discussed above, Autograd’s gradient convention is centered
+around optimization for real valued loss functions, so let’s assume :math:`f` is a part of larger real valued loss function :math:`g`. Using chain rule, we can write:
+
+    .. math::
+        \frac{\partial L}{\partial z^*} = \frac{\partial L}{\partial u} * \frac{\partial u}{\partial z^*} + \frac{\partial L}{\partial v} * \frac{\partial v}{\partial z^*}
         :label: [1]
 
-Conjugate Wirtinger derivative:
+Now using Wirtinger derivative definition, we can write:
 
     .. math::
-        \frac{\partial s}{\partial z^{*}} = 1/2 * (\frac{\partial s}{\partial x} + \frac{\partial s}{\partial y} j)
+        \begin{aligned}
+            \frac{\partial L}{\partial s} = 1/2 * (\frac{\partial L}{\partial u} - \frac{\partial L}{\partial v} j) \\
+            \frac{\partial L}{\partial s^*} = 1/2 * (\frac{\partial L}{\partial u} + \frac{\partial L}{\partial v} j)
+        \end{aligned}
+
+It should be noted here that since :math:`u` and :math:`v` are real functions, and :math:`L` is real by our assumption
+that :math:`f` is a part of a real valued function, we have:
+
+    .. math::
+        (\frac{\partial L}{\partial s})^* = \frac{\partial L}{\partial s^*}
         :label: [2]
 
-Using the real-valued chain rule to calculate gradients wrt., x and y individually and putting them together as
-explained in the Section 3.1 `here <https://arxiv.org/pdf/1701.00392.pdf>`_, we get the following result for
-the Vector-Jacobian product `VJP`:
+i.e., :math:`\frac{\partial L}{\partial s}` equals to :math:`grad\_output^*`.
+
+Solving the above equations for :math:`\frac{\partial L}{\partial u}` and :math:`\frac{\partial L}{\partial v}`, we get:
 
     .. math::
-        VJP = grad\_out^{*} * \frac{\partial s}{\partial z^{*}} + grad\_out * (\frac{\partial s}{\partial z})^{*}
+        \begin{aligned}
+            \frac{\partial L}{\partial u} = 1/2 * (\frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*}) \\
+            \frac{\partial L}{\partial v} = -1/2j * (\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*})
+        \end{aligned}
         :label: [3]
 
-where :math:`grad\_out` is the grad output vector.
-
-Substituting :math:`grad\_out = c + dj \in ℂ` in :eq:`[3]`, we get an alternate formula for `VJP` in terms
-of the Jacobian matrix defined for an :math:`ℝ^{2} → ℝ^{2}` corresponding to :math:`F`:
+Substituting :eq:`[3]` in :eq:`[1]`, we get:
 
     .. math::
-        VJP = \begin{bmatrix} c & d \end{bmatrix} * J^{T} * \begin{bmatrix} 1 \\ 1j \end{bmatrix}
+        \begin{aligned}
+            \frac{\partial L}{\partial z^*} &= 1/2 * (\frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*}) * \frac{\partial u}{\partial z^*} - 1/2j * (\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}) * \frac{\partial v}{\partial z^*}  \\
+                                            &= \frac{\partial L}{\partial s} * 1/2 * (\frac{\partial u}{\partial z^*} + \frac{\partial v}{\partial z^*} j) + \frac{\partial L}{\partial s^*} * 1/2 * (\frac{\partial u}{\partial z^*} - \frac{\partial v}{\partial z^*} j)  \\
+                                            &= \frac{\partial L}{\partial s^*} * \frac{\partial (u + vj)}{\partial z^*} + \frac{\partial L}{\partial s} * \frac{\partial (u + vj)^*}{\partial z^*}  \\
+                                            &= \frac{\partial L}{\partial s} * \frac{\partial s}{\partial z^*} + \frac{\partial L}{\partial s^*} * \frac{\partial s^*}{\partial z^*}    \\
+        \end{aligned}
+
+Using :eq:`[2]`, we get:
+
+    .. math::
+        \begin{aligned}
+            \frac{\partial L}{\partial z^*} &= (\frac{\partial L}{\partial s^*})^* * \frac{\partial s}{\partial z^*} + \frac{\partial L}{\partial s^*} * (\frac{\partial s}{\partial z})^*  \\
+                                            &= (grad\_output)^* * \frac{\partial s}{\partial z^*} + grad\_output * {(\frac{\partial s}{\partial z})}^*         \\
+        \end{aligned}
         :label: [4]
 
-where
+How can I use this formula to calculate gradients for a function?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+There are two ways you use this formula.
+
+    - The first way is to just use Wirtinger derivatives and calculate :math:`\frac{\partial s}{\partial z}  and :math:`\frac{\partial s}{\partial z^*}` by
+      using :math:`\frac{\partial s}{\partial x}` and :math:`\frac{\partial s}{\partial y}`.
+    - The second way is to use the change of variables trick and rewrite :math:`f(z)` as a two variable function :math:`f(z, z^*)`, and just compute
+      the conjugate Wirtinger derivatives by treating :math:`z` and :math:`z^*` as independent variables, which is often more straightforward and
+      requires less calculation.
+
+Let's consider the function :math:`f(z = x + yj) = c * z = c * (x+yj)` as an example, where :math:`c \in ℝ`.
+
+Using the first way to compute the Wirtinger derivatives, we have.
+
+.. math::
+    \begin{aligned}
+        \frac{\partial s}{\partial z} &= 1/2 * (\frac{\partial s}{\partial x} - \frac{\partial s}{\partial y} j) \\
+                                      &= 1/2 * (c - (c * 1j) * 1j)  \\
+                                      &= c                          \\
+        \\
+        \\
+        \frac{\partial s}{\partial z^*} &= 1/2 * (\frac{\partial s}{\partial x} + \frac{\partial s}{\partial y} j) \\
+                                        &= 1/2 * (c + (c * 1j) * 1j)  \\
+                                        &= 0                          \\
+    \end{aligned}
+
+Using :eq:`[4]`, and `grad\_output = 1.0` (which is the default grad output value used when :func:`backward` is called on a scalar output in PyTorch), we get:
 
     .. math::
-        J = \begin{bmatrix}
-            \frac{\partial u(x, y)}{\partial x} & \frac{\partial u(x, y)}{\partial y}\\
-            \frac{\partial v(x, y)}{\partial x} & \frac{\partial v(x, y)}{\partial y} \end{bmatrix} \\
+        \frac{\partial L}{\partial z^*} = 1 * 0 + 1 * c = c
 
-The key assumption made in the derivation of :eq:`[3]` is that function :math:`F` is a part of a
-real valued function. It implies that the Conjugate Wirtinger and Wirtinger derivative flowing back
-from the last `ℂ -> ℝ` function in :math:`G`, say :math:`H`, are complex conjugates of each other.
-This allows us to use :math:`grad\_output` as the incoming Conjugate Wirtinger derivative and recover the
-incoming Wirtinger derivative by complex conjugation of :math:`grad\_output` for function :math:`H`.
-For more details, please check out Section 3.4 `here <https://arxiv.org/pdf/1701.00392.pdf>`_.
-
-**What about cross-domain functions?**
-**************************************
-
-The above formula can also be verified to be correct for cross-domain functions functions.
-
-The Vector-Jacobian Product for a function :math:`F: ℂ → ℝ`:
-
-    .. code::
-
-        def F(z):
-            x, y = real(z), imag(z)
-            s = u(x, y)
-            return s
-
-at :math:`x + yj` can be simplified to:
-
-    .. math::
-        VJP = 2 * grad\_out * \frac{\partial s}{\partial z^{*}}
-        :label: [5]
-
-since the Wirtinger and Conjugate Wirtinger derivative in this case are conjugate of each other and :math:`grad\_out` is
-real valued.
-
-The Vector-Jacobian Product for a function :math:`F: ℝ → ℂ`:
-
-    .. code::
-
-        def F(z):
-            x, y = z, 0     # z = real(z)
-            s = u(x, y) + v(x, y) * 1j
-            return s
-
-at :math:`x` can be simplified to:
-
-    .. math::
-        VJP = real(grad\_out^{*} * \frac{\partial s}{\partial z^{*}} + grad\_out * (\frac{\partial s}{\partial z^{*}})^{*})
-        :label: [6]
-
-
-Note that the gradient in this case equals to the real value of the result obtained using :eq:`[3]`. The real operator
-has to be applied to the gradient since the input is real-valued, and in general the gradient is complex valued.
-
-**How can I use this formula to calculate gradients for a function?**
-*********************************************************************
-
-Let us consider a function :math:`F` that multiplies the input values.
-
-    .. code::
-
-        def F(a, b):
-            s = a * b
-            return s
-
-Consider the case where :math:`a=x+yj \in ℂ` and :math:`b \in ℝ`.
+Using the second way to compute Wirtinger derivatives, we directly get:
 
     .. math::
         \begin{aligned}
-            s &= F(x+yj, b)     \\
-            s &= u(x, y, b) + v(x, y, b) * 1j   \\
-            u &= x * b  \\
-            v &= y * b
+           \frac{\partial s}{\partial z} &= \frac{\partial (c*z)}{\partial z}       \\
+                                         &= c                                       \\
+            \frac{\partial s}{\partial z^*} &= \frac{\partial (c*z)}{\partial z^*}       \\
+                                         &= 0
         \end{aligned}
 
-Let's first calculate the gradient w.r.t. :math:`b` for :math:`grad\_out = 1.0 + 1j`. This is an
-example of computing gradient for an :math:`ℝ → ℂ` function.
+And using :eq:`[4]` again, we get :math:`\frac{\partial L}{\partial z^*} = c`. As you can see, the second way involves lesser calculations, and comes
+in more handy for faster calculations.
 
-    .. math::
-        \frac{\partial u}{\partial b} = x, \frac{\partial v}{\partial b} = y
-        :label: [7]
+What about cross-domain functions?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Using :eq:`[1]` and :eq:`[7]` we have,
+For cross-domain functions, we can write the chain rule, follow the same steps as shown for :math:`C → C` case. We end up
+getting a special case of :eq:`[4]` for both :math:`ℝ → ℂ` and :math:`ℂ → ℝ` case.
 
-    .. math::
-        \begin{aligned}
-            \frac{\partial s}{\partial b^*} &= 1/2 * (\frac{\partial (u + vj)}{\partial b} + 0j) \\
-                                            &= 1/2 * (\frac{\partial u}{\partial b} + \frac{\partial v}{\partial b} * 1j) \\
-                                            &= 1/2 * (x + yj)
-        \end{aligned}
+    - For :math:`f: ℂ → ℝ`, we get:
 
-Substituting the values of :math:`\frac{\partial s}{\partial b^*}` and :math:`grad\_out` in :eq:`[6]`, we get:
+        .. math::
+            \frac{\partial L}{\partial z^*} = 2 * grad\_output * \frac{\partial s}{\partial z^{*}}
 
-    .. math::
-        \begin{aligned}
-            VJP &= real([(1+1j)^* * 1/2 * (x+yj)] + [(1+1j) * 1/2 * (x+yj)^*])  \\
-                &= x + y
-        \end{aligned}
+    - For :math:`f: ℝ → ℂ`, we get:
 
-Now, let's compute the gradient w.r.t. :math:`a`. This is an example of computing gradient
-for a :math:`ℂ → ℂ` function. To compute the gradient, we will first work out the partial derivatives of
-:math:`u` and :math:`v` w.r.t :math:`x` and :math:`y` equals:
-
-    .. math::
-        \frac{\partial u}{\partial x} = b, \frac{\partial u}{\partial y} = 0 \\
-        \frac{\partial v}{\partial x} = 0, \frac{\partial v}{\partial y} = b
-
-Thus,
-
-    .. math::
-        \begin{aligned}
-            \frac{\partial (u + vj)}{\partial x} &= b + 0j \\
-            \frac{\partial (u + vj)}{\partial y} &= 0 + bj
-        \end{aligned}
-
-Using :eq:`[1]` and :eq:`[2]` we have,
-
-    .. math::
-        \begin{aligned}
-            \frac{\partial s}{\partial a^*} &= 1/2 * ( \frac{\partial (u + vj)}{\partial x} + \frac{\partial (u + vj)}{\partial y}j) \\
-                                            &= 1/2 * (b + bj)   \\
-            \frac{\partial s}{\partial a}   &= 1/2 * ( \frac{\partial (u + vj)}{\partial x} - \frac{\partial (u + vj)}{\partial y}j) \\
-                                            &= 1/2 * (b - bj)
-        \end{aligned}
-
-Substituting the values of :math:`\frac{\partial s}{\partial a}`, :math:`\frac{\partial s}{\partial a^*}`, and :math:`grad\_out` in :eq:`[3]`, we get:
-
-    .. math::
-        \begin{aligned}
-            VJP &= [(1+1j)^{*} * 1/2 * (b + bj)] + [(1+1j) * 1/2 * {(b-bj)}^{*}]  \\
-                &= b + bj
-        \end{aligned}
-
-Note that PyTorch Autograd uses :math:`grad\_out = 1.0` by default when :func:`backward` is called on a scalar output. :math:`grad\_out=1+1j`
-was used above to make the example more interesting.
+        .. math::
+            \frac{\partial L}{\partial z^*} = 2 * Re(grad\_out^* * \frac{\partial s}{\partial z^{*}})
