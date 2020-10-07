@@ -137,7 +137,7 @@ void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int6
 #define cublasGemmStridedBatchedExFix cublasGemmStridedBatchedEx
 #else
 // Workaround for https://github.com/pytorch/pytorch/issues/45724
-cublasStatus_t cublasGemmStridedBatchedExFix(cublasHandle_t handle,
+cublasStatus_t cublasGemmStridedBatchedExFix(cublasHandle_t &handle,
   cublasOperation_t transa,
   cublasOperation_t transb,
   int m,
@@ -157,7 +157,7 @@ cublasStatus_t cublasGemmStridedBatchedExFix(cublasHandle_t handle,
   cudaDataType Ctype,
   int ldc,
   long long int strideC,
-  int batchCount,
+  int64_t batchCount,
   cudaDataType computeType,
   cublasGemmAlgo_t algo)
 {
@@ -166,13 +166,14 @@ cublasStatus_t cublasGemmStridedBatchedExFix(cublasHandle_t handle,
     return cublasGemmStridedBatchedExFix(handle, transa, transb, m, n, k, alpha, A, Atype, lda, strideA, B, Btype, ldb, strideB, beta, C, Ctype, ldc, strideC, batchCount, computeType, algo);
   }
   cublasStatus_t result;
+  std::cout << strideA << ", " << strideB << ", " << strideC << std::endl;
   for(int64_t i = 0; i < batchCount; i += 65535) {
-    int64_t count = std::min<int64_t>(65535, batchCount - i * batchCount);
-    result = cublasGemmStridedBatchedExFix(handle, transa, transb, m, n, k, alpha,
-      A + i * strideA, Atype, lda, strideA,
-      B + i * strideB, Btype, ldb, strideB,
+    int64_t count = std::min<int64_t>(65535, batchCount - i);
+    result = cublasGemmStridedBatchedEx(handle, transa, transb, m, n, k, alpha,
+      (char *)A + i * strideA * 2, Atype, lda, strideA,
+      (char *)B + i * strideB * 2, Btype, ldb, strideB,
       beta,
-      C + i * strideC, Ctype, ldc, strideC,
+      (char *)C + i * strideC * 2, Ctype, ldc, strideC,
       (int)count, computeType, algo);
     THCublasCheck(result);
   }
