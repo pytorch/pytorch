@@ -1,7 +1,7 @@
 from tools.codegen.model import *
 
 from tools.codegen.api.types import CppArgument, DispatcherExpr, TensorOptionsArguments, \
-    DispatcherArgument, ThisArgument, LegacyDispatcherArgument, CppTensorOptionsArguments, CppThisArgument
+    DispatcherArgument, LegacyDispatcherArgument, CppTensorOptionsArguments, CppThisArgument
 import tools.codegen.api.cpp as cpp
 import tools.codegen.api.legacy_dispatcher as legacy_dispatcher
 import tools.codegen.local as local

@@ -1,8 +1,8 @@
 from tools.codegen.model import *
 from tools.codegen.api.types import TensorOptionsArguments, CppArgument, ThisArgument, \
-        CppTensorOptionsArguments, CppThisArgument
+    CppTensorOptionsArguments, CppThisArgument
 import tools.codegen.local as local
-from typing import Optional, Sequence, Union, Callable, List, NamedTuple
+from typing import Optional, Sequence, Union, Callable, List
 
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.
