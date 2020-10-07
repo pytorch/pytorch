@@ -884,7 +884,7 @@ def tensordot(a, b, dims=2):
     Args:
       a (Tensor): Left tensor to contract
       b (Tensor): Right tensor to contract
-      dims (int or tuple of two lists of integers): number of dimensions to
+      dims (int or Tuple[List[int]] containing two lists): number of dimensions to
          contract or explicit lists of dimensions for :attr:`a` and
          :attr:`b` respectively
 
@@ -919,6 +919,12 @@ def tensordot(a, b, dims=2):
                 [ 3.3161,  0.0704,  5.0187, -0.4079, -4.3126,  4.8744],
                 [ 0.8223,  3.9445,  3.2168, -0.2400,  3.4117,  1.7780]])
 
+        >>> a = torch.randn(3, 5, 4, 6)
+        >>> b = torch.randn(6, 4, 5, 3)
+        >>> torch.tensordot(a, b, dims=([2, 1, 3], [1, 2, 0]))
+        tensor([[  7.7193,  -2.4867, -10.3204],
+                [  1.5513, -14.4737,  -6.5113],
+                [ -0.2850,   4.2573,  -3.5997]])
     """
     if not torch.jit.is_scripting():
         if (type(a) is not Tensor or type(b) is not Tensor) and has_torch_function((a, b)):
