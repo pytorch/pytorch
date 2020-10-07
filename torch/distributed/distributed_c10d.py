@@ -935,24 +935,28 @@ def all_reduce(tensor,
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
-    Example:
-        Tensors are all of dtype torch.int64.
-        We have 2 process groups, 2 ranks.
-        rank 0 passes:
-            tensor = [[1, 1], [2, 2]]
-        rank 1 passes:
-            tensor = [[3, 3], [4, 4]]
-        both rank 0 and 1 get:
-            tensor = [[4, 4], [6, 6]]
+    Examples:
+        >>> # Tensors are all of dtype torch.int64.
+        >>> # We have 2 process groups, 2 ranks.
+        >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
+        >>> tensor
+        tensor([1, 2]) # Rank 0
+        tensor([3, 4]) # Rank 1
+        >>> dist.all_reduce(tensor, op=ReduceOp.SUM)
+        >>> tensor
+        tensor([4, 6]) # Rank 0
+        tensor([4, 6]) # Rank 1
 
-        Tensors are all of dtype torch.complex64.
-        We have 2 process groups, 2 ranks.
-        rank 0 passes:
-            tensor = [[1+i, 1+i], [2+2i, 2+2i]]
-        rank 1 passes:
-            tensor = [[3+3i, 3+3i], [4+4i, 4+4i]]
-        both rank 0 and 1 get:
-            tensor = [[4+4i, 4+4i], [6+6i, 6+6i]]
+        >>> # Tensors are all of dtype torch.complex64.
+        >>> # We have 2 process groups, 2 ranks.
+        >>> tensor = torch.tensor([complex(1, 1), complex(2, 2)], dtype=torch.complex64) + 2 * complex(rank, rank)
+        >>> tensor
+        tensor([1.+1.j, 2.+2.j]) # Rank 0
+        tensor([3.+3.j, 4.+4.j]) # Rank 1
+        >>> dist.all_reduce(tensor, op=ReduceOp.SUM)
+        >>> tensor
+        tensor([4.+4.j, 6.+6.j]) # Rank 0
+        tensor([4.+4.j, 6.+6.j]) # Rank 1
 
     """
     _check_single_tensor(tensor, "tensor")
@@ -1446,40 +1450,34 @@ def all_gather(tensor_list,
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
-    Example:
-        Tensors are all of dtype torch.int64.
-        We have 2 process groups, 2 ranks.
-        rank 0 passes:
-            tensor_list =
-               [[[-1, -1], [-1, -1]],
-                [[-1, -1], [-1, -1]]]
-            tensor = [[1, 1], [2, 2]]
-        rank 1 passes:
-            tensor_list =
-               [[[-1, -1], [-1, -1]],
-                [[-1, -1], [-1, -1]]]
-            tensor = [[3, 3], [4, 4]]
-        both rank 0 and 1 get:
-            tensor_list =
-               [[[1, 1], [2, 2]],
-                [[3, 3], [4, 4]]]
+    Examples:
+        >>> # Tensors are all of dtype torch.int64.
+        >>> # We have 2 process groups, 2 ranks.
+        >>> tensor_list = [torch.zero(2, dtype=torch.int64) for _ in range(2)]
+        >>> tensor_list
+        [tensor([0, 0]), tensor([0, 0])] # Rank 0 and 1
+        >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
+        >>> tensor
+        tensor([1, 2]) # Rank 0
+        tensor([3, 4]) # Rank 1
+        >>> dist.all_gather(tensor_list, tensor)
+        >>> tensor_list
+        [tensor([1, 2]), tensor([3, 4])] # Rank 0
+        [tensor([1, 2]), tensor([3, 4])] # Rank 1
 
-        Tensors are all of dtype torch.complex64.
-        We have 2 process groups, 2 ranks.
-        rank 0 passes:
-            tensor_list =
-               [[[0+0i, 0+0i], [0+0i, 0+0i]],
-                [[0+0i, 0+0i], [0+0i, 0+0i]]]
-            tensor = [[1+i, 1+i], [2+2i, 2+2i]]
-        rank 1 passes:
-            tensor_list =
-               [[[0+0i, 0+0i], [0+0i, 0+0i]],
-                [[0+0i, 0+0i], [0+0i, 0+0i]]]
-            tensor = [[3+3i, 3+3i], [4+4i, 4+4i]]
-        both rank 0 and 1 get:
-            tensor_list =
-               [[[1+i, 1+i], [2+2i, 2+2i]],
-                [[3+3i, 3+3i], [4+4i, 4+4i]]]
+        >>> # Tensors are all of dtype torch.complex64.
+        >>> # We have 2 process groups, 2 ranks.
+        >>> tensor_list = [torch.zero(2, dtype=torch.complex64) for _ in range(2)]
+        >>> tensor_list
+        [tensor([0.+0.j, 0.+0.j]), tensor([0.+0.j, 0.+0.j])] # Rank 0 and 1
+        >>> tensor = torch.tensor([complex(1, 1), complex(2, 2)], dtype=torch.complex64) + 2 * complex(rank, rank)
+        >>> tensor
+        tensor([1.+1.j, 2.+2.j]) # Rank 0
+        tensor([3.+3.j, 4.+4.j]) # Rank 1
+        >>> dist.all_gather(tensor_list, tensor)
+        >>> tensor_list
+        [tensor([1.+1.j, 2.+2.j]), tensor([3.+3.j, 4.+4.j])] # Rank 0
+        [tensor([1.+1.j, 2.+2.j]), tensor([3.+3.j, 4.+4.j])] # Rank 1
 
     """
     _check_tensor_list(tensor_list, "tensor_list")
