@@ -195,7 +195,7 @@ class TestQuantizedOps(TestCase):
                                                    dtype=torch_type)
 
                 if output_is_observed:
-                    extra_kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
+                    extra_kwargs.update({'output_scale': output_scale, 'output_zero_point': output_zero_point})
 
                 # Finds qY using in-place or non-in-place quantized operators.
                 qY = q_op(qX, **extra_kwargs)
@@ -253,7 +253,7 @@ class TestQuantizedOps(TestCase):
     @override_qengines
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
-    def test_qsigmoid(self, X):
+    def test_sigmoid_non_observed(self, X):
         sigmoid_test_configs = [
             {
                 'quantized_fn': [
@@ -262,6 +262,26 @@ class TestQuantizedOps(TestCase):
                 'reference_fn': torch.sigmoid,
                 'output_range': (0.0, 1.0),
                 'change_zero_point': True
+            }
+        ]
+        self._test_activation_function(X, 'sigmoid', sigmoid_test_configs)
+
+    """Tests the correctness of the quantized::sigmoid op."""
+    # TODO: enable after observed output is supported in qnnpack
+    # @override_qengines
+    @skipIfNoFBGEMM
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_sigmoid(self, X):
+        sigmoid_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.ops.quantized.sigmoid
+                ],
+                'reference_fn': torch.sigmoid,
+                'output_range': (0.0, 1.0),
+                'change_zero_point': True,
+                'output_is_observed': True,
             }
         ]
         self._test_activation_function(X, 'sigmoid', sigmoid_test_configs)
