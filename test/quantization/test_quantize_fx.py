@@ -369,7 +369,7 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.conv2.weight = torch.nn.Parameter(original_m.standalone.conv.weight.detach())
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.standalone.conv.bias.detach())
 
-        m = CustomTracer().trace(original_m).eval()
+        m = torch.fx.GraphModule(original_m, CustomTracer().trace(original_m)).eval()
         qconfig_dict = {'': default_qconfig, 'standalone_module_name': ['standalone']}
         # check prepared model
         m = prepare_fx(m, qconfig_dict)
@@ -762,7 +762,7 @@ class TestQuantizeFx(QuantizationTestCase):
             register_observed_custom_module_mapping(CustomModule, ObservedCustomModule)
             register_quantized_custom_module_mapping(CustomModule, QuantizedCustomModule)
 
-            m = CustomTracer().trace(original_m).eval()
+            m = torch.fx.GraphModule(original_m, CustomTracer().trace(original_m)).eval()
             qconfig_dict = {'': default_qconfig}
             # check prepared model
             m = prepare_fx(m, qconfig_dict)
@@ -1158,6 +1158,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
     def test_elu(self):
         self._test_activation_impl(nn.ELU, F.elu, nnq.ELU, torch.ops.quantized.elu)
 
+    def test_leaky_relu(self):
+        self._test_activation_impl(nn.LeakyReLU, F.leaky_relu, nnq.LeakyReLU, torch.ops.quantized.leaky_relu)
+
     def _test_norm_impl(
             self, float_module, float_op, op_args, data, quantized_module, quantized_op,
             skip_op_arg_for_functional=False):
@@ -1392,7 +1395,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
-                self.leaky_relu = torch.nn.LeakyReLU()
                 self.hardsigmoid = torch.nn.Hardsigmoid()
                 self.sigmoid = torch.nn.Sigmoid()
                 self.tanh = torch.nn.Tanh()
@@ -1417,11 +1419,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = x.mean([2, 3], True)
                 x = F.interpolate(x, 4, mode='nearest')
                 x = F.interpolate(x, 4, mode='linear')
-                x = self.leaky_relu(x)
-                x = F.leaky_relu(x)
-                x = F.leaky_relu(x, inplace=True)
-                x = x.leaky_relu()
-                x.leaky_relu_()
                 x = self.hardsigmoid(x)
                 x = F.hardsigmoid(x)
                 x = F.hardsigmoid(x, inplace=True)

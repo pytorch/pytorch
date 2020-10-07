@@ -22,8 +22,44 @@ TORCH_API std::shared_ptr<torch::jit::Graph> PrepareForStaticRuntime(
 class ProcessedNode;
 class TORCH_API StaticRuntime {
  public:
+  // g is the optimized graph produced by PrepareForStaticRuntime
   explicit StaticRuntime(std::shared_ptr<torch::jit::Graph> g);
+
+  // m is unoptimized
+  explicit StaticRuntime(const torch::jit::Module& m);
+
   std::vector<at::Tensor> run(const std::vector<at::Tensor>& inps) const;
+
+  c10::IValue run(
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs) const;
+
+  void benchmark(
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs,
+      const int warmup_runs,
+      const int main_runs) const;
+
+  float benchmark_model(
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs,
+      const int warmup_runs,
+      const int main_runs) const;
+
+  struct IndividualMetrics {
+    float setup_time;
+    float total_time;
+    std::vector<float> time_per_node;
+    std::unordered_map<std::string, float> time_per_node_type;
+    std::unordered_map<std::string, float> percent_per_node_type;
+    std::unordered_map<std::string, int> instances_per_node_type;
+  };
+
+  IndividualMetrics benchmark_individual_ops(
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs,
+      const int warmup_runs,
+      const int main_runs) const;
 
 #ifdef FBCODE_CAFFE2
   using ConstantMap = folly::F14FastMap<Value*, IValue>;
@@ -32,7 +68,13 @@ class TORCH_API StaticRuntime {
 #endif
 
  private:
+  explicit StaticRuntime(
+      std::shared_ptr<torch::jit::Graph> g, // optimized graph
+      c10::optional<torch::jit::Module> m);
+
   std::shared_ptr<torch::jit::Graph> graph_;
+
+  std::unique_ptr<c10::FunctionSchema> schema_{nullptr};
 
   // Static runtime states
   // Value table (including weights)
