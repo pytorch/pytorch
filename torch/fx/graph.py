@@ -3,6 +3,7 @@ from .node import Node, Argument, Target, map_arg
 from typing import Callable, Any, List, Dict, Optional, Tuple, Set
 import builtins
 import torch
+import types
 import keyword
 import re
 
@@ -51,6 +52,25 @@ def _format_target(base: str, target: str) -> str:
         else:
             r = f'{r}.{e}'
     return r
+
+# Borrowed from CPython typing module
+# https://github.com/python/cpython/blob/f90dc36c15d7fee0efaf6d39e97be0bdf2683e93/Lib/typing.py#L156
+def _type_repr(obj):
+    """Return the repr() of an object, special-casing types (internal helper).
+    If obj is a type, we return a shorter version than the default
+    type.__repr__, based on the module and qualified name, which is
+    typically enough to uniquely identify a type.  For everything
+    else, we fall back on repr(obj).
+    """
+    if isinstance(obj, type):
+        if obj.__module__ == 'builtins':
+            return obj.__qualname__
+        return f'{obj.__module__}.{obj.__qualname__}'
+    if obj is ...:
+        return('...')
+    if isinstance(obj, types.FunctionType):
+        return obj.__name__
+    return repr(obj)
 
 class insert_before:
     def __init__(self, n : Node):
@@ -239,7 +259,7 @@ class Graph:
                 modules_used.add(module_name)
 
         def type_repr(o : Any):
-            typename = torch.typename(o)
+            typename = _type_repr(o)
             register_modules_used(typename)
             return typename
 
@@ -330,18 +350,18 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
             if n.op == 'placeholder':
                 assert isinstance(n.target, str)
                 arg_str = n.target
-                arg_str = arg_str + f': {torch.typename(n.type)}' if n.type is not None else ''
+                arg_str = arg_str + f': {_type_repr(n.type)}' if n.type is not None else ''
                 placeholder_names.append(arg_str)
                 return None
             elif n.op == 'get_attr':
-                maybe_typename = f'{torch.typename(n.type)} ' if n.type is not None else ''
+                maybe_typename = f'{_type_repr(n.type)} ' if n.type is not None else ''
                 return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = self.{n.target}'
             elif n.op == 'output':
                 if n.type is not None:
-                    maybe_return_typename[0] = f' -> {torch.typename(n.type)}'
+                    maybe_return_typename[0] = f' -> {_type_repr(n.type)}'
                 return f'return {n.args[0]}'
             else:
-                maybe_typename = f'{torch.typename(n.type)} ' if n.type is not None else ''
+                maybe_typename = f'{_type_repr(n.type)} ' if n.type is not None else ''
                 return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = {n.op}[target={n.target}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
 
