@@ -55,11 +55,21 @@ class TORCH_API LoopNest {
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);
 
+  using AccessResult = std::pair<const Buf*, Stmt*>;
+  // Insert a cache for the consumer's usages of the buffer produced in
+  // consumer, and redirect reads and writes in the consumer to that cache.
+  // Returns a pair of the new cache buffer, and the new rewritten consumer.
+  AccessResult cacheAccesses(
+      const Buf* producer,
+      const std::string& name,
+      Stmt* consumer);
+
   // Insert a temporary computation of statement S in the scope of loop AT.
   // S is assumed to be a Store or a Block containing a Store. Along with the
   // computation itself, this transformation inserts Alloc/Free statements for
   // the temporary buffer used in the computation.
   void computeAt(Stmt* s, For* at);
+
   void rfactor(
       const Expr* f,
       const Var* reduction_var,

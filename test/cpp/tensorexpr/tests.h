@@ -116,6 +116,14 @@ namespace jit {
   _(ReduceInlineReduction)                  \
   _(ReduceInlineConsumer)                   \
   _(ReduceInlineReducerInternal)            \
+  _(ReductionCacheAccessesOuter)            \
+  _(ReductionCacheAccessesInner)            \
+  _(ReductionCacheBodyAccess)               \
+  _(ReductionCacheConsumerAccess)           \
+  _(ReductionSplitCacheConsumerAccess)      \
+  _(ReductionReorderCacheConsumerAccess)    \
+  _(ReductionRfactorCacheTempOuter)         \
+  _(ReductionRfactorCacheTempInner)         \
   _(TypeTest01)                             \
   _(TypePropagation)                        \
   _(Cond01)                                 \
@@ -255,7 +263,6 @@ namespace jit {
   _(LoopNestComputeAt_1)                    \
   _(LoopNestComputeAt_2)                    \
   _(LoopNestComputeAt_3)                    \
-  _(LoopNestComputeAt_4)                    \
   _(LoopNestReorderAxis1)                   \
   _(LoopNestReorderPartialAxes)             \
   _(LoopNestReorderInternalAxis)            \
@@ -282,6 +289,11 @@ namespace jit {
   _(NormalizeOnNestedInnerLoop)             \
   _(NormalizeAndSplitWithTail)              \
   _(DetectInlineRankMismatch)               \
+  _(CacheReadsSimple)                       \
+  _(CacheReadsOuter)                        \
+  _(CacheReadsInternal)                     \
+  _(CacheReadsInner)                        \
+  _(CacheWritesSimple)                      \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
   _(Kernel_3)                               \
