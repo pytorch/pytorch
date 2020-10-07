@@ -1,9 +1,7 @@
 import torch
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, skipCUDAIfRocm
-
-N_values = [20] if not TEST_WITH_SLOW else [30, 300]
 
 class TestForeach(TestCase):
     foreach_bin_ops = [
@@ -52,7 +50,7 @@ class TestForeach(TestCase):
         return tensors
 
     def _test_bin_op_list(self, device, dtype, foreach_op, foreach_op_, torch_op):
-        for N in N_values:
+        for N in [30, 300]:
             tensors1 = self._get_test_data(device, dtype, N)
             tensors2 = self._get_test_data(device, dtype, N)
 
@@ -70,7 +68,7 @@ class TestForeach(TestCase):
                 self.assertEqual(tensors1, expected)
 
     def _test_unary_op(self, device, dtype, foreach_op, foreach_op_, torch_op):
-        for N in N_values:
+        for N in [30, 300]:
             tensors1 = self._get_test_data(device, dtype, N)
             # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
             control_dtype = torch.float32 if (self.device_type == 'cuda' and
@@ -85,7 +83,7 @@ class TestForeach(TestCase):
                 self.assertEqual(tensors1, expected)
 
     def _test_pointwise_op(self, device, dtype, foreach_op, foreach_op_, torch_op):
-        for N in N_values:
+        for N in [30, 300]:
             tensors = self._get_test_data(device, dtype, N)
             tensors1 = self._get_test_data(device, dtype, N)
             tensors2 = self._get_test_data(device, dtype, N)
@@ -176,7 +174,7 @@ class TestForeach(TestCase):
     #
     @dtypes(*torch.testing.get_all_dtypes())
     def test_int_scalar(self, device, dtype):
-        for N in N_values:
+        for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
                                                                      self.foreach_bin_ops_,
                                                                      self.torch_bin_ops):
@@ -217,7 +215,7 @@ class TestForeach(TestCase):
     # Current schema is using 'float[]' as scalar list type.
     @dtypes(*torch.testing.get_all_dtypes())
     def test_int_scalarlist(self, device, dtype):
-        for N in N_values:
+        for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops_sl,
                                                                      self.foreach_bin_ops_sl_,
                                                                      self.torch_bin_ops):
@@ -262,7 +260,7 @@ class TestForeach(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_float_scalar(self, device, dtype):
-        for N in N_values:
+        for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
                                                                      self.foreach_bin_ops_,
                                                                      self.torch_bin_ops):
@@ -305,7 +303,7 @@ class TestForeach(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_float_scalarlist(self, device, dtype):
-        for N in N_values:
+        for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops_sl,
                                                                      self.foreach_bin_ops_sl_,
                                                                      self.torch_bin_ops):
@@ -365,7 +363,7 @@ class TestForeach(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_complex_scalar(self, device, dtype):
-        for N in N_values:
+        for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
                                                                      self.foreach_bin_ops_,
                                                                      self.torch_bin_ops):
@@ -403,7 +401,7 @@ class TestForeach(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_complex_scalarlist(self, device, dtype):
-        for N in N_values:
+        for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops_sl,
                                                                      self.foreach_bin_ops_sl_,
                                                                      self.torch_bin_ops):
@@ -428,7 +426,7 @@ class TestForeach(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_bool_scalar(self, device, dtype):
-        for N in N_values:
+        for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
                                                                      self.foreach_bin_ops_,
                                                                      self.torch_bin_ops):
@@ -478,7 +476,7 @@ class TestForeach(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_bool_scalarlist(self, device, dtype):
-        for N in N_values:
+        for N in [30, 300]:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops_sl,
                                                                      self.foreach_bin_ops_sl_,
                                                                      self.torch_bin_ops):
@@ -691,7 +689,7 @@ class TestForeach(TestCase):
                 self.skipTest("Skipped! See https://github.com/pytorch/pytorch/issues/44489")
             return
 
-        for N in N_values:
+        for N in [30, 300]:
             tensors1 = self._get_test_data(device, dtype, N)
 
             if dtype in [torch.bfloat16, torch.bool, torch.float16]:
