@@ -305,7 +305,8 @@ as they should never be created manually, but they are guaranteed to support two
 
 Synchronous and asynchronous collective operations
 --------------------------------------------------
-Every collective operation function supports the following two kinds of operations, depending on the setting of the ``async_op`` flag passed into the collective:
+Every collective operation function supports the following two kinds of operations, 
+depending on the setting of the ``async_op`` flag passed into the collective:
 
 **Synchronous operation** - the default mode, when ``async_op`` is set to ``False``.
 When the function returns, it is guaranteed that
@@ -314,7 +315,7 @@ that the CUDA operation is completed, since CUDA operations are asynchronous. Fo
 further function calls utilizing the output of the collective call will behave as expected. For CUDA collectives,
 function calls utilizing the output on the same CUDA stream will behave as expected. Users must take care of
 synchronization under the scenario of running under different streams. For details on CUDA semantics such as stream
-synchronization, see `cuda semantics <https://pytorch.org/docs/stable/autograd.html#profiler>`__.
+synchronization, see `CUDA Semantics <https://pytorch.org/docs/stable/notes/cuda.html>`__.
 See the below script to see examples of differences in these semantics for CPU and CUDA operations.
 
 **Asynchronous operation** - when ``async_op`` is set to True. The collective operation function
