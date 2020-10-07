@@ -140,3 +140,28 @@ Using the :attr:`dim` argument to compute matrix norms::
     >>> LA.norm(m[0, :, :]), LA.norm(m[1, :, :])
     (tensor(3.7417), tensor(11.2250))
 """)
+
+tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
+linalg.tensorinv(input, ind=2) -> Tensor
+
+Returns the inverse of a given tensor.
+
+This function computes a tensor such that ``tensordot(tensorinv(input), input, ind) == I``,
+where ``I`` denotes the identity tensor.
+
+Args:
+    input (Tensor): The tensor to invert. Its shape must satidsfy ``prod(input.shape[:ind]) == prod(input.shape[ind:])``.
+
+    ind (int): The positive number used in ``dims`` option of ``tensordot``.
+
+Returns:
+    (Tensor): the inverse of ``input`` with shape ``input.shape[ind:] + input.shape[:ind]``.
+
+    >>> a = torch.eye(4 * 6).reshape((4, 6, 8, 3))
+    >>> ainv = torch.linalg.tensorinv(a, ind=2)
+    >>> ainv.shape
+    torch.Size([8, 3, 4, 6])
+    >>> b = torch.randn(4, 6)
+    >>> torch.allclose(torch.tensordot(ainv, b), torch.linalg.tensorsolve(a, b))
+    True
+""")

@@ -1601,6 +1601,24 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, opt
   return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
 }
 
+Tensor linalg_tensorinv(const Tensor& self, optional<int64_t> ind) {
+  int64_t ind_value = ind.has_value() ? ind.value() : 2;
+  TORCH_CHECK(ind_value > 0, "'ind' must be a positive integer");
+
+  // self[ind:]
+  std::vector<int64_t> shape_ind_end = self.sizes().slice(ind_value).vec();
+  // self[:ind]
+  std::vector<int64_t> shape_start_ind = self.sizes().slice(0, ind_value).vec();
+
+  int64_t product = std::accumulate(shape_ind_end.begin(), shape_ind_end.end(), int64_t{1}, std::multiplies<int64_t>());
+
+  // Concatenate shape_ind_end and shape_start_ind
+  shape_ind_end.insert(shape_ind_end.end(), shape_start_ind.begin(), shape_start_ind.end());
+
+  Tensor result = at::inverse(self.reshape({product, -1}));
+  return result.reshape(shape_ind_end);
+}
+
 static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {
   if (i == j)
     return matrices[i];

@@ -7,7 +7,8 @@ from random import randrange
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN, make_tensor)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
+    (instantiate_device_type_tests, dtypes, dtypesIfCPU, dtypesIfCUDA,
+     onlyCUDA, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck
 
@@ -921,6 +922,64 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypesIfCPU(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypesIfCUDA(torch.float, torch.double)
+    @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
+    def test_tensorinv(self, device, dtype):
+
+        def run_test(a_shape, ind):
+            a = torch.rand(a_shape, dtype=dtype, device=device)
+            a_numpy = a.cpu().numpy()
+            result = torch.linalg.tensorinv(a, ind=ind)
+            expected = np.linalg.tensorinv(a_numpy, ind=ind)
+            self.assertEqual(result, expected)
+
+        def check_shape(a_shape, ind):
+            a = torch.rand(a_shape)
+            with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
+                torch.linalg.tensorinv(a, ind=ind)
+
+        def check_ind(a_shape, ind):
+            a = torch.rand(a_shape)
+            with self.assertRaisesRegex(RuntimeError, "must be a positive integer"):
+                torch.linalg.tensorinv(a, ind=ind)
+
+        # compare to NumPy output
+        run_test((12, 3, 4), ind=1)
+        run_test((3, 8, 24), ind=2)
+        run_test((18, 3, 3, 2), ind=1)
+        run_test((1, 4, 2, 2), ind=2)
+        run_test((2, 3, 5, 30), ind=3)
+        run_test((24, 2, 2, 3, 2), ind=1)
+        run_test((3, 4, 2, 3, 2), ind=2)
+        run_test((1, 2, 3, 2, 3), ind=3)
+        run_test((3, 2, 1, 2, 12), ind=4)
+
+        # test for invalid shape
+        check_shape((2, 3, 4), ind=1)
+        check_shape((1, 2, 3, 4), ind=3)
+
+        # test for invalid ind
+        check_ind((12, 3, 4), ind=-1)
+        check_ind((18, 3, 3, 2), ind=0)
+
+    # TODO: once "solve_inverse" supports complex dtypes, they shall be added to above test
+    @unittest.expectedFailure
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.cfloat, torch.cdouble)
+    def test_tensorinv_xfailed(self, device, dtype):
+        a_shape = (2, 3, 6)
+        a = torch.rand(a_shape, dtype=dtype, device=device)
+        a_numpy = a.cpu().numpy()
+        result = torch.linalg.tensorinv(a, ind=ind)
+        expected = torch.linalg.tensorinv(a_numpy, ind=ind)
+        self.assertEqual(result, expected)
 
 instantiate_device_type_tests(TestLinalg, globals())
 
