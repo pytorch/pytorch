@@ -643,8 +643,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
       clientPipe.pipe_,
       std::move(requestMessage),
       std::move(devices),
-      [this, &clientPipe, messageId](
-          const tensorpipe::Error& error) mutable {
+      [this, &clientPipe, messageId](const tensorpipe::Error& error) mutable {
         if (error) {
           if (error.isOfType<tensorpipe::PipeClosedError>() &&
               !rpcAgentRunning_.load()) {
