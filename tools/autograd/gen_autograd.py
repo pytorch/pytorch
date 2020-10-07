@@ -128,6 +128,8 @@ def load_aten_declarations(path):
 
         for arg in declaration['arguments']:
             arg['simple_type'] = get_simple_type(arg)
+        for arg in declaration['schema_order_arguments']:
+            arg['simple_type'] = get_simple_type(arg)
         for ret in declaration['returns']:
             ret['simple_type'] = get_simple_type(ret)
 
