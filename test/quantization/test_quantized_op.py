@@ -535,11 +535,16 @@ class TestQuantizedOps(TestCase):
         X, (scale, zero_point, torch_type) = X
 
         assume(min_val <= max_val)
-        Y = X.copy()
-        Y[Y < min_val] = min_val
-        Y[Y > max_val] = max_val
-        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
-                                       zero_point=zero_point, dtype=torch_type)
+        Y_clamp = torch.clamp(torch.from_numpy(X), min=min_val, max=max_val)
+        Y_min_clamp = torch.clamp(torch.from_numpy(X), min=min_val)
+        Y_max_clamp = torch.clamp(torch.from_numpy(X), max=max_val)
+
+        qY_clamp = torch.quantize_per_tensor(Y_clamp, scale=scale,
+                                             zero_point=zero_point, dtype=torch_type)
+        qY_min_clamp = torch.quantize_per_tensor(Y_min_clamp, scale=scale,
+                                                 zero_point=zero_point, dtype=torch_type)
+        qY_max_clamp = torch.quantize_per_tensor(Y_max_clamp, scale=scale,
+                                                 zero_point=zero_point, dtype=torch_type)
         X = torch.from_numpy(X)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                        dtype=torch_type)
@@ -549,8 +554,12 @@ class TestQuantizedOps(TestCase):
         }
 
         for name, op in ops_under_test.items():
-            qY_hat = op(qX, min_val, max_val)
-            self.assertEqual(qY, qY_hat, msg="{} qclamp failed".format(name))
+            qY_clamp_hat = op(qX, min=min_val, max=max_val)
+            qY_min_clamp_hat = op(qX, min=min_val)
+            qY_max_clamp_hat = op(qX, max=max_val)
+            self.assertEqual(qY_clamp, qY_clamp_hat, msg="{} qclamp failed".format(name))
+            self.assertEqual(qY_min_clamp, qY_min_clamp_hat, msg="{} qclamp failed".format(name))
+            self.assertEqual(qY_max_clamp, qY_max_clamp_hat, msg="{} qclamp failed".format(name))
 
     """Tests the correctness of the quantized::hardtanh op."""
     @skipIfNoFBGEMM
