@@ -2964,20 +2964,28 @@ class TestQuantizedEmbeddingOps(TestCase):
         torch.testing.assert_allclose(reference_result, result, atol=atol,
                                       rtol=rtol)
 
-        if bit_rate == 8:
+
+        if bit_rate == 8 or bit_rate == 4:
             # Test operator that accepts TorchBind packed weights.
-            obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+            if bit_rate == 4:
+                qdtype = torch.quint4x2
+                op = torch.ops.quantized.embedding_bag_4bit
+            else:
+                qdtype = torch.quint8
+                op = torch.ops.quantized.embedding_bag_byte
+            obs = PerChannelMinMaxObserver(dtype=qdtype, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
             obs(weights)
             # Get the scale and zero point for the weight tensor
             qparams = obs.calculate_qparams()
 
             # Quantize the weights to 8bits
-            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=qdtype)
             packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
-            result = torch.ops.quantized.embedding_bag_byte(packed_weight, indices, offsets, mode=0,
-                                                            per_sample_weights=per_sample_weights,
-                                                            include_last_offset=include_last_offset)
+            result = op(packed_weight, indices, offsets, mode=0,
+                        per_sample_weights=per_sample_weights,
+                        include_last_offset=include_last_offset)
             torch.testing.assert_allclose(reference_result, result, atol=atol, rtol=rtol)
+
 
 
     """ Tests the correctness of the embedding_bag_8bit quantized operator """
@@ -2987,10 +2995,10 @@ class TestQuantizedEmbeddingOps(TestCase):
            num_offsets=st.integers(1, 20),
            enable_per_sample_weights=st.booleans(),
            include_last_offset=st.booleans())
-    def test_embedding_bag_byte_rowwise_offsets(self, num_embeddings,
-                                                embedding_dim, num_offsets,
-                                                enable_per_sample_weights,
-                                                include_last_offset):
+    def test_embedding_bag_byte(self, num_embeddings,
+                                embedding_dim, num_offsets,
+                                enable_per_sample_weights,
+                                include_last_offset):
         self.embedding_bag_rowwise_offsets_run(
             8, num_embeddings, embedding_dim, num_offsets,
             enable_per_sample_weights, include_last_offset,
@@ -3002,10 +3010,10 @@ class TestQuantizedEmbeddingOps(TestCase):
            num_offsets=st.integers(1, 20),
            enable_per_sample_weights=st.booleans(),
            include_last_offset=st.booleans())
-    def test_embedding_bag_4bit_rowwise_offsets(self, num_embeddings,
-                                                embedding_dim, num_offsets,
-                                                enable_per_sample_weights,
-                                                include_last_offset):
+    def test_embedding_bag_4bit(self, num_embeddings,
+                                embedding_dim, num_offsets,
+                                enable_per_sample_weights,
+                                include_last_offset):
         self.embedding_bag_rowwise_offsets_run(4, num_embeddings,
                                                embedding_dim, num_offsets,
                                                enable_per_sample_weights,
