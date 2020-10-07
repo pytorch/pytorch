@@ -1,7 +1,7 @@
 import math
 import warnings
 import numbers
-from typing import List, Tuple, Optional, overload
+from typing import List, Tuple, Optional, overload, Union
 
 import torch
 from torch import Tensor
@@ -181,8 +181,7 @@ class RNNBase(Module):
 
     def get_expected_hidden_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
         if batch_sizes is not None:
-            mini_batch = batch_sizes[0]
-            mini_batch = int(mini_batch)
+            mini_batch = int(batch_sizes[0])
         else:
             mini_batch = input.size(0) if self.batch_first else input.size(1)
         num_directions = 2 if self.bidirectional else 1
@@ -206,7 +205,7 @@ class RNNBase(Module):
             return hx
         return apply_permutation(hx, permutation)
 
-    def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:
+    def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tuple[Union[Tensor, PackedSequence], Tensor]:
         is_packed = isinstance(input, PackedSequence)
         if is_packed:
             input, batch_sizes, sorted_indices, unsorted_indices = input
@@ -228,6 +227,7 @@ class RNNBase(Module):
             # the user believes he/she is passing in.
             hx = self.permute_hidden(hx, sorted_indices)
 
+        assert hx is not None
         self.check_forward_args(input, hx, batch_sizes)
         _impl = _rnn_impls[self.mode]
         if batch_sizes is None:
@@ -236,6 +236,8 @@ class RNNBase(Module):
         else:
             result = _impl(input, batch_sizes, hx, self._flat_weights, self.bias,
                            self.num_layers, self.dropout, self.training, self.bidirectional)
+        
+        output: Union[Tensor, PackedSequence]
         output = result[0]
         hidden = result[1]
 
@@ -283,7 +285,7 @@ class RNNBase(Module):
 
     @property
     def all_weights(self) -> List[Parameter]:
-        return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
+        return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]  # type: ignore
 
     def _replicate_for_data_parallel(self):
         replica = super(RNNBase, self)._replicate_for_data_parallel()
@@ -526,7 +528,7 @@ class LSTM(RNNBase):
     def __init__(self, *args, **kwargs):
         super(LSTM, self).__init__('LSTM', *args, **kwargs)
 
-    def check_forward_args(self, input: Tensor, hidden: Tuple[Tensor, Tensor], batch_sizes: Optional[Tensor]):
+    def check_forward_args(self, input: Tensor, hidden: Tuple[Tensor, Tensor], batch_sizes: Optional[Tensor]):  # type: ignore
         self.check_input(input, batch_sizes)
         expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
 
@@ -535,12 +537,12 @@ class LSTM(RNNBase):
         self.check_hidden_size(hidden[1], expected_hidden_size,
                                'Expected hidden[1] size {}, got {}')
 
-    def permute_hidden(self, hx: Tuple[Tensor, Tensor], permutation: Optional[Tensor]) -> Tuple[Tensor, Tensor]:
+    def permute_hidden(self, hx: Tuple[Tensor, Tensor], permutation: Optional[Tensor]) -> Tuple[Tensor, Tensor]:  # type: ignore
         if permutation is None:
             return hx
         return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
 
-    @overload
+    @overload  # type: ignore
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None
                 ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:  # noqa: F811
