@@ -3,7 +3,7 @@ from tools.codegen.model import *
 from tools.codegen.api.types import TensorOptionsArguments, NativeArgument, ThisArgument
 import tools.codegen.api.cpp as cpp
 
-from typing import Union, Sequence
+from typing import Union, Sequence, Tuple
 
 # This file describes the translation of JIT schema to the native functions API.
 # This looks a lot like the C++ API (which makes historical sense, because the
@@ -74,5 +74,5 @@ def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Native
     else:
         assert_never(a)
 
-def arguments(func: FunctionSchema) -> Sequence[NativeArgument]:
-    return list(map(argument, cpp.group_arguments(func, method=False)))
+def arguments(func: FunctionSchema) -> Tuple[NativeArgument, ...]:
+    return tuple(map(argument, cpp.group_arguments(func, method=False)))

@@ -256,9 +256,8 @@ def compute_type_method(
 """
 
         elif target is Target.REGISTRATION:
-            assert returns_type == dispatcher.returns_type(f.func.returns)
-            dispatcher_args = dispatcher.arguments(f.func)
-            dispatcher_args_types_str = ', '.join(map(lambda a: a.type, dispatcher_args))
+            dispatcher_sig = DispatcherSignature.from_schema(f.func)
+
             if dispatch is None or dispatch == 'Math':
                 type_name = f'TypeDefault::{name}'
             else:
@@ -275,7 +274,7 @@ def compute_type_method(
                 if local.use_c10_dispatcher() is UseC10Dispatcher.full:
 
                     payload = "c10::impl::hacky_wrapper_for_legacy_signatures<" \
-                        f"{returns_type} ({dispatcher_args_types_str})>(TORCH_FN({type_name}))"
+                        f"{dispatcher_sig.type()}>(TORCH_FN({type_name}))"
 
                 else:
                     payload = f"torch::CppFunction::makeUnboxedOnly(&{type_name})"
@@ -324,9 +323,9 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
         assert target is Target.DEFINITION
 
         def generate_defn(sig: CppSignature) -> str:
+            dispatcher_sig = DispatcherSignature.from_schema(f.func)
+
             dispatcher_exprs = dispatcher.cpparguments_exprs(sig.cpp_grouped_arguments())
-            dispatcher_returns_type = dispatcher.returns_type(f.func.returns)
-            dispatcher_types_str = ', '.join(map(lambda a: a.type, dispatcher_exprs))
             dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, dispatcher_exprs))
 
             return f"""
@@ -334,7 +333,7 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
 {sig.defn()} {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({dispatcher_types_str})>();
+        .typed<{dispatcher_sig.type()}>();
     return op.call({dispatcher_exprs_str});
 }}
 """
@@ -374,17 +373,17 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
         assert target is Target.DEFINITION
 
         def generate_defn(sig: CppSignature) -> str:
+            dispatcher_sig = DispatcherSignature.from_schema(f.func)
+
             dispatcher_exprs = dispatcher.cpparguments_exprs(sig.cpp_grouped_arguments())
-            dispatcher_returns_type = dispatcher.returns_type(f.func.returns)
-            dispatcher_types_str = ', '.join(map(lambda a: a.type, dispatcher_exprs))
             dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, dispatcher_exprs))
 
             return f"""
 // aten::{f.func}
-{sig.defn("Tensor::")} const {{
+{sig.defn(prefix="Tensor::")} const {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({dispatcher_types_str})>();
+        .typed<{dispatcher_sig.type()}>();
     return op.call({dispatcher_exprs_str});
 }}
 """
@@ -441,30 +440,26 @@ def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], Opti
             return None
 
         name = native.name(f.func)
-        native_returns_type = native.returns_type(f.func.returns)
-        native_args = native.arguments(f.func)
+        native_sig = NativeSignature.from_schema(f.func)
 
-        if not any(isinstance(a.argument, TensorOptionsArguments) for a in native_args):
+        if not any(isinstance(a.argument, TensorOptionsArguments) for a in native_sig.arguments()):
             return None
 
         native_tensor_args = [
-            a for a in native_args
+            a for a in native_sig.arguments()
             if isinstance(a.argument, Argument) and a.argument.type.is_tensor_like()
         ]
 
-        dispatcher_returns_type = dispatcher.returns_type(f.func.returns)
-        dispatcher_args = dispatcher.arguments(f.func)
+        dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
-        args: Union[Sequence[DispatcherArgument], Sequence[NativeArgument]]
+        sig: Union[NativeSignature, DispatcherSignature]
         if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-            returns_type = dispatcher_returns_type
-            args = dispatcher_args
-            exprs = dispatcher.exprs(dispatcher_args)
+            sig = dispatcher_sig
+            dispatcher_exprs = dispatcher_sig.exprs()
             dispatch_key = "c10::computeDispatchKey(dtype, layout, device)"
         else:
-            returns_type = native_returns_type
-            args = native_args
-            exprs = dispatcher.nativearguments_exprs(native_args)
+            sig = native_sig
+            dispatcher_exprs = native_sig.dispatcher_exprs()
             dispatch_key = "options.computeDispatchKey()"
 
         if target is Target.DEFINITION:
@@ -482,22 +477,22 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
                 compute_dk = f"DispatchKey _dk = {dispatch_key};"
             return f"""\
 // aten::{f.func}
-{returns_type} {name}({', '.join(str(a) for a in args)}) {{
+{sig.defn(name)} {{
   static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-    .typed<{dispatcher_returns_type} ({', '.join(a.type for a in dispatcher_args)})>();
+    .typed<{dispatcher_sig.type()}>();
   {compute_dk}
   DispatchKey _autograd_dk = c10::getAutogradKeyFromBackend(_dk);
   // This trick allows calling Autograd backend kernel first and then backend kernel,
   // without adding another AutogradBackendSelect dispatch key.
   DispatchKey _current_dk = at::impl::variable_excluded_from_dispatch() ? _dk : _autograd_dk;
-  return op.callWithDispatchKey(_current_dk, {', '.join(a.expr for a in exprs)});
+  return op.callWithDispatchKey(_current_dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
 """
         elif target is Target.REGISTRATION:
             if local.use_c10_dispatcher() is UseC10Dispatcher.full:
                 return f"""m.impl("aten::{f.func.name}",
-          c10::impl::hacky_wrapper_for_legacy_signatures<{dispatcher_returns_type} ({', '.join(a.type for a in dispatcher_args)})>(
+          c10::impl::hacky_wrapper_for_legacy_signatures<{dispatcher_sig.type()}>(
             TORCH_FN({name})));"""
             else:
                 return f"""m.impl_UNBOXED("aten::{f.func.name}", {name});"""
