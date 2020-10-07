@@ -186,6 +186,9 @@ RegisterOperators reg_fusion({
 RegisterOperators reg_guard({
     Operator(
         prim::CudaFusionGuard,
+        // prim::CudaFusionGuard returns a fresh Boolean type without aliasing.
+        // if we would ever return refined tensor, which would change aliasing
+        // analysis, we should update aliasdb pass.
         [](const Node* node) -> Operation {
           return [node](Stack* stack) {
             FUSER_PERF_SCOPE("CudaFusionGuard");
