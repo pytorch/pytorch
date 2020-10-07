@@ -1749,6 +1749,8 @@ def to(g, self, *args):
             if sym_help._is_value(dtype):
                 # aten::to(Tensor, Tensor, bool, bool, memory_format)
                 other = args[0]
+                if other.node().kind() == 'prim::dtype':
+                    other = other.node().input()
                 dtype = other.type().scalarType()
                 return g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[dtype])
             else:

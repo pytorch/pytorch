@@ -3659,6 +3659,16 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModule()
         self.run_test(model, (x,))
 
+    def test_dtype(self):
+        class MyModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input, other):
+                return input.to(dtype=other.dtype) + other
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        self.run_test(MyModel(), (x, y))
+
     def test_cast_to(self):
         class MyModule(torch.jit.ScriptModule):
             @torch.jit.script_method
