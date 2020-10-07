@@ -15,7 +15,7 @@ from tools.codegen.model import *
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
 import tools.codegen.api.dispatcher as dispatcher
-import tools.codegen.api.legacy_dispatcher as legacy_dispatcher
+import tools.codegen.api.native as native
 import tools.codegen.local as local
 
 try:
@@ -197,9 +197,9 @@ def compute_type_method(
                 f"aten::{f.func.name.name}" not in op_registration_whitelist and target is Target.REGISTRATION:
             return None
 
-        name = legacy_dispatcher.name(f.func)
-        returns_type = legacy_dispatcher.returns_type(f.func.returns)
-        args = legacy_dispatcher.arguments(f.func)
+        name = native.name(f.func)
+        returns_type = native.returns_type(f.func.returns)
+        args = native.arguments(f.func)
         args_str = ', '.join(map(str, args))
 
         if target is Target.DECLARATION:
@@ -430,8 +430,8 @@ def compute_native_function_declaration(f: NativeFunction) -> List[str]:
         if "legacy::" in n:
             continue
         seen.add(n)
-        returns_type = legacy_dispatcher.returns_type(f.func.returns)
-        args = legacy_dispatcher.arguments(f.func)
+        returns_type = native.returns_type(f.func.returns)
+        args = native.arguments(f.func)
         rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(map(lambda a: a.str_with_default(), args))});")
 
     return rs
@@ -445,31 +445,31 @@ def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], Opti
         if str(f.func.name.name).endswith('_like') or str(f.func.name.name).startswith('new_'):
             return None
 
-        name = legacy_dispatcher.name(f.func)
-        legacy_dispatcher_returns_type = legacy_dispatcher.returns_type(f.func.returns)
-        legacy_dispatcher_args = legacy_dispatcher.arguments(f.func)
+        name = native.name(f.func)
+        native_returns_type = native.returns_type(f.func.returns)
+        native_args = native.arguments(f.func)
 
-        if not any(isinstance(a.argument, TensorOptionsArguments) for a in legacy_dispatcher_args):
+        if not any(isinstance(a.argument, TensorOptionsArguments) for a in native_args):
             return None
 
-        legacy_dispatcher_tensor_args = [
-            a for a in legacy_dispatcher_args
+        native_tensor_args = [
+            a for a in native_args
             if isinstance(a.argument, Argument) and a.argument.type.is_tensor_like()
         ]
 
         dispatcher_returns_type = dispatcher.returns_type(f.func.returns)
         dispatcher_args = dispatcher.arguments(f.func)
 
-        args: Union[Sequence[DispatcherArgument], Sequence[LegacyDispatcherArgument]]
+        args: Union[Sequence[DispatcherArgument], Sequence[NativeArgument]]
         if local.use_c10_dispatcher() is UseC10Dispatcher.full:
             returns_type = dispatcher_returns_type
             args = dispatcher_args
             exprs = dispatcher.exprs(dispatcher_args)
             dispatch_key = "c10::computeDispatchKey(dtype, layout, device)"
         else:
-            returns_type = legacy_dispatcher_returns_type
-            args = legacy_dispatcher_args
-            exprs = dispatcher.legacydispatcherarguments_exprs(legacy_dispatcher_args)
+            returns_type = native_returns_type
+            args = native_args
+            exprs = dispatcher.nativearguments_exprs(native_args)
             dispatch_key = "options.computeDispatchKey()"
 
         if target is Target.DEFINITION:
@@ -477,8 +477,8 @@ def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], Opti
             # these two cases differently
             # The first case could probably be improved though- it calls dispatchTypeId(),
             # which looks at TLS dispatch keys- there should not be any by the time we reach backend select.
-            if legacy_dispatcher_tensor_args:
-                tensor_args = ', '.join(a.name for a in legacy_dispatcher_tensor_args)
+            if native_tensor_args:
+                tensor_args = ', '.join(a.name for a in native_tensor_args)
                 compute_dk = f"""\
 DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::multi_dispatch_key_set({tensor_args});
   DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
