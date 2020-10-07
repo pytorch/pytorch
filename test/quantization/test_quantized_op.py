@@ -253,7 +253,7 @@ class TestQuantizedOps(TestCase):
     @override_qengines
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
-    def test_sigmoid(self, X):
+    def test_sigmoid_non_observed(self, X):
         sigmoid_test_configs = [
             {
                 'quantized_fn': [
@@ -272,7 +272,7 @@ class TestQuantizedOps(TestCase):
     @skipIfNoFBGEMM
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
-    def test_sigmoid_observed_output(self, X):
+    def test_sigmoid(self, X):
         sigmoid_test_configs = [
             {
                 'quantized_fn': [
