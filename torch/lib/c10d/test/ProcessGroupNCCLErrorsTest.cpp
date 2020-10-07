@@ -60,7 +60,8 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       std::vector<at::Device> devices,
       int rank,
       c10d::OpType opType) override {
-    return std::make_shared<WorkNCCLSimulateErrors>(devices, simulate_error_, rank, opType);
+    return std::make_shared<WorkNCCLSimulateErrors>(
+        devices, simulate_error_, rank, opType);
   }
 
   size_t getNCCLCommCacheSize() {
@@ -86,7 +87,8 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       bool set_timedout_error,
       int rank,
       c10d::OpType opType)
-      : WorkNCCL(devices, rank, opType), set_timedout_error_(set_timedout_error) {}
+      : WorkNCCL(devices, rank, opType),
+        set_timedout_error_(set_timedout_error) {}
 
  private:
   bool isCompleted() override {

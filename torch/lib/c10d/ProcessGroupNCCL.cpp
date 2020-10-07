@@ -250,8 +250,13 @@ std::ostream& operator<<(
                 << ", Timeout(ms)=" << workNCCL.opTimeout_.count() << ")";
 }
 
-ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType)
-    : Work(rank, opType), devices_(devices), workStartTime_(std::chrono::steady_clock::now()) {
+ProcessGroupNCCL::WorkNCCL::WorkNCCL(
+    const std::vector<at::Device>& devices,
+    int rank,
+    OpType opType)
+    : Work(rank, opType),
+      devices_(devices),
+      workStartTime_(std::chrono::steady_clock::now()) {
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
@@ -388,8 +393,9 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
           store_->set(
               storeKey,
               std::vector<uint8_t>(
-                  reinterpret_cast<uint8_t*>(rankStr.data()),
-                  reinterpret_cast<uint8_t*>(rankStr.data()) + rankStr.size()));
+                  reinterpret_cast<const uint8_t*>(rankStr.data()),
+                  reinterpret_cast<const uint8_t*>(rankStr.data()) +
+                      rankStr.size()));
           LOG(INFO) << "[Rank " << rank_
                     << "] Wrote aborted communicator id to store: " << storeKey;
         }
@@ -639,8 +645,9 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
         store_->set(
             storeKey,
             std::vector<uint8_t>(
-                reinterpret_cast<uint8_t*>(rankStr.data()),
-                reinterpret_cast<uint8_t*>(rankStr.data()) + rankStr.size()));
+                reinterpret_cast<const uint8_t*>(rankStr.data()),
+                reinterpret_cast<const uint8_t*>(rankStr.data()) +
+                    rankStr.size()));
         LOG(INFO) << "[Rank " << rank_
                   << "] Watchdog wrote aborted communicator id to store: "
                   << storeKey;
@@ -843,8 +850,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
       numRanks = getSize() * devices.size();
       rank = getRank() * devices.size() + i;
     } else {
-    // For point-to-point operation, there are only 2 processes involved so
-    // the GPU rank is either 0 or 1.
+      // For point-to-point operation, there are only 2 processes involved so
+      // the GPU rank is either 0 or 1.
       numRanks = 2;
       rank = p2pRank;
     }
@@ -1521,7 +1528,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
     int srcRank,
     int /* unused */) {
   check_gpu_tensors(tensors);
-  auto ret= pointToPoint(
+  auto ret = pointToPoint(
       tensors,
       [&](at::Tensor& output,
           ncclComm_t comm,

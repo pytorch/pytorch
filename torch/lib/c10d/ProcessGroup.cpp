@@ -47,7 +47,8 @@ std::string opTypeToString(OpType opType) {
 }
 
 bool isP2POp(OpType opType) {
-  return opType == OpType::SEND || opType == OpType::RECV || opType == OpType::RECVANYSOURCE;
+  return opType == OpType::SEND || opType == OpType::RECV ||
+      opType == OpType::RECVANYSOURCE;
 }
 
 ProcessGroup::Work::Work() : rank_(-1), opType_(OpType::UNKNOWN) {}
