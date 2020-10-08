@@ -1,5 +1,5 @@
 # Nodes represent a definition of a value in our graph of operators.
-from typing import TYPE_CHECKING, Union, Callable, Any, Tuple, List, Optional, Dict
+from typing import TYPE_CHECKING, Union, Callable, Any, Set, Tuple, List, Optional, Dict
 import torch
 
 if TYPE_CHECKING:
@@ -30,31 +30,47 @@ class Node:
             assert isinstance(target, str)
         self.target = target  # for method/module/function, the name of the method/module/function/attr
         # being invoked, e.g add, layer1, or torch.add
-        self.args = args
-        self.kwargs = kwargs
-        self.uses = 0
+        self._args : Tuple[Argument, ...] = ()
+        self._kwargs : Dict[str, Argument] = {}
+        self.args, self.kwargs = args, kwargs
+        # All of the nodes that use the value produced by this Node
+        # Note one user may correspond to several uses, e.g. the node fo `x + x`
+        # would appear once here, but represents two uses.
+        #
+        # Is a dict to act as an "ordered set". Keys are significant, value dont-care
+        self.users : Dict['Node', None] = {}
 
-    def find_uses(self) -> List['Node']:
-        """
-        Find all nodes that use the value produced by `self`. The complexity of
-        this function is linear in the number of nodes * number of arguments to
-        each node.
+    @property
+    def args(self) -> Tuple[Argument, ...]:
+        return self._args
 
-        Note that len(find_uses()) is not necessarily equal to attribute `uses`.
-        This node could be used multiple times in the same `Node`. In that case,
-        the user node would appear once in the return value here, but `uses` would
-        account for the total number of times this Node is used by the user node.
-        e.g. a node for `x + x` would have two uses for the `x` node, but the
-        `x + x` node would appear once in the return from `find_uses`
-        """
-        use_nodes : List[Node] = []
-        for node in self.graph._nodes:
-            def record_use(arg_node : Node) -> None:
-                if arg_node == self and (len(use_nodes) == 0 or use_nodes[-1] != node):
-                    use_nodes.append(node)
-            map_arg(node.args, record_use)
-            map_arg(node.kwargs, record_use)
-        return use_nodes
+    @args.setter
+    def args(self, a : Tuple[Argument, ...]):
+        self._update_args_kwargs(new_args=a, new_kwargs=self._kwargs)
+
+    @property
+    def kwargs(self) -> Dict[str, Argument]:
+        return self._kwargs
+
+    @kwargs.setter
+    def kwargs(self, k : Dict[str, Argument]):
+        self._update_args_kwargs(new_args=self._args, new_kwargs=k)
+
+    def _update_args_kwargs(self, new_args : Tuple[Argument, ...], new_kwargs : Dict[str, Argument]):
+        old_defs = self._collect_all_defs()
+        self._args = new_args
+        self._kwargs = new_kwargs
+        new_defs = self._collect_all_defs()
+        for to_remove in old_defs - new_defs:
+            to_remove.users.pop(self)
+        for to_add in new_defs - old_defs:
+            to_add.users.setdefault(self)
+
+    def _collect_all_defs(self) -> Set['Node']:
+        defs = set()
+        map_arg(self._args, lambda n: defs.add(n))
+        map_arg(self._kwargs, lambda n: defs.add(n))
+        return defs
 
     def __repr__(self) -> str:
         return self.name
@@ -64,22 +80,22 @@ class Node:
         Replace all uses of `self` in the Graph with the Node `replace_with`.
         Returns the list of nodes on which this change was made.
         """
-        use_nodes : List[Node] = self.find_uses()
-        for use_node in use_nodes:
+        to_process = list(self.users)
+        for use_node in to_process:
             def maybe_replace_node(n : Node) -> Node:
                 if n == self:
-                    self.uses -= 1
                     return replace_with
                 else:
                     return n
-            new_args = map_arg(use_node.args, maybe_replace_node)
-            assert isinstance(new_args, tuple)
-            use_node.args = new_args
-            new_kwargs = map_arg(use_node.kwargs, maybe_replace_node)
-            assert isinstance(new_kwargs, dict)
-            use_node.kwargs = new_kwargs
 
-        return use_nodes
+            new_args = map_arg(use_node.args, maybe_replace_node)
+            new_kwargs = map_arg(use_node.kwargs, maybe_replace_node)
+            assert isinstance(new_args, tuple)
+            assert isinstance(new_kwargs, dict)
+            use_node._update_args_kwargs(new_args, new_kwargs)
+
+        assert len(self.users) == 0
+        return to_process
 
 
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
