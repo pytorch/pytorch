@@ -912,6 +912,14 @@
   variants: function, method
   device_guard: False
 
+- func: tensor_split.sections(Tensor(a) self, int sections, int dim=0) -> Tensor(a)[]
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: tensor_split.indices(Tensor(a) self, int[] indices, int dim=0) -> Tensor(a)[]
+  use_c10_dispatcher: full
+  variants: function, method
+
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -8308,3 +8316,8 @@
   python_module: nn
   dispatch:
     CPU: _test_optional_floatlist
+
+# Note: this function is only for testing.
+- func: _test_string_default(Tensor dummy, str a="\"'\\", str b='"\'\\') -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
