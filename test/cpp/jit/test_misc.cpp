@@ -1756,8 +1756,8 @@ TEST(ProfilerTest, Basic) {
   is.run(stack);
 
   // profiled types are stored as attributes and show up in the dump, e.g.
-  // Tensor = prim::profile[profiled_type=Double(4:256, 256:1, requires_grad=0,
-  // device=cpu)
+  // Tensor = prim::profile[profiled_type=Double(4, 256, strides=[256, 1],
+  // requires_grad=0, device=cpu)
   testing::FileCheck()
       .check("Tensor = prim::profile[profiled_type")
       ->check_same("256")

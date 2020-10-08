@@ -25,7 +25,6 @@ torch.*
 torch.nn
 ~~~~~~~~
 
--  Thomas Viehmann (`t-vi <https://github.com/t-vi>`__)
 -  Adam Paszke (`apaszke <https://github.com/apaszke>`__)
 -  Greg Chanan (`gchanan <https://github.com/gchanan>`__)
 -  Soumith Chintala (`soumith <https://github.com/soumith>`__)
