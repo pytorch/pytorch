@@ -536,30 +536,35 @@ class TestQuantizedOps(TestCase):
 
         assume(min_val <= max_val)
         Y_clamp = torch.clamp(torch.from_numpy(X), min=min_val, max=max_val)
-        Y_min_clamp = torch.clamp(torch.from_numpy(X), min=min_val)
-        Y_max_clamp = torch.clamp(torch.from_numpy(X), max=max_val)
-
         qY_clamp = torch.quantize_per_tensor(Y_clamp, scale=scale,
                                              zero_point=zero_point, dtype=torch_type)
-        qY_min_clamp = torch.quantize_per_tensor(Y_min_clamp, scale=scale,
-                                                 zero_point=zero_point, dtype=torch_type)
-        qY_max_clamp = torch.quantize_per_tensor(Y_max_clamp, scale=scale,
-                                                 zero_point=zero_point, dtype=torch_type)
+
         X = torch.from_numpy(X)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                        dtype=torch_type)
-
         ops_under_test = {
             'ops.quantized': torch.ops.quantized.clamp,
         }
 
         for name, op in ops_under_test.items():
             qY_clamp_hat = op(qX, min=min_val, max=max_val)
-            qY_min_clamp_hat = op(qX, min=min_val)
-            qY_max_clamp_hat = op(qX, max=max_val)
             self.assertEqual(qY_clamp, qY_clamp_hat, msg="{} qclamp failed".format(name))
-            self.assertEqual(qY_min_clamp, qY_min_clamp_hat, msg="{} qclamp failed".format(name))
-            self.assertEqual(qY_max_clamp, qY_max_clamp_hat, msg="{} qclamp failed".format(name))
+
+        with override_quantized_engine('fbgemm'):
+            Y_min_clamp = torch.clamp(X, min=min_val)
+            Y_max_clamp = torch.clamp(X, max=max_val)
+
+            qY_min_clamp = torch.quantize_per_tensor(Y_min_clamp, scale=scale,
+                                                     zero_point=zero_point, dtype=torch_type)
+            qY_max_clamp = torch.quantize_per_tensor(Y_max_clamp, scale=scale,
+                                                     zero_point=zero_point, dtype=torch_type)
+
+
+            for name, op in ops_under_test.items():
+                qY_min_clamp_hat = op(qX, min=min_val)
+                self.assertEqual(qY_min_clamp, qY_min_clamp_hat, msg="{} qclamp failed".format(name))
+                qY_max_clamp_hat = op(qX, max=max_val)
+                self.assertEqual(qY_max_clamp, qY_max_clamp_hat, msg="{} qclamp failed".format(name))
 
     """Tests the correctness of the quantized::hardtanh op."""
     @skipIfNoFBGEMM
