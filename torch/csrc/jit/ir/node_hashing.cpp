@@ -114,7 +114,7 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
       const auto& e_a1 = *it_a1;
       const auto& e_a2 = *it_a2;
 
-      if (!ivaluesEqual(e_a1.key(), e_a2.key()) &&
+      if (!ivaluesEqual(e_a1.key(), e_a2.key()) ||
           !ivaluesEqual(e_a1.value(), e_a2.value())) {
         return false;
       }

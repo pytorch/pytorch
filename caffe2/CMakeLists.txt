@@ -841,7 +841,7 @@ endif()
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 
-  if(BUILD_TEST AND NOT USE_ROCM)
+  if(BUILD_TEST)
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
     add_subdirectory(${TORCH_ROOT}/test/cpp/tensorexpr ${CMAKE_BINARY_DIR}/test_tensorexpr)
     if(USE_DISTRIBUTED AND NOT WIN32)
@@ -1026,7 +1026,11 @@ if($ENV{TH_BINARY_BUILD})
     #
     # These linker commands do not work on OS X, do not attempt this there.
     # (It shouldn't matter anyway, though, because OS X has dropped CUDA support)
-    set_target_properties(torch_cpu PROPERTIES LINK_FLAGS "-Wl,--undefined=mkl_lapack_slaed0 -Wl,--undefined=mkl_lapack_dlaed0 -Wl,--undefined=mkl_lapack_dormql -Wl,--undefined=mkl_lapack_sormql")
+    foreach(_symb  slaed0 daled0 dormql sormql zheevd cheevd)
+    STRING(APPEND _undefined_link_flags " -Wl,--undefined=mkl_lapack_${_symb}")
+    endforeach(_symb)
+    set_target_properties(torch_cpu PROPERTIES LINK_FLAGS  ${_undefined_link_flags})
+
   endif()
 endif()
 
@@ -1259,6 +1263,10 @@ if(BUILD_STATIC_RUNTIME_BENCHMARK)
   add_executable(static_runtime_test "${STATIC_RUNTIME_TEST_SRCS}")
   target_link_libraries(static_runtime_bench torch_library benchmark)
   target_link_libraries(static_runtime_test torch_library gtest_main)
+endif()
+
+if(BUILD_TENSOREXPR_BENCHMARK)
+  add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/tensorexpr ${CMAKE_BINARY_DIR}/tensorexpr_bench)
 endif()
 
 if(BUILD_MOBILE_BENCHMARK)

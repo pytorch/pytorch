@@ -373,6 +373,9 @@ op_db = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=(IS_MACOS or IS_WINDOWS)),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.float64],
+                                active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
@@ -1322,6 +1325,10 @@ def method_tests():
         ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), '', (True,)),
         ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3), 0],), 'size_0', (True, )),
         ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), 'dim', (True, ), [1]),
+        ('tensor_split', (S, S, S), (3,), 'sections', (False,)),
+        ('tensor_split', (S, S, S), (3, 1), 'sections_dim', (False,), [1]),
+        ('tensor_split', (S, S, S), ([2, 4],), 'indices', (False,)),
+        ('tensor_split', (S, S, S), ([2, 4], 1), 'indices_dim', (False,), [1]),
         ('gather', (M, S), (0, gather_variable((S, S), 1, M, True)), 'dim0', (), [0]),
         ('gather', (M, S), (1, gather_variable((M, S // 2), 0, S, True)), 'dim1', (), [0]),
         ('gather', (), (0, torch.tensor([0], dtype=torch.int64)), 'scalar_input', (), [0]),
@@ -1660,10 +1667,6 @@ EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
 def exclude_tensor_method(name, test_name):
     # there are no tensor equivalents for these (inplace or out)
     exclude_all_tensor_method_by_test_name = {
-        'test_clamp_min',
-        'test_clamp_max',
-        'test_clamp_min_scalar',
-        'test_clamp_max_scalar',
         'test_slice',
         'test_where',
         'test_where_broadcast_all',

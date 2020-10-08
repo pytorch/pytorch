@@ -664,6 +664,7 @@ _(aten, tan) \
 _(aten, tanh) \
 _(aten, tensor) \
 _(aten, tensordot) \
+_(aten, tensor_split) \
 _(aten, th_addmm) \
 _(aten, th_clone) \
 _(aten, th_norm) \
