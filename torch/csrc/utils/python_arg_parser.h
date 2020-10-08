@@ -188,6 +188,7 @@ struct PythonArgs {
   inline c10::optional<at::MemoryFormat> memoryformatOptional(int i);
   inline at::QScheme toQScheme(int i);
   inline std::string string(int i);
+  inline std::string stringWithDefault(int i, const std::string& default_str);
   inline c10::optional<std::string> stringOptional(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
@@ -226,6 +227,7 @@ struct FunctionParameter {
   at::SmallVector<PyObject *, 5> numpy_python_names;
   at::Scalar default_scalar;
   std::vector<int64_t> default_intlist;
+  std::string default_string;
   union {
     bool default_bool;
     int64_t default_int;
@@ -530,7 +532,11 @@ inline at::QScheme PythonArgs::toQScheme(int i) {
 }
 
 inline std::string PythonArgs::string(int i) {
-  if (!args[i]) return "";
+  return stringWithDefault(i, signature.params[i].default_string);
+}
+
+inline std::string PythonArgs::stringWithDefault(int i, const std::string& default_str) {
+  if (!args[i]) return default_str;
   return THPUtils_unpackString(args[i]);
 }
 
