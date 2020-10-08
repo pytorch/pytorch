@@ -747,7 +747,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         module_out = qemb(indices)
 
         # Call the qembedding operator directly
-        ref = torch.ops.quantized.embedding_byte(w_packed, indices, sparse=False)
+        ref = torch.ops.quantized.embedding_byte(w_packed, indices, pruned_weights=False)
         self.assertEqual(module_out, ref)
         self.checkEmbeddingSerialization(qemb, num_embeddings, embedding_dim, indices, None, set_qconfig=False, is_emb_bag=False)
 
