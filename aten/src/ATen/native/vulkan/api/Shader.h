@@ -43,7 +43,7 @@ struct Shader final {
     */
 
     struct Descriptor final {
-      c10::SmallVector<VkDescriptorSetLayoutBinding, 16u> bindings;
+      c10::SmallVector<VkDescriptorType, 8u> types;
     };
 
     /*
@@ -165,22 +165,17 @@ struct Shader final {
 inline bool operator==(
     const Shader::Layout::Descriptor& _1,
     const Shader::Layout::Descriptor& _2) {
-  return _1.bindings == _2.bindings;
+  return _1.types == _2.types;
 }
 
 inline size_t Shader::Layout::Factory::Hasher::operator()(
     const Descriptor& descriptor) const {
   size_t hash = 0u;
 
-  for (const VkDescriptorSetLayoutBinding& binding : descriptor.bindings) {
+  for (const VkDescriptorType type : descriptor.types) {
     hash = c10::hash_combine(
         hash,
-        c10::get_hash(
-            binding.binding,
-            binding.descriptorType,
-            binding.descriptorCount,
-            binding.stageFlags,
-            binding.pImmutableSamplers));
+        c10::get_hash(type));
   }
 
   return hash;

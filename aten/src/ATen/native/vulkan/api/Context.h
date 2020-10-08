@@ -26,10 +26,10 @@ class Context final {
  public:
   explicit Context(const Adapter& adapter);
   Context(const Context&) = delete;
-  Context(Context&&) = default;
+  Context(Context&&) = delete;
   Context& operator=(const Context&) = delete;
-  Context& operator=(Context&&) = default;
-  ~Context() = default;
+  Context& operator=(Context&&) = delete;
+  ~Context();
 
   GPU gpu();
   Command& command();
@@ -37,6 +37,18 @@ class Context final {
   Pipeline& pipeline();
   Descriptor& descriptor();
   Resource& resource();
+
+  void dispatch(
+      Command::Buffer& command_buffer,
+      const Shader::Layout::Descriptor& shader_layout_descriptor,
+      const Shader::Descriptor& shader_descriptor,
+      const Descriptor::Set& descriptor_set);
+
+  // This function is very expensive and its use is bad for performance.
+  // Only use this function for debugging or as a short term hack on way to a
+  // more performant solution.
+
+  void flush();
 
  private:
   VkDevice device();
