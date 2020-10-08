@@ -219,9 +219,12 @@ Autograd for Complex Numbers
 tl;dr
 ^^^^^
 
-- PyTorch Autograd returns gradients that are directly usable for optimization and gradient descent (no conjugation needed),
-  so existing optimizers work out of the box. We don’t make any attempt to support holomorphic functions specially;
-  in particular, derivatives are only well defined for real-valued loss functions.
+- PyTorch uses the Wirtinger Calculus to compute gradients for functions with complex valued input and (or)
+output. PyTorch's autograd convention for complex numbers allows gradient values to be used as a step in
+Gradient Descent, so existing optimizers work out of the box.
+- Wirtinger Calculus provides a means of computing gradients of real valued cost functions defined on
+complex domains(:math:`ℂ^n`) which are not holomorphic (complex differentiable). This comes in very handy since
+none of the relevant cost functions used in NN models are holomorphic.
 - The gradients returned correspond to “TensorFlow-style” complex gradients (as opposed to JAX-style complex gradients).
 
 What are complex derivatives?
@@ -245,7 +248,7 @@ the value of limit computed for a real and imaginary step (:math:`h`) must be eq
 The complex differentiable functions are commonly known as holomorphic functions. Practically, none of the
 loss functions used in real world applications satisfy these conditions.
 
-One of the common important non holomorphic functions is conjugate operator. Conjugate operation is defined as:
+One of the commonly used non holomorphic functions is conjugate operator. Conjugate operation is defined as:
 
     .. math::
         f(z) = f(x+yj) = z^* = x - yj
