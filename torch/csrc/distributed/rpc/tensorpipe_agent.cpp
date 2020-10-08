@@ -365,7 +365,7 @@ void TensorPipeAgent::onListenerAccepted(
 
 void TensorPipeAgent::pipeRead(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
-    std::function<void(const tensorpipe::Error&, Message&&)> fn) {
+    std::function<void(const tensorpipe::Error&, Message&&)> fn) noexcept {
   pipe->readDescriptor([fn{std::move(fn)}, pipe](
                            const tensorpipe::Error& error,
                            tensorpipe::Message tpMessage) mutable {
@@ -402,7 +402,7 @@ void TensorPipeAgent::pipeWrite(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
     Message&& rpcMessage,
     std::vector<c10::DeviceIndex>&& devices,
-    std::function<void(const tensorpipe::Error&)> fn) {
+    std::function<void(const tensorpipe::Error&)> fn) noexcept {
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers tpBuffers;
 

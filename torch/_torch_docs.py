@@ -110,19 +110,6 @@ tf32_notes = {
     "tf32_note": """This operator supports :ref:`TensorFloat32<tf32_on_ampere>`."""
 }
 
-
-reproducibility_notes = {
-    "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
-a CUDA device. See :doc:`/notes/randomness` for more information.""",
-    "backward_reproducibility_note": """This operation may produce nondeterministic gradients when given tensors on \
-a CUDA device. See :doc:`/notes/randomness` for more information.""",
-    "cudnn_reproducibility_note": """In some circumstances when given tensors on a CUDA device \
-and using CuDNN, this operator may select a nondeterministic algorithm to increase performance. If this is \
-undesirable, you can try to make the operation deterministic (potentially at \
-a performance cost) by setting ``torch.backends.cudnn.deterministic = True``. \
-See :doc:`/notes/randomness` for more information."""
-}
-
 add_docstr(torch.abs, r"""
 abs(input, *, out=None) -> Tensor
 
@@ -951,7 +938,12 @@ tensor of size 0. If :attr:`minlength` is specified, the number of bins is at le
 ``out[n] += 1``.
 
 Note:
-    {backward_reproducibility_note}
+    In some circumstances when using the CUDA backend with CuDNN, this operator
+    may select a nondeterministic algorithm to increase performance. If this is
+    undesirable, you can try to make the operation deterministic (potentially at
+    a performance cost) by setting ``torch.backends.cudnn.deterministic =
+    True``.
+    Please see the notes on :doc:`/notes/randomness` for background.
 
 Arguments:
     input (Tensor): 1-d int tensor
@@ -976,7 +968,7 @@ Example::
 
     >>> input.bincount(weights)
     tensor([0.0000, 0.0000, 0.0000, 1.0000, 1.0000, 0.0000, 0.5000])
-""".format(**reproducibility_notes))
+""")
 
 add_docstr(torch.bitwise_not,
            r"""
