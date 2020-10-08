@@ -216,53 +216,80 @@ proper thread locking code to ensure the hooks are thread safe.
 Autograd for Complex Numbers
 ----------------------------
 
-tl;dr
-^^^^^
+The short version:
 
-- PyTorch uses the Wirtinger Calculus to compute gradients for functions with complex valued input and (or)
-output. PyTorch's autograd convention for complex numbers allows gradient values to be used as a step in
-Gradient Descent, so existing optimizers work out of the box.
-- Wirtinger Calculus provides a means of computing gradients of real valued cost functions defined on
-complex domains(:math:`ℂ^n`) which are not holomorphic (complex differentiable). This comes in very handy since
-none of the relevant cost functions used in NN models are holomorphic.
-- The gradients returned correspond to “TensorFlow-style” complex gradients (as opposed to JAX-style complex gradients).
+- When you use PyTorch to differentiate a complex-to-real function :math:`f(z) = L`,
+  we will compute the partial derivative :math:`\frac{\partial L}{\partial z^*}`
+  (note the conjugation of z), as defined by Wirtinger calculus.  This
+  derivative is precisely the direction of the step you should take in
+  gradient descent, so all of your existing optimizers will work out of
+  the box even with complex parameters.
+- This convention matches TensorFlow's convention for complex
+  differentiation, but is different from JAX (which computes
+  :math:`\frac{\partial L}{\partial z}`).
+- If you have a real-to-real function which internally uses complex
+  operations, the convention here doesn't matter: you will always get
+  the same result that you would have gotten if it had been implemented
+  with only real operations.
+
+If you are curious about the mathematical details, or want to know how
+to define complex derivatives in PyTorch, read on.
 
 What are complex derivatives?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Consider a function :math:`f: ℂ → ℂ`, :math:`f(z) = f(x+yj) = u(x, y) +v(x, y)j` where :math:`u` and :math:`v`
-are real valued functions. Any such function :math:`f` may be decomposed as a complex valued function or a
-vector valued function whose input lies in :math:`ℝ^2`, i.e.,
+How does differentiation generalize to complex numbers?  There are two
+approaches you could take to such a generalization.
 
-    .. math::
-        f(z) = f(x+yj) = u(x, y) + v(x, y)j = (u(x, y), v(x, y))
+One (naive) approach would be to reinterpret the functions on :math:`ℂ`
+as functions on :math:`ℝ^2`, and then just ask what it means for this
+function to be differentiable.  For example, if
+we have a function :math:`f: ℂ → ℂ`, we can decompose it into
+:math:`f(z) = f(x+yj) = u(x, y) + v(x, y)j` where :math:`u` and
+:math:`v` are real valued functions.  Then the "real" version
+of this function `f: ℝ^2 → ℝ^2` is simply `f(x, y) = (u(x, y), v(x, y))`,
+and we can compute its Jacobian in the usual way.
 
-For a function :math:`f` to be complex differentiable, u and v must be real differentiable and f must satisfy the
-Cauchy-Riemann `equations <https://en.wikipedia.org/wiki/Cauchy%E2%80%93Riemann_equations>`_. The key condition
-used in obtaining the Cauchy-Riemann equations is that the below mentioned limit must exist, as a result of which
-the value of limit computed for a real and imaginary step (:math:`h`) must be equal.
+Unfortunately, there is something unsatisfying about this definition: we
+would hope that a derivative of a function gives us a linear
+approximation of :math:`f`, :math:`f'(z) = a z`, at some point. But
+there is no single complex :math:`a` (two reals) that can capture the
+full Jacobian (four reals).
+
+Thus, the mathematical definition of complex-differentiability takes the
+limit definition of a derivative and generalizes it to operate on
+complex numbers:
 
     .. math::
         f'(z) = \lim_{h \to 0, h \in C} \frac{f(z+h) - f(z)}{h}
 
-The complex differentiable functions are commonly known as holomorphic functions. Practically, none of the
-loss functions used in real world applications satisfy these conditions.
+In order for this limit to exist, not only must :math:`u` and :math:`v` must be
+real differentiable (as above), but :math:`f` must also satisfy the Cauchy-Riemann `equations
+<https://en.wikipedia.org/wiki/Cauchy%E2%80%93Riemann_equations>`_.  In
+other words: the limit computed for real and imaginary steps (:math:`h`)
+must be equal.  This is a more restrictive condition.
 
-One of the commonly used non holomorphic functions is conjugate operator. Conjugate operation is defined as:
+The complex differentiable functions are commonly known as holomorphic
+functions.  They are well behaved, have all the nice properties that
+you've seen from real differentiable functions, and are also completely
+useless: practically, none of the functions used in real world
+applications are actually holomorphic.  Not even
+the conjugate operation is holomorphic!  Recall the definition of
+conjugation:
 
     .. math::
-        f(z) = f(x+yj) = z^* = x - yj
+        f(z) = f(x+yj) = x - yj
 
-For a real step :math:`h`,
+The limits for the steps are inconsistent.  For a real step :math:`h`,
 
     .. math::
-        f’(z) = \lim_{h \to 0} \frac{(x+h - yj) - (x-yj)}{h} = 1
+        f'(z) = \lim_{h \to 0} \frac{(x+h - yj) - (x-yj)}{h} = 1
 
 For an imaginary step :math:`h*1j`,
 
     .. math::
         \begin{aligned}
-        f’(z) &= \lim_{h \to 0} \frac{f(z+h*1j) - f(z)}{h*1j}       \\
+        f'(z) &= \lim_{h \to 0} \frac{f(z+h*1j) - f(z)}{h*1j}       \\
               &= \lim_{h \to 0} \frac{(x - (y+h)j) - (x-yj)}{h*1j}  \\
               &= -1
         \end{aligned}
@@ -270,10 +297,14 @@ For an imaginary step :math:`h*1j`,
 Wirtinger Calculus comes in picture ...
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-So, we have this great theory of complex differentiability and holomorphic functions, and we can’t use any of it at all,
-because many of the commonly used functions are not holomorphic. What’s a poor mathematician to do? Well, Wirtinger observed that even if
-:math:`f(z)` isn’t holomorphic, one could rewrite it as a two variable function :math:`f(z, z*)` which is always holomorphic. This is because
-real and imaginary of the components of :math:`z` can be expressed in terms of :math:`z` and :math:`z^*` as:
+So, we have this great theory of complex differentiability and
+holomorphic functions, and we can’t use any of it at all, because many
+of the commonly used functions are not holomorphic. What’s a poor
+mathematician to do? Well, Wirtinger observed that even if :math:`f(z)`
+isn’t holomorphic, one could rewrite it as a two variable function
+:math:`f(z, z*)` which is always holomorphic. This is because real and
+imaginary of the components of :math:`z` can be expressed in terms of
+:math:`z` and :math:`z^*` as:
 
     .. math::
         \begin{aligned}
@@ -281,9 +312,14 @@ real and imaginary of the components of :math:`z` can be expressed in terms of :
             Im(z) &= \frac {z - z^*}{2j}
         \end{aligned}
 
-Wirtinger Calculus suggests to study :math:`f(z, z^*)` instead, which is guaranteed to be holomorphic, and has partial derivatives
-:math:`\frac{\partial }{\partial z}` and :math:`\frac{\partial }{\partial z^{*}}`. We can use the chain rule to establish a relationship
-between these partial derivatives and the partial derivatives w.r.t., the real and imaginary components of :math:`z`.
+Wirtinger calculus suggests to study :math:`f(z, z^*)` instead, which is
+guaranteed to be holomorphic if :math:`f` was real differentiable (another
+way to think of it is as a change of coordinate system, from :math:`f(x, y)`
+to :math:`f(z, z^*)`.)  This function has partial derivatives
+:math:`\frac{\partial }{\partial z}` and :math:`\frac{\partial}{\partial z^{*}}`.
+We can use the chain rule to establish a
+relationship between these partial derivatives and the partial
+derivatives w.r.t., the real and imaginary components of :math:`z`.
 
     .. math::
         \begin{aligned}
@@ -316,8 +352,11 @@ For more reading, check out: https://arxiv.org/pdf/0906.4835.pdf
 How is Wirtinger Calculus useful in optimization?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Researchers in audio and other fields, more commonly, use Gradient Descent to optimize real valued loss functions with complex variables. Typically, these people
-treat the real and imaginary values as separate channels that can be updated. For a step size :math:`s/2` and loss :math:`L`, we can write the following equations in :math:`R^2`:
+Researchers in audio and other fields, more commonly, use gradient
+descent to optimize real valued loss functions with complex variables.
+Typically, these people treat the real and imaginary values as separate
+channels that can be updated. For a step size :math:`s/2` and loss
+:math:`L`, we can write the following equations in :math:`ℝ^2`:
 
     .. math::
         \begin{aligned}
@@ -325,7 +364,7 @@ treat the real and imaginary values as separate channels that can be updated. Fo
             y_{n+1} &= y_n - (s/2) * \frac{\partial L}{\partial y}
         \end{aligned}
 
-How do these equations translate into complex space :math:`C`?
+How do these equations translate into complex space :math:`ℂ`?
 
     .. math::
         \begin{aligned}
@@ -334,26 +373,35 @@ How do these equations translate into complex space :math:`C`?
                     &= z_n - s * \frac{\partial L}{\partial z^*}
         \end{aligned}
 
-Something very interesting has happened: Wirtinger calculus tells us that we can simplify the complex variable update formula above to only refer to the
-Conjugate Wirtinger derivative :math:`\frac{\partial L}{\partial z^*}` and that gives us exactly the step we take in optimization.
+Something very interesting has happened: Wirtinger calculus tells us
+that we can simplify the complex variable update formula above to only
+refer to the conjugate Wirtinger derivative
+:math:`\frac{\partial L}{\partial z^*}`, giving us exactly the step we take in optimization.
 
-What does the PyTorch Autograd compute for complex functions?
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Because the conjugate Wirtinger derivative gives us exactly the correct step for a real valued loss function, PyTorch gives you this derivative
+when you differentiate a function with a real valued loss.
 
-As we saw above, the conjugate Wirtinger derivative gives us exactly the correct step for a real valued loss function; so,
-when you ask PyTorch autograd to compute the derivative of a function, we give you the conjugate Wirtinger derivative :math:`\frac{\partial L}{\partial z^*}` as
-the output gradient, while making the assumption that the function in question is itself a :math:`C → R` function itself or part of a bigger real valued function. If that
-is all you care about, that’s the end of the story, and you can stop reading here.
-
-What derivative formulas should we write for complex functions?
+How does PyTorch compute the conjugate Wirtinger derivative?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Typically, the derivative formula takes in `grad_output` as an input, representing the
-incoming Vector-Jacobian product that we’ve already computed, aka, :math:`\frac{\partial L}{\partial s^*}`, where :math:`L` is the loss of the parent real
-valued function and s is the output of our function. The goal here is to compute :math:`\frac{\partial L}{\partial z^*}`, where :math:`z` is the input of the function.
+Typically, our derivative formulas take in `grad_output` as an input,
+representing the incoming Vector-Jacobian product that we’ve already
+computed, aka, :math:`\frac{\partial L}{\partial s^*}`, where :math:`L`
+is the loss of the entire computation (producing a real loss) and
+:math:`s` is the output of our function. The goal here is to compute
+:math:`\frac{\partial L}{\partial z^*}`, where :math:`z` is the input of
+the function.  It turns out that in the case of real loss, we can
+get away with *only* calculating :math:`\frac{\partial L}{\partial z^*}`,
+even though the chain rule implies that we also need to
+have access to :math:`\frac{\partial L}{\partial z^*}`.  If you want
+to skip this derivation, look at the last equation in this section
+and then skip to the next section.
 
-Let’s continue working with :math:`f: ℂ → ℂ` defined as :math:`f(z) = f(x+yj) = u(x, y) + v(x, y)j`. As discussed above, Autograd’s gradient convention is centered
-around optimization for real valued loss functions, so let’s assume :math:`f` is a part of larger real valued loss function :math:`g`. Using chain rule, we can write:
+Let’s continue working with :math:`f: ℂ → ℂ` defined as
+:math:`f(z) = f(x+yj) = u(x, y) + v(x, y)j`. As discussed above,
+autograd’s gradient convention is centered around optimization for real
+valued loss functions, so let’s assume :math:`f` is a part of larger
+real valued loss function :math:`g`. Using chain rule, we can write:
 
     .. math::
         \frac{\partial L}{\partial z^*} = \frac{\partial L}{\partial u} * \frac{\partial u}{\partial z^*} + \frac{\partial L}{\partial v} * \frac{\partial v}{\partial z^*}
@@ -367,8 +415,9 @@ Now using Wirtinger derivative definition, we can write:
             \frac{\partial L}{\partial s^*} = 1/2 * (\frac{\partial L}{\partial u} + \frac{\partial L}{\partial v} j)
         \end{aligned}
 
-It should be noted here that since :math:`u` and :math:`v` are real functions, and :math:`L` is real by our assumption
-that :math:`f` is a part of a real valued function, we have:
+It should be noted here that since :math:`u` and :math:`v` are real
+functions, and :math:`L` is real by our assumption that :math:`f` is a
+part of a real valued function, we have:
 
     .. math::
         (\frac{\partial L}{\partial s})^* = \frac{\partial L}{\partial s^*}
@@ -400,20 +449,27 @@ Using :eq:`[2]`, we get:
     .. math::
         \begin{aligned}
             \frac{\partial L}{\partial z^*} &= (\frac{\partial L}{\partial s^*})^* * \frac{\partial s}{\partial z^*} + \frac{\partial L}{\partial s^*} * (\frac{\partial s}{\partial z})^*  \\
-                                            &= (grad\_output)^* * \frac{\partial s}{\partial z^*} + grad\_output * {(\frac{\partial s}{\partial z})}^*         \\
+                                            &= \boxed{ (grad\_output)^* * \frac{\partial s}{\partial z^*} + grad\_output * {(\frac{\partial s}{\partial z})}^* }       \\
         \end{aligned}
         :label: [4]
 
-How can I use this formula to calculate gradients for a function?
+This last equation is the important one for writing your own gradients,
+as it decomposes our derivative formula into a simpler one that is easy
+to compute by hand.
+
+How can I write my own derivative formula for a complex function?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-There are two ways you use this formula.
+The above boxed equation gives us the general formula for all
+derivatives on complex functions.  However, we still need to
+compute :math:`\frac{\partial s}{\partial z}` and :math:`\frac{\partial s}{\partial z^*}`.
+There are two ways you could do this:
 
-    - The first way is to just use Wirtinger derivatives and calculate :math:`\frac{\partial s}{\partial z}  and :math:`\frac{\partial s}{\partial z^*}` by
-      using :math:`\frac{\partial s}{\partial x}` and :math:`\frac{\partial s}{\partial y}`.
-    - The second way is to use the change of variables trick and rewrite :math:`f(z)` as a two variable function :math:`f(z, z^*)`, and just compute
-      the conjugate Wirtinger derivatives by treating :math:`z` and :math:`z^*` as independent variables, which is often more straightforward and
-      requires less calculation.
+    - The first way is to just use the definition of Wirtinger derivatives directly and calculate :math:`\frac{\partial s}{\partial z}` and :math:`\frac{\partial s}{\partial z^*}` by
+      using :math:`\frac{\partial s}{\partial x}` and :math:`\frac{\partial s}{\partial y}`
+      (which you can compute in the normal way).
+    - The second way is to use the change of variables trick and rewrite :math:`f(z)` as a two variable function :math:`f(z, z^*)`, and compute
+      the conjugate Wirtinger derivatives by treating :math:`z` and :math:`z^*` as independent variables. This is often easier; for example, if the function in question is holomorphic, only :math:`z` will be used (and :math:`\frac{\partial s}{\partial z^*}` will be zero).
 
 Let's consider the function :math:`f(z = x + yj) = c * z = c * (x+yj)` as an example, where :math:`c \in ℝ`.
 
@@ -452,8 +508,9 @@ in more handy for faster calculations.
 What about cross-domain functions?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-For cross-domain functions, we can write the chain rule, follow the same steps as shown for :math:`C → C` case. We end up
-getting a special case of :eq:`[4]` for both :math:`ℝ → ℂ` and :math:`ℂ → ℝ` case.
+Some functions map from complex inputs to real outputs, or vice versa.
+These functions form a special case of :eq:`[4]`, which we can derive using the
+chain rule:
 
     - For :math:`f: ℂ → ℝ`, we get:
 
