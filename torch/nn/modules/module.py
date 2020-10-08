@@ -606,7 +606,7 @@ class Module:
             if dtype.is_complex:
                 warnings.warn(
                     "Complex modules are a new feature, and some modules might not work as expected "
-                    "when using complex tensors as parameters or buffers. ")
+                    "when using complex tensors as parameters or buffers.")
 
         def convert(t):
             if convert_to_format is not None and t.dim() == 4:
