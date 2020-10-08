@@ -194,6 +194,16 @@ class TestLinalg(TestCase):
             self.assertEqual(actual_w, expected_w)
             # sign of eigenvectors is not unique and therefore absolute values are compared
             self.assertEqual(abs(actual_v), abs(expected_v))
+            # additionally we can flip the sign and then compare the values
+            # let's choose the convention that the first element of the eigenvector should be positive,
+            # otherwise flip the sign of the eigenvector
+            if matrix.numel() > 0:
+                sign = np.sign(expected_v[..., 0, :]).reshape(batch + (1, shape))
+                expected_v = sign * expected_v
+                torch_real_slice = actual_v[..., 0, :].real if dtype.is_complex else actual_v[..., 0, :]
+                sign = torch.sign(torch_real_slice).reshape(batch + (1, shape))
+                actual_v = sign * actual_v
+                self.assertEqual(actual_v, expected_v)
 
         shapes = (0, 3, 5)
         batches = ((), (3, ), (2, 2))
