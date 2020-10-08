@@ -8,6 +8,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <torch/csrc/cuda/nccl.h>
 
 #include <c10d/Utils.hpp>
 namespace c10d {
@@ -165,31 +166,6 @@ std::string getNcclAbortedCommStoreKey(const std::string ncclIdStr) {
 }
 
 #ifdef ENABLE_NCCL_P2P_SUPPORT
-ncclResult_t ncclAlltoall(
-    void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    size_t size,
-    ncclDataType_t type,
-    ncclComm_t comm,
-    cudaStream_t stream) {
-  int numranks;
-  size_t rankdiff = count * size;
-  C10D_NCCL_CHECK(ncclCommCount(comm, &numranks));
-  C10D_NCCL_CHECK(ncclGroupStart());
-  for (int r = 0; r < numranks; r++) {
-    // NCCL uses 0 byte message for synchronization
-    // Avoid send/recv when message size is zero
-    if (count != 0) {
-      C10D_NCCL_CHECK(ncclSend(
-          ((char*)sendbuff) + r * rankdiff, count, type, r, comm, stream));
-      C10D_NCCL_CHECK(ncclRecv(
-          ((char*)recvbuff) + r * rankdiff, count, type, r, comm, stream));
-    }
-  }
-  C10D_NCCL_CHECK(ncclGroupEnd());
-  return ncclSuccess;
-}
 
 ncclResult_t ncclAlltoallv(
     void* sendbuff,
@@ -1386,14 +1362,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
-          return ncclAlltoall(
-              input.data_ptr(),
-              output.data_ptr(),
-              input.numel() / size_,
-              input.element_size(),
-              getNcclDataType(input.scalar_type()),
+        torch::cuda::nccl::all2all(
+              input,
+              output,
+              this->getSize(),
               comm,
-              stream.stream());
+              stream);
+          return ncclSuccess;
         });
   } else {
     c10d::checkSplitSizes(inputSplitSizes, inputTensor, size_);
