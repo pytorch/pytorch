@@ -231,9 +231,13 @@ std::tuple<Tensor, Tensor> histogram(
         "histogram only supports input and weights of the same shape");
     flattened_weights = weights.flatten(0).contiguous();
   }
+
+  // This uses existing PyTorch operators to compute the histogram.
+  // First, it takes the sorted array of bin edges and performs the binsearch.
+  // The second line makes the uppermost bin inclusive to include the max value if it is present, by decrementing them by 1.
+  // The third line computes the actual histogram.
   int64_t nbins = bins.size(0) - 1;
   Tensor index = searchsorted(bins, self, false, true);
-  index.clamp_(0, nbins + 2);
   index = index.where(self != bins[-1], index - 1);
   Tensor hist = bincount(index.flatten(0), flattened_weights, nbins + 2);
 
