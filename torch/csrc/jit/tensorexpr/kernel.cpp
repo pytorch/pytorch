@@ -206,6 +206,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::relu:
     case aten::log:
     case aten::log10:
+    case aten::log1p:
     case aten::log2:
     case aten::exp:
     case aten::expm1:
@@ -900,6 +901,11 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::log10: {
       return computeOneOperand(
           "aten_log10", v, [](const ExprHandle& a) { return log10(a); });
+    } break;
+
+    case aten::log1p: {
+      return computeOneOperand(
+          "aten_log1p", v, [](const ExprHandle& a) { return log1p(a); });
     } break;
 
     case aten::log2: {
