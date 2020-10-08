@@ -657,7 +657,7 @@ _(aten, rsub) \
 _(aten, sum) \
 _(aten, sum_to_size) \
 _(aten, svd) \
-_(aten, swapdims) \
+_(aten, swapdim) \
 _(aten, symeig) \
 _(aten, t) \
 _(aten, take) \
