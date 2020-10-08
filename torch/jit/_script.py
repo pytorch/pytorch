@@ -269,10 +269,10 @@ if _enabled:
             # Add wrapped object's properties to this class instance.
             self._props = {prop[0]: property(prop[1], prop[2]) for prop in self._c._properties()}
 
-            self._initializing = False
+            self.__dict__["_initializing"] = False
 
         def __getattr__(self, attr):
-            if self._initializing:
+            if self.__dict__["_initializing"]:
                 return super(RecursiveScriptClass, self).__getattr__(attr)
 
             if attr in self._props:
@@ -281,7 +281,7 @@ if _enabled:
             return getattr(self._c, attr)
 
         def __setattr__(self, attr, value):
-            if self._initializing:
+            if self.__dict__["_initializing"]:
                 return super(RecursiveScriptClass, self).__setattr__(attr, value)
 
             if attr in self._props:
@@ -405,7 +405,7 @@ if _enabled:
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """
-        __ignored_properties__ = ['code', 'code_with_constants', 'graph', 'inlined_graph', 'original_name']
+        __jit_unused_properties__ = ['code', 'code_with_constants', 'graph', 'inlined_graph', 'original_name']
 
         def __init__(self):
             super(ScriptModule, self).__init__()
@@ -607,13 +607,13 @@ if _enabled:
             r = self.forward.code_with_constants
             return (r[0], ConstMap(r[1]))
 
-        def save(self, *args, **kwargs):
+        def save(self, f, **kwargs):
             r"""
             save(f, _extra_files={})
 
             See :func:`torch.jit.save <torch.jit.save>` for details.
             """
-            return self._c.save(*args, **kwargs)
+            return self._c.save(str(f), **kwargs)
 
         def _save_for_lite_interpreter(self, *args, **kwargs):
             r"""

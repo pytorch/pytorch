@@ -12,7 +12,7 @@ from typing import List, Tuple, Dict, Any
 from torch.testing import \
     (make_non_contiguous, _dispatch_dtypes,
      floating_types, floating_types_and, floating_and_complex_types,
-     floating_and_complex_types_and, all_types_and_complex_and)
+     floating_and_complex_types_and, all_types_and_complex_and, all_types_and)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
      expectedAlertNondeterministic, precisionOverride)
@@ -63,8 +63,10 @@ class OpInfo(object):
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
                  test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
+                 supports_tensor_out=True,  # whether the op supports the out kwarg, returning a Tensor
                  skips=tuple(),  # information about which tests to skip
                  decorators=None):  # decorators to apply to generated tests
+
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
             assert isinstance(dtype_list, (_dispatch_dtypes, type(None)))
@@ -85,6 +87,7 @@ class OpInfo(object):
         self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
 
         self.test_inplace_grad = test_inplace_grad
+        self.supports_tensor_out = supports_tensor_out
 
         self.skips = skips
         self.decorators = decorators
@@ -336,7 +339,7 @@ op_db = [
                    ref=np.negative,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.half)),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16)),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
                    handles_large_floats=False,
@@ -370,6 +373,9 @@ op_db = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=(IS_MACOS or IS_WINDOWS)),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.float64],
+                                active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
@@ -385,6 +391,11 @@ op_db = [
     UnaryUfuncInfo('exp2',
                    ref=np.exp2,
                    dtypes=floating_types_and(torch.half),
+                   dtypesIfCPU=None,
+                   dtypesIfCUDA=None),
+    UnaryUfuncInfo('nan_to_num',
+                   ref=np.nan_to_num,
+                   dtypes=all_types_and(torch.half),
                    dtypesIfCPU=None,
                    dtypesIfCUDA=None)
 ]
@@ -807,10 +818,14 @@ def method_tests():
         ('median', (S, S, S), (1,), 'dim', (), [0]),
         ('median', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
         ('median', (), NO_ARGS, 'scalar'),
-        # TODO: https://github.com/pytorch/pytorch/issues/30818
-        ('median', (), (0,), 'scalar_dim', (), [0], [expectedFailureCUDA]),
-        ('median', (), (0, True,), 'scalar_keepdim_dim', (), [0], [expectedFailureCUDA]),
-        # END TODO
+        ('median', (), (0,), 'scalar_dim', (), [0]),
+        ('median', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
+        ('nanmedian', (S, S, S), NO_ARGS),
+        ('nanmedian', (S, S, S), (1,), 'dim', (), [0]),
+        ('nanmedian', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
+        ('nanmedian', (), NO_ARGS, 'scalar'),
+        ('nanmedian', (), (0,), 'scalar_dim', (), [0]),
+        ('nanmedian', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
         ('mode', (S, S, S), NO_ARGS),
         ('mode', (S, S, S), (1,), 'dim', (), [0]),
         ('mode', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
@@ -879,6 +894,8 @@ def method_tests():
         ('repeat', (), (2, 3), 'scalar'),
         ('repeat', (2, 2), (3, 2)),
         ('repeat', (2, 2), (1, 3, 1, 2), 'unsqueeze'),
+        ('repeat', (S,), (0, ), 'zero_dim'),
+        ('repeat', (S,), (0, 2), 'zero_dim_multi'),
         ('logcumsumexp', (S, S, S), (0,), 'dim0', (), [0]),
         ('logcumsumexp', (S, S, S), (1,), 'dim1', (), [0]),
         ('logcumsumexp', (), (0,), 'dim0_scalar', (), [0]),
@@ -956,6 +973,7 @@ def method_tests():
         ('addr', (S, M), ((S,), (M,)), 'coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('addr', (), ((S,), (M,)), 'broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('dot', (L,), ((L,),), '', (True,)),
+        ('vdot', (L,), ((L,),),),
         ('mm', (S, M), ((M, S),), '', (True,)),
         ('bmm', (M, S, M), ((M, M, S),), '', (True,)),
         ('mv', (S, M), ((M,),), '', (True,)),
@@ -1307,6 +1325,10 @@ def method_tests():
         ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), '', (True,)),
         ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3), 0],), 'size_0', (True, )),
         ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), 'dim', (True, ), [1]),
+        ('tensor_split', (S, S, S), (3,), 'sections', (False,)),
+        ('tensor_split', (S, S, S), (3, 1), 'sections_dim', (False,), [1]),
+        ('tensor_split', (S, S, S), ([2, 4],), 'indices', (False,)),
+        ('tensor_split', (S, S, S), ([2, 4], 1), 'indices_dim', (False,), [1]),
         ('gather', (M, S), (0, gather_variable((S, S), 1, M, True)), 'dim0', (), [0]),
         ('gather', (M, S), (1, gather_variable((M, S // 2), 0, S, True)), 'dim1', (), [0]),
         ('gather', (), (0, torch.tensor([0], dtype=torch.int64)), 'scalar_input', (), [0]),
@@ -1645,10 +1667,6 @@ EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
 def exclude_tensor_method(name, test_name):
     # there are no tensor equivalents for these (inplace or out)
     exclude_all_tensor_method_by_test_name = {
-        'test_clamp_min',
-        'test_clamp_max',
-        'test_clamp_min_scalar',
-        'test_clamp_max_scalar',
         'test_slice',
         'test_where',
         'test_where_broadcast_all',

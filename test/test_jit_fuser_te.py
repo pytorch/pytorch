@@ -1,5 +1,3 @@
-from collections import defaultdict
-
 import operator
 import unittest
 import contextlib
@@ -73,36 +71,6 @@ class TestTEFuser(JitTestCase):
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
 
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
-
-    def assertAllFused(self, graph, except_for=()):
-
-        # note this helper collects nodes on 'fast path' only
-        # i.e. the true blocks of specialized checks
-        def get_nodes_and_parents_recursively(block, kind, acc):
-            for node in block.nodes():
-                if node.kind() == kind:
-                    acc[block].append(node)
-                elif node.kind() == 'prim::DifferentiableGraph':
-                    get_nodes_and_parents_recursively(node.g('Subgraph'), kind, acc)
-                elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or
-                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck'):
-                    get_nodes_and_parents_recursively(node.blocks().__next__(), kind, acc)
-                else:
-                    for inner_block in node.blocks():
-                        get_nodes_and_parents_recursively(inner_block, kind, acc)
-
-        allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
-                         'prim::TupleConstruct', 'prim::If', 'prim::TypeCheck'} | set(except_for)
-
-        fusion_groups = defaultdict(list)
-        get_nodes_and_parents_recursively(graph, FUSION_GROUP, fusion_groups)
-        self.assertTrue(len(fusion_groups) == 1, 'got {}'.format(graph))
-        (graph, fusion_nodes) = list(fusion_groups.items())[0]
-        # the block contains one FUSION_GROUP and the rest of nodes are `allowed_nodes`
-        self.assertTrue(len(fusion_nodes) == 1, 'got {}'.format(graph))
-        self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
-                        'got {}'.format(graph))
-
 
     def findFusionGroups(self, graph):
         result = []
@@ -682,6 +650,26 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(graph)
         # XXX: TE fuser can handle concats in a fusion group.
         # FileCheck().check("FusedConcat").check_next("return").run(str(graph))
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_remove_output_used_only_in_size(self):
+        def test_fuse(a, b):
+            c = a + b
+            d = c + b
+            return d
+
+        scripted_f = torch.jit.script(test_fuse)
+        x = torch.ones(1, requires_grad=True, device='cuda')
+        y = torch.ones(1, requires_grad=True, device='cuda')
+        warmup_forward(scripted_f, x, y)
+        g = torch.jit.last_executed_optimized_graph()
+        diff_nodes = [n for n in g.nodes() if n.kind() == 'prim::DifferentiableGraph']
+        self.assertEqual(len(diff_nodes), 1)
+        g = diff_nodes[0].g('Subgraph')
+        if_nodes = [n for n in g.nodes() if n.kind() == 'prim::If']
+        self.assertEqual(len(if_nodes), 1)
+        # the if node and the fusion group inside it should only have one output
+        self.assertEqual(len(list(if_nodes[0].outputs())), 1)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_concat_invariant_cuda(self):
@@ -1268,7 +1256,7 @@ class TestTEFuser(JitTestCase):
             torch.int16,
             torch.int32,
             torch.int64,
-            # torch.float16,
+            torch.float16,
             torch.float32,
             torch.float64,
             torch.bool,

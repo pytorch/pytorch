@@ -488,6 +488,13 @@ struct CAFFE2_API SymbolicShape {
     dims_ = shape_symbols;
   }
 
+  ShapeSymbol operator[](size_t i) const {
+    if (!dims_) {
+      throw std::runtime_error("Rank isn't fixed");
+    }
+    return (*dims_).at(i);
+  }
+
   // Returns rank or nullopt in case of unranked shape.
   c10::optional<size_t> rank() const {
     if(!dims_) {
@@ -548,7 +555,7 @@ struct VaryingShape {
     return dims_ == other.dims_;
   }
 
-  const c10::optional<T>& operator[](int i) const {
+  const c10::optional<T> &operator[](size_t i) const {
     if (!dims_) {
       throw std::runtime_error("Rank isn't fixed");
     }

@@ -206,6 +206,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::relu:
     case aten::log:
     case aten::log10:
+    case aten::log1p:
     case aten::log2:
     case aten::exp:
     case aten::expm1:
@@ -902,6 +903,11 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           "aten_log10", v, [](const ExprHandle& a) { return log10(a); });
     } break;
 
+    case aten::log1p: {
+      return computeOneOperand(
+          "aten_log1p", v, [](const ExprHandle& a) { return log1p(a); });
+    } break;
+
     case aten::log2: {
       return computeOneOperand(
           "aten_log2", v, [](const ExprHandle& a) { return log2(a); });
@@ -1264,7 +1270,7 @@ void TensorExprKernel::flattenTensors(BackendType backendType) {
     // Flatten the index for GPU kernels.
     // TODO: move this to fusing axis when it is ready.
     Tensor* newOut = Compute(
-        tensor->func_var()->name_hint() + "_flat",
+        tensor->buf()->name_hint() + "_flat",
         {totalCount},
         [tensor](const VarHandle& index) -> ExprHandle {
           std::vector<ExprHandle> dims;
@@ -1376,68 +1382,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   l.prepareForCodegen();
 
   if (backendType == kLLVMCodeGen && !hasReduction) {
-    std::vector<For*> innerLoops;
-    std::vector<For*> worklist;
-
-    // Find outer-most For loops
-    if (For* rootF = dynamic_cast<For*>(l.root_stmt())) {
-      worklist.push_back(rootF);
-    } else if (Block* body = dynamic_cast<Block*>(l.root_stmt())) {
-      std::vector<Block*> blocks = {body};
-      while (blocks.size()) {
-        Block* b = blocks.back();
-        blocks.pop_back();
-
-        for (Stmt* s : *b) {
-          if (For* f = dynamic_cast<For*>(s)) {
-            worklist.push_back(f);
-          } else if (Block* b2 = dynamic_cast<Block*>(s)) {
-            blocks.push_back(b2);
-          }
-        }
-      }
-    }
-
-    // Traverse the For loop nest find inner-most loops, which are
-    // vectorization candidates.
-    while (worklist.size()) {
-      For* f = worklist.back();
-      worklist.pop_back();
-
-      bool containsSubLoops = false;
-      if (Block* body = dynamic_cast<Block*>(f->body())) {
-        for (Stmt* s2 : *body) {
-          if (For* f2 = dynamic_cast<For*>(s2)) {
-            containsSubLoops = true;
-            worklist.push_back(f2);
-          }
-        }
-      }
-
-      if (!containsSubLoops) {
-        innerLoops.push_back(f);
-      }
-    }
-
-    // vectorize inner loops.
-    for (For* loop : innerLoops) {
-      For* outer1;
-      For* split1;
-      For* tail1;
-
-      static const int kBodyVectorWidth = 8;
-      l.splitWithTail(loop, kBodyVectorWidth, &outer1, &split1, &tail1);
-      l.vectorize(split1);
-
-      if (tail1) {
-        For* outer2;
-        For* split2;
-        For* tail2;
-        static const int kTailVectorWidth = 4;
-        l.splitWithTail(tail1, kTailVectorWidth, &outer2, &split2, &tail2);
-        l.vectorize(split2);
-      }
-    }
+    l.vectorizeInnerLoops();
   }
 
   Stmt* stmt = l.root_stmt();
@@ -1510,7 +1455,7 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
   switch (t->kind()) {
     case TypeKind::TensorType: {
       auto tt = input->type()->cast<TensorType>();
-      Buffer inBuffer(
+      Placeholder inBuffer(
           "t" + input->debugName(),
           ToDtype(static_cast<ScalarType>(*tt->scalarType())),
           {0});
@@ -1531,7 +1476,7 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
                 for (size_t i = 0; i < axes.size(); i++) {
                   idx = idx + axes[i] * IntImm::make(*strides[i]);
                 }
-                return inBuffer(idx);
+                return inBuffer.load(idx);
               }));
       kernelArgs_.emplace_back(
           inBuffer, std::vector<ShapeArg>(), std::vector<ShapeArg>());
