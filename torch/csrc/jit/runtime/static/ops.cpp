@@ -6,14 +6,16 @@ namespace torch {
 namespace jit {
 
 bool canRunOutOfPlace(Node* n) {
+  static std::unordered_set<std::string> out_of_place_nodes{"aten::add",
+                                                            "aten::mul",
+                                                            "aten::addmm"
+                                                            "aten::bmm",
+                                                            "aten::sigmoid",
+                                                            "aten::cat",
+                                                            "aten::transpose",
+                                                            "aten::flatten"};
   auto str = std::string(n->kind().toQualString());
-  if ((str == "aten::add") || (str == "aten::mul") || (str == "aten::addmm") ||
-      (str == "aten::bmm") || (str == "aten::sigmoid") ||
-      (str == "aten::cat") || (str == "aten::transpose") ||
-      (str == "aten::flatten")) {
-    return true;
-  }
-  return false;
+  return out_of_place_nodes.count(str) > 0;
 }
 
 std::function<void(StaticRuntime::ConstantMap&)> getOutOfPlaceOperation(
