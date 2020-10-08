@@ -401,36 +401,6 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   TORCH_CHECK(false, "ProcessGroupNCCL::WorkNCCL::abort not implemented.");
 }
 
-void ProcessGroupNCCL::parseNcclBlockingWait() {
-  char* blockingWait = getenv(NCCL_BLOCKING_WAIT);
-  if (blockingWait != nullptr) {
-    auto val = std::stoi(blockingWait);
-    if (val == 1) {
-      // Make wait() and synchronize() a blocking call.
-      blockingWait_ = true;
-    } else if (val != 0) {
-      throw std::runtime_error(
-          "Invalid value for environment variable: " +
-          std::string(NCCL_BLOCKING_WAIT));
-    }
-  }
-}
-
-void ProcessGroupNCCL::parseNcclAsyncErrorHandling() {
-  char* errorHandle = getenv(NCCL_ASYNC_ERROR_HANDLING);
-  if (errorHandle != nullptr) {
-    auto val = std::stoi(errorHandle);
-    if (val == 1) {
-      asyncErrorHandling_ = true;
-      LOG(INFO) << "[Rank " << rank_ << "] NCCL Async Error Handling enabled.";
-    } else if (val != 0) {
-      throw std::runtime_error(
-          "Invalid value for environment variable: " +
-          std::string(NCCL_ASYNC_ERROR_HANDLING));
-    }
-  }
-}
-
 bool ProcessGroupNCCL::WorkNCCL::timedOut() {
   auto currentTimepoint = std::chrono::steady_clock::now();
   return (
@@ -450,20 +420,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       opTimeout_(options.opTimeout),
       futureNCCLCallbackStreams_(c10::cuda::device_count()),
       isHighPriorityStream_(options.isHighPriorityStream) {
-  try {
-    parseNcclBlockingWait();
-  } catch (std::exception& e) {
-    throw std::runtime_error(
-        "Invalid value for environment variable: " +
-        std::string(NCCL_BLOCKING_WAIT));
-  }
-  try {
-    parseNcclAsyncErrorHandling();
-  } catch (std::exception& e) {
-    throw std::runtime_error(
-        "Invalid value for environment variable: " +
-        std::string(NCCL_ASYNC_ERROR_HANDLING));
-  }
+  blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
+  asyncErrorHandling_ = parseEnvVarFlag(NCCL_ASYNC_ERROR_HANDLING);
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_ =
