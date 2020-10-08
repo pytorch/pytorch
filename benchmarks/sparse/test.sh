@@ -1,6 +1,6 @@
 #!/bin/bash
 
-OUTFILE=spmm-mkl-test.txt
+OUTFILE=spmm-no-mkl-test.txt
 PYTORCH_HOME=$HOME/gitrepos/pytorch
 
 cd $PYTORCH_HOME
@@ -22,7 +22,7 @@ echo "!! SPARSE SPMM TIME BENCHMARK!! " >> $OUTFILE
 for dim0 in 1000 5000 10000; do
     for nnzr in 0.01 0.05 0.1 0.3; do
         python -m sparse.spmm --format gcs --m $dim0 --n $dim0 --k $dim0 --nnz_ratio $nnzr --outfile $OUTFILE
-        python -m sparse.spmm --format coo --m $dim0 --n $dim0 --k $dim0 --nnz_ratio $nnzr --outfile $OUTFILE
+        # python -m sparse.spmm --format coo --m $dim0 --n $dim0 --k $dim0 --nnz_ratio $nnzr --outfile $OUTFILE
     done
 done
 echo "----------------------" >> $OUTFILE

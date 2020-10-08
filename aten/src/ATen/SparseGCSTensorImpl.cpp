@@ -74,7 +74,7 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
   TORCH_CHECK(indices.size(0) == values.size(0), "indices and values must have same nnz, but got nnz from indices: ", indices.size(0), ", nnz from values: ", values.size(0));
 
   TORCH_CHECK(indices.dim() == pointers.dim() == values.dim() == reduction.dim() == 1, "indices, pointers, values and reduction must have dim=1 but got indices.dim()=",
-              indices.dim(), " pointers.dim()=", pointers(), " values.dim()=", values.dim(), " reduction.dim()=", reduction.dim());
+              indices.dim(), " pointers.dim()=", pointers.dim(), " values.dim()=", values.dim(), " reduction.dim()=", reduction.dim());
   
   pointers_ = pointers;
   indices_ = indices;
