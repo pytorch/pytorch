@@ -11,7 +11,6 @@ namespace jit {
 namespace tensorexpr {
 
 class Tensor;
-class Function;
 
 class TORCH_API IRPrinter : public IRVisitor {
  public:
@@ -95,12 +94,10 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const Expr&);
 TORCH_API std::ostream& operator<<(std::ostream& stream, const ExprHandle&);
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Stmt&);
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Tensor&);
-TORCH_API std::ostream& operator<<(std::ostream& stream, const Function&);
 
 TORCH_API void print(const Expr* expr);
 TORCH_API void print(const Stmt* stmt);
 TORCH_API void print(const Tensor* t);
-TORCH_API void print(const Function* f);
 
 } // namespace tensorexpr
 } // namespace jit
@@ -109,12 +106,10 @@ TORCH_API void print(const Function* f);
 namespace std {
 
 using torch::jit::tensorexpr::Expr;
-using torch::jit::tensorexpr::Function;
 using torch::jit::tensorexpr::Stmt;
 using torch::jit::tensorexpr::Tensor;
 
 TORCH_API std::string to_string(const Expr* expr);
 TORCH_API std::string to_string(const Stmt* stmt);
 TORCH_API std::string to_string(const Tensor* t);
-TORCH_API std::string to_string(const Function* f);
 } // namespace std

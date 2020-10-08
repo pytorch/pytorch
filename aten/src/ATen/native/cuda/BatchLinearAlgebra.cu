@@ -123,11 +123,12 @@ void magmaSymeig(
     value_t* w, scalar_t* wA, magma_int_t ldwa, scalar_t* work, magma_int_t lwork, value_t* rwork,
     magma_int_t lrwork, magma_int_t* iwork, magma_int_t liwork, magma_int_t* info);
 
-template<class scalar_t>
+template<class scalar_t, class value_t=scalar_t>
 void magmaSvd(
     magma_vec_t jobz, magma_int_t m, magma_int_t n, scalar_t* A,
-    magma_int_t lda, scalar_t* s, scalar_t* U, magma_int_t ldu,
+    magma_int_t lda, value_t* s, scalar_t* U, magma_int_t ldu,
     scalar_t* VT, magma_int_t ldvt, scalar_t* work, magma_int_t lwork,
+    value_t* rwork,
     magma_int_t* iwork, magma_int_t* info);
 
 template<class scalar_t>
@@ -538,7 +539,8 @@ void magmaSvd<double>(
     magma_vec_t jobz, magma_int_t m, magma_int_t n, double* A,
     magma_int_t lda, double* s, double* U, magma_int_t ldu,
     double* VT, magma_int_t ldvt, double* work, magma_int_t lwork,
-    magma_int_t* iwork, magma_int_t* info) {
+    double *rwork, magma_int_t* iwork, magma_int_t* info) {
+  (void)rwork; // unused
   MagmaStreamSyncGuard guard;
   magma_dgesdd(jobz, m, n, A, lda, s, U, ldu, VT, ldvt, work, lwork, iwork, info);
   AT_CUDA_CHECK(cudaGetLastError());
@@ -549,9 +551,40 @@ void magmaSvd<float>(
     magma_vec_t jobz, magma_int_t m, magma_int_t n, float* A,
     magma_int_t lda, float* s, float* U, magma_int_t ldu,
     float* VT, magma_int_t ldvt, float* work, magma_int_t lwork,
-    magma_int_t* iwork, magma_int_t* info) {
+    float* rwork, magma_int_t* iwork, magma_int_t* info) {
+  (void)rwork; // unused
   MagmaStreamSyncGuard guard;
   magma_sgesdd(jobz, m, n, A, lda, s, U, ldu, VT, ldvt, work, lwork, iwork, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaSvd<c10::complex<float>, float>(
+    magma_vec_t jobz, magma_int_t m, magma_int_t n, c10::complex<float>* A,
+    magma_int_t lda, float* s, c10::complex<float>* U, magma_int_t ldu,
+    c10::complex<float>* VT, magma_int_t ldvt, c10::complex<float>* work, magma_int_t lwork,
+    float *rwork, magma_int_t* iwork, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_cgesdd(jobz, m, n, reinterpret_cast<magmaFloatComplex*>(A), lda, s,
+                reinterpret_cast<magmaFloatComplex*>(U), ldu,
+                reinterpret_cast<magmaFloatComplex*>(VT), ldvt,
+                reinterpret_cast<magmaFloatComplex*>(work), lwork,
+                rwork, iwork, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaSvd<c10::complex<double>, double>(
+    magma_vec_t jobz, magma_int_t m, magma_int_t n, c10::complex<double>* A,
+    magma_int_t lda, double* s, c10::complex<double>* U, magma_int_t ldu,
+    c10::complex<double>* VT, magma_int_t ldvt, c10::complex<double>* work, magma_int_t lwork,
+    double *rwork, magma_int_t* iwork, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_zgesdd(jobz, m, n, reinterpret_cast<magmaDoubleComplex*>(A), lda, s,
+                reinterpret_cast<magmaDoubleComplex*>(U), ldu,
+                reinterpret_cast<magmaDoubleComplex*>(VT), ldvt,
+                reinterpret_cast<magmaDoubleComplex*>(work), lwork,
+                rwork, iwork, info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -1299,9 +1332,11 @@ AT_ERROR("symeig: MAGMA library not found in "
   ALLOCATE_ARRAY(iwork, magma_int_t, liwork);
 
   value_t* rwork = nullptr;
+  c10::Storage storage_rwork;
   if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
     lrwork = magma_int_cast(rwkopt, "rwork_size");
-    ALLOCATE_ARRAY(rwork, value_t, lrwork);
+    storage_rwork = pin_memory<value_t>(lrwork);
+    rwork = static_cast<value_t*>(storage_rwork.data());
   }
 
   for (int64_t i = 0; i < batch_size; i++) {
@@ -1363,9 +1398,10 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
 AT_ERROR("svd: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto U_data = U.data_ptr<scalar_t>();
-  auto S_data = S.data_ptr<scalar_t>();
+  auto S_data = S.data_ptr<value_t>();
   auto VT_data = VT.data_ptr<scalar_t>();
   auto self_stride = matrixStride(self);
   auto U_stride = matrixStride(U);
@@ -1377,7 +1413,18 @@ AT_ERROR("svd: MAGMA library not found in "
 
   magma_int_t m = magma_int_cast(self.size(-2), "m");
   magma_int_t n = magma_int_cast(self.size(-1), "n");
-  auto k = std::min(m, n);
+  auto mn = std::min(m, n);
+
+  c10::Storage storage_rwork;
+  value_t* rwork = nullptr;
+
+  magma_int_t* iwork;
+  ALLOCATE_ARRAY(iwork, magma_int_t, 8 * mn);
+  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
+    auto lrwork = computeLRWorkDim(jobchar, m, n);
+    storage_rwork = pin_memory<value_t>(lrwork);
+    rwork = static_cast<value_t*>(storage_rwork.data());
+  }
 
   magma_int_t info = 0;
   // Run once, first to get the optimum work size.
@@ -1386,22 +1433,20 @@ AT_ERROR("svd: MAGMA library not found in "
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   magma_int_t lwork = -1;
   scalar_t wkopt;
-  magma_int_t* iwork;
-  ALLOCATE_ARRAY(iwork, magma_int_t, 8 * k);
-  magmaSvd<scalar_t>(jobz, m, n, self_data, m, S_data, U_data, m, VT_data, n, &wkopt, lwork, iwork, &info);
-  lwork = magma_int_cast(wkopt, "work_size");
+  magmaSvd<scalar_t, value_t>(jobz, m, n, self_data, m, S_data, U_data, m, VT_data, n, &wkopt, lwork, rwork, iwork, &info);
+  lwork = magma_int_cast(real_impl<scalar_t, value_t>(wkopt), "work_size");
   scalar_t* work;
   ALLOCATE_ARRAY(work, scalar_t, lwork);
 
   for (int64_t i = 0; i < batchsize; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_stride];
-    scalar_t* S_working_ptr = &S_data[i * S_stride];
+    value_t* S_working_ptr = &S_data[i * S_stride];
     scalar_t* U_working_ptr = &U_data[i * U_stride];
     scalar_t* VT_working_ptr = &VT_data[i * VT_stride];
 
     // Compute S, U (optionally), VT (optionally)
-    magmaSvd<scalar_t>(jobz, m, n, self_working_ptr, m,
-                       S_working_ptr, U_working_ptr, m, VT_working_ptr, n, work, lwork, iwork, &info);
+    magmaSvd<scalar_t, value_t>(jobz, m, n, self_working_ptr, m,
+                                S_working_ptr, U_working_ptr, m, VT_working_ptr, n, work, lwork, rwork, iwork, &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -1434,7 +1479,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
                                                at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
     self_working_copy.copy_(self);
 
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "svd_cuda", [&]{
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda", [&] {
       apply_svd<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobchar, infos);
     });
 
