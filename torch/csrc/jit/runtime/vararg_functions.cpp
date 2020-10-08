@@ -43,38 +43,40 @@ void format(Stack& stack, size_t num_inputs) {
 // IValue type to the specified format.
 std::string getFormattedArg(char key, IValue ival) {
   std::stringstream ss;
-  ss << ival;
+  bool added = false;
   switch (key) {
     case 'd':
     case 'i': {
-      if (!ival.isScalar()) {
-        //AT_ERROR("%" + key + " A number is required, not " + ival.tagKind(), format);
-        AT_ERROR(" A number is required", format);
-      }
-      else if (ival.isDouble()) {
+      TORCH_CHECK(ival.isScalar(), "%", key, " format: A number is required, not ", ival.tagKind());
+      if (ival.isDouble()) {
         std::stringstream().swap(ss);
-        ss << (int)ival.toDouble();
+        ss << static_cast<int>(ival.toDouble());
+        added = true;
       }
       break;
     }
     case 'f': {
-      if (!ival.isScalar()) {
-        //AT_ERROR("%" + key + " A number is required, not " + ival.tagKind(), format);
-        AT_ERROR(" A number is required", format);
+      TORCH_CHECK(ival.isScalar(), "%", key, " format: A number is required, not ", ival.tagKind());
+      ss << std::setprecision(6) << std::fixed;
+      if (ival.isInt()) {
+        ss << static_cast<float>(ival.toInt());
       }
-      else if (ival.isInt()) {
-        std::stringstream().swap(ss);
-        ss << (double)ival.toInt();
+      else {
+        ss << static_cast<float>(ival.toDouble());
       }
+      added = true;
       break;
     }
+  }
+  if (!added) {
+    ss << ival;
   }
   return ss.str();
 }
 
 void percentFormat(Stack& stack, size_t num_inputs) {
   // TODO: add support for more specifiers
-  std::vector<char> specifiers = { 'd', 'i', 'f', 's'};
+  std::vector<char> specifiers = {'d', 'i', 'f', 's'};
   auto format = peek(stack, 0, num_inputs).toStringRef();
   auto args = last(stack, num_inputs - 1);
   std::stringstream ss;
@@ -85,9 +87,7 @@ void percentFormat(Stack& stack, size_t num_inputs) {
       break;
     }
     ss << format.substr(begin, loc - begin);
-    if (used_args >= args.size()) {
-      AT_ERROR("Too few arguments for format string: ", format);
-    }
+    TORCH_CHECK(used_args < args.size(), "Too few arguments for format string: ", format);
     char key = format.at(loc + 1);
     if (std::find(specifiers.begin(), specifiers.end(), key) != specifiers.end()) {
       auto ins = getFormattedArg(key, args[used_args]);

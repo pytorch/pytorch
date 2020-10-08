@@ -6,6 +6,7 @@
 #include <utility>
 #include <memory>
 #include <sstream>
+#include <iostream>
 #include <string>
 #include <cstdlib>
 #include <functional>

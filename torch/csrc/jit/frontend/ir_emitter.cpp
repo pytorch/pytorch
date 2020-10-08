@@ -3141,7 +3141,9 @@ struct to_ir {
           auto values = getValues(tree->trees(), /*maybe_unpack=*/false);
           auto node = graph->create(aten::percentFormat, values, 1)
                         ->setSourceRange(tree->range());
-          return graph->insertNode(node)->output();
+          Value* output = graph->insertNode(node)->output();
+          output->setType(StringType::get());
+          return output;
         }
       }
       case TK_IN:

@@ -185,6 +185,7 @@ namespace c10 {
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
+  _(aten, percentFormat)             \
   _(aten, __not__)                   \
   _(aten, __is__)                    \
   _(aten, __isnot__)                 \

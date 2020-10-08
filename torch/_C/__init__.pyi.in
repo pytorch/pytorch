@@ -93,6 +93,7 @@ def DisableTorchFunction(): ...
 # Defined in torch/csrc/utils/tensor_layouts.cpp
 strided : layout = ...
 sparse_coo : layout = ...
+_mkldnn : layout = ...
 
 # Defined in torch/csrc/MemoryFormat.cpp
 class memory_format: ...
@@ -268,6 +269,10 @@ def import_ir_module_from_buffer(
 class Graph:
     ...
 
+# Defined in torch/csrc/jit/ir/ir.h
+class Value:
+    ...
+
 # Defined in torch/aten/src/ATen/core/function_schema.h
 class FunctionSchema:
     ...
@@ -389,6 +394,7 @@ def _is_xnnpack_enabled() -> _bool: ...  # THPModule_isEnabledXNNPACK
 def _vmapmode_increment_nesting() -> _int: ...  # THPModule_vmapmode_increment_nesting
 def _vmapmode_decrement_nesting() -> _int: ...  # THPModule_vmapmode_decrement_nesting
 def _log_api_usage_once(str) -> None: ...  # LogAPIUsageOnceFromPython
+def _demangle(str) -> str: ...  # c10::demangle
 
 # Defined in `valgrind.h` and `callgrind.h` respecitively.
 def valgrind_supported_platform() -> _bool: ...  # NVALGRIND
@@ -496,6 +502,10 @@ ${legacy_storage_base_hints}
 
 # TODO: where
 ${legacy_class_hints}
+
+# Defined in torch/csrc/autograd/python_engine.cpp
+class _ImperativeEngine:
+    ...
 
 # Defined in torch/csrc/autograd/python_variable.cpp
 class _TensorBase(object):
