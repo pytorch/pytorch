@@ -603,8 +603,8 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
 
   // Get devices for tensors in the request message. This can throw if device
   // maps are not configured properly for this request.
-  auto devices = getDevicesForTensors(
-      clientPipe.pipe_->getRemoteName(), requestMessage);
+  auto devices =
+      getDevicesForTensors(clientPipe.pipe_->getRemoteName(), requestMessage);
 
   futureResponseMessage->futMsg.addCallback([this]() {
     TORCH_INTERNAL_ASSERT(
@@ -1049,7 +1049,7 @@ std::vector<c10::DeviceIndex> TensorPipeAgent::getDevicesForTensors(
     std::vector<c10::DeviceIndex> deviceIndices;
     deviceIndices.reserve(message.tensors().size());
     const auto& deviceMap = iter->second;
-    for (const auto&t : message.tensors()) {
+    for (const auto& t : message.tensors()) {
       if (t.device().is_cpu()) {
         deviceIndices.push_back(-1);
       } else {
