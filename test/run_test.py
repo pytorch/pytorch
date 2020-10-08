@@ -465,7 +465,7 @@ def parse_args():
         type=int,
         help='runs a shard of the tests (taking into account other selections), e.g., '
         '--shard 2 3 will break up the selected tests into 3 shards and run the tests '
-        'in the 2nd shard (the number of shards will be whichever argument is greater)',
+        'in the 2nd shard (the first number should not exceed the second)',
     )
     parser.add_argument(
         '--exclude-jit-executor',

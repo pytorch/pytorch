@@ -679,15 +679,32 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
   return nullptr;
 }
 
-void ProcessGroupNCCL::broadcastUniqueNCCLID(ncclUniqueId* ncclID) {
+void ProcessGroupNCCL::broadcastUniqueNCCLID(
+  ncclUniqueId* ncclID,
+  NCCLCommType commType,
+  const std::string& p2pKey,
+  int p2pRank) {
+  // For collective operations:
   // For every NCCL communicator that we create we need to broadcast
   // a unique ID from rank 0 to all other ranks. This broadcast is
   // done by rank 0 setting a key in the store and all other ranks
   // retrieving the contents of that key. A single process group
   // may create multiple NCCL communicators, so we use a sequence
   // number to differentiate between them.
-  std::string storeKey = std::to_string(ncclCommCounter_++);
-  if (rank_ == 0) {
+  // For point-to-point operations:
+  // The sequence number will only be increased on 2 out of all the
+  // processes in a Process Group. So all following collective
+  // operations will see different sequence numbers which will cause
+  // runtime errors. To avoid that, use the src:target pair instead
+  // of sequence number for p2p communications.
+
+  std::string storeKey;
+  if (commType == NCCLCommType::COLL) {
+    storeKey = std::to_string(ncclCommCounter_++);
+  } else {
+    storeKey = p2pKey;
+  }
+  if (rank_ == 0 || (commType != NCCLCommType::COLL && p2pRank == 0)) {
     auto vec = std::vector<uint8_t>(
         reinterpret_cast<uint8_t*>(ncclID),
         reinterpret_cast<uint8_t*>(ncclID) + NCCL_UNIQUE_ID_BYTES);
@@ -703,7 +720,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     const std::string& devicesKey,
     const std::vector<at::Device>& devices,
     NCCLCommType commType,
-    int p2pRank) {
+    int p2pRank,
+    bool isSendRecvSelf) {
   // Sanity check
   if (devicesKey.empty()) {
     throw std::runtime_error(
@@ -735,8 +753,11 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID));
   }
 
-  // Broadcast so that each process can have a unique NCCL ID
-  broadcastUniqueNCCLID(&ncclID);
+  // For point-to-point communication on the same process, don't need broadcast.
+  if (!isSendRecvSelf) {
+    // Broadcast so that each process can have a unique NCCL ID
+    broadcastUniqueNCCLID(&ncclID, commType, devicesKey, p2pRank);
+  }
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
@@ -772,9 +793,13 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     if (commType == NCCLCommType::COLL) {
       numRanks = getSize() * devices.size();
       rank = getRank() * devices.size() + i;
+    } else if(isSendRecvSelf) {
+      // Same process send and recv.
+      numRanks = 1;
+      rank = 0;
     } else {
-    // For point-to-point operation, there are only 2 processes involved so
-    // the GPU rank is either 0 or 1.
+      // For point-to-point operation, there are only 2 processes involved so
+      // the GPU rank is either 0 or 1.
       numRanks = 2;
       rank = p2pRank;
     }
@@ -1041,8 +1066,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     PostProcess post) {
   const auto devices = getDeviceList(tensors);
   const auto key = getKeySendRecv(rank_, peer);
-  int p2pRank = rank_ < peer ? 0 : 1;
-  auto& ncclComms = getNCCLComm(key, devices, commType, p2pRank);
+  int p2pRank = rank_ <= peer ? 0 : 1;
+  auto isSendRecvSelf = rank_ == peer;
+  auto& ncclComms = getNCCLComm(key, devices, commType, p2pRank, isSendRecvSelf);
 
   // First let NCCL streams wait for input tensors allocation streams
   syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
@@ -1081,7 +1107,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
       // For point-to-point communication, NCCL ranks can only
       // be 0 or 1.
-      int p2pTargetRank = 1 - p2pRank;
+      int p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
       C10D_NCCL_CHECK(
           fn(tensors[i], ncclComms[i]->getNcclComm(), ncclStream, p2pTargetRank));
     }
