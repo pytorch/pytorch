@@ -959,9 +959,9 @@ def all_reduce(tensor,
         tensor([4, 6]) # Rank 0
         tensor([4, 6]) # Rank 1
 
-        >>> # All tensors below are of torch.cdouble type.
+        >>> # All tensors below are of torch.cfloat type.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cdouble) + 2 * rank * (1+1j)
+        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat) + 2 * rank * (1+1j)
         >>> tensor
         tensor([1.+1.j, 2.+2.j]) # Rank 0
         tensor([3.+3.j, 4.+4.j]) # Rank 1
@@ -1483,12 +1483,12 @@ def all_gather(tensor_list,
         [tensor([1, 2]), tensor([3, 4])] # Rank 0
         [tensor([1, 2]), tensor([3, 4])] # Rank 1
 
-        >>> # All tensors below are of torch.cdouble dtype.
+        >>> # All tensors below are of torch.cfloat dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_list = [torch.zero(2, dtype=torch.cdouble) for _ in range(2)]
+        >>> tensor_list = [torch.zero(2, dtype=torch.float) for _ in range(2)]
         >>> tensor_list
         [tensor([0.+0.j, 0.+0.j]), tensor([0.+0.j, 0.+0.j])] # Rank 0 and 1
-        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cdouble) + 2 * rank * (1+1j)
+        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat) + 2 * rank * (1+1j)
         >>> tensor
         tensor([1.+1.j, 2.+2.j]) # Rank 0
         tensor([3.+3.j, 4.+4.j]) # Rank 1
