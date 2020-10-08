@@ -989,6 +989,11 @@ void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
   // TODO: record history of transformations
 }
 
+void LoopNest::splitWithTail(For* f, int factor) {
+  For *outer, *inner, *tail;
+  splitWithTail(f, factor, &outer, &inner, &tail);
+}
+
 void LoopNest::splitWithTail(
     For* f,
     int factor,
@@ -1054,8 +1059,11 @@ void LoopNest::splitWithTail(
   } else {
     *tail = nullptr;
   }
+}
 
-  // TODO: record history of transformations
+void LoopNest::splitWithMask(For* f, int factor) {
+  For *outer, *inner;
+  splitWithMask(f, factor, &outer, &inner);
 }
 
 void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
@@ -1115,8 +1123,6 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
 
   // TODO: cleanup API for adding/removing statements
   p->replace_stmt(f, *outer);
-
-  // TODO: record history of transformations
 }
 
 For* findOuterFor(For* a, For* b) {
