@@ -167,8 +167,9 @@ cublasStatus_t cublasGemmStridedBatchedExFix(cublasHandle_t &handle,
     return cublasGemmStridedBatchedEx(handle, transa, transb, m, n, k, alpha, A, Atype, lda, strideA, B, Btype, ldb, strideB, beta, C, Ctype, ldc, strideC, batchCount, computeType, algo);
   }
   cublasStatus_t result;
-  for(int64_t i = 0; i < batchCount; i += 65535) {
-    int64_t count = std::min<int64_t>(65535, batchCount - i);
+  constexpr int64_t split = 63 * 1024;
+  for(int64_t i = 0; i < batchCount; i += split) {
+    int64_t count = std::min<int64_t>(split, batchCount - i);
     result = cublasGemmStridedBatchedEx(handle, transa, transb, m, n, k, alpha,
       (char *)A + i * strideA * 2, Atype, lda, strideA,
       (char *)B + i * strideB * 2, Btype, ldb, strideB,
