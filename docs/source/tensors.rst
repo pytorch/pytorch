@@ -573,6 +573,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: symeig
    .. automethod:: t
    .. automethod:: t_
+   .. automethod:: tensor_split
    .. automethod:: to
    .. automethod:: to_mkldnn
    .. automethod:: take

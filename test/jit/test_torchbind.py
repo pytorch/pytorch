@@ -24,10 +24,14 @@ if __name__ == "__main__":
 
 class TestTorchbind(JitTestCase):
     def setUp(self):
-        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
+        if IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
             raise unittest.SkipTest("non-portable load_library call used in test")
-        torch_root = Path(__file__).resolve().parent.parent.parent
-        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
+        if TEST_WITH_ROCM:
+            torch_root = Path(torch.__file__).resolve().parent
+            p = torch_root / 'lib' / 'libtorchbind_test.so'
+        else:
+            torch_root = Path(__file__).resolve().parent.parent.parent
+            p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
         torch.ops.load_library(str(p))
 
     def test_torchbind(self):
@@ -282,3 +286,12 @@ class TestTorchbind(JitTestCase):
             if e.name == '_TorchScriptTesting::take_an_instance':
                 found_event = True
         self.assertTrue(found_event)
+
+    def test_torchbind_getattr(self):
+        foo = torch.classes._TorchScriptTesting._StackString(["test"])
+        self.assertEqual(None, getattr(foo, 'bar', None))
+
+    def test_torchbind_attr_exception(self):
+        foo = torch.classes._TorchScriptTesting._StackString(["test"])
+        with self.assertRaisesRegex(AttributeError, 'does not have a field'):
+            foo.bar
