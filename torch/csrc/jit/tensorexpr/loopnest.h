@@ -32,8 +32,8 @@ class TORCH_API LoopNest {
   // they can be deduced.
   LoopNest(
       Stmt* stmt,
-      const std::unordered_set<const Buf*> output_bufs,
-      const std::unordered_set<const Buf*> intermediate_bufs,
+      const std::unordered_set<const Buf*>& output_bufs,
+      const std::unordered_set<const Buf*>& intermediate_bufs,
       const std::unordered_map<const Buf*, const Expr*>& buf_initializers)
       : root_stmt_(stmt),
         output_bufs_(output_bufs),
