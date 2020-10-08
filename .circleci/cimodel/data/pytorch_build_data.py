@@ -19,7 +19,9 @@ CONFIG_TREE_DATA = [
             ("5", [
                 ("3.6", [
                     ("asan", [
-                        ("shard_test", [XImportant(True)]),
+                        (True, [
+                            ("shard_test", [XImportant(True)]),
+                        ]),
                     ]),
                 ]),
             ]),
@@ -198,7 +200,7 @@ class AsanConfigNode(TreeConfigNode):
         self.props["is_asan"] = node_name
 
     def child_constructor(self):
-        return ShardTestConfigNode
+        return ExperimentalFeatureConfigNode
 
 
 class ONNXConfigNode(TreeConfigNode):
