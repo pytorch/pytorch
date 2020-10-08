@@ -62,10 +62,11 @@ std::tuple<uint64_t, dim3, dim3> calc_execution_policy(int64_t total_elements) {
 template<typename accscalar_t, int unroll_factor, typename dist_t, typename transform_t>
 C10_LAUNCH_BOUNDS_2(block_size_bound, grid_size_bound)
 __global__ void distribution_elementwise_grid_stride_kernel(int numel,
-                                                            std::pair<uint64_t, uint64_t> seeds,
+                                                            philox_kernelarg_t philox_args,
                                                             const dist_t dist_func,
                                                             const transform_t transform_func) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  auto seeds = philox_args.get();
   curandStatePhilox4_32_10_t state;
   curand_init(
       seeds.first,
@@ -123,11 +124,11 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
   auto counter_offset = std::get<0>(execution_policy);
   auto grid = std::get<1>(execution_policy);
   auto block = std::get<2>(execution_policy);
-  std::pair<uint64_t, uint64_t> rng_engine_inputs;
+  philox_cuda_state_t rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
-    rng_engine_inputs = gen->philox_engine_inputs(counter_offset);
+    rng_engine_inputs = gen->philox_cuda_state(counter_offset);
   }
 
   if (!iter.can_use_32bit_indexing()) {
@@ -146,7 +147,7 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
     int stride0 = strides[0];
     distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
       numel,
-      rng_engine_inputs,
+      rng_engine_inputs.to_kernel_arg(),
       dist_func,
       [=]__device__(int idx, accscalar_t rand) {
         scalar_t* out = (scalar_t*)&out_data[stride0 * idx];
@@ -157,7 +158,7 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
     auto offset_calc = make_offset_calculator<1>(iter);
     distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
       numel,
-      rng_engine_inputs,
+      rng_engine_inputs.to_kernel_arg(),
       dist_func,
       [=]__device__(int idx, accscalar_t rand) {
         auto offsets = offset_calc.get(idx);
@@ -174,7 +175,7 @@ template <typename func_t, typename inp_offset_calc_t, typename out_offset_calc_
 __global__ void distribution_binary_elementwise_kernel(
     int numel,
     func_t f,
-    std::pair<uint64_t, uint64_t> seeds,
+    philox_kernelarg_t philox_args,
     typename function_traits<func_t>::result_type *output_data,
     const typename function_traits<func_t>::template arg<1>::type *input_data_1,
     const typename function_traits<func_t>::template arg<2>::type *input_data_2,
@@ -189,6 +190,7 @@ __global__ void distribution_binary_elementwise_kernel(
   int base_index = BLOCK_WORK_SIZE * blockIdx.x;
   int remaining = std::min<int>(numel - base_index, BLOCK_WORK_SIZE);
 
+  auto seeds = philox_args.get();
   curandStatePhilox4_32_10_t state;
   curand_init(seeds.first, blockIdx.x * blockDim.x + threadIdx.x, seeds.second, &state);
 
@@ -222,7 +224,7 @@ __global__ void distribution_binary_elementwise_kernel(
 }
 
 template <typename func_t>
-void distribution_binary_kernel(TensorIterator &iter, std::pair<uint64_t, uint64_t> seeds, const func_t &f) {
+void distribution_binary_kernel(TensorIterator &iter, philox_kernelarg_t philox_args, const func_t &f) {
   static_assert(std::is_same<typename function_traits<func_t>::template arg<0>::type, curandStatePhilox4_32_10_t&>::value, "the first argument of functor must be curandStatePhilox4_32_10_t");
   using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
   using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
@@ -230,7 +232,7 @@ void distribution_binary_kernel(TensorIterator &iter, std::pair<uint64_t, uint64
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      distribution_binary_kernel(sub_iter, seeds, f);
+      distribution_binary_kernel(sub_iter, philox_args, f);
     }
     return;
   }
@@ -251,11 +253,11 @@ void distribution_binary_kernel(TensorIterator &iter, std::pair<uint64_t, uint64
 
   if (iter.is_contiguous()) {
     distribution_binary_elementwise_kernel<<<grid,num_threads, 0, stream>>>(
-        numel, f, seeds, output_data, input_data_1, input_data_2,
+        numel, f, philox_args, output_data, input_data_1, input_data_2,
         TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<1>());
   } else {
     distribution_binary_elementwise_kernel<<<grid, num_threads, 0, stream>>>(
-        numel, f, seeds, output_data, input_data_1, input_data_2,
+        numel, f, philox_args, output_data, input_data_1, input_data_2,
         make_input_offset_calculator<2>(iter), make_output_offset_calculator(iter));
   }
 }
@@ -570,14 +572,15 @@ struct CauchyKernel {
 template<typename scalar_t, typename prob_t>
 void bernoulli_tensor_cuda_kernel(
     at::Tensor& ret, const at::Tensor& p,
-    std::pair<uint64_t, uint64_t> seeds) {
+    philox_kernelarg_t philox_args) {
   // The template argument `4` below indicates that we want to operate on four
   // element at each time. See NOTE [ CUDA_tensor_applyN helpers ] for details.
   at::cuda::CUDA_tensor_apply2<scalar_t, prob_t, 4>(
       ret, p,
-      [seeds] __device__(
+      [philox_args] __device__(
           int n, scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4,
           const prob_t& p1, const prob_t& p2, const prob_t& p3, const prob_t& p4) {
+        auto seeds = philox_args.get();
         curandStatePhilox4_32_10_t state;
         curand_init(
             seeds.first,
@@ -613,11 +616,11 @@ void bernoulli_tensor_cuda_kernel(
 
 template<typename RNG>
 void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG gen) {
-  std::pair<uint64_t, uint64_t> rng_engine_inputs;
+  philox_cuda_state_t rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
-    rng_engine_inputs = gen->philox_engine_inputs(10);
+    rng_engine_inputs = gen->philox_cuda_state(10);
   }
   auto p = std::get<0>(expand_inplace(self, p_.to(kCUDA)));
   AT_DISPATCH_ALL_TYPES_AND3(
@@ -625,7 +628,7 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG gen) {
       using self_t = scalar_t;
       AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, p.scalar_type(), "bernoulli_tensor_cuda_p_", [&] {
         using p_t = scalar_t;
-        return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, p, rng_engine_inputs);
+        return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, p, rng_engine_inputs.to_kernel_arg());
       });
    });
 }

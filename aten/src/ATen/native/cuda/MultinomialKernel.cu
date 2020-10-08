@@ -113,7 +113,7 @@ __device__ int binarySearchForMultinomial(scalar_t* cumdist,
 
 template <typename scalar_t>
 __global__ void
-sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
+sampleMultinomialWithReplacement(philox_kernelarg_t state,
                                  int totalSamples,
                                  int64_t* dest,
                                  int64_t distributions,
@@ -127,6 +127,7 @@ sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
   // global index formula for 2D grid of 1D blocks
   int idx = blockIdx.y * gridDim.x * blockDim.x + blockIdx.x * blockDim.x + threadIdx.x;
 
+  auto seeds = state.get();
   curandStatePhilox4_32_10_t state;
   curand_init(seeds.first, idx, seeds.second, &state);
 
@@ -359,7 +360,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
       // Prefix sum along rows
       at::_cumsum_out(prefixSum, normDist, 1);
 
-      std::pair<uint64_t, uint64_t> rng_engine_inputs;
+      philox_cuda_state_t rng_engine_inputs;
 
       if (with_replacement) {
         // Binary search is warp divergent (so effectively we're running
@@ -379,13 +380,13 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
           // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
           // offset is 4 times that.
           auto offset = ((numDist-1)/grid.y+1)*4;
-          rng_engine_inputs = gen->philox_engine_inputs(offset);
+          rng_engine_inputs = gen->philox_cuda_state(offset);
         }
         // Sample with replacement
 
         sampleMultinomialWithReplacement
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-            rng_engine_inputs,
+            rng_engine_inputs.to_kernel_arg(),
                 n_sample,
                 result.data_ptr<int64_t>(),
                 numDist, numCategories,
