@@ -4641,6 +4641,33 @@ for shape in [(1,), ()]:
         test(inp, torch.float, torch.double)
         test(inp, torch.double, torch.float)
 
+    def test_nan_to_num(self):
+        a = torch.randn(3, 3, 3, 3)
+        with torch.no_grad():
+            a[torch.rand_like(a) < 0.2] = float('nan')
+            a[torch.rand_like(a) < 0.2] = float('inf')
+            a[torch.rand_like(a) < 0.2] = -float('inf')
+
+        a.requires_grad = True
+
+        gradcheck(lambda x: x.nan_to_num(), a)
+        gradgradcheck(lambda x: x.nan_to_num(), a)
+
+        gradcheck(lambda x: x.nan_to_num(nan=1.2), a)
+        gradgradcheck(lambda x: x.nan_to_num(nan=1.2), a)
+
+        gradcheck(lambda x: x.nan_to_num(nan=1.2, posinf=2.0), a)
+        gradgradcheck(lambda x: x.nan_to_num(nan=1.2, posinf=2.0), a)
+
+        gradcheck(lambda x: x.nan_to_num(nan=1.2, posinf=2.0, neginf=-2.0), a)
+        gradgradcheck(lambda x: x.nan_to_num(nan=1.2, posinf=2.0, neginf=-2.0), a)
+
+        gradcheck(lambda x: x.nan_to_num(posinf=2.0, neginf=-2.0), a)
+        gradgradcheck(lambda x: x.nan_to_num(posinf=2.0, neginf=-2.0), a)
+
+        gradcheck(lambda x: x.nan_to_num(neginf=-2.0), a)
+        gradgradcheck(lambda x: x.nan_to_num(neginf=-2.0), a)
+
     def test_custom_function_error(self):
         class BadFw(Function):
             @staticmethod
@@ -4808,6 +4835,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot'] + separate_complex_tests
 
+# TODO(@anjali411): add tests for 'sub', 'div
 # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition - @anjali411
 # complex_list += ['fill_', 't', '__rdiv__', 'tanh']
 
@@ -6110,6 +6138,18 @@ class TestAutogradDeviceType(TestCase):
         _test_cdist_for_size((1, 2, 3))
         _test_cdist_for_size((1, 1), (S, 1))
         _test_euclidean_large_cdist((2000, 5))
+
+    # Ensure that cdist backward with p<1 does not produce NaNs
+    def test_cdist_grad_p_lt_1_no_nan(self, device):
+        for p in [0.99, 0.7, 0.5, 0.1, 0.01]:
+            x = torch.randn(1, 2, device=device)
+            y = x.clone().detach() + torch.tensor([[1., 0.]], device=device)
+            x.requires_grad = True
+            y.requires_grad = True
+            result = torch.cdist(x, y, p=p)
+            result.backward(torch.ones_like(result))
+            self.assertFalse(torch.isnan(x.grad).any())
+            self.assertFalse(torch.isnan(y.grad).any())
 
     def test_cdist_same_inputs(self, device):
         # Test to detect issues in cdist gradient calculation

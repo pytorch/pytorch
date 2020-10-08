@@ -654,6 +654,13 @@ class AbstractTestCases:
             self.assertEqual(y[:, 0], range(100))
             self.assertEqual(y[:, 40], range(4000, 4100))
 
+            # Validates regression reported in https://github.com/pytorch/pytorch/issues/45269
+            x = torch.arange(100 * 100).reshape(100, 100).to(dtype=torch.cfloat).t()
+            y = torch.empty(100, 100, dtype=torch.cfloat)
+            y.copy_(x)
+            self.assertEqual(y[:, 0], range(100))
+            self.assertEqual(y[:, 40], range(4000, 4100))
+
         def test_device(self):
             cpu = torch.device('cpu')
             self.assertEqual('cpu', str(cpu))
@@ -6379,85 +6386,96 @@ class TestTorchDeviceType(TestCase):
     def test_logical_or(self, device, dtypes):
         self._test_logical(device, dtypes, 'logical_or', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 1, 1])
 
+    def generate_clamp_baseline(self, device, dtype, *, min_vals, max_vals, with_nans):
+        """
+        Creates a random tensor for a given device and dtype, and computes the expected clamped
+        values given the min_vals and/or max_vals.
+        If with_nans is provided, then some values are randomly set to nan.
+        """
+        X = torch.rand(100, device=device).mul(50).add(-25)  # uniform in [-25, 25]
+        X = X.to(dtype)
+        if with_nans:
+            mask = torch.randint(0, 2, X.shape, dtype=torch.bool, device=device)
+            X[mask] = nan
+
+        if isinstance(min_vals, torch.Tensor):
+            min_vals = min_vals.cpu().numpy()
+
+        if isinstance(max_vals, torch.Tensor):
+            max_vals = max_vals.cpu().numpy()
+
+        # Use NumPy implementation as reference
+        X_clamped = torch.tensor(np.clip(X.cpu().numpy(), a_min=min_vals, a_max=max_vals), device=device)
+        return X, X_clamped
+
     # Tests clamp and its alias, clip
-    def test_clamp(self, device):
-        op_list = ((torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_),
-                   (torch.clip, torch.Tensor.clip, torch.Tensor.clip_))
-        for op, method_op, inplace_op in op_list:
+    @dtypes(torch.int64, torch.float32)
+    def test_clamp(self, device, dtype):
+        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_, 
+                   torch.clip, torch.Tensor.clip, torch.Tensor.clip_)
 
-            m1 = torch.rand(100, device=device).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
-            # just in case we're extremely lucky.
-            min_val = -1
-            max_val = 1
-            m1[1] = min_val
-            m1[2] = max_val
+        # min/max argument product
+        args = product((-10, None), (10, None))
 
-            res1 = m1.clone()
-            inplace_op(res1, min_val, max_val)
-            res2 = m1.clone()
-            for i in iter_indices(res2):
-                res2[i] = max(min_val, min(max_val, res2[i]))
-            self.assertEqual(res1, res2)
+        for op in op_list:
+            for min_val, max_val in args:
+                if min_val is None and max_val is None:
+                    continue
 
-            out = m1.clone()
-            op(m1, min=min_val, max=max_val, out=out)
-            self.assertEqual(out, res1)
+                X, Y_expected = self.generate_clamp_baseline(device, dtype,
+                                                             min_vals=min_val,
+                                                             max_vals=max_val,
+                                                             with_nans=False)
 
-            res1 = op(m1, min=min_val)
-            res2 = m1.clone()
-            for i in iter_indices(res2):
-                res2[i] = max(min_val, res2[i])
-            self.assertEqual(res1, res2)
+                # Test op
+                X1 = X.clone()  # So that the in-place ops do not change X
+                Y_actual = op(X1, min_val, max_val)
+                self.assertEqual(Y_expected, Y_actual)
 
-            op(m1, min=min_val, out=out)
-            self.assertEqual(out, res1)
+                # Test op-out behavior (out does not exist for method versions)
+                if op in (torch.clamp, torch.clip):
+                    Y_out = torch.empty_like(X)
+                    op(X, min=min_val, max=max_val, out=Y_out)
+                    self.assertEqual(Y_expected, Y_out)
 
-            res1 = op(m1, max=max_val)
-            res2 = m1.clone()
-            for i in iter_indices(res2):
-                res2[i] = min(max_val, res2[i])
-            self.assertEqual(res1, res2)
+    def test_clamp_propagates_nans(self, device):
+        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_, 
+                   torch.clip, torch.Tensor.clip, torch.Tensor.clip_)
 
-            op(m1, max=max_val, out=out)
-            self.assertEqual(out, res1)
+        # min/max argument product
+        args = product((-10, None), (10, None))
 
-            # if the tensor contains nan case
-            test_tens = torch.tensor([nan], device=device)
+        for op in op_list:
+            for min_val, max_val in args:
+                if min_val is None and max_val is None:
+                    continue
 
-            res1 = test_tens.clone()
-            inplace_op(res1, min_val, max_val)
-            res2 = test_tens.clone()
-            for i in iter_indices(res2):
-                res2[i] = max(min(res2[i], max_val), min_val)
-            self.assertEqual(torch.isnan(res1), torch.isnan(res2))
+                X, Y_expected = self.generate_clamp_baseline(device, torch.float, 
+                                                             min_vals=min_val, 
+                                                             max_vals=max_val, 
+                                                             with_nans=True)
+                Y_expected = torch.isnan(Y_expected)
 
-            out = test_tens.clone()
-            op(test_tens, min=min_val, max=max_val, out=out)
-            self.assertEqual(torch.isnan(out), torch.isnan(res1))
+                # Test op
+                X1 = X.clone()  # So that the in-place ops do not change X
+                Y_actual = op(X1, min_val, max_val)
+                self.assertEqual(Y_expected, torch.isnan(Y_actual))
 
-            res1 = op(test_tens, min=min_val)
-            res2 = test_tens.clone()
-            for i in iter_indices(res2):
-                res2[i] = max(res2[i], min_val)
-            self.assertEqual(torch.isnan(res1), torch.isnan(res2))
+                # Test op-out behavior (out does not exist for method versions)
+                if op in (torch.clamp, torch.clip):
+                    Y_out = torch.empty_like(X)
+                    op(X, min_val, max_val, out=Y_out)
+                    self.assertEqual(Y_expected, torch.isnan(Y_out))
 
-            op(test_tens, min=min_val, out=out)
-            self.assertEqual(torch.isnan(out), torch.isnan(res1))
-
-            res1 = op(test_tens, max=max_val)
-            res2 = test_tens.clone()
-            for i in iter_indices(res2):
-                res2[i] = min(res2[i], max_val)
-            self.assertEqual(torch.isnan(res1), torch.isnan(res2))
-
-            op(test_tens, max=max_val, out=out)
-            self.assertEqual(torch.isnan(out), torch.isnan(res1))
-
-            error_msg = 'At least one of \'min\' or \'max\' must not be None'
-            with self.assertRaisesRegex(RuntimeError, error_msg):
-                method_op(m1)
-            with self.assertRaisesRegex(RuntimeError, error_msg):
-                inplace_op(m1)
+    def test_clamp_raises_arg_errors(self, device):
+        X = torch.randn(100, dtype=torch.float, device=device)
+        error_msg = 'At least one of \'min\' or \'max\' must not be None'
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            X.clamp()
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            X.clamp_()
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.clamp(X)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64)
@@ -9547,20 +9565,26 @@ class TestTorchDeviceType(TestCase):
         assert m.dim() == 0, "m is intentionally a scalar"
         self.assertEqual(torch.pow(2, m), 2**m)
 
+    @precisionOverride({torch.float32: 1e-5, torch.complex64: 1e-5})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float32, torch.float64)
     def test_symeig(self, device, dtype):
-        from torch.testing._internal.common_utils import random_symmetric_matrix
+        from torch.testing._internal.common_utils import random_hermitian_matrix
 
         def run_test(dims, eigenvectors, upper):
-            x = random_symmetric_matrix(*dims, dtype=dtype, device=device)
-            oute = torch.empty(dims[1:] + dims[:1], dtype=dtype, device=device)
+            x = random_hermitian_matrix(*dims, dtype=dtype, device=device)
+            if dtype.is_complex:
+                real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+            else:
+                real_dtype = dtype
+            oute = torch.empty(dims[1:] + dims[:1], dtype=real_dtype, device=device)
             outv = torch.empty(dims[1:] + dims[:1] * 2, dtype=dtype, device=device)
             torch.symeig(x, eigenvectors=eigenvectors, upper=upper, out=(oute, outv))
 
             if eigenvectors:
-                x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute)), outv.transpose(-2, -1))
+                x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute.to(dtype))), outv.transpose(-2, -1).conj())
                 self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
             else:
                 eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
@@ -9572,14 +9596,14 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(resv, outv, msg="outputs of symeig and symeig with out don't match")
 
             # test non-contiguous
-            x = random_symmetric_matrix(*dims, dtype=dtype, device=device)
+            x = random_hermitian_matrix(*dims, dtype=dtype, device=device)
             n_dim = len(dims) + 1
             # Reverse the batch dimensions and the matrix dimensions and then concat them
             x = x.permute(tuple(range(n_dim - 3, -1, -1)) + (n_dim - 1, n_dim - 2))
             assert not x.is_contiguous(), "x is intentionally non-contiguous"
             rese, resv = torch.symeig(x, eigenvectors=eigenvectors, upper=upper)
             if eigenvectors:
-                x_recon = torch.matmul(torch.matmul(resv, torch.diag_embed(rese)), resv.transpose(-2, -1))
+                x_recon = torch.matmul(torch.matmul(resv, torch.diag_embed(rese.to(dtype))), resv.transpose(-2, -1).conj())
                 self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
             else:
                 eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
@@ -9589,6 +9613,25 @@ class TestTorchDeviceType(TestCase):
         batch_dims_set = [(), (3,), (3, 5), (5, 3, 5)]
         for batch_dims, eigenvectors, upper in product(batch_dims_set, (True, False), (True, False)):
             run_test((5,) + batch_dims, eigenvectors, upper)
+
+    # TODO: once there is more support for complex dtypes on GPU, they shall be added to above test
+    # particularly when RuntimeError: _th_bmm_out not supported on CUDAType for ComplexFloat is fixed
+    @unittest.expectedFailure
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.complex64, torch.complex128)
+    def test_symeig_complex_xfailed(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_matrix
+
+        dims = (5, 3)
+        x = random_hermitian_matrix(*dims, dtype=dtype, device=device)
+        real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+        oute = torch.empty(dims[1:] + dims[:1], dtype=real_dtype, device=device)
+        outv = torch.empty(dims[1:] + dims[:1] * 2, dtype=dtype, device=device)
+        torch.symeig(x, eigenvectors=eigenvectors, upper=upper, out=(oute, outv))
+
+        x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute.to(dtype))), outv.transpose(-2, -1).conj())
+        self.assertEqual(x, x_recon, atol=1e-8, rtol=0)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -14713,8 +14756,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(sort_topk, topk[0])      # check values
         self.assertEqual(sort_topk, a[topk[1]])   # check indices
 
-    @dtypesIfCUDA(*([torch.half, torch.float, torch.double]
-                    + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
     @dtypes(torch.float, torch.double)
     def test_topk_nonfinite(self, device, dtype):
         x = torch.tensor([float('nan'), float('inf'), 1e4, 0, -1e4, -float('inf')], device=device, dtype=dtype)
@@ -16653,7 +16695,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @precisionOverride({torch.bfloat16: 1e-0, torch.half: 5e-4, torch.float: 1e-4, torch.double: 1e-8,
                         torch.cfloat: 1e-4, torch.cdouble: 1e-8})
-    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
+    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(),
+                  *([torch.float32, torch.float64, torch.bfloat16]
+                    if TEST_WITH_ROCM else torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)))
     @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_addmv(self, device, dtype):
@@ -20305,11 +20349,11 @@ tensor_op_tests = [
     ('transpose', 'neg_dim', _new_t((1, 2, 3, 4)), lambda t, d: [-1, -2], ),
     ('tolist', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('topk', 'dim_sort', _small_3d_unique, lambda t, d: [2, 1, False, True],
-        1e-5, 1e-5, 1e-5, _types2, _cpu_types, False),
+        1e-5, 1e-5, 1e-5, torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
     ('topk', 'neg_dim_sort', _small_3d_unique, lambda t, d: [2, -1, False, True],
-        1e-5, 1e-5, 1e-5, _types2, _cpu_types, False),
+        1e-5, 1e-5, 1e-5, torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
     ('topk', 'dim_desc_sort', _small_3d_unique, lambda t, d: [2, 1, True, True],
-        1e-5, 1e-5, 1e-5, _types2, _cpu_types, False),
+        1e-5, 1e-5, 1e-5, torch.testing.get_all_dtypes(include_complex=False, include_bool=False), _cpu_types, False),
     ('trace', '', _medium_2d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _types, _cpu_types, False),
     ('tril', '', _medium_2d, lambda t, d: [],),
     ('tril', 'zero_stride', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -20806,7 +20850,7 @@ class TestTensorDeviceOps(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(*_float_types_no_half)
+    @dtypes(*(_float_types_no_half + _complex_types))
     def test_svd_square(self, device, dtype):
         self._test_svd_helper((10, 10), True, False, device, dtype)
 

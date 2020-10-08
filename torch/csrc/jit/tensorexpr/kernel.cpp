@@ -1470,7 +1470,7 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
                 for (size_t i = 0; i < axes.size(); i++) {
                   idx = idx + axes[i] * IntImm::make(*strides[i]);
                 }
-                return inBuffer(idx);
+                return inBuffer.load(idx);
               }));
       kernelArgs_.emplace_back(
           inBuffer, std::vector<ShapeArg>(), std::vector<ShapeArg>());

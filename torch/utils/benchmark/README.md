@@ -15,8 +15,8 @@ into two broad categories:
 
 ### Integration and better measurement:
 
-  `Timer`, while modeled after the `timit` analog, uses a slightly different
-  API from `timit.Timer`.
+  `Timer`, while modeled after the `timeit` analog, uses a slightly different
+  API from `timeit.Timer`.
 
   * The constructor accepts additional metadata and timing methods return
   a `Measurement` class rather than a float. This `Measurement` class is
