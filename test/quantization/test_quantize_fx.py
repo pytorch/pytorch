@@ -635,18 +635,22 @@ class TestQuantizeFx(QuantizationTestCase):
                 return self.conv(x)
 
         class ObservedCustomModule(torch.nn.Module):
-            def __init__(self, conv):
+            # index of observed outputs
+            _OBSERVED_OUTPUTS = [0]
+
+            def __init__(self, conv, qconfig):
                 super().__init__()
+                self.qconfig = qconfig
                 self.conv = conv
+                self.activation_post_process = qconfig.activation()
 
             def forward(self, x):
-                return self.conv(x)
+                return self.activation_post_process(self.conv(x))
 
             @classmethod
             def from_float(cls, float_module):
                 assert hasattr(float_module, 'qconfig')
-                observed = cls(float_module.conv)
-                observed.qconfig = float_module.qconfig
+                observed = cls(float_module.conv, float_module.qconfig)
                 return observed
 
         class QuantizedCustomModule(torch.nn.Module):

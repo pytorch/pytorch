@@ -452,6 +452,12 @@ class Quantizer:
                     output_is_observed = self.modules[node.target]._output_is_observed
                     if output_is_observed:
                         observed_node_names_set.add(node.name)
+                elif isinstance(obj, CustomModuleQuantizeHandler):
+                    assert node.op == 'call_module'
+                    assert hasattr(self.modules[node.target], '_OBSERVED_OUTPUTS'), \
+                        'Must define _OBSERVED_OUTPUT on observed custom module class'
+                    observed_outputs = self.modules[node.target]._OBSERVED_OUTPUTS
+                    # TODO
                 elif qconfig is not None and obj.all_nodes:
                     # observer for outputs
                     new_observer = qconfig.activation()
