@@ -110,6 +110,19 @@ tf32_notes = {
     "tf32_note": """This operator supports :ref:`TensorFloat32<tf32_on_ampere>`."""
 }
 
+
+reproducibility_notes = {
+    "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
+a CUDA device. See :doc:`/notes/randomness` for more information.""",
+    "backward_reproducibility_note": """This operation may produce nondeterministic gradients when given tensors on \
+a CUDA device. See :doc:`/notes/randomness` for more information.""",
+    "cudnn_reproducibility_note": """In some circumstances when given tensors on a CUDA device \
+and using CuDNN, this operator may select a nondeterministic algorithm to increase performance. If this is \
+undesirable, you can try to make the operation deterministic (potentially at \
+a performance cost) by setting ``torch.backends.cudnn.deterministic = True``. \
+See :doc:`/notes/randomness` for more information."""
+}
+
 add_docstr(torch.abs, r"""
 abs(input, *, out=None) -> Tensor
 
@@ -938,12 +951,7 @@ tensor of size 0. If :attr:`minlength` is specified, the number of bins is at le
 ``out[n] += 1``.
 
 Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
+    {backward_reproducibility_note}
 
 Arguments:
     input (Tensor): 1-d int tensor
@@ -968,7 +976,7 @@ Example::
 
     >>> input.bincount(weights)
     tensor([0.0000, 0.0000, 0.0000, 1.0000, 1.0000, 0.0000, 0.5000])
-""")
+""".format(**reproducibility_notes))
 
 add_docstr(torch.bitwise_not,
            r"""
@@ -1208,6 +1216,67 @@ Example::
 
 
 """.format(**common_args))
+
+add_docstr(torch.tensor_split,
+           r"""
+tensor_split(input, indices_or_sections, dim=0) -> List of Tensors
+
+Splits a tensor into multiple sub-tensors, all of which are views of :attr:`input`,
+along dimension :attr:`dim` according to the indices or number of sections specified
+by :attr:`indices_or_sections. This function is based on NumPy's
+:func:`numpy.array_split`.
+
+Args:
+    input (Tensor): the tensor to split
+    indices_or_sections (int or (list(int))):
+        If :attr:`indices_or_sections` is an integer ``n``, :attr:`input` is split
+        into ``n`` sections along dimension :attr:`dim`. If :attr:`input` is divisible
+        by ``n`` along dimension :attr:`dim`, each section will be of equal size,
+        :code:`input.size(dim) / n`. If :attr:`input` is not divisible by ``n``, the
+        sizes of the first :code:`int(input.size(dim) % n)` sections will have size
+        :code:`int(input.size(dim) / n) + 1`, and the rest will have size
+        :code:`int(input.size(dim) / n)`.
+
+        If :attr:`indices_or_sections` is a list of ints, :attr:`input` is split along
+        dimension :attr:`dim` at each of the indices in the list. For instance,
+        :code:`[2, 3]` and :code:`dim=0` would result in the following tensors:
+
+            - :code:`input[:2]`
+            - :code:`input[2:3]`
+            - :code:`input[3:]`
+
+    dim (int, optional): dimension along which to split the tensor. Default: ``0``
+
+Example::
+    >>> x = torch.arange(8)
+    >>> torch.tensor_split(x, 3)
+    (tensor([0, 1, 2]), tensor([3, 4, 5]), tensor([6, 7]))
+
+    >>> x = torch.arange(7)
+    >>> torch.tensor_split(x, 3)
+    (tensor([0, 1, 2]), tensor([3, 4]), tensor([5, 6]))
+    >>> torch.tensor_split(x, (1, 6))
+    (tensor([0]), tensor([1, 2, 3, 4, 5]), tensor([6]))
+
+    >>> x = torch.arange(14).reshape(2, 7)
+    >>> x
+    tensor([[ 0,  1,  2,  3,  4,  5,  6],
+            [ 7,  8,  9, 10, 11, 12, 13]])
+    >>> torch.tensor_split(x, 3, dim=1)
+    (tensor([[0, 1, 2],
+            [7, 8, 9]]),
+     tensor([[ 3,  4],
+            [10, 11]]),
+     tensor([[ 5,  6],
+            [12, 13]]))
+    >>> torch.tensor_split(x, (1, 6), dim=1)
+    (tensor([[0],
+            [7]]),
+     tensor([[ 1,  2,  3,  4,  5],
+            [ 8,  9, 10, 11, 12]]),
+     tensor([[ 6],
+            [13]]))
+""")
 
 add_docstr(torch.chunk,
            r"""
