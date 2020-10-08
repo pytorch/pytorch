@@ -360,7 +360,7 @@ Tensor _histc_cuda_template(
 
 ///////////////// histogram /////////////////
 template <typename input_t, typename weights_t>
-Tensor _histogram_uniformbins_cuda_template(
+Tensor _histogram_cuda_template_uniform_bins(
     const Tensor& self,
     int64_t nbins,
     const Tensor& weights,
@@ -394,7 +394,6 @@ Tensor _histogram_uniformbins_cuda_template(
       maxvalue,
       "] is not finite");
 #endif
-  TORCH_CHECK(minvalue < maxvalue, "max must be larger than min");
   bool has_weights = weights.defined();
   Tensor output;
   if (has_weights) {
@@ -451,7 +450,7 @@ Tensor& _histc_out_cuda(Tensor& result, const Tensor& self, int64_t bins, Scalar
   return result;
 }
 
-std::tuple<Tensor,Tensor> _histogram_cuda(
+std::tuple<Tensor,Tensor> _histogram_cuda_uniform_bins(
     const Tensor& self,
     int64_t nbins,
     c10::optional<ArrayRef<double>> range,
@@ -473,6 +472,10 @@ std::tuple<Tensor,Tensor> _histogram_cuda(
   Scalar min;
   Scalar max;
   if (range.has_value()) {
+    // If range is defined, max must be larger than min. Otherwise, they can be
+    // equal.
+    TORCH_CHECK(
+        range.value()[0] < range.value()[1], "max must be larger than min");
     min = range.value()[0];
     max = range.value()[1];
   } else {
@@ -482,13 +485,13 @@ std::tuple<Tensor,Tensor> _histogram_cuda(
 
   Tensor hist =
       AT_DISPATCH_ALL_TYPES(
-      self.scalar_type(), "histogram_cuda_uniform", [&] {
+      self.scalar_type(), "histogram_cuda_uniform_bins", [&] {
         const auto scalar = weights.scalar_type();
         if (scalar == ScalarType::Float || scalar == ScalarType::Undefined) {
-          return _histogram_uniformbins_cuda_template<scalar_t, float>(
+          return _histogram_cuda_template_uniform_bins<scalar_t, float>(
               self, nbins, weights, min.to<scalar_t>(), max.to<scalar_t>());
         }
-        return _histogram_uniformbins_cuda_template<scalar_t, double>(
+        return _histogram_cuda_template_uniform_bins<scalar_t, double>(
             self,
             nbins,
             weights.to(kDouble),

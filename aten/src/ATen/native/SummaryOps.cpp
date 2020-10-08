@@ -65,16 +65,16 @@ inline int64_t getbin(input_t x, input_t min, input_t max, int64_t bins) {
 }
 
 ///////////////// histogram /////////////////
+//This template assumes that input and weights are contiguous and have the same size, and that min is not greater than max.
 template <typename input_t, typename weights_t>
-Tensor _histogram_cpu_template_uniformbins(
+Tensor _histogram_cpu_template_uniform_bins(
     const Tensor& self,
     int64_t nbins,
     const Tensor& weights,
     input_t min,
     input_t max,
     bool density) {
-  // This is done to avoid divide by zero. Technically, it results in incorrect behavior in that case,
-  // but it is consistent with numpy.
+  // This is done to avoid divide by zero if input min is equal to input max. As specifying range with min=max is not allowed, this should be correct.
   if (min == max) {
     min -= .5;
     max += .5;
@@ -89,7 +89,6 @@ Tensor _histogram_cpu_template_uniformbins(
       ", ",
       max,
       "] is not finite");
-  TORCH_CHECK(min < max, "max must be larger than min");
 
   bool has_weights = weights.defined();
 
@@ -133,7 +132,7 @@ Tensor _bincount_cpu(const Tensor& self, const Tensor& weights, int64_t minlengt
 }
 
 
-std::tuple<Tensor,Tensor> _histogram_cpu(
+std::tuple<Tensor,Tensor> _histogram_cpu_uniform_bins(
     const Tensor& self,
     int64_t bins,
     c10::optional<ArrayRef<double>> range,
@@ -156,6 +155,10 @@ std::tuple<Tensor,Tensor> _histogram_cpu(
   Scalar min;
   Scalar max;
   if (range.has_value()) {
+    // If range is defined, max must be larger than min. Otherwise, they can be
+    // equal.
+    TORCH_CHECK(
+        range.value()[0] < range.value()[1], "max must be larger than min");
     min = range.value()[0];
     max = range.value()[1];
   } else {
@@ -164,17 +167,17 @@ std::tuple<Tensor,Tensor> _histogram_cpu(
   }
 
   Tensor hist = AT_DISPATCH_ALL_TYPES(
-      self.scalar_type(), "histogram_cpu_uniformbins", [&] {
+      self.scalar_type(), "histogram_cpu_uniform_bins", [&] {
         const auto scalar = weights.scalar_type();
         if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
-          return _histogram_cpu_template_uniformbins<scalar_t, float>(
+          return _histogram_cpu_template_uniform_bins<scalar_t, float>(
               self.flatten(0).contiguous(),
               bins,
               flattened_weights,
               min.to<scalar_t>(),
               max.to<scalar_t>(),
               density);
-        return _histogram_cpu_template_uniformbins<scalar_t, double>(
+        return _histogram_cpu_template_uniform_bins<scalar_t, double>(
             self.flatten(0).contiguous(),
             bins,
             flattened_weights.to(kDouble),
