@@ -529,6 +529,13 @@ void vTensor::View::transition(Active view) const {
   std::cout << "Next - " << state.next.view << std::endl;
   std::cout << "--------------------\n\n";
 
+  // A transition to an unknown state is an invalid transition.  Make sure we
+  // are never going to find ourselves in that boat.
+
+  TORCH_INTERNAL_ASSERT(
+      Component::Unknown != state.next.view.component,
+      "Invalid transition!");
+
   // If dealing with a transition from an initial Unknown state, update the
   // active view and return.  No synchronization is reuiqred in such scenarios.
   // This takes care of 6 states originating from an Unknown state leaving us
@@ -618,11 +625,16 @@ void vTensor::View::transition(Active view) const {
       (state.next.view.access & Access::Write) &&
       !state.requires_image_layout_transition()) {
     command_buffer.barrier({
-      {
-        state.current.stage(),
-        state.next.stage(),
-      },
-    });
+        // Stage
+        {
+          state.current.stage(),
+          state.next.stage(),
+        },
+        // Buffer
+        {},
+        // Image
+        {},
+      });
   }
 
   // Handle any of the previous 6 RAR or WAR transitions that indeed do require
@@ -648,46 +660,53 @@ void vTensor::View::transition(Active view) const {
     // to overwriting the memory.
 
     command_buffer.barrier({
-      {
-        (Access::Read == (state.next.view.access & Access::Read)) ?
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT:
-            state.next.stage(),
-        state.next.stage(),
-      },
-      api::Resource::Image::Barrier{
-        image().object,
+        // Stage
         {
           (Access::Read == (state.next.view.access & Access::Read)) ?
-              0u :
-              state.next.access(),
+              VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT:
+              state.current.stage(),
+          state.next.stage(),
         },
+        // Buffer
+        {},
+        // Image
         {
-          state.current.layout(),
-          state.next.layout(),
+          {
+            image().object,
+            {
+              (Access::Read == (state.next.view.access & Access::Read)) ?
+                  0u :
+                  state.current.access(),
+              state.next.access(),
+            },
+            {
+              state.current.layout(),
+              state.next.layout(),
+            },
+          },
         },
-      },
-    });
+      });
   }
 
   // Or the remaining 16 RAW or WAW hazards:
 
   // Write Staging -> Read  Buffer
-  // Write Staging -> Read  Image
   // Write Staging -> Write Buffer
+  // Write Staging -> Read  Image
   // Write Staging -> Write Image
   //
   // Write Buffer  -> Read  Staging
   // Write Buffer  -> Write Staging
   // Write Buffer  -> Read  Buffer
-  // Write Buffer  -> Read  Image
   // Write Buffer  -> Write Buffer
+  // Write Buffer  -> Read  Image
   // Write Buffer  -> Write Image
   //
   // Write Image   -> Read  Staging
   // Write Image   -> Write Staging
   // Write Image   -> Read  Buffer
-  // Write Image   -> Read  Image
   // Write Image   -> Write Buffer
+  // Write Image   -> Read  Image
   // Write Image   -> Write Image
 
   else {
@@ -700,6 +719,11 @@ void vTensor::View::transition(Active view) const {
         "Only RAW or WAW transitions were expected at this point.");
 
     // If dealing with a RAW or WAW staging to buffer / image transition:
+    //
+    // Write Staging -> Read  Buffer
+    // Write Staging -> Write Buffer
+    // Write Staging -> Read  Image
+    // Write Staging -> Write Image
 
     if (Component::Staging == state.current.view.component) {
       TORCH_INTERNAL_ASSERT(
@@ -707,7 +731,8 @@ void vTensor::View::transition(Active view) const {
           (Component::Image == state.next.view.component),
           "Invalid state!  "
           "Only transitions to buffer or image out of a staging state are "
-          "expected at this point.");
+          "expected at this point.  Staging to staging transitions are "
+          "expected to have been handled previously.");
 
       TORCH_INTERNAL_ASSERT(
           (Component::Buffer != state.next.view.component) ||
@@ -737,18 +762,24 @@ void vTensor::View::transition(Active view) const {
 
         if (Component::Buffer == state.next.view.component) {
           command_buffer.barrier({
-            {
-              VK_PIPELINE_STAGE_TRANSFER_BIT,
-              state.next.stage(),
-            },
-            api::Resource::Buffer::Barrier{
-              buffer().object,
+              // Stage
               {
-                VK_ACCESS_TRANSFER_WRITE_BIT,
-                state.next.access(),
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                state.next.stage(),
               },
-            },
-          });
+              // Buffer
+              {
+                {
+                  buffer().object,
+                  {
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    state.next.access(),
+                  },
+                },
+              },
+              // Image
+              {},
+            });
         }
       }
 
@@ -757,113 +788,281 @@ void vTensor::View::transition(Active view) const {
       // if our final destination is an image, we need to pack NHWC to NC4HW.
 
       if (Component::Image == state.next.view.component) {
-        // First off, we need to make sure the image is in proper layout for
-        // shader storage writes in case it already is not.  Regardless of
-        // whether a layout transition is required or not though, we must make
-        // sure the staging to buffer copy above is done prior to packing.
+        // First off, in case we triggered one, we must make sure the staging to
+        // buffer copy above is done prior to initiating an NHWC to NC4HW packing.
+        // Orthogonollay, we also need to make sure the image is in proper layout
+        // for shader storage writes in case it is not already.  If either of
+        // these scenarios are the case, we need a pre-op barrier.
 
-        // command_buffer.barrier({
-        //   {
-        //     VK_PIPELINE_STAGE_TRANSFER_BIT |
-        //         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        //     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        //   },
-        //   api::Resource::Image::Barrier{
-        //   },
-        //   api::Resource::Image::Barrier{
-        //     image().object,
-        //     {
-        //       VK_ACCESS_SHADER_READ_BIT,
-        //       VK_ACCESS_SHADER_WRITE_BIT,
-        //     },
-        //     {
-        //       state.current.layout(),
-        //       VK_IMAGE_LAYOUT_GENERAL,
-        //     },
-        //   },
-        // });
+        if ((required_ & Component::Staging) ||
+            (VK_IMAGE_LAYOUT_GENERAL != state.current.layout())) {
+          api::Pipeline::Barrier barrier{};
+
+          // If we are on a discrete system, we must have had triggered a transfer
+          // by this point and need to insert a dependency on that.
+
+          if (required_ & Component::Staging) {
+            barrier.stage.src |= VK_PIPELINE_STAGE_TRANSFER_BIT;
+            barrier.stage.dst |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+
+            barrier.buffers.push_back({
+              buffer().object,
+              {
+                VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT,
+              },
+            });
+          }
+
+          if (VK_IMAGE_LAYOUT_GENERAL != state.current.layout()) {
+            barrier.stage.src |= VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+            barrier.stage.dst |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+
+            barrier.images.push_back({
+              image().object,
+              {
+                0u,
+                VK_ACCESS_SHADER_WRITE_BIT,
+              },
+              {
+                state.current.layout(),
+                VK_IMAGE_LAYOUT_GENERAL,
+              },
+            });
+          }
+
+          command_buffer.barrier(barrier);
+        }
 
         // Perform NHWC to NC4HW packing:
+        // context_->dispatch();
 
-        //
-        // bind pipeline
-        // bind descriptor set
-        // dispatch
-        //
-
-        // Finally, make sure we transition to the target view and layout.
-        // The image layout transition could possibly be skipped if source and
+        // Finally, make sure we transition to the target view and layout
+        // considering what we have dealt with so far is a transition to an
+        // intermediary state required to perform the packing.  With that said,
+        // the image layout transition could possibly be skipped if source and
         // destination of this transition have the same layout, but we need
         // the memory barrier portion regardless, considering that we just wrote
         // to the image, and need to make the writes visible to anything that
         // comes after whether it is an image read or an image write.
 
         command_buffer.barrier({
-          {
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            state.next.stage(),
-          },
-          api::Resource::Image::Barrier{
-            image().object,
+            // Stage
             {
-              VK_ACCESS_SHADER_WRITE_BIT,
-              state.next.access(),
+              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+              state.next.stage(),
             },
+            // Buffer
+            {},
+            // Image
             {
-              VK_IMAGE_LAYOUT_GENERAL,
-              state.next.layout(),
+              {
+                image().object,
+                {
+                  VK_ACCESS_SHADER_WRITE_BIT,
+                  state.next.access(),
+                },
+                {
+                  VK_IMAGE_LAYOUT_GENERAL,
+                  state.next.layout(),
+                },
+              },
             },
-          },
-        });
+          });
       }
     }
 
     // If dealing with a RAW or WAW buffer to image / staging transition:
+    //
+    // Write Buffer -> Read  Staging
+    // Write Buffer -> Write Staging
+    // Write Buffer -> Read  Buffer
+    // Write Buffer -> Write Buffer
+    // Write Buffer -> Read  Image
+    // Write Buffer -> Write Image
 
     else if (Component::Buffer == state.current.view.component) {
-      // Considering that we are coming from a [buffer] write, we need to make
-      // the writes visible to whatever operation comes next, regardless of
-      // whether we are going to staging (on UMA or discrete), or image.
+      TORCH_INTERNAL_ASSERT(
+          (Component::Buffer == state.next.view.component) ||
+          (Component::Image == state.next.view.component) ||
+          (Component::Staging == state.next.view.component),
+          "Invalid state!  "
+          "Only transitions to buffer, image, or staging out of a buffer state "
+          "are expected at this point.");
 
-      command_buffer.barrier({
-        {
-          state.current.stage(),
-          state.next.stage(),
-        },
-        api::Resource::Buffer::Barrier{
-          buffer().object,
-          {
-            state.current.access(),
-            state.next.access(),
-          },
-        },
-      });
+      // If we are going to staging on UMA or buffer on UMA or discrete, this
+      // is a one hop transition.
 
-      if (Component::Staging == state.next.view.component) {
-        command_buffer.copy(buffer().object, staging().object);
-
+      if ((!(required_ & Component::Staging) &&
+            (Component::Staging == state.next.view.component)) ||
+          (Component::Buffer == state.next.view.component)) {
         command_buffer.barrier({
+            // Stage
+            {
+              state.current.stage(),
+              state.next.stage(),
+            },
+            // Buffer
+            {
+              {
+                buffer().object,
+                {
+                  state.current.access(),
+                  state.next.access(),
+                },
+              },
+            },
+            // Image
+            {},
+          });
+      }
+
+      // Otherwise, we need to go through the trio of pre-op barrier, op, post-op
+      // barrier where op is either a transfer or packing operation depending on
+      // target.
+
+      else {
+        api::Pipeline::Barrier barrier{
+          // Stage
           {
             state.current.stage(),
-            state.next.stage(),
+            // To be filled subsequently.
+            0u,
           },
-          api::Resource::Buffer::Barrier{
-            buffer().object,
+          // Buffer
+          {
             {
-              state.current.access(),
-              state.next.access(),
+              buffer().object,
+              {
+                state.current.access(),
+                // To be filled subsequently.
+                0u,
+              },
             },
           },
-        });
+          // Image
+          {},
+        };
 
-        if (required_ & Component::Staging) {
+        if (Component::Staging == state.next.view.component) {
+          TORCH_INTERNAL_ASSERT(
+              (required_ & Component::Staging),
+              "Invalid state! "
+              "UMA transitions of buffers to staging are expected to have been "
+              "handled earlier.");
+
+          // Pre transfer barrier.
+          barrier.stage.dst |= VK_PIPELINE_STAGE_TRANSFER_BIT;
+          barrier.buffers.back().memory.dst |= VK_ACCESS_TRANSFER_READ_BIT;
+          command_buffer.barrier(barrier);
+
+          // Issue the transfer.
+          command_buffer.copy(buffer().object, staging().object);
+
+          // Post transfer barrier.
+          command_buffer.barrier({
+              // Stage
+              {
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                state.next.stage(),
+              },
+              // Buffer
+              {
+                {
+                  staging().object,
+                  {
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    state.next.access(),
+                  },
+                },
+              },
+              // Image
+              {},
+            });
+        }
+        else if (Component::Image == state.next.view.component) {
+          //
+          barrier.stage.dst |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+          barrier.buffers.back().memory.dst |= VK_ACCESS_SHADER_READ_BIT;
+
+          // If a layout transition is required, handle that here.
+
+          if (VK_IMAGE_LAYOUT_GENERAL != state.current.layout()) {
+            barrier.stage.src |= VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+            barrier.stage.dst |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+            barrier.images.push_back({
+              image().object,
+              {
+                0u,
+                VK_ACCESS_SHADER_WRITE_BIT,
+              },
+              {
+                state.current.layout(),
+                VK_IMAGE_LAYOUT_GENERAL,
+              },
+            });
+          }
+
+          // Pre packing barrier.
+          command_buffer.barrier(barrier);
+
+          // Perform NHWC to NC4HW packing:
+          // context_->dispatch();
+
+          // Post packing barrier.
+          command_buffer.barrier({
+              // Stage
+              {
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                state.next.stage(),
+              },
+              // Buffer
+              {},
+              // Image
+              {
+                {
+                  image().object,
+                  {
+                    VK_ACCESS_SHADER_WRITE_BIT,
+                    state.next.access(),
+                  },
+                  {
+                    VK_IMAGE_LAYOUT_GENERAL,
+                    state.next.layout(),
+                  },
+                },
+              },
+            });
+        }
+
+        // Or did we mess up?
+
+        else {
+          TORCH_INTERNAL_ASSERT(
+              false,
+              "Invalid state! Exectution must never reach here.");
         }
       }
     }
 
-    // If dealing with a RAW or WAW image to buffer / staging transition:
+    // Finally, if dealing with a RAW or WAW image to buffer / staging
+    // transition:
+    //
+    // Write Image -> Read  Staging
+    // Write Image -> Write Staging
+    // Write Image -> Read  Buffer
+    // Write Image -> Write Buffer
+    // Write Image -> Read  Image
+    // Write Image -> Write Image
 
     else if (Component::Image == state.current.view.component) {
+      TORCH_INTERNAL_ASSERT(
+          (Component::Buffer == state.next.view.component) ||
+          (Component::Image == state.next.view.component) ||
+          (Component::Staging == state.next.view.component),
+          "Invalid state!  "
+          "Only transitions to buffer, image, or staging out of an image state "
+          "are expected at this point.");
     }
 
     // Or did we mess up?

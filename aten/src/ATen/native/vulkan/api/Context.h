@@ -38,6 +38,18 @@ class Context final {
   Descriptor& descriptor();
   Resource& resource();
 
+  void dispatch(
+      Command::Buffer& command_buffer,
+      const Shader::Layout::Descriptor& shader_layout_descriptor,
+      const Shader::Descriptor& shader_descriptor,
+      const Descriptor::Set& descriptor_set);
+
+  // This function is very expensive and its use is bad for performance.
+  // Only use this function for debugging or as a short term hack on way to a
+  // more performant solution.
+
+  void flush();
+
  private:
   VkDevice device();
   VkQueue queue();
@@ -67,13 +79,13 @@ Context* context();
 //
 
 inline GPU Context::gpu() {
-    // A GPU is simply a (physical device, logical device, device queue) trio.
-    return {
-      &adapter_,
-      device(),
-      queue(),
-    };
-  }
+  // A GPU is simply a (physical device, logical device, device queue) trio.
+  return {
+    &adapter_,
+    device(),
+    queue(),
+  };
+}
 
 inline Command& Context::command() {
   return command_;

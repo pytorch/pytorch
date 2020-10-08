@@ -26,8 +26,8 @@ class Runtime final {
 
   explicit Runtime(Type type);
   Runtime(const Runtime&) = delete;
-  Runtime(Runtime&&) = default;
   Runtime& operator=(const Runtime&) = delete;
+  Runtime(Runtime&&) = default;
   Runtime& operator=(Runtime&&) = default;
   ~Runtime() = default;
 
