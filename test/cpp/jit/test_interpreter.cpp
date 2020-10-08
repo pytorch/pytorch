@@ -19,7 +19,7 @@ class TypeCheckTest : public ::testing::Test {
         R"IR(
 graph(%a.1 : Tensor,
       %b.1 : Tensor):
-  %t0 : Float(2:2, 2:1, device=cpu, requires_grad=1), %t1 : Float(3:3, 3:1), %type_matched : bool = prim::TypeCheck(%a.1, %b.1)
+  %t0 : Float(2, 2, strides=[2, 1], device=cpu, requires_grad=1), %t1 : Float(3, 3, strides=[3, 1]), %type_matched : bool = prim::TypeCheck(%a.1, %b.1)
   return (%t0, %t1, %type_matched)
   )IR",
         &*graph,

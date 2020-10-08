@@ -414,20 +414,23 @@ std::vector<Tensor*> LoopNest::findAllNeededTensors(
   return result;
 }
 
-LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors)
-    : output_tensors_(output_tensors.begin(), output_tensors.end()) {
+LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
   // Find all tensors we need to compute (including dependencies) and put them
   // in a topological order
   std::vector<Tensor*> tensors_to_compute =
       findAllNeededTensors(output_tensors);
+
+  for (auto t : output_tensors) {
+    output_bufs_.insert(t->buf());
+  }
 
   // Find all intermediate tensors, we'll need that for inserting alloc/free
   // statements
   std::unordered_set<Tensor*> tensors_to_compute_set(
       tensors_to_compute.begin(), tensors_to_compute.end());
   for (Tensor* t : tensors_to_compute) {
-    if (!output_tensors_.count(t)) {
-      intermediate_tensors_.insert(t);
+    if (!output_bufs_.count(t->buf())) {
+      intermediate_bufs_.insert(t->buf());
     }
   }
 
@@ -449,11 +452,9 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors)
 }
 
 Stmt* LoopNest::lowerToStmt(Tensor* t) {
-  Function* f = t->function();
-  // TODO: Support multiple-output functions
-  Stmt* body = f->ElementStmt(0);
+  Stmt* body = t->ElementStmt();
 
-  if (f->ndim() == 0) {
+  if (t->ndim() == 0 && t->reduce_ndim() == 0) {
     return body;
   }
 
@@ -461,17 +462,29 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
   if (initializer) {
     buf_initializers_[t->buf()] = initializer;
   }
+
   std::vector<const Expr*> indices(t->args().begin(), t->args().end());
 
-  for (size_t i = 0; i < f->ndim(); i++) {
-    // Going in reverse order: from innermost loop to the outermost
-    size_t dim_index = f->ndim() - i - 1;
-    body = new For(f->arg(dim_index), new IntImm(0), f->dim(dim_index), body);
-    indices.pop_back();
-    if (initializer && indices.size() == t->ndim()) {
+  if (t->reduce_ndim() > 0) {
+    for (size_t i = 0; i < t->reduce_ndim(); i++) {
+      // Going in reverse order: from innermost loop to the outermost
+      size_t dim_index = t->reduce_ndim() - i - 1;
+      body = new For(
+          t->reduce_arg(dim_index),
+          new IntImm(0),
+          t->reduce_dim(dim_index),
+          body);
+    }
+    if (initializer) {
       Store* init = new Store(t->buf(), indices, initializer, new IntImm(1));
       body = new Block({init, body});
     }
+  }
+
+  for (size_t i = 0; i < t->ndim(); i++) {
+    // Going in reverse order: from innermost loop to the outermost
+    size_t dim_index = t->ndim() - i - 1;
+    body = new For(t->arg(dim_index), new IntImm(0), t->dim(dim_index), body);
   }
   return body;
 }
@@ -493,15 +506,10 @@ class FunctionInliner : public IRMutator {
   // For the target function, insert the caller/callee pair into the replacement
   // mapping.
   const Expr* mutate(const FunctionCall* v) override {
-    Function* func = v->tensor()->function();
-    const Buf* buf = v->tensor()->buf();
+    const Tensor* t = v->tensor();
+    const Buf* buf = t->buf();
     if (buf != buf_) {
       return IRMutator::mutate(v);
-    }
-
-    // TODO: Support multiple-output functions
-    if (func->func_vars().size() != 1) {
-      throw unimplemented_lowering();
     }
 
     if (v->nparams() != buf->ndim()) {
@@ -510,9 +518,9 @@ class FunctionInliner : public IRMutator {
     }
 
     std::vector<const Var*> index_vars;
-    TORCH_INTERNAL_ASSERT(buf->ndim() == func->args().size());
+    TORCH_INTERNAL_ASSERT(buf->ndim() == t->args().size());
     for (size_t i = 0; i < buf->ndim(); i++) {
-      const Var* func_callee_arg = dynamic_cast<const Var*>(func->arg(i));
+      const Var* func_callee_arg = dynamic_cast<const Var*>(t->arg(i));
       const Expr* func_caller_param = v->param(i);
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
@@ -648,10 +656,8 @@ void LoopNest::computeInline(Stmt* s) {
 }
 
 void LoopNest::computeInline(const Buf* b) {
-  for (auto* t : output_tensors_) {
-    if (b == t->buf()) {
-      throw std::logic_error("Can't inline producers of output Tensors");
-    }
+  if (output_bufs_.count(b)) {
+    throw std::logic_error("Can't inline producers of output Tensors");
   }
 
   // Find producers.
@@ -674,19 +680,7 @@ void LoopNest::computeInline(const Buf* b) {
   root_stmt_ = root_stmt_->accept_mutator(&inliner);
 
   // No longer computing this intermediate tensor, so don't alloc it.
-  for (auto* t : intermediate_tensors_) {
-    if (b == t->buf()) {
-      intermediate_tensors_.erase(t);
-      break;
-    }
-  }
-
-  for (auto it = temp_bufs_.begin(); it != temp_bufs_.end(); ++it) {
-    if (b == *it) {
-      temp_bufs_.erase(it);
-      break;
-    }
-  }
+  intermediate_bufs_.erase(b);
 }
 
 // TODO: Unify with DepTracker
@@ -783,9 +777,7 @@ Block* findLowestContainingBlock(const std::vector<BufUse>& uses) {
 }
 
 Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
-  // Add allocs and frees for intermediate buffers at the global level.
-  // TODO: move allocs and frees to the imemediate areas to reuse buffers.
-  if (intermediate_tensors_.size() == 0ULL && temp_bufs_.size() == 0ULL) {
+  if (intermediate_bufs_.size() == 0ULL) {
     return stmt;
   }
 
@@ -794,31 +786,17 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
     b = new Block({stmt});
   }
 
-  // TODO: Fix the traversal, currently the order is non-deterministic
-  for (Tensor* tensor : intermediate_tensors_) {
-    if (output_tensors_.count(tensor) > 0) {
-      // No need to allocate memory if the tensors are given as input/output.
-      continue;
-    }
-    Stmt* alloc = new Allocate(
-        tensor->buf()->base_handle(), tensor->body()->dtype(), tensor->dims());
-    Stmt* free = new Free(tensor->buf()->base_handle());
-    b->prepend_stmt(alloc);
-    b->append_stmt(free);
-  }
-
-  // Now insert allocations and frees for temporary buffers. Do that in the
-  // innermost possible scope.
   std::unordered_map<const Buf*, std::vector<BufUse>> uses = findUses(stmt);
-
-  for (const auto& buf : temp_bufs_) {
+  // Insert allocations and frees for temporary buffers in the innermost
+  // possible scope.
+  for (const Buf* buf : intermediate_bufs_) {
     Stmt* alloc = new Allocate(buf->base_handle(), buf->dtype(), buf->dims());
     Stmt* free = new Free(buf->base_handle());
-
     Block* alloc_block = findLowestContainingBlock(uses.at(buf));
     alloc_block->prepend_stmt(alloc);
     alloc_block->append_stmt(free);
   }
+
   return b;
 }
 
@@ -984,6 +962,11 @@ void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
   // TODO: record history of transformations
 }
 
+void LoopNest::splitWithTail(For* f, int factor) {
+  For *outer, *inner, *tail;
+  splitWithTail(f, factor, &outer, &inner, &tail);
+}
+
 void LoopNest::splitWithTail(
     For* f,
     int factor,
@@ -1049,8 +1032,11 @@ void LoopNest::splitWithTail(
   } else {
     *tail = nullptr;
   }
+}
 
-  // TODO: record history of transformations
+void LoopNest::splitWithMask(For* f, int factor) {
+  For *outer, *inner;
+  splitWithMask(f, factor, &outer, &inner);
 }
 
 void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
@@ -1110,8 +1096,6 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
 
   // TODO: cleanup API for adding/removing statements
   p->replace_stmt(f, *outer);
-
-  // TODO: record history of transformations
 }
 
 For* findOuterFor(For* a, For* b) {
@@ -1644,7 +1628,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 
   // Mark the new temp buffer as requiring an alloc (it will be inserted as a
   // part of prepareForCodegen).
-  temp_bufs_.emplace_back(temp_buf);
+  intermediate_bufs_.insert(temp_buf);
 }
 
 class SwapReduce : public IRMutator {
@@ -1922,7 +1906,7 @@ void LoopNest::rfactor(
   }
 
   tmp_buf->set_dims(tmp_dims);
-  temp_bufs_.emplace_back(tmp_buf);
+  intermediate_bufs_.insert(tmp_buf);
 }
 
 } // namespace tensorexpr

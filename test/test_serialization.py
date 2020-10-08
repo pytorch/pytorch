@@ -584,16 +584,21 @@ class serialization_method(object):
         torch.save = self.torch_save
 
 class TestBothSerialization(TestCase, SerializationMixin):
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_new_format_old_format_compat(self):
         x = [torch.ones(200, 200) for i in range(30)]
-        torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=True)
-        x_new_load = torch.load("big_tensor.zip")
-        self.assertEqual(x, x_new_load)
 
-        torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=False)
-        x_old_load = torch.load("big_tensor.zip")
-        self.assertEqual(x_old_load, x_new_load)
-        os.remove("big_tensor.zip")
+        def test(filename):
+            torch.save(x, filename, _use_new_zipfile_serialization=True)
+            x_new_load = torch.load(filename)
+            self.assertEqual(x, x_new_load)
+
+            torch.save(x, filename, _use_new_zipfile_serialization=False)
+            x_old_load = torch.load(filename)
+            self.assertEqual(x_old_load, x_new_load)
+
+        with tempfile.NamedTemporaryFile() as f:
+            test(f.name)
 
 
 class TestOldSerialization(TestCase, SerializationMixin):

@@ -486,7 +486,8 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
   });
 }
 
-void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
+void qsigmoid_kernel(
+    const Tensor& qx, Tensor& qy, double output_scale, int64_t output_zero_point ) {
   int64_t zero_point = qx.q_zero_point();
   float scale = qx.q_scale();
   auto scale_vec = Vec256<float>(scale);
@@ -494,19 +495,6 @@ void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
   auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qsigmoid", [&]() {
-    // Naive implemenentation: uses dequantize/execute/quantize routine
-    // - Output scale is set to 1.0 / 2^(BIT_NUM)
-    // - For signed types output zero point is set to 0
-    // - For unsigned types output zero point is set to (qmax + qmin) / 2.0
-    // See https://stackoverflow.com/a/34448562/3606192 for potential
-    // optimizations
-    float output_scale = 0.00390625;  // 1.0 / 2^8
-    int64_t output_zero_point = 0;
-    if (SCALAR_TYPE == at::kQInt32) {
-      output_scale = 2.3283064365386963e-10;  // 1.0 / 2^32
-    } else if (SCALAR_TYPE == at::kQInt8) {
-      output_zero_point = -128;
-    }
     float inv_output_scale = 1.0 / output_scale;
 
     qy = at::_empty_affine_quantized(
