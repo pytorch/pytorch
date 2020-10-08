@@ -6,7 +6,8 @@ from math import inf, nan, isnan
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
+    (instantiate_device_type_tests, dtypes, dtypesIfCPU, dtypesIfCUDA,
+     onlyCUDA, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck
 
@@ -681,19 +682,16 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float32, torch.float64)
     def test_cholesky(self, device, dtype):
-        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value, random_symmetric_pd_matrix
+        from torch.testing._internal.common_utils import random_matrix, random_symmetric_pd_matrix
 
         def run_test(shape, batch):
-            # matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
-            # matrix = matrix + 1e-5*torch.eye(shape, device=device)
-            # matrix = (shape, *batch, dtype=dtype, device=device)
-            # matrix = matrix @ matrix.transpose(-2, -1).conj()
             if dtype.is_complex:
                 real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-                A_real = random_fullrank_matrix_distinct_singular_value(shape, *batch, dtype=real_dtype, device=device)
-                A_imag = random_fullrank_matrix_distinct_singular_value(shape, *batch, dtype=real_dtype, device=device)
+                A_real = random_matrix(shape, shape, *batch, dtype=real_dtype, device=device)
+                A_imag = random_matrix(shape, shape, *batch, dtype=real_dtype, device=device)
                 A = A_real + 1j * A_imag
                 A = A @ A.transpose(-2, -1).conj()
             else:
@@ -711,6 +709,24 @@ class TestLinalg(TestCase):
         t = torch.randn(2, 3, device=device, dtype=dtype)
         with self.assertRaises(RuntimeError):
             torch.linalg.cholesky(t)
+
+    # TODO: once there is more support for complex dtypes on GPU, they shall be added to above test
+    # particularly when RuntimeError: _th_bmm_out not supported on CUDAType for ComplexFloat is fixed
+    @unittest.expectedFailure
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.complex64, torch.complex128)
+    def test_cholesky_xfailed(self, device, dtype):
+        from torch.testing._internal.common_utils import random_matrix
+        real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+        A_real = random_matrix(shape, shape, *batch, dtype=real_dtype, device=device)
+        A_imag = random_matrix(shape, shape, *batch, dtype=real_dtype, device=device)
+        A = A_real + 1j * A_imag
+        A = A @ A.transpose(-2, -1).conj()
+        expected_L = np.linalg.cholesky(A.cpu().numpy())
+        actual_L = torch.linalg.cholesky(A)
+        self.assertEqual(actual_L, expected_L)
 
 instantiate_device_type_tests(TestLinalg, globals())
 
