@@ -570,10 +570,13 @@ class AttributePropagator {
           auto mptr =
               getModulePtrForGetAttrNode(n->input(0)->node(), graph, module_);
           auto module = Module(mptr);
-          if (module.type() == n->inputs()[0]->type() && module.hasattr(name)) {
-            auto attr = module.attr(name);
-            insertMutableAttr(name, attr, mptr);
-          }
+          TORCH_INTERNAL_ASSERT(module.hasattr(name));
+          // FIXME: This is catching type inconsistency between GetAttr and
+          // attribute types. Observed that some models the type insconstent
+          // between GetAttr node and attribute types.
+          n->input(0)->setType(module.type());
+          auto attr = module.attr(name);
+          insertMutableAttr(name, attr, mptr);
         } else if (n->kind() == prim::fork) {
           applyToForkSubgraph(
               n,
