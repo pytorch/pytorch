@@ -8,7 +8,6 @@ from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
-from torch.fx.experimental.Partitioner import DAG, Partitioner
 from torch.fx.experimental.subgraph_creation_example import split_module
 
 from torch.fx.proxy import TraceError
@@ -790,28 +789,6 @@ class TestFX(JitTestCase):
                                               type_expr=List[float])
         output : torch.fx.Node = graph.output(b)
         self.assertTrue('typing.List[float]' in str(graph))
-
-    def test_find_single_partition(self):
-        class testModule(torch.nn.Module):
-            def forward(self, a, b):
-                return a + b
-        m = testModule()
-        traced = symbolic_trace(m)
-        partitioner = Partitioner()
-        devices = [{"name": "dev_0", "available_mem": float('inf')}]
-        dag = partitioner.partition_graph(traced, devices)
-        for node in traced.graph.nodes:
-            assert node.op == 'output' or node.partition_ids == [1]
-        nodes = traced.graph.nodes
-        res_dag = DAG()
-        res_dag.create_node(0, [], [1], [], [])
-        res_dag.create_node(1, [0], [], [nodes[0], nodes[1]], [nodes[2]])
-        for r, d in zip(res_dag.nodes, dag.nodes):
-            assert(r.partition_id == d.partition_id)
-            assert(r.parents == d.parents)
-            assert(r.children == d.children)
-            assert(r.input_nodes == d.input_nodes)
-            assert(r.output_nodes == d.output_nodes)
 
     def test_subgraph_creation(self):
         class MyModule(torch.nn.Module):
