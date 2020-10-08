@@ -4,20 +4,17 @@ import re
 import shutil
 import random
 import tempfile
-import textwrap
 import unittest
 import torch
 import torch.nn as nn
 import torch.utils.data
 import torch.cuda
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
-import torch.utils.benchmark as benchmark_utils
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
 from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE
 from urllib.error import URLError
-import numpy as np
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings

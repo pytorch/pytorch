@@ -3,7 +3,6 @@ import collections
 import enum
 import dataclasses
 import itertools as it
-import json
 import os
 import pickle
 import re
