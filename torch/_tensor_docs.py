@@ -3,6 +3,7 @@
 import torch._C
 from torch._C import _add_docstr as add_docstr
 from ._torch_docs import parse_kwargs
+from ._torch_docs import reproducibility_notes
 
 
 def add_docstr_all(method, docstr):
@@ -1154,18 +1155,28 @@ dist(other, p=2) -> Tensor
 See :func:`torch.dist`
 """)
 
-add_docstr_all('div',
-               r"""
+add_docstr_all('div', r"""
 div(value) -> Tensor
 
 See :func:`torch.div`
 """)
 
-add_docstr_all('div_',
-               r"""
+add_docstr_all('div_', r"""
 div_(value) -> Tensor
 
 In-place version of :meth:`~Tensor.div`
+""")
+
+add_docstr_all('divide', r"""
+divide(value) -> Tensor
+
+See :func:`torch.divide`
+""")
+
+add_docstr_all('divide_', r"""
+divide_(value) -> Tensor
+
+In-place version of :meth:`~Tensor.divide`
 """)
 
 add_docstr_all('dot',
@@ -1618,12 +1629,7 @@ length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
 
 Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
+    {forward_reproducibility_note}
 
 Args:
     dim (int): dimension along which to index
@@ -1641,7 +1647,7 @@ Example::
             [  8.,   9.,  10.],
             [  1.,   1.,   1.],
             [  5.,   6.,   7.]])
-""")
+""".format(**reproducibility_notes))
 
 add_docstr_all('index_copy_',
                r"""
@@ -2244,18 +2250,28 @@ movedim(source, destination) -> Tensor
 See :func:`torch.movedim`
 """)
 
-add_docstr_all('mul',
-               r"""
+add_docstr_all('mul', r"""
 mul(value) -> Tensor
 
-See :func:`torch.mul`
+See :func:`torch.mul`.
 """)
 
-add_docstr_all('mul_',
-               r"""
-mul_(value)
+add_docstr_all('mul_', r"""
+mul_(value) -> Tensor
 
-In-place version of :meth:`~Tensor.mul`
+In-place version of :meth:`~Tensor.mul`.
+""")
+
+add_docstr_all('multiply', r"""
+multiply(value) -> Tensor
+
+See :func:`torch.multiply`.
+""")
+
+add_docstr_all('multiply_', r"""
+multiply_(value) -> Tensor
+
+In-place version of :meth:`~Tensor.multiply`.
 """)
 
 add_docstr_all('multinomial',
@@ -2320,6 +2336,18 @@ add_docstr_all('ndimension',
 ndimension() -> int
 
 Alias for :meth:`~Tensor.dim()`
+""")
+
+add_docstr_all('nan_to_num', r"""
+nan_to_num(nan=0.0, posinf=None, neginf=None) -> Tensor
+
+See :func:`torch.nan_to_num`.
+""")
+
+add_docstr_all('nan_to_num_', r"""
+nan_to_num_(nan=0.0, posinf=None, neginf=None) -> Tensor
+
+In-place version of :meth:`~Tensor.nan_to_num`.
 """)
 
 add_docstr_all('ne', r"""
@@ -2928,9 +2956,6 @@ is updated as::
 Reducing with the addition operation is the same as using
 :meth:`~torch.Tensor.scatter_add_`.
 
-Note:
-    Reduction is not yet implemented for the CUDA backend.
-
 Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter,
@@ -2988,12 +3013,7 @@ dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``.
 
 Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
+    {forward_reproducibility_note}
 
 Args:
     dim (int): the axis along which to index
@@ -3013,7 +3033,7 @@ Example::
             [1.0000, 1.0427, 1.0000, 1.6782, 1.0000],
             [1.7953, 1.0000, 1.6480, 1.0000, 1.9620]])
 
-""")
+""".format(**reproducibility_notes))
 
 add_docstr_all('select',
                r"""
@@ -3099,6 +3119,20 @@ add_docstr_all('signbit',
 signbit() -> Tensor
 
 See :func:`torch.signbit`
+""")
+
+add_docstr_all('sgn',
+               r"""
+sgn() -> Tensor
+
+See :func:`torch.sgn`
+""")
+
+add_docstr_all('sgn_',
+               r"""
+sgn_() -> Tensor
+
+In-place version of :meth:`~Tensor.sgn`
 """)
 
 add_docstr_all('sin',
@@ -3997,6 +4031,13 @@ add_docstr_all('unsafe_split',
 unsafe_split(split_size, dim=0) -> List of Tensors
 
 See :func:`torch.unsafe_split`
+""")
+
+add_docstr_all('tensor_split',
+               r"""
+tensor_split(indices_or_sections, dim=0) -> List of Tensors
+
+See :func:`torch.tensor_split`
 """)
 
 add_docstr_all('stft',

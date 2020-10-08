@@ -6,8 +6,8 @@ import random
 import torch
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, do_test_empty_full, TEST_NUMPY, suppress_warnings,
-     IS_WINDOWS, torch_to_numpy_dtype_dict, slowTest)
+    (TestCase, run_tests, do_test_empty_full, TEST_NUMPY, TEST_WITH_ROCM, suppress_warnings,
+     torch_to_numpy_dtype_dict, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
      onlyCPU, skipCUDAIfNotRocm, largeCUDATensorTest, precisionOverride, dtypes,
@@ -822,10 +822,7 @@ class TestTensorCreation(TestCase):
                 self.assertEqual(shape, torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                 self.assertEqual(shape, torch.empty_strided(shape, (0,) * len(shape), device=device, dtype=dt).shape)
 
-                if dt == torch.bfloat16 and device.startswith('cuda') and IS_WINDOWS:
-                    # TODO: https://github.com/pytorch/pytorch/issues/33793
-                    self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
-                elif dt == torch.bool:
+                if dt == torch.bool:
                     self.assertEqual(shape, torch.randint(2, shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 2).shape)
                 elif dt.is_complex:
@@ -1051,7 +1048,9 @@ class TestTensorCreation(TestCase):
             self._test_logspace_base2(device, dtype, steps=steps)
 
     @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False, include_complex=False))
-    @dtypesIfCUDA(*torch.testing.get_all_dtypes(include_bool=False, include_half=True, include_complex=False))
+    @dtypesIfCUDA(*((torch.testing.get_all_int_dtypes() + [torch.float32, torch.float16, torch.bfloat16]) 
+                    if TEST_WITH_ROCM 
+                    else torch.testing.get_all_dtypes(include_bool=False, include_half=True, include_complex=False)))
     def test_logspace(self, device, dtype):
         _from = random.random()
         to = _from + random.random()

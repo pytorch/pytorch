@@ -318,5 +318,7 @@ inline __device__ float gpuAtomicMul (float * address, float val) {
 
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
   } while (assumed != old);
+
+  return __int_as_float(old);
 }
 #endif // THC_ATOMICS_INC

@@ -492,8 +492,6 @@ _(aten, mode) \
 _(aten, mse_loss) \
 _(aten, mse_loss_backward) \
 _(aten, mse_loss_forward) \
-_(aten, mul) \
-_(aten, mul_) \
 _(aten, multi_margin_loss) \
 _(aten, multi_margin_loss_backward) \
 _(aten, multi_margin_loss_forward) \
@@ -504,6 +502,7 @@ _(aten, multinomial) \
 _(aten, mv) \
 _(aten, mvlgamma) \
 _(aten, nansum) \
+_(aten, nan_to_num) \
 _(aten, narrow) \
 _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
@@ -613,6 +612,7 @@ _(aten, sigmoid) \
 _(aten, sign) \
 _(aten, signbit) \
 _(aten, silu) \
+_(aten, sgn) \
 _(aten, sin) \
 _(aten, sinh) \
 _(aten, size) \
@@ -664,6 +664,7 @@ _(aten, tan) \
 _(aten, tanh) \
 _(aten, tensor) \
 _(aten, tensordot) \
+_(aten, tensor_split) \
 _(aten, th_addmm) \
 _(aten, th_clone) \
 _(aten, th_norm) \

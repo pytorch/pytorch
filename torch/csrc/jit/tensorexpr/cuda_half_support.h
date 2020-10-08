@@ -38,6 +38,11 @@ class CudaHalfChecker : public IRMutator {
     return new Store(v->buf(), v->indices(), new_val, v->mask());
   }
 
+  const Expr* mutate(const HalfImm* v) override {
+    hasHalf_ = true;
+    return new Cast(kFloat, v);
+  }
+
  private:
   bool hasHalf_{false};
 };
