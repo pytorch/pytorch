@@ -1121,7 +1121,7 @@ class TestSparse(TestCase):
         res = bias.sspaddmm(weight, x)
 
         true_result = (bias.to_dense() + torch.matmul(weight.to_dense(), x)).to_sparse()
-        self.assertTrue(res.to_dense().equal(true_result.to_dense()))
+        self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
     def test_sparse_addmm(self):
         def test_shape(m, n, p, nnz, broadcast):
