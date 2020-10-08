@@ -1909,6 +1909,7 @@ Block* TermExpander::fuseConditions(Block* v) {
       stmts.push_back(s);
       continue;
     }
+
     // Fuse the two Conds by appending the bodies of the second Cond to the
     // first.
     Block* true_block = new Block({});
@@ -1939,11 +1940,13 @@ Block* TermExpander::fuseConditions(Block* v) {
       false_block = nullptr;
     }
 
-    prev_cond = prev_cond->cloneWithNewBodies(true_block, false_block);
+    Stmt* new_cond = prev_cond->cloneWithNewBodies(true_block, false_block)
+                         ->accept_mutator(this);
+    prev_cond = dynamic_cast<Cond*>(new_cond);
 
     // erase, which shortens the list.
     stmts.pop_back();
-    stmts.push_back(prev_cond);
+    stmts.push_back(new_cond);
     did_anything = true;
   }
 
