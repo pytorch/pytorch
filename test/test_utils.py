@@ -633,6 +633,18 @@ class TestBenchmarkUtils(TestCase):
         # The internal algorithm is tested in `test_adaptive_timer`
         median = timer.adaptive_autorange(threshold=0.5).median
 
+        # Test that multi-line statements work properly.
+        median = benchmark_utils.Timer(
+            stmt="""
+                with torch.no_grad():
+                    y = x + 1""",
+            setup="""
+                x = torch.ones((1,), requires_grad=True)
+                for _ in range(5):
+                    x = x + 1.0""",
+        ).timeit(5).median
+        self.assertIsInstance(sample, float)
+
     class _MockTimer:
         _seed = 0
 
@@ -695,6 +707,17 @@ class TestBenchmarkUtils(TestCase):
               Median: 7.86 ns
               IQR:    0.71 ns (7.63 to 8.34)
               6 measurements, 1000000 runs per measurement, 1 thread"""
+        )
+
+        assert_reprs_match(
+            MockTimer("pass", "setup_fn()").blocked_autorange(min_run_time=10),
+            """
+            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            pass
+            setup: setup_fn()
+              Median: 7.98 ns
+              IQR:    0.52 ns (7.74 to 8.26)
+              125 measurements, 10000000 runs per measurement, 1 thread"""
         )
 
         assert_reprs_match(
@@ -768,15 +791,384 @@ class TestBenchmarkUtils(TestCase):
             self.assertEqual(len(measurement.times), repeats)
             self.assertEqual(measurement.number_per_run, number_per_run)
 
+        class _MockTimer(self._MockTimer):
+            _function_costs = (
+                ("with torch.no_grad():\n    y = x + 1", 10e-6),
+            )
+
+        class MockTimer(benchmark_utils.Timer):
+            _timer_cls = _MockTimer
+
+        timer = MockTimer(
+            stmt="""
+                with torch.no_grad():
+                    y = x + 1
+            """)
+
+        assert_reprs_match(
+            MockTimer(
+                stmt="""
+                    with torch.no_grad():
+                        y = x + 1
+                """
+            ).blocked_autorange(min_run_time=10),
+            """
+            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            stmt:
+              with torch.no_grad():
+                  y = x + 1
+
+              Median: 10.02 us
+              IQR:    0.67 us (9.67 to 10.34)
+              100 measurements, 10000 runs per measurement, 1 thread"""
+        )
+
+        assert_reprs_match(
+            MockTimer(
+                stmt="""
+                    with torch.no_grad():
+                        y = x + 1
+                """,
+                sub_label="scalar_add"
+            ).blocked_autorange(min_run_time=10),
+            """
+            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            stmt: (scalar_add)
+              with torch.no_grad():
+                  y = x + 1
+
+              Median: 10.02 us
+              IQR:    0.67 us (9.67 to 10.34)
+              100 measurements, 10000 runs per measurement, 1 thread"""
+        )
+
+        assert_reprs_match(
+            MockTimer(
+                stmt="""
+                    with torch.no_grad():
+                        y = x + 1
+                """,
+                label = "x + 1",
+                sub_label="scalar_add",
+            ).blocked_autorange(min_run_time=10),
+            """
+            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            x + 1: scalar_add
+              Median: 10.02 us
+              IQR:    0.67 us (9.67 to 10.34)
+              100 measurements, 10000 runs per measurement, 1 thread"""
+        )
+
+        assert_reprs_match(
+            MockTimer(
+                stmt="""
+                    with torch.no_grad():
+                        y = x + 1
+                """,
+                setup="setup_fn()",
+                sub_label="scalar_add"
+            ).blocked_autorange(min_run_time=10),
+            """
+            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            stmt: (scalar_add)
+              with torch.no_grad():
+                  y = x + 1
+
+            setup: setup_fn()
+              Median: 10.02 us
+              IQR:    0.67 us (9.67 to 10.34)
+              100 measurements, 10000 runs per measurement, 1 thread"""
+        )
+
+        assert_reprs_match(
+            MockTimer(
+                stmt="""
+                    with torch.no_grad():
+                        y = x + 1
+                """,
+                setup="""
+                    x = torch.ones((1,), requires_grad=True)
+                    for _ in range(5):
+                        x = x + 1.0""",
+                sub_label="scalar_add",
+                description="Multi-threaded scalar math!",
+                num_threads=16,
+            ).blocked_autorange(min_run_time=10),
+            """
+            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+            stmt: (scalar_add)
+              with torch.no_grad():
+                  y = x + 1
+
+            Multi-threaded scalar math!
+            setup:
+              x = torch.ones((1,), requires_grad=True)
+              for _ in range(5):
+                  x = x + 1.0
+
+              Median: 10.02 us
+              IQR:    0.67 us (9.67 to 10.34)
+              100 measurements, 10000 runs per measurement, 16 threads"""
+        )
+
     @slowTest
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
     def test_collect_callgrind(self):
-        timer = benchmark_utils.Timer("y = torch.ones((1,)) + 1")
+        @torch.jit.script
+        def add_one(x):
+            return x + 1
+
+        timer = benchmark_utils.Timer(
+            "y = add_one(x) + k",
+            setup="x = torch.ones((1,))",
+            globals={"add_one": add_one, "k": 5}
+        )
 
         # Don't collect baseline to speed up unit test by ~30 seconds.
         stats = timer.collect_callgrind(number=1000, collect_baseline=False)
+        counts = stats.counts(denoise=False)
 
-        self.assertIsInstance(stats.counts(include_lookdict_unicode=False), int)
+        self.assertIsInstance(counts, int)
+        self.assertGreater(counts, 0)
+
+    def test_manipulate_callgrind_stats(self):
+        from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import load_test_example
+        stats_no_data, stats_with_data = load_test_example()
+
+        self.assertEqual(stats_no_data.counts(), 8869966)
+        self.assertEqual(stats_no_data.counts(denoise=True), 8728096)
+
+        def assert_reprs_match(actual, expected: str):
+            actual_str = re.sub(
+                "object at 0x[0-9a-fA-F]+>",
+                "object at 0xXXXXXXXXXXXX>",
+                repr(actual),
+            )
+
+            self.assertEqual(actual_str, textwrap.dedent(expected).strip())
+
+        assert_reprs_match(
+            stats_no_data,
+            """
+            <torch.utils.benchmark.utils.valgrind_wrapper.timer_interface.CallgrindStats object at 0xXXXXXXXXXXXX>
+            y = torch.ones(())
+                                       All          Noisy symbols removed
+                Instructions:      8869966                    8728096
+                Baseline:             6682                       5766
+            1000 runs per measurement, 1 thread
+            """
+        )
+
+        # High level summaries:
+        assert_reprs_match(
+            stats_no_data.stats(),
+            """
+            <torch.utils.benchmark.utils.valgrind_wrapper.timer_interface.FunctionCounts object at 0xXXXXXXXXXXXX>
+              408000  ???:__tls_get_addr [/usr/lib64/ld-2.28.so]
+              388193  ???:_int_free [/usr/lib64/libc-2.28.so]
+              274000  build/../torch/csrc/utils/python ... rch/torch/lib/libtorch_python.so]
+              264000  build/../aten/src/ATen/record_fu ... ytorch/torch/lib/libtorch_cpu.so]
+              192000  build/../c10/core/Device.h:c10:: ... epos/pytorch/torch/lib/libc10.so]
+              169855  ???:_int_malloc [/usr/lib64/libc-2.28.so]
+              154000  build/../c10/core/TensorOptions. ... ytorch/torch/lib/libtorch_cpu.so]
+              147167  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
+              135000  ???:malloc [/usr/lib64/libc-2.28.so]
+                 ...
+                 -62  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
+                 -63  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
+                 -70  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
+                 -74  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
+                 -85  /home/test_user/miniconda3/envs/ ... rch/torch/lib/libtorch_python.so]
+                 -95  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
+                -104  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
+                -134  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
+                -180  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
+
+            Total: 8863284""" # 8869966 - 6682 = 8863284
+        )
+
+        assert_reprs_match(
+            stats_no_data.stats(inclusive=True),
+            """
+            <torch.utils.benchmark.utils.valgrind_wrapper.timer_interface.FunctionCounts object at 0xXXXXXXXXXXXX>
+              8952420  ???:0x0000000000001050 [/usr/lib64/ld-2.28.so]
+              8952420  ???:(below main) [/usr/lib64/libc-2.28.so]
+              8952420  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+              8952420  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+              8952420  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+              8952420  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+              8952420  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+              8952420  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+              8952420  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+                  ...
+                 -195  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+                 -196  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+                 -207  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+                 -261  /home/test_user/miniconda3/envs/ ... ch/torch/lib/libtorch_python.so]
+                 -561  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+                 -789  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+                 -881  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+                -1196  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+                -1206  /tmp/build/80754af9/python_15996 ... a3/envs/throwaway/bin/python3.6]
+            """
+        )
+
+        assert_reprs_match(
+            # Mock `torch.set_printoptions(linewidth=160)`
+            benchmark_utils.FunctionCounts(stats_no_data.stats(inclusive=False)._data, False, 160),
+            """
+            <torch.utils.benchmark.utils.valgrind_wrapper.timer_interface.FunctionCounts object at 0xXXXXXXXXXXXX>
+              408000  ???:__tls_get_addr [/usr/lib64/ld-2.28.so]
+              388193  ???:_int_free [/usr/lib64/libc-2.28.so]
+              274000  build/../torch/csrc/utils/python_arg_parser.cpp:torch::FunctionSignature ...  bool) [/data/users/test_user/repos/pytorch/torch/lib/libtorch_python.so]
+              264000  build/../aten/src/ATen/record_function.cpp:at::RecordFunction::RecordFun ... ordScope) [/data/users/test_user/repos/pytorch/torch/lib/libtorch_cpu.so]
+              192000  build/../c10/core/Device.h:c10::Device::validate() [/data/users/test_user/repos/pytorch/torch/lib/libc10.so]
+              169855  ???:_int_malloc [/usr/lib64/libc-2.28.so]
+              154000  build/../c10/core/TensorOptions.h:c10::TensorOptions::merge_in(c10::Tens ... ns) const [/data/users/test_user/repos/pytorch/torch/lib/libtorch_cpu.so]
+              147167  /tmp/build/80754af9/python_1599604603603/work/Python/ceval.c:_PyEval_EvalFrameDefault [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
+              135000  ???:malloc [/usr/lib64/libc-2.28.so]
+                 ...
+                 -62  /tmp/build/80754af9/python_1599604603603/work/Objects/abstract.c:PyNumber_Subtract [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
+                 -63  /tmp/build/80754af9/python_1599604603603/work/Objects/longobject.c:long_richcompare [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
+                 -70  /tmp/build/80754af9/python_1599604603603/work/Objects/abstract.c:_PyObject_FastCallDict [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
+                 -74  /tmp/build/80754af9/python_1599604603603/work/Python/pytime.c:_PyTime_FromSecondsObject [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
+                 -85  /home/test_user/miniconda3/envs/throwaway/include/pybind11/pybind11.h:py ... ject*) [/data/users/test_user/repos/pytorch/torch/lib/libtorch_python.so]
+                 -95  /tmp/build/80754af9/python_1599604603603/work/Objects/rangeobject.c:rangeiter_next [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
+                -104  /tmp/build/80754af9/python_1599604603603/work/Objects/object.c:PyObject_RichCompare [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
+                -134  /tmp/build/80754af9/python_1599604603603/work/Objects/rangeobject.c:range_new [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
+                -180  /tmp/build/80754af9/python_1599604603603/work/Objects/longobject.c:PyLong_FromLong [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
+
+            Total: 8863284"""  # noqa
+        )
+
+        assert_reprs_match(
+            stats_no_data.as_standardized().stats(),
+            """
+            <torch.utils.benchmark.utils.valgrind_wrapper.timer_interface.FunctionCounts object at 0xXXXXXXXXXXXX>
+              408000  ???:__tls_get_addr
+              388193  ???:_int_free
+              274000  build/../torch/csrc/utils/python ... ject*, _object*, _object**, bool)
+              264000  build/../aten/src/ATen/record_fu ... ::RecordFunction(at::RecordScope)
+              192000  build/../c10/core/Device.h:c10::Device::validate()
+              169855  ???:_int_malloc
+              154000  build/../c10/core/TensorOptions. ... erge_in(c10::TensorOptions) const
+              147167  Python/ceval.c:_PyEval_EvalFrameDefault
+              135000  ???:malloc
+                 ...
+                 -62  Objects/abstract.c:PyNumber_Subtract
+                 -63  Objects/longobject.c:long_richcompare
+                 -70  Objects/abstract.c:_PyObject_FastCallDict
+                 -74  Python/pytime.c:_PyTime_FromSecondsObject
+                 -85  /home/test_user/miniconda3/envs/ ... her(_object*, _object*, _object*)
+                 -95  Objects/rangeobject.c:rangeiter_next
+                -104  Objects/object.c:PyObject_RichCompare
+                -134  Objects/rangeobject.c:range_new
+                -180  Objects/longobject.c:PyLong_FromLong
+
+            Total: 8863284
+            """
+        )
+
+        self.assertEqual(
+            # `delta` is just a convenience method.
+            stats_with_data.delta(stats_no_data)._data,
+            (stats_with_data.stats() - stats_no_data.stats())._data
+        )
+
+        assert_reprs_match(
+            stats_with_data.as_standardized().delta(stats_no_data.as_standardized()),
+            """
+            <torch.utils.benchmark.utils.valgrind_wrapper.timer_interface.FunctionCounts object at 0xXXXXXXXXXXXX>
+                85000  Objects/dictobject.c:lookdict_unicode
+                59089  ???:_int_free
+                43000  ???:malloc
+                25000  build/../torch/csrc/utils/python ... :torch::PythonArgs::intlist(int)
+                24000  ???:__tls_get_addr
+                23000  ???:free
+                21067  Objects/dictobject.c:lookdict_unicode_nodummy
+                20000  build/../torch/csrc/utils/python ... :torch::PythonArgs::intlist(int)
+                18000  Objects/longobject.c:PyLong_AsLongLongAndOverflow
+                  ...
+                 2000  /home/nwani/m3/conda-bld/compile ... del_op.cc:operator delete(void*)
+                 1000  /usr/include/c++/8/bits/stl_vector.h:torch::PythonArgs::intlist(int)
+                  193  ???:_int_malloc
+                   75  ???:_int_memalign
+                -1000  build/../c10/util/SmallVector.h: ... _contiguous(c10::ArrayRef<long>)
+                -1000  build/../c10/util/SmallVector.h: ... nsor_restride(c10::MemoryFormat)
+                -1000  /usr/include/c++/8/bits/stl_vect ... es(_object*, _object*, _object*)
+                -8000  Python/ceval.c:_PyEval_EvalFrameDefault
+               -16000  Objects/tupleobject.c:PyTuple_New
+
+            Total: 432917
+            """
+        )
+
+        # Fine grained manipulation
+        deltas = stats_with_data.as_standardized().delta(stats_no_data.as_standardized())
+
+        def custom_transforms(fn: str):
+            fn = re.sub(re.escape("/usr/include/c++/8/bits/"), "", fn)
+            fn = re.sub(r"build/../", "", fn)
+            fn = re.sub(".+" + re.escape("libsupc++"), "libsupc++", fn)
+            return fn
+
+        assert_reprs_match(
+            deltas.transform(custom_transforms),
+            """
+            <torch.utils.benchmark.utils.valgrind_wrapper.timer_interface.FunctionCounts object at 0xXXXXXXXXXXXX>
+                85000  Objects/dictobject.c:lookdict_unicode
+                59089  ???:_int_free
+                43000  ???:malloc
+                25000  torch/csrc/utils/python_numbers.h:torch::PythonArgs::intlist(int)
+                24000  ???:__tls_get_addr
+                23000  ???:free
+                21067  Objects/dictobject.c:lookdict_unicode_nodummy
+                20000  torch/csrc/utils/python_arg_parser.h:torch::PythonArgs::intlist(int)
+                18000  Objects/longobject.c:PyLong_AsLongLongAndOverflow
+                  ...
+                 2000  c10/util/SmallVector.h:c10::TensorImpl::compute_contiguous() const
+                 1000  stl_vector.h:torch::PythonArgs::intlist(int)
+                  193  ???:_int_malloc
+                   75  ???:_int_memalign
+                -1000  stl_vector.h:torch::autograd::TH ... es(_object*, _object*, _object*)
+                -1000  c10/util/SmallVector.h:c10::Tens ... _contiguous(c10::ArrayRef<long>)
+                -1000  c10/util/SmallVector.h:c10::Tens ... nsor_restride(c10::MemoryFormat)
+                -8000  Python/ceval.c:_PyEval_EvalFrameDefault
+               -16000  Objects/tupleobject.c:PyTuple_New
+
+            Total: 432917
+            """
+        )
+
+        assert_reprs_match(
+            deltas.filter(lambda fn: fn.startswith("???")),
+            """
+            <torch.utils.benchmark.utils.valgrind_wrapper.timer_interface.FunctionCounts object at 0xXXXXXXXXXXXX>
+              59089  ???:_int_free
+              43000  ???:malloc
+              24000  ???:__tls_get_addr
+              23000  ???:free
+                193  ???:_int_malloc
+                 75  ???:_int_memalign
+
+            Total: 149357
+            """
+        )
+
+        self.assertEqual(len(deltas), 35)
+        assert_reprs_match(
+            deltas[:5],
+            """
+            <torch.utils.benchmark.utils.valgrind_wrapper.timer_interface.FunctionCounts object at 0xXXXXXXXXXXXX>
+              85000  Objects/dictobject.c:lookdict_unicode
+              59089  ???:_int_free
+              43000  ???:malloc
+              25000  build/../torch/csrc/utils/python_ ... h:torch::PythonArgs::intlist(int)
+              24000  ???:__tls_get_addr
+
+            Total: 236089
+            """
+        )
 
     def test_compare(self):
         # Simulate several approaches.
@@ -910,6 +1302,19 @@ class TestBenchmarkUtils(TestCase):
             Times are in microseconds (us)."""  # noqa
         )
 
+        compare.colorize(rowwise=True)
+        check_output(
+            str(compare),
+            """
+            [------------------------------------------------- fn ------------------------------------------------]
+                                         |  (16, 16)  |  (16, 128)  |  (128, 128)  |  (4096, 1024)  |  (2048, 2048)
+            1 threads: --------------------------------------------------------------------------------------------
+                  overhead_optimized     |  \x1b[92m\x1b[1m   1    \x1b[0m\x1b[0m  |  \x1b[2m\x1b[91m   3.0   \x1b[0m\x1b[0m  |  \x1b[31m\x1b[1m    17    \x1b[0m\x1b[0m  |  \x1b[31m\x1b[1m    4200    \x1b[0m\x1b[0m  |  \x1b[31m\x1b[1m    4200    \x1b[0m\x1b[0m
+                  compute_optimized      |  \x1b[92m\x1b[1m   3    \x1b[0m\x1b[0m  |     4.0     |  \x1b[2m\x1b[91m    11    \x1b[0m\x1b[0m  |  \x1b[31m\x1b[1m    2100    \x1b[0m\x1b[0m  |  \x1b[31m\x1b[1m    2100    \x1b[0m\x1b[0m
+                  special_case (square)  |  \x1b[92m\x1b[1m   1    \x1b[0m\x1b[0m  |             |  \x1b[31m\x1b[1m     8    \x1b[0m\x1b[0m  |                |  \x1b[31m\x1b[1m    1700    \x1b[0m\x1b[0m
+
+            Times are in microseconds (us)."""  # noqa
+        )
 
     @unittest.skipIf(IS_WINDOWS and os.getenv("VC_YEAR") == "2019", "Random seed only accepts int32")
     def test_fuzzer(self):
