@@ -1485,7 +1485,7 @@ def all_gather(tensor_list,
 
         >>> # All tensors below are of torch.cfloat dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_list = [torch.zero(2, dtype=torch.float) for _ in range(2)]
+        >>> tensor_list = [torch.zero(2, dtype=torch.cfloat) for _ in range(2)]
         >>> tensor_list
         [tensor([0.+0.j, 0.+0.j]), tensor([0.+0.j, 0.+0.j])] # Rank 0 and 1
         >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat) + 2 * rank * (1+1j)
