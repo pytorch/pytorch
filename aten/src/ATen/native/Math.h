@@ -148,9 +148,10 @@ Date:  February 1996
  * This function is derived from the implementation of the zeta function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
-static inline double zeta(double x, double q) {
-  static double MACHEP = 1.11022302462515654042E-16;
-  static double A[] = {
+template <typename T>
+static inline T zeta(T x, T q) {
+  static T MACHEP = 1.11022302462515654042E-16;
+  static T A[] = {
       12.0,
       -720.0,
       30240.0,
@@ -166,13 +167,13 @@ static inline double zeta(double x, double q) {
   };
 
   int i = 0;
-  double a, b, k, s, t, w;
+  T a, b, k, s, t, w;
   if (x == 1.0) {
     return INFINITY;
   }
 
   if (x < 1.0) {
-    return std::numeric_limits<double>::quiet_NaN();
+    return std::numeric_limits<T>::quiet_NaN();
   }
 
   if (q <= 0.0) {
@@ -180,7 +181,7 @@ static inline double zeta(double x, double q) {
       return INFINITY;
     }
     if (x != floor(x)) {
-      return std::numeric_limits<double>::quiet_NaN();
+      return std::numeric_limits<T>::quiet_NaN();
     }
   }
 
@@ -220,28 +221,24 @@ static inline double zeta(double x, double q) {
   return s;
 }
 
-static inline double polevl(double x, double *A, size_t len) {
-  double result = 0;
+
+template <typename T>
+static inline T polevl(T x, T *A, size_t len) {
+  T result = 0;
   for (size_t i = 0; i <= len; i++) {
     result = result * x + A[i];
   }
   return result;
 }
 
-static inline float polevlf(float x, float *A, size_t len) {
-  float result = 0;
-  for (size_t i = 0; i <= len; i++) {
-    result = result * x + A[i];
-  }
-  return result;
-}
 
-static inline double trigamma(double x) {
-  double sign = +1;
-  double result = 0;
+template <typename T>
+static inline T trigamma(T x) {
+  T sign = +1;
+  T result = 0;
   if (x < 0.5) {
     sign = -1;
-    const double sin_pi_x = sin(M_PI * x);
+    const T sin_pi_x = sin(M_PI * x);
     result -= (M_PI * M_PI) / (sin_pi_x * sin_pi_x);
     x = 1 - x;
   }
@@ -249,26 +246,8 @@ static inline double trigamma(double x) {
     result += 1 / (x * x);
     x += 1;
   }
-  const double ixx = 1 / (x*x);
+  const T ixx = 1 / (x*x);
   result += (1 + 1 / (2*x) + ixx * (1./6 - ixx * (1./30 - ixx * (1./42)))) / x;
-  return sign * result;
-}
-
-static inline float trigamma(float x) {
-  float sign = +1;
-  float result = 0;
-  if (x < 0.5f) {
-    sign = -1;
-    const float sin_pi_x = sinf(M_PIf * x);
-    result -= (M_PIf * M_PIf) / (sin_pi_x * sin_pi_x);
-    x = 1 - x;
-  }
-  for (int i = 0; i < 6; ++i) {
-    result += 1 / (x * x);
-    x += 1;
-  }
-  const float ixx = 1 / (x*x);
-  result += (1 + 1 / (2*x) + ixx * (1.f/6 - ixx * (1.f/30 - ixx * (1.f/42)))) / x;
   return sign * result;
 }
 
@@ -276,8 +255,9 @@ static inline float trigamma(float x) {
  * This function is derived from the implementation of the digamma function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
-static inline double calc_digamma(double x) {
-  static double PSI_10 = 2.25175258906672110764;
+template <typename T>
+static inline T calc_digamma(T x) {
+  static T PSI_10 = 2.25175258906672110764;
   if (x == 0) {
     return INFINITY;
   }
@@ -291,7 +271,7 @@ static inline double calc_digamma(double x) {
   }
 
   // Push x to be >= 10
-  double result = 0;
+  T result = 0;
   while (x < 10) {
     result -= 1 / x;
     x += 1;
@@ -301,7 +281,7 @@ static inline double calc_digamma(double x) {
   }
 
   // Compute asymptotic digamma
-  static double A[] = {
+  static T A[] = {
       8.33333333333333333333E-2,
       -2.10927960927960927961E-2,
       7.57575757575757575758E-3,
@@ -311,74 +291,19 @@ static inline double calc_digamma(double x) {
       8.33333333333333333333E-2,
   };
 
-  double y = 0;
+  T y = 0;
   if (x < 1.0e17) {
-    double z = 1.0 / (x * x);
+    T z = 1.0 / (x * x);
     y = z * polevl(z, A, 6);
   }
   return result + log(x) - (0.5 / x) - y;
 }
 
-/*
- * This function is derived from the implementation of the digamma function in the Cephes Math Library.
- * See note [3-Clause BSD License for the Cephes Math Library].
- */
-static inline float calc_digamma(float x) {
-  static float PSI_10 = 2.25175258906672110764f;
-  if (x == 0) {
-    return INFINITY;
-  }
-
-  int x_is_integer = x == floorf(x);
-  if (x < 0) {
-    if (x_is_integer) {
-      return INFINITY;
-    }
-    // Avoid rounding errors for `tan`'s input.
-    // Those make a big difference at extreme values.
-    float pi_over_tan_pi_x = (float)(M_PI / tan(M_PI * (double)x));
-    return calc_digamma(1 - x) - pi_over_tan_pi_x;
-  }
-
-  // Push x to be >= 10
-  float result = 0;
-  while (x < 10) {
-    result -= 1 / x;
-    x += 1;
-  }
-  if (x == 10) {
-    return result + PSI_10;
-  }
-
-  // Compute asymptotic digamma
-  static float A[] = {
-      8.33333333333333333333E-2f,
-      -2.10927960927960927961E-2f,
-      7.57575757575757575758E-3f,
-      -4.16666666666666666667E-3f,
-      3.96825396825396825397E-3f,
-      -8.33333333333333333333E-3f,
-      8.33333333333333333333E-2f,
-  };
-
-  float y = 0;
-  if (x < 1.0e17f) {
-    float z = 1 / (x * x);
-    y = z * polevlf(z, A, 6);
-  }
-  return result + logf(x) - (0.5f / x) - y;
-}
-
-static inline double calc_polygamma(int64_t n, double x) {
+template <typename T>
+static inline T calc_polygamma(int64_t n, T x) {
   // already blocked if n <= 1
-  return ((n % 2) ? 1.0 : -1.0) * std::exp(lgamma(double(n) + 1.0)) *
-      zeta(double(n + 1), x);
-}
-
-static inline float calc_polygamma(int64_t n, float x) {
-  // already blocked if n <= 1
-  return ((n % 2) ? 1.0f : -1.0f) * std::exp(lgamma(double(n) + 1.0)) *
-      zeta(double(n + 1), x);
+  return T(((n % 2) ? 1.0f : -1.0f) * std::exp(lgamma(T(n) + 1.0)) *
+      zeta(T(n + 1), x));
 }
 
 inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }
