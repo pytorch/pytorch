@@ -39,15 +39,20 @@ void format(Stack& stack, size_t num_inputs) {
   push(stack, ss.str());
 }
 
-// IValue tags are intentionally private, so we need additional logic to cast the
-// IValue type to the specified format.
+// IValue tags are intentionally private, so we need additional logic to cast
+// the IValue type to the specified format.
 std::string getFormattedArg(char key, IValue ival) {
   std::stringstream ss;
   bool added = false;
   switch (key) {
     case 'd':
     case 'i': {
-      TORCH_CHECK(ival.isScalar(), "%", key, " format: A number is required, not ", ival.tagKind());
+      TORCH_CHECK(
+          ival.isScalar(),
+          "%",
+          key,
+          " format: A number is required, not ",
+          ival.tagKind());
       if (ival.isDouble()) {
         std::stringstream().swap(ss);
         ss << static_cast<int>(ival.toDouble());
@@ -56,12 +61,16 @@ std::string getFormattedArg(char key, IValue ival) {
       break;
     }
     case 'f': {
-      TORCH_CHECK(ival.isScalar(), "%", key, " format: A number is required, not ", ival.tagKind());
+      TORCH_CHECK(
+          ival.isScalar(),
+          "%",
+          key,
+          " format: A number is required, not ",
+          ival.tagKind());
       ss << std::setprecision(6) << std::fixed;
       if (ival.isInt()) {
         ss << static_cast<float>(ival.toInt());
-      }
-      else {
+      } else {
         ss << static_cast<float>(ival.toDouble());
       }
       added = true;
@@ -87,9 +96,13 @@ void percentFormat(Stack& stack, size_t num_inputs) {
       break;
     }
     ss << format.substr(begin, loc - begin);
-    TORCH_CHECK(used_args < args.size(), "Too few arguments for format string: ", format);
+    TORCH_CHECK(
+        used_args < args.size(),
+        "Too few arguments for format string: ",
+        format);
     char key = format.at(loc + 1);
-    if (std::find(specifiers.begin(), specifiers.end(), key) != specifiers.end()) {
+    if (std::find(specifiers.begin(), specifiers.end(), key) !=
+        specifiers.end()) {
       auto ins = getFormattedArg(key, args[used_args]);
       ss << ins;
       begin = loc + 2;

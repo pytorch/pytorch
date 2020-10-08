@@ -382,7 +382,7 @@ RegisterOperators reg(
            format(*stack, num_inputs);
          },
          aliasAnalysisFromSchema()),
-    OperatorGenerator(
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::percentFormat(str self, ...) -> str"),
          [](Stack* stack) {
            size_t num_inputs = pop(stack).toInt();

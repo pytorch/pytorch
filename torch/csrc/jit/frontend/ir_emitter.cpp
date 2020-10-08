@@ -3140,7 +3140,7 @@ struct to_ir {
         if (tree->tree(0)->kind() == TK_STRINGLITERAL) {
           auto values = getValues(tree->trees(), /*maybe_unpack=*/false);
           auto node = graph->create(aten::percentFormat, values, 1)
-                        ->setSourceRange(tree->range());
+                          ->setSourceRange(tree->range());
           Value* output = graph->insertNode(node)->output();
           output->setType(StringType::get());
           return output;
