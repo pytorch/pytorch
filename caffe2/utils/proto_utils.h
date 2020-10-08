@@ -80,13 +80,15 @@ inline bool ReadProtoFromTextFile(const string filename, MessageLite* proto) {
 
 inline void WriteProtoToTextFile(
     const MessageLite& /*proto*/,
-    const char* /*filename*/) {
+    const char* /*filename*/,
+    bool throwIfError = true) {
   LOG(FATAL) << "If you are running lite version, you should not be "
                   << "calling any text-format protobuffers.";
 }
 inline void WriteProtoToTextFile(const MessageLite& proto,
-                                 const string& filename) {
-  return WriteProtoToTextFile(proto, filename.c_str());
+                                 const string& filename,
+                                 bool throwIfError = true) {
+  return WriteProtoToTextFile(proto, filename.c_str(), throwIfError);
 }
 
 inline bool ReadProtoFromFile(const char* filename, MessageLite* proto) {
@@ -115,9 +117,9 @@ inline bool ReadProtoFromTextFile(const string filename, Message* proto) {
   return ReadProtoFromTextFile(filename.c_str(), proto);
 }
 
-CAFFE2_API void WriteProtoToTextFile(const Message& proto, const char* filename);
-inline void WriteProtoToTextFile(const Message& proto, const string& filename) {
-  return WriteProtoToTextFile(proto, filename.c_str());
+CAFFE2_API void WriteProtoToTextFile(const Message& proto, const char* filename, bool throwIfError = true);
+inline void WriteProtoToTextFile(const Message& proto, const string& filename, bool throwIfError = true) {
+  return WriteProtoToTextFile(proto, filename.c_str(), throwIfError);
 }
 
 // Read Proto from a file, letting the code figure out if it is text or binary.
