@@ -151,7 +151,7 @@ class LeakyReLU(torch.nn.LeakyReLU):
         return cls(float(scale), int(zero_point), mod.negative_slope, mod.inplace)
 
 class Sigmoid(torch.nn.Sigmoid):
-    r"""This is the quantized equivalent of :class:`~torch.nn.Sigmoid`.
+    r"""This is the quantized equivalent of :class:`~torch.nn.LeakyReLU`.
 
     Args:
         scale: quantization scale of the output tensor
