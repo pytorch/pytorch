@@ -192,6 +192,12 @@ class Tensor(torch._C._TensorBase):
         See :ref:`Default gradient layouts<default-grad-layouts>`
         for details on the memory layout of accumulated gradients.
 
+        .. note::
+
+            If you run any forward ops, create ``gradient``, and/or call ``backward``
+            in a user-specified CUDA stream context, see
+            :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
+
         Arguments:
             gradient (Tensor or None): Gradient w.r.t. the
                 tensor. If it is a tensor, it will be automatically converted

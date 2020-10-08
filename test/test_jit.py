@@ -76,7 +76,7 @@ from torch.testing._internal.test_module.no_future_div import div_int_nofuture, 
 from collections import defaultdict, namedtuple, OrderedDict
 import copy
 from copy import deepcopy
-from itertools import product, chain
+from itertools import product
 import itertools
 from textwrap import dedent
 from typing import List, Dict, Optional, Tuple, Union
@@ -1299,7 +1299,7 @@ graph(%Ra, %Rb):
 
         graph = torch.jit.script(broadcast).graph
         torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
-        FileCheck().check("Double(4:120, 3:40, 8:5, 5:1, device=cpu)").run(str(graph))
+        FileCheck().check("Double(4, 3, 8, 5, strides=[120, 40, 5, 1], device=cpu)").run(str(graph))
 
     def test_shape_analysis_unsqueeze_in_loop(self):
         input_str = """graph(%x.1 : Tensor):
@@ -1969,15 +1969,17 @@ graph(%Ra, %Rb):
                 tup_constant = constants[i] + ", " + constants[j]
                 check_constant(tup_constant)
 
+        dict_constants = []
         for i in range(len(constants)):
             # check_constant constructs the second dict with another Tensor
             # which fails the comparison
-            if isinstance(eval(constants[i]), (list, bool, Tensor)) or eval(constants[i]) is None:
+            if not isinstance(eval(constants[i]), (str, int, float)):
                 continue
             for j in range(len(constants)):
                 dict_constant = "{ " + constants[i] + ": " + constants[j] + "}"
                 check_constant(dict_constant)
-
+                dict_constants.append(dict_constant)
+        constants = constants + dict_constants
 
         # testing node hashing
         funcs_template = dedent('''
@@ -2009,14 +2011,8 @@ graph(%Ra, %Rb):
         # generate dicts with built-in types (excluding torch.Tensor)
         xprod = itertools.product(constants, constants)
 
-        def keys_pred(t):
-            return isinstance(eval(t[0]), (list, bool)) or eval(t[0]) is None
-
-        filt = [x for x in xprod if not keys_pred(x)]
-        dict_strs = map(lambda t: '{' + t[0] + ':' + t[1] + '}', filt)
-
         # test that equal tuples and dicts correctly work with node hashing
-        for tup in chain(map(lambda x: "(" + x + ",)", constants), dict_strs):
+        for tup in map(lambda x: "(" + x + ",)", constants):
             funcs_str = funcs_template.format(constant_constructor=tup)
             scope = {}
             execWrapper(funcs_str, globals(), scope)
@@ -2804,8 +2800,8 @@ class TestScript(JitTestCase):
                 test_not_const(torch.rand([2, 2]))
 
                 graph_str = torch.jit.last_executed_optimized_graph()
-                FileCheck().check("profiled_type=Double(*:2, 2:1, requires_grad=0, device=cpu").run(graph_str)
-                FileCheck().check_not("profiled_type=Double(1:2, 2:1, requires_grad=0, device=cpu").run(graph_str)
+                FileCheck().check("profiled_type=Double(*, 2, strides=[2, 1], requires_grad=0, device=cpu").run(graph_str)
+                FileCheck().check_not("profiled_type=Double(1, 2, strides=[2, 1], requires_grad=0, device=cpu").run(graph_str)
 
 
     def test_nested_bailouts(self):
@@ -9775,7 +9771,7 @@ dedent """
 
         cm = ScriptMod(Mod())
         # specialized tensor in graph
-        FileCheck().check("Double(1:3, 3:1, requires_grad=0, device=cpu)").run(cm.forward.graph)
+        FileCheck().check("Double(1, 3, strides=[3, 1], requires_grad=0, device=cpu)").run(cm.forward.graph)
         buffer = io.BytesIO()
         torch.jit.save(cm, buffer)
         buffer.seek(0)
@@ -10334,7 +10330,7 @@ dedent """
         a = torch.zeros(2, 2)
         b = torch.zeros(4, dtype=torch.long)
         torch._C._jit_pass_complete_shape_analysis(foo.graph, (a, b), False)
-        FileCheck().check("Double(2:4, 4:1, requires_grad=0, device=cpu)").run(str(foo.graph))
+        FileCheck().check("Double(2, 4, strides=[4, 1], requires_grad=0, device=cpu)").run(str(foo.graph))
 
     def test_shape_analysis_loop(self):
         def foo(a, b, x):
@@ -10622,8 +10618,8 @@ dedent """
                 out = fn()
                 graph_str = torch.jit.last_executed_optimized_graph()
                 self.assertEqual(out.dtype, torch.double)
-                FileCheck().check("Double(3:4, 4:1, requires_grad=0, device=cpu)") \
-                           .check_not("Float(3:4, 4:1, requires_grad=0, device=cpu)").run(graph_str)
+                FileCheck().check("Double(3, 4, strides=[4, 1], requires_grad=0, device=cpu)") \
+                           .check_not("Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu)").run(graph_str)
 
             # fn = self.checkScript(test_rand, ())
             # out = fn()
@@ -10640,7 +10636,7 @@ dedent """
                 out = randint()
                 graph_str = torch.jit.last_executed_optimized_graph()
                 self.assertEqual(out.dtype, torch.double)
-                FileCheck().check("profiled_type=Double(1:2, 2:1, requires_grad=0, device=cpu)").run(graph_str)
+                FileCheck().check("profiled_type=Double(1, 2, strides=[2, 1], requires_grad=0, device=cpu)").run(graph_str)
 
 
     def test_erase_number_types(self):
