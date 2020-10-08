@@ -1,8 +1,7 @@
 import torch
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
-    skipCUDAIfRocm, dtypesIfCUDA, dtypesIfCPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, skipCUDAIfRocm
 from torch._six import inf, nan
 
 N_values = [20] if not TEST_WITH_SLOW else [30, 300]
@@ -196,53 +195,53 @@ class TestForeach(TestCase):
             self.assertEqual(res_min, expected_min)
 
 
-    @dtypes(*torch.testing.get_all_dtypes(include_complex=False))
-    def atest_max_min_float_inf_nan(self, device, dtype):
-            a = [
-                torch.tensor([float('inf') ], device=device, dtype=dtype),
-                torch.tensor([-float('inf')], device=device, dtype=dtype),
-                torch.tensor([float('nan')], device=device, dtype=dtype),
-                torch.tensor([float('nan')], device=device, dtype=dtype)
-            ]
+    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False)))
+    def test_max_min_float_inf_nan(self, device, dtype):
+        a = [
+            torch.tensor([float('inf')], device=device, dtype=dtype),
+            torch.tensor([-float('inf')], device=device, dtype=dtype),
+            torch.tensor([float('nan')], device=device, dtype=dtype),
+            torch.tensor([float('nan')], device=device, dtype=dtype)
+        ]
 
-            b = [
-                torch.tensor([-float('inf')], device=device, dtype=dtype),
-                torch.tensor([ float('inf')], device=device, dtype=dtype),
-                torch.tensor([float('inf')], device=device, dtype=dtype),
-                torch.tensor([float('nan')], device=device, dtype=dtype)
-            ]
+        b = [
+            torch.tensor([-float('inf')], device=device, dtype=dtype),
+            torch.tensor([float('inf')], device=device, dtype=dtype),
+            torch.tensor([float('inf')], device=device, dtype=dtype),
+            torch.tensor([float('nan')], device=device, dtype=dtype)
+        ]
 
-            expected = [torch.max(a1, b1) for a1, b1 in zip(a,b)]
-            res = torch._foreach_max(a, b)
-            self.assertEqual(expected, res)
+        expected = [torch.max(a1, b1) for a1, b1 in zip(a, b)]
+        res = torch._foreach_max(a, b)
+        self.assertEqual(expected, res)
 
-            expected = [torch.min(a1, b1) for a1, b1 in zip(a,b)]
-            res = torch._foreach_min(a, b)
-            self.assertEqual(expected, res)
+        expected = [torch.min(a1, b1) for a1, b1 in zip(a, b)]
+        res = torch._foreach_min(a, b)
+        self.assertEqual(expected, res)
 
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False)))
     def test_max_min_inf_nan(self, device, dtype):
-            a = [
-                torch.tensor([inf], device=device, dtype=dtype),
-                torch.tensor([-inf], device=device, dtype=dtype),
-                torch.tensor([nan], device=device, dtype=dtype),
-                torch.tensor([nan], device=device, dtype=dtype)
-            ]
+        a = [
+            torch.tensor([inf], device=device, dtype=dtype),
+            torch.tensor([-inf], device=device, dtype=dtype),
+            torch.tensor([nan], device=device, dtype=dtype),
+            torch.tensor([nan], device=device, dtype=dtype)
+        ]
 
-            b = [
-                torch.tensor([-inf], device=device, dtype=dtype),
-                torch.tensor([inf], device=device, dtype=dtype),
-                torch.tensor([inf], device=device, dtype=dtype),
-                torch.tensor([nan], device=device, dtype=dtype)
-            ]
+        b = [
+            torch.tensor([-inf], device=device, dtype=dtype),
+            torch.tensor([inf], device=device, dtype=dtype),
+            torch.tensor([inf], device=device, dtype=dtype),
+            torch.tensor([nan], device=device, dtype=dtype)
+        ]
 
-            expected_max = [torch.max(a1, b1) for a1, b1 in zip(a,b)]
-            res_max = torch._foreach_max(a, b)
-            self.assertEqual(expected_max, res_max)
+        expected_max = [torch.max(a1, b1) for a1, b1 in zip(a, b)]
+        res_max = torch._foreach_max(a, b)
+        self.assertEqual(expected_max, res_max)
 
-            expected_min = [torch.min(a1, b1) for a1, b1 in zip(a,b)]
-            res_min = torch._foreach_min(a, b)
-            self.assertEqual(expected_min, res_min)
+        expected_min = [torch.min(a1, b1) for a1, b1 in zip(a, b)]
+        res_min = torch._foreach_min(a, b)
+        self.assertEqual(expected_min, res_min)
 
     #
     # Ops with scalar
