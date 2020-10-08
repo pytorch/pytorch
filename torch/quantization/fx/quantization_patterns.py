@@ -410,8 +410,8 @@ class DefaultNode(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
         if not self.all_nodes:
             return NotImplemented
-        assert node.op in ['call_module', 'call_function', 'call_method'], 'Only call_module and ' + \
-            'call_function are handled in DefaultNode ' + \
+        assert node.op in ['call_module', 'call_function', 'call_method'], 'Only call_module, ' + \
+            'call_function and call_method are handled in DefaultNode ' + \
             'found:' + node.op + ' ' + node.target
         activation_post_process = quantizer.activation_post_process_map[node.name]
         if node.op == 'call_module':

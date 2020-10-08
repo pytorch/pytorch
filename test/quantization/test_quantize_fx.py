@@ -1182,11 +1182,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 extra_kwargs, extra_kwargs)
 
     def test_sigmoid(self):
-        self._test_activation_impl(nn.Sigmoid, F.sigmoid, nnq.Sigmoid, torch.ops.quantized.sigmoid)
+        self._test_activation_impl(nn.Sigmoid, torch.sigmoid, nnq.Sigmoid, torch.ops.quantized.sigmoid)
 
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
+
             def forward(self, x):
                 x = x.sigmoid()
                 x.sigmoid_()
@@ -1436,7 +1437,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 self.hardsigmoid = torch.nn.Hardsigmoid()
-                self.sigmoid = torch.nn.Sigmoid()
                 self.tanh = torch.nn.Tanh()
 
             def forward(self, x):
@@ -1464,11 +1464,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = F.hardsigmoid(x, inplace=True)
                 x = x.hardsigmoid()
                 x.hardsigmoid_()
-                x = self.sigmoid(x)
-                x = torch.sigmoid(x)
-                # F.sigmoid is deprecated
-                x = x.sigmoid()
-                x.sigmoid_()
                 x = self.tanh(x)
                 # F.tanh is deprecated
                 x = torch.tanh(x)
