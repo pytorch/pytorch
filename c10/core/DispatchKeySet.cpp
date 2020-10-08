@@ -15,7 +15,7 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends | Disp
 
 // math_dispatch_keyset contains all keys in backend_dispatch_keyset and autograd_dispatch_keyset
 // Alias key DispatchKey::Math maps to math_dispatch_keyset.
-constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset | autograd_dispatch_keyset;
+constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset | autograd_dispatch_keyset | DispatchKeySet(DispatchKey::Meta);
 
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
