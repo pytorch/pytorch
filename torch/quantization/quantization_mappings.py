@@ -19,7 +19,6 @@ STATIC_QUANT_MODULE_MAPPINGS = {
     nn.Hardswish: nnq.Hardswish,
     nn.ELU: nnq.ELU,
     nn.LeakyReLU: nnq.LeakyReLU,
-    nn.Sigmoid: nnq.Sigmoid,
     nn.Conv1d: nnq.Conv1d,
     nn.Conv2d: nnq.Conv2d,
     nn.Conv3d: nnq.Conv3d,
@@ -86,11 +85,6 @@ _INCLUDE_QCONFIG_PROPAGATE_LIST = {
 FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS = {
     F.elu: torch._ops.ops.quantized.elu,
     F.leaky_relu: torch._ops.ops.quantized.leaky_relu,
-    torch.sigmoid: torch._ops.ops.quantized.sigmoid,
-    # note that F.sigmoid is deprecated
-    F.sigmoid: torch._ops.ops.quantized.sigmoid,
-    'sigmoid': torch._ops.ops.quantized.sigmoid,
-    'sigmoid_': torch._ops.ops.quantized.sigmoid,
     F.hardswish: torch._ops.ops.quantized.hardswish,
     F.instance_norm: torch._ops.ops.quantized.instance_norm,
     F.layer_norm: torch._ops.ops.quantized.layer_norm,
