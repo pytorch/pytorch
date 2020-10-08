@@ -516,7 +516,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
   }
 }
 
-c10::intrusive_ptrptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
@@ -582,7 +582,7 @@ c10::intrusive_ptrptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
   }
 }
 
-c10::intrusive_ptrptr<ProcessGroup::Work> ProcessGroupMPI::reduce_scatter(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {

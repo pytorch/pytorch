@@ -116,31 +116,31 @@ class ProcessGroupMPI : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-  c10::intrusive_ptrptr<ProcessGroup::Work> allreduce_coalesced(
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts =
           AllreduceCoalescedOptions()) override;
 
-  c10::intrusive_ptrptr<ProcessGroup::Work> reduce(
+  c10::intrusive_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
 
-  c10::intrusive_ptrptr<ProcessGroup::Work> allgather(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptrptr<ProcessGroup::Work> allgather_base(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
       at::Tensor& outputbuffer,
       at::Tensor& inputbuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptrptr<ProcessGroup::Work> allgather_coalesced(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& outputTensorLists,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptrptr<ProcessGroup::Work> gather(
+  c10::intrusive_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const GatherOptions& opts = GatherOptions()) override;
@@ -150,24 +150,24 @@ class ProcessGroupMPI : public ProcessGroup {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& opts = ScatterOptions()) override;
 
-  c10::intrusive_ptrptr<ProcessGroup::Work> reduce_scatter(
+  c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptrptr<ProcessGroup::Work> alltoall_base(
+  c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputSplitSizes,
       std::vector<int64_t>& inputSplitSizes,
       const AllToAllOptions& opts = AllToAllOptions()) override;
 
-  c10::intrusive_ptrptr<ProcessGroup::Work> alltoall(
+  c10::intrusive_ptr<ProcessGroup::Work> alltoall(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllToAllOptions& opts = AllToAllOptions()) override;
 
-  c10::intrusive_ptrptr<ProcessGroup::Work> send(
+  c10::intrusive_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag);
