@@ -32,6 +32,19 @@ def _fuse_fx(graph_module, inplace=False):
     fuser = Fuser()
     return fuser.fuse(graph_module, inplace)
 
+class CustomTracer(Tracer):
+    def __init__(self, standalone_modules, custom_module_classes):
+        super().__init__()
+        self.standalone_modules = standalone_modules
+        self.custom_module_classes = custom_module_classes
+
+    def is_leaf_module(self, m, module_qualified_name):
+        return (m.__module__.startswith('torch.nn') and
+                not isinstance(m, torch.nn.Sequential)) or \
+            module_qualified_name in self.standalone_modules or \
+            type(m) in self.custom_module_classes
+
+
 def _prepare_fx(model, qconfig_dict, inplace, is_standalone_module=False):
     r""" Internal helper function for prepare_fx
     Args:
@@ -44,24 +57,19 @@ forward graph of the parent module,
       :func:`~torch.quantization._prepare_standalone_module_fx`
     """
     # symbolically trace the model
-    standalone_modules = qconfig_dict.get('standalone_module_name', [])
-    custom_module_config = qconfig_dict.get('custom_module_class', [])
-    custom_module_class = [config[0] for config in custom_module_config]
-    _register_custom_module_class(custom_module_config)
-
-    class CustomTracer(Tracer):
-        def is_leaf_module(self, m, module_qualified_name):
-            return (m.__module__.startswith('torch.nn') and \
-                not isinstance(m, torch.nn.Sequential)) or \
-                module_qualified_name in standalone_modules or \
-                type(m) in custom_module_class
-
     if is_standalone_module:
         # standlone module is traced before quantizing standalone modules
         graph_module = symbolic_trace(model)
     else:
+        standalone_modules = qconfig_dict.get('standalone_module_name', [])
+        custom_module_config = qconfig_dict.get('custom_module_class', [])
+        custom_module_classes = [config[0] for config in custom_module_config]
+        # TODO: currently we are registering classes globally,
+        # we want to make custom module class mapping local
+        _register_custom_module_class(custom_module_config)
         # skipping tracing standalone modules when tracing top level module
-        graph_module = GraphModule(model, CustomTracer().trace(model))
+        tracer = CustomTracer(standalone_modules, custom_module_classes)
+        graph_module = GraphModule(model, tracer.trace(model))
     graph_module = _fuse_fx(graph_module, inplace)
     quantizer = Quantizer()
     return quantizer.prepare(graph_module, qconfig_dict, inplace=True, is_standalone_module=is_standalone_module)

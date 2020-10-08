@@ -2,7 +2,6 @@ import torch
 from torch.fx import (
     GraphModule,
     Proxy,
-    symbolic_trace,
     map_arg
 )
 
