@@ -76,7 +76,7 @@ from torch.testing._internal.test_module.no_future_div import div_int_nofuture, 
 from collections import defaultdict, namedtuple, OrderedDict
 import copy
 from copy import deepcopy
-from itertools import product, chain
+from itertools import product
 import itertools
 from textwrap import dedent
 from typing import List, Dict, Optional, Tuple, Union
@@ -1969,15 +1969,17 @@ graph(%Ra, %Rb):
                 tup_constant = constants[i] + ", " + constants[j]
                 check_constant(tup_constant)
 
+        dict_constants = []
         for i in range(len(constants)):
             # check_constant constructs the second dict with another Tensor
             # which fails the comparison
-            if isinstance(eval(constants[i]), (list, bool, Tensor)) or eval(constants[i]) is None:
+            if not isinstance(eval(constants[i]), (str, int, float)):
                 continue
             for j in range(len(constants)):
                 dict_constant = "{ " + constants[i] + ": " + constants[j] + "}"
                 check_constant(dict_constant)
-
+                dict_constants.append(dict_constant)
+        constants = constants + dict_constants
 
         # testing node hashing
         funcs_template = dedent('''
@@ -2009,14 +2011,8 @@ graph(%Ra, %Rb):
         # generate dicts with built-in types (excluding torch.Tensor)
         xprod = itertools.product(constants, constants)
 
-        def keys_pred(t):
-            return isinstance(eval(t[0]), (list, bool)) or eval(t[0]) is None
-
-        filt = [x for x in xprod if not keys_pred(x)]
-        dict_strs = map(lambda t: '{' + t[0] + ':' + t[1] + '}', filt)
-
         # test that equal tuples and dicts correctly work with node hashing
-        for tup in chain(map(lambda x: "(" + x + ",)", constants), dict_strs):
+        for tup in map(lambda x: "(" + x + ",)", constants):
             funcs_str = funcs_template.format(constant_constructor=tup)
             scope = {}
             execWrapper(funcs_str, globals(), scope)
