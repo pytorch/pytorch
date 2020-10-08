@@ -474,8 +474,10 @@ foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration
              unsigned_compare_with_zero
              declared_but_not_referenced
              bad_friend_decl)
-  list(APPEND CUDA_NVCC_FLAGS -Xcudafe --diag_suppress=${diag})
+  list(APPEND SUPPRESS_WARNING_FLAGS --diag_suppress=${diag})
 endforeach()
+string(REPLACE ";" "," SUPPRESS_WARNING_FLAGS "${SUPPRESS_WARNING_FLAGS}")
+list(APPEND CUDA_NVCC_FLAGS -Xcudafe ${SUPPRESS_WARNING_FLAGS})
 
 # Set C++14 support
 set(CUDA_PROPAGATE_HOST_FLAGS_BLOCKLIST "-Werror")
