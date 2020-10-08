@@ -8,6 +8,10 @@ namespace linalg {
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
 
+inline Tensor cholesky(const Tensor& self) {
+  return torch::linalg_cholesky(self);
+}
+
 inline Tensor det(const Tensor& self) {
   return torch::linalg_det(self);
 }
@@ -31,6 +35,20 @@ inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, opt
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
+/// Cholesky decomposition
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.cholesky
+///
+/// Example:
+/// ```
+/// auto A = torch::randn({4, 4});
+/// auto A = torch::matmul(A, A.t());
+/// auto L = torch::linalg::cholesky(A);
+/// assert(torch::allclose(torch::matmul(L, L.t()), A));
+/// ```
+inline Tensor cholesky(const Tensor& self) {
+  return detail::cholesky(self);
+}
 
 /// See the documentation of torch.linalg.det
 inline Tensor linalg_det(const Tensor& self) {
