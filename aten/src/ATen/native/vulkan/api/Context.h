@@ -67,13 +67,13 @@ Context* context();
 //
 
 inline GPU Context::gpu() {
-    // A GPU is simply a (physical device, logical device, device queue) trio.
-    return {
-      &adapter_,
-      device(),
-      queue(),
-    };
-  }
+  // A GPU is simply a (physical device, logical device, device queue) trio.
+  return {
+    &adapter_,
+    device(),
+    queue(),
+  };
+}
 
 inline Command& Context::command() {
   return command_;
