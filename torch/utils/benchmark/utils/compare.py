@@ -294,9 +294,9 @@ class Compare(object):
 
     def _render(self):
         results = common.Measurement.merge(self._results)
-        results = self._group_by_label(results)
+        grouped_results = self._group_by_label(results)
         output = []
-        for group in results.values():
+        for group in grouped_results.values():
             output.append(self._layout(group))
         return output
 

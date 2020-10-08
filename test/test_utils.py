@@ -848,7 +848,7 @@ class TestBenchmarkUtils(TestCase):
                     with torch.no_grad():
                         y = x + 1
                 """,
-                label = "x + 1",
+                label="x + 1",
                 sub_label="scalar_add",
             ).blocked_autorange(min_run_time=10),
             """
@@ -984,7 +984,7 @@ class TestBenchmarkUtils(TestCase):
                 -134  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
                 -180  /tmp/build/80754af9/python_15996 ... da3/envs/throwaway/bin/python3.6]
 
-            Total: 8863284""" # 8869966 - 6682 = 8863284
+            Total: 8863284"""  # 8869966 - 6682 = 8863284
         )
 
         assert_reprs_match(

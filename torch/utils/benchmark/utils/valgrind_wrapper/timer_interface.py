@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from typing import cast, Any, Callable, DefaultDict, Dict, Generator, Iterable, List, NamedTuple, Optional, Tuple, Union
+from typing import cast, Any, Callable, DefaultDict, Dict, Generator, List, NamedTuple, Optional, Tuple, Union
 
 import torch
 from torch.utils.benchmark.utils import common
@@ -252,9 +252,9 @@ class CallgrindStats(object):
 
 
 class Serialization(enum.Enum):
-        PICKLE = 0
-        TORCH = 1
-        TORCH_JIT = 2
+    PICKLE = 0
+    TORCH = 1
+    TORCH_JIT = 2
 
 
 _GLOBALS_TYPES_WHITELIST: Dict[Serialization, Tuple[Any, ...]] = {
@@ -745,7 +745,8 @@ def load_test_example() -> Tuple[CallgrindStats, CallgrindStats]:
     with open(artifact_path, "rt") as f:
         artifacts = json.load(f)
 
-    pattern = re.compile("^\s*([0-9]+)\s(.+)$")
+    pattern = re.compile(r"^\s*([0-9]+)\s(.+)$")
+
     def to_function_counts(count_strings: List[str], inclusive: bool) -> FunctionCounts:
         data: List[FunctionCount] = []
         for cs in count_strings:
