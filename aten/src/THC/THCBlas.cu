@@ -133,6 +133,7 @@ void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int6
   at::cuda::blas::gemm<double>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
+#ifndef __HIP_PLATFORM_HCC__
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11200
 #define cublasGemmStridedBatchedExFix cublasGemmStridedBatchedEx
 #else
@@ -178,6 +179,7 @@ cublasStatus_t cublasGemmStridedBatchedExFix(cublasHandle_t &handle,
   }
   return result;
 }
+#endif
 #endif
 
 void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
