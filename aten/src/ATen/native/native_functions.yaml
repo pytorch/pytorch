@@ -5699,6 +5699,10 @@
     CPU: _svd_helper_cpu
     CUDA: _svd_helper_cuda
 
+- func: swapdim(Tensor(a) self, int source, int destination) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function
+
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: cholesky(Tensor self, bool upper=False) -> Tensor
