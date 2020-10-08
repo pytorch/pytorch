@@ -91,7 +91,7 @@ class TORCH_API LoopNest {
 
   Stmt* root_stmt_;
 
-  std::unordered_set<Tensor*> output_tensors_;
+  std::unordered_set<const Buf*> output_bufs_;
   std::unordered_set<const Buf*> intermediate_bufs_;
   // Holds the initializer Expr of buffers that have been initialized.
   std::unordered_map<const Buf*, const Expr*> buf_initializers_;
