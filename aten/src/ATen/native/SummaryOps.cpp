@@ -198,10 +198,11 @@ std::tuple<Tensor,Tensor> _histogram_cpu_uniform_bins(
   }
 
   Tensor edges;
-  if (self.scalar_type() == kFloat) {
+  if (c10::isFloatingType(self.scalar_type())) {
     edges = at::linspace(min, max, bins + 1, self.options());
   } else {
-    edges = at::linspace(min, max, bins + 1, self.options().dtype(kDouble));
+    edges = at::linspace(
+        min, max, bins + 1, self.options().dtype(c10::get_default_dtype()));
   }
 
   return std::make_tuple(hist, edges);
