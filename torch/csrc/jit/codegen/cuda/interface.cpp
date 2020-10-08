@@ -43,7 +43,7 @@ void fuseGraph(std::shared_ptr<Graph>& graph) {
 
 bool canFuseNode(const Node* node) {
   return getFuserInterface()->fn_can_fuse_n_ != nullptr &&
-  getFuserInterface()->fn_can_fuse_n_(node);
+      getFuserInterface()->fn_can_fuse_n_(node);
 }
 
 //! [ Note -- type guard logic in CudaFusionGuard ]

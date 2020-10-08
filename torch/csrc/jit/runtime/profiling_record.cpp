@@ -1,12 +1,12 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <ATen/core/interned_strings.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include <torch/csrc/jit/codegen/cuda/interface.h>
 
 namespace torch {
 namespace jit {
