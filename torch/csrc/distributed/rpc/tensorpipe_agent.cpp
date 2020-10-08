@@ -1049,17 +1049,17 @@ std::vector<c10::DeviceIndex> TensorPipeAgent::getDevicesForTensors(
     std::vector<c10::DeviceIndex> deviceIndices;
     deviceIndices.reserve(message.tensors().size());
     const auto& deviceMap = iter->second;
-    for (const auto& t : message.tensors()) {
-      const auto deviceIter = deviceMap.find(t.device().index());
-      if (deviceIter == deviceMap.end()) {
+    for (const auto&t : message.tensors()) {
+      if (t.device().is_cpu()) {
+        deviceIndices.push_back(-1);
+      } else {
+        const auto deviceIter = deviceMap.find(t.device().index());
         TORCH_CHECK(
-            t.device().is_cpu(),
+            deviceIter != deviceMap.end(),
             errStr,
             " for device ",
             t.device(),
             " but received a tensor on that device.");
-        deviceIndices.push_back(-1);
-      } else {
         deviceIndices.push_back(deviceIter->second);
       }
     }
