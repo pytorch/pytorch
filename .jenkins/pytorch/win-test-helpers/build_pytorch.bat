@@ -103,7 +103,7 @@ if "%USE_CUDA%"=="1" (
   :: in PATH, and then pass the arguments to it.
   :: Currently, randomtemp is placed before sccache (%TMP_DIR_WIN%\bin\nvcc)
   :: so we are actually pretending sccache instead of nvcc itself.
-  curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.2/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
+  curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.3/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
   set RANDOMTEMP_EXECUTABLE=%TMP_DIR_WIN%\bin\nvcc.exe
   set CUDA_NVCC_EXECUTABLE=%TMP_DIR_WIN%\bin\randomtemp.exe
   set RANDOMTEMP_BASEDIR=%TMP_DIR_WIN%\bin
