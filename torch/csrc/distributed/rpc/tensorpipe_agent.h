@@ -200,7 +200,7 @@ class TensorPipeAgent : public RpcAgent {
   // by client, and read request messages by server.
   void pipeRead(
       const std::shared_ptr<tensorpipe::Pipe>&,
-      std::function<void(const tensorpipe::Error&, Message&&)>) noexcept;
+      std::function<void(const tensorpipe::Error&, Message&&)>);
 
   // TensorPipe write function that could be used to write response
   // messages by server, and write request messages by client.
@@ -208,7 +208,7 @@ class TensorPipeAgent : public RpcAgent {
       const std::shared_ptr<tensorpipe::Pipe>&,
       Message&& message,
       std::vector<c10::DeviceIndex>&& devices,
-      std::function<void(const tensorpipe::Error&)>) noexcept;
+      std::function<void(const tensorpipe::Error&)>);
 
   // Callback of listener accept()
   void onListenerAccepted(
