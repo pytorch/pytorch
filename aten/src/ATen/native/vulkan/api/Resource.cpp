@@ -230,7 +230,10 @@ Resource::Pool::~Pool() {
 
 Resource::Pool::Pool(Pool&& pool)
   : device_(std::move(pool.device_)),
-    allocator_(std::move(pool.allocator_)) {
+    allocator_(std::move(pool.allocator_)),
+    buffer_(std::move(pool.buffer_)),
+    image_(std::move(pool.image_)),
+    fence_(std::move(pool.fence_)) {
   pool.device_ = VK_NULL_HANDLE;
 }
 
@@ -238,6 +241,9 @@ Resource::Pool& Resource::Pool::operator=(Pool&& pool) {
   if (&pool != this) {
     device_ = std::move(pool.device_);
     allocator_ = std::move(pool.allocator_);
+    buffer_ = std::move(pool.buffer_);
+    image_ = std::move(pool.image_);
+    fence_ = std::move(pool.fence_);
 
     pool.device_ = VK_NULL_HANDLE;
   };
@@ -249,7 +255,7 @@ Resource::Buffer Resource::Pool::buffer(
     const Buffer::Descriptor& descriptor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && allocator_,
-      "Invalid Vulkan device and / or allocator! ",
+      "This resource pool is in an invalid state! ",
       "Potential reason: This resource pool is moved from.");
 
   const VkBufferCreateInfo buffer_create_info{
@@ -302,7 +308,7 @@ Resource::Image Resource::Pool::image(
     const Image::Descriptor& descriptor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && allocator_,
-      "Invalid Vulkan device and / or allocator! ",
+      "This resource pool is in an invalid state! ",
       "Potential reason: This resource pool is moved from.");
 
   const VkImageCreateInfo image_create_info{
@@ -393,6 +399,11 @@ Resource::Image Resource::Pool::image(
 }
 
 Resource::Fence Resource::Pool::fence() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && allocator_,
+      "This resource pool is in an invalid state! ",
+      "Potential reason: This resource pool is moved from.");
+
   if (fence_.pool.size() == fence_.in_use) {
     const VkFenceCreateInfo fence_create_info{
       VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
@@ -423,7 +434,7 @@ Resource::Fence Resource::Pool::fence() {
 void Resource::Pool::purge() {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && allocator_,
-      "Invalid Vulkan device and / or allocator! ",
+      "This resource pool is in an invalid state! ",
       "Potential reason: This resource pool is moved from.");
 
   if (!fence_.waitlist.empty()) {
