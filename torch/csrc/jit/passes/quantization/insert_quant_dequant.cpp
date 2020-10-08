@@ -342,7 +342,9 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     for (auto i = 1; i < inputs_size - 1; ++i) {
       qembedding_bag_inputs.push_back(embedding_bag_inputs[i]);
     }
-    // Set the sparse field to 0 for inference.
+    // The sparse field in the float operator denotes sparse gradients.
+    // For inference this stands for pruned weights. We currently don't support
+    // pruning in graph mode API so we set the field to 0 for inference.
     qembedding_bag_inputs[5] = sparse_const;
   } else {
     TORCH_CHECK(
@@ -353,7 +355,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     qembedding_bag_inputs.push_back(
         embedding_bag_inputs[6]); // scale_grad_by_freq
     qembedding_bag_inputs.push_back(zero); // mode
-    qembedding_bag_inputs.push_back(sparse_const); // sparse
+    qembedding_bag_inputs.push_back(sparse_const); // pruned_weights
     qembedding_bag_inputs.push_back(
         embedding_bag_inputs[9]); // per_sample_weights
   }
