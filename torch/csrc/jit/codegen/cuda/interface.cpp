@@ -41,6 +41,11 @@ void fuseGraph(std::shared_ptr<Graph>& graph) {
   getFuserInterface()->fn_fuse_graph(graph);
 }
 
+bool canFuseNode(const Node* node) {
+  return getFuserInterface()->fn_can_fuse_n_ != nullptr &&
+  getFuserInterface()->fn_can_fuse_n_(node);
+}
+
 //! [ Note -- type guard logic in CudaFusionGuard ]
 //!
 //! CudaFusionGuard is used to Guard input tensor to `CudaFusionGroup` so that

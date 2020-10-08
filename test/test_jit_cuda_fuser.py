@@ -772,6 +772,21 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    @skipIfRocm
+    def test_profiling_node(self):
+        dtype = torch.float
+        device = "cuda"
+        x = torch.randn(4, 8, 8, 8, dtype=dtype, device=device)
+
+        def repro(x: torch.Tensor, alpha: float):
+            o = torch.rand_like(x)
+            o = torch.add(o, alpha)
+            return o
+        repro_jit = torch.jit.script(repro)
+        self._run_helper(repro_jit, repro, x, 0.6)
 
 class TestPassManagerCudaFuser(JitTestCase):
 

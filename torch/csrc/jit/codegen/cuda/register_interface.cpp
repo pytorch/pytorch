@@ -19,6 +19,7 @@ class RegisterInterface {
     ptr->fn_compile_n_ = &compileCudaFusionGroup;
     ptr->fn_run_n_s_ = &runCudaFusionGroup;
     ptr->fn_fuse_graph = &CudaFuseGraph;
+    ptr->fn_can_fuse_n_ = &isFusableCudaFusionGroup;
   }
 };
 

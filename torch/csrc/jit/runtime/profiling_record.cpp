@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 
 namespace torch {
 namespace jit {
@@ -167,6 +168,10 @@ bool needsProfiledInputs(Node* n) {
     return true;
   }
 
+  if (fuser::cuda::canFuseNode(n)) {
+    return true;
+  }
+
   switch (n->kind()) {
     // specialize_autogradzero
     case prim::AutogradAdd:
@@ -195,6 +200,10 @@ bool needsProfiledInputs(Node* n) {
 
 bool needsProfiledOutput(Node* n) {
   if (tensorexpr::isSupported(n)) {
+    return true;
+  }
+
+  if (fuser::cuda::canFuseNode(n)) {
     return true;
   }
 
