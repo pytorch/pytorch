@@ -92,7 +92,8 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         to get the value.
 
         We recommend that you use the ``then`` API as it provides a way to synchronize
-        after your callback has completed. But both ``then`` and ``add_done_callback``
+        after your callback has completed. ``add_done_callback`` can be cheaper if your
+        callback does not return anything. But both ``then`` and ``add_done_callback``
         use the same callback registration API under the hood, and thus the order of
         their callbacks will be maintained even if their calls are interleaved.
 
