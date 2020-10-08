@@ -330,8 +330,8 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   // Create and insert quantized embedding op.
   Value* none = g->insertConstant(IValue());
   Value* zero = g->insertConstant(IValue(0));
-  bool sparse_param = false;
-  auto sparse_const = g->insertConstant(sparse_param);
+  bool pruned_wt = false;
+  auto pruned_const = g->insertConstant(pruned_wt);
 
   if (is_aten_op) {
     TORCH_CHECK(
@@ -345,7 +345,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     // The sparse field in the float operator denotes sparse gradients.
     // For inference this stands for pruned weights. We currently don't support
     // pruning in graph mode API so we set the field to 0 for inference.
-    qembedding_bag_inputs[5] = sparse_const;
+    qembedding_bag_inputs[5] = pruned_const;
   } else {
     TORCH_CHECK(
         inputs_size == 11,
@@ -355,7 +355,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     qembedding_bag_inputs.push_back(
         embedding_bag_inputs[6]); // scale_grad_by_freq
     qembedding_bag_inputs.push_back(zero); // mode
-    qembedding_bag_inputs.push_back(sparse_const); // pruned_weights
+    qembedding_bag_inputs.push_back(pruned_const); // pruned_weights
     qembedding_bag_inputs.push_back(
         embedding_bag_inputs[9]); // per_sample_weights
   }
