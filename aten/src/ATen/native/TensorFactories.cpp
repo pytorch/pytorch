@@ -350,8 +350,14 @@ Tensor empty_like(
     if (self.is_non_overlapping_and_dense()) {
       result = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
     } else {
-      // See Note [Explicit nullopt MemoryFormat argument]
-      result = at::empty(self.sizes(), options.memory_format(self.suggest_memory_format()), c10::nullopt);
+      DimVector strides;
+      if (infer_dense_strides(self, strides)) {
+        // See Note [Explicit nullopt MemoryFormat argument]
+        result = at::empty_strided(self.sizes(), strides, options.memory_format(c10::nullopt));
+      } else {
+        // See Note [Explicit nullopt MemoryFormat argument]
+        result = at::empty(self.sizes(), options.memory_format(self.suggest_memory_format()), c10::nullopt);
+      }
     }
   } else {
     // See Note [Explicit nullopt MemoryFormat argument]
