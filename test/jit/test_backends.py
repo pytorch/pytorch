@@ -242,18 +242,32 @@ class SelectiveLoweringTest(JitBackendTestCase):
         Check that type remapping and replacement occurred during selective lowering.
         """
         # Check that self.lowered_module was not lowered; there should be no uses of the lowered module type in its graph.
-        FileCheck().check("OuterModule").check_not("test_backendLoweredModule").run(self.lowered_module.graph)
+        FileCheck() \
+            .check("OuterModule") \
+            .check_not("test_backendLoweredModule") \
+            .run(self.lowered_module.graph)
 
         # Check that self.lowered_module.submodule was not lowered but that BasicModule has been replaced in its graph.
         # self.scripted_module.submodule should be an OuterModule that contains a BasicModule.
         # self.lowered_module.submodule should be an OuterModule that contains a test_backendLoweredModule.
-        FileCheck().check("OuterModule").check("BasicModule").check_not("test_backendLoweredModule").run(self.scripted_module.submodule.graph)
-        FileCheck().check("OuterModule").check("test_backendLoweredModule").check_not("BasicModule").run(self.lowered_module.submodule.graph)
+        FileCheck() \
+            .check("OuterModule") \
+            .check("BasicModule") \
+            .check_not("test_backendLoweredModule") \
+            .run(self.scripted_module.submodule.graph)
+        FileCheck() \
+            .check("OuterModule") \
+            .check("test_backendLoweredModule") \
+            .check_not("BasicModule") \
+            .run(self.lowered_module.submodule.graph)
 
         # Check that self.lowered_module.submodule.submodule was lowered. Its graph should mention
         # __torch__.torch.classes.__backends__.test_backend, the TorchBind class for executing functions
         # on the test JIT backend.
-        FileCheck().check_not("BasicModule").check("__torch__.torch.classes.__backends__.test_backend").run(self.lowered_module.submodule.submodule.graph)
+        FileCheck() \
+            .check_not("BasicModule") \
+            .check("__torch__.torch.classes.__backends__.test_backend") \
+            .run(self.lowered_module.submodule.submodule.graph)
 
 
 class TestBackends(JitTestCase):
