@@ -631,11 +631,11 @@ class _ValgrindWrapper(object):
             # == User specified setup =====================================================
             # =============================================================================
 
-            # Load serialized globals
-            {load_globals}
-
             # User setup str
             {setup}
+
+            # Load serialized globals
+            {load_globals}
 
             for _ in range({warmup_number}):
             {indented_stmt}
@@ -693,92 +693,3 @@ def wrapper_singleton() -> _ValgrindWrapper:
     if CALLGRIND_SINGLETON is None:
         CALLGRIND_SINGLETON = _ValgrindWrapper()
     return CALLGRIND_SINGLETON
-
-
-def load_test_example() -> Tuple[CallgrindStats, CallgrindStats]:
-    """Hermetic artifact to unit test Callgrind wrapper.
-
-    In addition to collecting counts, this wrapper provides some facilities for
-    manipulating and displaying the collected counts. The results of several
-    measurements are stored in test_callgrind_artifacts.json.
-
-    While FunctionCounts and CallgrindStats are pickleable, they are stored in
-    raw string form for easier inspection and to avoid baking any implementation
-    details into the artifact itself.
-
-    The json was generated with the following snippet:
-    ```
-        import json
-        import os
-
-        import torch.utils.benchmark as benchmark_utils
-
-        stats_no_data = benchmark_utils.Timer(
-            "y = torch.ones(())"
-        ).collect_callgrind(number=1000)
-
-        stats_with_data = benchmark_utils.Timer(
-            "y = torch.ones((1,))"
-        ).collect_callgrind(number=1000)
-
-        user = os.getenv("USER")
-        def to_entry(fn_counts):
-            return [f"{c} {fn.replace(f'/{user}/', '/test_user/')}" for c, fn in fn_counts]
-
-        artifacts = {
-            "baseline_inclusive": to_entry(stats_no_data.baseline_inclusive_stats),
-            "baseline_exclusive": to_entry(stats_no_data.baseline_exclusive_stats),
-            "ones_no_data_inclusive": to_entry(stats_no_data.stmt_inclusive_stats),
-            "ones_no_data_exclusive": to_entry(stats_no_data.stmt_exclusive_stats),
-            "ones_with_data_inclusive": to_entry(stats_with_data.stmt_inclusive_stats),
-            "ones_with_data_exclusive": to_entry(stats_with_data.stmt_exclusive_stats),
-        }
-
-        with open("/tmp/test_callgrind_artifacts.json", "wt") as f:
-            json.dump(artifacts, f, indent=4)
-    ```
-    """
-    artifact_path = os.path.join(
-        os.path.split(os.path.abspath(__file__))[0],
-        "test_callgrind_artifacts.json")
-
-    with open(artifact_path, "rt") as f:
-        artifacts = json.load(f)
-
-    pattern = re.compile(r"^\s*([0-9]+)\s(.+)$")
-
-    def to_function_counts(count_strings: List[str], inclusive: bool) -> FunctionCounts:
-        data: List[FunctionCount] = []
-        for cs in count_strings:
-            # Storing entries as f"{c} {fn}" rather than [c, fn] adds some work
-            # reviving the artifact, but it makes the json much easier to read.
-            match = pattern.search(cs)
-            assert match is not None
-            c, fn = match.groups()
-            data.append(FunctionCount(count=int(c), function=fn))
-        return FunctionCounts(tuple(sorted(data, reverse=True)), inclusive=inclusive)
-
-    baseline_inclusive = to_function_counts(artifacts["baseline_inclusive"], True)
-    baseline_exclusive = to_function_counts(artifacts["baseline_exclusive"], False)
-
-    stats_no_data = CallgrindStats(
-        common.TaskSpec("y = torch.ones(())", "pass"),
-        number_per_run=1000,
-        built_with_debug_symbols=True,
-        baseline_inclusive_stats=baseline_inclusive,
-        baseline_exclusive_stats=baseline_exclusive,
-        stmt_inclusive_stats=to_function_counts(artifacts["ones_no_data_inclusive"], True),
-        stmt_exclusive_stats=to_function_counts(artifacts["ones_no_data_exclusive"], False),
-    )
-
-    stats_with_data = CallgrindStats(
-        common.TaskSpec("y = torch.ones((1,))", "pass"),
-        number_per_run=1000,
-        built_with_debug_symbols=True,
-        baseline_inclusive_stats=baseline_inclusive,
-        baseline_exclusive_stats=baseline_exclusive,
-        stmt_inclusive_stats=to_function_counts(artifacts["ones_with_data_inclusive"], True),
-        stmt_exclusive_stats=to_function_counts(artifacts["ones_with_data_exclusive"], False),
-    )
-
-    return stats_no_data, stats_with_data

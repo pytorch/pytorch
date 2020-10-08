@@ -22,6 +22,88 @@ else:
 
 
 class Timer(object):
+    """Helper class for measuring PyTorch performance.
+
+    The PyTorch Timer is based on `timeit.Timer` (and in fact uses
+    `timeit.Timer` internally), but with several key differences:
+
+    1) Runtime aware:
+        Timer will perform warmups (important as some elements of PyTorch are
+        lazily initialized), set threadpool size so that comparisons are
+        apples-to-apples, and syncronize CUDA when necessary.
+
+    2) Focus on replicates:
+        When measuring code, and particularly complex kernels / models,
+        run-to-run variation is a significant confounding factor. This
+        class deviates from the `timeit` API by conceptually merging
+        `timeit.Timer.repeat` and `timeit.Timer.autorange`. In effect,
+        it is expected that all measurements should include replicates.
+        (Exact algorithms are discussed in method docstrings.)
+
+    3) Optional metadata:
+        When defining a Timer, one can optionally specify `label`, `sub_label`,
+        `description`, and `env`. (Defined later) These fields are attached to
+        results and used when printing the results and by the `Compare` class.
+
+    4) Instruction counts
+        In addition to wall times, Timer can run a statement under Callgrind
+        and report instructions executed.
+
+    Arguments:
+        Directly analogous to `timeit.Timer` constructor arguments:
+        -----------------------------------------------------------------------
+        stmt: Code snippet to be run in a loop and timed.
+        setup: Optional setup code. Used to define variables used in `stmt`
+        timer:
+            Callable which returns the current time. If PyTorch was built
+            without CUDA or there is no GPU present, this defaults to
+            `timer.default_timer`; otherwise it will synchronize CUDA before
+            measuring the time.
+
+        globals:
+            A dict which defines the global variables when `stmt` is being
+            executed. This is the other method for providing variables which
+            `stmt` needs.
+
+        PyTorch Timer specific constructor arguments:
+        -----------------------------------------------------------------------
+        label:
+            String which summarizes `stmt`. For instance, if `stmt` is
+              "torch.nn.functional.relu(torch.add(x, 1, out=out))"
+            one might set label to "ReLU(x + 1)" to improve readability.
+
+        sub_label:
+            Provide supplemental information to disambiguate measurements
+            with identical stmt or label. For instance, in our example
+            above sub_label might be "float" or "int", so that it is easy
+            to differentiate:
+                "ReLU(x + 1): (float)"
+                "ReLU(x + 1): (int)"
+            when printing Measurements or summarizing using `Compare`.
+
+        description:
+            This is a tag which is completely orthoganal to stmt, label, and
+            sub_label. (For instance a description of the particular size or
+            layout of the data that `stmt` is operating on.) The principle
+            use of `description` is to signal to `Compare` the columns of
+            data. It also appears in the __repr__ of `Measurement`
+
+        env:
+            This tag indicates that otherwise identical tasks were run in
+            different environments, and are therefore not equivilent. For
+            instance, when A/B testing a change to a kernel. `Compare` will
+            treat Measurements with different `env` specification as distinct
+            when merging replicate runs.
+
+        num_threads:
+            The size of the PyTorch threadpool when executing `stmt`. Single
+            threaded performace is important as both a key inference workload
+            and a good indicator of intrinsic algorithmic efficiency, so the
+            default is set to one. This is in contrast to the default PyTorch
+            threadpool size which tries to utilize all cores so that most
+            users don't have to think about threading in most cases.
+    """
+
     _timer_cls = timeit.Timer
 
     def __init__(
@@ -74,6 +156,7 @@ class Timer(object):
         )
 
     def timeit(self, number: int = 1000000) -> common.Measurement:
+        """Mirrors the semantics of timeit.Timer.timeit()."""
         with common.set_torch_threads(self._task_spec.num_threads):
             # Warmup
             self._timer.timeit(number=max(int(number // 100), 1))
@@ -165,6 +248,23 @@ class Timer(object):
         callback: Optional[Callable[[int, float], NoReturn]] = None,
         min_run_time: float = 0.2,
     ) -> common.Measurement:
+        """Measure many replicates while keeping timer overhead to a minimum.
+
+        This method repeats `stmt` until a time quota (set by `min_run_time`)
+        has been met. It dynamically chooses the block size by balancing two
+        criteria:
+            1) A small block size results in more replicates and generally
+               better statistics.
+            2) A large block size better amortizes the cost of `timer`
+               invocation, and results in a less biased measurement. This is
+               important because CUDA syncronization time is non-trivial
+               (order single to low double digit microseconds) and would
+               otherwise bias the measurement.
+
+        Returns:
+            A `Measurement` object which can be used to compute statistics.
+            (mean, median, etc.)
+        """
         number = self._estimate_block_size(min_run_time)
 
         def time_hook() -> float:
@@ -189,6 +289,37 @@ class Timer(object):
         number: int = 100,
         collect_baseline: bool = True
     ) -> valgrind_timer_interface.CallgrindStats:
+        """Collect instruction counts using Callgrind.
+
+        Unlike wall times, instruction counts are deterministic
+        (modulo non-determinism in the program itself and small amounts of
+        jitter from the Python interpreter.) This makes them ideal for detailed
+        performance analysis. This method runs `stmt` in a separate process
+        so that Valgrind can instrument the program. Performance is severely
+        degraded due to the instrumentation, howevever this is ameliorated by
+        the fact that a small number of iterations is generally sufficient to
+        obtain good measurements.
+
+        In order to to use this method `valgrind`, `callgrind_control`, and
+        `callgrind_annotate` must be installed.
+
+        Because there is a process boundary between the caller (this process)
+        and the `stmt` execution, `globals` cannot contain arbitrary in-memory
+        data structures. (Unlike timing methods) Instead, globals are
+        restricted to builtins, `nn.Modules`'s, and TorchScripted functions/modules
+        to reduce the surprise factor from serialization and subsequent
+        deserialization. The `GlobalsBridge` class provides more detail on this
+        subject. Take particular care with nn.Modules: they rely on pickle and
+        you may need to add an import to `setup` for them to transfer properly.
+
+        By default, a profile will also be collected for an empty statement
+        (and cached) to indicate how many instructions are from the Python
+        loop which drives `stmt`.
+
+        Returns:
+            A `CallgrindStats` object which provides instruction counts and
+            some basic facilities for analyzing and manipulating results.
+        """
         if not isinstance(self._task_spec.stmt, str):
             raise ValueError("`collect_callgrind` currently only supports string `stmt`")
 
