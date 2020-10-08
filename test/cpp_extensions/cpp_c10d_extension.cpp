@@ -63,7 +63,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::allgather_base(
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::barrier(
     const BarrierOptions& opts) {
-  return std::make_shared<ProcessGroupTest::WorkTest>();
+  return c10::make_intrusive<ProcessGroupTest::WorkTest>();
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupTest::gather(
