@@ -122,7 +122,6 @@ def send_report(reports):
             ),
         },
     )
-    print("Scribe report status: {}".format(r.text))
     r.raise_for_status()
 
 def positive_integer(value):
