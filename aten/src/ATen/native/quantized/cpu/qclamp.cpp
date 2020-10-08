@@ -93,10 +93,13 @@ Tensor quantized_clamp_impl(
 #endif
     qclamp_stub(qx.device().type(), qx, *min, *max, qy);
   } else {
+#ifdef USE_PYTORCH_QNNPACK
     if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
       TORCH_CHECK(
           false, "Both min and max should be specified for quantized clamp!");
-    } else if (max) {
+    }
+#endif
+    if (max) {
       qclamp_max_stub(qx.device().type(), qx, *max, qy);
     } else if (min) {
       qclamp_min_stub(qx.device().type(), qx, *min, qy);
