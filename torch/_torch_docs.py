@@ -110,6 +110,19 @@ tf32_notes = {
     "tf32_note": """This operator supports :ref:`TensorFloat32<tf32_on_ampere>`."""
 }
 
+
+reproducibility_notes = {
+    "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
+a CUDA device. See :doc:`/notes/randomness` for more information.""",
+    "backward_reproducibility_note": """This operation may produce nondeterministic gradients when given tensors on \
+a CUDA device. See :doc:`/notes/randomness` for more information.""",
+    "cudnn_reproducibility_note": """In some circumstances when given tensors on a CUDA device \
+and using CuDNN, this operator may select a nondeterministic algorithm to increase performance. If this is \
+undesirable, you can try to make the operation deterministic (potentially at \
+a performance cost) by setting ``torch.backends.cudnn.deterministic = True``. \
+See :doc:`/notes/randomness` for more information."""
+}
+
 add_docstr(torch.abs, r"""
 abs(input, *, out=None) -> Tensor
 
@@ -938,12 +951,7 @@ tensor of size 0. If :attr:`minlength` is specified, the number of bins is at le
 ``out[n] += 1``.
 
 Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
+    {backward_reproducibility_note}
 
 Arguments:
     input (Tensor): 1-d int tensor
@@ -968,7 +976,7 @@ Example::
 
     >>> input.bincount(weights)
     tensor([0.0000, 0.0000, 0.0000, 1.0000, 1.0000, 0.0000, 0.5000])
-""")
+""".format(**reproducibility_notes))
 
 add_docstr(torch.bitwise_not,
            r"""
@@ -1208,6 +1216,67 @@ Example::
 
 
 """.format(**common_args))
+
+add_docstr(torch.tensor_split,
+           r"""
+tensor_split(input, indices_or_sections, dim=0) -> List of Tensors
+
+Splits a tensor into multiple sub-tensors, all of which are views of :attr:`input`,
+along dimension :attr:`dim` according to the indices or number of sections specified
+by :attr:`indices_or_sections. This function is based on NumPy's
+:func:`numpy.array_split`.
+
+Args:
+    input (Tensor): the tensor to split
+    indices_or_sections (int or (list(int))):
+        If :attr:`indices_or_sections` is an integer ``n``, :attr:`input` is split
+        into ``n`` sections along dimension :attr:`dim`. If :attr:`input` is divisible
+        by ``n`` along dimension :attr:`dim`, each section will be of equal size,
+        :code:`input.size(dim) / n`. If :attr:`input` is not divisible by ``n``, the
+        sizes of the first :code:`int(input.size(dim) % n)` sections will have size
+        :code:`int(input.size(dim) / n) + 1`, and the rest will have size
+        :code:`int(input.size(dim) / n)`.
+
+        If :attr:`indices_or_sections` is a list of ints, :attr:`input` is split along
+        dimension :attr:`dim` at each of the indices in the list. For instance,
+        :code:`[2, 3]` and :code:`dim=0` would result in the following tensors:
+
+            - :code:`input[:2]`
+            - :code:`input[2:3]`
+            - :code:`input[3:]`
+
+    dim (int, optional): dimension along which to split the tensor. Default: ``0``
+
+Example::
+    >>> x = torch.arange(8)
+    >>> torch.tensor_split(x, 3)
+    (tensor([0, 1, 2]), tensor([3, 4, 5]), tensor([6, 7]))
+
+    >>> x = torch.arange(7)
+    >>> torch.tensor_split(x, 3)
+    (tensor([0, 1, 2]), tensor([3, 4]), tensor([5, 6]))
+    >>> torch.tensor_split(x, (1, 6))
+    (tensor([0]), tensor([1, 2, 3, 4, 5]), tensor([6]))
+
+    >>> x = torch.arange(14).reshape(2, 7)
+    >>> x
+    tensor([[ 0,  1,  2,  3,  4,  5,  6],
+            [ 7,  8,  9, 10, 11, 12, 13]])
+    >>> torch.tensor_split(x, 3, dim=1)
+    (tensor([[0, 1, 2],
+            [7, 8, 9]]),
+     tensor([[ 3,  4],
+            [10, 11]]),
+     tensor([[ 5,  6],
+            [12, 13]]))
+    >>> torch.tensor_split(x, (1, 6), dim=1)
+    (tensor([[0],
+            [7]]),
+     tensor([[ 1,  2,  3,  4,  5],
+            [ 8,  9, 10, 11, 12]]),
+     tensor([[ 6],
+            [13]]))
+""")
 
 add_docstr(torch.chunk,
            r"""
@@ -1761,18 +1830,12 @@ Keyword args:
 add_docstr(torch.clamp, r"""
 clamp(input, min, max, *, out=None) -> Tensor
 
-Clamp all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]` and return
-a resulting tensor:
+Clamp all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]`.
+Let min_value and max_value be :attr:`min` and :attr:`max`, respectively, this returns:
 
 .. math::
-    y_i = \begin{cases}
-        \text{min} & \text{if } x_i < \text{min} \\
-        x_i & \text{if } \text{min} \leq x_i \leq \text{max} \\
-        \text{max} & \text{if } x_i > \text{max}
-    \end{cases}
+    y_i = \min(\max(x_i, \text{min\_value}), \text{max\_value})
 """ + r"""
-If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, args :attr:`min`
-and :attr:`max` must be real numbers, otherwise they should be integers.
 
 Args:
     {input}
@@ -1794,9 +1857,6 @@ Example::
 
 Clamps all elements in :attr:`input` to be larger or equal :attr:`min`.
 
-If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`value`
-should be a real number, otherwise it should be an integer.
-
 Args:
     {input}
 
@@ -1815,9 +1875,6 @@ Example::
 .. function:: clamp(input, *, max, out=None) -> Tensor
 
 Clamps all elements in :attr:`input` to be smaller or equal :attr:`max`.
-
-If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`value`
-should be a real number, otherwise it should be an integer.
 
 Args:
     {input}
@@ -4414,16 +4471,15 @@ Example::
 
 add_docstr(torch.matrix_exp,
            r"""
-matrix_power(input) -> Tensor
-
 Returns the matrix exponential. Supports batched input.
 For a matrix ``A``, the matrix exponential is defined as
 
 .. math::
-    \exp^A = \sum_{k=0}^\infty A^k / k!.
+    \mathrm{e}^A = \sum_{k=0}^\infty A^k / k!
 
 """ + r"""
 The implementation is based on:
+
 Bader, P.; Blanes, S.; Casas, F.
 Computing the Matrix Exponential with an Optimized Taylor Polynomial Approximation.
 Mathematics 2019, 7, 1174.
@@ -5410,6 +5466,41 @@ Example::
             [ 5,  6],
             [ 8,  9]])
 """)
+
+add_docstr(torch.nan_to_num,
+           r"""
+nan_to_num(input, nan=0.0, posinf=None, neginf=None, *, out=None) -> Tensor
+
+Replaces :literal:`NaN`, positive infinity, and negative infinity values in :attr:`input`
+with the values specified by :attr:`nan`, :attr:`posinf`, and :attr:`neginf`, respectively.
+By default, :literal:`NaN`s are replaced with zero, positive infinity is replaced with the
+greatest finite value representable by :attr:`input`'s dtype, and negative infinity
+is replaced with the least finite value representable by :attr:`input`'s dtype.
+
+Args:
+    {input}
+    nan (Number, optional): the value to replace :literal:`NaN`\s with. Default is zero.
+    posinf (Number, optional): if a Number, the value to replace positive infinity values with.
+        If None, positive infinity values are replaced with the greatest finite value representable by :attr:`input`'s dtype.
+        Default is None.
+    neginf (Number, optional): if a Number, the value to replace negative infinity values with.
+        If None, negative infinity values are replaced with the lowest finite value representable by :attr:`input`'s dtype.
+        Default is None.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> x = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14])
+    >>> torch.nan_to_num(x)
+    tensor([ 0.0000e+00,  3.4028e+38, -3.4028e+38,  3.1400e+00])
+    >>> torch.nan_to_num(x, nan=2.0)
+    tensor([ 2.0000e+00,  3.4028e+38, -3.4028e+38,  3.1400e+00])
+    >>> torch.nan_to_num(x, nan=2.0, posinf=1.0)
+    tensor([ 2.0000e+00,  1.0000e+00, -3.4028e+38,  3.1400e+00])
+
+""".format(**common_args))
 
 add_docstr(torch.ne, r"""
 ne(input, other, *, out=None) -> Tensor

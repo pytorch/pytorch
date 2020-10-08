@@ -101,6 +101,7 @@ Indexing, Slicing, Joining, Mutating Ops
     stack
     t
     take
+    tensor_split
     transpose
     unbind
     unsqueeze
@@ -315,6 +316,7 @@ Pointwise Ops
     mul
     multiply
     mvlgamma
+    nan_to_num
     neg
     negative
     nextafter

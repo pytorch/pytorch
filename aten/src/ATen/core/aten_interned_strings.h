@@ -504,6 +504,7 @@ _(aten, multinomial) \
 _(aten, mv) \
 _(aten, mvlgamma) \
 _(aten, nansum) \
+_(aten, nan_to_num) \
 _(aten, narrow) \
 _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
@@ -665,6 +666,7 @@ _(aten, tan) \
 _(aten, tanh) \
 _(aten, tensor) \
 _(aten, tensordot) \
+_(aten, tensor_split) \
 _(aten, th_addmm) \
 _(aten, th_clone) \
 _(aten, th_norm) \
