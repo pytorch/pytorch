@@ -11,7 +11,9 @@ from typing import Any, Dict, Tuple, Union
 from numbers import Number
 import functools
 from typing import Optional
-
+import itertools
+from collections import defaultdict
+import math
 
 def _wrap_type_error_to_not_implemented(f):
     # functools.wraps doesn't work well with methods in python 2
@@ -923,6 +925,66 @@ class Tensor(torch._C._TensorBase):
 
         # See Note [rename_ / rename API]
         return update_names(self, names, rename_map, inplace=False)
+
+    def to_sparse_gcs(self, reduction, fill_value):
+        def make_strides(shape, dims=None):
+            if dims is None:
+                dims = tuple(range(len(shape)))
+            ndims = len(dims)
+            if ndims == 0:
+                return ()
+            strides = [1]
+            for i in range(ndims - 1):
+                strides.insert(0, strides[0] * shape[dims[ndims - i - 1]])
+            return tuple(strides)
+
+        def apply_reduction(index, strides, dims):
+            return sum(strides[k] * index[dims[k]] for k in range(len(dims)))
+
+        shape = self.shape
+        N = len(shape)
+        # TODO: N=0, N=1
+        if reduction is None:
+            dims1 = tuple(range(N//2))
+            dims2 = tuple(range(N//2, N))
+            reduction = dims1 + dims2 + (N//2,)
+            l = N // 2
+        else:
+            l = reduction[-1]
+            dims1 = reduction[:l]
+            dims2 = reduction[l:-1]
+
+        strides1 = make_strides(shape[:l])
+        strides2 = make_strides(shape[l:])
+        # <row>: <list of (colindex, value)>
+        col_value = defaultdict(list)
+        for index in itertools.product(*map(range, shape)):
+            v = self
+            for i in index:
+                v = v[i]
+            if v == fill_value or math.isnan(v):
+                continue
+            # print(index)
+            p1 = apply_reduction(index, strides1, dims1)
+            p2 = apply_reduction(index, strides2, dims2)
+            col_value[p1].append((p2, v))
+        ro = [0]
+        co = []
+        values = []
+        
+        for i in range(max(col_value)+1):
+            cv = col_value.get(i, [])
+            ro.append(ro[-1] + len(cv))
+            cv.sort()
+            if len(cv) != 0:
+                c, v = zip(*cv)
+                co.extend(c)
+                values.extend(v)
+
+        return torch.sparse_gcs_tensor(torch.tensor(ro, dtype=torch.int32),
+                                       torch.tensor(co, dtype=torch.int32), torch.tensor(values),
+                                       torch.tensor(reduction), shape, fill_value)
+
 
     def _update_names(self, names, inplace):
         relevant_args = (self,)
