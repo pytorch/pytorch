@@ -246,8 +246,8 @@ scalar_t get_value_bounded(
   int ix = static_cast<int>(x);
   int iy = static_cast<int>(y); 
 
-  if (padding_mode == GridSamplerPadding::Zeros) {
-    return within_bounds_2d(iy, ix, H, W) ? data[iy * sH + ix * sW]: static_cast<scalar_t>(0); 
+  if (padding_mode == GridSamplerPadding::Zeros && !within_bounds_2d(iy, ix, H, W)) {
+    return static_cast<scalar_t>(0); 
   } else {
     return data[iy * sH + ix * sW];
   }
@@ -267,10 +267,8 @@ void add_value_bounded(
   int ix = static_cast<int>(x);
   int iy = static_cast<int>(y); 
 
-  if (padding_mode == GridSamplerPadding::Zeros) {
-    if (within_bounds_2d(iy, ix, H, W)) {
-      gpuAtomicAdd(data + iy * sH + ix * sW, delta);
-    }
+  if (padding_mode == GridSamplerPadding::Zeros && !within_bounds_2d(iy, ix, H, W)) {
+    return;
   } else {
     gpuAtomicAdd(data + iy * sH + ix * sW, delta);
   }

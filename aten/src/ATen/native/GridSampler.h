@@ -228,8 +228,8 @@ static inline scalar_t get_value_bounded(
   int64_t ix = static_cast<int64_t>(x);
   int64_t iy = static_cast<int64_t>(y);
   
-  if (padding_mode == GridSamplerPadding::Zeros) {
-    return within_bounds_2d(iy, ix, H, W) ? data[iy * sH + ix * sW]: static_cast<scalar_t>(0);
+  if (padding_mode == GridSamplerPadding::Zeros && !within_bounds_2d(iy, ix, H, W)) {
+    return static_cast<scalar_t>(0);
   } else {
     return data[iy * sH + ix * sW];
   }
@@ -254,10 +254,8 @@ static inline void add_value_bounded(
   int64_t ix = static_cast<int64_t>(x);
   int64_t iy = static_cast<int64_t>(y);
 
-  if (padding_mode == GridSamplerPadding::Zeros) {
-    if (within_bounds_2d(iy, ix, H, W)) {
-      data[iy * sH + ix * sW] += delta;
-    }
+  if (padding_mode == GridSamplerPadding::Zeros && !within_bounds_2d(iy, ix, H, W)) {
+    return;
   } else {
     data[iy * sH + ix * sW] += delta;
   }
