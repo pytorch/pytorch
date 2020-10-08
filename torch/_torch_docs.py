@@ -3732,9 +3732,9 @@ spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
 
 .. math::
     (\text{start},
-    \text{start} + \frac{\text{end} - \text{start}}{\text{steps}},
+    \text{start} + \frac{\text{end} - \text{start}}{\text{steps} - 1},
     \ldots,
-    \text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{\text{steps}},
+    \text{start} + (\text{steps} - 2) * \frac{\text{end} - \text{start}}{\text{steps} - 1},
     \text{end})
 """ + """
 
@@ -4057,9 +4057,9 @@ with base :attr:`base`. That is, the values are:
 
 .. math::
     (\text{base}^{\text{start}},
-    \text{base}^{(\text{start} + \frac{\text{end} - \text{start}}{ \text{steps}})},
+    \text{base}^{(\text{start} + \frac{\text{end} - \text{start}}{ \text{steps} - 1})},
     \ldots,
-    \text{base}^{(\text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{ \text{steps}})},
+    \text{base}^{(\text{start} + (\text{steps} - 2) * \frac{\text{end} - \text{start}}{ \text{steps} - 1})},
     \text{base}^{\text{end}})
 """ + """
 
