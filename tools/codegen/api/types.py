@@ -94,7 +94,7 @@ class CppSingleArgumentPack(CppArgumentPackIface):
     this: CppArgument
 
     def no_default(self) -> 'CppSingleArgumentPack':
-        return self
+        return CppSingleArgumentPack(self.this.no_default())
 
     @property
     def type(self) -> str:
