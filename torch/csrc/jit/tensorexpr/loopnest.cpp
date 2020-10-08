@@ -449,11 +449,9 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors)
 }
 
 Stmt* LoopNest::lowerToStmt(Tensor* t) {
-  Function* f = t->function();
-  // TODO: Support multiple-output functions
-  Stmt* body = f->ElementStmt(0);
+  Stmt* body = t->ElementStmt();
 
-  if (f->ndim() == 0) {
+  if (t->ndim() == 0 && t->reduce_ndim() == 0) {
     return body;
   }
 
@@ -461,17 +459,29 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
   if (initializer) {
     buf_initializers_[t->buf()] = initializer;
   }
+
   std::vector<const Expr*> indices(t->args().begin(), t->args().end());
 
-  for (size_t i = 0; i < f->ndim(); i++) {
-    // Going in reverse order: from innermost loop to the outermost
-    size_t dim_index = f->ndim() - i - 1;
-    body = new For(f->arg(dim_index), new IntImm(0), f->dim(dim_index), body);
-    indices.pop_back();
-    if (initializer && indices.size() == t->ndim()) {
+  if (t->reduce_ndim() > 0) {
+    for (size_t i = 0; i < t->reduce_ndim(); i++) {
+      // Going in reverse order: from innermost loop to the outermost
+      size_t dim_index = t->reduce_ndim() - i - 1;
+      body = new For(
+          t->reduce_arg(dim_index),
+          new IntImm(0),
+          t->reduce_dim(dim_index),
+          body);
+    }
+    if (initializer) {
       Store* init = new Store(t->buf(), indices, initializer, new IntImm(1));
       body = new Block({init, body});
     }
+  }
+
+  for (size_t i = 0; i < t->ndim(); i++) {
+    // Going in reverse order: from innermost loop to the outermost
+    size_t dim_index = t->ndim() - i - 1;
+    body = new For(t->arg(dim_index), new IntImm(0), t->dim(dim_index), body);
   }
   return body;
 }
@@ -493,15 +503,10 @@ class FunctionInliner : public IRMutator {
   // For the target function, insert the caller/callee pair into the replacement
   // mapping.
   const Expr* mutate(const FunctionCall* v) override {
-    Function* func = v->tensor()->function();
-    const Buf* buf = v->tensor()->buf();
+    const Tensor* t = v->tensor();
+    const Buf* buf = t->buf();
     if (buf != buf_) {
       return IRMutator::mutate(v);
-    }
-
-    // TODO: Support multiple-output functions
-    if (func->func_vars().size() != 1) {
-      throw unimplemented_lowering();
     }
 
     if (v->nparams() != buf->ndim()) {
@@ -510,9 +515,9 @@ class FunctionInliner : public IRMutator {
     }
 
     std::vector<const Var*> index_vars;
-    TORCH_INTERNAL_ASSERT(buf->ndim() == func->args().size());
+    TORCH_INTERNAL_ASSERT(buf->ndim() == t->args().size());
     for (size_t i = 0; i < buf->ndim(); i++) {
-      const Var* func_callee_arg = dynamic_cast<const Var*>(func->arg(i));
+      const Var* func_callee_arg = dynamic_cast<const Var*>(t->arg(i));
       const Expr* func_caller_param = v->param(i);
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
