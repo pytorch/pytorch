@@ -279,6 +279,10 @@ class TestDistBackend(MultiProcessTestCase):
         initialize_temp_directories()
         # initialize Barrier
         Barrier.init()
+        self.skip_process_error_code_checks = [
+            self.test_DistributedDataParallel_desync.__wrapped__,
+            self.test_DistributedDataParallel_desync_requires_grads.__wrapped__,
+        ]
 
     def tearDown(self):
         cleanup_temp_dir()
@@ -287,6 +291,10 @@ class TestDistBackend(MultiProcessTestCase):
     @property
     def init_method(self):
         return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
+
+    def _reset_env_vars(self):
+        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        os.environ["NCCL_BLOCKING_WAIT"] = "0"
 
     @classmethod
     def _run(cls, rank, test_name, file_name):
@@ -311,6 +319,7 @@ class TestDistBackend(MultiProcessTestCase):
         # Execute barrier prior to running test to ensure that every process
         # has finished initialization and that the following test
         # immediately exiting due to a skip doesn't cause flakiness.
+        self._reset_env_vars()
         self._barrier()
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
@@ -2500,6 +2509,60 @@ class DistributedTest:
                         expected_grad,
                         msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
                     )
+
+        def _test_desync_helper(self, tensor):
+            rank = self.rank
+
+            dist.destroy_process_group()
+
+            # Enable NCCL Async error handling
+            os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+
+            # Reinitialize global process group with a timeout
+            dist.init_process_group(
+                init_method=INIT_METHOD,
+                backend=BACKEND,
+                world_size=int(os.environ["WORLD_SIZE"]),
+                rank=rank,
+                timeout=timedelta(seconds=2),
+            )
+
+            dist.all_reduce(tensor)
+            self.assertEqual(tensor, torch.tensor([3] * 10, dtype=torch.float32))
+            print('1st all reduce done: Rank ', rank, ' has data ', tensor)
+            if rank != 1:
+                dist.all_reduce(tensor)
+                # Sleep for a small time period so that the ProcessGroup
+                # destructor is not triggered before the asybc error handling
+                # mechanism can throw an exception.
+                time.sleep(5)
+            print('2nd all reduce: Rank ', rank, ' has data ', tensor)
+            # We ensure that the process that is not stuck in the desync exits
+            # cleanly.
+            sys.exit(0)
+
+
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_DistributedDataParallel_desync(self):
+            rank = self.rank
+            tensor = torch.ones(10).cuda(rank)
+            self._test_desync_helper(tensor)
+
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_DistributedDataParallel_desync_requires_grads(self):
+            rank = self.rank
+            tensor = torch.ones(10, requires_grad=True).cuda(rank)
+            self._test_desync_helper(tensor)
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")

@@ -286,6 +286,7 @@ class MultiProcessTestCase(TestCase):
     def setUp(self):
         super().setUp()
         self.skip_return_code_checks = []
+        self.skip_process_error_code_checks = []
         self.processes = []
         self.rank = self.MAIN_PROCESS_RANK
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
@@ -378,7 +379,12 @@ class MultiProcessTestCase(TestCase):
                 # Sleep to avoid excessive busy polling.
                 time.sleep(0.1)
             elapsed_time = time.time() - start_time
-            if fn in self.skip_return_code_checks:
+            if fn in self.skip_process_error_code_checks:
+                # Don't check process exit codes, since these tests expect
+                # processes to crash/exit uncleanly. Also skips timeout
+                # checking since that is not needed due to the crash.
+                self._check_no_test_errors(elapsed_time, check_process_exit_codes=False)
+            elif fn in self.skip_return_code_checks:
                 self._check_no_test_errors(elapsed_time)
             else:
                 self._check_return_codes(elapsed_time)
@@ -386,14 +392,15 @@ class MultiProcessTestCase(TestCase):
             global TEST_SKIPS
             TEST_SKIPS = self.old_test_skips
 
-    def _check_no_test_errors(self, elapsed_time):
+    def _check_no_test_errors(self, elapsed_time, check_process_exit_codes=True):
         """
         Checks that we didn't have any errors thrown in the child processes.
         """
         for i, p in enumerate(self.processes):
-            if p.exitcode is None:
-                raise RuntimeError('Process {} timed out after {} seconds'.format(i, elapsed_time))
-            self.assertNotEqual(self.TEST_ERROR_EXIT_CODE, p.exitcode)
+            if check_process_exit_codes:
+                if p.exitcode is None:
+                    raise RuntimeError('Process {} timed out after {} seconds'.format(i, elapsed_time))
+                self.assertNotEqual(self.TEST_ERROR_EXIT_CODE, p.exitcode)
 
     def _check_return_codes(self, elapsed_time):
         """
