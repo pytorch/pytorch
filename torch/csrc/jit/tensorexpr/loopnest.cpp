@@ -414,19 +414,22 @@ std::vector<Tensor*> LoopNest::findAllNeededTensors(
   return result;
 }
 
-LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors)
-    : output_tensors_(output_tensors.begin(), output_tensors.end()) {
+LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
   // Find all tensors we need to compute (including dependencies) and put them
   // in a topological order
   std::vector<Tensor*> tensors_to_compute =
       findAllNeededTensors(output_tensors);
+
+  for (auto t : output_tensors) {
+    output_bufs_.insert(t->buf());
+  }
 
   // Find all intermediate tensors, we'll need that for inserting alloc/free
   // statements
   std::unordered_set<Tensor*> tensors_to_compute_set(
       tensors_to_compute.begin(), tensors_to_compute.end());
   for (Tensor* t : tensors_to_compute) {
-    if (!output_tensors_.count(t)) {
+    if (!output_bufs_.count(t->buf())) {
       intermediate_bufs_.insert(t->buf());
     }
   }
@@ -653,10 +656,8 @@ void LoopNest::computeInline(Stmt* s) {
 }
 
 void LoopNest::computeInline(const Buf* b) {
-  for (auto* t : output_tensors_) {
-    if (b == t->buf()) {
-      throw std::logic_error("Can't inline producers of output Tensors");
-    }
+  if (output_bufs_.count(b)) {
+    throw std::logic_error("Can't inline producers of output Tensors");
   }
 
   // Find producers.
