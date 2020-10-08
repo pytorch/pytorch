@@ -51,7 +51,7 @@ except ImportError:
 # We'd like calls to unsupported ops to error out accordingly,
 # rather than returning garbage values.
 def supports_complex(reduceOp: ReduceOp) -> bool:
-    if reduceOp == ReduceOp.MAX or reduceOp == ReduceOp.MIN:
+    if reduceOp == ReduceOp.MAX or reduceOp == ReduceOp.MIN or reduceOp == ReduceOp.PRODUCT:
         return False
     return True
 
@@ -1034,7 +1034,7 @@ def all_reduce_coalesced(tensors,
         return
 
     if any([t.is_complex() for t in tensors]) and not supports_complex(op):
-        raise RuntimeError(f"{op} is unsupported on complex tensors")
+        raise RuntimeError(f"all_reduce does not support {op} on complex tensors")
 
     tensors = [t if not t.is_complex() else torch.view_as_real(t) for t in tensors]
 
