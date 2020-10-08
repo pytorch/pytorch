@@ -349,7 +349,7 @@ class Module:
         elif hasattr(self, name) and name not in self._modules:
             raise KeyError("attribute '{}' already exists".format(name))
         elif '.' in name:
-            raise KeyError("module name can't contain \".\"")
+            raise KeyError("module name can't contain \".\", got: {}".format(name))
         elif name == '':
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module

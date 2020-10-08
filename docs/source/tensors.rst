@@ -453,6 +453,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: narrow
    .. automethod:: narrow_copy
    .. automethod:: ndimension
+   .. automethod:: nan_to_num
+   .. automethod:: nan_to_num_
    .. automethod:: ne
    .. automethod:: ne_
    .. automethod:: not_equal
@@ -571,6 +573,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: symeig
    .. automethod:: t
    .. automethod:: t_
+   .. automethod:: tensor_split
    .. automethod:: to
    .. automethod:: to_mkldnn
    .. automethod:: take
