@@ -130,6 +130,17 @@ def requires_mpi():
         "c10d was not compiled with the MPI backend",
     )
 
+def skip_if_rocm_single_process(func):
+    """Skips a test for ROCm in a single process environment"""
+    func.skip_if_rocm = True
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not TEST_WITH_ROCM:
+            return func(*args, **kwargs)
+        raise unittest.SkipTest("Test skipped for ROCm")
+
+    return wrapper
 
 def skip_if_rocm(func):
     """Skips a test for ROCm"""
