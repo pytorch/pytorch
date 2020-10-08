@@ -8,9 +8,7 @@ Automatic Mixed Precision examples
 Ordinarily, "automatic mixed precision training" means training with
 :class:`torch.cuda.amp.autocast` and :class:`torch.cuda.amp.GradScaler` together.
 
-Instances of :class:`torch.cuda.amp.autocast` enable autocasting for chosen regions.
-Autocasting automatically chooses the precision for GPU operations to improve performance
-while maintaining accuracy.
+Cases of :class:`torch.cuda.amp.autocast` empower autocasting for picked regions. Autocasting consequently picks the exactness for GPU activities to improve performance while looking after accuracy.
 
 Instances of :class:`torch.cuda.amp.GradScaler` help perform the steps of
 gradient scaling conveniently.  Gradient scaling improves convergence for networks with ``float16``
