@@ -488,8 +488,8 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 }
 
 void ProcessGroupNCCL::abortTimedOutCollectives(std::unordered_set<std::string>& abortedCommIds) {
-  std::unique_lock<std::mutex> lock(workListMutex_);
-  for (auto& work : workList_) {
+  std::unique_lock<std::mutex> lock(workMetaListMutex_);
+  for (auto& work : workMetaList_) {
     work->checkAndSetException();
     // Aborting NCCL Communicators due to errors is already handled above.
     if (work->exception()) {
