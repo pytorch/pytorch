@@ -743,18 +743,26 @@ void initJitScriptBindings(PyObject* module) {
           .def(
               "getattr",
               [](Object& self, const std::string& name) {
-                return toPyObject(self.attr(name));
+                try {
+                  return toPyObject(self.attr(name));
+                } catch (const ObjectAttributeError& err) {
+                  throw AttributeError("%s", err.what());
+                }
               })
           .def(
               "__getattr__",
               [](Object& self, const std::string& name) -> py::object {
-                if (name == "__qualname__") {
-                  return py::cast(self.type()->name()->name());
+                try {
+                  if (name == "__qualname__") {
+                    return py::cast(self.type()->name()->name());
+                  }
+                  if (auto method = self.find_method(name)) {
+                    return py::cast(*method);
+                  }
+                  return toPyObject(self.attr(name));
+                } catch (const ObjectAttributeError& err) {
+                  throw AttributeError("%s", err.what());
                 }
-                if (auto method = self.find_method(name)) {
-                  return py::cast(*method);
-                }
-                return toPyObject(self.attr(name));
               })
           .def(
               "hasattr",
