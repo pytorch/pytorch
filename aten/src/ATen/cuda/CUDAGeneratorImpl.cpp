@@ -235,6 +235,16 @@ philox_cuda_state_t CUDAGeneratorImplDeviceState::philox_cuda_state(uint64_t inc
   return philox_cuda_state_t{std::move(frozen_seed), std::move(frozen_offset)};
 }
 
+// TEMPORARY, ALLOWS JIT STUFF TO COMPILE, DO NOT MERGE WITH THIS,
+// FIX JIT TO USE philox_cuda_state_t and philox_kernelarg_t
+std::pair<uint64_t, uint64_t> CUDAGeneratorImplHostState::philox_engine_inputs(uint64_t increment) {
+  return std::make_pair(current_seed(), philox_offset_per_thread());
+}
+
+std::pair<uint64_t, uint64_t> CUDAGeneratorImplDeviceState::philox_engine_inputs(uint64_t increment) {
+  return std::make_pair(current_seed(), philox_offset_per_thread());
+}
+
 /*
  * Gets the DeviceType of CUDAGeneratorImpl.
  * Used for type checking during run time.

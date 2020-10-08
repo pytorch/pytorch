@@ -102,6 +102,7 @@ struct TORCH_CUDA_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   void set_philox_offset_per_thread(uint64_t offset) = 0;
   uint64_t philox_offset_per_thread() = 0;
   philox_cuda_state_t philox_cuda_state(uint64_t increment) = 0;
+  std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment) = 0
   static DeviceType device_type() = 0;
   virtual bool state_on_device() = 0;
 };
@@ -119,7 +120,8 @@ struct TORCH_CUDA_API CUDAGeneratorImplHostState : public c10::GeneratorImpl {
   uint64_t seed() override;
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread();
-  std::pair<uint64_t, uint64_t> philox_cuda_state(uint64_t increment);
+  philox_cuda_state_t philox_cuda_state(uint64_t increment);
+  std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment);
   static DeviceType device_type();
   static state_on_device() { return false; }
 
@@ -142,7 +144,8 @@ struct TORCH_CUDA_API CUDAGeneratorImplDeviceState : public c10::GeneratorImpl {
   uint64_t seed() override;
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread();
-  std::pair<uint64_t, uint64_t> philox_cuda_state(uint64_t increment);
+  philox_cuda_state_t philox_cuda_state(uint64_t increment);
+  std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment);
   static DeviceType device_type();
   static state_on_device() { return true; }
 
