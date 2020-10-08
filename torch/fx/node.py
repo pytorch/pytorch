@@ -84,7 +84,7 @@ class Node:
         Equvalent to `self.next.prepend(x)`
 
         Args:
-            x (Node): The node to put before this node. Must be a member of the same graph.
+            x (Node): The node to put after this node. Must be a member of the same graph.
         """
         self._next.prepend(x)
 
