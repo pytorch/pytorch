@@ -16814,6 +16814,16 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     m2 = torch.randn(k, m, device=device).to(dtype)
                     self._test_addmm_addmv(torch.addmm, M, m1, m2)
 
+    @onlyCUDA
+    def test_matmul_45724(self, device):
+        # https://github.com/pytorch/pytorch/issues/45724
+        a = torch.rand(65537, 22, 64).cuda().half()
+        b = torch.rand(65537, 64, 22).cuda().half()
+        c = torch.full((65537, 22, 22), math.nan, dtype=torch.half, device='cuda')
+        cpu_result = torch.matmul(a.cpu().float(), b.cpu().float()).cuda().half()
+        torch.matmul(a, b, out=c)
+        self.assertEqual(c, cpu_result)
+
     def _test_dot_vdot_vs_numpy(self, device, dtype, torch_fn, np_fn):
         def compare_with_numpy_bin_op(torch_fn, np_fn, x, y):
             y_np = y.cpu().numpy()
