@@ -23,6 +23,17 @@ def _fuse_fx(graph_module, inplace=False):
     fuser = Fuser()
     return fuser.fuse(graph_module, inplace)
 
+class CustomTracer(Tracer):
+    def __init__(self, standalone_modules):
+        super().__init__()
+        self.standalone_modules = standalone_modules
+
+    def is_leaf_module(self, m, module_qualified_name):
+        return (m.__module__.startswith('torch.nn') and
+                not isinstance(m, torch.nn.Sequential)) or \
+            module_qualified_name in self.standalone_modules
+
+
 def _prepare_fx(model, qconfig_dict, inplace, is_standalone_module=False):
     r""" Internal helper function for prepare_fx
     Args:
@@ -35,19 +46,13 @@ forward graph of the parent module,
       :func:`~torch.quantization._prepare_standalone_module_fx`
     """
     # symbolically trace the model
-    standalone_modules = qconfig_dict.get('standalone_module_name', [])
-    class CustomTracer(Tracer):
-        def is_leaf_module(self, m, module_qualified_name):
-            return (m.__module__.startswith('torch.nn') and \
-                not isinstance(m, torch.nn.Sequential)) or \
-                module_qualified_name in standalone_modules
-
     if is_standalone_module:
         # standlone module is traced before quantizing standalone modules
         graph_module = symbolic_trace(model)
     else:
+        standalone_modules = qconfig_dict.get('standalone_module_name', [])
         # skipping tracing standalone modules when tracing top level module
-        graph_module = GraphModule(model, CustomTracer().trace(model))
+        graph_module = GraphModule(model, CustomTracer(standalone_modules).trace(model))
     graph_module = _fuse_fx(graph_module, inplace)
     quantizer = Quantizer()
     return quantizer.prepare(graph_module, qconfig_dict, inplace=True, is_standalone_module=is_standalone_module)
