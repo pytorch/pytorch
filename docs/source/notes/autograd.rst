@@ -218,12 +218,12 @@ Autograd for Complex Numbers
 
 The short version:
 
-- When you use PyTorch to differentiate a complex-to-real function :math:`f(z) = L`,
-  we will compute the partial derivative :math:`\frac{\partial L}{\partial z^*}`
-  (note the conjugation of z), as defined by Wirtinger calculus.  This
-  derivative is precisely the direction of the step you should take in
-  gradient descent, so all of your existing optimizers will work out of
-  the box even with complex parameters.
+- When you use PyTorch to differentiate any function :math:`f(z)` with complex domain and/or codomain,
+  the gradients are computed under the assumption that the function is a part of a larger real-valued
+  loss function :math:`g(input)=L`. The gradient computed is :math:`\frac{\partial L}{\partial z^*}`
+  (note the conjugation of z), which is precisely the direction of the step
+  you should take in gradient descent. Thus, all the existing optimizers work out of
+  the box with complex parameters.
 - This convention matches TensorFlow's convention for complex
   differentiation, but is different from JAX (which computes
   :math:`\frac{\partial L}{\partial z}`).
@@ -238,27 +238,9 @@ to define complex derivatives in PyTorch, read on.
 What are complex derivatives?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-How does differentiation generalize to complex numbers?  There are two
-approaches you could take to such a generalization.
-
-One (naive) approach would be to reinterpret the functions on :math:`ℂ`
-as functions on :math:`ℝ^2`, and then just ask what it means for this
-function to be differentiable.  For example, if
-we have a function :math:`f: ℂ → ℂ`, we can decompose it into
-:math:`f(z) = f(x+yj) = u(x, y) + v(x, y)j` where :math:`u` and
-:math:`v` are real valued functions.  Then the "real" version
-of this function `f: ℝ^2 → ℝ^2` is simply `f(x, y) = (u(x, y), v(x, y))`,
-and we can compute its Jacobian in the usual way.
-
-Unfortunately, there is something unsatisfying about this definition: we
-would hope that a derivative of a function gives us a linear
-approximation of :math:`f`, :math:`f'(z) = a z`, at some point. But
-there is no single complex :math:`a` (two reals) that can capture the
-full Jacobian (four reals).
-
-Thus, the mathematical definition of complex-differentiability takes the
+The mathematical definition of complex-differentiability takes the
 limit definition of a derivative and generalizes it to operate on
-complex numbers:
+complex numbers. For a function :math:`f: ℂ → ℂ`, we can write:
 
     .. math::
         f'(z) = \lim_{h \to 0, h \in C} \frac{f(z+h) - f(z)}{h}
@@ -267,32 +249,18 @@ In order for this limit to exist, not only must :math:`u` and :math:`v` must be
 real differentiable (as above), but :math:`f` must also satisfy the Cauchy-Riemann `equations
 <https://en.wikipedia.org/wiki/Cauchy%E2%80%93Riemann_equations>`_.  In
 other words: the limit computed for real and imaginary steps (:math:`h`)
-must be equal.  This is a more restrictive condition.
+must be equal. This is a more restrictive condition.
 
 The complex differentiable functions are commonly known as holomorphic
-functions.  They are well behaved, have all the nice properties that
-you've seen from real differentiable functions, and are also completely
-useless: practically, none of the functions used in real world
-applications are actually holomorphic.  Not even
-the conjugate operation is holomorphic!  Recall the definition of
-conjugation:
+functions. They are well behaved, have all the nice properties that
+you've seen from real differentiable functions, but are practically of no
+use in the optimization world. For optimization problems, only real valued objective
+functions are used in the research community since complex numbers are not part of any
+ordered field and so having complex valued loss does not make much sense.
 
-    .. math::
-        f(z) = f(x+yj) = x - yj
-
-The limits for the steps are inconsistent.  For a real step :math:`h`,
-
-    .. math::
-        f'(z) = \lim_{h \to 0} \frac{(x+h - yj) - (x-yj)}{h} = 1
-
-For an imaginary step :math:`h*1j`,
-
-    .. math::
-        \begin{aligned}
-        f'(z) &= \lim_{h \to 0} \frac{f(z+h*1j) - f(z)}{h*1j}       \\
-              &= \lim_{h \to 0} \frac{(x - (y+h)j) - (x-yj)}{h*1j}  \\
-              &= -1
-        \end{aligned}
+It also turns out that no interesting real-valued objective fulfill the
+Cauchy-Riemann equations. So the theory with homomorphic function cannot be
+used for optimization and most people therefore use the Wirtinger calculus.
 
 Wirtinger Calculus comes in picture ...
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
