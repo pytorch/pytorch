@@ -136,6 +136,13 @@ TORCH_CUDA_API void all_gather(
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
+TORCH_CUDA_API void all2all(
+    at::Tensor& input,
+    at::Tensor& output,
+    int size,
+    ncclComm_t comm,
+    at::cuda::CUDAStream& stream);
+
 } // namespace nccl
 } // namespace cuda
 } // namespace torch
