@@ -134,7 +134,7 @@ Descriptor::Set::Set(
 void Descriptor::Set::update(const Stream& source) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
-      "Invalid Vulkan device! "
+      "This descriptor set is in an invalid state! "
       "Potential reason: This descriptor set is moved from.");
 
   const auto stream_itr = std::find_if(
@@ -160,7 +160,7 @@ Descriptor::Set& Descriptor::Set::bind(
     const Resource::Buffer& buffer) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
-      "Invalid Vulkan device! "
+      "This descriptor set is in an invalid state! "
       "Potential reason: This descriptor set is moved from.");
 
   update(Stream{
@@ -184,7 +184,7 @@ Descriptor::Set& Descriptor::Set::bind(
     const Resource::Image& image) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
-      "Invalid Vulkan device! "
+      "This descriptor set is in an invalid state! "
       "Potential reason: This descriptor set is moved from.");
 
   update(Stream{
@@ -205,7 +205,7 @@ Descriptor::Set& Descriptor::Set::bind(
 VkDescriptorSet Descriptor::Set::handle() const {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
-      "Invalid Vulkan device! "
+      "This descriptor set is in an invalid state! "
       "Potential reason: This descriptor set is moved from.");
 
   if (bindings_.dirty) {
@@ -313,7 +313,7 @@ Descriptor::Set Descriptor::Pool::allocate(
 {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && descriptor_pool_,
-      "Invalid Vulkan device and / or descriptor pool! "
+      "This descriptor pool is in an invalid state! "
       "Potential reason: This descriptor pool is moved from.");
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -329,7 +329,7 @@ Descriptor::Set Descriptor::Pool::allocate(
 void Descriptor::Pool::purge() {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && descriptor_pool_,
-      "Invalid Vulkan device and / or descriptor pool! "
+      "This descriptor pool is in an invalid state! "
       "Potential reason: This descriptor pool is moved from.");
 
   VK_CHECK(vkResetDescriptorPool(device_, descriptor_pool_.get(), 0u));

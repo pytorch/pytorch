@@ -81,7 +81,7 @@ Command::Buffer::Buffer(
 void Command::Buffer::Buffer::begin() {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
-      "Invalid Vulkan command buffer! "
+      "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
   const VkCommandBufferBeginInfo command_buffer_begin_info{
@@ -99,7 +99,7 @@ void Command::Buffer::Buffer::begin() {
 void Command::Buffer::Buffer::end() {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
-      "Invalid Vulkan command buffer! "
+      "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
   VK_CHECK(vkEndCommandBuffer(command_buffer_));
@@ -109,7 +109,7 @@ void Command::Buffer::barrier(
     const Pipeline::Barrier& barrier) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
-      "Invalid Vulkan command buffer! "
+      "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
   c10::SmallVector<VkMemoryBarrier, 1u> global_memory_barriers;
@@ -166,7 +166,7 @@ void Command::Buffer::bind(
     const Pipeline::Object& pipeline) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
-      "Invalid Vulkan command buffer! "
+      "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -187,7 +187,7 @@ void Command::Buffer::bind(
     const Descriptor::Set& set) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
-      "Invalid Vulkan command buffer! "
+      "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
   const VkDescriptorSet descriptor_set = set.handle();
@@ -217,7 +217,7 @@ void Command::Buffer::copy(
     const size_t size) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
-      "Invalid Vulkan command buffer! "
+      "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -246,7 +246,7 @@ void Command::Buffer::dispatch(
     const Shader::WorkGroup& work_group) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
-      "Invalid Vulkan command buffer! "
+      "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
   vkCmdDispatch(
@@ -261,7 +261,7 @@ void Command::Buffer::submit(
     const VkFence fence) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
-      "Invalid Vulkan command buffer! "
+      "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -317,7 +317,7 @@ Command::Pool& Command::Pool::operator=(Pool&& pool) {
 Command::Buffer Command::Pool::allocate() {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && command_pool_,
-      "Invalid Vulkan command pool! "
+      "This command pool is in an invalid state! "
       "Potential reason: This command pool is moved from.");
 
   return Buffer(device_, command_pool_.get());
@@ -326,7 +326,7 @@ Command::Buffer Command::Pool::allocate() {
 void Command::Pool::purge() {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && command_pool_,
-      "Invalid Vulkan command pool! "
+      "This command pool is in an invalid state! "
       "Potential reason: This command pool is moved from.");
 
   VK_CHECK(vkResetCommandPool(device_, command_pool_.get(), 0u));

@@ -66,8 +66,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${CMAKE_BINARY_DIR}/third_party
     ${CMAKE_BINARY_DIR}/third_party/onnx
 
-    ${TORCH_ROOT}/third_party/valgrind/callgrind
-    ${TORCH_ROOT}/third_party/valgrind/include
+    ${TORCH_ROOT}/third_party/valgrind-headers
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
