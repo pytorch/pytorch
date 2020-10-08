@@ -41,7 +41,7 @@ void format(Stack& stack, size_t num_inputs) {
 
 // IValue tags are intentionally private, so we need additional logic to cast
 // the IValue type to the specified format.
-std::string getFormattedArg(char key, IValue ival) {
+std::string getFormattedArg(char key, const IValue& ival) {
   std::stringstream ss;
   bool added = false;
   switch (key) {
@@ -90,7 +90,7 @@ void percentFormat(Stack& stack, size_t num_inputs) {
   auto args = last(stack, num_inputs - 1);
   std::stringstream ss;
   for (size_t begin = 0, used_args = 0; true; ++used_args) {
-    size_t loc = format.find("%", begin);
+    size_t loc = format.find('%', begin);
     if (loc >= format.length() - 1) {
       ss << format.substr(begin);
       break;
