@@ -872,14 +872,14 @@ class TestTensorExprFuser(BaseTestClass):
             test_log,
             test_log2,
             test_log10,
-            # test_log1p, # TODO: reenable
+            test_log1p,
             test_rsqrt,
             test_exp,
             test_expm1,
             test_erf,
             test_erfc,
             test_frac,
-            # test_lgamma, # TODO : reenable
+            test_lgamma,
             test_reciprocal,
             test_neg,
             test_threshold,
