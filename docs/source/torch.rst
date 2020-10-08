@@ -99,6 +99,7 @@ Indexing, Slicing, Joining, Mutating Ops
     stack
     t
     take
+    tensor_split
     transpose
     unbind
     unsqueeze
