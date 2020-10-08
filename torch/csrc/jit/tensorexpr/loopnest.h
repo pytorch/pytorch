@@ -39,8 +39,16 @@ class TORCH_API LoopNest {
   void computeInline(Stmt* s);
   void computeInline(const Buf* b);
 
-  void splitWithTail(For* f, int factor, For** outer, For** inner, For** tail);
-  void splitWithMask(For* f, int factor, For** outer, For** inner);
+  static void splitWithTail(For* f, int factor);
+  static void splitWithTail(
+      For* f,
+      int factor,
+      For** outer,
+      For** inner,
+      For** tail);
+
+  static void splitWithMask(For* f, int factor);
+  static void splitWithMask(For* f, int factor, For** outer, For** inner);
 
   void reorderAxis(For* a, For* b);
 
