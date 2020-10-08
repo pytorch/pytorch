@@ -27,7 +27,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << "Tensor";
     }
     if (auto ndim = value->sizes().size()) {
-      bool has_valid_strides_info =
+      bool has_valid_strides_info = *ndim > 0 &&
           value->strides().isComplete() && value->strides().size() == ndim;
 
       out << "(";
@@ -41,10 +41,17 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         } else {
           out << "*";
         }
-        if (has_valid_strides_info &&
-            type_verbosity() >= TypeVerbosity::TypeAndStride) {
-          out << ":" << *value->strides()[i];
+      }
+      if (has_valid_strides_info &&
+          type_verbosity() >= TypeVerbosity::TypeAndStride) {
+        out << ", strides=[";
+        for (size_t i = 0; i < *ndim; ++i) {
+          if (i > 0) {
+            out << ", ";
+          }
+          out << *value->strides()[i];
         }
+        out << "]";
       }
       if (type_verbosity() >= TypeVerbosity::Full) {
         if (value->requiresGrad()) {
@@ -1300,6 +1307,14 @@ void ClassType::unsafeRemoveAttribute(const std::string& name) {
   attributes_.erase(attributes_.begin() + slot);
   attributeTypes_.erase(attributeTypes_.begin() + slot);
   AT_ASSERT(attributes_.size() == attributeTypes_.size());
+}
+
+void ClassType::unsafeChangeAttributeType(const std::string& name, TypePtr new_ty) {
+  auto slot = getAttributeSlot(name);
+  auto old_attr_info = attributes_[slot];
+  AT_ASSERT(old_attr_info.getKind() == AttributeKind::REGULAR_ATTRIBUTE);
+  attributes_[slot] = ClassAttribute(old_attr_info.getKind(), new_ty, old_attr_info.getName());
+  attributeTypes_[slot] = new_ty;
 }
 
 size_t ClassType::addConstant(const std::string& name, const IValue& value) {

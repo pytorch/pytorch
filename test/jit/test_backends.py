@@ -5,7 +5,9 @@ import unittest
 
 import torch
 import torch._C
+from torch.testing import FileCheck
 from pathlib import Path
+
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
@@ -88,9 +90,9 @@ class JitBackendTestCase(JitTestCase):
         backend_method = self.lowered_module.__getattr__(function_name)
 
         # Run methods.
-        python_output = python_method(input, input)
-        jit_output = jit_method(input, input)
-        backend_output = backend_method(input, input)
+        python_output = python_method(*input)
+        jit_output = jit_method(*input)
+        backend_output = backend_method(*input)
 
         # The answers returned by Python, JIT and to_backend should all match.
         self.assertEqual(python_output, backend_output)
@@ -107,7 +109,6 @@ class BasicModuleTest(JitBackendTestCase):
     """
     Tests for BasicModule.
     """
-
     def setUp(self):
         super().setUp()
         # Create Python, JIT and backend versions of BasicModule.
@@ -123,9 +124,9 @@ class BasicModuleTest(JitBackendTestCase):
         input = torch.randn(5)
 
         # Test all three module methods.
-        self.check_function("accum", input)
-        self.check_function("sub_accum", input)
-        self.check_function("forward", input)
+        self.check_function("accum", (input, input))
+        self.check_function("sub_accum", (input, input))
+        self.check_function("forward", (input, input))
 
     @skipIfRocm
     def test_save_load(self):
@@ -173,33 +174,22 @@ class NestedModuleTest(JitBackendTestCase):
         self.module = NestedModuleTest.NestedModule(BasicModule())
         # Both modules in self.scripted_module are ScriptModules.
         self.scripted_module = torch.jit.script(NestedModuleTest.NestedModule(BasicModule()))
-        lowered_module = to_test_backend_multi(
-            self.scripted_module, {"forward": {"": ""}}
-        )
 
         # First, script another instance of NestedModule with share_types=False so that it can be
         # selectively lowered without modifying the type of self.scripted_module.
-        nested = torch.jit._recursive.create_script_module(
-            NestedModuleTest.NestedModule(BasicModule()),
-            torch.jit._recursive.infer_methods_to_compile,
-            share_types=False,
+        lowered_module = to_test_backend_multi(
+            torch.jit.script(BasicModule()),
+            {"accum": {"": ""}, "sub_accum": {"": ""}, "forward": {"": ""}},
         )
-        self.lowered_module = torch.jit._recursive.create_script_module(
-            NestedModuleTest.NestedModule(nested),
-            torch.jit._recursive.infer_methods_to_compile,
-            share_types=False,
-        )
-
         # self.lowered_module is a ScriptModule, but its submodule is a lowered module.
-        modules_to_lower = ["submodule.submodule"]
-        to_test_backend_selective(self.lowered_module, {"": ""}, modules_to_lower)
+        self.lowered_module = torch.jit.script(NestedModuleTest.NestedModule(lowered_module))
 
     def test_execution(self):
         # Test execution with backend against Python and JIT.
         input = torch.randn(5)
 
         # Test forward.
-        self.check_function("forward", input)
+        self.check_function("forward", (input, input))
 
     def test_save_load(self):
         # Lowered module should produce the same outputs.
@@ -212,6 +202,60 @@ class NestedModuleTest(JitBackendTestCase):
         self.test_execution()
 
 
+class SelectiveLoweringTest(JitBackendTestCase):
+    """
+    Tests for the selective lowering API.
+    """
+    class OuterModule(torch.nn.Module):
+        def __init__(self, submodule):
+            super().__init__()
+            self.submodule = submodule
+
+        def forward(self, x, y):
+            return self.submodule.forward(x, y)
+
+    def setUp(self):
+        super().setUp()
+        OuterModule = SelectiveLoweringTest.OuterModule
+
+        # Create Python, JIT and backend versions of OuterModule(OuterModule(InnerModule())).
+        self.module = OuterModule(OuterModule(BasicModule()))
+        self.scripted_module = torch.jit.script(OuterModule(OuterModule(BasicModule())))
+        self.lowered_module = torch.jit.script(OuterModule(OuterModule(BasicModule())))
+        self.lowered_module = to_test_backend_selective(self.lowered_module, {"forward": ""}, ["submodule.submodule"])
+
+    def test_execution(self):
+        input = torch.randn(5)
+        self.check_function("forward", (input, input))
+
+        self.test_selective_lowering_type_remap()
+
+    def test_save_load(self):
+        self.test_execution()
+        self.save_load()
+        self.test_execution()
+
+        self.test_selective_lowering_type_remap()
+
+    def test_selective_lowering_type_remap(self):
+        """
+        Check that type remapping and replacement occurred during selective lowering.
+        """
+        # Check that self.lowered_module was not lowered; there should be no uses of the lowered module type in its graph.
+        FileCheck().check("OuterModule").check_not("test_backendLoweredModule").run(self.lowered_module.graph)
+
+        # Check that self.lowered_module.submodule was not lowered but that BasicModule has been replaced in its graph.
+        # self.scripted_module.submodule should be an OuterModule that contains a BasicModule.
+        # self.lowered_module.submodule should be an OuterModule that contains a test_backendLoweredModule.
+        FileCheck().check("OuterModule").check("BasicModule").check_not("test_backendLoweredModule").run(self.scripted_module.submodule.graph)
+        FileCheck().check("OuterModule").check("test_backendLoweredModule").check_not("BasicModule").run(self.lowered_module.submodule.graph)
+
+        # Check that self.lowered_module.submodule.submodule was lowered. Its graph should mention
+        # __torch__.torch.classes.__backends__.test_backend, the TorchBind class for executing functions
+        # on the test JIT backend.
+        FileCheck().check_not("BasicModule").check("__torch__.torch.classes.__backends__.test_backend").run(self.lowered_module.submodule.submodule.graph)
+
+
 class TestBackends(JitTestCase):
     """
     This class wraps and invokes all subclasses of JitBackendTestCase so that each one
@@ -222,19 +266,23 @@ class TestBackends(JitTestCase):
         super().__init__(name)
         self.basic_module_test = BasicModuleTest(name)
         self.nested_module_test = NestedModuleTest(name)
+        self.selective_lowering_test = SelectiveLoweringTest(name)
 
     def setUp(self):
         super().setUp()
         if not TEST_WITH_ROCM:
             self.basic_module_test.setUp()
             self.nested_module_test.setUp()
+            self.selective_lowering_test.setUp()
 
     @skipIfRocm
     def test_execution(self):
         self.basic_module_test.test_execution()
         self.nested_module_test.test_execution()
+        self.selective_lowering_test.test_execution()
 
     @skipIfRocm
     def test_save_load(self):
         self.basic_module_test.test_save_load()
         self.nested_module_test.test_save_load()
+        self.selective_lowering_test.test_save_load()

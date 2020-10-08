@@ -25,7 +25,7 @@ void to_backend_selective_impl(
     // qual_module_name until current points to the module to
     // be lowered. Make parent point to its parent for type
     // modification purposes.
-    Module parent = cloned_mod;
+    Module parent;
     Module current = cloned_mod;
     for (size_t i = 0, e = atoms.size(); i < e; ++i) {
       IValue submodule = current.attr(atoms[i]);
@@ -53,11 +53,29 @@ void to_backend_selective_impl(
 
     // Adjust the parent's type so that the type of the submodule matches
     // the type of lowered_submodule.
-    auto parent_jit_type = parent.type();
-    parent_jit_type->unsafeRemoveAttribute(qual_module_name.name());
-    parent_jit_type->addAttribute(
+    auto parent_type = parent.type();
+    parent_type->unsafeChangeAttributeType(
         qual_module_name.name(), lowered_submodule.type());
     parent.setattr(qual_module_name.name(), lowered_submodule._ivalue());
+
+    // Fix references to the submodule in the graphs of parent's methods.
+    std::unordered_map<TypePtr, TypePtr> type_remap;
+    type_remap[current.type()] = lowered_submodule.type();
+
+    auto type_remap_fn = [&type_remap](TypePtr in) {
+      auto it = type_remap.find(in);
+      if (it == type_remap.end())
+        return in;
+      return it->second;
+    };
+
+    for (auto& fn : parent_type->methods()) {
+      auto method = parent.get_method(fn->name());
+      auto graph = method.graph();
+      graph->remapTypes(type_remap_fn);
+      auto new_schema = fn->getSchema().cloneWithRemappedTypes(type_remap_fn);
+      fn->setSchema(new_schema);
+    }
   }
 }
 
