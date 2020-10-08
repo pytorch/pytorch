@@ -625,7 +625,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mf.hasattr('sub'))
         self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
-        with self.assertRaisesRegex(RuntimeError, "TestModule does not have a field with name '_forward'"):
+        with self.assertRaisesRegex(AttributeError, "TestModule does not have a field with name '_forward'"):
             mf._forward(x)
 
     def test_freeze_module_with_inplace_mutable(self):
@@ -1047,7 +1047,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mEval_freezed.hasattr('fc1'))
         self.assertFalse(mEval_freezed.hasattr('dropout2'))
         self.assertFalse(mEval_freezed.hasattr('fc2'))
-        with self.assertRaisesRegex(RuntimeError, "does not have a field with name 'state_dict'"):
+        with self.assertRaisesRegex(AttributeError, "does not have a field with name 'state_dict'"):
             print(mEval_freezed.state_dict())
         buffer = io.BytesIO()
         torch.jit.save(mEval_freezed, buffer)

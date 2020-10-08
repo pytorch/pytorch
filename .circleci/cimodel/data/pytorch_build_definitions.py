@@ -288,6 +288,7 @@ def instantiate_configs():
         rocm_version = None
         if compiler_name == "cuda":
             cuda_version = fc.find_prop("compiler_version")
+            restrict_phases = ["build", "test1", "test2"]
 
         elif compiler_name == "rocm":
             rocm_version = fc.find_prop("compiler_version")

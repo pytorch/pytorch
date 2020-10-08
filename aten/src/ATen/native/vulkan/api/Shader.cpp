@@ -19,12 +19,25 @@ Shader::Layout::Factory::Factory(const GPU& gpu)
 
 Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
     const Descriptor& descriptor) const {
+  c10::SmallVector<VkDescriptorSetLayoutBinding, 8u> bindings;
+
+  uint32_t binding = 0u;
+  for (const VkDescriptorType type : descriptor.types) {
+    bindings.push_back({
+      binding++,
+      type,
+      1u,
+      VK_SHADER_STAGE_COMPUTE_BIT,
+      nullptr,
+    });
+  }
+
   const VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info{
     VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
     nullptr,
     0u,
-    static_cast<uint32_t>(descriptor.bindings.size()),
-    descriptor.bindings.data(),
+    static_cast<uint32_t>(bindings.size()),
+    bindings.data(),
   };
 
   VkDescriptorSetLayout descriptor_set_layout{};

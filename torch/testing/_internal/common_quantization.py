@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig, \
-    get_default_qat_qconfig
+    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic
 from torch.quantization import (
     is_custom_module_class,
     is_observed_custom_module,
@@ -667,7 +667,8 @@ class QuantizationTestCase(TestCase):
             qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
 
 
-    def checkEmbeddingSerialization(self, qemb, num_embeddings, embedding_dim, indices, offsets, set_qconfig, is_emb_bag):
+    def checkEmbeddingSerialization(self, qemb, num_embeddings, embedding_dim, indices, offsets,
+                                    set_qconfig, is_emb_bag, dtype=torch.quint8):
         # Test serialization of dynamic EmbeddingBag module using state_dict
         if is_emb_bag:
             inputs = [indices, offsets]
@@ -690,9 +691,9 @@ class QuantizationTestCase(TestCase):
         # Check state dict serialization and torch.save APIs
         if is_emb_bag:
             loaded_qemb = nnq.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
-                                           include_last_offset=True, mode='sum')
+                                           include_last_offset=True, mode='sum', dtype=dtype)
         else:
-            loaded_qemb = nnq.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
+            loaded_qemb = nnq.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim, dtype=dtype)
         self.check_eager_serialization(qemb, loaded_qemb, inputs)
 
         loaded_qemb.load_state_dict(loaded_dict)
@@ -711,7 +712,11 @@ class QuantizationTestCase(TestCase):
             float_embedding = torch.nn.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
 
         if set_qconfig:
-            float_embedding.qconfig = float_qparams_dynamic_qconfig
+            float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=dtype,
+                                                                        qscheme=torch.per_channel_affine_float_qparams,
+                                                                        ch_axis=0)
+            float_embedding.qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+                                                     weight=float_qparams_observer)
 
         prepare_dynamic(float_embedding)
 
