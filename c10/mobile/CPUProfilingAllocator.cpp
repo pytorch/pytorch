@@ -12,7 +12,7 @@ struct MemBlock {
   uint64_t start_offset, end_offset;
   MemBlock(uint64_t s, uint64_t e) : start_offset(s), end_offset(e) {}
   bool operator<(const MemBlock& other) const {
-    return end_offset <= other.start_offset;
+    return start_offset < other.start_offset;
   }
 };
 
@@ -31,6 +31,14 @@ struct MemEvent {
     time(t), allocation_id(id), size(s), type(e) {}
 };
 
+bool overlaps(const MemBlock& a, const MemBlock& b) {
+  // two blocks dont overlap if
+  // |---a--------|--------------b--------|
+  // strat_a     end_a <= start_b       end_b
+  return
+    !((a.end_offset <= b.start_offset) || (b.end_offset <= a.start_offset));
+}
+
 bool validate_allocation_plan(
     const std::vector<MemEvent>& alloc_events,
     const std::vector<uint64_t>& allocation_offsets) {
@@ -43,12 +51,33 @@ bool validate_allocation_plan(
     }
     auto start_offset = allocation_offsets[alloc_id];
     auto end_offset = allocation_offsets[alloc_id] + event.size;
+    MemBlock mem_block(start_offset, end_offset);
     if (event.type == EventType::Allocate) {
-      if (!allocations.emplace(start_offset, end_offset).second) {
-        return false;
+      // 1. Form a block whose start offset is end_offset of the candidate block.
+      // 2. Find lower_bound. Thus find iterator to the first block whose start offset
+      //    is not less than, i.e. >=, of this block.
+      //    i.e. first_it.start_offset >= mem_block.end_offset
+      //    all blocks after this iterator dont overlap with mem_block
+      // 3. Iterate over all blocks from the beginning till iterator and check
+      //    for overlaps.
+      // Still O(n)
+      const MemBlock query_block(
+          end_offset, std::numeric_limits<uint64_t>::max());
+      auto it = allocations.lower_bound(query_block);
+      if (it != allocations.end()) {
+        while(it != allocations.begin()) {
+          if (overlaps(*it, mem_block)) {
+            return false;
+          }
+          --it;
+        }
+        if (overlaps(*it, mem_block)) {
+          return false;
+        }
       }
+      allocations.emplace(mem_block);
     } else if (event.type == EventType::Free) {
-      auto it = allocations.find(MemBlock(start_offset, end_offset));
+      auto it = allocations.find(mem_block);
       TORCH_CHECK(
           it != allocations.end(),
           "ProfilingAllocator: Allocate event "

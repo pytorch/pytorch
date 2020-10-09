@@ -55,11 +55,7 @@ import struct
 
 
 def is_sandcastle():
-    if os.getenv('SANDCASTLE') == '1':
-        return True
-    elif os.getenv('TW_JOB_USER') == 'sandcastle':
-        return True
-    return False
+    return os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 
 
 def is_travis():

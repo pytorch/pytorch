@@ -500,11 +500,12 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
 
         std::atomic<int> next_substep{0};
         std::condition_variable cv;
-        std::atomic<int> done{0};
-        std::mutex exception_mutex;
+        std::mutex exception_mutex; // exception_mutex protects done and first_exception
+        int done{0};
         ExceptionWrapper first_exception;
         auto worker = [&]() {
           ScopeExitGuard on_exit([&] {
+            std::lock_guard<std::mutex> guard(exception_mutex);
             done += 1;
             cv.notify_all();
           });
@@ -538,6 +539,8 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
           }
         };
 
+        std::unique_lock<std::mutex> guard(exception_mutex);
+
         std::vector<std::thread> threads;
         auto numThreads = compiledStep->recurringSubsteps.size();
         if (step.has_num_concurrent_instances()) {
@@ -551,7 +554,6 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
 
         // If we get an exception, try to wait for all threads to stop
         // gracefully.
-        std::unique_lock<std::mutex> guard(exception_mutex);
         cv.wait(guard, [&] { return workersDone() || first_exception; });
         cv.wait_for(
             guard,
