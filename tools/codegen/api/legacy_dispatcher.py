@@ -2,6 +2,7 @@ from tools.codegen.model import *
 
 from tools.codegen.api.types import TensorOptionsArguments, LegacyDispatcherArgument, ThisArgument
 import tools.codegen.api.cpp as cpp
+import tools.codegen.local as local
 
 from typing import Union, Sequence
 
@@ -38,39 +39,68 @@ def returns_type(rs: Sequence[Return]) -> str:
 def argument_type(a: Argument) -> str:
     return argumenttype_type(a.type, mutable=a.is_write)
 
-def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> LegacyDispatcherArgument:
+def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Sequence[LegacyDispatcherArgument]:
     if isinstance(a, Argument):
-        return LegacyDispatcherArgument(
+        return [LegacyDispatcherArgument(
             type=argument_type(a),
             name=a.name,
             default=cpp.default_expr(a.default, a.type) if a.default is not None else None,
             argument=a,
-        )
+        )]
     elif isinstance(a, ThisArgument):
         # Erase ThisArgument from the distinction
-        return LegacyDispatcherArgument(
+        return [LegacyDispatcherArgument(
             type=argument_type(a.argument),
             name=a.argument.name,
             default=None,
             argument=a.argument,
-        )
+        )]
     elif isinstance(a, TensorOptionsArguments):
-        # TODO: expunge this logic entirely
-        default = None
-        if all(x.default == "None" for x in a.all()):
-            default = '{}'
-        elif a.dtype.default == "long":
-            default = 'at::kLong'  # TODO: this is wrong
-        return LegacyDispatcherArgument(
-            type='const TensorOptions &',
-            name='options',
-            default=default,
-            argument=a,
-        )
+        if local.use_c10_dispatcher() in [UseC10Dispatcher.hacky_wrapper_for_legacy_signatures,
+                                          UseC10Dispatcher.with_codegenerated_unboxing_wrapper]:
+            # TODO: expunge this logic entirely
+            default = None
+            if all(x.default == "None" for x in a.all()):
+                default = '{}'
+            elif a.dtype.default == "long":
+                default = 'at::kLong'  # TODO: this is wrong
+            return [LegacyDispatcherArgument(
+                type='const TensorOptions &',
+                name='options',
+                default=default,
+                argument=a,
+            )]
+        else:
+            assert local.use_c10_dispatcher() == UseC10Dispatcher.full
+            return [
+                LegacyDispatcherArgument(
+                    type='c10::optional<ScalarType>',
+                    name='dtype',
+                    default='{}',
+                    argument=a,
+                ),
+                LegacyDispatcherArgument(
+                    type='c10::optional<Layout>',
+                    name='layout',
+                    default='{}',
+                    argument=a,
+                ),
+                LegacyDispatcherArgument(
+                    type='c10::optional<Device>',
+                    name='device',
+                    default='{}',
+                    argument=a,
+                ),
+                LegacyDispatcherArgument(
+                    type='c10::optional<bool>',
+                    name='pin_memory',
+                    default='{}',
+                    argument=a,
+                )]
     else:
         assert_never(a)
 
 def arguments(func: FunctionSchema) -> Sequence[LegacyDispatcherArgument]:
     signature_group = cpp.signature_group(func)
     args = signature_group.signature_prefer_gathered().arguments
-    return list(map(argument, args))
+    return [i for arg in args for i in argument(arg)]
