@@ -460,7 +460,11 @@ class ProcessGroupNCCL : public ProcessGroup {
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
-  void broadcastUniqueNCCLID(ncclUniqueId* ncclID);
+  void broadcastUniqueNCCLID(
+      ncclUniqueId* ncclID,
+      NCCLCommType commType,
+      const std::string& devicesKey,
+      int p2pRank);
 
   // Helper that either looks up the cached NCCL communicators or creates
   // a new set of NCCL communicators as a cache entry
@@ -468,7 +472,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       const std::string& devicesKey,
       const std::vector<at::Device>& devices,
       NCCLCommType commType = NCCLCommType::COLL,
-      int p2pRank = 0);
+      int p2pRank = 0,
+      bool isSendRecvSelf = false);
 
   // Wrapper method which can be overridden for tests.
   virtual std::exception_ptr checkForNCCLErrors(
