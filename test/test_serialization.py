@@ -584,7 +584,7 @@ class serialization_method(object):
     def __exit__(self, *args, **kwargs):
         torch.save = self.torch_save
 
-class TestBothSerialization(TestCase, SerializationMixin):
+class TestBothSerialization(TestCase):
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_new_format_old_format_compat(self, device):
         x = [torch.ones(200, 200, device=device) for i in range(30)]
