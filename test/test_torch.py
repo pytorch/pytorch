@@ -7795,19 +7795,9 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_cholesky(self, device, dtype):
-        from torch.testing._internal.common_utils import \
-            (random_symmetric_pd_matrix,
-             random_fullrank_matrix_distinct_singular_value)
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
-        # This is a workaround while there is no support for complex random_symmetric_pd_matrix
-        if dtype.is_complex:
-            real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-            A_real = random_fullrank_matrix_distinct_singular_value(10, dtype=real_dtype, device=device)
-            A_imag = random_fullrank_matrix_distinct_singular_value(10, dtype=real_dtype, device=device)
-            A = A_real + 1j * A_imag
-            A = A @ A.t().conj()
-        else:
-            A = random_symmetric_pd_matrix(10, dtype=dtype, device=device)
+        A = random_hermitian_pd_matrix(10, dtype=dtype, device=device)
 
         # default Case
         C = torch.cholesky(A)
