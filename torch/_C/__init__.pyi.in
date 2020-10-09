@@ -273,6 +273,15 @@ class Graph:
 class Value:
     ...
 
+# Defined in torch/csrc/jit/ir/ir.h
+class Block:
+    ...
+
+# Defined in torch/csrc/jit/ir/ir.h
+class Node:
+    ...
+
+
 # Defined in torch/aten/src/ATen/core/function_schema.h
 class FunctionSchema:
     ...

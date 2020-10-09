@@ -1237,6 +1237,27 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(op, (torch.randn(B0, 2), torch.randint(10, [B0], dtype=torch.int64)),
              check_propagates_grad=False)
 
+    def test_tensor_split(self):
+        test = self._vmap_view_test
+        op = torch.tensor_split
+        B0, B1, B2 = 7, 11, 13
+
+        # tests for torch.tensor_split(self, indices_or_sections: int, dim)
+        test(op, (torch.rand(B0, 2, 1024), 5, -1), in_dims=(0, None, None))
+        test(op, (torch.rand(2, B0, 1024), 150, 1), in_dims=(1, None, None))
+        test(vmap(op, in_dims=(0, None, None)), (torch.rand(B1, 1023, B0, 5), 256, 0),
+             in_dims=(2, None, None))
+        test(vmap(vmap(lambda t: op(t, 4, 1), in_dims=2)),
+             (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
+
+        # tests for torch.tensor_split(self, indices_or_sections: List[int], dim)
+        test(op, (torch.rand(B0, 2, 1024), [50, 100, 378, 890], -1), in_dims=(0, None, None))
+        test(op, (torch.rand(2, B0, 1024), [50, 100, 212, 345, 0, 378, 890], 1), in_dims=(1, None, None))
+        test(vmap(op, in_dims=(0, None, None)), (torch.rand(B1, 1023, B0, 5), [50, 100, 212, 345, 0, 378, 890], 0),
+             in_dims=(2, None, None))
+        test(vmap(vmap(lambda t: op(t, [4, 8, 9, 34, 29], 1), in_dims=2)),
+             (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
+
     def test_split(self):
         test = self._vmap_view_test
         op = torch.split
