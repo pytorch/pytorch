@@ -137,8 +137,9 @@ class SerializationMixin(object):
         with tempfile.NamedTemporaryFile() as f:
             test(f)
 
-        with tempfile.NamedTemporaryFile() as f:
-            test(f.name)
+        if sys.platform != "win32":
+            with tempfile.NamedTemporaryFile() as f:
+                test(f.name)
 
         test(io.BytesIO())
 
@@ -204,14 +205,15 @@ class SerializationMixin(object):
         t = torch.tensor(data, dtype=torch.uint8)
 
         with tempfile.NamedTemporaryFile() as f:
-            torch.save(t, f.name)
+            torch.save(t, f)
 
             # If this check is False for all Python versions (i.e. the fix
             # has been backported), this test and torch.serialization._is_zipfile
             # can be deleted
             self.assertTrue(zipfile.is_zipfile(f))
             self.assertFalse(torch.serialization._is_zipfile(f))
-            self.assertEqual(torch.load(f.name), t)
+            f.seek(0)
+            self.assertEqual(torch.load(f), t)
 
     def test_serialization_gzip(self):
         # Test serialization with gzip file
@@ -281,8 +283,9 @@ class SerializationMixin(object):
         x[1][1] = 1
         x = x.to_sparse()
         with tempfile.NamedTemporaryFile() as f:
-            torch.save({"tensor": x}, f.name)
-            y = torch.load(f.name)
+            torch.save({"tensor": x}, f)
+            f.seek(0)
+            y = torch.load(f)
             self.assertEqual(x, y["tensor"])
 
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
@@ -308,11 +311,12 @@ class SerializationMixin(object):
                             self.tensor.size())))
 
         with tempfile.NamedTemporaryFile() as f:
-            torch.save({"spoofed": TensorSerializationSpoofer(x)}, f.name)
+            torch.save({"spoofed": TensorSerializationSpoofer(x)}, f)
+            f.seek(0)
             with self.assertRaisesRegex(
                     RuntimeError,
                     "size is inconsistent with indices"):
-                y = torch.load(f.name)
+                y = torch.load(f)
 
     def test_serialize_device(self):
         device_str = ['cpu', 'cpu:0', 'cuda', 'cuda:0']
@@ -588,17 +592,19 @@ class TestBothSerialization(TestCase, SerializationMixin):
     def test_serialization_new_format_old_format_compat(self):
         x = [torch.ones(200, 200) for i in range(30)]
 
-        def test(filename):
-            torch.save(x, filename, _use_new_zipfile_serialization=True)
-            x_new_load = torch.load(filename)
+        def test(f_new, f_old):
+            torch.save(x, f_new, _use_new_zipfile_serialization=True)
+            f_new.seek(0)
+            x_new_load = torch.load(f_new)
             self.assertEqual(x, x_new_load)
 
-            torch.save(x, filename, _use_new_zipfile_serialization=False)
-            x_old_load = torch.load(filename)
+            torch.save(x, f_old, _use_new_zipfile_serialization=False)
+            f_old.seek(0)
+            x_old_load = torch.load(f_old)
             self.assertEqual(x_old_load, x_new_load)
 
-        with tempfile.NamedTemporaryFile() as f:
-            test(f.name)
+        with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
+            test(f_new, f_old)
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
@@ -713,8 +719,10 @@ class TestSerialization(TestCase, SerializationMixin):
 
         with tempfile.NamedTemporaryFile() as f:
             test(f)
-        with tempfile.NamedTemporaryFile() as f:
-            test(f.name)
+
+        if sys.platform != "win32":
+            with tempfile.NamedTemporaryFile() as f:
+                test(f.name)
 
         test(io.BytesIO())
 
@@ -734,7 +742,7 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             state = torch.load(f)
 
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    @unittest.skipIf(IS_WINDOWS, "torch.save with filename will open file twice, not supported in Windows.")
     def test_pathlike_serialization(self):
         model = torch.nn.Conv2d(20, 3200, kernel_size=3)
 
