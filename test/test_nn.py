@@ -10175,12 +10175,13 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 10, 10, device=device)
             mod(inp)
 
+    @onlyOnCPUAndCUDA
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)
         unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
         self._test_module_empty_input(unfold, inp, check_size=False)
 
-        with self.assertRaisesRegex(RuntimeError, '3D or 4D'):
+        with self.assertRaisesRegex(RuntimeError, 'Expected 3D or 4D'):
             inp = torch.randn(3, 0, 3, 4, device=device)
             unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
             unfold(inp)
