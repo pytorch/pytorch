@@ -112,7 +112,7 @@ class Graph:
         """
         Construct an empty Graph.
         """
-        self._root : Node = Node(self, '', 'root', None, (), {})
+        self._root : Node = Node(self, '', 'root', '', (), {})
         self._used_names : Dict[str, int] = {}  # base name -> number
         self._insert = self._root.prepend
         self._len = 0
@@ -162,10 +162,6 @@ class Graph:
         to_erase._erased = True  # iterators may retain handles to erased nodes
         self._len -= 1
 
-    # these can be used to permanently set the insert point: g.insert_before(x)
-    # or when used in a with statement, to temporarily change the insert point:
-    # with g.insert_before(n):
-    #     <do some insertions>
     def inserting_before(self, n: Optional[Node] = None):
         """Set the point at which create_node and companion methods will insert into the graph.
         When used within a 'with' statement, this will temporary set the insert point and
@@ -184,7 +180,7 @@ class Graph:
             A resource manager that will restore the insert point on `__exit__`.
         """
         if n is None:
-            return self.insert_after(self._root)
+            return self.inserting_after(self._root)
         assert n.graph == self, "Node to insert before is not in graph."
         return _InsertPoint(self, n.prepend)
 
@@ -206,7 +202,7 @@ class Graph:
             A resource manager that will restore the insert point on `__exit__`.
         """
         if n is None:
-            return self.insert_before(self._root)
+            return self.inserting_before(self._root)
         assert n.graph == self, "Node to insert after is not in graph."
         return _InsertPoint(self, n.append)
 
