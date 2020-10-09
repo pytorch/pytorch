@@ -590,6 +590,7 @@ def method_tests():
         ('view', (S,), (S,), '1d', (False,)),
         ('view', (), (dont_convert(()),), 'scalar_to_scalar', (False,)),
         ('view', (), (1,), 'scalar_to_1d', (False,)),
+        ('ravel', (S, S, S), NO_ARGS, '', (True,)),
         ('reshape', (S, S, S), (S * S, S), '', (False,)),
         ('reshape', (S, S, S), (torch.Size([S * S, S]),), 'size', (False,)),
         ('reshape', (S,), (S,), '1d', (False,)),

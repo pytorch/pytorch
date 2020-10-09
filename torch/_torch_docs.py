@@ -6494,7 +6494,7 @@ add_docstr(torch.ravel,
            r"""
 ravel(input) -> Tensor
 
-Return a contiguous flattened tensor.
+Return a contiguous flattened tensor. A copy is made only if needed.
 
 Args:
     {input}

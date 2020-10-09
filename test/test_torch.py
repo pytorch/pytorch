@@ -1903,15 +1903,24 @@ class AbstractTestCases:
             self.assertEqual(flat0.shape, flat1.shape)
 
             # Test both float tensor and quantized tensor
-            tensors = [torch.randn(5, 5, 5, 5),
-                       torch._empty_affine_quantized([5, 5, 5, 5],
+            tensors = [torch.randn(5, 5),
+                       torch._empty_affine_quantized([5, 5],
                                                      scale=2,
                                                      zero_point=3,
-                                                     dtype=torch.quint8)]
+                                                     dtype=torch.quint8),]
             for src in tensors:
+                # Continuous Tensor -> View
                 flat = src.ravel()
-                self.assertEqual(flat.shape, torch.Size([625]))
+                self.assertEqual(flat.shape, torch.Size([25]))
                 self.assertEqual(src.view(-1), flat.view(-1))
+                self.assertEqual(flat._base, src)
+
+                # Non-continuous Tensor -> Copy
+                nc_src = src.t()
+                nc_flat = nc_src.ravel()
+                self.assertEqual(nc_flat.shape, torch.Size([25]))
+                self.assertEqual(nc_src.reshape(-1), nc_flat.reshape(-1))
+                self.assertTrue(nc_flat._base != nc_src)
 
         @staticmethod
         def _test_scatter_add_mult_index_base(self, cast):

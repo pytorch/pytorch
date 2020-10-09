@@ -1625,8 +1625,7 @@ Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
 }
 
 Tensor ravel(const Tensor& self) {
-  // Same as flatten() with start_dim as 0 and end_dim as -1.
-  return native::flatten(self, 0, -1);
+  return self.reshape(-1);
 }
 
 Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
