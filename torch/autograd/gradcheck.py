@@ -463,7 +463,7 @@ def gradcheck(
 
             # All backward functions must work properly if all output grads are undefined
             outputs_to_check = [[
-                torch._C._functions.UndefinedGrad()([o]) for o in _differentiable_outputs(func(*tupled_inputs))
+                torch._C._functions.UndefinedGrad()(o) for o in _differentiable_outputs(func(*tupled_inputs))
                 # This check filters out Tensor-likes that aren't instances of Tensor.
                 if isinstance(o, torch.Tensor)
             ]]
