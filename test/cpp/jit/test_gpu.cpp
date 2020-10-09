@@ -7088,7 +7088,7 @@ TEST(NVFuserTest, FusionInputsIdLookup_CUDA) {
   TORCH_CHECK(id_1_relook.eviction == false);
 }
 
-TEST(NVFuserTest, FusionGroupGuardSimpleTensor) {
+TEST(NVFuserTest, FusionGroupGuardSimpleTensor_CUDA) {
   std::vector<int64_t> sizes_vec({16, 8, 8});
   std::vector<int64_t> strides_vec({64, 8, 1});
   auto tensor_type = TensorType::create(
@@ -7120,7 +7120,7 @@ TEST(NVFuserTest, FusionGroupGuardSimpleTensor) {
   TORCH_CHECK(!fuser::cuda::complyWith(t4, tensor_type));
 }
 
-TEST(NVFuserTest, FusionGroupGuardBroadcastTensor) {
+TEST(NVFuserTest, FusionGroupGuardBroadcastTensor_CUDA) {
   std::vector<int64_t> sizes_vec({16, 1, 8});
   std::vector<int64_t> strides_vec({8, 8, 1});
   auto tensor_type = TensorType::create(
@@ -7144,7 +7144,7 @@ TEST(NVFuserTest, FusionGroupGuardBroadcastTensor) {
   TORCH_CHECK(fuser::cuda::complyWith(t3, tensor_type));
 }
 
-TEST(NVFuserTest, FusionGroupGuardPermutedTensor) {
+TEST(NVFuserTest, FusionGroupGuardPermutedTensor_CUDA) {
   std::vector<int64_t> sizes_vec({16, 8, 8});
   std::vector<int64_t> strides_vec({64, 1, 8});
   auto tensor_type = TensorType::create(
@@ -7160,7 +7160,7 @@ TEST(NVFuserTest, FusionGroupGuardPermutedTensor) {
   TORCH_CHECK(fuser::cuda::complyWith(t1, tensor_type));
 }
 
-TEST(NVFuserTest, FusionGroupGuardRelaxedCheck) {
+TEST(NVFuserTest, FusionGroupGuardRelaxedCheck_CUDA) {
   std::vector<int64_t> sizes_vec({16, 8, 8});
   std::vector<int64_t> strides_vec({128, 16, 1});
   auto tensor_type = TensorType::create(
