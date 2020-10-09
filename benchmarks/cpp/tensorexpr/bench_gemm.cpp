@@ -128,5 +128,3 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile32x32)(benchmark::State& state) {
 BENCHMARK_REGISTER_F(Gemm, Torch)->Args({128, 128, 128});
 BENCHMARK_REGISTER_F(Gemm, TensorExprNoopt)->Args({128, 128, 128});
 BENCHMARK_REGISTER_F(Gemm, TensorExprTile32x32)->Args({128, 128, 128});
-
-BENCHMARK_MAIN();
