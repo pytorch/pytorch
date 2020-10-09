@@ -113,7 +113,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             >>> # Outputs are:
             >>> # This will run after the future has finished.
         """
-        cast(None, super().add_done_callback(callback))
+        super().add_done_callback(callback)
 
     def set_result(self, result: T) -> None:
         r"""

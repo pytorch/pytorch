@@ -160,29 +160,29 @@ class TestFuture(TestCase):
         # set2 called last, callback_result = 2
         self.assertEqual(callback_result, 2)
 
+    def _test_add_done_calback_error_ignored(self, cb):
+        fut = Future[int]()
+        fut.add_done_callback(cb)
+
+        fut.set_result(5)
+        # error msg logged to stdout
+        self.assertEqual(5, fut.wait())
+
     def test_add_done_callback_error_is_ignored(self):
 
         def raise_value_error(fut):
             raise ValueError("Expected error")
 
-        fut = Future[torch.Tensor]()
-        fut.add_done_callback(raise_value_error)
-        fut.set_result(torch.ones(2, 2))
-
-        # error msg logged to stdout
-        self.assertEqual(fut.wait(), torch.ones(2, 2))
+        _test_add_done_callback_error_ignored(raise_value_error)
 
     def test_add_done_callback_no_arg_error_is_ignored(self):
 
         def no_arg():
             return True
 
-        fut = Future[torch.Tensor]()
-        fut.add_done_callback(no_arg)
-        fut.set_result(torch.ones(2, 2))
-
-        # error msg logged to stdout
-        self.assertEqual(fut.wait(), torch.ones(2, 2))
+        # Adding another level of function indirection here on purpose.
+        # Otherwise mypy will pick up on no_arg having an incompatible type and fail CI
+        _test_add_done_callback_error_ignored(raise_value_error)
 
     def test_interleaving_then_and_add_done_callback_maintains_callback_order(self):
         callback_result = 0
