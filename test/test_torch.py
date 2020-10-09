@@ -1907,7 +1907,7 @@ class AbstractTestCases:
                        torch._empty_affine_quantized([5, 5],
                                                      scale=2,
                                                      zero_point=3,
-                                                     dtype=torch.quint8),]
+                                                     dtype=torch.quint8)]
             for src in tensors:
                 # Continuous Tensor -> View
                 flat = src.ravel()
