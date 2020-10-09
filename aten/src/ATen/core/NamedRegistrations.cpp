@@ -317,6 +317,11 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("median.dim_values", CppFunction::makeFallthrough());
   m.impl("median.names_dim", CppFunction::makeFallthrough());
   m.impl("median.names_dim_values", CppFunction::makeFallthrough());
+  m.impl("nanmedian", CppFunction::makeFallthrough());
+  m.impl("nanmedian.dim", CppFunction::makeFallthrough());
+  m.impl("nanmedian.dim_values", CppFunction::makeFallthrough());
+  m.impl("nanmedian.names_dim", CppFunction::makeFallthrough());
+  m.impl("nanmedian.names_dim_values", CppFunction::makeFallthrough());
   m.impl("min", CppFunction::makeFallthrough());
   m.impl("min.dim", CppFunction::makeFallthrough());
   m.impl("min.dim_min", CppFunction::makeFallthrough());

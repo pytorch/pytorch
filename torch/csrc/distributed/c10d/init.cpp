@@ -1145,8 +1145,8 @@ static auto processGroup_torchbind =
   torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup");
 
 static auto processGroupGloo_torchbind =
-  torch::class_<::c10d::ProcessGroupGloo>("dist_c10d", "ProcessGroupGloo")
-    .def(torch::init<std::shared_ptr<::c10d::Store>, )
+  torch::class_<::c10d::ProcessGroupGloo>("dist_c10d", "ProcessGroupGloo");
+    // .def(torch::init<std::shared_ptr<::c10d::Store>, )
 
 } // namespace
 
