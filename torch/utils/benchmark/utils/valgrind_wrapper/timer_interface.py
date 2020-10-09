@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+from types import ModuleType
 from typing import cast, Any, Callable, DefaultDict, Dict, Generator, List, NamedTuple, Optional, Tuple, Union
 
 import torch
@@ -386,6 +387,18 @@ class GlobalsBridge:
 
 class _ValgrindWrapper(object):
     def __init__(self) -> None:
+        self._bindings_module: Optional[ModuleType] = None
+        if hasattr(torch._C, "valgrind_supported_platform"):
+            self._supported_platform: bool = torch._C.valgrind_supported_platform()
+
+        else:
+            print("Callgrind bindings are not present in `torch._C`. JIT-ing bindings.")
+            # This import will JIT the Callgrind control bindings, so don't
+            # invoke unless we know we'll need it.
+            from torch.utils.benchmark.utils.valgrind_wrapper.compat_bindings import bindings
+            self._bindings_module = bindings
+            self._supported_platform: bool = bindings.valgrind_supported_platform()
+
         self._commands_available: Dict[str, bool] = {}
         if torch._C.valgrind_supported_platform():
             # Only bother checking on supported platforms.
@@ -498,13 +511,20 @@ class _ValgrindWrapper(object):
                 f_stdout_stderr.close()
 
         try:
+            if self._bindings_module is not None:
+                shutil.copy(
+                    self._bindings_module.__file__,
+                    os.path.join(working_dir, os.path.split(self._bindings_module.__file__)[1])
+                )
+
             with open(script_file, "wt") as f:
                 f.write(self._construct_script(
                     task_spec,
                     globals=GlobalsBridge(globals, data_dir),
                     number=number,
                     error_log=error_log,
-                    stat_log=stat_log))
+                    stat_log=stat_log,
+                    bindings=self._bindings_module))
 
             valgrind_invocation, valgrind_invocation_output = run([
                 "valgrind",
@@ -565,7 +585,8 @@ class _ValgrindWrapper(object):
         globals: GlobalsBridge,
         number: int,
         error_log: str,
-        stat_log: str
+        stat_log: str,
+        bindings: Optional[ModuleType],
     ) -> str:
         # The naive template looks something like:
         #   "for _ in range({number}): {stmt}"
@@ -598,6 +619,8 @@ class _ValgrindWrapper(object):
 
             import torch
             torch.set_num_threads({num_threads})
+
+            {bindings_import}
 
             PID = os.getpid()
 
@@ -664,13 +687,13 @@ class _ValgrindWrapper(object):
             # =============================================================================
             # == User code block ==========================================================
             # =============================================================================
-            torch._C.valgrind_toggle()
+            callgrind_bindings.valgrind_toggle()
             {blocked_stmt}
 
             # Sleep is to allow the interpreter to catch up before we stop collecting in
             # order to reduce jitter.
             time.sleep(0.01)
-            torch._C.valgrind_toggle()
+            callgrind_bindings.valgrind_toggle()
         """).strip().format(
             indented_stmt=textwrap.indent(task_spec.stmt, " " * 4),
             blocked_stmt=blocked_stmt,
@@ -683,6 +706,9 @@ class _ValgrindWrapper(object):
             stat_log=stat_log,
             parent_interpreter=sys.executable,
             torch_file=torch.__file__,
+            bindings_import=(
+                "import torch._C as callgrind_bindings" if bindings is None
+                else f"import {bindings.__name__} as callgrind_bindings"),
         )
 
 

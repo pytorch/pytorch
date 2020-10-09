@@ -420,6 +420,12 @@ class TestBenchmarkUtils(TestCase):
         self.assertIsInstance(counts, int)
         self.assertGreater(counts, 0)
 
+        from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import wrapper_singleton
+        self.assertIsNone(
+            wrapper_singleton()._bindings_module,
+            "JIT'd bindings are only for back testing."
+        )
+
     def test_manipulate_callgrind_stats(self):
         stats_no_data, stats_with_data = load_test_example()
 
