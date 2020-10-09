@@ -229,7 +229,6 @@ TEST(PlanExecutorTest, ErrorAsyncPlan) {
 // death tests not supported on mobile
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 TEST(PlanExecutorTest, BlockingErrorPlan) {
-
   // TSAN doesn't play nicely with death tests
 #if defined(__has_feature)
 #if __has_feature(thread_sanitizer)
@@ -268,16 +267,6 @@ TEST(PlanExecutorTest, BlockingErrorPlan) {
       "failed to stop concurrent workers after exception: test error");
 }
 #endif
-
-TEST(PlanExecutorTest, ErrorPlanWithCancellableStuckNet) {
-  HandleExecutorThreadExceptionsGuard guard;
-
-  PlanDef plan_def = parallelErrorPlanWithCancellableStuckNet();
-  Workspace ws;
-
-  ASSERT_THROW(ws.RunPlan(plan_def), TestError);
-  ASSERT_EQ(cancelCount, 1);
-}
 
 } // namespace caffe2
 
