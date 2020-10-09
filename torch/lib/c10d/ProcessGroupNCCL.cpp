@@ -8,6 +8,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <torch/csrc/cuda/nccl.h>
 
 #include <c10d/Utils.hpp>
 namespace c10d {
@@ -107,6 +108,13 @@ std::string getKeyFromDevices(const std::vector<at::Device>& devices) {
   return deviceList;
 }
 
+std::string getKeySendRecv(int myRank, int peer) {
+  int lowRank = myRank < peer ? myRank : peer;
+  int highRank = myRank < peer ? peer : myRank;
+  std::string sendRecvPair = std::to_string(lowRank) + ":" + std::to_string(highRank);
+  return sendRecvPair;
+}
+
 // Get the list of devices from list of tensors
 std::vector<at::Device> getDeviceList(const std::vector<at::Tensor>& tensors) {
   std::vector<at::Device> res;
@@ -158,31 +166,6 @@ std::string getNcclAbortedCommStoreKey(const std::string ncclIdStr) {
 }
 
 #ifdef ENABLE_NCCL_P2P_SUPPORT
-ncclResult_t ncclAlltoall(
-    void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    size_t size,
-    ncclDataType_t type,
-    ncclComm_t comm,
-    cudaStream_t stream) {
-  int numranks;
-  size_t rankdiff = count * size;
-  C10D_NCCL_CHECK(ncclCommCount(comm, &numranks));
-  C10D_NCCL_CHECK(ncclGroupStart());
-  for (int r = 0; r < numranks; r++) {
-    // NCCL uses 0 byte message for synchronization
-    // Avoid send/recv when message size is zero
-    if (count != 0) {
-      C10D_NCCL_CHECK(ncclSend(
-          ((char*)sendbuff) + r * rankdiff, count, type, r, comm, stream));
-      C10D_NCCL_CHECK(ncclRecv(
-          ((char*)recvbuff) + r * rankdiff, count, type, r, comm, stream));
-    }
-  }
-  C10D_NCCL_CHECK(ncclGroupEnd());
-  return ncclSuccess;
-}
 
 ncclResult_t ncclAlltoallv(
     void* sendbuff,
@@ -232,6 +215,7 @@ const int64_t ProcessGroupNCCL::kWorkCleanupThreadSleepMillis = 1000;
 constexpr int64_t kWaitForAbortCommStoreKey = 1000;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 const int64_t ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis = 10 * 1000;
+thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
     : devices_(devices), workStartTime_(std::chrono::steady_clock::now()) {
@@ -695,15 +679,32 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
   return nullptr;
 }
 
-void ProcessGroupNCCL::broadcastUniqueNCCLID(ncclUniqueId* ncclID) {
+void ProcessGroupNCCL::broadcastUniqueNCCLID(
+  ncclUniqueId* ncclID,
+  NCCLCommType commType,
+  const std::string& p2pKey,
+  int p2pRank) {
+  // For collective operations:
   // For every NCCL communicator that we create we need to broadcast
   // a unique ID from rank 0 to all other ranks. This broadcast is
   // done by rank 0 setting a key in the store and all other ranks
   // retrieving the contents of that key. A single process group
   // may create multiple NCCL communicators, so we use a sequence
   // number to differentiate between them.
-  std::string storeKey = std::to_string(ncclCommCounter_++);
-  if (rank_ == 0) {
+  // For point-to-point operations:
+  // The sequence number will only be increased on 2 out of all the
+  // processes in a Process Group. So all following collective
+  // operations will see different sequence numbers which will cause
+  // runtime errors. To avoid that, use the src:target pair instead
+  // of sequence number for p2p communications.
+
+  std::string storeKey;
+  if (commType == NCCLCommType::COLL) {
+    storeKey = std::to_string(ncclCommCounter_++);
+  } else {
+    storeKey = p2pKey;
+  }
+  if (rank_ == 0 || (commType != NCCLCommType::COLL && p2pRank == 0)) {
     auto vec = std::vector<uint8_t>(
         reinterpret_cast<uint8_t*>(ncclID),
         reinterpret_cast<uint8_t*>(ncclID) + NCCL_UNIQUE_ID_BYTES);
@@ -717,7 +718,10 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(ncclUniqueId* ncclID) {
 
 std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     const std::string& devicesKey,
-    const std::vector<at::Device>& devices) {
+    const std::vector<at::Device>& devices,
+    NCCLCommType commType,
+    int p2pRank,
+    bool isSendRecvSelf) {
   // Sanity check
   if (devicesKey.empty()) {
     throw std::runtime_error(
@@ -744,25 +748,61 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // Create the unique NCCL ID and broadcast it
   ncclUniqueId ncclID;
 
-  if (rank_ == 0) {
+  // For point-to-point communication, lower rank of the two will get unique id.
+  if (rank_ == 0 || (commType != NCCLCommType::COLL && p2pRank == 0)) {
     C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID));
   }
 
-  // Broadcast so that each process can have a unique NCCL ID
-  broadcastUniqueNCCLID(&ncclID);
+  // For point-to-point communication on the same process, don't need broadcast.
+  if (!isSendRecvSelf) {
+    // Broadcast so that each process can have a unique NCCL ID
+    broadcastUniqueNCCLID(&ncclID, commType, devicesKey, p2pRank);
+  }
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
   std::vector<at::cuda::CUDAStream> streamVal;
   streamVal.reserve(devices.size());
 
-  // Create the NCCL communicators for each GPU
+  // [Group Start/End Note] This is used to ensure that nccl communicator will be created
+  // before communication primitives are called. Let's look at this example:
+  // Using the batch_isend_irecv to send a tensor to a target process. On the sender side,
+  // the corresponding underlying NCCL calls will look like
+  //   ncclGroupStart() // This is in batch_isend_irecv
+  //   ncclGroupStart() // This is [Note 1]
+  //   ncclCommInitRank() // Inside NCCLComm::create
+  //   ncclSend()
+  //   ncclGroupEnd() // This is [Note 2]
+  //   ncclGroupEnd() // This is in batch_isend_irecv
+  // With this pattern, the nccl communicator will be created in the last ncclGroupEnd
+  // which means when ncclSend is processed, the passed communicator argument is NULL which will
+  // lead to runtime error. So we need to "close" all active nccl groups to ensure
+  // nccl communicator is actually created before encountering any communication calls.
+  // This is why we need the following for loop.
+  for (size_t i = 0; i < ncclActiveGroupCounter_; ++i) {
+    C10D_NCCL_CHECK(ncclGroupEnd());
+  }
+
+  // [Note 1] Create the NCCL communicators for each GPU
   C10D_NCCL_CHECK(ncclGroupStart());
 
   for (size_t i = 0; i < devices.size(); ++i) {
     // GPU world size and GPU rank
-    int numRanks = getSize() * devices.size();
-    int rank = getRank() * devices.size() + i;
+    int numRanks, rank;
+
+    if (commType == NCCLCommType::COLL) {
+      numRanks = getSize() * devices.size();
+      rank = getRank() * devices.size() + i;
+    } else if(isSendRecvSelf) {
+      // Same process send and recv.
+      numRanks = 1;
+      rank = 0;
+    } else {
+      // For point-to-point operation, there are only 2 processes involved so
+      // the GPU rank is either 0 or 1.
+      numRanks = 2;
+      rank = p2pRank;
+    }
     // Get the device index
     int deviceIndex = devices[i].index();
 
@@ -781,7 +821,13 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     }
   }
 
+  // [Note 2 ]
   C10D_NCCL_CHECK(ncclGroupEnd());
+
+  // See [Group Start/End Note]
+  for (size_t i = 0; i < ncclActiveGroupCounter_; ++i) {
+    C10D_NCCL_CHECK(ncclGroupStart());
+  }
 
   ncclStreams_.emplace(devicesKey, std::move(streamVal));
 
@@ -1010,6 +1056,78 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   return work;
 }
 
+template <typename Fn, typename PreProcess, typename PostProcess>
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
+    std::vector<at::Tensor>& tensors,
+    Fn fn,
+    int peer,
+    NCCLCommType commType,
+    PreProcess pre,
+    PostProcess post) {
+  const auto devices = getDeviceList(tensors);
+  const auto key = getKeySendRecv(rank_, peer);
+  int p2pRank = rank_ <= peer ? 0 : 1;
+  auto isSendRecvSelf = rank_ == peer;
+  auto& ncclComms = getNCCLComm(key, devices, commType, p2pRank, isSendRecvSelf);
+
+  // First let NCCL streams wait for input tensors allocation streams
+  syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
+
+  // Work itself will create the CUDA events on all GPUs of tensors
+  auto work = initWork(devices);
+
+  if (commType == NCCLCommType::RECV) {
+    // Store references to outputs and futureNCCLCallbackStream to be used by
+    // WorkNCCL::getFuture.
+    work->outputs_ = std::make_shared<std::vector<at::Tensor>>(tensors);
+    work->futureNCCLCallbackStreams_ = futureNCCLCallbackStreams_;
+  }
+
+  at::cuda::OptionalCUDAGuard gpuGuard;
+
+  pre(ncclStreams_[key]);
+
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    gpuGuard.set_index(devices[i].index());
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+
+    // Both send tensor and recv tensor are created on a worker stream and used in
+    // different ncclStreams.  Hence, both must record the ncclStream to
+    // prevent being freed before the collective finishes.
+    //
+    // See [Sync Streams].
+    c10::cuda::CUDACachingAllocator::recordStream(
+        tensors[i].storage().data_ptr(), ncclStream);
+  }
+
+  {
+    AutoNcclGroup nccl_group_guard;
+    for (size_t i = 0; i < tensors.size(); ++i) {
+      gpuGuard.set_index(devices[i].index());
+      at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+      // For point-to-point communication, NCCL ranks can only
+      // be 0 or 1.
+      int p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
+      C10D_NCCL_CHECK(
+          fn(tensors[i], ncclComms[i]->getNcclComm(), ncclStream, p2pTargetRank));
+    }
+  }
+
+  post(ncclStreams_[key]);
+
+  // Event should only be recorded after the ncclGroupEnd()
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+    (*work->cudaEvents_)[i].record(ncclStream);
+    work->ncclComms_[i] = ncclComms[i];
+    work->blockingWait_ = blockingWait_;
+    work->opTimeout_ = opTimeout_;
+    work->store_ = store_;
+  }
+
+  return work;
+}
+
 template <typename Fn>
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& inputs,
@@ -1019,6 +1137,21 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
       inputs,
       outputs,
       fn,
+      [](std::vector<at::cuda::CUDAStream>&) {},
+      [](std::vector<at::cuda::CUDAStream>&) {});
+}
+
+template <typename Fn>
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
+    std::vector<at::Tensor>& tensor,
+    Fn fn,
+    int peer,
+    NCCLCommType type) {
+  return pointToPoint(
+      tensor,
+      fn,
+      peer,
+      type,
       [](std::vector<at::cuda::CUDAStream>&) {},
       [](std::vector<at::cuda::CUDAStream>&) {});
 }
@@ -1255,14 +1388,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
-          return ncclAlltoall(
-              input.data_ptr(),
-              output.data_ptr(),
-              input.numel() / size_,
-              input.element_size(),
-              getNcclDataType(input.scalar_type()),
+        torch::cuda::nccl::all2all(
+              input,
+              output,
+              this->getSize(),
               comm,
-              stream.stream());
+              stream);
+          return ncclSuccess;
         });
   } else {
     c10d::checkSplitSizes(inputSplitSizes, inputTensor, size_);
@@ -1298,6 +1430,44 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
         });
   }
 }
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
+    std::vector<at::Tensor>& tensors,
+    int dstRank,
+    int /* unused */) {
+  check_gpu_tensors(tensors);
+  auto ret = pointToPoint(
+        tensors,
+      [&](at::Tensor& input,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream,
+          int dst) {
+        torch::cuda::nccl::send(input, comm, stream, dst);
+        return ncclSuccess;
+      },
+      dstRank,
+      NCCLCommType::SEND);
+  return ret;
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
+    std::vector<at::Tensor>& tensors,
+    int srcRank,
+    int /* unused */) {
+  check_gpu_tensors(tensors);
+  auto ret= pointToPoint(
+      tensors,
+      [&](at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream,
+          int src) {
+        torch::cuda::nccl::recv(output, comm, stream, src);
+        return ncclSuccess;
+      },
+      srcRank,
+      NCCLCommType::RECV);
+  return ret;
+}
 #else
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
     at::Tensor& /* unused */,
@@ -1308,7 +1478,37 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
   throw std::runtime_error(
       "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
 }
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
+    std::vector<at::Tensor>& /* unused */,
+    int /* unused */,
+    int /* unused */) {
+  throw std::runtime_error(
+      "ProcessGroupNCCL only supports send for NCCL lib version >= 2.7.0");
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
+    std::vector<at::Tensor>& /* unused */,
+    int /* unused */,
+    int /* unused */) {
+  throw std::runtime_error(
+      "ProcessGroupNCCL only supports recv for NCCL lib version >= 2.7.0");
+}
 #endif
+
+void ProcessGroupNCCL::groupStart() {
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+  C10D_NCCL_CHECK(ncclGroupStart());
+#endif
+  ++ncclActiveGroupCounter_;
+}
+
+void ProcessGroupNCCL::groupEnd() {
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+  C10D_NCCL_CHECK(ncclGroupEnd());
+#endif
+  --ncclActiveGroupCounter_;
+}
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& /* unused */,
@@ -1331,24 +1531,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
   throw std::runtime_error("ProcessGroupNCCL does not support scatter");
 }
 
-std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
-    std::vector<at::Tensor>& /* unused */,
-    int /* unused */,
-    int /* unused */) {
-  throw std::runtime_error("ProcessGroupNCCL does not support send");
-}
-
-std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
-    std::vector<at::Tensor>& /* unused */,
-    int /* unused */,
-    int /* unused */) {
-  throw std::runtime_error("ProcessGroupNCCL does not support recv");
-}
-
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */) {
-  throw std::runtime_error("ProcessGroupNCCL does not support recv");
+  throw std::runtime_error("ProcessGroupNCCL does not support recvAnysource");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_base(

@@ -33,7 +33,7 @@ from torch.testing._internal.common_distributed import MultiProcessTestCase, \
     create_device
 
 from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, \
-    retry_on_connect_failures, ADDRESS_IN_USE, CONNECT_TIMEOUT, TEST_WITH_TSAN
+    retry_on_connect_failures, ADDRESS_IN_USE, CONNECT_TIMEOUT, TEST_WITH_TSAN, slowTest
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -296,6 +296,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(b"value1", fs.get("key1"))
         self.assertEqual(b"value2", fs.get("key4"))
 
+    # https://github.com/pytorch/pytorch/issues/46064 <- takes 5+ min to finish
+    @slowTest
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
 
@@ -2172,6 +2174,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     @skip_if_lt_x_gpu(4)
+    @skip_if_rocm
     def test_gloo_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
