@@ -22,7 +22,7 @@ else:
 
 
 class Timer(object):
-    """Helper class for measuring PyTorch performance.
+    """Helper class for measuring execution time of PyTorch statements.
 
     The PyTorch Timer is based on `timeit.Timer` (and in fact uses
     `timeit.Timer` internally), but with several key differences:
@@ -30,20 +30,25 @@ class Timer(object):
     1) Runtime aware:
         Timer will perform warmups (important as some elements of PyTorch are
         lazily initialized), set threadpool size so that comparisons are
-        apples-to-apples, and syncronize CUDA when necessary.
+        apples-to-apples, and synchronize asynchronous CUDA functions when
+        necessary.
 
     2) Focus on replicates:
         When measuring code, and particularly complex kernels / models,
-        run-to-run variation is a significant confounding factor. This
-        class deviates from the `timeit` API by conceptually merging
-        `timeit.Timer.repeat` and `timeit.Timer.autorange`. In effect,
-        it is expected that all measurements should include replicates.
-        (Exact algorithms are discussed in method docstrings.)
+        run-to-run variation is a significant confounding factor. It is
+        expected that all measurements should include replicates to quantify
+        noise and allow median computation, which is more robust than mean.
+        To that effect, this class deviates from the `timeit` API by
+        conceptually merging `timeit.Timer.repeat` and `timeit.Timer.autorange`.
+        (Exact algorithms are discussed in method docstrings.) The `timeit`
+        method is replicated for cases where an adaptive strategy is not
+        desired.
 
     3) Optional metadata:
         When defining a Timer, one can optionally specify `label`, `sub_label`,
-        `description`, and `env`. (Defined later) These fields are attached to
-        results and used when printing the results and by the `Compare` class.
+        `description`, and `env`. (Defined later) These fields are included in
+        the representation of result object and by the `Compare` class to group
+        and display results for comparison.
 
     4) Instruction counts
         In addition to wall times, Timer can run a statement under Callgrind
@@ -82,16 +87,22 @@ class Timer(object):
             when printing Measurements or summarizing using `Compare`.
 
         description:
-            This is a tag which is completely orthoganal to stmt, label, and
-            sub_label. (For instance a description of the particular size or
-            layout of the data that `stmt` is operating on.) The principle
-            use of `description` is to signal to `Compare` the columns of
-            data. It also appears in the __repr__ of `Measurement`
+            String to distinguish measurements with identical label and
+            sub_label. The principal use of `description` is to signal to
+            `Compare` the columns of data. For instance one might set it
+            based on the input size  to create a table of the form:
+
+                                    | n=1 | n=4 | ...
+                                    ------------- ...
+            ReLU(x + 1): (float)    | ... | ... | ...
+            ReLU(x + 1): (int)      | ... | ... | ...
+
+            using `Compare`. It is also included when printing a Measurement.
 
         env:
             This tag indicates that otherwise identical tasks were run in
-            different environments, and are therefore not equivilent. For
-            instance, when A/B testing a change to a kernel. `Compare` will
+            different environments, and are therefore not equivilent, for
+            instance when A/B testing a change to a kernel. `Compare` will
             treat Measurements with different `env` specification as distinct
             when merging replicate runs.
 
@@ -100,8 +111,7 @@ class Timer(object):
             threaded performace is important as both a key inference workload
             and a good indicator of intrinsic algorithmic efficiency, so the
             default is set to one. This is in contrast to the default PyTorch
-            threadpool size which tries to utilize all cores so that most
-            users don't have to think about threading in most cases.
+            threadpool size which tries to utilize all cores.
     """
 
     _timer_cls = timeit.Timer
