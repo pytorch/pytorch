@@ -3774,6 +3774,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.ones((3, 4), dtype=torch.int)
         y = torch.ones((6, 7), dtype=torch.int)
+        self.onnx_shape_inference=True
         self.run_test(UninitializedModel(), x, test_with_inputs=[y],
                       input_names=['input_1'],
                       dynamic_axes={'input_1': [0, 1]})
