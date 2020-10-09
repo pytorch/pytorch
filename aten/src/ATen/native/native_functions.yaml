@@ -5547,6 +5547,13 @@
   use_c10_dispatcher: full
   variants: method, function
 
+- func: _svd_helper(Tensor self, bool some, bool compute_uv) -> (Tensor, Tensor, Tensor)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _svd_helper_cpu
+    CUDA: _svd_helper_cuda
+
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: cholesky(Tensor self, bool upper=False) -> Tensor
@@ -8019,14 +8026,6 @@
   python_module: linalg
   use_c10_dispatcher: full
   variants: method, function
-
-- func: _linalg_svd_helper(Tensor self, bool full_matrices, bool compute_uv) -> (Tensor, Tensor, Tensor)
-  python_module: linalg
-  use_c10_dispatcher: full
-  variants: function
-  dispatch:
-    CPU: _linalg_svd_helper_cpu
-    CUDA: _linalg_svd_helper_cuda
 
 
 ## Functions that are only for testing

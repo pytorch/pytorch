@@ -1655,15 +1655,12 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
 // https://j-towns.github.io/papers/svd-derivative.pdf
 //
 // This makes no assumption on the signs of sigma.
-
-// XXX TODO: this is wrong! It expects to receive "V" but linalg_svd now returns VT
-Tensor linalg_svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-          bool full_matrices, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
+Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+          bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
   TORCH_CHECK(compute_uv,
-           "linalg_svd_backward: Setting compute_uv to false in torch.svd doesn't compute singular matrices, ",
+           "svd_backward: Setting compute_uv to false in torch.svd doesn't compute singular matrices, ",
            "and hence we cannot compute backward. Please use torch.svd(compute_uv=True)");
 
-  bool some = !full_matrices;
   auto m = self.size(-2);
   auto n = self.size(-1);
   auto k = sigma.size(-1);
@@ -1955,7 +1952,7 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
     Tensor u, sigma, v;
     std::tie(u, sigma, v) = self.svd();
     auto gsigma = prod_backward(grad.unsqueeze(-1), sigma, det.unsqueeze(-1));
-    return linalg_svd_backward({{}, gsigma, {}}, self, false, true, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   };
 
   auto nonsingular_case_backward = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
@@ -2005,7 +2002,7 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
     std::tie(u, sigma, v) = self.svd();
     // logdet = \sum log(sigma)
     auto gsigma = grad.unsqueeze(-1).div(sigma);
-    return linalg_svd_backward({{}, gsigma, {}}, self, false, true, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   };
 
   auto nonsingular_case_backward = [&](const Tensor& grad, const Tensor& self) -> Tensor {
@@ -2057,7 +2054,7 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
     // so logabsdet = \sum log(abs(sigma))
     // but det = 0, so backward logabsdet = \sum log(sigma)
     auto gsigma = grad_logabsdet.unsqueeze(-1).div(sigma);
-    return linalg_svd_backward({{}, gsigma, {}}, self, false, true, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   };
 
   auto nonsingular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {

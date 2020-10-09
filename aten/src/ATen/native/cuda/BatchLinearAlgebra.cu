@@ -1371,8 +1371,7 @@ AT_ERROR("svd: MAGMA library not found in "
 #endif
 }
 
-std::tuple<Tensor, Tensor, Tensor> _linalg_svd_helper_cuda(const Tensor& self, bool full_matrices, bool compute_uv) {
-  bool some = !full_matrices;
+std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool some, bool compute_uv) {
   std::vector<int64_t> infos(batchCount(self), 0);
   int64_t m = self.size(-2), n = self.size(-1);
   int64_t k = std::min(m, n);
@@ -1423,6 +1422,8 @@ std::tuple<Tensor, Tensor, Tensor> _linalg_svd_helper_cuda(const Tensor& self, b
     S_working_copy = same_stride_to(S_working_copy, self.options());
     VT_working_copy = same_stride_to(VT_working_copy, self.options()).zero_();
   }
+  // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
+  VT_working_copy.transpose_(-2, -1);
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 

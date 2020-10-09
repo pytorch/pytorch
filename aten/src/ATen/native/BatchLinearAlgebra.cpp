@@ -935,7 +935,7 @@ std::tuple<Tensor&, Tensor&> symeig_out(Tensor& vals, Tensor& vecs, const Tensor
   return std::tuple<Tensor&, Tensor&>(vals, vecs);
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
 static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
@@ -1004,8 +1004,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
 #endif
 }
 
-std::tuple<Tensor, Tensor, Tensor> _linalg_svd_helper_cpu(const Tensor& self, bool full_matrices, bool compute_uv) {
-  bool some = !full_matrices;
+std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some, bool compute_uv) {
   std::vector<int64_t> infos(batchCount(self), 0);
   int64_t m = self.size(-2), n = self.size(-1);
   int64_t k = std::min(m, n);
@@ -1040,52 +1039,55 @@ std::tuple<Tensor, Tensor, Tensor> _linalg_svd_helper_cpu(const Tensor& self, bo
     U_working_copy.zero_();
     VT_working_copy.zero_();
   }
+  // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
+  VT_working_copy.transpose_(-2, -1);
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
-std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matrices, bool compute_uv) {
-  TORCH_CHECK(self.dim() >= 2,
-              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  return at::_linalg_svd_helper(self, full_matrices, compute_uv);
-}
-
-// Question for reviewers: should this function even exist? Do we want to
-// support out versions of torch.linalg.*?
-std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tensor& VT,
-                                                     const Tensor& self, bool full_matrices, bool compute_uv) {
-  TORCH_CHECK(self.dim() >= 2,
-              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  Tensor U_tmp, S_tmp, VT_tmp;
-  std::tie(U_tmp, S_tmp, VT_tmp) = at::_linalg_svd_helper(self, full_matrices, compute_uv);
-  U.resize_as_(U_tmp).copy_(U_tmp);
-  S.resize_as_(S_tmp).copy_(S_tmp);
-  VT.resize_as_(VT_tmp).copy_(VT_tmp);
-  return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, VT);
-}
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/* the legacy version of torch.svd, implemented in terms of linalg_svd: note
-    the two main differences:
-
-    1. the 2nd parameter is bool some=True, which if effectively the opposite
-       of full_matrices=True
-
-    2. linalg_svd returns VT, while svd returns V. To accommodate the
-       difference, we transpose_() VT upon return
-*/
-
 std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compute_uv) {
-    bool full_matrices = !some;
-    Tensor U, S, VT;
-    std::tie(U, S, VT) = at::linalg_svd(self, full_matrices, compute_uv);
-    Tensor V = VT.transpose(-2, -1);
-    return std::make_tuple(U, S, V);
+  TORCH_CHECK(self.dim() >= 2,
+              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  return at::_svd_helper(self, some, compute_uv);
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& V,
                                               const Tensor& self, bool some, bool compute_uv) {
+  TORCH_CHECK(self.dim() >= 2,
+              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   Tensor U_tmp, S_tmp, V_tmp;
-  std::tie(U_tmp, S_tmp, V_tmp) = at::svd(self, some, compute_uv);
+  std::tie(U_tmp, S_tmp, V_tmp) = at::_svd_helper(self, some, compute_uv);
+  U.resize_as_(U_tmp).copy_(U_tmp);
+  S.resize_as_(S_tmp).copy_(S_tmp);
+  V.resize_as_(V_tmp).copy_(V_tmp);
+  return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, V);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/* torch.linalg.svd, implemented in terms of torch.svd. There are two main
+   differences:
+
+    1. the 2nd parameter is bool some=True, which if effectively the opposite
+       of full_matrices=True
+
+    2. svd returns V, while linalg.svd returns VT. To accommodate the
+       difference, we transpose() V upon return
+*/
+
+std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matrices, bool compute_uv) {
+    bool some = !full_matrices;
+    Tensor U, S, V;
+    std::tie(U, S, V) = at::svd(self, some, compute_uv);
+    Tensor VT = V.transpose(-2, -1);
+    return std::make_tuple(U, S, VT);
+}
+
+// Question for reviewers: should this function even exist? Do we want to
+// support out versions of torch.linalg.*?
+std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tensor& V,
+                                                     const Tensor& self, bool full_matrices, bool compute_uv) {
+  Tensor U_tmp, S_tmp, V_tmp;
+  std::tie(U_tmp, S_tmp, V_tmp) = at::svd(self, full_matrices, compute_uv);
   U.resize_as_(U_tmp).copy_(U_tmp);
   S.resize_as_(S_tmp).copy_(S_tmp);
   V.resize_as_(V_tmp).copy_(V_tmp);
