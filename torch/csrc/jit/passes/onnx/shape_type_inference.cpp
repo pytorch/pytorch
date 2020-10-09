@@ -425,9 +425,6 @@ void ONNXAssignOutputShape(
     std::shared_ptr<Graph>& graph,
     at::ArrayRef<at::Tensor> outputs,
     bool onnx_shape_inference) {
-  // std::cout << " graph outputs --> " <<
-  // graph->outputs()[0]->type()->cast<ListType>() <<"\n"; std::cout << "
-  // outputs --> " << outputs.size() << "\n";
   TORCH_INTERNAL_ASSERT(graph->outputs().size() == outputs.size());
   for (size_t i = 0; i < outputs.size(); ++i) {
     if (onnx_shape_inference) {
@@ -439,8 +436,15 @@ void ONNXAssignOutputShape(
   }
 }
 
-bool IsUninitializedOutput(Node* n) {
-  return n->inputs()[0]->node()->kind() == prim::Uninitialized;
+// Check if subblock output is output of prim::Uninitialized,
+// or output of prim::Uninitialized->onnx::Identity
+bool IsUninitializedBlockOutput(Node* n) {
+  if (n->kind() == ::c10::onnx::Identity &&
+      n->inputs()[0]->node()->kind() == prim::Uninitialized)
+    return true;
+  if (n->kind() == prim::Uninitialized)
+    return true;
+  return false;
 }
 
 Node* CreateCastToBoolNode(Value* val, Graph* graph) {
@@ -454,7 +458,7 @@ Node* CreateCastToBoolNode(Value* val, Graph* graph) {
 // Infer shape and type of the uninitialized_output from the corresponding
 // output of the other subblock. prim::Uninitialized node is proven to be
 // unsed. So replace this node with a constant of the inferred shape and type.
-void InferShapeTypeForUninitializedOutout(
+void InferShapeTypeForUninitializedOutput(
     Graph* graph,
     Block* block,
     Value* uninitialized_output,
@@ -498,16 +502,16 @@ void InferShapeTypeForUninitializedOutout(
 //   ...
 
 void ONNXIfShapeTypeInference(Node* node) {
-  if (node->kind() != ::c10::onnx::If) {
-    return;
-  }
-
   for (Block* b : node->blocks()) {
     for (Node* n : b->nodes()) {
       if (n->kind() == ::c10::onnx::If) {
         ONNXIfShapeTypeInference(n);
       }
     }
+  }
+
+  if (node->kind() != ::c10::onnx::If) {
+    return;
   }
 
   GRAPH_DUMP("Graph before fixing If shape type: ", node->owningGraph());
@@ -528,22 +532,22 @@ void ONNXIfShapeTypeInference(Node* node) {
   // Infer shape and type for subblock outputs
   TORCH_INTERNAL_ASSERT(
       then_block->outputs().size() == else_block->outputs().size())
-  for (int i = 0; i < else_block->outputs().size(); i++) {
+  for (size_t i = 0; i < else_block->outputs().size(); i++) {
     Value* then_block_output = then_block->outputs()[i];
     Value* else_block_output = else_block->outputs()[i];
 
     // If both subblocks have an uninitialized output, shape and type cannot
     // be inferred.
     TORCH_INTERNAL_ASSERT(
-        !(IsUninitializedOutput(then_block_output->node()) &&
-          IsUninitializedOutput(else_block_output->node())),
+        !(IsUninitializedBlockOutput(then_block_output->node()) &&
+          IsUninitializedBlockOutput(else_block_output->node())),
         "Error trying to infer shape and type for ONNX If with uninitialized output.");
 
-    if (IsUninitializedOutput(then_block_output->node())) {
+    if (IsUninitializedBlockOutput(then_block_output->node())) {
       InferShapeTypeForUninitializedOutput(
           graph, then_block, then_block_output, else_block_output);
       if_node->outputs()[i]->setType(then_block->outputs()[i]->type());
-    } else if (IsUninitializedOutput(else_block_output->node())) {
+    } else if (IsUninitializedBlockOutput(else_block_output->node())) {
       InferShapeTypeForUninitializedOutput(
           graph, else_block, else_block_output, then_block_output);
       if_node->outputs()[i]->setType(else_block->outputs()[i]->type());
@@ -554,7 +558,7 @@ void ONNXIfShapeTypeInference(Node* node) {
 void ONNXShapeTypeInference(std::shared_ptr<Graph>& graph, int opset_version) {
   for (auto n : graph->nodes()) {
     ONNXShapeTypeInference(n, opset_version);
-    if (n->kind() == ::c10::onnx::If) {
+    if (n->kind() == ::c10::onnx::If || n->kind() == ::c10::onnx::Loop) {
       ONNXIfShapeTypeInference(n);
     }
   }
