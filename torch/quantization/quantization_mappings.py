@@ -18,6 +18,7 @@ STATIC_QUANT_MODULE_MAPPINGS = {
     nn.ReLU6: nnq.ReLU6,
     nn.Hardswish: nnq.Hardswish,
     nn.ELU: nnq.ELU,
+    nn.LeakyReLU: nnq.LeakyReLU,
     nn.Conv1d: nnq.Conv1d,
     nn.Conv2d: nnq.Conv2d,
     nn.Conv3d: nnq.Conv3d,
@@ -83,6 +84,7 @@ _INCLUDE_QCONFIG_PROPAGATE_LIST = {
 # mapping from floating point function or torch ops to quantized ops
 FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS = {
     F.elu: torch._ops.ops.quantized.elu,
+    F.leaky_relu: torch._ops.ops.quantized.leaky_relu,
     F.hardswish: torch._ops.ops.quantized.hardswish,
     F.instance_norm: torch._ops.ops.quantized.instance_norm,
     F.layer_norm: torch._ops.ops.quantized.layer_norm,
