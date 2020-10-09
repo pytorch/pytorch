@@ -165,27 +165,23 @@ Tensor polar(const Tensor& abs, const Tensor& angle) {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
+  Device device = device_or_default(device_opt);
 
-  TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
-  TensorOptions options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
-
-  AT_ASSERT(options.device().type() == DeviceType::CPU);
+  AT_ASSERT(device.type() == DeviceType::CPU);
   TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   check_size_nonnegative(size);
 
+  bool pin_memory = pinned_memory_or_default(pin_memory_opt);
   c10::Allocator* allocator;
-  if (options.pinned_memory()) {
+  if (pin_memory) {
     allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
   } else {
     allocator = at::getCPUAllocator();
   }
 
   int64_t nelements = prod_intlist(size);
-  auto dtype = options.dtype();
+  caffe2::TypeMeta dtype = scalarTypeToTypeMeta(dtype_or_default(dtype_opt));
   int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
@@ -201,7 +197,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
 
-  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
+  auto memory_format = memory_format_opt.value_or(MemoryFormat::Contiguous);
   tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
 
   return tensor;
@@ -224,9 +220,9 @@ Tensor empty(
   return result;
 }
 
-Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
+Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
   check_size_nonnegative(size);
-  auto t = at::native::empty_cpu({0}, options);
+  auto t = at::native::empty_cpu({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   at::native::resize_impl_cpu_(t.unsafeGetTensorImpl(), size, stride);
   return t;
 }
@@ -368,9 +364,18 @@ Tensor empty_like(
 Tensor new_empty(
     const Tensor& self,
     IntArrayRef size,
-    const TensorOptions& options
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt
     ) {
-  return at::empty(size, self.options().merge_in(options));
+  return at::empty(size,
+    dtype_opt.value_or_else([&] {return typeMetaToScalarType(self.options().dtype());}),
+    layout_opt.value_or(self.options().layout()),
+    device_opt.value_or(self.options().device()),
+    pin_memory_opt.value_or(self.options().pinned_memory()),
+    c10::nullopt
+  );
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -531,7 +536,7 @@ Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
     //   auto result = at::empty({}, options);
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    auto result = empty_cpu({}, options);
+    auto result = empty_cpu({}, optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
     at::native::fill_(result, s);
     return result;
   }

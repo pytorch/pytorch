@@ -736,6 +736,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         strategy = dispatch_strategy(declaration)
         if declaration['name'] not in MANUAL_AUTOGRAD and strategy == 'use_derived':
             body = emit_body(declaration)
+
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body, formals=formals))
             if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:

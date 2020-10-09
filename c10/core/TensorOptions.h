@@ -21,19 +21,19 @@ namespace c10 {
 DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device);
 
 inline ScalarType dtype_or_default(c10::optional<ScalarType> dtype) {
-  return dtype.has_value() ? *dtype : get_default_dtype_as_scalartype();
+  return dtype.value_or_else(&get_default_dtype_as_scalartype);
 }
 
 inline caffe2::TypeMeta dtype_or_default(c10::optional<caffe2::TypeMeta> dtype) {
-  return dtype.has_value() ? *dtype : get_default_dtype();
+  return dtype.value_or_else(&get_default_dtype);
 }
 
 inline Layout layout_or_default(c10::optional<Layout> layout) {
-  return layout.has_value() ? *layout : kStrided;
+  return layout.value_or(kStrided);
 }
 
 inline Device device_or_default(c10::optional<Device> device) {
-  return device.has_value() ? *device : Device(kCPU);
+  return device.value_or_else([] {return Device(kCPU);});
 }
 
 inline bool pinned_memory_or_default(c10::optional<bool> pinned_memory) {
@@ -119,6 +119,8 @@ inline bool pinned_memory_or_default(c10::optional<bool> pinned_memory) {
 ///
 /// To get around this, we templatize the `Device` constructor. Since overload
 /// resolution is done before template resolution, our problem is solved.
+
+DispatchKey computeDispatchKey(optional<ScalarType> dtype, optional<Layout> layout, optional<Device> device);
 
 
 struct C10_API TensorOptions {
@@ -392,7 +394,7 @@ struct C10_API TensorOptions {
     return DispatchKeySet(computeDispatchKey());
   }
 
-  inline DispatchKey computeDispatchKey() const {
+  DispatchKey computeDispatchKey() const {
     return c10::computeDispatchKey(optTypeMetaToScalarType(dtype_opt()), layout_opt(), device_opt());
   }
 
