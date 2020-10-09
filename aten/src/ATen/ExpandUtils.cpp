@@ -85,71 +85,55 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t>> inferExpandGeometry(
       expandedSizes, expandedStrides);
 }
 
-// Given input tensor, compute the dense strides which preserve the same memory layout as
-// the input tensor with same sizes.
-// Return false, if input tensor has memory overlap.
-// Return true otherwise,  the calculated strides will be stored in `out_strides`.
-bool infer_dense_strides(const Tensor& tensor, DimVector& out_strides) {
+// This function returns a dense and non-overlapping strides based on the shape of input
+// tensor. The returned strides also keeps the same memory layout as the input tensor.
+// If the input tensor is a dense and non-overlapping tensor, the returned strides will
+// be the same as input tensor's strides. Otherwise, the input tensor's strides will be
+// sorted, a contiguous strides will be computed and returned based on the sorted input
+// tensor's strides and shape, so the input tensor's memory layout is also preserved.
+std::vector<int64_t> infer_dense_strides(const Tensor& tensor) {
 
-  // Note: numel() == 0 is treated as contiguous which is in the scope of
-  //       non overlapping and dense, so we keep the strides as it
+  // Note: numel() == 0 is also treated as contiguous which is in the scope of
+  //       non overlapping and dense, so we return the strides as it as well
   if (tensor.is_non_overlapping_and_dense()) {
-    out_strides = tensor.strides();
-    return true;
-  }
-
-  if (tensor.dim() == 0) {
-    out_strides.resize(0);
-    return true;
+    IntArrayRef strides = tensor.strides();
+    return std::vector<int64_t>(strides.begin(), strides.end());
   }
 
   IntArrayRef ori_sizes(tensor.sizes());
   IntArrayRef ori_strides(tensor.strides());
-  DimVector perm(tensor.dim());
+
+  size_t ndim = tensor.dim();
+  DimVector perm(ndim);
 
   // initialize perm with n-1, n-2, ..., 1, 0
   std::iota(perm.rbegin(), perm.rend(), 0);
 
-  // sort index of sizes, strides from back to front in ascending order
-  std::sort(perm.begin(), perm.end(), [&](size_t dim0, size_t dim1) {
-    // keep the original order if strides are the same
+  // Stable sort indices in `perm` based on `ori_strides` and `ori_sizes` in ascending order.
+  // Note that stable sort is needed here to ensure we keep the original order when strides
+  // and sizes are both equal. eg. given size/stride (3,2,2,3)/(4,3,3,4), the output strides
+  // should be garanteed to (12, 2, 1, 4), no (12, 1, 2, 4) occurs.
+  std::stable_sort(perm.begin(), perm.end(), [&](size_t dim0, size_t dim1) {
+    // smaller size goes inner dimension when strides are the same
     if (ori_strides[dim0] == ori_strides[dim1]) {
-      return dim0 > dim1;
+      return ori_sizes[dim0] > ori_sizes[dim1];
     }
     return ori_strides[dim0] < ori_strides[dim1];
   });
 
-  // check overlap.
-  int64_t sz = perm.size() - 1;
-  for (size_t i = 0; i < sz; ++i) {
-    int64_t idx = perm[i];
-    if (ori_strides[idx] == 0) {
-      if (ori_sizes[idx] != 1) {
-        return false;
-      }
-      continue;
-    }
-    // check minimal stride for non-overlapping
-    if ((ori_sizes[idx] - 1) * ori_strides[idx] + 1 > ori_strides[perm[i+1]]) {
-      return false;
-    }
-  }
-  if (ori_strides[perm[sz]] == 0 && ori_sizes[perm[sz]] != 1) {
-    return false;
-  }
-
-  // get dense strides in preserved memory layout
-  out_strides.resize(tensor.dim());
+  // get dense strides with preserved memory layout
+  std::vector<int64_t> out_strides(ndim);
   int64_t curr_stride = 1;
-  for (size_t i = 0; i <= sz; ++i) {
+  for (size_t i = 0; i < ndim; ++i) {
     int64_t idx = perm[i];
     out_strides[idx] = curr_stride;
+    // ori_sizes does not have 0 here since the input tensor will be contiguous otherwise,
+    // the function will stoped in the `non overlapping and dense check` block
     if (ori_sizes[idx] != 1) {
       curr_stride *= ori_sizes[idx];
     }
   }
-
-  return true;
+  return out_strides;
 }
 
 } // namespace at

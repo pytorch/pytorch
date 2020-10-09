@@ -16,7 +16,7 @@ inferExpandGeometry(
     IntArrayRef tensor_sizes,
     IntArrayRef tensor_strides,
     IntArrayRef sizes);
-CAFFE2_API bool infer_dense_strides(const Tensor& tensor, DimVector& out_strides);
+CAFFE2_API std::vector<int64_t> infer_dense_strides(const Tensor& tensor);
 
 // True if input shapes are expandable
 // NOTE: infer_size did a similar check, please keep them sync if change is needed

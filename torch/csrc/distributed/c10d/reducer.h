@@ -170,6 +170,10 @@ class Reducer {
 
   void finalize_backward();
 
+  // Asserts that the reduction for the previous iteration has finished before
+  // rebuilding buckets or kicking off the next one.
+  void ensure_prior_reduction_finished();
+
   // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
   // the buckets
   void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
