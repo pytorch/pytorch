@@ -15,9 +15,10 @@
  */
 
 #include <string>
-
+#include <sstream>
 #include "torch/script.h"
 #include "torch/csrc/jit/api/module.h"
+#include "torch/csrc/jit/passes/metal_rewrite.h"
 #include "torch/csrc/jit/passes/vulkan_rewrite.h"
 #include "torch/csrc/jit/passes/xnnpack_rewrite.h"
 #include "torch/csrc/jit/serialization/import.h"
@@ -29,6 +30,7 @@ C10_DEFINE_string(
     "",
     "Name of the output model to be saved.");
 C10_DEFINE_string(backend, "", "The backend to be optimized");
+C10_DEFINE_string(skip, "", "The methods to be preserved")
 
 int main(int argc, char** argv) {
   c10::SetUsageMessage(
@@ -37,6 +39,7 @@ int main(int argc, char** argv) {
     " --model=<model_file>"
     " [--output=<output_file_name>]"
     " [--backend=<cpu|vulkan>]"
+    " [--skip=<method_names>]"
   );
 
   if (!c10::ParseCommandLineFlags(&argc, &argv)) {
@@ -54,6 +57,21 @@ int main(int argc, char** argv) {
     output_model_name = FLAGS_output;
   }
 
+  std::vector<std::string> preserved_methods;
+  if(FLAGS_skip != ""){
+    std::stringstream ss(FLAGS_skip);
+    std::string m;
+    while(std::getline(ss, m, ';')){
+      if(m != ""){
+        preserved_methods.emplace_back(std::move(m));
+      }
+    }
+    std::cout<<"The following methods were preserved:"<<std::endl;
+    for(auto& str : preserved_methods){
+      std::cout<<str<<std::endl;
+    }
+  }
+
   auto module = torch::jit::load(FLAGS_model);
   auto ops = torch::jit::export_opnames(module);
   std::cout << "\npt_operator_library(" << std::endl;
@@ -68,9 +86,10 @@ int main(int argc, char** argv) {
   if (FLAGS_backend == "" || FLAGS_backend == "cpu") {
     optimized_module = torch::jit::optimizeForMobile(module);
   } else if (FLAGS_backend == "vulkan") {
-    std::vector<std::string> empty_preserved_methods;
-    optimized_module = torch::jit::vulkanOptimizeForMobile(module, empty_preserved_methods);
-  } else {
+    optimized_module = torch::jit::vulkanOptimizeForMobile(module, preserved_methods);
+  } else if (FLAGS_backend == "metal"){
+    optimized_module = torch::jit::metalOptimizeForMobile(module, preserved_methods);
+  }else{
     CAFFE_ENFORCE(false, "Unknown backend: " + FLAGS_backend);
   }
   auto new_ops = torch::jit::export_opnames(optimized_module);
