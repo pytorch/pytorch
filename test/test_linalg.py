@@ -685,17 +685,10 @@ class TestLinalg(TestCase):
     @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @dtypesIfCUDA(torch.float32, torch.float64)
     def test_cholesky(self, device, dtype):
-        from torch.testing._internal.common_utils import random_matrix, random_symmetric_pd_matrix
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
         def run_test(shape, batch):
-            if dtype.is_complex:
-                real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-                A_real = random_matrix(shape, shape, *batch, dtype=real_dtype, device=device)
-                A_imag = random_matrix(shape, shape, *batch, dtype=real_dtype, device=device)
-                A = A_real + 1j * A_imag
-                A = A @ A.transpose(-2, -1).conj()
-            else:
-                A = random_symmetric_pd_matrix(shape, *batch, dtype=dtype, device=device)
+            A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
             expected_L = np.linalg.cholesky(A.cpu().numpy())
             actual_L = torch.linalg.cholesky(A)
             self.assertEqual(actual_L, expected_L)
@@ -718,12 +711,8 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @dtypes(torch.complex64, torch.complex128)
     def test_cholesky_xfailed(self, device, dtype):
-        from torch.testing._internal.common_utils import random_matrix
-        real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-        A_real = random_matrix(shape, shape, *batch, dtype=real_dtype, device=device)
-        A_imag = random_matrix(shape, shape, *batch, dtype=real_dtype, device=device)
-        A = A_real + 1j * A_imag
-        A = A @ A.transpose(-2, -1).conj()
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
         expected_L = np.linalg.cholesky(A.cpu().numpy())
         actual_L = torch.linalg.cholesky(A)
         self.assertEqual(actual_L, expected_L)
