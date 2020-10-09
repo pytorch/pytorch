@@ -1126,6 +1126,37 @@ class TestTensorExprFuser(BaseTestClass):
         # FIXME: interp.elapsed_value() also increments due to simplifier
         assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
+    def _test_softmax(self, device):
+        def test(x, y):
+            a = F.softmax(x, dim=0, dtype=torch.float32)
+            b = F.softmax(y, dim=0, dtype=torch.float32)
+            c = F.softmax(x, dim=1, dtype=torch.float32)
+            d = F.softmax(y, dim=1, dtype=torch.float32)
+            return a + b + c + d
+
+        old = torch._C._jit_set_texpr_reductions_enabled(True)
+        traced = torch.jit.trace(test, (torch.randn(2, 3, device=device), torch.randn(2, 3, device=device)))
+        inp = torch.randn(2, 3, device=device)
+        res = traced(inp, inp)
+        # Use eager mode as reference.
+        ref = test(inp, inp)
+        np.testing.assert_allclose(ref, res.cpu().numpy(), rtol=1e-06, atol=1e-06)
+        torch._C._jit_set_texpr_reductions_enabled(old)
+
+    def test_softmax_cpu(self):
+        llvm = LLVMCodeGenExecuted()
+        interp = SimpleIREvalExecuted()
+        self._test_softmax('cpu')
+        # FIXME: interp.elapsed_value() also increments due to simplifier
+        assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skip("global allocs are not supported yet.")
+    def test_softmax_cuda(self):
+        cuda = CudaCodeGenExecuted()
+        self._test_softmax('cuda')
+        assert cuda.elapsed_value() == 1
+
     def test_transpose(self):
         @torch.jit.script
         def test(x, y, z):
