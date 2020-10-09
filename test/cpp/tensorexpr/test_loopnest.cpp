@@ -2922,5 +2922,289 @@ void testDetectInlineRankMismatch() {
       "Placeholder indexed access is inconsistent with its rank");
 }
 
+void testCacheReadsSimple() {
+  KernelScope kernel_scope;
+
+  Tensor* A = Compute(
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
+  Tensor* B = Compute(
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 30, j + 3);
+      });
+  Tensor* C = Compute(
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+      });
+
+  LoopNest l({B, C});
+  Stmt* j_loop = l.getLoopStmtsFor(B)[1];
+  l.cacheAccesses(A->buf(), "A_local", j_loop);
+
+  l.prepareForCodegen();
+  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+
+  std::ostringstream oss;
+  oss << *result;
+
+  // just this once: verify the whole thing.
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: Allocate(A, int, {64, 64});
+#CHECK: for (int i
+#CHECK:  for (int j
+#CHECK:   A[
+#CHECK:  }
+#CHECK: }
+#CHECK: for (int i_1
+#CHECK:  Allocate(A_local, int, {1, 10});
+#CHECK:  for (int j_1
+#CHECK:   A_local[j_1] = A[
+#CHECK:  }
+#CHECK:  for (int j_2
+#CHECK:   B[10 * i_1 + j_2] = A_local[j_2];
+#CHECK:  }
+#CHECK:  Free(A_local);
+#CHECK: }
+#CHECK: for (int i_2
+#CHECK:  for (int j_3
+#CHECK:   C[
+#CHECK:  }
+#CHECK: }
+#CHECK: Free(A);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  std::vector<int> b_data(200, 0);
+  std::vector<int> c_data(200, 0);
+  SimpleIREvaluator cg(l.root_stmt(), {B, C});
+  cg.call({b_data, c_data});
+
+  std::vector<int> b_ref(200, 0);
+  std::vector<int> c_ref(200, 0);
+
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < 10; ++j) {
+      b_ref[i * 10 + j] = (i + 30) * (j + 3);
+      c_ref[i * 10 + j] = (i + 10) * (j + 20) + (i + 30) * (j + 40);
+    }
+  }
+
+  assertAllEqual(b_data, b_ref);
+  assertAllEqual(c_data, c_ref);
+}
+
+void testCacheReadsOuter() {
+  KernelScope kernel_scope;
+
+  Tensor* A = Compute(
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
+  Tensor* B = Compute(
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 30, j + 40) + A->call(i + 31, j + 41);
+      });
+  Tensor* C = Compute(
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+      });
+
+  LoopNest l({B, C});
+  Stmt* i_loop = l.getLoopStmtsFor(B)[0];
+  l.cacheAccesses(A->buf(), "A_local", i_loop);
+
+  l.prepareForCodegen();
+  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: Allocate(A_local, int, {21, 11});
+#CHECK: A_local[j_1 + 11 * i_1] =
+#CHECK: B[10 * i_2 + j_2] = (A_local[(j_2 + 11 * i_2) + 12]) + (A_local[j_2 + 11 * i_2]);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  std::vector<int> b_data(200, 0);
+  std::vector<int> c_data(200, 0);
+  SimpleIREvaluator cg(l.root_stmt(), {B, C});
+  cg.call({b_data, c_data});
+
+  std::vector<int> b_ref(200, 0);
+  std::vector<int> c_ref(200, 0);
+
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < 10; ++j) {
+      b_ref[i * 10 + j] = (i + 30) * (j + 40) + (i + 31) * (j + 41);
+      c_ref[i * 10 + j] = (i + 10) * (j + 20) + (i + 30) * (j + 40);
+    }
+  }
+
+  assertAllEqual(b_data, b_ref);
+  assertAllEqual(c_data, c_ref);
+}
+
+void testCacheReadsInternal() {
+  KernelScope kernel_scope;
+
+  Tensor* A = Compute(
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
+  Tensor* B = Compute(
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 30, j + 40) + A->call(i + 31, j + 41);
+      });
+  Tensor* C = Compute(
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+      });
+
+  LoopNest l({B, C});
+  Stmt* j_loop = l.getLoopStmtsFor(B)[1];
+  l.cacheAccesses(A->buf(), "A_local", j_loop);
+  l.prepareForCodegen();
+  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: Allocate(A_local, int, {2, 11});
+#CHECK: A_local[j_1 + 11 * i_2] =
+#CHECK: B[10 * i_1 + j_2] = (A_local[j_2]) + (A_local[j_2 + 12]);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  std::vector<int> b_data(200, 0);
+  std::vector<int> c_data(200, 0);
+  SimpleIREvaluator cg(l.root_stmt(), {B, C});
+  cg.call({b_data, c_data});
+
+  std::vector<int> b_ref(200, 0);
+  std::vector<int> c_ref(200, 0);
+
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < 10; ++j) {
+      b_ref[i * 10 + j] = (i + 30) * (j + 40) + (i + 31) * (j + 41);
+      c_ref[i * 10 + j] = (i + 10) * (j + 20) + (i + 30) * (j + 40);
+    }
+  }
+
+  assertAllEqual(b_data, b_ref);
+  assertAllEqual(c_data, c_ref);
+}
+
+void testCacheReadsInner() {
+  KernelScope kernel_scope;
+
+  Tensor* A = Compute(
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
+  // note im changing the offset of the first arg of the first call to A.
+  Tensor* B = Compute(
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 34, j + 40) + A->call(i + 30, j + 41);
+      });
+  Tensor* C = Compute(
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+      });
+
+  LoopNest l({B, C});
+  Stmt* body = l.getLoopBodyFor(B);
+  l.cacheAccesses(A->buf(), "A_local", body);
+  l.prepareForCodegen();
+  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: Allocate(A_local, int, {5, 2});
+#CHECK: A_local[2 * i_2 + j_2] =
+#CHECK: B[10 * i_1 + j_1] = (A_local[8]) + (A_local[1]);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  std::vector<int> b_data(200, 0);
+  std::vector<int> c_data(200, 0);
+  SimpleIREvaluator cg(l.root_stmt(), {B, C});
+  cg.call({b_data, c_data});
+
+  std::vector<int> b_ref(200, 0);
+  std::vector<int> c_ref(200, 0);
+
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < 10; ++j) {
+      b_ref[i * 10 + j] = (i + 34) * (j + 40) + (i + 30) * (j + 41);
+      c_ref[i * 10 + j] = (i + 10) * (j + 20) + (i + 30) * (j + 40);
+    }
+  }
+
+  assertAllEqual(b_data, b_ref);
+  assertAllEqual(c_data, c_ref);
+}
+
+void testCacheWritesSimple() {
+  KernelScope kernel_scope;
+
+  Tensor* A = Compute(
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
+  Tensor* B = Compute(
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 30, j + 40) + A->call(i + 31, j + 41);
+      });
+  Tensor* C = Compute(
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+      });
+
+  LoopNest l({B, C});
+  Stmt* a_loop = l.getLoopStmtsFor(A)[1];
+  l.cacheAccesses(A->buf(), "A_local", a_loop);
+
+  l.prepareForCodegen();
+  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: Allocate(A_local, int, {1, 64});
+#CHECK: for (int j = 0; j < 64
+#CHECK:   A_local[j] = i * j;
+#CHECK: for (int j_1 = 0; j_1 < 64
+#CHECK:   A[64 * i + j_1] = A_local[
+#CHECK: Free(A_local);
+#CHECK-NOT: A_local
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  std::vector<int> b_data(200, 0);
+  std::vector<int> c_data(200, 0);
+  SimpleIREvaluator cg(l.root_stmt(), {B, C});
+  cg.call({b_data, c_data});
+
+  std::vector<int> b_ref(200, 0);
+  std::vector<int> c_ref(200, 0);
+
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < 10; ++j) {
+      b_ref[i * 10 + j] = (i + 30) * (j + 40) + (i + 31) * (j + 41);
+      c_ref[i * 10 + j] = (i + 10) * (j + 20) + (i + 30) * (j + 40);
+    }
+  }
+
+  assertAllEqual(b_data, b_ref);
+  assertAllEqual(c_data, c_ref);
+}
+
 } // namespace jit
 } // namespace torch
