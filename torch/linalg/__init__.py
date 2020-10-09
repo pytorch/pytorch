@@ -145,7 +145,7 @@ def svd(a, full_matrices=True, compute_uv=True, hermitian=False):
     """
     XXX write docstring
     """
-    assert not hermitian # XXX implement me
+    assert not hermitian  # XXX implement me
     USV = _linalg.linalg_svd(a, full_matrices, compute_uv)
     if not compute_uv:
         # we want to return a value of type torch.return_types.linalg_svd
