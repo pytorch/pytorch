@@ -1,6 +1,7 @@
 import collections
 import io
 import tempfile
+from typing import NamedTuple
 import unittest
 import sys
 from itertools import repeat, chain, product
@@ -14,6 +15,7 @@ import torch
 import torch.cuda
 import torch.cuda.comm as comm
 from torch import multiprocessing as mp
+from torch.nn.parallel import scatter_gather
 from torch._six import inf, nan, container_abcs
 
 from test_torch import AbstractTestCases
@@ -1731,6 +1733,48 @@ class TestCuda(TestCase):
         self.assertTrue(a.grad.sum().item() == 4 * size)
         self.assertTrue(b.grad.sum().item() == 4 * size)
 
+    def test_streaming_backward_sync_graph_root(self):
+        # This function tests if bwd ops running on a side stream properly sync with the GraphRoot.
+        # The potential bug it targets is a race condition. The test uses multiple trials and
+        # torch.cuda._sleep such that if the race condition exists, the test will almost certainly fail,
+        # but there's a chance it may spuriously pass. Passing does not guarantee the backend is bug-free,
+        # but failure does guarantee there is a bug.
+        fwd_bwd_op_stream = torch.cuda.Stream()
+        bwd_ambient_stream = torch.cuda.Stream()
+        # We need these streams to be different otherwise the test is meaningless.
+        self.assertTrue(fwd_bwd_op_stream != bwd_ambient_stream)
+
+        size = int(1e3)
+
+        a = torch.full((size,), 2.0, device="cuda", requires_grad=True)
+        b = torch.full((size,), 3.0, device="cuda", requires_grad=True)
+
+        # I don't think we need any manual record_streams below.
+        # a and b remain in scope for the entire test.
+        # c and grad remain in scope for each iteration, and there's a full sync between iterations.
+        for trial in range(5):
+            torch.cuda.synchronize()
+            a.grad = b.grad = None
+            with torch.cuda.stream(fwd_bwd_op_stream):
+                c = a * b
+
+            with torch.cuda.stream(bwd_ambient_stream):
+                torch.cuda.synchronize()
+                # Long-running dummy kernel on bwd_ambient_stream delays filling of grad
+                torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+                # Fills grad on bwd_ambient_stream
+                grad = torch.full((size,), float(trial + 1), device="cuda")
+
+                # Bwd ops still run on fwd_bwd_ops_stream, so the following will likely fail if
+                # bwd ops don't sync with bwd_ambient_stream before consuming grad.
+                torch.autograd.backward(tensors=c, grad_tensors=grad)
+
+                # assertEquals below run on bwd_ambient_stream, so this test may also fail
+                # if backward() fails to sync with bwd_ambient_stream at the end.
+                with torch.no_grad():
+                    self.assertEqual(a.grad, grad * b)
+                    self.assertEqual(b.grad, grad * a)
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @unittest.skipIf(not IS_SANDCASTLE, "Does not work on Sandcastle")
     def test_cuda_init_race(self):
@@ -3134,6 +3178,48 @@ class TestCudaComm(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
                     torch.addmm(s, m1, m2)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
+    def test_scatter_namedtuple(self):
+        # tests ability to scatter namedtuples and retrieve a list where each
+        # element is of the expected namedtuple type.
+        fields = ("a", "b")
+        TestNamedTupleInput_0 = collections.namedtuple("NamedTuple", fields)
+        num_gpus = torch.cuda.device_count()
+        a = torch.rand(num_gpus * 2, device=0)
+        b = torch.rand(num_gpus * 2, device=0)
+        a_tensors_for_gpu = [a[2 * i : 2 * i + 2].to(i) for i in range(num_gpus)]
+        b_tensors_for_gpu = [b[2 * i : 2 * i + 2].to(i) for i in range(num_gpus)]
+
+        inp = TestNamedTupleInput_0(a, b)
+        target_gpus = [torch.device(i) for i in range(num_gpus)]
+        scatter_out = scatter_gather.scatter(inp, target_gpus)
+
+        for i, x in enumerate(scatter_out):
+            self.assertTrue(isinstance(x, type(inp)))
+            self.assertEqual(x._fields, fields)
+            expected_a = a_tensors_for_gpu[i]
+            expected_b = b_tensors_for_gpu[i]
+            self.assertEqual(expected_a, x.a)
+            self.assertEqual(expected_b, x.b)
+
+        class TestNamedTupleInput_1(NamedTuple):
+            a: torch.tensor
+            b: torch.tensor
+
+        a = torch.rand(num_gpus * 2, device=0)
+        b = torch.rand(num_gpus * 2, device=0)
+        a_tensors_for_gpu = [a[2 * i : 2 * i + 2].to(i) for i in range(num_gpus)]
+        b_tensors_for_gpu = [b[2 * i : 2 * i + 2].to(i) for i in range(num_gpus)]
+        inp = TestNamedTupleInput_1(a, b)
+
+        scatter_out = scatter_gather.scatter(inp, target_gpus)
+        for i, x in enumerate(scatter_out):
+            self.assertTrue(isinstance(x, type(inp)))
+            self.assertEqual(x._fields, fields)
+            expected_a = a_tensors_for_gpu[i]
+            expected_b = b_tensors_for_gpu[i]
+            self.assertEqual(expected_a, x.a)
+            self.assertEqual(expected_b, x.b)
 
 if __name__ == '__main__':
     run_tests()

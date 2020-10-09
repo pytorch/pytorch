@@ -29,41 +29,6 @@ const std::string kClientActiveCalls = "agent.client_active_calls";
 const std::string kServerActiveCalls = "agent.server_active_calls";
 const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
 
-inline void checkCPUTensor(const torch::Tensor& tensor) {
-  TORCH_CHECK(
-      tensor.device() == at::kCPU,
-      "TensorPipe RPC backend only supports CPU tensors, please move your ",
-      "tensors to CPU before sending them over RPC. Found tensor on device: ",
-      tensor.device());
-}
-
-std::vector<c10::DeviceIndex> getDevicesForTensors(
-    const std::string& remoteName,
-    const std::vector<torch::Tensor>& tensors,
-    const std::unordered_map<std::string, tensorpipe::DeviceMap>& deviceMaps) {
-  const auto workerIter = deviceMaps.find(remoteName);
-  if (workerIter == deviceMaps.end()) {
-    for (const auto& tensor : tensors) {
-      checkCPUTensor(tensor);
-    }
-    return {};
-  } else {
-    std::vector<c10::DeviceIndex> deviceIndices;
-    deviceIndices.reserve(tensors.size());
-    const auto& deviceMap = workerIter->second;
-    for (const auto& tensor : tensors) {
-      const auto deviceIter = deviceMap.find(tensor.device().index());
-      if (deviceIter == deviceMap.end()) {
-        checkCPUTensor(tensor);
-        deviceIndices.push_back(-1);
-      } else {
-        deviceIndices.push_back(deviceIter->second);
-      }
-    }
-    return deviceIndices;
-  }
-}
-
 } // namespace
 
 C10_DEFINE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
@@ -400,7 +365,7 @@ void TensorPipeAgent::onListenerAccepted(
 
 void TensorPipeAgent::pipeRead(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
-    std::function<void(const tensorpipe::Error&, Message&&)> fn) {
+    std::function<void(const tensorpipe::Error&, Message&&)> fn) noexcept {
   pipe->readDescriptor([fn{std::move(fn)}, pipe](
                            const tensorpipe::Error& error,
                            tensorpipe::Message tpMessage) mutable {
@@ -436,14 +401,11 @@ void TensorPipeAgent::pipeRead(
 void TensorPipeAgent::pipeWrite(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
     Message&& rpcMessage,
-    std::function<void(const tensorpipe::Error&)> fn) {
+    std::vector<c10::DeviceIndex>&& devices,
+    std::function<void(const tensorpipe::Error&)> fn) noexcept {
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers tpBuffers;
 
-  const auto& deviceMaps =
-      rpcMessage.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
-  auto devices = getDevicesForTensors(
-      pipe->getRemoteName(), rpcMessage.tensors(), deviceMaps);
   std::tie(tpMessage, tpBuffers) =
       tensorpipeSerialize(std::move(rpcMessage), std::move(devices));
 
@@ -477,22 +439,18 @@ void TensorPipeAgent::sendCompletedResponseMessage(
   Message&& responseMessage = std::move(*futureResponseMessage).moveValue();
   responseMessage.setId(messageId);
   if (!error) {
-    for (const auto& tensor : responseMessage.tensors()) {
-      if (!tensor.device().is_cpu()) {
-        responseMessage = createExceptionResponse(
-            c10::str(
-                "TensorPipe RPC backend only supports CPU tensors, please ",
-                "move your tensors to CPU before sending them over RPC. Found ",
-                "tensor on device: ",
-                tensor.device()),
-            responseMessage.id());
-        break;
-      }
+    std::vector<c10::DeviceIndex> devices;
+
+    try {
+      devices = getDevicesForTensors(pipe->getRemoteName(), responseMessage);
+    } catch (const std::exception& e) {
+      responseMessage = createExceptionResponse(e.what(), responseMessage.id());
     }
 
     pipeWrite(
         pipe,
         std::move(responseMessage),
+        std::move(devices),
         [this, pipe, messageId](const tensorpipe::Error& error) {
           if (error) {
             LOG(WARNING)
@@ -511,6 +469,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     pipeWrite(
         pipe,
         createExceptionResponse(error->what(), responseMessage.id()),
+        {},
         [this, pipe, messageId](const tensorpipe::Error& error) {
           if (error) {
             LOG(WARNING)
@@ -642,6 +601,11 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
 
   lock.unlock();
 
+  // Get devices for tensors in the request message. This can throw if device
+  // maps are not configured properly for this request.
+  auto devices =
+      getDevicesForTensors(clientPipe.pipe_->getRemoteName(), requestMessage);
+
   futureResponseMessage->futMsg.addCallback([this]() {
     TORCH_INTERNAL_ASSERT(
         this->threadPool_.inThreadPool(),
@@ -678,6 +642,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   pipeWrite(
       clientPipe.pipe_,
       std::move(requestMessage),
+      std::move(devices),
       [this, &clientPipe, messageId](const tensorpipe::Error& error) mutable {
         if (error) {
           if (error.isOfType<tensorpipe::PipeClosedError>() &&
@@ -1052,6 +1017,53 @@ void TensorPipeAgent::markFutureWithError(
       // briefly dip to zero and trick join into thinking all work is done.
       decreaseCallCount(clientActiveCalls_);
     });
+  }
+}
+
+std::vector<c10::DeviceIndex> TensorPipeAgent::getDevicesForTensors(
+    const std::string& remoteName,
+    const Message& message) const {
+  const auto& deviceMaps =
+      message.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
+
+  const auto errStr = c10::str(
+      "TensorPipe RPC backend only supports CPU tensors by default, please "
+      "move your tensors to CPU before sending them over RPC, or call "
+      "`set_device_map` on `TensorPipeRpcBackendOptions` to explicitly "
+      "configure device mapping. ",
+      message.isRequest() ? "Request" : "Response",
+      " device mapping is not available for destination ",
+      remoteName);
+
+  const auto& iter = deviceMaps.find(remoteName);
+  if (iter == deviceMaps.end()) {
+    for (const auto& t : message.tensors()) {
+      TORCH_CHECK(
+          t.device().is_cpu(),
+          errStr,
+          ", but found tensor on device: ",
+          t.device());
+    }
+    return {};
+  } else {
+    std::vector<c10::DeviceIndex> deviceIndices;
+    deviceIndices.reserve(message.tensors().size());
+    const auto& deviceMap = iter->second;
+    for (const auto& t : message.tensors()) {
+      if (t.device().is_cpu()) {
+        deviceIndices.push_back(-1);
+      } else {
+        const auto deviceIter = deviceMap.find(t.device().index());
+        TORCH_CHECK(
+            deviceIter != deviceMap.end(),
+            errStr,
+            " for device ",
+            t.device(),
+            " but received a tensor on that device.");
+        deviceIndices.push_back(deviceIter->second);
+      }
+    }
+    return deviceIndices;
   }
 }
 

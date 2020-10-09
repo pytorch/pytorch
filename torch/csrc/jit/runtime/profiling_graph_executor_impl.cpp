@@ -49,7 +49,7 @@ static std::atomic<bool> profiling_mode{true};
 #endif
 
 static std::atomic<size_t> num_profiled_runs{1};
-static std::atomic<size_t> bailout_depth{1};
+static std::atomic<size_t> bailout_depth{20}; // NOLINT
 
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
@@ -253,7 +253,7 @@ void runDiffGraphPasses(std::shared_ptr<Graph>& graph) {
       BatchMM(graph);
       GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
 
-      FuseTensorExprs(graph);
+      FuseTensorExprs(graph, getFusionGroupInlining() ? 2 : 1);
       GRAPH_DEBUG(
           "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
 
@@ -312,7 +312,7 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
       BatchMM(graph);
       GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
 
-      FuseTensorExprs(graph);
+      FuseTensorExprs(graph, getFusionGroupInlining() ? 2 : 1);
       GRAPH_DEBUG(
           "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
 

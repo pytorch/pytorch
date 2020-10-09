@@ -408,6 +408,43 @@ class TestList(JitTestCase):
             return a[3:10] == [3, 4]
         self.checkScript(test_backward_slice, ())
 
+    def test_slice_index(self):
+        a = torch.tensor(
+            [
+                [[1, 11], [2, 22]],
+                [[3, 33], [4, 44]],
+                [[5, 55], [6, 66]],
+            ]
+        )
+
+        def test_index_slice1(x):
+            x = x[:, :, [0, 1]]
+            return x
+        self.checkScript(test_index_slice1, (a,))
+
+        def test_index_slice2(x):
+            x = x[[2, 1, 0], :, :]
+            return x
+        self.checkScript(test_index_slice2, (a,))
+
+        def test_index_slice3(x):
+            x = x[[0, 1], :, [1]]
+            return x
+        self.checkScript(test_index_slice3, (a,))
+
+        def test_index_slice_empty_list(x):
+            empty_list: List[int] = []
+            x = x[empty_list, :, :]
+            return x
+        self.checkScript(test_index_slice_empty_list, (a,))
+
+        def test_index_slice_out_of_bounds_index(x):
+            x = x[[4], :, :]
+            return x
+        with self.assertRaisesRegex(RuntimeError, "index 4 is out of bounds for dimension 0 with size 3"):
+            self.checkScript(test_index_slice_out_of_bounds_index, (a,))
+
+
     def test_mutable_list_append(self):
         def test_append():
             a = [0, 1]
@@ -1287,6 +1324,15 @@ class TestDict(JitTestCase):
 
         self.checkScript(update, (self.dict(), self.dict()))
         self.checkScript(update, (self.dict(), self.dict2()))
+
+    def test_update_existing_key(self):
+        def foo() -> Dict[str, int]:
+            a: Dict[str, int] = {}
+            for i in range(3):
+                a.update({'a': i})
+            return a
+
+        self.checkScript(foo, ())
 
     def test_aug_assign(self):
         def aug_assign_dict_tensor(a):
