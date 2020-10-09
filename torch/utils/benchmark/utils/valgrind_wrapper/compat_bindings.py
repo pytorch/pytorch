@@ -6,7 +6,6 @@ import os
 import textwrap
 from typing import List
 
-import torch
 from torch.utils.cpp_extension import load_inline
 
 
