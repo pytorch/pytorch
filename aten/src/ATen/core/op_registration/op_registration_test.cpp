@@ -789,8 +789,8 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndCatchallKe
 
   called = false;
   auto stack = callOp(*op, dummyTensor(c10::DispatchKey::CPU), "hello ");
-  EXPECT_FALSE(called);
-  EXPECT_EQ("hello _test::dummy", stack[1].toString()->string());
+  // CatchAll now maps to Math and has higher precedence than backend fallback.
+  EXPECT_TRUE(called);
 }
 
 bool called_autograd = false;
@@ -857,10 +857,11 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_t
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
 
+  // catchAll now maps to Math which has higher precedence than Autograd
   called_nonautograd = called_autograd = false;
   op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU, /*requires_grad=*/true));
-  EXPECT_FALSE(called_nonautograd);
-  EXPECT_TRUE(called_autograd);
+  EXPECT_TRUE(called_nonautograd);
+  EXPECT_FALSE(called_autograd);
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_thenCanCallCatchallKernel) {
@@ -1708,18 +1709,20 @@ TEST(NewOperatorRegistrationTest, dispatchWithMathAndCatchAllKernel) {
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
   ASSERT_TRUE(op.has_value());
 
+  // catchAll now maps to Math, which means we have two registrations to Math key.
+  // The last registration is used.
   {
     catchall_called = math_called = false;
     callOp(*op, dummyTensor(c10::DispatchKey::CPU));
-    ASSERT_TRUE(math_called);
-    ASSERT_FALSE(catchall_called);
+    ASSERT_FALSE(math_called);
+    ASSERT_TRUE(catchall_called);
   }
 
   {
     catchall_called = math_called = false;
     callOp(*op, dummyTensor(c10::DispatchKey::CPU, /*requires_grad=*/true));
-    ASSERT_TRUE(math_called);
-    ASSERT_FALSE(catchall_called);
+    ASSERT_FALSE(math_called);
+    ASSERT_TRUE(catchall_called);
   }
 }
 
@@ -2055,6 +2058,10 @@ TEST(NewOperatorRegistrationTest, throwsWhenRegisterToBackendMapsToAutogradOther
 TEST(NewOperatorRegistrationTest, dispatchMultipleTensors) {
   bool privateuse1_called = false;
   bool catchall_called = false;
+  // Similar to in-tree AutogradCPU/AutogradCUDA etc, out-of-tree backends usually register
+  // a fallthrough kernel for AutogradPrivateUse1.
+  auto m1 = MAKE_TORCH_LIBRARY_IMPL(_, AutogradPrivateUse1);
+  m1.fallback(CppFunction::makeFallthrough());
 
   auto m = MAKE_TORCH_LIBRARY(test);
   m.def("fn", torch::dispatch(c10::DispatchKey::PrivateUse1, [&](const Tensor& x, const Tensor& y) { privateuse1_called = true; return x; }));

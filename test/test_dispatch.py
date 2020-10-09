@@ -243,7 +243,7 @@ alias analysis kind: FROM_SCHEMA
 CPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 AutogradCPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 Autograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Math[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
     def test_def_impl_schema_mismatch(self):
@@ -276,7 +276,7 @@ alias analysis kind: CONSERVATIVE
 CPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 AutogradCPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 Autograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Math[alias]: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
     def test_def_only(self):
@@ -308,7 +308,7 @@ schema: (none)
 CPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 AutogradCPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 Autograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Math[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
     def test_computed_table(self):
@@ -334,7 +334,7 @@ CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 XLA: fn_xla :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 AutogradCPU: fn_autogradcpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 Autograd[alias]: fn_autograd :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Math[alias]: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -342,11 +342,11 @@ catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 
         self.assertExpectedInline(extracted_table, '''\
 CPU: fn_cpu [kernel]
-CUDA: default_def_name_t_t [catch all]
+CUDA: default_def_name_t_t [math kernel]
 XLA: fn_xla [kernel]
-AutogradOther: fn_autograd [autograd kernel]
+AutogradOther: default_def_name_t_t [math kernel]
 AutogradCPU: fn_autogradcpu [kernel]
-AutogradCUDA: fn_autograd [autograd kernel]
+AutogradCUDA: default_def_name_t_t [math kernel]
 AutogradXLA: fn_autograd [autograd kernel]
 ''')
 
@@ -365,7 +365,7 @@ schema: test::foo(Tensor _0) -> (Tensor _0)
 debug: registered at /dev/null:0
 alias analysis kind: CONSERVATIVE
 CPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Math[alias]: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -373,12 +373,12 @@ catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 
         self.assertExpectedInline(extracted_table, '''\
 CPU: impl_t_t [kernel]
-CUDA: default_def_name_t_t [catch all]
-XLA: default_def_name_t_t [catch all]
-AutogradOther: default_def_name_t_t [catch all]
+CUDA: default_def_name_t_t [math kernel]
+XLA: default_def_name_t_t [math kernel]
+AutogradOther: default_def_name_t_t [math kernel]
 AutogradCPU: fallthrough registered in pytorch framework [backend fallback]
-AutogradCUDA: default_def_name_t_t [catch all]
-AutogradXLA: default_def_name_t_t [catch all]
+AutogradCUDA: default_def_name_t_t [math kernel]
+AutogradXLA: default_def_name_t_t [math kernel]
 ''')
 
     def test_computed_table_with_math(self):
@@ -471,10 +471,11 @@ AutogradCUDA: impl_t_t [autograd kernel]
 AutogradXLA: impl_t_t [autograd kernel]
 ''')
 
-    def test_computed_table_with_cpu_autograd_math_catchall(self):
+    # Now that catchAll maps to Math, registering to both catchAll and Math breaks commutativity.
+    def test_computed_table_with_cpu_autograd_math(self):
         result = self.commute("foo", [
-            # m.def("foo", [](const Tensor & x) { return x })
-            lambda m: m.def_name_t_t("foo"),
+            # m.def("foo(Tensor x) -> Tensor")
+            lambda m: m.def_("foo(Tensor x) -> Tensor"),
             # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
             # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
@@ -485,13 +486,12 @@ AutogradXLA: impl_t_t [autograd kernel]
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor _0) -> (Tensor _0)
+schema: test::foo(Tensor x) -> (Tensor)
 debug: registered at /dev/null:0
-alias analysis kind: CONSERVATIVE
+alias analysis kind: FROM_SCHEMA
 CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 Autograd[alias]: fn_autograd :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 Math[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -524,7 +524,7 @@ debug: registered at /dev/null:0
 alias analysis kind: CONSERVATIVE
 CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 Autograd[alias]: fn_autograd :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Math[alias]: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -532,18 +532,18 @@ catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 
         self.assertExpectedInline(extracted_table, '''\
 CPU: fn_cpu [kernel]
-CUDA: default_def_name_t_t [catch all]
-XLA: default_def_name_t_t [catch all]
-AutogradOther: fn_autograd [autograd kernel]
+CUDA: default_def_name_t_t [math kernel]
+XLA: default_def_name_t_t [math kernel]
+AutogradOther: default_def_name_t_t [math kernel]
 AutogradCPU: fn_autograd [autograd kernel]
-AutogradCUDA: fn_autograd [autograd kernel]
-AutogradXLA: fn_autograd [autograd kernel]
+AutogradCUDA: default_def_name_t_t [math kernel]
+AutogradXLA: default_def_name_t_t [math kernel]
 ''')
 
     def test_computed_table_with_ambiguous_autogradother(self):
         result = self.commute("foo", [
-            # m.def("foo", [](const Tensor & x) { return x })
-            lambda m: m.def_name_t_t("foo"),
+            # m.def("foo(Tensor x) -> Tensor")
+            lambda m: m.def_("foo(Tensor x) -> Tensor"),
             # m.impl("foo", torch::kMath, [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo", "Math", debug="fn_math"),
             # m.impl("foo", torch::kQuantizedCPU, [](const Tensor & x) { return x })
@@ -552,12 +552,11 @@ AutogradXLA: fn_autograd [autograd kernel]
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor _0) -> (Tensor _0)
+schema: test::foo(Tensor x) -> (Tensor)
 debug: registered at /dev/null:0
-alias analysis kind: CONSERVATIVE
+alias analysis kind: FROM_SCHEMA
 QuantizedCPU: fn_quantizedcpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 Math[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -794,8 +793,8 @@ alias analysis kind: PURE_FUNCTION
             '''\
 name: test::foo
 schema: (none)
-catchall: fn2 :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-catchall (inactive): fn1 :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Math[alias]: fn2 :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Math[alias] (inactive): fn1 :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 '''
         )
 
