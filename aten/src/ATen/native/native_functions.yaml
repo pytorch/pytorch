@@ -2865,6 +2865,10 @@
     CPU: range_cpu_out
     CUDA: range_cuda_out
 
+- func: ravel(Tensor(a) self) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+
 - func: reciprocal(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
