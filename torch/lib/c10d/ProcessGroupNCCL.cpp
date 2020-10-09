@@ -1437,18 +1437,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
     int /* unused */) {
   check_gpu_tensors(tensors);
   auto ret = pointToPoint(
-      tensors,
+        tensors,
       [&](at::Tensor& input,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream,
           int dst) {
-        return ncclSend(
-            input.data_ptr(),
-            input.numel(),
-            getNcclDataType(input.scalar_type()),
-            dst,
-            comm,
-            stream.stream());
+        torch::cuda::nccl::send(input, comm, stream, dst);
+        return ncclSuccess;
       },
       dstRank,
       NCCLCommType::SEND);
@@ -1466,13 +1461,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
           ncclComm_t comm,
           at::cuda::CUDAStream& stream,
           int src) {
-        return ncclRecv(
-            output.data_ptr(),
-            output.numel(),
-            getNcclDataType(output.scalar_type()),
-            src,
-            comm,
-            stream.stream());
+        torch::cuda::nccl::recv(output, comm, stream, src);
+        return ncclSuccess;
       },
       srcRank,
       NCCLCommType::RECV);
