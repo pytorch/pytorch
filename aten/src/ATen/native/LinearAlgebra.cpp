@@ -1601,6 +1601,33 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, opt
   return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
 }
 
+Tensor linalg_tensorsolve(const Tensor& self, const Tensor& input2, optional<IntArrayRef> axes) {
+  int64_t ndim = self.dim();
+  Tensor self_ = self;
+
+  // prepare the permutation vector with given axes and permute self_
+  if (axes.has_value()) {
+    std::vector<int64_t> permutation_axes(ndim);
+    std::iota(permutation_axes.begin(), permutation_axes.end(), 0);
+    for (int64_t k : axes.value().vec()) {
+      auto it = std::find(permutation_axes.begin(), permutation_axes.end(), k);
+      std::rotate(it, it + 1, permutation_axes.end());
+    }
+    self_ = self_.permute(permutation_axes);
+  }
+
+  // result_shape is self_.sizes[-(an-input2.dim):]
+  std::vector<int64_t> result_shape = self_.sizes().slice(input2.dim(), ndim - input2.dim()).vec();
+
+  int64_t product = std::accumulate(result_shape.begin(), result_shape.end(), int64_t{1}, std::multiplies<int64_t>());
+  self_ = self_.reshape({-1, product});
+
+  // 0th output of at::solve is the solution
+  // normally input2 would be flattened by at::solve expects 2D input
+  Tensor result = std::get<0>(at::solve(input2.reshape({input2.numel(), 1}), self_));
+  return result.reshape(result_shape);
+}
+
 static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {
   if (i == j)
     return matrices[i];

@@ -140,3 +140,33 @@ Using the :attr:`dim` argument to compute matrix norms::
     >>> LA.norm(m[0, :, :]), LA.norm(m[1, :, :])
     (tensor(3.7417), tensor(11.2250))
 """)
+
+tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
+linalg.tensorsolve(a, b, axes=None) -> Tensor
+
+Computes the solution to the tensor equation ``a x = b`` for ``x``.
+
+Suppose that `:attr:`b` is equivalent to ``torch.tensordot(a, x)``.
+This function computes tensor ``x`` from `:attr:`a` and `:attr:`b`.
+
+Args:
+    a (Tensor): left-hand-side tensor of size ``b.shape + Q``.
+        ``Q`` is the shape of that sub-tensor of `:attr:`a` consisting of the appropriate
+        number of its rightmost indices, and must be such that ``prod(Q) == prod(b.shape)``.
+    b (Tensor): right-hand-side tensor of any size.
+    axes (Tuple[int]): axes (dimensions) of `:attr:`a` to reorder to the right, before solve.
+        If None (default), no reordering is done.
+
+    Returns:
+        (Tensor): The tensor with shape ``Q`` such that ``b.shape + Q == a.shape``.
+
+Example::
+
+    >>> a = torch.eye(2 * 3 * 4).reshape((2 * 3, 4, 2, 3, 4))
+    >>> b = torch.randn(2 * 3, 4)
+    >>> x = torch.linalg.tensorsolve(a, b)
+    >>> x.shape
+    torch.Size([2, 3, 4])
+    >>> torch.allclose(torch.tensordot(a, x, dims=3), b)
+    True
+""")

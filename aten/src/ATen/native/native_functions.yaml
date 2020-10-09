@@ -8319,6 +8319,10 @@
   python_module: linalg
   variants: function
 
+- func: linalg_tensorsolve(Tensor self, Tensor input2, int[]? axes=None) -> Tensor
+  python_module: linalg
+  variants: function
+
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
 - func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor

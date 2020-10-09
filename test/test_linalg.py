@@ -6,7 +6,8 @@ from math import inf, nan, isnan
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
+    (instantiate_device_type_tests, dtypes, dtypesIfCPU, dtypesIfCUDA,
+     onlyCUDA, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck
 
@@ -678,6 +679,40 @@ class TestLinalg(TestCase):
         # fast 3-norm
         result = torch.linalg.norm(x, 3, 1)
         expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
+        self.assertEqual(result, expected)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypesIfCPU(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypesIfCUDA(torch.float, torch.double)
+    @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
+    def test_tensorsolve(self, device, dtype):
+        def run_test(a_shape, axes):
+            a = torch.rand(a_shape, dtype=dtype, device=device)
+            b = torch.rand(a_shape[:2], dtype=dtype, device=device)
+            result = torch.linalg.tensorsolve(a, b, axes=axes)
+            expected = np.linalg.tensorsolve(a.cpu().numpy(), b.cpu().numpy(), axes=axes)
+            self.assertEqual(result, expected)
+
+        a_shapes = [(2, 3, 6), (3, 4, 4, 3)]
+        axes = [None, (0, 2)]
+        for a_shape, ax in itertools.product(a_shapes, axes):
+            run_test(a_shape, ax)
+
+    # TODO: once "solve_cuda" supports complex dtypes, they shall be added to above test
+    @unittest.expectedFailure
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.cfloat, torch.cdouble)
+    def test_tensorsolve_xfailed(self, device, dtype):
+        a_shape = (2, 3, 6)
+        a = torch.rand(a_shape, dtype=dtype, device=device)
+        b = torch.rand(a_shape[:2], dtype=dtype, device=device)
+        result = torch.linalg.tensorsolve(a, b)
+        expected = np.linalg.tensorsolve(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(result, expected)
 
 instantiate_device_type_tests(TestLinalg, globals())
