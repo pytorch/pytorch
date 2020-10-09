@@ -630,12 +630,12 @@ class DistributedTest:
             if rank == 0:
                 send_tensor = _build_tensor(rank + 1, device_id=device_id)
                 recv_tensor = _build_tensor(rank + 1, value=-1, device_id=device_id)
-                recv_op = dist._P2POp(dist.irecv, recv_tensor, 0)
+                recv_op = dist.P2POp(dist.irecv, recv_tensor, 0)
                 p2p_op_list.append(recv_op)
-                send_op = dist._P2POp(dist.isend, send_tensor, 0)
+                send_op = dist.P2POp(dist.isend, send_tensor, 0)
                 p2p_op_list.append(send_op)
 
-                reqs = dist._batch_isend_irecv(p2p_op_list)
+                reqs = dist.batch_isend_irecv(p2p_op_list)
                 for req in reqs:
                     req.wait()
 
@@ -661,12 +661,12 @@ class DistributedTest:
             if rank in [1, 2]:
                 send_tensor = _build_tensor(rank + 1, device_id=device_id)
                 recv_tensor = _build_tensor(peer + 1, value=-1, device_id=device_id)
-                recv_op = dist._P2POp(dist.irecv, recv_tensor, peer)
+                recv_op = dist.P2POp(dist.irecv, recv_tensor, peer)
                 p2p_op_list.append(recv_op)
-                send_op = dist._P2POp(dist.isend, send_tensor, peer)
+                send_op = dist.P2POp(dist.isend, send_tensor, peer)
                 p2p_op_list.append(send_op)
 
-                reqs = dist._batch_isend_irecv(p2p_op_list)
+                reqs = dist.batch_isend_irecv(p2p_op_list)
                 for req in reqs:
                     req.wait()
 
