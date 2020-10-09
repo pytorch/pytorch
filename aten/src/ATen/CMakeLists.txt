@@ -127,6 +127,8 @@ endif()
 
 if(USE_METAL)
   set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${native_metal_srcs})
+else()
+  set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp})
 endif()
 
 if(USE_CUDA AND USE_ROCM)
