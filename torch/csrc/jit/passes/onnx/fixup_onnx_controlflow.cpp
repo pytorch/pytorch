@@ -3,7 +3,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 
-#include <algorithm>    // std::find
+#include <algorithm> // std::find
 
 namespace torch {
 namespace jit {
@@ -235,9 +235,10 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   GRAPH_DUMP("Graph before fixing controlflow: ", node->owningGraph());
   auto* if_node = node;
   auto* graph = if_node->owningGraph();
-  for (Block* block: node->blocks()) {
+  for (Block* block : node->blocks()) {
     for (Value* output : block->outputs()) {
-     auto it = std::find(block->nodes().begin(), block->nodes().end(), output->node());
+      auto it = std::find(
+          block->nodes().begin(), block->nodes().end(), output->node());
       if (it == block->nodes().end()) {
         Node* id_node = graph->create(onnx::Identity);
         id_node->insertBefore(block->return_node());
