@@ -9,6 +9,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> cuda_fusion_guard_mode{true};
 
 std::atomic<bool>& getCudaFusionGuardMode() {
@@ -178,6 +179,7 @@ bool complyWith(
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_fusion({
     Operator(
         prim::CudaFusionGroup,
@@ -189,6 +191,7 @@ RegisterOperators reg_fusion({
         aliasAnalysisSpecialCase()),
 });
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_guard({
     Operator(
         "prim::CudaFusionGuard(...) -> bool",
