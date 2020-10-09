@@ -4,6 +4,7 @@
 #include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
+#include <ATen/cuda/PhiloxUtils.cuh>
 #include <c10/macros/Macros.h>
 #include <curand_kernel.h>
 
@@ -46,7 +47,7 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
   using LoadT = memory::aligned_vector<scalar_t, VEC>;
   using MaskLoadT = memory::aligned_vector<uint8_t, VEC>;
 
-  auto seeds = philox_args.get();
+  auto seeds = at::cuda::philox::unpack(philox_args);
 
   accscalar_t pinv = accscalar_t(1)/p;
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -115,7 +116,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
                      cuda::detail::TensorInfo<uint8_t, IndexType> c,
                      IndexType totalElements, accscalar_t p,
                      philox_kernelarg_t philox_args) {
-  auto seeds = philox_args.get();
+  auto seeds = at::cuda::philox::unpack(philox_args);
 
   accscalar_t pinv = accscalar_t(1)/p;
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;

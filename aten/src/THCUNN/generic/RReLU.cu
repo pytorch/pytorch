@@ -31,16 +31,17 @@ void THNN_(RReLU_updateOutput)(
     const uint32_t curand4_engine_calls = 4;
     dim3 grid = NUM_BLOCKS(n);
     uint64_t counter_offset = ((n - 1) / (BLOCK_SIZE * grid.x) + 1) * curand4_engine_calls;
-    philox_cuda_state_t rng_engine_inputs;
+    at::philox_cuda_state_t rng_engine_inputs;
     {
       // See Note [Acquire lock when using random generators]
       std::lock_guard<std::mutex> lock(gen->mutex_);
       rng_engine_inputs = gen->philox_cuda_state(counter_offset);
     }
+    at::philox_kernelarg_t rng_engine_kernelarg = rng_engine_inputs.to_kernel_arg();
     if (inplace)
     {
       rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(
-        n, rng_engine_inputs.to_kernel_arg(), input_data, noise_data, input_data, lower, upper);
+        n, rng_engine_kernelarg, input_data, noise_data, input_data, lower, upper);
       THCTensor_(set)(state, output, input);
     }
     else
@@ -48,7 +49,7 @@ void THNN_(RReLU_updateOutput)(
       THCTensor_(resizeAs)(state, output, input);
       scalar_t *output_data = THCTensor_(data)(state, output);
       rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(
-        n, rng_engine_inputs.to_kernel_arg(), input_data, noise_data, output_data, lower, upper);
+        n, rng_engine_kernelarg, input_data, noise_data, output_data, lower, upper);
     }
     THCudaCheck(cudaGetLastError());
   }

@@ -1,23 +1,29 @@
 #pragma once
 
 #include <c10/core/GeneratorImpl.h>
+#include <c10/core/StreamGuard.h>
 #include <ATen/core/Generator.h>
 
 // TODO: this file should be in ATen/cuda, not top level
+// Should I move it to ATen/cuda as part of this PR?
+// Then I wouldn't need cuda/PhiloxUtils.cuh.
 
 namespace at {
 
 /*
-philox_kernelarg_t and philox_cuda_state_t allow non-divergent use of
+philox_kernelarg_t, philox_cuda_state_t, and unpack() in
+cuda/PhiloxUtils.cuh allow non-divergent use of
 CUDAGeneratorImplHostState::philox_cuda_state() and
 CUDAGeneratorImplDeviceState::philox_cuda_state()
-in callers.
+in callers without synchronization.
 
 Intended usage (see e.g. native/cuda/Dropout.cu):
 
+#include <ATen/cuda/philox_kernelarg_helper.h>
+
 __global__ void kernel(..., philox_kernelarg_t philox_args) {
   // Provides std::pair<uint64_t, uint64_t>
-  auto seeds = philox_args.get();
+  auto seeds = at::cuda::philox::unpack(philox_args);
   auto seed = state.first;
   auto offset = state.second;
 }
@@ -51,19 +57,14 @@ struct philox_kernelarg_t {
     : has_device_ptrs_{true} {
     state_ptrs_ = std::make_pair(seed, offset);
   }
-  std::pair<uint64_t, uint64_t> get() const {
-    if (has_device_ptrs_) {
-      return std::make_pair{*state_ptrs_.first, *state_ptrs_.second};
-    } else {
-      return state_;
-    }
-  }
 
-  private:
+  // Not private, directly accessible by at::cuda::philox::unpack.
+  // If we made them private with getters/setters, the getters/setters
+  // would have to be __device__, and we can't do that in ATen.
   std::pair<uint64_t, uint64_t> state_;
   std::pair<uint64_t*, uint64_t*> state_ptrs_;
   const bool has_device_ptrs_;
-}
+};
 
 struct philox_cuda_state_t {
   philox_cuda_state_t() {}
@@ -75,7 +76,7 @@ struct philox_cuda_state_t {
     : has_device_tensors_{true} {
     state_tensors_ = std::make_pair(seed, offset);
   }
-  philox_kernelarg_state_t to_kernel_arg() const {
+  philox_kernelarg_t to_kernel_arg() const {
     if (has_device_tensors_) {
       return philox_kernelarg_t{state_tensors_.first.data_ptr<uint64_t>(),
                                 state_tensors_.second.data_ptr<uint64_t>()};
@@ -86,72 +87,83 @@ struct philox_cuda_state_t {
 
   private:
   std::pair<uint64_t, uint64_t> state_;
+  // Must be Tensor, not Tensor&.
+  // Part of philox_cuda_state_t's job is to keep allocations alive.
   std::pair<Tensor, Tensor> state_tensors_;
-  const bool has_device_tensors_;
-}
+  bool has_device_tensors_;
+};
 
+// Some callers cast to CUDAGeneratorImpl, so we need it as an interface.
 struct TORCH_CUDA_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
-  ~CUDAGeneratorImpl() = 0;
+  virtual ~CUDAGeneratorImpl() = 0;
 
   // CUDAGeneratorImpl methods
-  std::shared_ptr<CUDAGeneratorImpl> clone() const = 0;
-  void set_current_seed(uint64_t seed) override = 0;
-  uint64_t current_seed() const override = 0;
-  uint64_t seed() override = 0;
-  void set_philox_offset_per_thread(uint64_t offset) = 0;
-  uint64_t philox_offset_per_thread() = 0;
-  philox_cuda_state_t philox_cuda_state(uint64_t increment) = 0;
-  std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment) = 0
-  static DeviceType device_type() = 0;
-  virtual bool state_on_device() = 0;
+  static DeviceType device_type() { return DeviceType::CUDA; }
+  uint64_t seed() override;
+  std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment);
+
+  // Methods declared by GeneratorImpl base class, for reference:
+  // virtual void set_current_seed(uint64_t seed) = 0;
+  // virtual uint64_t current_seed() const = 0;
+  // virtual uint64_t seed() = 0;
+  // virtual GeneratorImpl* clone_impl() const = 0;
+
+  // clone() WAS NOT declared virtual in GeneratorImpl.h:
+  // c10::intrusive_ptr<GeneratorImpl> clone() const;
+  // See "Simple Hierarchy: Covariance + Name hiding" in
+  // https://www.fluentcpp.com/2017/09/12/how-to-return-a-smart-pointer-and-use-covariance/
+  // Similarly declares clone() an ordinary nonvirtual function here:
+  std::shared_ptr<CUDAGeneratorImpl> clone() const;
+
+  // Adds methods specific to the CUDAGeneratorImpl interface:
+  virtual void set_philox_offset_per_thread(uint64_t offset) = 0;
+  virtual uint64_t philox_offset_per_thread() const = 0;
+  virtual philox_cuda_state_t philox_cuda_state(uint64_t increment) const = 0;
+  virtual bool state_on_device() const = 0;
 };
 
 // Maintains philox state on the CPU.  Simple and fast, but not cuda graph-safe.
-struct TORCH_CUDA_API CUDAGeneratorImplHostState : public c10::GeneratorImpl {
+struct TORCH_CUDA_API CUDAGeneratorImplHostState : public CUDAGeneratorImpl {
   // Constructors
-  CUDAGeneratorImpl(DeviceIndex device_index = -1);
-  ~CUDAGeneratorImpl() = default;
+  CUDAGeneratorImplHostState(DeviceIndex device_index = -1);
+  ~CUDAGeneratorImplHostState() = default;
 
-  // CUDAGeneratorImpl methods
-  std::shared_ptr<CUDAGeneratorImpl> clone() const;
+  // CUDAGeneratorImplHostState methods
   void set_current_seed(uint64_t seed) override;
   uint64_t current_seed() const override;
-  uint64_t seed() override;
-  void set_philox_offset_per_thread(uint64_t offset);
-  uint64_t philox_offset_per_thread();
-  philox_cuda_state_t philox_cuda_state(uint64_t increment);
-  std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment);
-  static DeviceType device_type();
-  static state_on_device() { return false; }
+  void set_philox_offset_per_thread(uint64_t offset) override;
+  uint64_t philox_offset_per_thread() const override;
+  philox_cuda_state_t philox_cuda_state(uint64_t increment) const override;
+  bool state_on_device() const override { return false; }
+
+  std::shared_ptr<CUDAGeneratorImplHostState> clone() const;
 
   private:
-  CUDAGeneratorImpl* clone_impl() const override = 0;
+  CUDAGeneratorImplHostState* clone_impl() const override;
   uint64_t seed_ = default_rng_seed_val;
   uint64_t philox_offset_per_thread_ = 0;
 };
 
 // Maintains philox state on the GPU. More complex, but fully cuda graph-safe.
-struct TORCH_CUDA_API CUDAGeneratorImplDeviceState : public c10::GeneratorImpl {
+struct TORCH_CUDA_API CUDAGeneratorImplDeviceState : public CUDAGeneratorImpl {
   // Constructors
-  CUDAGeneratorImpl(DeviceIndex device_index = -1);
-  ~CUDAGeneratorImpl() = default;
+  CUDAGeneratorImplDeviceState(DeviceIndex device_index = -1);
+  ~CUDAGeneratorImplDeviceState() = default;
 
-  // CUDAGeneratorImpl methods
-  std::shared_ptr<CUDAGeneratorImpl> clone() const;
+  // CUDAGeneratorImplDeviceState
   void set_current_seed(uint64_t seed) override;
   uint64_t current_seed() const override;
-  uint64_t seed() override;
-  void set_philox_offset_per_thread(uint64_t offset);
-  uint64_t philox_offset_per_thread();
-  philox_cuda_state_t philox_cuda_state(uint64_t increment);
-  std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment);
-  static DeviceType device_type();
-  static state_on_device() { return true; }
+  void set_philox_offset_per_thread(uint64_t offset) override;
+  uint64_t philox_offset_per_thread() const override;
+  philox_cuda_state_t philox_cuda_state(uint64_t increment) const override;
+  bool state_on_device() const override { return false; }
+
+  std::shared_ptr<CUDAGeneratorImplDeviceState> clone() const;
 
   private:
-  CUDAGeneratorImpl* clone_impl() const override;
-  Tensor seed_ = default_rng_seed_val;
+  CUDAGeneratorImplDeviceState* clone_impl() const override;
+  Tensor seed_;
   Tensor philox_offset_per_thread_;
   c10::optional<c10::Stream>& state_update_stream_;
 };

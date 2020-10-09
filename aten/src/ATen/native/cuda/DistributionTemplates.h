@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/cuda/PhiloxUtils.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/core/DistributionsHelper.h>
 
@@ -66,7 +67,7 @@ __global__ void distribution_elementwise_grid_stride_kernel(int numel,
                                                             const dist_t dist_func,
                                                             const transform_t transform_func) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  auto seeds = philox_args.get();
+  auto seeds = at::cuda::philox::unpack(philox_args);
   curandStatePhilox4_32_10_t state;
   curand_init(
       seeds.first,
@@ -190,7 +191,7 @@ __global__ void distribution_binary_elementwise_kernel(
   int base_index = BLOCK_WORK_SIZE * blockIdx.x;
   int remaining = std::min<int>(numel - base_index, BLOCK_WORK_SIZE);
 
-  auto seeds = philox_args.get();
+  auto seeds = at::cuda::philox::unpack(philox_args);
   curandStatePhilox4_32_10_t state;
   curand_init(seeds.first, blockIdx.x * blockDim.x + threadIdx.x, seeds.second, &state);
 
@@ -580,7 +581,7 @@ void bernoulli_tensor_cuda_kernel(
       [philox_args] __device__(
           int n, scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4,
           const prob_t& p1, const prob_t& p2, const prob_t& p3, const prob_t& p4) {
-        auto seeds = philox_args.get();
+        auto seeds = at::cuda::philox::unpack(philox_args);
         curandStatePhilox4_32_10_t state;
         curand_init(
             seeds.first,

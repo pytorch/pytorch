@@ -49,13 +49,13 @@ template <typename scalar_t>
 void poisson_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& lambda,
-    philox_kernelarg_t philox_args) {
+    at::philox_kernelarg_t philox_args) {
   at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t>(
       ret,
       lambda,
       [philox_args] __device__(
           scalar_t & ret_val, const scalar_t& lambda) {
-        auto seeds = philox_args.get();
+        auto seeds = at::cuda::philox::unpack(philox_args);
         curandStatePhilox4_32_10_t state;
         curand_init(
             seeds.first,
@@ -83,7 +83,7 @@ void binomial_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& count,
     const at::Tensor& prob,
-    philox_kernelarg_t philox_args) {
+    at::philox_kernelarg_t philox_args) {
   using accscalar_t = at::acc_type<scalar_t, true>;
   at::TensorIterator iter = at::TensorIteratorConfig()
       .add_output(ret)
@@ -109,13 +109,14 @@ template <typename scalar_t>
 void gamma_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& alpha,
-    philox_kernelarg_t philox_args) {
+    at::philox_kernelarg_t philox_args) {
   using accscalar_t = at::acc_type<scalar_t, true>;
   at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t>(
       ret,
       alpha,
-      [seeds] __device__(
+      [philox_args] __device__(
           scalar_t & ret_val, const scalar_t& alpha) {
+        auto seeds = at::cuda::philox::unpack(philox_args);
         curandStatePhilox4_32_10_t state;
         curand_init(
             seeds.first,
@@ -173,7 +174,7 @@ Tensor _s_poisson_cuda(const Tensor& lambda, c10::optional<Generator> gen_) {
   }
   Tensor ret = at::empty(lambda.sizes(), lambda.options());
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, ret.scalar_type(), "poisson_cuda", [&] {
-    poisson_cuda_kernel<scalar_t>(ret, lambda, rng_engine_inputs);
+    poisson_cuda_kernel<scalar_t>(ret, lambda, rng_engine_inputs.to_kernel_arg());
   });
   return ret;
 }
@@ -195,7 +196,7 @@ Tensor _s_binomial_cuda(const Tensor& count, const Tensor& prob, c10::optional<G
 
 Tensor _s_gamma_cuda(const Tensor& alpha, c10::optional<Generator> gen_) {
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
-  std::pair<uint64_t, uint64_t> rng_engine_inputs;
+  philox_cuda_state_t rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
@@ -203,14 +204,14 @@ Tensor _s_gamma_cuda(const Tensor& alpha, c10::optional<Generator> gen_) {
   }
   Tensor ret = at::empty(alpha.sizes(), alpha.options());
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, ret.scalar_type(), "gamma_cuda", [&] {
-     gamma_cuda_kernel<scalar_t>(ret, alpha, rng_engine_inputs);
+     gamma_cuda_kernel<scalar_t>(ret, alpha, rng_engine_inputs.to_kernel_arg());
    });
   return ret;
 }
 
 Tensor _s_dirichlet_cuda(const Tensor& alpha, c10::optional<Generator> gen_) {
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
-  std::pair<uint64_t, uint64_t> rng_engine_inputs;
+  philox_cuda_state_t rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
@@ -219,7 +220,7 @@ Tensor _s_dirichlet_cuda(const Tensor& alpha, c10::optional<Generator> gen_) {
   Tensor ret = at::empty(alpha.sizes(), alpha.options());
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, ret.scalar_type(), "dirichlet", [&] {
     Tensor gamma = at::empty(alpha.sizes(), alpha.options());
-    gamma_cuda_kernel<scalar_t>(gamma, alpha, rng_engine_inputs);
+    gamma_cuda_kernel<scalar_t>(gamma, alpha, rng_engine_inputs.to_kernel_arg());
     dirichlet_scalar_cuda_kernel<scalar_t>(ret, gamma);
   });
   return ret;
