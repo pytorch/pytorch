@@ -49,7 +49,7 @@ namespace api {
 // as well.  This behavior is by design.
 //
 
-struct C10_EXPORT Descriptor final {
+struct Descriptor final {
   //
   // Pool
   //
@@ -72,7 +72,7 @@ struct C10_EXPORT Descriptor final {
 
     class Factory final {
      public:
-      explicit Factory(VkDevice device);
+      explicit Factory(const GPU& gpu);
 
       typedef Pool::Descriptor Descriptor;
       typedef VK_DELETER(DescriptorPool) Deleter;
@@ -95,8 +95,8 @@ struct C10_EXPORT Descriptor final {
     typedef api::Cache<Factory> Cache;
     Cache cache;
 
-    explicit Pool(const VkDevice device)
-      : cache(Factory(device)) {
+    explicit Pool(const GPU& gpu)
+      : cache(Factory(gpu)) {
     }
 
     static void purge(VkDevice device, VkDescriptorPool descriptor_pool);
@@ -118,9 +118,9 @@ struct C10_EXPORT Descriptor final {
     VkDescriptorPool descriptor_pool_;
   } factory;
 
-  explicit Descriptor(const VkDevice device)
-    : pool(device),
-      factory(device, pool.cache.retrieve(Pool::kDefault)) {
+  explicit Descriptor(const GPU& gpu)
+    : pool(gpu),
+      factory(gpu.device, pool.cache.retrieve(Pool::kDefault)) {
   }
 };
 
@@ -156,8 +156,8 @@ inline size_t Descriptor::Pool::Factory::Hasher::operator()(
 } // namespace at
 
 inline bool operator==(
-    const VkDescriptorPoolSize& descriptor_pool_size_1,
-    const VkDescriptorPoolSize& descriptor_pool_size_2) {
-  return (descriptor_pool_size_1.type == descriptor_pool_size_2.type) &&
-         (descriptor_pool_size_1.descriptorCount == descriptor_pool_size_2.descriptorCount);
+    const VkDescriptorPoolSize& _1,
+    const VkDescriptorPoolSize& _2) {
+  return (_1.type == _2.type) &&
+         (_1.descriptorCount == _2.descriptorCount);
 }
