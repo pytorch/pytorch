@@ -1177,7 +1177,7 @@ void dictUpdate(Stack* stack) {
   auto dict = pop(stack).toGenericDict();
 
   for (const auto& item : to_add) {
-    dict.insert(item.key(), item.value());
+    dict.insert_or_assign(item.key(), item.value());
   }
 }
 
