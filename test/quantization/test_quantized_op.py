@@ -646,16 +646,11 @@ class TestQuantizedOps(TestCase):
                 qY, qY_hat,
                 msg="Hardswish failed: {} vs {}, {}".format(qY, qY_hat, torch.backends.quantized.engine))
 
-    """Tests the correctness of the scalar addition."""
-    @unittest.skip("Failing on MacOS")
-    @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
-                       elements=hu.floats(-1e6, 1e6, allow_nan=False),
-                       qparams=hu.qparams()),
-           b=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
-    def test_qadd_scalar_relu(self, A, b):
+    """Tests the correctness of the binary op + scalar."""
+    def _test_binary_op_scalar_relu(self, A, b, op, op_relu):
         import copy
-        add_scalar = torch.ops.quantized.add
-        add_scalar_relu = torch.ops.quantized.add_relu
+        op_scalar = op
+        op_scalar_relu = op
 
         A, (scale, zero_point, dtype) = A
         A = A.astype(np.float32)
@@ -665,18 +660,32 @@ class TestQuantizedOps(TestCase):
         C_relu = copy.deepcopy(C)
         C_relu[C_relu < 0] = 0
 
-        C_hat = add_scalar(qA, b)
+        C_hat = op_scalar(qA, b)
         C_ref = torch.quantize_per_tensor(C, C_hat.q_scale(), C_hat.q_zero_point(), dtype)
-        C_relu_hat = add_scalar_relu(qA, b)
+        C_relu_hat = op_scalar_relu(qA, b)
         C_relu_ref = torch.quantize_per_tensor(
             C_relu, C_relu_hat.q_scale(), C_relu_hat.q_zero_point(), dtype)
 
         self.assertEqual(C_ref.dequantize(), C_hat.dequantize(),
-                         msg="Scalar add results don't match:\
-                         {} vs {}".format(C_ref.dequantize(), C_hat.dequantize()))
+                         msg="binary_op_scalar results don't match: "
+                         "{} vs {}".format(C_ref.dequantize(), C_hat.dequantize()))
         self.assertEqual(C_relu_ref.dequantize(), C_relu_hat.dequantize(),
-                         msg="Scalar add relu results don't match:\
-                         {} vs {}".format(C_relu_ref.dequantize(), C_relu_hat.dequantize()))
+                         msg="bianry_op_scalar_relu results don't match: "
+                         "{} vs {}".format(C_relu_ref.dequantize(), C_relu_hat.dequantize()))
+
+    @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False),
+                       qparams=hu.qparams()),
+           b=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
+    def test_add_scalar_relu(self, A, b):
+        self._test_binary_op_scalar_relu(A, b, torch.ops.quantized.add, torch.ops.quantized.add_relu)
+
+    @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False),
+                       qparams=hu.qparams()),
+           b=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
+    def test_mul_scalar_relu(self, A, b):
+        self._test_binary_op_scalar_relu(A, b, torch.ops.quantized.mul, torch.ops.quantized.mul_relu)
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
