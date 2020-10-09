@@ -52,9 +52,8 @@ except ImportError:
 # We'd like calls to unsupported ops to error out accordingly,
 # rather than returning garbage values.
 def supports_complex(reduceOp: ReduceOp) -> bool:
-    if reduceOp == ReduceOp.MAX or reduceOp == ReduceOp.MIN or reduceOp == ReduceOp.PRODUCT:
-        return False
-    return True
+    denyList = [ReduceOp.MAX, ReduceOp.MIN, ReduceOp.PRODUCT]
+    return reduceOp not in denyList
 
 
 class Backend(object):
