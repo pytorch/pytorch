@@ -660,6 +660,54 @@ void all2all(at::Tensor& input,
 #endif
 }
 
+void send(
+    const at::Tensor& input,
+    ncclComm_t comm,
+    at::cuda::CUDAStream stream,
+    int dst) {
+#ifdef USE_NCCL
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 7)
+  using namespace torch::cuda::nccl::detail;
+  NCCL_CHECK(ncclSend(
+      input.data_ptr(),
+      input.numel(),
+      to_nccl_data_type(input),
+      dst,
+      to_nccl_comm(comm),
+      stream.stream()));
+#else
+  AT_ERROR("Send is only supported for NCCL lib version >= 2.7.0");
+#endif
+#else
+  AT_ERROR("PyTorch built without NCCL support");
+#endif
+}
+
+void recv(
+    at::Tensor& output,
+    ncclComm_t comm,
+    at::cuda::CUDAStream stream,
+    int src) {
+#ifdef USE_NCCL
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 7)
+  using namespace torch::cuda::nccl::detail;
+  NCCL_CHECK(ncclRecv(
+      output.data_ptr(),
+      output.numel(),
+      to_nccl_data_type(output),
+      src,
+      to_nccl_comm(comm),
+      stream.stream()));
+#else
+  AT_ERROR("Recv is only supported for NCCL lib version >= 2.7.0");
+#endif
+#else
+  AT_ERROR("PyTorch built without NCCL support");
+#endif
+}
+
 } // namespace nccl
 } // namespace cuda
 } // namespace torch
