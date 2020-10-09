@@ -1,6 +1,6 @@
 ir_version: 6
 producer_name: "pytorch"
-producer_version: "CURRENT_VERSION"
+producer_versionproducer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "0"
@@ -101,15 +101,9 @@ graph {
     op_type: "Sub"
   }
   node {
-    input: "9"
-    output: "10"
-    name: "Abs_9"
-    op_type: "Abs"
-  }
-  node {
     input: "7"
-    output: "11"
-    name: "Cast_10"
+    output: "10"
+    name: "Cast_9"
     op_type: "Cast"
     attribute {
       name: "to"
@@ -118,15 +112,15 @@ graph {
     }
   }
   node {
+    input: "9"
     input: "10"
-    input: "11"
-    output: "12"
-    name: "Mul_11"
+    output: "11"
+    name: "Mul_10"
     op_type: "Mul"
   }
   node {
-    output: "13"
-    name: "Constant_12"
+    output: "12"
+    name: "Constant_11"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -138,23 +132,23 @@ graph {
     }
   }
   node {
-    input: "11"
-    input: "13"
-    output: "14"
-    name: "Sub_13"
+    input: "10"
+    input: "12"
+    output: "13"
+    name: "Sub_12"
     op_type: "Sub"
   }
   node {
-    input: "12"
-    input: "14"
-    output: "15"
-    name: "Div_14"
+    input: "11"
+    input: "13"
+    output: "14"
+    name: "Div_13"
     op_type: "Div"
   }
   node {
-    input: "15"
-    output: "16"
-    name: "Sqrt_15"
+    input: "14"
+    output: "15"
+    name: "Sqrt_14"
     op_type: "Sqrt"
   }
   name: "torch-jit-export"
@@ -178,7 +172,7 @@ graph {
     }
   }
   output {
-    name: "16"
+    name: "15"
     type {
       tensor_type {
         elem_type: 1
