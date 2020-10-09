@@ -8,7 +8,7 @@ torch.Tensor
 A :class:`torch.Tensor` is a multi-dimensional matrix containing elements of
 a single data type.
 
-Torch defines 10 tensor types with CPU and GPU variants:
+Torch defines 10 tensor types with CPU and GPU variants which are as follows:
 
 ========================== ===========================================   ============================= ================================
 Data type                  dtype                                         CPU tensor                    GPU tensor
@@ -32,7 +32,7 @@ Boolean                    ``torch.bool``                                :class:
   Sometimes referred to as binary16: uses 1 sign, 5 exponent, and 10
   significand bits. Useful when precision is important at the expense of range.
 .. [2]
-  Sometimes referred to as Brain Floating Point: use 1 sign, 8 exponent and 7
+  Sometimes referred to as Brain Floating Point: uses 1 sign, 8 exponent, and 7
   significand bits. Useful when range is important, since it has the same
   number of exponent bits as ``float32``
 
@@ -436,6 +436,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: maximum
    .. automethod:: mean
    .. automethod:: median
+   .. automethod:: nanmedian
    .. automethod:: min
    .. automethod:: minimum
    .. automethod:: mm
@@ -453,6 +454,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: narrow
    .. automethod:: narrow_copy
    .. automethod:: ndimension
+   .. automethod:: nan_to_num
+   .. automethod:: nan_to_num_
    .. automethod:: ne
    .. automethod:: ne_
    .. automethod:: not_equal
@@ -571,6 +574,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: symeig
    .. automethod:: t
    .. automethod:: t_
+   .. automethod:: tensor_split
    .. automethod:: to
    .. automethod:: to_mkldnn
    .. automethod:: take

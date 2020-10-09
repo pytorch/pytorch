@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 import numpy as np
