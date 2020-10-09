@@ -21,7 +21,8 @@ Argument = Optional[Union[
 
 class Node:
     def __init__(self, graph: 'Graph', name: str, op: str, target: Target,
-                 args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> None:
+                 args: Tuple[Argument, ...], kwargs: Dict[str, Argument],
+                 type : Optional[Any] = None) -> None:
         self.graph = graph
         self.name = name  # unique name of value being created
         assert op in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output']
@@ -39,6 +40,17 @@ class Node:
         #
         # Is a dict to act as an "ordered set". Keys are significant, value dont-care
         self.users : Dict['Node', None] = {}
+        # Type expression representing the output value of this node.
+        # This should contain the same class of Type objects that would appear
+        # as type annotations for function inputs/outputs.
+        #
+        # For placeholder nodes, this value will be used to type-annotate the
+        # generated function parameters.
+        # For the return ndoe, this value will be used to type-annotate the
+        # generated function return type. (Note this is a special case. `return`
+        # does not produce a value, it's more of a notation. Thus, this value
+        # describes the type of args[0] in the `return` node.
+        self.type : Optional[Any] = type
 
     @property
     def args(self) -> Tuple[Argument, ...]:
