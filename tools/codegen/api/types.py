@@ -1,6 +1,8 @@
 from tools.codegen.model import *
 from dataclasses import dataclass
-from typing import Optional, Union, Sequence, Tuple
+from typing import Optional, Union, Sequence, Tuple, TypeVar
+
+_T = TypeVar('_T')
 
 # ------------------------------------------------------------------- #
 
@@ -51,10 +53,6 @@ class CppArgument:
             mb_default = f"={self.default}"
         return f"{self.type} {self.name}{mb_default}"
 
-    # List of CppArguments that this structure explicitly represents
-    def explicit_arguments(self) -> Sequence['CppArgument']:
-        return [self]
-
     # Return a copy of CppArgument with defaults removed
     def no_default(self) -> 'CppArgument':
         return CppArgument(
@@ -68,9 +66,44 @@ class CppArgument:
     def str_no_default(self) -> str:
         return f"{self.type} {self.name}"
 
-# Describe an implicit this argument (*this) on methods in the C++ API
+# An argument pack groups several CppArguments together into
+# a semantically meaningful unit.  Don't let the packing
+# deceive you: if you look at these arguments in C++, they're
+# always packing (in analogy to how parameter packs in C++
+# templates actually turn into separate arguments when you
+# unpack them).
 @dataclass(frozen=True)
-class CppThisArgument:
+class CppArgumentPackIface:
+    # Return this argument pack, but with default stripped
+    def no_default(self: _T) -> _T:
+        raise NotImplementedError
+
+    # Unpack the pack into a sequence of arguments, discarding
+    # semantic information, and also discarding the implicit this
+    # argument that doesn't actually show up in declarations
+    def explicit_arguments(self) -> Sequence[CppArgument]:
+        raise NotImplementedError
+
+# Lifts a single CppArgument into a pack.
+@dataclass(frozen=True)
+class CppSingleArgumentPack(CppArgumentPackIface):
+    this: CppArgument
+
+    def no_default(self) -> 'CppSingleArgumentPack':
+        return CppSingleArgumentPack(self.this.no_default())
+
+    @property
+    def type(self) -> str:
+        return self.this.type
+
+    def explicit_arguments(self) -> Sequence[CppArgument]:
+        return [self.this]
+
+# Describe an implicit this argument (*this) on methods in the C++ API.
+# We don't use CppSingleArgumentPack because these never show up
+# in the explicit arguments list
+@dataclass(frozen=True)
+class CppThisArgumentPack(CppArgumentPackIface):
     # The grouped JIT argument this formal was derived from
     argument: ThisArgument
 
@@ -78,7 +111,7 @@ class CppThisArgument:
     type: str
 
     # this arguments are never defaulted
-    def no_default(self) -> 'CppThisArgument':
+    def no_default(self) -> 'CppThisArgumentPack':
         return self
 
     # The this argument is implicit, so it's not included in the
@@ -92,8 +125,11 @@ class CppThisArgument:
 # if you need to bundle these arguments back into a single
 # TensorOptions, it will be easiest to operate on this struct as a
 # whole.
+#
+# NOTE: this does NOT represent a 'const TensorOptions&' argument.
+# If you have one of those, it will be CppSingleArgumentPack
 @dataclass(frozen=True)
-class CppTensorOptionsArguments:
+class CppTensorOptionsArgumentPack(CppArgumentPackIface):
     argument: TensorOptionsArguments
     dtype: CppArgument
     layout: CppArgument
@@ -102,8 +138,8 @@ class CppTensorOptionsArguments:
 
     # Remove the defaults from each of the constituent arguments
     # representing the TensorOptions
-    def no_default(self) -> 'CppTensorOptionsArguments':
-        return CppTensorOptionsArguments(
+    def no_default(self) -> 'CppTensorOptionsArgumentPack':
+        return CppTensorOptionsArgumentPack(
             argument=self.argument,
             dtype=self.dtype.no_default(),
             layout=self.layout.no_default(),
@@ -114,6 +150,13 @@ class CppTensorOptionsArguments:
     # Flatten the TensorOptions into individual CppArguments
     def explicit_arguments(self) -> Sequence[CppArgument]:
         return [self.dtype, self.layout, self.device, self.pin_memory]
+
+# Use this instead of CppArgumentPackIface, as this is a closed union
+CppArgumentPack = Union[
+    CppSingleArgumentPack,
+    CppThisArgumentPack,
+    CppTensorOptionsArgumentPack,
+]
 
 @dataclass(frozen=True)
 class CppExpr:
@@ -132,38 +175,32 @@ class CppSignature:
     # Enough information about the C++ types to generate a full
     # C++ type signature for this signature.  I'm not too sure
     # if these are the right representations, so for now this
-    # is intended to be more abstract.  Prefer using
-    # cpp_grouped_arguments() to access this
-    _cpp_grouped_arguments: Tuple[Union[CppArgument, CppTensorOptionsArguments, CppThisArgument], ...]
-    _cpp_returns_type: str
+    # is intended to be more abstract.
+    _argument_packs: Tuple[CppArgumentPack, ...]
+    _returns_type: str
 
-    # WARNING: This is probably NOT what you want
-    #
-    # Return the flattened argument structure of this signature,
-    # discarding information about grouping.  If you are planning
-    # to translate these arguments into expressions on another
-    # API, you probably want cpp_grouped_arguments instead (which
-    # will handle TensorOptions translations correctly)
-    def cpp_ungrouped_arguments(self) -> Sequence[CppArgument]:
-        return [sub_a for a in self._cpp_grouped_arguments for sub_a in a.explicit_arguments()]
+    # Return the unpacked argument structure of this signature,
+    # discarding information about which arguments are semantically
+    # related to each other.
+    def arguments(self) -> Sequence[CppArgument]:
+        return [sub_a for a in self._argument_packs for sub_a in a.explicit_arguments()]
 
-    # Return the grouped argument structure of this signature.  This
-    # preserves high-level structure of the arguments so you may
-    # find it easier to do translations working with this
-    # representation.
-    def cpp_grouped_arguments(self) -> Sequence[Union[CppArgument, CppTensorOptionsArguments, CppThisArgument]]:
-        return self._cpp_grouped_arguments
+    # Return the packed argument structure of this signature.  This preserves
+    # high-level structure of the arguments so you may find it easier to do
+    # translations working with this representation.
+    def argument_packs(self) -> Sequence[CppArgumentPack]:
+        return self._argument_packs
 
     # Render the C++ declaration for this signature
     def decl(self) -> str:
-        cpp_args_str = ', '.join(map(str, self.cpp_ungrouped_arguments()))
-        return f"{self._cpp_returns_type} {cpp.name(self.func)}({cpp_args_str})"
+        cpp_args_str = ', '.join(map(str, self.arguments()))
+        return f"{self._returns_type} {cpp.name(self.func)}({cpp_args_str})"
 
     # Render the C++ definition for this signature, not including
     # the body (with curly braces)
     def defn(self, prefix: str = "") -> str:
-        cpp_args_str = ', '.join(a.str_no_default() for a in self.cpp_ungrouped_arguments())
-        return f"{self._cpp_returns_type} {prefix}{cpp.name(self.func)}({cpp_args_str})"
+        cpp_args_str = ', '.join(a.str_no_default() for a in self.arguments())
+        return f"{self._returns_type} {prefix}{cpp.name(self.func)}({cpp_args_str})"
 
     # NB: This constructor knows how to disambiguate defaults when
     # faithful is True.  Ideally this would live as an external process
@@ -176,21 +213,24 @@ class CppSignature:
         faithful: bool
     ) -> 'CppSignature':
         if faithful:
-            # Immediately, manually do overload disambiguation, by
+            # Faithful signatures will ungroup arguments into argument
+            # packs.
+            #
+            # After this, manually do overload disambiguation, by
             # dropping defaults from the faithful signature.  In
             # principle, we should be able to do this at some later
             # point in time with other overload disambiguation
-            cpp_grouped_arguments = tuple(
+            argument_packs = tuple(
                 cpp.argument_faithful(a).no_default() for a in arguments
             )
         else:
-            cpp_grouped_arguments = tuple(
+            argument_packs = tuple(
                 cpp.argument(a) for a in arguments
             )
         return CppSignature(
             func=func,
-            _cpp_grouped_arguments=cpp_grouped_arguments,
-            _cpp_returns_type=cpp.returns_type(func.returns),
+            _argument_packs=argument_packs,
+            _returns_type=cpp.returns_type(func.returns),
         )
 
 # Represents group of all CppSignatures associated with a
