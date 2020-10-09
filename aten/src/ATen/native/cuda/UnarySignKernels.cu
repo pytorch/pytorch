@@ -11,11 +11,11 @@
 namespace at { namespace native {
 
 void logical_not_kernel_cuda(TensorIterator& iter) {
-  // error check -- this is just ensuring we don't dispatch on types that aren't in ALL_TYPES_AND2(...)
+  // error check -- this is just ensuring we don't dispatch on types that aren't in ALL_TYPES_AND_COMPLEX_AND3(...)
   // so we don't have to maintain a separate list or to do double dispatch.
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_not_cuda", [&]() {});
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(0), "logical_not_cuda", [&]() {});
 
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_not_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(1), "logical_not_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> bool { return !a; });
   });
 }

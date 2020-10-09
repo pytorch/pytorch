@@ -2,7 +2,7 @@
 import torch
 from torch.nn.modules.pooling import MaxPool2d
 
-from .activation import ReLU, ReLU6, Hardswish, ELU
+from .activation import ReLU, ReLU6, Hardswish, ELU, LeakyReLU
 from .batchnorm import BatchNorm2d, BatchNorm3d
 from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
     InstanceNorm2d, InstanceNorm3d
@@ -34,6 +34,9 @@ class Quantize(torch.nn.Module):
         tensor([[ 1., -1.],
                 [ 1., -1.]], size=(2, 2), dtype=torch.qint8, scale=1.0, zero_point=2)
     """
+
+    scale: torch.Tensor
+    zero_point: torch.Tensor
 
     def __init__(self, scale, zero_point, dtype):
         super(Quantize, self).__init__()
@@ -96,6 +99,7 @@ __all__ = [
     'ReLU6',
     'Hardswish',
     'ELU',
+    'LeakyReLU',
     'LayerNorm',
     'GroupNorm',
     'InstanceNorm1d',
