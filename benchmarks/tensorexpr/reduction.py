@@ -165,7 +165,6 @@ class DynamicReduce2DBench(benchmark.DynamicShape, Reduce2DBench):
     def __init__(self, mode, device, dtype, red_dim, dim0, dim1):
         benchmark.DynamicShape.__init__(self)
         Reduce2DBench.__init__(self, mode, device, dtype, red_dim, dim0, dim1)
-        self.load_inputs()
 
     def instantiate_input(self):
         dim0, dim1 = self.rand_shape([self.dim0, self.dim1])

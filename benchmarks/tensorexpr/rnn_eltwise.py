@@ -72,8 +72,6 @@ class DynamicLSTM(benchmark.DynamicShape, RNNEltwise):
         benchmark.DynamicShape.__init__(self)
         RNNEltwise.__init__(self, mode, device, dtype, b, hs)
 
-        self.load_inputs()
-
     def instantiate_input(self):
         b, hs = self.rand_shape([self.b, self.hs])
 

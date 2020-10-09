@@ -247,34 +247,43 @@ class DynamicShape(object):
     fuser sees a different input tensor shape
     '''
 
-    # number of random inputs in an instance
+    # Number of random inputs in an instance
     SAMPLE_SIZE = 100
 
     def __init__(self, dynamic_range=1.2):
         self._input_samples = []
         self._input_sample_index = 0
         self._dynamic_range = 1. / dynamic_range if dynamic_range > 1.0 else dynamic_range
+        self._enable_dynamic_shapes = True
 
-    # returns the input test case that current index points to
+    # Returns the input test case that current index points to
     @property
     def inputs(self):
         return self._input_samples[self._input_sample_index]
 
-    # an inputs assignment actually adds a test case in the class buffer
+    # An inputs assignment actually adds a test case in the class buffer
     @inputs.setter
     def inputs(self, val):
         self._input_samples.append(val)
 
-    # runs normal compute while increment test case index
+    # Runs normal compute while increment test case index
     def compute(self):
         super().compute()
         self._input_sample_index = (self._input_sample_index + 1) % self.SAMPLE_SIZE
 
-    # defined by benchmark, the benchmark needs to specify the input
+    # Defined by benchmark, the benchmark needs to specify the input
     # tensor construction in this method, essentially the same way
     # a benchmark creates the inputs list in the initializer
     def instantiate_input(self):
         raise NotImplementedError
+
+    # Instantiate random shaped inputs and start the benchmark run
+    def run(self, args):
+        # force disable dynamic shape from command line
+        if args.no_dynamic_shape:
+            self._enable_dynamic_shapes = False
+        self.load_inputs()
+        super().run(args)
 
     # pre-compute inputs so the creations of random tensors
     # do not add to the compute time
@@ -284,7 +293,7 @@ class DynamicShape(object):
 
     # returns a randomized shape
     def rand_shape(self, shape):
-        if 'PYTORCH_CUDA_FUSER_NO_DYNSHAPE' in os.environ:
+        if not self._enable_dynamic_shapes:
             return shape
         ratios = np.random.uniform(self._dynamic_range, 1.0, len(shape))
         dyn_shape = list(

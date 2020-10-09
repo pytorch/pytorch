@@ -217,8 +217,6 @@ class DynamicSimpleElementBench(benchmark.DynamicShape, SimpleElementBench):
         benchmark.DynamicShape.__init__(self)
         SimpleElementBench.__init__(self, mode, device, dtype, N)
 
-        self.load_inputs()
-
     @classmethod
     def module(cls):
         return "dynamic_simple_element"
