@@ -242,8 +242,9 @@ class DynamicShape(object):
     r'''
     An Auxiliary class for dynamic shape benchmarks
 
-    Pre-computes input with random shapes and also computes
-    with random shapes
+    Pre-computes input with random shapes and also 
+    modifies the compute method so in each call the
+    fuser sees a different input tensor shape
     '''
 
     # number of random inputs in an instance
@@ -269,11 +270,14 @@ class DynamicShape(object):
         super().compute()
         self._input_sample_index = (self._input_sample_index + 1) % self.SAMPLE_SIZE
 
-    # defined by benchmark
+    # defined by benchmark, the benchmark needs to specify the input
+    # tensor construction in this method, essentially the same way
+    # a benchmark creates the inputs list in the initializer
     def instantiate_input(self):
         raise NotImplementedError
 
-    # pre-compute inputs so the creations
+    # pre-compute inputs so the creations of random tensors
+    # do not add to the compute time
     def load_inputs(self):
         for i in range(self.SAMPLE_SIZE - 1):
             self.instantiate_input()
