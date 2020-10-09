@@ -345,6 +345,10 @@ namespace {
   bool _is_same_size_as_sparse(const SparseTensor& self, const SparseTensor& src) {
     return self.sparse_dim() == src.sparse_dim() && self.dense_dim() == src.dense_dim() && self.sizes().equals(src.sizes());
   }
+
+  bool _is_same_size_as_sparse_gcs(const SparseTensor& self, const SparseTensor& src) {
+    return self.dim() == src.dim() && self.sizes().equals(src.sizes());
+  }
 }
 
 // Invoked from native/Resize.cpp (no dynamic dispatch necessary)
@@ -354,6 +358,15 @@ SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
   }
   return self;
 }
+
+SparseTensor& resize_as_sparse_gcs_(SparseTensor& self, const SparseTensor& src) {
+  if (!_is_same_size_as_sparse_gcs(self, src)) {
+    get_sparse_impl<SparseGCSTensorImpl>(self)->resize_(src.sizes());
+  }
+  return self;
+}
+
+
 
 std::vector<int> make_strides(std::vector<int> shape) {
   std::vector<int> dims(shape.size());
@@ -539,7 +552,7 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   AT_ASSERT(!t.is_cuda()); // we were supposed to have dispatched on this
   TORCH_CHECK(!r.is_cuda(), "sparse_mask: expected 'out' to be CPU, but got CUDA");
   TORCH_CHECK(!mask.is_cuda(), "sparse_mask: expected 'mask' to be CPU, but got CUDA");
-  resize_as_sparse_(r, mask);
+  at::resize_as_sparse_(r, mask);
   if (mask._nnz() == 0) {
     return r.zero_();
   }

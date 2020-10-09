@@ -32,7 +32,8 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
   int64_t rsplit_dim_;           
  public:
   explicit SparseGCSTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
-  
+
+  void resize_(IntArrayRef size);
   void resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, ArrayRef<int64_t> size);
 
   void set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices,

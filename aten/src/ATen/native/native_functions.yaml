@@ -3904,6 +3904,13 @@
   use_c10_dispatcher: full
   variants: function, method
 
+- func: resize_as_sparse_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    SparseCPU, SparseCUDA: resize_as_sparse_
+    SparseGCS_CPU: resize_as_sparse_gcs_
+
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method, function
