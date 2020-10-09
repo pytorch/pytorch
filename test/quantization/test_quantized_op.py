@@ -4,6 +4,7 @@ import itertools
 import numpy as np
 import sys
 import unittest
+import operator
 
 import torch
 from torch import _VF
@@ -647,16 +648,16 @@ class TestQuantizedOps(TestCase):
                 msg="Hardswish failed: {} vs {}, {}".format(qY, qY_hat, torch.backends.quantized.engine))
 
     """Tests the correctness of the binary op + scalar."""
-    def _test_binary_op_scalar_relu(self, A, b, op, op_relu):
+    def _test_binary_op_scalar_relu(self, A, b, binary_op, quantized_op, quantized_op_relu):
         import copy
-        op_scalar = op
-        op_scalar_relu = op
+        op_scalar = quantized_op
+        op_scalar_relu = quantized_op_relu
 
         A, (scale, zero_point, dtype) = A
         A = A.astype(np.float32)
         qA = torch.quantize_per_tensor(torch.from_numpy(A), scale, zero_point, dtype)
 
-        C = qA.dequantize() + round(b / scale) * scale
+        C = binary_op(qA.dequantize(), round(b / scale) * scale)
         C_relu = copy.deepcopy(C)
         C_relu[C_relu < 0] = 0
 
@@ -678,14 +679,14 @@ class TestQuantizedOps(TestCase):
                        qparams=hu.qparams()),
            b=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
     def test_add_scalar_relu(self, A, b):
-        self._test_binary_op_scalar_relu(A, b, torch.ops.quantized.add, torch.ops.quantized.add_relu)
+        self._test_binary_op_scalar_relu(A, b, operator.add, torch.ops.quantized.add, torch.ops.quantized.add_relu)
 
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
                        elements=hu.floats(-1e6, 1e6, allow_nan=False),
                        qparams=hu.qparams()),
            b=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
     def test_mul_scalar_relu(self, A, b):
-        self._test_binary_op_scalar_relu(A, b, torch.ops.quantized.mul, torch.ops.quantized.mul_relu)
+        self._test_binary_op_scalar_relu(A, b, operator.mul, torch.ops.quantized.mul, torch.ops.quantized.mul_relu)
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
