@@ -78,17 +78,13 @@ VkQueue acquire_queue(
 
 } // namespace
 
-void Context::Deleter::operator()(const VkDevice device) const {
-  vkDestroyDevice(device, nullptr);
-}
-
 Context::Context(const Adapter& adapter)
     : adapter_(adapter),
       device_(
           create_device(
               adapter.handle,
               adapter.compute_queue_family_index),
-          Deleter{}),
+          &VK_DELETER(Device)),
       queue_(acquire_queue(device(), adapter.compute_queue_family_index)),
       command_(gpu()),
       shader_(gpu()),

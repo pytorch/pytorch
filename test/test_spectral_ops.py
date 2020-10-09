@@ -6,7 +6,7 @@ from itertools import product
 import itertools
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA)
+    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, _assertGradAndGradgradChecks)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA, precisionOverride,
      skipCPUIfNoMkl, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA)
@@ -341,14 +341,16 @@ class TestFFT(TestCase):
                 # Use real input instead and put view_as_complex into the graph
                 if dtype.is_complex:
                     def test_fn(x):
-                        return torch_fn(torch.view_as_complex(x), *args)
-                    input = torch.view_as_real(input).detach().requires_grad_()
+                        out = torch_fn(torch.view_as_complex(x), *args)
+                        return torch.view_as_real(out) if out.is_complex() else out
+                    inputs = (torch.view_as_real(input).detach().requires_grad_(),)
                 else:
                     def test_fn(x):
-                        return torch_fn(x, *args)
-                    input = input.detach().requires_grad_()
+                        out = torch_fn(x, *args)
+                        return torch.view_as_real(out) if out.is_complex() else out
+                    inputs = (input.detach().requires_grad_(),)
 
-                self.assertTrue(torch.autograd.gradcheck(test_fn, (input,)))
+                _assertGradAndGradgradChecks(self, test_fn, inputs)
 
     # nd-fft tests
 
@@ -473,14 +475,16 @@ class TestFFT(TestCase):
                 # Use real input instead and put view_as_complex into the graph
                 if dtype.is_complex:
                     def test_fn(x):
-                        return torch_fn(torch.view_as_complex(x), s, dim, norm)
+                        out = torch_fn(torch.view_as_complex(x), s, dim, norm)
+                        return torch.view_as_real(out) if out.is_complex() else out
                     inputs = (torch.view_as_real(input).detach().requires_grad_(),)
                 else:
                     def test_fn(x):
-                        return torch_fn(x, s, dim, norm)
+                        out = torch_fn(x, s, dim, norm)
+                        return torch.view_as_real(out) if out.is_complex() else out
                     inputs = (input.detach().requires_grad_(),)
 
-                self.assertTrue(torch.autograd.gradcheck(test_fn, inputs))
+                _assertGradAndGradgradChecks(self, test_fn, inputs)
 
     @skipCUDAIfRocm
     @skipCPUIfNoMkl
