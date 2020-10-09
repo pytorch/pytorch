@@ -9,6 +9,7 @@ from collections import OrderedDict, defaultdict
 import argparse
 import pathlib
 import functools
+import json
 
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import *
@@ -122,6 +123,18 @@ def concatMap(func: Callable[[T], Sequence[S]], xs: Sequence[T]) -> Iterator[S]:
     for x in xs:
         for r in func(x):
             yield r
+
+def cpp_string(s: str) -> str:
+    """Convert a python string into a c++ string literal """
+    s = s.replace('\\', '\\\\')
+    s = s.replace('"', '\\"')
+    s = s.replace('\a', '\\a')
+    s = s.replace('\b', '\\b')
+    s = s.replace('\f', '\\f')
+    s = s.replace('\n', '\\n')
+    s = s.replace('\v', '\\v')
+    s = s.replace('\t', '\\t')
+    return f'"{s}"'
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -267,7 +280,7 @@ def compute_type_method(
             # def registration only happens in TypeDefault
             def_registration = ""
             if dispatch is None:
-                def_registration = f'm.def("{f.func}");\n'
+                def_registration = f'm.def({cpp_string(str(f.func))});\n'
 
             impl_registration = ""
             if not def_only and not f.manual_kernel_registration and (dispatch is not None or f.dispatch is None):
@@ -324,7 +337,7 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
         assert target is Target.DEFINITION
 
         def generate_defn(sig: CppSignature) -> str:
-            dispatcher_exprs = dispatcher.cpparguments_exprs(sig.cpp_grouped_arguments())
+            dispatcher_exprs = dispatcher.cpparguments_exprs(sig.argument_packs())
             dispatcher_returns_type = dispatcher.returns_type(f.func.returns)
             dispatcher_types_str = ', '.join(map(lambda a: a.type, dispatcher_exprs))
             dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, dispatcher_exprs))
@@ -376,7 +389,7 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
         assert target is Target.DEFINITION
 
         def generate_defn(sig: CppSignature) -> str:
-            dispatcher_exprs = dispatcher.cpparguments_exprs(sig.cpp_grouped_arguments())
+            dispatcher_exprs = dispatcher.cpparguments_exprs(sig.argument_packs())
             dispatcher_returns_type = dispatcher.returns_type(f.func.returns)
             dispatcher_types_str = ', '.join(map(lambda a: a.type, dispatcher_exprs))
             dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, dispatcher_exprs))
@@ -720,7 +733,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     out_arg_set = set(a.name for a in f.func.out_arguments)
 
     sig_group = CppSignatureGroup.from_schema(f.func, method=False)
-    cpp_args = sig_group.signature.cpp_ungrouped_arguments()
+    cpp_args = sig_group.signature.arguments()
     arguments = [
         compute_cpp_argument_yaml(
             cpp_a, schema_order=False,
@@ -790,9 +803,12 @@ def compute_registration_declarations(f: NativeFunction) -> str:
     returns_type = dispatcher.returns_type(f.func.returns)
     args = dispatcher.arguments(f.func)
     args_str = ', '.join(map(str, args))
-    dispatch = f.dispatch is not None
-    math = dispatch and 'Math' in f.dispatch  # type: ignore
-    return f"""{returns_type} {name}({args_str}); // {{"schema": "aten::{f.func}", "dispatch": "{dispatch}", "math": "{math}"}}
+    comment_data : Dict[str, str] = {
+        'schema': f'aten::{f.func}',
+        'dispatch': str(f.dispatch is not None),
+        'math': str(f.dispatch is not None and 'Math' in f.dispatch)
+    }
+    return f"""{returns_type} {name}({args_str}); // {json.dumps(comment_data)}
 """
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
