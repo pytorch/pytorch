@@ -148,7 +148,10 @@ def svd(a, full_matrices=True, compute_uv=True, hermitian=False):
     assert not hermitian # XXX implement me
     USV = _linalg.linalg_svd(a, full_matrices, compute_uv)
     if not compute_uv:
-        # our C++ API always returns a full 3-tuple, but in this case numpy
-        # returns only S
-        return USV.S
+        # we want to return a value of type torch.return_types.linalg_svd
+        # (which is a PyStructSequence). However, this type is not directly
+        # exposed by pytorch, so we get a reference to it by calling type() on
+        # USV.
+        USV_TYPE = type(USV)
+        return USV_TYPE((None, USV.S, None))
     return USV

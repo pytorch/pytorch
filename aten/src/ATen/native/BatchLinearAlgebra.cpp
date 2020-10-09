@@ -1078,8 +1078,14 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matr
     bool some = !full_matrices;
     Tensor U, S, V;
     std::tie(U, S, V) = at::svd(self, some, compute_uv);
-    Tensor VT = V.transpose(-2, -1);
-    return std::make_tuple(U, S, VT);
+    if (compute_uv) {
+        Tensor VT = V.transpose(-2, -1);
+        return std::make_tuple(U, S, VT);
+    } else {
+        Tensor empty_U = at::empty({0}, self.options());
+        Tensor empty_VT = at::empty({0}, self.options());
+        return std::make_tuple(empty_U, S, empty_VT);
+    }
 }
 
 // Question for reviewers: should this function even exist? Do we want to

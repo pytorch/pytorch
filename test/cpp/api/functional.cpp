@@ -2796,3 +2796,16 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
     ASSERT_TRUE(torch::isfinite(out2).all().item<bool>());
   }
 }
+
+TEST_F(FunctionalTest, linalg_svd) {
+    // NOTE: this is only a partial test: it tests that when we pass
+    // compute_uv=False, the returned U and VT are empty tensors. We need to
+    // write a C++ test because in Python it has a slightly different behavior
+    // and it returns (None, S, None) instead. The full logic for svd is
+    // tested thoughtfully in Python.
+    const auto input = torch::rand({7, 3});
+    torch::Tensor U, S, VT;
+    std::tie(U, S, VT) = at::linalg_svd(input, true, false);
+    ASSERT_EQ(U.numel(), 0) << "U is not empty";
+    ASSERT_EQ(VT.numel(), 0) << "VT is not empty";
+}

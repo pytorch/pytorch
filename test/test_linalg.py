@@ -576,11 +576,18 @@ class TestLinalg(TestCase):
     def test_svd(self, device, dtype):
         t = torch.randn((10, 10), device=device, dtype=dtype)
         np_t = t.cpu().numpy()
+
         for full_matrices in (True, False):
-            for compute_uv in (True, False):
-                expected = np.linalg.svd(np_t, full_matrices, compute_uv)
-                actual = torch.linalg.svd(t, full_matrices, compute_uv)
-                self.assertEqual(actual, expected)
+            expected = np.linalg.svd(np_t, full_matrices, compute_uv=True)
+            actual = torch.linalg.svd(t, full_matrices, compute_uv=True)
+            self.assertEqual(actual, expected)
+
+        for full_matrices in (True, False):
+            np_s = np.linalg.svd(np_t, full_matrices, compute_uv=False)
+            USV = torch.linalg.svd(t, full_matrices, compute_uv=False)
+            assert USV.U is None
+            self.assertEqual(USV.S, np_s)
+            assert USV.V is None
 
 instantiate_device_type_tests(TestLinalg, globals())
 
