@@ -1749,8 +1749,6 @@ def to(g, self, *args):
             if sym_help._is_value(dtype):
                 # aten::to(Tensor, Tensor, bool, bool, memory_format)
                 other = args[0]
-                if other.node().kind() == 'prim::dtype':
-                    other = other.node().input()
                 dtype = other.type().scalarType()
                 return g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[dtype])
             else:
@@ -2194,6 +2192,12 @@ def log2(g, self):
 
 def prim_shape(g, self):
     return g.op('Shape', self)
+
+
+def prim_dtype(g, self):
+    dtype = sym_help._try_get_scalar_type(self)
+    dtype = sym_help.cast_pytorch_to_scalar_type[dtype]
+    return g.op("Constant", value_t=torch.IntTensor([dtype]))
 
 
 @parse_args('v', 'i')

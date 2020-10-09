@@ -558,6 +558,20 @@ scalar_name_to_pytorch = {
     'complex128': 'ComplexDouble'
 }
 
+cast_pytorch_to_scalar_type = {
+    "Byte": 0,
+    "Char": 1,
+    "Short": 2,
+    "Int": 3,
+    "Long": 4,
+    "Half": 5,
+    "Float": 6,
+    "Double": 7,
+    "Undefined": 8,
+    "ComplexFloat": 9,
+    "ComplexDouble": 10,
+    "Bool": 11
+}
 
 # This indicates each scalar type's corresponding
 # torch type. Related source:
