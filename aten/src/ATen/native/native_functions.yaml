@@ -4478,6 +4478,12 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: fused_fake_quantize_linear(Tensor x, Tensor weight, Tensor bias, Tensor buffer_min, Tensor buffer_max, float running_min, float running_max, int window_size) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: fused_fake_quant_linear_cpu
+
 - func: _choose_qparams_per_tensor(Tensor self, bool reduce_range=False) -> (float, int)
   use_c10_dispatcher: full
   variants: function

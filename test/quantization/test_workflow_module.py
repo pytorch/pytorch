@@ -757,6 +757,15 @@ class TestRecordHistogramObserver(QuantizationTestCase):
 
 
 class TestFakeQuantizePerTensor(TestCase):
+    def test_fused_fake_quant_linear(self):
+        x = torch.randn(5, 5, dtype=torch.float, device='cuda')
+        w = torch.randn(5, 5, dtype=torch.float, device='cuda')
+        b = torch.randn(5, dtype=torch.float, device='cuda')
+        buffer_min = torch.empty(5000)
+        buffer_max = torch.empty(5000)
+        out = torch.fused_fake_quantize_linear(x, w, b, buffer_min, buffer_max, 0, 1.0, 5000)
+        print(out)
+
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        qparams=hu.qparams(dtypes=torch.quint8)))
