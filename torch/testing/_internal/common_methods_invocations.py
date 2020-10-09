@@ -80,7 +80,7 @@ class OpInfo(object):
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
         if op is None:
-            assert hasattr(torch, self.name)
+            assert hasattr(torch, self.name), f"Can't find torch.{self.name}"
         self.op = op if op else getattr(torch, self.name)
         self.method_variant = getattr(torch.Tensor, name) if hasattr(torch.Tensor, name) else None
         inplace_name = name + "_"
