@@ -3335,3 +3335,34 @@ class DistributedTest:
                 self.assertNotEqual(objects, collectives_object_test_list)
             dist.broadcast_object_list(objects, src=0)
             self.assertEqual(objects, collectives_object_test_list)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_ddp_unused_params_rebuild_buckets_exception(self):
+            class ToyModel(nn.Module):
+                def __init__(self):
+                    super(ToyModel, self).__init__()
+                    self.net1 = nn.Linear(10, 10, bias=False)
+                    self.net2 = nn.Linear(10, 10, bias=False)
+
+                def forward(self, x):
+                    return self.net1(x)
+
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                ToyModel().cuda(self.rank), device_ids=[self.rank]
+            )
+            for i in range(2):
+                inp = torch.rand(1, 10)
+                if i > 0:
+                    # On 2nd iteration, this will fail during rebuild_buckets,
+                    # but we should report an error regarding unused parameters
+                    # since that is the underlying root cause.
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Expected to have finished reduction in the prior iteration",
+                    ):
+                        ddp(inp).sum().backward()
+                else:
+                    ddp(inp).sum().backward()
