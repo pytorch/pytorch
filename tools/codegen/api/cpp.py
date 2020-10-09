@@ -86,11 +86,9 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
             if mutable:
                 return 'Tensor &'  # TODO: fix this discrepancy
             else:
-                if local.use_c10_dispatcher() is UseC10Dispatcher.full or \
-                        local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
+                if local.use_c10_dispatcher().dispatcher_uses_new_style():
                     return 'const c10::optional<Tensor>&'
                 else:
-                    assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
                     return 'const Tensor &'
         elem = argumenttype_type(t.elem, mutable=mutable)
         return f"c10::optional<{elem}>"
@@ -103,7 +101,7 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
         elif str(t.elem) == 'Dimname':
             return "DimnameList"
         # TODO: do something reasonable about lists of optional tensors
-        elif local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper and str(t.elem) == 'Tensor?':
+        elif (not local.use_c10_dispatcher().dispatcher_uses_new_style()) and str(t.elem) == 'Tensor?':
             return "TensorList"
         elem = argumenttype_type(t.elem, mutable=mutable)
         # TODO: explicitly qualify namespace here
@@ -154,7 +152,6 @@ JIT_TO_CPP_DEFAULT = {
     'None': 'c10::nullopt',  # UGH this one is type directed
     'Mean': 'at::Reduction::Mean',
     '[]': '{}',
-    '[0,1]': '{0,1}',  # TODO: stop special casing
     'contiguous_format': 'MemoryFormat::Contiguous',
     'long': 'at::kLong',
 }
@@ -163,6 +160,40 @@ JIT_TO_CPP_DEFAULT = {
 def default_expr(d: str, t: Type) -> str:
     if d == 'None' and str(t) == 'Tensor?':
         return '{}'
+    if isinstance(t, BaseType) and t.name is BaseTy.str:
+        # Schema allows single quotes but C++ needs double
+        if len(d) >= 2 and d[0] == "'" and d[-1] == "'":
+            s = ''
+            i = 1
+            while i + 1 < len(d):
+                if d[i] != '\\':
+                    if d[i] == '"':
+                        s += '\\"'
+                    else:
+                        s += d[i]
+                    i += 1
+                else:
+                    if d[i + 1] == "'":
+                        s += "'"
+                    else:
+                        s += d[i:i + 2]
+                    i += 2
+
+            return f'"{s}"'
+
+    if isinstance(t, OptionalType):
+        if d == 'None':
+            return 'c10::nullopt'
+
+        return default_expr(d, t.elem)
+
+    if isinstance(t, ListType):
+        if (d.startswith('[') and d.endswith(']')):
+            return '{' + d[1:-1] + '}'
+        elif t.size is None:
+            # NOTE: Sized lists can have scalar defaults
+            raise ValueError(f"Expected a list default '[...]' but found: '{d}'")
+
     return JIT_TO_CPP_DEFAULT.get(d, d)
 
 # Convert an argument into its C++ API form

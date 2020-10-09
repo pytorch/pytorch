@@ -9,6 +9,7 @@ from collections import OrderedDict
 import argparse
 import pathlib
 import functools
+import json
 
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import *
@@ -123,6 +124,18 @@ def concatMap(func: Callable[[T], Sequence[S]], xs: Sequence[T]) -> Iterator[S]:
     for x in xs:
         for r in func(x):
             yield r
+
+def cpp_string(s: str) -> str:
+    """Convert a python string into a c++ string literal """
+    s = s.replace('\\', '\\\\')
+    s = s.replace('"', '\\"')
+    s = s.replace('\a', '\\a')
+    s = s.replace('\b', '\\b')
+    s = s.replace('\f', '\\f')
+    s = s.replace('\n', '\\n')
+    s = s.replace('\v', '\\v')
+    s = s.replace('\t', '\\t')
+    return f'"{s}"'
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -277,7 +290,7 @@ def compute_type_method(
             # def registration only happens in TypeDefault
             def_registration = ""
             if dispatch is None:
-                def_registration = f'm.def("{f.func}");\n'
+                def_registration = f'm.def({cpp_string(str(f.func))});\n'
 
             impl_registration = ""
             if not def_only and not f.manual_kernel_registration and (dispatch is not None or f.dispatch is None):
@@ -380,8 +393,7 @@ CAFFE2_API {cpp_returns_type} {cpp_name}({signature_group.signature.cpp_argument
     return op.call({exprs_str(signature_group.signature)});
 }}
 """
-        elif local.use_c10_dispatcher() is UseC10Dispatcher.full or \
-                local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
+        elif local.use_c10_dispatcher().dispatcher_uses_new_style():
             # for c10-full ops, the scattered version is the real op and the gathered version is a proxy
             # calling into the scattered version
             return f"""
@@ -471,8 +483,7 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
     return op.call({exprs_str(signature_group.signature)});
 }}
 """
-        elif local.use_c10_dispatcher() is UseC10Dispatcher.full or \
-                local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
+        elif local.use_c10_dispatcher().dispatcher_uses_new_style():
             # for c10-full ops, the scattered version is the real op and the gathered version is a proxy
             # calling into the scattered version
             return f"""
@@ -564,14 +575,12 @@ def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], Opti
         dispatcher_args = dispatcher.arguments(f.func)
 
         args: Union[Sequence[DispatcherArgument], Sequence[LegacyDispatcherArgument]]
-        if local.use_c10_dispatcher() is UseC10Dispatcher.full or \
-                local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
+        if local.use_c10_dispatcher().dispatcher_uses_new_style():
             returns_type = dispatcher_returns_type
             args = dispatcher_args
             exprs = dispatcher.exprs(dispatcher_args)
             dispatch_key = "c10::computeDispatchKey(dtype, layout, device)"
         else:
-            assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
             returns_type = legacy_dispatcher_returns_type
             args = legacy_dispatcher_args
             exprs = dispatcher.legacydispatcherarguments_exprs(legacy_dispatcher_args)
@@ -898,9 +907,12 @@ def compute_registration_declarations(f: NativeFunction) -> str:
     returns_type = dispatcher.returns_type(f.func.returns)
     args = dispatcher.arguments(f.func)
     args_str = ', '.join(map(str, args))
-    dispatch = f.dispatch is not None
-    math = dispatch and 'Math' in f.dispatch  # type: ignore
-    return f"""{returns_type} {name}({args_str}); // {{"schema": "aten::{f.func}", "dispatch": "{dispatch}", "math": "{math}"}}
+    comment_data : Dict[str, str] = {
+        'schema': f'aten::{f.func}',
+        'dispatch': str(f.dispatch is not None),
+        'math': str(f.dispatch is not None and 'Math' in f.dispatch)
+    }
+    return f"""{returns_type} {name}({args_str}); // {json.dumps(comment_data)}
 """
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
