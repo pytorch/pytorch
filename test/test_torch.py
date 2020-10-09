@@ -10462,7 +10462,8 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @tf32_on_and_off(0.001)
-    def test_qr(self, device):
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_qr(self, device, dtype):
         def run_test(tensor_dims, some):
             A = torch.randn(*tensor_dims, device=device)
             Q, R = torch.qr(A, some=some)
@@ -16971,9 +16972,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @onlyCUDA
     def test_matmul_45724(self, device):
         # https://github.com/pytorch/pytorch/issues/45724
-        a = torch.rand(65537, 22, 64).cuda().half()
-        b = torch.rand(65537, 64, 22).cuda().half()
-        c = torch.full((65537, 22, 22), math.nan, dtype=torch.half, device='cuda')
+        a = torch.rand(65537, 22, 64, device=device, dtype=torch.half)
+        b = torch.rand(65537, 64, 22, device=device, dtype=torch.half)
+        c = torch.full((65537, 22, 22), math.nan, dtype=torch.half, device=device)
         cpu_result = torch.matmul(a.cpu().float(), b.cpu().float()).cuda().half()
         torch.matmul(a, b, out=c)
         self.assertEqual(c, cpu_result)
