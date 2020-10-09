@@ -16,8 +16,7 @@ Tensor* Compute(
   std::vector<const Var*> args;
   unpack_dim_args(dim_args, &dims, &args);
   const Expr* body = body_func(VarVectorToVarHandleVector(args)).node();
-  Function* func = new Function(func_name, dims, args, body);
-  return new Tensor(func, 0);
+  return new Tensor(func_name, dims, args, body);
 }
 
 Tensor* Compute(
@@ -32,8 +31,7 @@ Tensor* Compute(
   std::vector<const Var*> args;
   unpack_dim_args(dim_args, &dims, &args);
   const Expr* body = body_func(VarHandle(args[0])).node();
-  Function* func = new Function(func_name, dims, args, body);
-  return new Tensor(func, 0);
+  return new Tensor(func_name, dims, args, body);
 }
 
 Tensor* Compute(
@@ -48,8 +46,7 @@ Tensor* Compute(
   std::vector<const Var*> args;
   unpack_dim_args(dim_args, &dims, &args);
   const Expr* body = body_func(VarHandle(args[0]), VarHandle(args[1])).node();
-  Function* func = new Function(func_name, dims, args, body);
-  return new Tensor(func, 0);
+  return new Tensor(func_name, dims, args, body);
 }
 
 Tensor* Compute(
@@ -67,8 +64,7 @@ Tensor* Compute(
   const Expr* body =
       body_func(VarHandle(args[0]), VarHandle(args[1]), VarHandle(args[2]))
           .node();
-  Function* func = new Function(func_name, dims, args, body);
-  return new Tensor(func, 0);
+  return new Tensor(func_name, dims, args, body);
 }
 
 Tensor* Compute(
@@ -87,20 +83,17 @@ Tensor* Compute(
   unpack_dim_args(dim_args, &dims, &args_nodes);
   auto args = VarVectorToVarHandleVector(args_nodes);
   const Expr* body = body_func(args[0], args[1], args[2], args[3]).node();
-  Function* func = new Function(func_name, dims, args_nodes, body);
-  return new Tensor(func, 0);
+  return new Tensor(func_name, dims, args_nodes, body);
 }
 
-Stmt* Function::ElementStmt(size_t index) {
-  const Buf* buf = func_var(index);
+Stmt* Tensor::ElementStmt() {
   std::vector<const Expr*> indices;
-  for (size_t i = 0; i < buf->ndim(); i++) {
-    indices.push_back(this->args_[i]);
+  for (size_t i = 0; i < buf_->ndim(); i++) {
+    indices.push_back(args_[i]);
   }
 
   const Expr* mask = new IntImm(1);
-
-  Stmt* update_stmt = new Store(buf, indices, body(index), mask);
+  Stmt* update_stmt = new Store(buf_, indices, body_, mask);
   return update_stmt;
 }
 

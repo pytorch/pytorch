@@ -37,22 +37,23 @@ at::optional<Node*> FindFusibleListUnpack(Node* n) {
 //  split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
 //  split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
 //
-// graph(%input : Float(5:12, 4:3, 3:1)):
+// graph(%input : Float(5, 4, 3, strides=[12, 3, 1])):
 //   %13 : int[] = prim::Constant[value=[2, 1, 2]]()
 //   %7 : int = prim::Constant[value=0]()
 //   %8 : Tensor[] = aten::split_with_sizes(%input, %13, %7)
-//   %9 : Float(2:12, 4:3, 3:1), %10 : Float(1:12, 4:3, 3:1), %11 : Float(2:12,
-//      4:3, 3:1) = prim::ListUnpack(%8) return (%9, %10, %11)
+//   %9 : Float(2, 4, 3, strides=[12, 3, 1]), %10 : Float(1, 4, 3, strides=[12,
+//   3, 1]), %11 : Float(2, 4, 3, strides=[12, 3, 1]) = prim::ListUnpack(%8)
+//   return (%9, %10, %11)
 //
 // After fusion
-// graph(%input : Float(5:12, 4:3, 3:1)):
+// graph(%input : Float(5, 4, 3, strides=[12, 3, 1])):
 //   %13 : int[] = prim::Constant[value=[2, 1, 2]]()
 //   %7 : int = prim::Constant[value=0]()
 //   %8 : int = prim::Constant[value=3]()  # Adding addtional input of value 3
 //      representing the number of outputs.
-//   %14 : Float(2:12, 4:3, 3:1), %15 : Float(1:12, 4:3, 3:1), %16 : Float(2:12,
-//       4:3, 3:1) = aten::split_with_sizes(%input, %13, %7, %8)
-//   return (%14, %15, %16)
+//   %14 : Float(2, 4, 3, strides=[12, 3, 1]), %15 : Float(1, 4, 3, strides=[12,
+//      3, 1]), %16 : Float(2, 4, 3, strides=[12, 3, 1] =
+//      aten::split_with_sizes(%input, %13, %7, %8) return (%14, %15, %16)
 void FuseWithListUnpack(Node* n) {
   auto found_listUnpack = FindFusibleListUnpack(n);
   if (!found_listUnpack) {
@@ -108,8 +109,8 @@ static void FuseWithListUnpack(Block* b) {
 // when inputs to the add node are two int lists
 //
 // before the pass:
-// graph(%x.1 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu),
-//  %y.1 : Float(1:6, 2:3, 3:1, requires_grad=0, device=cpu)):
+// graph(%x.1 : Float(2, 3, 4, strides=[12, 4, 1], requires_grad=0, device=cpu),
+//  %y.1 : Float(1, 2, 3, strides=[6, 3, 1], requires_grad=0, device=cpu)):
 //  %2 : None = prim::Constant()
 //  %3 : int[] = aten::size(%x.1)
 //  %l1.1 : int[] = aten::list(%3
@@ -120,8 +121,8 @@ static void FuseWithListUnpack(Block* b) {
 //  return (%8)
 //
 // after the pass:
-// graph(%x.1 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu),
-//  %y.1 : Float(1:6, 2:3, 3:1, requires_grad=0, device=cpu)):
+// graph(%x.1 : Float(2, 3, 4, strides=[12, 4, 1], requires_grad=0, device=cpu),
+//  %y.1 : Float(1, 2, 3, strides=[6, 3, 1], requires_grad=0, device=cpu)):
 //  %2 : None = prim::Constant()
 //  %3 : int[] = aten::size(%x.1)
 //  %l1.1 : int[] = aten::list(%3)
