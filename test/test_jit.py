@@ -76,7 +76,7 @@ from torch.testing._internal.test_module.no_future_div import div_int_nofuture, 
 from collections import defaultdict, namedtuple, OrderedDict
 import copy
 from copy import deepcopy
-from itertools import product, chain
+from itertools import product
 import itertools
 from textwrap import dedent
 from typing import List, Dict, Optional, Tuple, Union
@@ -1969,15 +1969,17 @@ graph(%Ra, %Rb):
                 tup_constant = constants[i] + ", " + constants[j]
                 check_constant(tup_constant)
 
+        dict_constants = []
         for i in range(len(constants)):
             # check_constant constructs the second dict with another Tensor
             # which fails the comparison
-            if isinstance(eval(constants[i]), (list, bool, Tensor)) or eval(constants[i]) is None:
+            if not isinstance(eval(constants[i]), (str, int, float)):
                 continue
             for j in range(len(constants)):
                 dict_constant = "{ " + constants[i] + ": " + constants[j] + "}"
                 check_constant(dict_constant)
-
+                dict_constants.append(dict_constant)
+        constants = constants + dict_constants
 
         # testing node hashing
         funcs_template = dedent('''
@@ -2009,14 +2011,8 @@ graph(%Ra, %Rb):
         # generate dicts with built-in types (excluding torch.Tensor)
         xprod = itertools.product(constants, constants)
 
-        def keys_pred(t):
-            return isinstance(eval(t[0]), (list, bool)) or eval(t[0]) is None
-
-        filt = [x for x in xprod if not keys_pred(x)]
-        dict_strs = map(lambda t: '{' + t[0] + ':' + t[1] + '}', filt)
-
         # test that equal tuples and dicts correctly work with node hashing
-        for tup in chain(map(lambda x: "(" + x + ",)", constants), dict_strs):
+        for tup in map(lambda x: "(" + x + ",)", constants):
             funcs_str = funcs_template.format(constant_constructor=tup)
             scope = {}
             execWrapper(funcs_str, globals(), scope)
@@ -2585,68 +2581,119 @@ class TestFrontend(JitTestCase):
 
 
 class TestScript(JitTestCase):
-    def test_percent_operator_overloading(self):
-        """
-        Test that the '%' token can be parsed as both the modulo operator and as the string formatting operator
-        """
-        def test_modulo_operator():
-            @torch.jit.script
-            def fn(dividend: int, divisor: int) -> int:
-                return dividend % divisor
-            self.assertEqual(1, fn(5, 2))
 
-        def test_string_interpolation_with_string_placeholder_and_string_varaiable():
-            @torch.jit.script
-            def fn(arg1: str):
-                return "%s in template" % arg1
-            self.assertEqual("string in template", fn("string"))
+    def test_modulo_operator(self):
+        @torch.jit.script
+        def fn(dividend: int, divisor: int) -> int:
+            return dividend % divisor
+        self.assertEqual(1, fn(5, 2))
 
-        def test_string_interpolation_with_string_placeholder_and_digit_varaiable():
-            @torch.jit.script
-            def fn(arg1: int) -> str:
-                return "%s in template" % arg1
-            self.assertEqual("1 in template", fn(1))
+    def test_string_interpolation_with_string_placeholder_and_string_varaiable(self):
+        @torch.jit.script
+        def fn(arg1: str):
+            return "%s in template" % arg1
+        self.assertEqual("foo in template", fn("foo"))
 
-        def test_string_interpolation_with_digit_placeholder_and_digit_varaiable():
+    def test_string_interpolation_with_string_placeholder_and_digit_varaiable(self):
+        @torch.jit.script
+        def fn(arg1: int) -> str:
+            return "%s in template" % arg1
+        self.assertEqual("1 in template", fn(1))
+
+    def test_string_interpolation_with_digit_placeholder_and_digit_varaiable(self):
+        @torch.jit.script
+        def fn(arg1: int) -> str:
+            return "%d in template" % arg1
+        self.assertEqual("1 in template", fn(1))
+
+    def test_string_interpolation_with_alternate_digit_placeholder(self):
+        @torch.jit.script
+        def fn(arg1: int) -> str:
+            return "%i in template" % arg1
+        self.assertEqual("1 in template", fn(1))
+
+    def test_string_interpolation_with_digit_placeholder_and_string_varaiable(self):
+        with self.assertRaisesRegex(RuntimeError, "%d format: A number is required, not String"):
             @torch.jit.script
-            def fn(arg1: int) -> str:
+            def fn(arg1: str) -> str:
                 return "%d in template" % arg1
-            self.assertEqual("1 in template", fn(1))
+            fn("1")
 
-        def test_string_interpolation_with_digit_placeholder_and_string_varaiable():
-            with self.assertRaises(RuntimeError):
-                @torch.jit.script
-                def fn(arg1: str) -> str:
-                    return "%d in template" % arg1
-                fn("1")
-
-        def test_string_interpolation_with_float_placeholder_and_float_varaiable():
+    def test_string_interpolation_with_exponent_placeholder_and_string_varaiable(self):
+        with self.assertRaisesRegex(RuntimeError, "%e format: A number is required, not String"):
             @torch.jit.script
-            def fn(arg1: float) -> str:
-                return "%f in template" % arg1
-            self.assertEqual("1.000000 in template", fn(1.0))
+            def fn(arg1: str) -> str:
+                return "%e in template" % arg1
+            fn("1")
 
-        def test_string_interpolation_with_float_placeholder_and_digit_varaiable():
+    def test_string_interpolation_with_lowercase_exponent_placeholder_and_digit_varaiable(self):
+        @torch.jit.script
+        def fn(arg1: int) -> str:
+            return "%e in template" % arg1
+        self.assertEqual("1.000000e+00 in template", fn(1))
+
+    def test_string_interpolation_with_capital_exponent_placeholder_and_digit_varaiable(self):
+        @torch.jit.script
+        def fn(arg1: int) -> str:
+            return "%E in template" % arg1
+        self.assertEqual("1.000000E+00 in template", fn(1))
+
+    def test_string_interpolation_with_float_placeholder_and_float_varaiable(self):
+        @torch.jit.script
+        def fn(arg1: float) -> str:
+            return "%f in template" % arg1
+        self.assertEqual("1.000000 in template", fn(1.0))
+
+    def test_string_interpolation_with_float_placeholder_and_digit_varaiable(self):
+        @torch.jit.script
+        def fn(arg1: int) -> str:
+            return "%f in template" % arg1
+        self.assertEqual("1.000000 in template", fn(1))
+
+    def test_string_interpolation_with_char_placeholder_and_char_varaiable(self):
+        @torch.jit.script
+        def fn(arg1: str) -> str:
+            return "%c in template" % arg1
+        self.assertEqual("a in template", fn("a"))
+
+    def test_string_interpolation_with_char_placeholder_and_digit_varaiable(self):
+        @torch.jit.script
+        def fn(arg1: int) -> str:
+            return "%c in template" % arg1
+        self.assertEqual("a in template", fn(97))
+
+    def test_string_interpolation_with_char_placeholder_and_true_string_variable(self):
+        with self.assertRaisesRegex(RuntimeError, "%c requires int or char"):
             @torch.jit.script
-            def fn(arg1: int) -> str:
-                return "%f in template" % arg1
-            self.assertEqual("1.000000 in template", fn(1))
+            def fn(arg1: str) -> str:
+                return "%c in template" % arg1
+            fn("foo")
 
-        def test_string_interpolation_with_too_few_arguments():
-            with self.assertRaises(RuntimeError):
-                @torch.jit.script
-                def fn(arg1: str) -> str:
-                    return "%s %s in template" % arg1
-                fn("string")
+    def test_string_interpolation_with_multiple_placeholders(self):
+        @torch.jit.script
+        def fn(arg1: str, arg2: int, arg3: float) -> str:
+            return "%s %d %f in template" % (arg1, arg2, arg3)
+        self.assertEqual("foo 1 1.000000 in template", fn("foo", 1, 1))
 
-        test_modulo_operator()
-        test_string_interpolation_with_string_placeholder_and_string_varaiable()
-        test_string_interpolation_with_string_placeholder_and_digit_varaiable()
-        test_string_interpolation_with_digit_placeholder_and_digit_varaiable()
-        test_string_interpolation_with_digit_placeholder_and_string_varaiable()
-        test_string_interpolation_with_float_placeholder_and_float_varaiable()
-        test_string_interpolation_with_float_placeholder_and_digit_varaiable()
-        test_string_interpolation_with_too_few_arguments()
+    def test_string_interpolation_with_subscript(self):
+        @torch.jit.script
+        def fn(arg1: List[str]) -> str:
+            return "%s in template" % arg1[0]
+        self.assertEqual("foo in template", fn(["foo", "bar"]))
+
+    def test_string_interpolation_with_too_few_arguments(self):
+        with self.assertRaisesRegex(RuntimeError, "Too few arguments for format string"):
+            @torch.jit.script
+            def fn(arg1: str) -> str:
+                return "%s %s in template" % arg1
+            fn("foo")
+
+    def test_string_interpolation_with_too_many_arguments(self):
+        with self.assertRaisesRegex(RuntimeError, "Too many arguments for format string"):
+            @torch.jit.script
+            def fn(arg1: str, arg2: str) -> str:
+                return "%s in template" % (arg1, arg2)
+            fn("foo", "bar")
 
     def test_pretty_print_function(self):
         @torch.jit.script
@@ -15491,6 +15538,12 @@ EXCLUDE_SCRIPT_AD_CHECK = {
     'test_split_size_list',
     'test_split_size_list_dim',
     'test_split_size_list_dim_neg0',
+    'test_tensor_indices_sections',
+    'test_tensor_indices_sections_dim',
+    'test_tensor_indices_sections_dim_neg0',
+    'test_tensor_split_sections',
+    'test_tensor_split_sections_dim',
+    'test_tensor_split_sections_dim_neg0',
 }
 
 EXCLUDE_PYTHON_PRINT = {

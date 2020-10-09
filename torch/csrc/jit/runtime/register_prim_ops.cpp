@@ -383,13 +383,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::percentFormat(str self, ...) -> str"),
-         [](Stack* stack) {
-           size_t num_inputs = pop(stack).toInt();
-           percentFormat(*stack, num_inputs);
-         },
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::NumToTensor.Scalar(Scalar a) -> Tensor"),
          [](Stack* stack) {
            at::Scalar s;
@@ -1184,7 +1177,7 @@ void dictUpdate(Stack* stack) {
   auto dict = pop(stack).toGenericDict();
 
   for (const auto& item : to_add) {
-    dict.insert(item.key(), item.value());
+    dict.insert_or_assign(item.key(), item.value());
   }
 }
 
