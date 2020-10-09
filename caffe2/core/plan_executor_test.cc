@@ -268,16 +268,6 @@ TEST(PlanExecutorTest, BlockingErrorPlan) {
 }
 #endif
 
-TEST(PlanExecutorTest, ErrorPlanWithCancellableStuckNet) {
-  HandleExecutorThreadExceptionsGuard guard;
-
-  PlanDef plan_def = parallelErrorPlanWithCancellableStuckNet();
-  Workspace ws;
-
-  ASSERT_THROW(ws.RunPlan(plan_def), TestError);
-  ASSERT_EQ(cancelCount, 1);
-}
-
 } // namespace caffe2
 
 #endif
