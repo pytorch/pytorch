@@ -228,7 +228,9 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
     }
   }
 
-  bool is_autograd_key_with_backend_kernel =
+  // Note when there's direct registration to DefaultBackend, this code path will only be hit by
+  // non backend keys (e.g AutogradXXX, Batched etc) due to (2.1).
+  bool has_backend_kernel =
     hasKernelForAnyDispatchKey(getBackendKeySetFromAutograd(dispatch_key).add(DispatchKey::DefaultBackend));
   // 2.2. Use Math kernel if available. For autograd keys, we only use kernel from Math
   //      when there's no direct registration to its corresponding backend key or DefaultBackend.
@@ -239,7 +241,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
       if (dispatch_key == DispatchKey::AutogradOther
           && hasKernelForAnyDispatchKey(c10::autogradother_backends)) {
         return {ambiguousAutogradOtherKernel_, "ambiguous autogradother"};
-      } else if (!is_autograd_key_with_backend_kernel) {
+      } else if (!has_backend_kernel) {
         return {*math_registration.value(), "math kernel"};
       }
     }
@@ -256,7 +258,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //      registration to the backend key or DefaultBackend. Once CatchAll is moved to Math, this should
   //      fit 2.1 and we can remove 2.3 entirely.
   if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)
-      && !is_autograd_key_with_backend_kernel && !catchAllKernel_.empty()) {
+      && !has_backend_kernel && !catchAllKernel_.empty()) {
     TORCH_INTERNAL_ASSERT(catchAllKernel_.front().kernel.isValid());
     return {catchAllKernel_.front(), "catch all"};
   }
