@@ -156,7 +156,7 @@ const KernelFunction& OperatorEntry::computeDispatchTableEntry(const c10::Dispat
   return computeDispatchTableEntryWithDebug(dispatcher, dispatch_key).first.kernel;
 }
 
-bool OperatorEntry::hasKernelForDispatchKeySet(DispatchKeySet ks) const {
+bool OperatorEntry::hasKernelForAnyDispatchKey(DispatchKeySet ks) const {
   TORCH_INTERNAL_ASSERT(kernels_.find(DispatchKey::Undefined) == kernels_.end());
   for (auto& kv : kernels_) {
     if (ks.has(kv.first)) return true;
@@ -181,29 +181,39 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // For any dispatch key, it'll pick a kernel using the following order:
   //  (1) Use kernel if it's directly registered to this key
   //  (2) Handle runtime keys that have kernels available from alias keys
-  //    (2.1) Use kernel from DispatchKey::Math if available.
+  //    (2.1) Use kernel from DispatchKey::DefaultBackend if available.
+  //          This is used to register a kernel that works for all backend in inference. But it requires
+  //          separate registration for Autograd keys to support training.
+  //    (2.2) Use kernel from DispatchKey::Math if available.
   //          For autograd keys, we only use kernel from Math when there's no direct registration
-  //          to its corresponding backend key.
+  //          to its corresponding backend key or DefaultBackend. See Note [DefaultBackend and Math].
   //          For AutogradOther, we eagerly return ambiguousAutogradOtherKernel_ if there's registration to any of
   //          its backends and ask backend extender to request a decicated Autograd key for the backend.
   //          See Note [Ambiguity in AutogradOther kernel] for more details.
-  //    (2.2) Use kernel from DispatchKey::Autograd if available
-  //    (2.3) Special logic to handle catchAll for Autograd keys
+  //          A DefaultBackend kernel prevents Math kernel being used for Autograd keys, but it doesn't
+  //          cause confusion for AutogradOther. It's pretty straightforward to use Autograd (if available)
+  //          in this case.
+  //    (2.3) Use kernel from DispatchKey::Autograd if available
+  //    (2.4) Special logic to handle catchAll for Autograd keys
   //          For autograd backend keys, we use kernel from alias Math key (catchAll will be moved to Math)
   //          if there's no direct registration to the backend key.
   //          Tensor factory functions used to have no registration to Autograd key but only to catchAll.
   //          In the past we directly call into backends(filled with catchAll) after BackendSelect.
   //          Now that we first call Autograd backend keys after BackendSelect, we should fill those
   //          with catchAll as well.
-  //    The implementation of (2.1) & (2.3) relies on the invariant that for a given backend,
+  //    The implementation of (2.2) & (2.4) relies on the invariant that for a given backend,
   //    `computeDispatchTableEntryWithDebug()` will be called for that backend's autograd key after the
   //    backend key. See Note [Refresh Runtime Autograd entries in dispatchTable_]
   //  (3) Use fallthrough kernel that are registered as fallback.
   //  (4) Use catchAll kernel if available
   // Alias Key Precedence:
-  //   Math > Autograd
+  //   DefaultBackend > Math > Autograd
+  // Note [DefaultBackend and Math]
+  //   When there're registrations to both DefaultBackend & Math & Autograd, from (2.2) we know DefaultBackend
+  //   and Autograd kernels will be picked up and Math is overriden.
+  //   This is fine and in practice DefaultBackend and Math shouldn't co-exist for an op.
   // TODO: Update alias key precedence after we add new alias keys AutogradDispatchCPUOrCUDA .
-  // TODO: we can remove (2.3) and (4) after TypeDefault registrations are moved from catchAll to Math
+  // TODO: we can remove (2.4) and (4) after TypeDefault registrations are moved from catchAll to Math
   //       so that Math can populate to Autograd backend keys before fallback kernels.
 
   // 1. Operator registration
@@ -211,34 +221,44 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
     return {*direct_registration.value(), "kernel"};
   }
 
-  bool is_autograd_key_with_backend_kernel =
-    hasKernelForDispatchKeySet(getBackendKeySetFromAutograd(dispatch_key));
-  // 2.1. Use Math kernel if available. For autograd keys, we only use kernel from Math
-  //      when there's no direct registration to its corresponding backend key.
+  // 2.1 Use DefaultBackend kernel if available.
+  if (isIncludedInAlias(dispatch_key, DispatchKey::DefaultBackend)) {
+    if (auto default_backend_registration = getKernelForDispatchKey(DispatchKey::DefaultBackend)) {
+      return {*default_backend_registration.value(), "default backend kernel"};
+    }
+  }
+
+  // Note when there's direct registration to DefaultBackend, this code path will only be hit by
+  // non backend keys (e.g AutogradXXX, Batched etc) due to (2.1).
+  bool has_backend_kernel =
+    hasKernelForAnyDispatchKey(getBackendKeySetFromAutograd(dispatch_key).add(DispatchKey::DefaultBackend));
+  // 2.2. Use Math kernel if available. For autograd keys, we only use kernel from Math
+  //      when there's no direct registration to its corresponding backend key or DefaultBackend.
   //      For AutogradOther, we return ambiguousAutogradOtherKernel_ if there's registration
   //      to any of its backends.
   if (isIncludedInAlias(dispatch_key, DispatchKey::Math)) {
     if (auto math_registration = getKernelForDispatchKey(DispatchKey::Math)) {
-      if (dispatch_key == DispatchKey::AutogradOther && is_autograd_key_with_backend_kernel) {
+      if (dispatch_key == DispatchKey::AutogradOther
+          && hasKernelForAnyDispatchKey(c10::autogradother_backends)) {
         return {ambiguousAutogradOtherKernel_, "ambiguous autogradother"};
-      } else if (!is_autograd_key_with_backend_kernel) {
+      } else if (!has_backend_kernel) {
         return {*math_registration.value(), "math kernel"};
       }
     }
   }
 
-  // 2.2. For autograd backend keys, use kernel from DispatchKey::Autograd if available
+  // 2.3. For autograd backend keys, use kernel from DispatchKey::Autograd if available
   if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)) {
     if (auto autograd_registration = getKernelForDispatchKey(DispatchKey::Autograd)) {
       return {*autograd_registration.value(), "autograd kernel"};
     }
   }
 
-  // 2.3. For autograd backend keys, we use kernel from catchAll if there's no direct
-  //      registration to the backend key. Once CatchAll is moved to Math, this should
+  // 2.4. For autograd backend keys, we use kernel from catchAll if there's no direct
+  //      registration to the backend key or DefaultBackend. Once CatchAll is moved to Math, this should
   //      fit 2.1 and we can remove 2.3 entirely.
   if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)
-      && !is_autograd_key_with_backend_kernel && !catchAllKernel_.empty()) {
+      && !has_backend_kernel && !catchAllKernel_.empty()) {
     TORCH_INTERNAL_ASSERT(catchAllKernel_.front().kernel.isValid());
     return {catchAllKernel_.front(), "catch all"};
   }
