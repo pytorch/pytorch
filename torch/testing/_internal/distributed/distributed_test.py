@@ -1509,7 +1509,7 @@ class DistributedTest:
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
         def test_all_reduce_coalesced_max_complex_unsupported(self):
             group, group_id, rank = self._init_global_test()
-            with self.assertRaisesRegex(RuntimeError, "is unsupported on complex tensors"):
+            with self.assertRaisesRegex(RuntimeError, "all_reduce does not support"):
                 dist.all_reduce_coalesced([_build_tensor(1, dtype=torch.cfloat)], dist.ReduceOp.MAX, group_id)
 
         def _test_all_reduce_coalesced_helper(

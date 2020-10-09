@@ -1077,7 +1077,7 @@ def all_reduce(tensor,
 
     if tensor.is_complex():
         if not supports_complex(op):
-            raise RuntimeError(f"{op} is unsupported on complex tensors")
+            raise RuntimeError(f"all_reduce does not support {op} on complex tensors")
         tensor = torch.view_as_real(tensor)
 
     opts = AllreduceOptions()
