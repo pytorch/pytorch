@@ -570,21 +570,22 @@ class TestQuantizedOps(TestCase):
             qY_clamp_hat = op(qX, min=min_val, max=max_val)
             self.assertEqual(qY_clamp, qY_clamp_hat, msg="{} qclamp failed".format(name))
 
-        with override_quantized_engine('fbgemm'):
-            Y_min_clamp = torch.clamp(X, min=min_val)
-            Y_max_clamp = torch.clamp(X, max=max_val)
+        if torch.backends.quantized.engine == 'fbgemm':
+            with override_quantized_engine('fbgemm'):
+                Y_min_clamp = torch.clamp(X, min=min_val)
+                Y_max_clamp = torch.clamp(X, max=max_val)
 
-            qY_min_clamp = torch.quantize_per_tensor(Y_min_clamp, scale=scale,
-                                                     zero_point=zero_point, dtype=torch_type)
-            qY_max_clamp = torch.quantize_per_tensor(Y_max_clamp, scale=scale,
-                                                     zero_point=zero_point, dtype=torch_type)
+                qY_min_clamp = torch.quantize_per_tensor(Y_min_clamp, scale=scale,
+                                                         zero_point=zero_point, dtype=torch_type)
+                qY_max_clamp = torch.quantize_per_tensor(Y_max_clamp, scale=scale,
+                                                         zero_point=zero_point, dtype=torch_type)
 
 
-            for name, op in ops_under_test.items():
-                qY_min_clamp_hat = op(qX, min=min_val)
-                self.assertEqual(qY_min_clamp, qY_min_clamp_hat, msg="{} qclamp failed".format(name))
-                qY_max_clamp_hat = op(qX, max=max_val)
-                self.assertEqual(qY_max_clamp, qY_max_clamp_hat, msg="{} qclamp failed".format(name))
+                for name, op in ops_under_test.items():
+                    qY_min_clamp_hat = op(qX, min=min_val)
+                    self.assertEqual(qY_min_clamp, qY_min_clamp_hat, msg="{} qclamp failed".format(name))
+                    qY_max_clamp_hat = op(qX, max=max_val)
+                    self.assertEqual(qY_max_clamp, qY_max_clamp_hat, msg="{} qclamp failed".format(name))
 
     """Tests the correctness of the quantized::hardtanh op."""
     @skipIfNoFBGEMM
@@ -3081,7 +3082,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
 
         packed_weight = prepack_op(qweight)
-        qresult = quant_op(packed_weight, indices, sparse=False)
+        qresult = quant_op(packed_weight, indices, pruned_weights=False)
 
         ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
         torch.testing.assert_allclose(ref, qresult, atol=0.005, rtol=1e-3)
