@@ -617,6 +617,63 @@ class DistributedTest:
 
             self._barrier()
 
+        @skip_if_no_gpu
+        @unittest.skip("NCCL P2P is not enabled for OSS builds")
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        def test_batch_isend_irecv_self_nccl(self):
+            self._barrier()
+            rank = dist.get_rank()
+            rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            p2p_op_list = []
+
+            if rank == 0:
+                send_tensor = _build_tensor(rank + 1, device_id=device_id)
+                recv_tensor = _build_tensor(rank + 1, value=-1, device_id=device_id)
+                recv_op = dist._P2POp(dist.irecv, recv_tensor, 0)
+                p2p_op_list.append(recv_op)
+                send_op = dist._P2POp(dist.isend, send_tensor, 0)
+                p2p_op_list.append(send_op)
+
+                reqs = dist._batch_isend_irecv(p2p_op_list)
+                for req in reqs:
+                    req.wait()
+
+            self._barrier()
+
+        @skip_if_no_gpu
+        @skip_if_small_worldsize
+        @unittest.skip("NCCL P2P is not enabled for OSS builds")
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        def test_batch_isend_irecv_no_rank_zero_nccl(self):
+            self._barrier()
+            rank = dist.get_rank()
+            rank_to_GPU = self._init_multigpu_helper()
+            device_id = rank_to_GPU[rank][0]
+            p2p_op_list = []
+
+            if rank == 1:
+                peer = 2
+            elif rank == 2:
+                peer = 1
+
+            if rank in [1, 2]:
+                send_tensor = _build_tensor(rank + 1, device_id=device_id)
+                recv_tensor = _build_tensor(peer + 1, value=-1, device_id=device_id)
+                recv_op = dist._P2POp(dist.irecv, recv_tensor, peer)
+                p2p_op_list.append(recv_op)
+                send_op = dist._P2POp(dist.isend, send_tensor, peer)
+                p2p_op_list.append(send_op)
+
+                reqs = dist._batch_isend_irecv(p2p_op_list)
+                for req in reqs:
+                    req.wait()
+
+
+            self._barrier()
+
         # GLOO Batch SEND RECV CPU
         @unittest.skipIf(BACKEND != "gloo", "GLOO Batch Send Recv CPU")
         def test_batch_isend_irecv_gloo(self):
