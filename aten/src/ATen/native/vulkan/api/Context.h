@@ -55,12 +55,6 @@ class Context final {
   VkQueue queue();
 
  private:
-  class Deleter final {
-   public:
-    void operator()(VkDevice device) const;
-  };
-
- private:
   // Construction and destruction order matters.  Do not move members around.
   Adapter adapter_;
   Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;

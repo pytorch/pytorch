@@ -4535,7 +4535,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def _test_device_maps_missing_config(self, mode):
         dst = worker_name((self.rank + 1) % self.world_size)
         errMsg = (
-            "TensorPipeAgent only supports CPU tensors by default.*"
+            "TensorPipe RPC backend only supports CPU tensors by default.*"
             "`set_device_map` on `TensorPipeRpcBackendOptions`"
         )
 
@@ -4579,6 +4579,28 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     @dist_init
     def test_device_maps_missing_config(self):
         self._test_device_maps_missing_config(RPCExecMode.SYNC)
+
+    @skip_if_lt_x_gpu(1)
+    def test_device_maps_missing_config_not_timeout(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options
+        )
+
+        timeout = rpc.get_rpc_timeout()
+
+        tik = time.time()
+        self._test_device_maps_missing_config(RPCExecMode.SYNC)
+        rpc.shutdown()
+        tok = time.time()
+
+        self.assertTrue(tok - tik < timeout)
 
     @skip_if_lt_x_gpu(1)
     @dist_init
