@@ -78,10 +78,6 @@ VkQueue acquire_queue(
 
 } // namespace
 
-void Context::Deleter::operator()(const VkDevice device) const {
-  vkDestroyDevice(device, nullptr);
-}
-
 Context::Context(const Adapter& adapter)
     : adapter_(adapter),
       device_(
@@ -135,7 +131,7 @@ void Context::flush() {
 
 Context* context() {
   Context* const context = initialize();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(context);
+  TORCH_CHECK(context, "Vulkan: Backend not available on this platform!");
 
   return context;
 }

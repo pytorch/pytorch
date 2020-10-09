@@ -101,7 +101,7 @@ void* map(const Resource::Memory& memory) {
 Resource::Memory::Scope::Scope(
     const VmaAllocator allocator,
     const VmaAllocation allocation,
-    const Resource::Memory::Access::Flags access)
+    const Access::Flags access)
   : allocator_(allocator),
     allocation_(allocation),
     access_(access) {

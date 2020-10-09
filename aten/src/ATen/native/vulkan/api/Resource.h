@@ -302,14 +302,14 @@ class Resource::Memory::Scope final {
   Scope(
       VmaAllocator allocator,
       VmaAllocation allocation,
-      Resource::Memory::Access::Flags access);
+      Access::Flags access);
 
   void operator()(const void* data) const;
 
  private:
   VmaAllocator allocator_;
   VmaAllocation allocation_;
-  Resource::Memory::Access::Flags access_;
+  Access::Flags access_;
 };
 
 template<typename, typename Pointer>

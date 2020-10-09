@@ -61,7 +61,7 @@ namespace ops {
 // support.
 //
 
-class C10_EXPORT vTensor final {
+class vTensor final {
  public:
   vTensor() = default;
   vTensor(
@@ -180,12 +180,6 @@ class C10_EXPORT vTensor final {
   // the underlying memory out of the expected scope.
 
   /*
-    Future
-  */
-
-  Memory& wait();
-
-  /*
     Host
   */
 
@@ -221,52 +215,79 @@ class C10_EXPORT vTensor final {
       typedef uint8_t Flags;
 
       enum Type : Flags {
-        Unknown = 0u << 0u,
         Buffer = 1u << 0u,
         Image = 1u << 1u,
         Staging = 1u << 2u,
+        All = Buffer | Image | Staging,
       };
     };
 
-    struct Active final {
-      Component::Type component;
-      Access::Flags access;
+    Buffer& buffer(Access::Flags access) const;
+    Image& image(Access::Flags access) const;
+    Buffer& staging(Access::Flags access) const;
+    vTensor::Memory& wait();
 
-      // Debug
-      friend std::ostream& operator<<(
-          std::ostream& stream,
-          const View::Active view);
-    };
-
+   private:
     Buffer& buffer() const;
     Image& image() const;
     Buffer& staging() const;
-
-    void transition(Active view) const;
-    void wait();
-
-   private:
     Fence& fence() const;
-    void verify() const;
 
    private:
-    api::Context* context_;
-    mutable Image image_;
+    // Resources
     mutable Buffer buffer_;
+    mutable Image image_;
     mutable Buffer staging_;
     mutable Fence fence_;
-    Component::Flags required_;
-    mutable Active active_;
 
+    // Context
+    api::Context* context_;
+
+    // State
+    mutable class State final {
+     public:
+      State();
+      State(api::Context*, IntArrayRef);
+
+      struct Buffer final {
+        VkPipelineStageFlags stage;
+        VkAccessFlags access;
+      };
+
+      struct Image final {
+        VkPipelineStageFlags stage;
+        VkAccessFlags access;
+        VkImageLayout layout;
+      };
+
+      // Availability
+      bool is_available(Component::Flags) const;
+      bool is_discrete() const;
+      bool is_uma() const;
+
+      // Clean / Dirty
+      bool is_clean(Component::Flags) const;
+      bool is_dirty(Component::Flags) const;
+      void set_clean(Component::Flags);
+      void set_dirty(Component::Flags);
+
+      // Barrier
+      Buffer& buffer();
+      Image& image();
+      Buffer& staging();
+
+     private:
+      Component::Flags available_;
+      Component::Flags dirty_;
+      Buffer buffer_;
+      Image image_;
+      Buffer staging_;
+    } state_;
+
+    // Metadata
     c10::SmallVector<int64_t, 6u> sizes_;
     TensorOptions options_;
   } view_;
-
- private:
-  // Debug
-  friend std::ostream& operator<<(
-      std::ostream& stream,
-      const View::Active view);
 };
 
 using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
@@ -323,10 +344,7 @@ template<typename Type, vTensor::Access::Flags kAccess>
 inline vTensor::Future<Type, kAccess>::~Future() {
   // Sync eagerly in an effort to hide latency.
   if (Access::Write & kAccess) {
-    tensor_->view_.transition({
-      View::Component::Image,
-      vTensor::Access::Read,
-    });
+    ;
   }
 }
 
@@ -338,7 +356,7 @@ vTensor::Future<Type, kAccess>::wait() const & {
       "vTensor::Future is in an invalid state!  "
       "Potential reason: This future is moved from.");
 
-  return tensor_->wait().template map<Type, kAccess>();
+  return tensor_->view_.wait().template map<Type, kAccess>();
 }
 
 template<typename Type>
@@ -349,6 +367,39 @@ inline vTensor::Future<Type, vTensor::Access::Read> vTensor::host() const & {
 template<typename Type, vTensor::Access::Flags kAccess>
 inline vTensor::Future<Type, kAccess> vTensor::host() & {
   return Future<Type, kAccess>(host(kAccess));
+}
+
+inline bool vTensor::View::State::is_available(
+    const Component::Flags components) const {
+  return available_ & components;
+}
+
+inline bool vTensor::View::State::is_discrete() const {
+  return is_available(Component::Staging);
+}
+
+inline bool vTensor::View::State::is_uma() const {
+  return !is_discrete();
+}
+
+inline bool vTensor::View::State::is_clean(
+    const Component::Flags components) const {
+  return !is_dirty(components);
+}
+
+inline bool vTensor::View::State::is_dirty(
+    const Component::Flags components) const {
+  return dirty_ & components;
+}
+
+inline void vTensor::View::State::set_clean(
+    const Component::Flags components) {
+  dirty_ &= ~components;
+}
+
+inline void vTensor::View::State::set_dirty(
+    const Component::Flags components) {
+  dirty_ |= components;
 }
 
 } // namespace ops
