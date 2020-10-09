@@ -2,7 +2,6 @@ import torch
 from torch.fx import (
     GraphModule,
     Proxy,
-    symbolic_trace,
     map_arg
 )
 
@@ -47,6 +46,7 @@ from .utils import (
 )
 
 from collections import OrderedDict
+import warnings
 import copy
 import re
 
@@ -297,7 +297,13 @@ class Quantizer:
             elif node.op == 'call_method':
                 self_obj = node.args[0]
                 # qconfig for call_method should be the same as the `self` object for the call
-                self.qconfig_map[node.name] = self.qconfig_map[self_obj.name]
+                if self_obj.name in self.qconfig_map:
+                    qconfig = self.qconfig_map[self_obj.name]
+                else:
+                    # need scope info for each node to support this
+                    warnings.warn("Scope info is not yet supported, taking default qconfig for value {}".format(node.name))
+                    qconfig = get_qconfig('')
+                self.qconfig_map[node.name] = qconfig
             elif node.op == 'call_module':
                 module_qconfig = get_qconfig(node.target)
                 # regex is not supported eager mode propagate_qconfig_, we'll need to
@@ -406,9 +412,8 @@ class Quantizer:
                 if isinstance(obj, StandaloneModuleQuantizeHandler):
                     # observe standalone module
                     standalone_module = self.modules[node.target]
-                    traced_standalone_module = symbolic_trace(standalone_module)
                     prepare = torch.quantization.quantize_fx._prepare_standalone_module_fx
-                    observed_standalone_module = prepare(traced_standalone_module, {'': qconfig})
+                    observed_standalone_module = prepare(standalone_module, {'': qconfig})
                     observed_standalone_module.qconfig = qconfig
                     standalone_module_input_idxs = observed_standalone_module._standalone_module_observed_input_idxs
                     observed_standalone_module = mark_observed_standalone_module(observed_standalone_module)
