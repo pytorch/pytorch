@@ -272,7 +272,7 @@ if _enabled:
             self.__dict__["_initializing"] = False
 
         def __getattr__(self, attr):
-            if self.__dict__["_initializing"]:
+            if "_initializing" in self.__dict__ and self.__dict__["_initializing"]:
                 return super(RecursiveScriptClass, self).__getattr__(attr)
 
             if attr in self._props:
@@ -281,7 +281,7 @@ if _enabled:
             return getattr(self._c, attr)
 
         def __setattr__(self, attr, value):
-            if self.__dict__["_initializing"]:
+            if "_initializing" in self.__dict__ and self.__dict__["_initializing"]:
                 return super(RecursiveScriptClass, self).__setattr__(attr, value)
 
             if attr in self._props:
