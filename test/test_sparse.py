@@ -12,6 +12,8 @@ import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_WITH_ROCM, IS_WINDOWS
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
+from torch.testing._internal.common_methods_invocations import unary_ufuncs
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops, dtypes
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
 from typing import Dict, Any
@@ -3055,6 +3057,42 @@ class TestSparseOneOff(TestCase):
                                                  [0, 4, 4, 0])
         with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
+
+
+class TestSparseUnaryUfuncs(TestCase):
+
+    @ops([op for op in unary_ufuncs if op.supports_sparse])
+    def test_sparse_unary_ops(self, device, dtype, op):
+        # op is common_methods_invocations.UnaryUfuncInfo
+        sparse_inputs = op.sample_inputs(device, dtype)
+        uncoalesed_sparse_inputs = op.sample_inputs(device, dtype, coalesced=False)
+
+        for sparse_tensor in sparse_inputs + uncoalesed_sparse_inputs:
+            dense_tensor = sparse_tensor.to_dense()
+            expected_output = op(dense_tensor)
+
+            sparse_tensor_copy = sparse_tensor.clone()
+            self.assertEqual(expected_output, op(sparse_tensor_copy).to_dense())
+
+            sparse_tensor_copy = sparse_tensor.clone()
+            self.assertEqual(expected_output, op.method_variant(sparse_tensor_copy).to_dense())
+
+            if op.supports_tensor_out:
+                sparse_tensor_out = torch.zeros_like(sparse_tensor)
+                op(sparse_tensor, out=sparse_tensor_out)
+                self.assertEqual(expected_output, sparse_tensor_out.to_dense())
+
+            if op.inplace_variant is not None:
+                sparse_tensor_copy = sparse_tensor.clone().coalesce()
+                self.assertEqual(expected_output, op.inplace_variant(sparse_tensor_copy).to_dense())
+
+                if not sparse_tensor.is_coalesced():                
+                    # test in-place op on uncoalesced input
+                    with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
+                        op.inplace_variant(sparse_tensor)
+
+
+instantiate_device_type_tests(TestSparseUnaryUfuncs, globals())
 
 
 if __name__ == '__main__':

@@ -177,6 +177,7 @@ class UnaryUfuncInfo(OpInfo):
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
                  promotes_integers_to_float=False,  # whether op promotes unary output to float or not
+                 supports_sparse=False,  # whether the op correctly handles sparse input
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
@@ -190,21 +191,51 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
         self.promotes_integers_to_float = promotes_integers_to_float
+        self.supports_sparse = supports_sparse
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
         self._domain_eps = 1e-5
 
-    def sample_inputs(self, device, dtype, requires_grad=False):
+    def sample_inputs(self, device, dtype, requires_grad=False, **sparse_kwargs):
         low, high = self.domain
         low = low if low is None else low + self._domain_eps
         high = high if high is None else high - self._domain_eps
+
+        if self.supports_sparse:
+            return self._sample_sparse_inputs(device, dtype, requires_grad, low=low, high=high, **sparse_kwargs)
 
         return (SampleInput(make_tensor((L,), device, dtype,
                                         low=low, high=high,
                                         requires_grad=requires_grad)),)
 
+    def _sample_sparse_inputs(self, device, dtype, requires_grad=False, low=low, high=high, **kwargs):
+        is_coalesced = kwargs.get("coalesced", True)
 
+        t1 = torch.sparse_coo_tensor(
+            indices=torch.tensor([[0], [1], [2]]).transpose(1, 0),
+            values=torch.tensor([3.0, 4.0, 5.0]),
+            size=[3, ],
+            device=device,
+            dtype=dtype,
+        )
+        # hybrid sparse input
+        t2 = torch.sparse_coo_tensor(
+            indices=torch.tensor([[1, 3], [2, 4]]),
+            values=torch.tensor([[1.0, 3.0], [5.0, 7.0]]),
+            size=[4, 5, 2],
+            device=device,
+            dtype=dtype
+        )
+
+        if is_coalesced:
+            t1 = t1.coalesce()
+            t2 = t2.coalesce()
+
+        return (
+            SampleInput(t1),
+            SampleInput(t2),
+        )
 
 # Operator database (sorted alphabetically)
 op_db = [
@@ -255,7 +286,8 @@ op_db = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=IS_WINDOWS),
-                   )),
+                   ),
+                   supports_sparse=True),
     # NOTE: derivative for inplace asinh is not implemented
     UnaryUfuncInfo('asinh',
                    ref=np.arcsinh,
@@ -351,7 +383,8 @@ op_db = [
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
-                   promotes_integers_to_float=True),
+                   promotes_integers_to_float=True,
+                   supports_sparse=True),
     UnaryUfuncInfo('log2',
                    ref=np.log2,
                    domain=(0, float('inf')),
@@ -370,7 +403,8 @@ op_db = [
                    ref=np.negative,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16)),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   supports_sparse=True),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -470,6 +504,30 @@ op_db = [
                                 dtypes=[torch.cdouble]),),
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False),
+    UnaryUfuncInfo('abs',
+                   ref=np.abs,
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
+                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
+                   ),
+                   supports_sparse=True),
+    UnaryUfuncInfo('sign',
+                   ref=np.sign,
+                   dtypesIfCPU=floating_types_and(torch.half),
+                   dtypesIfCUDA=floating_types_and(torch.half),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.float16, torch.float, torch.double]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cuda', dtypes=[torch.float16, torch.float, torch.double]),
+                   ),
+                   supports_sparse=True),
 ]
 
 if TEST_SCIPY:
