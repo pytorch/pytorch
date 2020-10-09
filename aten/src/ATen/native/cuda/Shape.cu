@@ -84,6 +84,7 @@ struct OutputTensorSizeStride {
 
 
 #ifdef __HIP_PLATFORM_HCC__
+// Use pinned memory and and pass the struct by pointer on ROCm
 template <typename T, typename IndexType>
 struct CatArrInputTensor {
   T* input;
