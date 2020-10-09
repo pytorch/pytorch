@@ -16972,9 +16972,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @onlyCUDA
     def test_matmul_45724(self, device):
         # https://github.com/pytorch/pytorch/issues/45724
-        a = torch.rand(65537, 22, 64).cuda().half()
-        b = torch.rand(65537, 64, 22).cuda().half()
-        c = torch.full((65537, 22, 22), math.nan, dtype=torch.half, device='cuda')
+        a = torch.rand(65537, 22, 64, device=device, dtype=torch.half)
+        b = torch.rand(65537, 64, 22, device=device, dtype=torch.half)
+        c = torch.full((65537, 22, 22), math.nan, dtype=torch.half, device=device)
         cpu_result = torch.matmul(a.cpu().float(), b.cpu().float()).cuda().half()
         torch.matmul(a, b, out=c)
         self.assertEqual(c, cpu_result)

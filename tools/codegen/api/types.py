@@ -53,10 +53,6 @@ class CppArgument:
             mb_default = f"={self.default}"
         return f"{self.type} {self.name}{mb_default}"
 
-    # List of CppArguments that this structure explicitly represents
-    def explicit_arguments(self) -> Sequence['CppArgument']:
-        return [self]
-
     # Return a copy of CppArgument with defaults removed
     def no_default(self) -> 'CppArgument':
         return CppArgument(
