@@ -3067,7 +3067,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
 
         packed_weight = prepack_op(qweight)
-        qresult = quant_op(packed_weight, indices, sparse=False)
+        qresult = quant_op(packed_weight, indices, pruned_weights=False)
 
         ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
         torch.testing.assert_allclose(ref, qresult, atol=0.005, rtol=1e-3)
