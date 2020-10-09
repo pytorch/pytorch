@@ -149,7 +149,11 @@ def _cast(value, dtype):
     elif isinstance(value, container_abcs.Mapping):
         return {_cast(k, dtype): _cast(v, dtype) for k, v in value.items()}
     elif isinstance(value, container_abcs.Iterable):
-        return type(value)(_cast(v, dtype) for v in value)
+        iterable = map(lambda v: _cast(v, dtype), value)
+        if isinstance(value, list) or isinstance(value, tuple):
+            return type(value)(iterable)
+        else:
+            return iterable
     else:
         return value
 

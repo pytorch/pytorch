@@ -1406,6 +1406,16 @@ C10_EXPORT void SumSqr<float, CPUContext>(
 }
 
 template <>
+C10_EXPORT void SumSqr<double, CPUContext>(
+    const int N,
+    const double* x,
+    double* y,
+    CPUContext* /*context*/ /* unused */,
+    Tensor* /*scratch_ptr*/ /* unused */) {
+  *y = ConstEigenVectorMap<double>(x, N).squaredNorm();
+}
+
+template <>
 C10_EXPORT void Select<float, CPUContext>(
     const int N,
     const int D,

@@ -35,7 +35,7 @@ Statement* OptOutMutator::mutate(IterDomain* id) {
     return id;
 
   Val* mutated_val = new IterDomain(
-      s, e, id->parallel_method(), id->isReduction(), id->isRFactorProduct());
+      s, e, id->getParallelType(), id->getIterType(), id->isRFactorProduct());
   registerMutation(id, mutated_val);
   return mutated_val;
 }
@@ -44,14 +44,15 @@ Statement* OptOutMutator::mutate(TensorDomain* td) {
   std::vector<IterDomain*> dom;
   bool mutated = false;
   for (decltype(td->nDims()) i = 0; i < td->nDims(); i++) {
-    IterDomain* id = static_cast<IterDomain*>(mutateAsVal(td->axis(i)));
+    IterDomain* id = mutateAsVal(td->axis(i))->as<IterDomain>();
     dom.push_back(id);
     if (!id->sameAs(td->axis(i)))
       mutated = true;
   }
 
   if (mutated) {
-    Val* mutated_val = new TensorDomain(dom);
+    Val* mutated_val = new TensorDomain(
+        td->getRootDomain(), td->getRFactorDomain(), dom, td->contiguity());
     registerMutation(td, mutated_val);
     return mutated_val;
   }
@@ -59,12 +60,11 @@ Statement* OptOutMutator::mutate(TensorDomain* td) {
 }
 
 Statement* OptOutMutator::mutate(TensorView* tv) {
-  TensorDomain* td = static_cast<TensorDomain*>(mutateAsVal(tv->domain()));
+  TensorDomain* td = mutateAsVal(tv->domain())->as<TensorDomain>();
 
   TensorView* computeAtView = nullptr;
   if (tv->hasComputeAt())
-    computeAtView =
-        static_cast<TensorView*>(mutateAsVal(tv->getComputeAtView()));
+    computeAtView = mutateAsVal(tv->getComputeAtView())->as<TensorView>();
 
   if (!tv->domain()->sameAs(td) ||
       (tv->hasComputeAt() && !tv->getComputeAtView()->sameAs(computeAtView))) {
@@ -79,28 +79,8 @@ Statement* OptOutMutator::mutate(TensorView* tv) {
   return tv;
 }
 
-Statement* OptOutMutator::mutate(TensorIndex* ti) {
-  std::vector<Statement*> inds;
-  for (auto* ind : ti->indices())
-    inds.push_back(mutateAsVal(ind));
-
-  bool changed = false;
-  for (decltype(inds.size()) i{0}; i < inds.size(); i++) {
-    TORCH_INTERNAL_ASSERT(inds[i]->isVal() && inds[i]->asVal()->isAnInt());
-    if (!inds[i]->sameAs(ti->index(i)))
-      changed = true;
-  }
-
-  if (!changed)
-    return ti;
-
-  std::vector<Val*> valInds(inds.size(), nullptr);
-  for (decltype(inds.size()) i{0}; i < inds.size(); i++)
-    valInds[i] = inds[i]->asVal();
-
-  Val* mutated_val = new TensorIndex(ti->view(), valInds);
-  registerMutation(ti, mutated_val);
-  return mutated_val;
+Statement* OptOutMutator::mutate(kir::TensorIndex* ti) {
+  return ti;
 }
 
 Statement* OptOutMutator::mutate(Bool* b) {
@@ -125,32 +105,32 @@ Statement* OptOutMutator::mutate(NamedScalar* ns) {
 
 // MUTATE FUNCTIONS FOR EXPRESSIONS.
 
-Statement* OptOutMutator::mutate(Allocate* a) {
-  TensorView* tv = static_cast<TensorView*>(mutateAsVal(a->buffer()));
-  Val* ext = mutateAsVal(a->extent())->asVal();
-  if (ext->sameAs(a->extent()) && tv->sameAs(a->buffer()))
-    return a;
-  FusionGuard::getCurFusion()->removeExpr(a);
-  return new Allocate(tv, ext);
+Statement* OptOutMutator::mutate(kir::Allocate* a) {
+  return a;
+}
+
+Statement* OptOutMutator::mutate(kir::Sync* a) {
+  return a;
 }
 
 Statement* OptOutMutator::mutate(Split* s) {
-  IterDomain* ot = static_cast<IterDomain*>(mutateAsVal(s->outer()));
-  IterDomain* inr = static_cast<IterDomain*>(mutateAsVal(s->inner()));
-  IterDomain* in = static_cast<IterDomain*>(mutateAsVal(s->in()));
-  Int* fact = static_cast<Int*>(mutateAsVal(s->factor()));
+  IterDomain* ot = mutateAsVal(s->outer())->as<IterDomain>();
+  IterDomain* inr = mutateAsVal(s->inner())->as<IterDomain>();
+  IterDomain* in = mutateAsVal(s->in())->as<IterDomain>();
+  Val* fact = mutateAsVal(s->factor())->as<Val>();
 
   if (ot->sameAs(s->outer()) && inr->sameAs(s->inner()) &&
-      in->sameAs(s->in()) && fact->sameAs(s->factor()))
+      in->sameAs(s->in()) && areEqualScalars(fact, s->factor())) {
     return s;
+  }
   FusionGuard::getCurFusion()->removeExpr(s);
   return new Split(ot, inr, in, fact);
 }
 
 Statement* OptOutMutator::mutate(Merge* m) {
-  IterDomain* ot = static_cast<IterDomain*>(mutateAsVal(m->out()));
-  IterDomain* otr = static_cast<IterDomain*>(mutateAsVal(m->outer()));
-  IterDomain* in = static_cast<IterDomain*>(mutateAsVal(m->inner()));
+  IterDomain* ot = mutateAsVal(m->out())->as<IterDomain>();
+  IterDomain* otr = mutateAsVal(m->outer())->as<IterDomain>();
+  IterDomain* in = mutateAsVal(m->inner())->as<IterDomain>();
 
   if (ot->sameAs(m->out()) && otr->sameAs(m->outer()) && in->sameAs(m->inner()))
     return m;
@@ -202,141 +182,20 @@ Statement* OptOutMutator::mutate(ReductionOp* rop) {
   return new ReductionOp(rop->getReductionOpType(), init, out, in);
 }
 
-Statement* OptOutMutator::mutate(BroadcastOp* bop) {
-  Val* out = mutateAsVal(bop->out())->asVal();
-  Val* in = mutateAsVal(bop->in())->asVal();
-  if (out->sameAs(bop->out()) && in->sameAs(bop->in()))
-    return bop;
-
-  TORCH_INTERNAL_ASSERT(
-      out->getValType().value() == ValType::TensorView &&
-      in->getValType().value() == ValType::TensorView)
-  return new BroadcastOp(
-      static_cast<TensorView*>(out), static_cast<TensorView*>(in));
+Statement* OptOutMutator::mutate(kir::GridReduction* gr) {
+  return gr;
 }
 
-Statement* OptOutMutator::mutate(ForLoop* fl) {
-  Val* index = mutateAsVal(fl->index())->asVal();
-  Val* val_id = mutateAsVal(fl->iter_domain())->asVal();
+Statement* OptOutMutator::mutate(BroadcastOp* bop) {
+  return bop;
+}
 
-  TORCH_INTERNAL_ASSERT(val_id->getValType() == ValType::IterDomain);
-  IterDomain* id = static_cast<IterDomain*>(val_id);
-
-  bool is_mutated = !index->sameAs(fl->index());
-  is_mutated = is_mutated | !id->sameAs(fl->iter_domain());
-
-  std::vector<Expr*> mutated_exprs;
-  for (auto expr : fl->body().exprs()) {
-    Statement* mutated_stmt = mutate(expr);
-    TORCH_INTERNAL_ASSERT(
-        mutated_stmt->isExpr(),
-        "While mutating a for loop, received a non-expression for a body entry.");
-    Expr* mutated_expr = static_cast<Expr*>(mutated_stmt);
-    mutated_exprs.push_back(mutated_expr);
-    // could use sameAs here, but we'd have to check the output value separately
-    is_mutated = is_mutated | (mutated_expr != expr);
-  }
-
-  if (is_mutated) {
-    auto newFL = new ForLoop(index, id, mutated_exprs, fl->parentScope());
-    return newFL;
-  }
-
+Statement* OptOutMutator::mutate(kir::ForLoop* fl) {
   return fl;
 }
 
-Statement* OptOutMutator::mutate(IfThenElse* ite) {
-  Val* val_cond = mutateAsVal(ite->cond())->asVal();
-  TORCH_INTERNAL_ASSERT(
-      val_cond->getValType().value() == ValType::Scalar &&
-      val_cond->getDataType().value() == DataType::Bool);
-  Bool* cond = static_cast<Bool*>(val_cond);
-
-  bool is_mutated = !cond->sameAs(ite->cond());
-
-  std::vector<Expr*> mutated_exprs;
-  for (auto expr : ite->body().exprs()) {
-    Statement* mutated_stmt = mutate(expr);
-    TORCH_INTERNAL_ASSERT(
-        mutated_stmt->isExpr(),
-        "While mutating a for loop, received a non-expression for a body entry.");
-    Expr* mutated_expr = static_cast<Expr*>(mutated_stmt);
-    mutated_exprs.push_back(mutated_expr);
-    // could use sameAs here, but we'd have to check the output value separately
-    is_mutated = is_mutated | (mutated_expr != expr);
-  }
-
-  std::vector<Expr*> mutated_else_exprs;
-  for (auto expr : ite->elseBody().exprs()) {
-    Statement* mutated_stmt = mutate(expr);
-    TORCH_INTERNAL_ASSERT(
-        mutated_stmt->isExpr(),
-        "While mutating a for loop, received a non-expression for a body entry.");
-    Expr* mutated_expr = static_cast<Expr*>(mutated_stmt);
-    mutated_else_exprs.push_back(mutated_expr);
-    // could use sameAs here, but we'd have to check the output value separately
-    is_mutated = is_mutated | (mutated_expr != expr);
-  }
-
-  if (is_mutated) {
-    auto newITE = new IfThenElse(
-        cond, ite->body().exprs(), ite->elseBody().exprs(), ite->parentScope());
-    return newITE;
-  }
-
+Statement* OptOutMutator::mutate(kir::IfThenElse* ite) {
   return ite;
-}
-
-// START REPLACE ALL
-
-void ReplaceAll::replaceInpOut() {
-  Fusion* fusion = FusionGuard::getCurFusion();
-  for (auto it : mutations) {
-    Val* val = it.first;
-    if (fusion->hasInput(val)) {
-      fusion->replaceInput(it.first, it.second);
-    } else if (fusion->hasOutput(val)) {
-      fusion->replaceOutput(it.first, it.second);
-    }
-  }
-}
-
-void ReplaceAll::instancesOf(Val* instance, Val* with) {
-  std::unordered_map<Val*, Val*> replacement_map;
-  replacement_map[instance] = with;
-  ReplaceAll::instancesOf(replacement_map);
-}
-
-void ReplaceAll::instancesOf(std::unordered_map<Val*, Val*> replacement_map) {
-  ReplaceAll ra(std::move(replacement_map));
-  // Get a copy because this will be modified in place, we shouldn't auto
-  // iterate on it
-  std::vector<Expr*> to_mutate;
-  for (Expr* expr : FusionGuard::getCurFusion()->unordered_exprs())
-    to_mutate.push_back(expr);
-
-  for (Expr* expr : to_mutate)
-    ra.mutate(expr);
-
-  ra.replaceInpOut();
-}
-
-void ReplaceAll::instancesWithin(Val* instance, Val* with, Expr* within) {
-  if (within == nullptr)
-    return;
-  FusionGuard fg(within->fusion());
-  ReplaceAll ra(instance, with);
-  ra.mutate(within);
-}
-
-void ReplaceAll::instancesWithin(
-    std::unordered_map<Val*, Val*> replacement_map,
-    Expr* within) {
-  if (within == nullptr)
-    return;
-  FusionGuard fg(within->fusion());
-  ReplaceAll ra(std::move(replacement_map));
-  ra.mutate(within);
 }
 
 } // namespace fuser

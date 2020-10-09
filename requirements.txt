@@ -4,3 +4,5 @@ pyyaml
 requests
 setuptools
 six
+typing_extensions
+dataclasses

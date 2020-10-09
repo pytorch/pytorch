@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from inspect import currentframe, getframeinfo
 import unittest
@@ -393,6 +393,7 @@ class TestAppendNet(test_util.TestCase):
 
 class TestExtractPredictorNet(test_util.TestCase):
 
+    @unittest.skipIf('ImageInput' not in workspace.RegisteredOperators(), "Needs OpenCV")
     def test_extract_simple(self):
         from caffe2.python import brew
         from caffe2.python.model_helper import ModelHelper, ExtractPredictorNet

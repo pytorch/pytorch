@@ -16,7 +16,6 @@ struct Module;
 namespace tracer {
 void initPythonTracerBindings(PyObject* module);
 
-std::string getPythonInterpreterStackTrace();
 SourceRange getPythonInterpreterSourceRange();
 
 Node* preRecordPythonTrace(

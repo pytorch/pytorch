@@ -1,11 +1,12 @@
-#include "test/cpp/jit/test_base.h"
+#include <gtest/gtest.h>
+
 #include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/runtime/graph_executor.h"
 
 namespace torch {
 namespace jit {
 
-void testGraphExecutor() {
+TEST(GraphExecutorTest, Basic_CUDA) {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
 

@@ -243,12 +243,14 @@ class ModuleDict(Module):
 
     * the order of insertion, and
 
-    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged ``OrderedDict``
-      or another :class:`~torch.nn.ModuleDict` (the argument to :meth:`~torch.nn.ModuleDict.update`).
+    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged 
+      ``OrderedDict``, ``dict`` (started from Python 3.6) or another
+      :class:`~torch.nn.ModuleDict` (the argument to 
+      :meth:`~torch.nn.ModuleDict.update`).
 
     Note that :meth:`~torch.nn.ModuleDict.update` with other unordered mapping
-    types (e.g., Python's plain ``dict``) does not preserve the order of the
-    merged mapping.
+    types (e.g., Python's plain ``dict`` before Python version 3.6) does not
+    preserve the order of the merged mapping.
 
     Arguments:
         modules (iterable, optional): a mapping (dictionary) of (string: module)
@@ -351,11 +353,8 @@ class ModuleDict(Module):
                             "iterable of key/value pairs, but got " +
                             type(modules).__name__)
 
-        if isinstance(modules, (OrderedDict, ModuleDict)):
+        if isinstance(modules, (OrderedDict, ModuleDict, container_abcs.Mapping)):
             for key, module in modules.items():
-                self[key] = module
-        elif isinstance(modules, container_abcs.Mapping):
-            for key, module in sorted(modules.items()):
                 self[key] = module
         else:
             for j, m in enumerate(modules):
@@ -430,6 +429,11 @@ class ParameterList(Module):
         idx = self._get_abs_string_index(idx)
         return self.register_parameter(str(idx), param)
 
+    def __setattr__(self, key: Any, value: Any) -> None:
+        if not isinstance(value, torch.nn.Parameter):
+            warnings.warn("Setting attributes on ParameterList is not supported.")
+        super(ParameterList, self).__setattr__(key, value)
+
     def __len__(self) -> int:
         return len(self._parameters)
 
@@ -480,6 +484,13 @@ class ParameterList(Module):
 
     def __call__(self, input):
         raise RuntimeError('ParameterList should not be called.')
+
+    def _replicate_for_data_parallel(self):
+        warnings.warn("nn.ParameterList is being used with DataParallel but this is not "
+                      "supported. This list will appear empty for the models replicated "
+                      "on each GPU except the original one.")
+
+        return super(ParameterList, self)._replicate_for_data_parallel()
 
 
 class ParameterDict(Module):
@@ -533,6 +544,11 @@ class ParameterDict(Module):
 
     def __delitem__(self, key: str) -> None:
         del self._parameters[key]
+
+    def __setattr__(self, key: Any, value: Any) -> None:
+        if not isinstance(value, torch.nn.Parameter):
+            warnings.warn("Setting attributes on ParameterDict is not supported.")
+        super(ParameterDict, self).__setattr__(key, value)
 
     def __len__(self) -> int:
         return len(self._parameters)
@@ -622,3 +638,10 @@ class ParameterDict(Module):
 
     def __call__(self, input):
         raise RuntimeError('ParameterDict should not be called.')
+
+    def _replicate_for_data_parallel(self):
+        warnings.warn("nn.ParameterDict is being used with DataParallel but this is not "
+                      "supported. This dict will appear empty for the models replicated "
+                      "on each GPU except the original one.")
+
+        return super(ParameterDict, self)._replicate_for_data_parallel()

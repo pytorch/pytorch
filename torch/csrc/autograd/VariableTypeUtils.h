@@ -55,10 +55,29 @@ inline void check_inplace(const Tensor& tensor) {
   }
 }
 
+inline void check_inplace(const TensorList tensors) {
+  for (const auto& tensor : tensors) {
+    check_inplace(tensor);
+  }
+}
+
 inline void throw_error_out_requires_grad(const char* name) {
   AT_ERROR(
       name, "(): functions with out=... arguments don't support automatic differentiation, "
       "but one of the arguments requires grad.");
+}
+
+inline void throw_error_for_complex_autograd(const Tensor& tensor, const char* name) {
+  if (tensor.requires_grad()) {
+    TORCH_CHECK(!tensor.is_complex(), name,
+                " does not support automatic differentiation for outputs with complex dtype.");
+  }
+}
+
+inline void throw_error_for_complex_autograd(const TensorList& tensorlist, const char* name) {
+  for (auto tensor: tensorlist) {
+    throw_error_for_complex_autograd(tensor, name);
+  }
 }
 
 // TODO: Blegh, bare references
@@ -199,6 +218,12 @@ inline void check_no_requires_grad(const Tensor& tensor, const char* name) {
     msg += name;
     msg += "' is not implemented";
     throw std::runtime_error(msg);
+  }
+}
+
+inline void check_no_requires_grad(const c10::optional<Tensor>& tensor, const char* name) {
+  if (tensor.has_value()) {
+    check_no_requires_grad(*tensor, name);
   }
 }
 

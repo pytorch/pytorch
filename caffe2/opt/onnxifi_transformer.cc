@@ -151,7 +151,7 @@ void fetchInputsToIfOpsSubnet(NetDef* net) {
   NetDef clone(*net);
   clone.clear_op();
   for (auto& op : net->op()) {
-    if (op.type() == "If") {
+    if (op.type() == "If" || op.type() == "AsyncIf") {
       OperatorDef new_op(op);
       ArgumentHelper helper(op);
       std::set<std::string> subnet_inputs, subnet_outputs;
@@ -200,6 +200,67 @@ NetDef composeResultNet(const OperatorDef& onnxifi_op) {
   NetDef net_opt;
   net_opt.add_op()->CopyFrom(onnxifi_op);
   return net_opt;
+}
+
+void enforceFp32InputsToFp16(
+    const std::unordered_set<std::string>& weights,
+    NetDef* pred_net,
+    ShapeInfoMap* shape_hints) {
+  std::unordered_map<std::string, ShapeInfo> user_input_map;
+  for (const auto& i : pred_net->external_input()) {
+    if (weights.count(i)) {
+      continue;
+    }
+    auto it = shape_hints->find(i);
+    if (it == shape_hints->end() ||
+        it->second.shape.data_type() != TensorProto_DataType_FLOAT) {
+      continue;
+    }
+    auto& shape_info = it->second;
+    user_input_map[i] = shape_info;
+    shape_info.shape.set_data_type(TensorProto_DataType_FLOAT16);
+  }
+
+  if (user_input_map.empty()) {
+    return;
+  }
+
+  std::vector<OperatorDef> ops;
+  for (const auto& op : pred_net->op()) {
+    ops.emplace_back(op);
+  }
+  pred_net->clear_op();
+  int current_pos = ops.size();
+
+  const char kBridgeTensorSuffix[] = "_to_float_bridge";
+  std::vector<OperatorDef> converts;
+  for (const auto& elem : user_input_map) {
+    const auto& name = elem.first;
+    const auto& shape_info = elem.second;
+    std::string new_name = name + kBridgeTensorSuffix;
+    shape_hints->emplace(new_name, shape_info);
+    converts.emplace_back(CreateOperatorDef(
+        "HalfToFloat",
+        "",
+        {name},
+        {new_name},
+        {MakeArgument<int>(kNetPos, current_pos++)}));
+  }
+  for (const auto& op : converts) {
+    pred_net->add_op()->CopyFrom(op);
+  }
+
+  for (auto& op : ops) {
+    for (auto& input : *op.mutable_input()) {
+      if (user_input_map.count(input)) {
+        input += kBridgeTensorSuffix;
+      }
+    }
+  }
+
+  for (const auto& op : ops) {
+    pred_net->add_op()->CopyFrom(op);
+  }
 }
 
 void mergeFp32InputsAndConvertToFp16(
@@ -578,7 +639,7 @@ void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws) {
       {"SparseLengthsSum4BitRowwiseSparse", "SparseLengthsSumFused4BitRowwise"},
       {"SparseLengthsWeightedSum4BitRowwiseSparse",
        "SparseLengthsWeightedSumFused4BitRowwise"},
-      {"SparseLengthsSum8BitRowwiseSparse", "SparseLengthsSum8FusedBitRowwise"},
+      {"SparseLengthsSum8BitRowwiseSparse", "SparseLengthsSumFused8BitRowwise"},
       {"SparseLengthsWeightedSum8BitRowwiseSparse",
        "SparseLengthsWeightedSumFused8BitRowwise"},
       {"SparseLengthsSum2BitRowwiseSparse", "SparseLengthsSumFused2BitRowwise"},
@@ -781,7 +842,9 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   int onnxifi_op_id = onnxifi_op_id_;
   if (opts_.debug) {
     WriteProtoToTextFile(
-        net, "debug_original_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt");
+        net,
+        "debug_original_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt",
+        false);
   }
   if (opts_.min_ops > net.op_size()) {
     return net;
@@ -909,10 +972,12 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   if (opts_.debug) {
     WriteProtoToTextFile(
         onnxifi_net,
-        "debug_onnxifi_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt");
+        "debug_onnxifi_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt",
+        false);
     WriteProtoToTextFile(
         net_opt,
-        "debug_optimized_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt");
+        "debug_optimized_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt",
+        false);
   }
   return net_opt;
 }
@@ -1026,8 +1091,8 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
 
   // Debugging stuff
   if (opts_.debug) {
-    WriteProtoToTextFile(onnx_model, "debug_onnxifi_net.onnx_txt");
-    WriteProtoToTextFile(net_opt, "debug_optimized_net.pb_txt");
+    WriteProtoToTextFile(onnx_model, "debug_onnxifi_net.onnx_txt", false);
+    WriteProtoToTextFile(net_opt, "debug_optimized_net.pb_txt", false);
   }
   return net_opt;
 }
@@ -1035,12 +1100,12 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
 bool OnnxifiTransformer::supportOpOnnx(
     const caffe2::OperatorDef& op,
     onnx::OnnxExporter* exporter,
-    const std::unordered_set<int>& blacklisted_ops,
+    const std::unordered_set<int>& blocklisted_ops,
     onnxBackendID backend_id) const {
   try {
     int pos =
         ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
-    if (blacklisted_ops.count(pos)) {
+    if (blocklisted_ops.count(pos)) {
       LOG(INFO) << "Skipping blacklisted op " << op.type() << " at pos " << pos;
       return false;
     }
@@ -1136,13 +1201,13 @@ bool OnnxifiTransformer::supportOpC2(
     const caffe2::OperatorDef& op,
     const ShapeInfoMap& shape_hints,
     const std::unordered_set<std::string>& weights,
-    const std::unordered_set<int>& blacklisted_ops,
+    const std::unordered_set<int>& blocklisted_ops,
     onnxBackendID backend_id) const {
   try {
     int pos =
         ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
-    if (blacklisted_ops.count(pos)) {
-      LOG(INFO) << "Skipping blacklisted op " << op.type() << " at pos " << pos;
+    if (blocklisted_ops.count(pos)) {
+      LOG(INFO) << "Skipping blocklisted op " << op.type() << " at pos " << pos;
       return false;
     }
 
@@ -1248,7 +1313,7 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
     const NetDef& net,
     const ShapeInfoMap& shape_hints,
     const std::unordered_set<std::string>& weights,
-    std::unordered_set<int>* blacklisted_ops) const {
+    std::unordered_set<int>* blocklisted_ops) const {
   std::unordered_map<std::string, int> output_pos;
   onnx::OnnxExporter exporter(nullptr);
   onnxBackendID backend_id = backend_ids_[idx_];
@@ -1263,8 +1328,8 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
       }
     } else if (StartsWith(op.type(), "SparseLengthsWeighted")) {
       auto supported = opts_.use_onnx
-          ? supportOpOnnx(op, &exporter, *blacklisted_ops, backend_id)
-          : supportOpC2(op, shape_hints, weights, *blacklisted_ops, backend_id);
+          ? supportOpOnnx(op, &exporter, *blocklisted_ops, backend_id)
+          : supportOpC2(op, shape_hints, weights, *blocklisted_ops, backend_id);
       if (!supported && op.input_size() > 1) {
         check = op.input(1);
       }
@@ -1277,18 +1342,18 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
       if (it == output_pos.end()) {
         continue;
       }
-      blacklisted_ops->emplace(it->second);
+      blocklisted_ops->emplace(it->second);
       // We know that current op is not going to be supported. Might as well
-      // blacklist it too
-      blacklisted_ops->emplace(
+      // blocklist it too
+      blocklisted_ops->emplace(
           ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1));
     }
   }
 }
 
-void OnnxifiTransformer::blacklistCpuPartition(
+void OnnxifiTransformer::blocklistCpuPartition(
     const NetDef& net,
-    std::unordered_set<int>* blacklisted_ops) const {
+    std::unordered_set<int>* blocklisted_ops) const {
   std::unordered_set<std::string> cpu_partitions;
   for (const auto& p : partition_infos_) {
     if (p.device_id_size() == 0) {
@@ -1298,7 +1363,7 @@ void OnnxifiTransformer::blacklistCpuPartition(
   for (const auto& op : net.op()) {
     const auto& pname = op.device_option().node_name();
     if (cpu_partitions.count(pname)) {
-      blacklisted_ops->emplace(
+      blocklisted_ops->emplace(
           ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1));
     }
   }
@@ -1308,10 +1373,10 @@ void OnnxifiTransformer::applyFilteringRules(
     const NetDef& net,
     const ShapeInfoMap& shape_hints,
     const std::unordered_set<std::string>& weights,
-    std::unordered_set<int>* blacklisted_ops) const {
+    std::unordered_set<int>* blocklisted_ops) const {
   tieGatherAndSparseLengthsWeightedSumOps(
-      net, shape_hints, weights, blacklisted_ops);
-  blacklistCpuPartition(net, blacklisted_ops);
+      net, shape_hints, weights, blocklisted_ops);
+  blocklistCpuPartition(net, blocklisted_ops);
 }
 
 void OnnxifiTransformer::getBackendId() {
@@ -1338,16 +1403,16 @@ void OnnxifiTransformer::getBackendId() {
 NetDef OnnxifiTransformer::TransformViaC2(
     NetDef* pred_net,
     const std::unordered_set<std::string>& weights,
-    const std::unordered_set<int>& blacklisted_ops,
+    const std::unordered_set<int>& blocklisted_ops,
     const ShapeInfoMap& shape_hints) {
   onnxBackendID backend_id = backend_ids_[idx_];
 
   auto c2_supports = [this,
                       &shape_hints,
-                      &blacklisted_ops,
+                      &blocklisted_ops,
                       backend_id,
                       &weights](const caffe2::OperatorDef& op) {
-    return supportOpC2(op, shape_hints, weights, blacklisted_ops, backend_id);
+    return supportOpC2(op, shape_hints, weights, blocklisted_ops, backend_id);
   };
 
   auto c2_converter =
@@ -1363,15 +1428,15 @@ NetDef OnnxifiTransformer::TransformViaOnnx(
     Workspace* ws,
     NetDef* pred_net,
     const std::unordered_set<std::string>& weights,
-    const std::unordered_set<int>& blacklisted_ops,
+    const std::unordered_set<int>& blocklisted_ops,
     ShapeInfoMap* shape_hints) {
   onnxBackendID backend_id = backend_ids_[idx_];
 
   // function to tell whether the ONNXIFI backend supports a given C2 op or not
   onnx::OnnxExporter exporter(nullptr);
-  auto onnx_supports = [this, &exporter, &blacklisted_ops, backend_id](
+  auto onnx_supports = [this, &exporter, &blocklisted_ops, backend_id](
                            const caffe2::OperatorDef& op) {
-    return supportOpOnnx(op, &exporter, blacklisted_ops, backend_id);
+    return supportOpOnnx(op, &exporter, blocklisted_ops, backend_id);
   };
 
   // function to convert runnable subgraph into an onnxifi op. We need to keep
@@ -1401,9 +1466,13 @@ void OnnxifiTransformer::transform(
     NetDef* pred_net,
     const std::vector<std::string>& weight_names,
     const ShapeInfoMap& input_shape_hints,
-    const std::unordered_set<int>& blacklisted_ops) {
+    const std::unordered_set<int>& blocklisted_ops) {
   CAFFE_ENFORCE(ws);
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
+
+  if (opts_.debug) {
+    WriteProtoToTextFile(*pred_net, "debug_pre_ssa_net.pb_txt", false);
+  }
 
   // Get model id and reset Onnxifi op id to 0
   model_id_ = getModelId(*pred_net);
@@ -1421,6 +1490,9 @@ void OnnxifiTransformer::transform(
     LOG(INFO) << "predictor net has been ssaRewritten, skip rewritting here";
     annotateOpIndex(pred_net);
     shape_hints_mapped = input_shape_hints;
+    for (const auto& w : weights) {
+      input_mapping_.emplace(w, w);
+    }
   } else {
     shape_hints_mapped = ssaRewriteAndMapNames(ws, pred_net, input_shape_hints);
   }
@@ -1437,6 +1509,9 @@ void OnnxifiTransformer::transform(
       &mapped_ws, pred_net, shape_hints_mapped, opts_.bound_shape_spec);
   if (opts_.use_onnx) {
     shape_hints_onnx_ = stripShapeInfoMap(shape_hints);
+  }
+  if (opts_.enforce_fp32_inputs_into_fp16) {
+    enforceFp32InputsToFp16(weights, pred_net, &shape_hints);
   }
   if (opts_.merge_fp32_inputs_into_fp16) {
     mergeFp32InputsAndConvertToFp16(
@@ -1459,24 +1534,25 @@ void OnnxifiTransformer::transform(
   getBackendId();
 
   // Apply some filtering rules
-  std::unordered_set<int> new_blacklisted_ops(
-      blacklisted_ops.begin(), blacklisted_ops.end());
-  applyFilteringRules(*pred_net, shape_hints, weights, &new_blacklisted_ops);
+  std::unordered_set<int> new_blocklisted_ops(
+      blocklisted_ops.begin(), blocklisted_ops.end());
+  applyFilteringRules(*pred_net, shape_hints, weights, &new_blocklisted_ops);
 
   // Transform the net
   NetDef net_opt = opts_.use_onnx
       ? TransformViaOnnx(
-            ws, pred_net, weights, new_blacklisted_ops, &shape_hints)
-      : TransformViaC2(pred_net, weights, new_blacklisted_ops, shape_hints);
+            ws, pred_net, weights, new_blocklisted_ops, &shape_hints)
+      : TransformViaC2(pred_net, weights, new_blocklisted_ops, shape_hints);
 
   // Need to figure out a proper place to handle device option
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
+  net_opt.set_type(pred_net->type());
 
   pred_net->Swap(&net_opt);
 
   addShapeToNet(*pred_net, shape_hints);
   if (opts_.debug) {
-    WriteProtoToTextFile(*pred_net, "debug_full_opt_net.pb_txt");
+    WriteProtoToTextFile(*pred_net, "debug_full_opt_net.pb_txt", false);
   }
 }
 

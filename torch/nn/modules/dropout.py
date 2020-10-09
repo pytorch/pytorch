@@ -93,7 +93,7 @@ class Dropout2d(_DropoutNd):
         >>> output = m(input)
 
     .. _Efficient Object Localization Using Convolutional Networks:
-       http://arxiv.org/abs/1411.4280
+       https://arxiv.org/abs/1411.4280
     """
 
     def forward(self, input: Tensor) -> Tensor:
@@ -135,7 +135,7 @@ class Dropout3d(_DropoutNd):
         >>> output = m(input)
 
     .. _Efficient Object Localization Using Convolutional Networks:
-       http://arxiv.org/abs/1411.4280
+       https://arxiv.org/abs/1411.4280
     """
 
     def forward(self, input: Tensor) -> Tensor:
@@ -226,7 +226,7 @@ class FeatureAlphaDropout(_DropoutNd):
 
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     .. _Efficient Object Localization Using Convolutional Networks:
-       http://arxiv.org/abs/1411.4280
+       https://arxiv.org/abs/1411.4280
     """
 
     def forward(self, input: Tensor) -> Tensor:

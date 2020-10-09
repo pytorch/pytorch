@@ -1,6 +1,8 @@
 import torch
-from typing import Optional, Union
+from typing import Union
 from torch.types import Device
+# The _get_device_index has been moved to torch.utils._get_device_index
+from torch._utils import _get_device_index as _torch_get_device_index
 
 
 def _get_device_index(device: Union[Device, str, int], optional: bool = False,
@@ -21,27 +23,13 @@ def _get_device_index(device: Union[Device, str, int], optional: bool = False,
     """
     if isinstance(device, str):
         device = torch.device(device)
-    device_idx: Optional[int]
     if isinstance(device, torch.device):
-        dev_type = device.type
         if allow_cpu:
             if device.type not in {'cuda', 'cpu'}:
                 raise ValueError('Expected a cuda or cpu device, but got: {}'.format(device))
         elif device.type != 'cuda':
             raise ValueError('Expected a cuda device, but got: {}'.format(device))
-        device_idx = -1 if device.type == 'cpu' else device.index
-    else:
-        if device is not None and not isinstance(device, torch._six.int_classes):
-            raise ValueError('Cannot recognize device {}'.format(device))
-        device_idx = device
-    if device_idx is None:
-        if optional:
-            # default cuda device index
-            return torch.cuda.current_device()
-        else:
-            raise ValueError('Expected a cuda device with a specified index '
-                             'or an integer, but got: {}'.format(device))
-    return device_idx
+    return _torch_get_device_index(device, optional, allow_cpu)
 
 
 def _dummy_type(name: str) -> type:

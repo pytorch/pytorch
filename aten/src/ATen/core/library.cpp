@@ -98,8 +98,7 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
     // in the end in any case (and if it turns out you DON'T have the right
     // information at the site, as is the case with backend specific
     // per-op registrations, you will get the right behavior!)
-    TORCH_CHECK(false,
-      *ns_opt == *ns_,
+    TORCH_CHECK(*ns_opt == *ns_,
       "Explicitly provided namespace (", *ns_opt, ") in schema string "
       "does not match namespace of enclosing ", toString(kind_), " block (", *ns_, ").  "
       "Move this definition to the (unique) TORCH_LIBRARY block corresponding to this namespace "
@@ -218,13 +217,17 @@ Library& Library::_fallback(CppFunction&& f) & {
     "this fallback function globally, please define a separate block:\n\n",
     "    TORCH_LIBRARY_IMPL(_, ", *dispatch_key, ", m) { m.fallback(...); }\n\n",
     ERROR_CONTEXT);
-  registrars_.emplace_back(
-    c10::Dispatcher::singleton().registerFallback(
-      *dispatch_key,
-      std::move(f.func_),
-      debugString(std::move(f.debug_), file_, line_)
-    )
-  );
+  // Note if dispatch_key is DispatchKey::Undefined, it'll be ignored here since Undefined
+  // isn't a runtime key, you shouldn't register anything to it at all.
+  for (auto k : c10::getRuntimeDispatchKeySet(*dispatch_key)) {
+    registrars_.emplace_back(
+      c10::Dispatcher::singleton().registerFallback(
+        k,
+        std::move(f.func_),
+        debugString(std::move(f.debug_), file_, line_)
+      )
+    );
+  }
   return *this;
 }
 

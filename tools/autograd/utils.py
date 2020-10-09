@@ -1,5 +1,6 @@
 import re
 import os
+import yaml
 from .nested_dict import nested_dict
 
 
@@ -8,11 +9,7 @@ __all__ = [
     'split_name_params', 'write',
 ]
 
-try:
-    from src.ATen.code_template import CodeTemplate
-except ImportError:
-    from tools.shared.module_loader import import_module
-    CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
+from tools.codegen.code_template import CodeTemplate
 
 # You should use these lines, rather than doing it manually.
 # Especially if you see this error!
@@ -77,7 +74,17 @@ def is_tensor_method(declaration):
 def is_out_variant(decl):
     return decl['name'].endswith('_out')
 
-def signature_without_args(decl):
+def op_name_without_overload(decl):
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
-    overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
-    return 'aten::{}{}'.format(name, overload_name)
+    return 'aten::{}'.format(name)
+
+def load_op_list_and_strip_overload(op_list, op_list_path):
+    if op_list is None and op_list_path is None:
+        return None
+    if op_list is None:
+        op_list = []
+    if op_list_path is not None:
+        with open(op_list_path, 'r') as f:
+            op_list += yaml.load(f, Loader=YamlLoader)
+    # strip out the overload part
+    return {opname.split('.', 1)[0] for opname in op_list}

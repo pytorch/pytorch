@@ -113,7 +113,6 @@ bool PoolGradientOp<float, CPUContext, LpPoolFunctor>::
   auto& dY = Input(2);
 
   const auto p = OperatorBase::GetSingleArgument<float>("p", 2.0);
-  const auto inv_p = 1.0 / p;
 
   // TODO(Yangqing): Add shape checks.
   auto* dX = Output(0, X.sizes(), at::dtype<float>());
@@ -142,7 +141,6 @@ bool PoolGradientOp<float, CPUContext, LpPoolFunctor>::
           int wend = min(wstart + kernel_[1], width);
           hstart = max(hstart, 0);
           wstart = max(wstart, 0);
-          float scale = 1. / (hend - hstart) / (wend - wstart);
           for (int h = hstart; h < hend; ++h) {
             for (int w = wstart; w < wend; ++w) {
               // gradient of p-norm is x_j * |x_j|^{p-2} / |x|_p^{p-1}
@@ -185,7 +183,6 @@ bool PoolGradientOp<float, CPUContext, LpPoolFunctor>::
   int width = X.dim32(2);
   ConvPoolOpBase<CPUContext>::ComputePads({height, width});
   const auto p = OperatorBase::GetSingleArgument<float>("p", 2.0);
-  const auto inv_p = 1.0 / p;
 
   int pooled_height = dY.dim32(1);
   int pooled_width = dY.dim32(2);
@@ -200,7 +197,6 @@ bool PoolGradientOp<float, CPUContext, LpPoolFunctor>::
         int wend = min(wstart + kernel_[1], width);
         hstart = max(hstart, 0);
         wstart = max(wstart, 0);
-        float scale = 1. / (hend - hstart) / (wend - wstart);
         for (int h = hstart; h < hend; ++h) {
           for (int w = wstart; w < wend; ++w) {
             for (int c = 0; c < channels; ++c) {

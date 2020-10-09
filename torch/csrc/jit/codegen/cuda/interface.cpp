@@ -1,3 +1,4 @@
+
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <ATen/core/dispatch/OperatorOptions.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
@@ -41,9 +42,8 @@ RegisterOperators reg({
     Operator(
         prim::CudaFusionGroup,
         [](const Node* node) -> Operation {
-          return [node](Stack& stack) {
-            fuser::cuda::runFusionGroup(node, stack);
-            return 0;
+          return [node](Stack* stack) {
+            fuser::cuda::runFusionGroup(node, *stack);
           };
         },
         c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE),

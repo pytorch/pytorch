@@ -28,6 +28,8 @@ using OptNameList = c10::optional<std::vector<std::string>>;
 
 #define C10_FORALL_TYPES(_) \
   _(AnyType)                \
+  _(EnumType)               \
+  _(AnyEnumType)            \
   _(TensorType)             \
   _(TupleType)              \
   _(ListType)               \
@@ -40,6 +42,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(NoneType)               \
   _(StringType)             \
   _(GeneratorType)          \
+  _(QuantizerType)          \
   _(BoolType)               \
   _(OptionalType)           \
   _(VarType)                \
@@ -260,7 +263,12 @@ struct SingleElementType : public Type {
   }
 
  protected:
-  SingleElementType(TypePtr elem) : Type(Kind), elem(std::move(elem)) {}
+  SingleElementType(TypePtr elem) : Type(Kind), elem(std::move(elem)) {
+    if (!this->elem) {
+      throw std::runtime_error(c10::str(
+            "Can not create ", typeKindToString(Kind), " with None type"));
+    }
+  }
 
  private:
   TypePtr elem;
@@ -277,6 +285,7 @@ using OptionalTypePtr = std::shared_ptr<OptionalType>;
 struct CAFFE2_API OptionalType
     : public SingleElementType<TypeKind::OptionalType, OptionalType> {
   static OptionalTypePtr create(TypePtr element) {
+    TORCH_INTERNAL_ASSERT(element, "OptionalType requires valid TypePtr");
     // Optional is a union of [None, T], so Optional[[Optional[T]]] ->
     // Optional[T]
     if (auto opt_ptr = element->cast<OptionalType>()) {
@@ -454,6 +463,20 @@ struct CAFFE2_API SymbolicShape {
     dims_ = shape_symbols;
   }
 
+  // Mix of known and unknown ranks
+  SymbolicShape(const std::vector<c10::optional<int64_t>> dims) {
+    std::vector<ShapeSymbol> shape_symbols;
+    shape_symbols.reserve(dims.size());
+    for(c10::optional<int64_t> dim: dims) {
+      if(!dim) {
+        shape_symbols.push_back(ShapeSymbol::newSymbol());
+      } else {
+        shape_symbols.push_back(ShapeSymbol::fromStaticSize(*dim));
+      }
+    }
+    dims_ = shape_symbols;
+  }
+
   SymbolicShape(const std::vector<ShapeSymbol> dims) : dims_(dims) {}
 
   SymbolicShape(c10::IntArrayRef dims) {
@@ -463,6 +486,13 @@ struct CAFFE2_API SymbolicShape {
       shape_symbols.push_back(ShapeSymbol::fromStaticSize(dim));
     }
     dims_ = shape_symbols;
+  }
+
+  ShapeSymbol operator[](size_t i) const {
+    if (!dims_) {
+      throw std::runtime_error("Rank isn't fixed");
+    }
+    return (*dims_).at(i);
   }
 
   // Returns rank or nullopt in case of unranked shape.
@@ -503,7 +533,7 @@ struct CAFFE2_API SymbolicShape {
 };
 
 template <typename T>
-struct CAFFE2_API VaryingShape {
+struct VaryingShape {
   using ListOfOptionalElements = std::vector<c10::optional<T>>;
   VaryingShape(const std::vector<T>& vec)
       : VaryingShape(ListOfOptionalElements(vec.begin(), vec.end())) {}
@@ -525,7 +555,7 @@ struct CAFFE2_API VaryingShape {
     return dims_ == other.dims_;
   }
 
-  const c10::optional<T>& operator[](int i) const {
+  const c10::optional<T> &operator[](size_t i) const {
     if (!dims_) {
       throw std::runtime_error("Rank isn't fixed");
     }
@@ -544,7 +574,7 @@ struct CAFFE2_API VaryingShape {
     return dims_;
   }
 
-  VaryingShape merge(const VaryingShape& other) const;
+  CAFFE2_API VaryingShape merge(const VaryingShape& other) const;
 
   c10::optional<std::vector<T>> concrete_sizes() const {
     if (!dims_) {
@@ -880,6 +910,7 @@ struct CAFFE2_API DictType : public Type {
     switch (key->kind()) {
       case TypeKind::AnyType:
       case TypeKind::IntType:
+      case TypeKind::BoolType:
       case TypeKind::FloatType:
       case TypeKind::StringType:
       case TypeKind::TensorType:
@@ -972,6 +1003,16 @@ struct CAFFE2_API FutureType
     return create(contained_types.at(0));
   }
 
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+    if (Type::isSubtypeOfExt(rhs, why_not)) {
+      return true;
+    }
+    if (auto rhs_ = rhs->cast<FutureType>()) {
+      return getElementType()->isSubtypeOfExt(rhs_->getElementType(), why_not);
+    }
+    return false;
+  }
+
  private:
   FutureType(TypePtr elem) : SingleElementType(elem) {}
 
@@ -1024,7 +1065,8 @@ struct CAFFE2_API NamedType : public Type {
       : Type(tk), name_(std::move(name)) {
     TORCH_INTERNAL_ASSERT(
         tk == TypeKind::TupleType || tk == TypeKind::FunctionType ||
-            tk == TypeKind::ClassType || tk == TypeKind::InterfaceType,
+        tk == TypeKind::ClassType || tk == TypeKind::InterfaceType ||
+        tk == TypeKind::EnumType,
         "If you add a new kind of NamedType, ",
         "please update the cast<NamedType> specialization and this assert");
   }
@@ -1122,6 +1164,115 @@ struct CAFFE2_API TupleType : public NamedType {
   bool has_free_variables_;
   std::shared_ptr<FunctionSchema> schema_;
 };
+
+struct EnumType;
+using EnumTypePtr = std::shared_ptr<EnumType>;
+using EnumNameValue = std::pair<std::string, IValue>;
+struct CAFFE2_API EnumType : public NamedType {
+  friend struct Type;
+  static const TypeKind Kind = TypeKind::EnumType;
+
+  static EnumTypePtr create(
+      const c10::QualifiedName& qualified_class_name,
+      TypePtr value, std::vector<EnumNameValue> enum_names_values, std::weak_ptr<::torch::jit::CompilationUnit> cu) {
+    switch (value->kind()) {
+      case TypeKind::IntType:
+      case TypeKind::FloatType:
+      case TypeKind::StringType:
+        return EnumTypePtr(new EnumType(qualified_class_name, std::move(value), std::move(enum_names_values), std::move(cu)));
+      default:
+        AT_ERROR(
+            "Cannot create Enum with value type '",
+            value->str(),
+            "', only int, float and string are supported");
+    }
+  }
+
+  std::string str() const override {
+    return "Enum<" + annotation_str() + ">";
+  }
+
+  std::string repr_str() const override {
+    return str();
+  }
+
+  TypePtr getValueType() const {
+    return value_type_;
+  }
+
+  bool operator==(const Type& rhs) const override {
+    if (auto enum_rhs = rhs.cast<EnumType>()) {
+      return name().value() == enum_rhs->name().value() &&
+          *getValueType() == *(enum_rhs->getValueType()) &&
+          this->compilation_unit() == enum_rhs->compilation_unit();
+    }
+    return false;
+  }
+
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+
+  std::shared_ptr<const ::torch::jit::CompilationUnit> compilation_unit() const {
+    auto cu = cu_.lock();
+    return cu;
+  }
+
+  const QualifiedName qualifiedClassName() const {
+    return name().value();
+  }
+
+  at::ArrayRef<TypePtr> containedTypes() const override {
+    return value_type_;
+  }
+
+  const at::ArrayRef<EnumNameValue> enumNamesValues() const {
+    return enum_names_values_;
+  }
+
+ private:
+  EnumType(
+      c10::QualifiedName qualified_class_name,
+      TypePtr value_type,
+      std::vector<EnumNameValue> enum_names_values,
+      std::weak_ptr<torch::jit::CompilationUnit> cu)
+      : NamedType(TypeKind::EnumType, std::move(qualified_class_name)),
+        value_type_(std::move(value_type)),
+        enum_names_values_(std::move(enum_names_values)),
+        cu_(cu) {}
+
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    const auto& n = name().value();
+    return n.qualifiedName();
+  }
+
+  TypePtr value_type_;
+  std::vector<EnumNameValue> enum_names_values_;
+  std::weak_ptr<::torch::jit::CompilationUnit> cu_;
+};
+
+
+// the common supertype of all Enums, only used in operator registraion.
+// EnumType <: AnyEnumType for all Enums
+struct AnyEnumType;
+using AnyEnumTypePtr = std::shared_ptr<AnyEnumType>;
+struct CAFFE2_API AnyEnumType : public Type {
+  static AnyEnumTypePtr create() {
+    return AnyEnumTypePtr(
+        new AnyEnumType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "AnyEnumType";
+  }
+  static const TypeKind Kind = TypeKind::AnyEnumType;
+  // global singleton
+  static AnyEnumTypePtr get();
+private:
+  AnyEnumType()
+  : Type(TypeKind::AnyEnumType) {}
+};
+
 
 struct NumberType;
 using NumberTypePtr = std::shared_ptr<NumberType>;
@@ -1333,6 +1484,28 @@ struct CAFFE2_API GeneratorType : public Type {
   GeneratorType() : Type(TypeKind::GeneratorType) {}
 };
 
+struct QuantizerType;
+using QuantizerTypePtr = std::shared_ptr<QuantizerType>;
+// This type represents a Quantizer
+struct CAFFE2_API QuantizerType : public Type {
+  static QuantizerTypePtr create() {
+    return QuantizerTypePtr(
+        new QuantizerType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Quantizer";
+  }
+  static const TypeKind Kind = TypeKind::QuantizerType;
+  // global singleton
+  static QuantizerTypePtr get();
+
+ private:
+  QuantizerType() : Type(TypeKind::QuantizerType) {}
+};
+
 struct QSchemeType;
 using QSchemeTypePtr = std::shared_ptr<QSchemeType>;
 // This type represents a QScheme
@@ -1357,7 +1530,7 @@ struct CAFFE2_API QSchemeType : public Type {
 
 struct DeviceObjType;
 using DeviceObjTypePtr = std::shared_ptr<DeviceObjType>;
-// This type represents a Generator
+// This type represents a Device
 struct CAFFE2_API DeviceObjType : public Type {
   static DeviceObjTypePtr create() {
     return DeviceObjTypePtr(
@@ -1447,6 +1620,16 @@ private:
   : Type(TypeKind::PyObjectType) {}
 };
 
+enum class TypeVerbosity {
+  None,
+  Type,
+  TypeAndStride,
+  Full,
+  Default = Full,
+};
+
+CAFFE2_API TypeVerbosity type_verbosity();
+
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Type& t);
 template <typename T>
 CAFFE2_API std::ostream& operator<<(
@@ -1481,7 +1664,7 @@ inline TypePtr TensorType::fromBoolType() {
 
 inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePtr & type) {
   if (type == FloatType::get()) {
-    return at::ScalarType::Double;
+    return at::typeMetaToScalarType(c10::get_default_dtype());
   } else if (type == IntType::get()) {
     return at::ScalarType::Long;
   } else if (type == BoolType::get()) {
@@ -1500,14 +1683,16 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
 }
 
 // Attempt to find the correct supertype of t1 and t2. If none is found then
-// nullopt will be returned. If t1 == t2, or t1 is a type refinement of t2,
+// nullopt will be returned if default_to_any is false, and Any will be returned
+// if it is true. If t1 == t2, or t1 is a type refinement of t2,
 // then t2 will be returned (and vice versa).
 // Two different tensortypes will return dynamic.
 // Currently we chose not to support returning a NumberType for a float & int
 // input because of a lack of operator support for NumberType
 CAFFE2_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
-    const TypePtr& t2);
+    const TypePtr& t2,
+    bool default_to_any = false);
 
 CAFFE2_API c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
@@ -1763,6 +1948,14 @@ using ::torch::jit::CompilationUnit;
 
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public NamedType {
+  // This represents an attribute of a class; a name associated with an attribute, and a
+  // getter and (optional) setter for that attribute.
+  struct Property {
+    std::string name;
+    const torch::jit::Function* getter;
+    const torch::jit::Function* setter;
+  };
+
   // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
       c10::optional<QualifiedName> qualifiedName,
@@ -1907,6 +2100,11 @@ struct CAFFE2_API ClassType : public NamedType {
       "'");
     return *slot_idx;
   }
+
+  // Get the property with the given \p name, if it exists on the class.
+  c10::optional<ClassType::Property> getProperty(const std::string& name);
+  // Add a property named \p name with \p getter and \p setter as its getter and setter.
+  void addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter);
 
   bool hasConstant(const std::string& name) const {
     return std::find_if(
@@ -2074,6 +2272,9 @@ struct CAFFE2_API ClassType : public NamedType {
 
   // List of methods associated with this class.
   std::vector<torch::jit::Function*> methods_;
+
+  // List of properties exposed by this class.
+  std::vector<Property> properties_;
 
   bool isModule_ = false;
 };

@@ -3,20 +3,11 @@
 #include <c10/util/C++17.h>
 #include <c10d/ProcessGroup.hpp>
 #include <fmt/format.h>
-#include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-
-#include <Python.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
-const std::string kRPCTimeoutErrorStr =
-    "RPC ran for more than {} milliseconds and timed out.";
-
-namespace {
-constexpr auto kSecToMsConversion = 1000;
-}
 
 //////////////////////////  MessageCounter  /////////////////////////////////
 
@@ -101,10 +92,11 @@ ProcessGroupAgent::ProcessGroupAgent(
     std::string workerName,
     std::shared_ptr<c10d::ProcessGroup> pg,
     int numSendRecvThreads,
-    std::chrono::milliseconds rpcTimeout)
+    std::chrono::milliseconds rpcTimeout,
+    std::unique_ptr<RequestCallback> cb)
     : RpcAgent(
           WorkerInfo(std::move(workerName), (int64_t)pg->getRank()),
-          std::make_unique<RequestCallbackImpl>(),
+          std::move(cb),
           rpcTimeout),
       pg_(std::move(pg)),
       sendCounts_(pg_->getSize()),
@@ -804,7 +796,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
 
     for (const auto& timedOutFuture : timedOutFutures) {
       auto errStr =
-          fmt::format(kRPCTimeoutErrorStr, timedOutFuture.timeout_.count());
+          fmt::format(kRpcTimeoutErrorStr, timedOutFuture.timeout_.count());
       auto err = makeRPCError(errStr, RPCErrorType::TIMEOUT);
 
       if (!timedOutFuture.future_->hasError()) {

@@ -61,9 +61,11 @@ class GivenTensorFillOp final : public FillerOp<Context> {
  private:
   template <typename Type>
   void ExtractValues() {
-    auto source_values =
-        this->template GetRepeatedArgument<Type>("values");
-    ReinitializeTensor(&values_, {static_cast<int64_t>(source_values.size())}, at::dtype<Type>().device(CPU));
+    auto source_values = this->template GetRepeatedArgument<Type>("values");
+    ReinitializeTensor(
+        &values_,
+        {static_cast<int64_t>(source_values.size())},
+        at::dtype<Type>().device(CPU));
     Type* values_data = values_.template mutable_data<Type>();
     for (int i = 0; i < source_values.size(); i++) {
       values_data[i] = static_cast<Type>(source_values[i]);

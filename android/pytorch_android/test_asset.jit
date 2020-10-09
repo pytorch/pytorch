@@ -90,3 +90,27 @@ def testNonContiguous(self):
     assert x[0] == 100
     assert x[1] == 300
     return x
+
+def conv2d(self, x, w, toChannelsLast):
+    # type: (Tensor, Tensor, bool) -> Tensor
+    r = torch.conv2d(x, w)
+    if (toChannelsLast):
+        # memory_format=torch.channels_last
+        r = r.contiguous(memory_format=2)
+    else:
+        r = r.contiguous()
+    return r
+
+def contiguous(self, x):
+    # type: (Tensor) -> Tensor
+    return x.contiguous()
+
+def contiguousChannelsLast(self, x):
+    # type: (Tensor) -> Tensor
+    # memory_format=torch.channels_last
+    return x.contiguous(memory_format=2)
+
+def contiguousChannelsLast3d(self, x):
+    # type: (Tensor) -> Tensor
+    # memory_format=torch.channels_last_3d
+    return x.contiguous(memory_format=3)

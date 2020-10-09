@@ -15,11 +15,4 @@ clang --version
 export LLVM_DIR="$(llvm-config-5.0 --prefix)"
 echo "LLVM_DIR: ${LLVM_DIR}"
 
-# Run the following 2 steps together because they share the same (reusable) time
-# consuming process to build LibTorch into LLVM assembly.
-
-# 1. Run code analysis test first to fail fast
 time ANALYZE_TEST=1 CHECK_RESULT=1 tools/code_analyzer/build.sh
-
-# 2. Run code analysis on mobile LibTorch
-time ANALYZE_TORCH=1 tools/code_analyzer/build.sh

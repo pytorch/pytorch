@@ -13,7 +13,6 @@ CMAKE_ARGS=()
 
 if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
   # Build PyTorch mobile
-  CMAKE_ARGS+=("-DUSE_STATIC_DISPATCH=ON")
   CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
   CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
   CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
@@ -62,7 +61,7 @@ fi
 
 # IOS_PLATFORM controls type of iOS platform (see ios-cmake)
 if [ -n "${IOS_PLATFORM:-}" ]; then
-  CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")    
+  CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
   if [ "${IOS_PLATFORM}" == "WATCHOS" ]; then
       # enable bitcode by default for watchos
       CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")

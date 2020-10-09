@@ -79,22 +79,27 @@ namespace impl {
     if (self.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta(self));
-      // Do not use handle_view_on_rebase here as check_inplace should have been called before this
-      // and either throw an error or clear the warning
-      TORCH_INTERNAL_ASSERT(diff_view_meta->creation_meta == CreationMeta::DEFAULT);
-      TORCH_INTERNAL_ASSERT(gradient_edge.input_nr == 0);
-      TORCH_INTERNAL_ASSERT(gradient_edge.function);
-      TORCH_CHECK(
-          gradient_edge.function->num_inputs() == 1,
-          "Functions which modify views in-place must return a single Variable");
-      diff_view_meta->output_nr_ = gradient_edge.input_nr;
-      auto copy_slices = std::make_shared<CopySlices>(
-          diff_view_meta->base_, at::TensorGeometry(self), diff_view_meta->view_fn_, std::move(gradient_edge.function));
-      set_gradient_edge(diff_view_meta->base_, {std::move(copy_slices), 0});
-      self.grad_fn(); // trigger an update to the view's grad_fn
-    } else {
-      set_gradient_edge(self, std::move(gradient_edge));
+
+      // See NOTE [ View + Inplace detection ]
+      if (diff_view_meta->creation_meta != CreationMeta::MULTI_OUTPUT_SAFE) {
+        // Do not use handle_view_on_rebase here as check_inplace should have been called before this
+        // and either throw an error or clear the warning
+        TORCH_INTERNAL_ASSERT(diff_view_meta->creation_meta == CreationMeta::DEFAULT);
+        TORCH_INTERNAL_ASSERT(gradient_edge.input_nr == 0);
+        TORCH_INTERNAL_ASSERT(gradient_edge.function);
+        TORCH_CHECK(
+            gradient_edge.function->num_inputs() == 1,
+            "Functions which modify views in-place must return a single Variable");
+        diff_view_meta->output_nr_ = gradient_edge.input_nr;
+        auto copy_slices = std::make_shared<CopySlices>(
+            diff_view_meta->base_, at::TensorGeometry(self), diff_view_meta->view_fn_, std::move(gradient_edge.function));
+        set_gradient_edge(diff_view_meta->base_, {std::move(copy_slices), 0});
+        self.grad_fn(); // trigger an update to the view's grad_fn
+        return;
+      }
     }
+
+    set_gradient_edge(self, std::move(gradient_edge));
   }
 
   void create_cpp_hook(const Variable& self) {
@@ -333,66 +338,70 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
   if (self.is_view()) {
     // NB: is_view() ==> get_autograd_meta()
     auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
-    std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
-    if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
+
+    // See NOTE [ View + Inplace detection ]
+    if (diff_view_meta->creation_meta != CreationMeta::MULTI_OUTPUT_SAFE) {
+      std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
+      if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
+        return diff_view_meta->grad_fn_;
+      }
+      auto current_version = self._version();
+      if (diff_view_meta->attr_version != current_version) {
+        // This is an indirect rebase_history due to another view or the base being modified inplace
+        handle_view_on_rebase(diff_view_meta, /* indirect */ true);
+        TORCH_INTERNAL_ASSERT(diff_view_meta->output_nr_ == 0);
+        // Note [View + Inplace update for view tensor]
+        // An inplace update happened on Tensor `self` (which is a view).
+        // For example:
+        //   view_1 = view_op_1(diff_view_meta->base_)
+        //   view_2 = view_op_2(view_1)
+        //   ...
+        //   self = view_op_n(view_n-1)
+        //   self = inplace_op(self)
+        //
+        // For CPU/CUDA backends, we employ one AsStridedBackward Node to represent the chain of
+        // view backward ops for effienciency.
+        //
+        // However in XLA backend we don't have full support of AsStridedBackward, we instead run a full
+        // forward pass with a tensor that requires gradient to get proper grad_fn setup,
+        // then save it to DifferentiableViewMeta for future use.
+        // This is fairly cheap for XLA lazy tensor approach (but would be really expensive for CPU/CUDA).
+        // XLA Tensor only run thorugh VariableType dispatch and lower the forward pass to a XLA HLO graph,
+        // then we take grad_fn and never materialize the tensor content.
+        // So we only construct the graph but not execute it, which is a fairly cheap operation to do.
+        //
+        // See Note [View + Inplace update for base tensor] for what we do to base tensor when
+        // an in-place operation happens.
+        //
+        // TODO: Potentially the following logic can be replaced by special logic in VariableType_x.cpp
+        //       that would provide a way to recreate the grad_fn chain.
+        if (diff_view_meta->has_view_fn()) {
+          auto view_fn = diff_view_meta->view_fn();
+          auto diff_view = view_fn(diff_view_meta->base_);
+          diff_view_meta->grad_fn_ = diff_view.grad_fn();
+        } else {
+          auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
+          fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
+          fn->size = self.sizes().vec();
+          fn->stride = self.strides().vec();
+          fn->storage_offset = self.storage_offset();
+          fn->set_next_edges(torch::autograd::collect_next_edges(diff_view_meta->base_));
+          fn->add_input_metadata(
+            diff_view_meta->base_.options(),
+            self.sizes(), // Note: sizes(), not base_.sizes(), is intentional
+            diff_view_meta->base_.device());
+          diff_view_meta->grad_fn_ = std::move(fn);
+        }
+        diff_view_meta->attr_version = current_version;
+      }
       return diff_view_meta->grad_fn_;
     }
-    auto current_version = self._version();
-    if (diff_view_meta->attr_version != current_version) {
-      // This is an indirect rebase_history due to another view or the base being modified inplace
-      handle_view_on_rebase(diff_view_meta, /* indirect */ true);
-      TORCH_INTERNAL_ASSERT(diff_view_meta->output_nr_ == 0);
-      // Note [View + Inplace update for view tensor]
-      // An inplace update happened on Tensor `self` (which is a view).
-      // For example:
-      //   view_1 = view_op_1(diff_view_meta->base_)
-      //   view_2 = view_op_2(view_1)
-      //   ...
-      //   self = view_op_n(view_n-1)
-      //   self = inplace_op(self)
-      //
-      // For CPU/CUDA backends, we employ one AsStridedBackward Node to represent the chain of
-      // view backward ops for effienciency.
-      //
-      // However in XLA backend we don't have full support of AsStridedBackward, we instead run a full
-      // forward pass with a tensor that requires gradient to get proper grad_fn setup,
-      // then save it to DifferentiableViewMeta for future use.
-      // This is fairly cheap for XLA lazy tensor approach (but would be really expensive for CPU/CUDA).
-      // XLA Tensor only run thorugh VariableType dispatch and lower the forward pass to a XLA HLO graph,
-      // then we take grad_fn and never materialize the tensor content.
-      // So we only construct the graph but not execute it, which is a fairly cheap operation to do.
-      //
-      // See Note [View + Inplace update for base tensor] for what we do to base tensor when
-      // an in-place operation happens.
-      //
-      // TODO: Potentially the following logic can be replaced by special logic in VariableType_x.cpp
-      //       that would provide a way to recreate the grad_fn chain.
-      if (diff_view_meta->has_view_fn()) {
-        auto view_fn = diff_view_meta->view_fn();
-        auto diff_view = view_fn(diff_view_meta->base_);
-        diff_view_meta->grad_fn_ = diff_view.grad_fn();
-      } else {
-        auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
-        fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
-        fn->size = self.sizes().vec();
-        fn->stride = self.strides().vec();
-        fn->storage_offset = self.storage_offset();
-        fn->set_next_edges(torch::autograd::collect_next_edges(diff_view_meta->base_));
-        fn->add_input_metadata(
-          diff_view_meta->base_.options(),
-          self.sizes(), // Note: sizes(), not base_.sizes(), is intentional
-          diff_view_meta->base_.device());
-        diff_view_meta->grad_fn_ = std::move(fn);
-      }
-      diff_view_meta->attr_version = current_version;
-    }
-    return diff_view_meta->grad_fn_;
+  }
+  
+  if (torch::autograd::impl::get_autograd_meta(self)) {
+    return torch::autograd::impl::get_autograd_meta(self)->grad_fn_;
   } else {
-    if (torch::autograd::impl::get_autograd_meta(self)) {
-      return torch::autograd::impl::get_autograd_meta(self)->grad_fn_;
-    } else {
-      return singleton_shared_ptr;
-    }
+    return singleton_shared_ptr;
   }
 }
 
@@ -452,6 +461,13 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
                        " autograd logic to handle view+inplace would override the custom backward associated with the custom"
                        " Function, leading to incorrect gradients. This behavior is deprecated and will be forbidden starting"
                        " version 1.6. You can remove this warning by cloning the output of the custom Function.");
+      } else if (diff_view_meta->creation_meta == CreationMeta::MULTI_OUTPUT_SAFE) {
+        msg = c10::str(msg, " This view is an output of a function that "
+                       "returns multiple views. Inplace operators on such "
+                       "views are being deprecated and will be forbidden "
+                       "starting from version 1.8. Consider using `unsafe_` "
+                       "version of the function that produced this view or "
+                       "don't modify this view inplace.");
       } else {
         TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
       }

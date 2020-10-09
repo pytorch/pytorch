@@ -22,6 +22,8 @@ struct CAFFE2_API SchemaTypeParser {
   }
 
  private:
+  c10::optional<bool> tryToParseRequiresGrad();
+  c10::optional<c10::Device> tryToParseDeviceType();
   void parseList(
       int begin,
       int sep,

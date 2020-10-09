@@ -82,20 +82,3 @@ TEST_F(AutogradTest, CanPassCustomGradientInputs) {
   z.sum().backward(torch::ones({}) * 2);
   ASSERT_TRUE(x.grad().allclose(y * 2));
 }
-
-TEST(DeterministicTest, CanSetDeterministic) {
-  auto context = &at::globalContext();
-  for (bool deterministic : {true, false}) {
-    context->setDeterministic(deterministic);
-    ASSERT_TRUE(context->deterministic() == deterministic);
-  }
-}
-
-TEST(DeterministicTest, CanAlertNotDeterministic) {
-  auto context = &at::globalContext();
-  context->setDeterministic(true);
-  ASSERT_ANY_THROW(context->alertNotDeterministic("test"));
-  context->setDeterministic(false);
-  // Should not throw error if deterministic setting is turned off
-  context->alertNotDeterministic("test");
-}

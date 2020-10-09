@@ -75,7 +75,7 @@ Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim) {
   return output;
 }
 #endif
-Tensor& quantized_mean_out_cpu(
+Tensor& mean_out_quantized_cpu(
     Tensor& result,
     const Tensor& self,
     IntArrayRef dim,
@@ -83,7 +83,14 @@ Tensor& quantized_mean_out_cpu(
     c10::optional<ScalarType> opt_dtype) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
-      self.scalar_type() == kQUInt8) {
+      self.scalar_type() == kQUInt8 &&
+      // QNNPACK currently is only supported for NCHW + dim=(2, 3)
+      // Remove these checks after generic version is implemented.
+      self.ndimension() == 4 &&
+      dim.size() == 2 &&
+      dim[0] == 2 &&
+      dim[1] == 3
+     ){
     result = qnnpack_mean(self, dim);
     return result;
   }
@@ -99,38 +106,38 @@ Tensor& quantized_mean_out_cpu(
   return result;
 }
 
-Tensor quantized_mean_cpu(const Tensor& self, optional<ScalarType> dtype) {
+Tensor mean_quantized_cpu(const Tensor& self, optional<ScalarType> dtype) {
   Tensor result;
-  quantized_mean_out_cpu(result, self, IntArrayRef{}, false, dtype);
+  mean_out_quantized_cpu(result, self, IntArrayRef{}, false, dtype);
   return result;
 }
 
-Tensor quantized_mean_cpu(
+Tensor mean_quantized_cpu(
     const Tensor& self,
     IntArrayRef dim,
     bool keepdim,
     optional<ScalarType> dtype) {
   Tensor result;
-  quantized_mean_out_cpu(result, self, dim, keepdim, dtype);
+  mean_out_quantized_cpu(result, self, dim, keepdim, dtype);
   return result;
 }
 
-Tensor quantized_mean_cpu(
+Tensor mean_quantized_cpu(
     const Tensor& self,
     DimnameList dim,
     bool keepdim,
     optional<ScalarType> dtype) {
-  return quantized_mean_cpu(
+  return mean_quantized_cpu(
       self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor& quantized_mean_out_cpu(
+Tensor& mean_out_quantized_cpu(
     Tensor& result,
     const Tensor& self,
     DimnameList dim,
     bool keepdim,
     c10::optional<ScalarType> opt_dtype) {
-  return quantized_mean_out_cpu(
+  return mean_out_quantized_cpu(
       result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 

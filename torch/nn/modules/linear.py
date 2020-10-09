@@ -34,6 +34,8 @@ class Identity(Module):
 class Linear(Module):
     r"""Applies a linear transformation to the incoming data: :math:`y = xA^T + b`
 
+    This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
     Args:
         in_features: size of each input sample
         out_features: size of each output sample
@@ -96,7 +98,7 @@ class Linear(Module):
         )
 
 
-# This class exists soley for Transformer; it has an annotation stating
+# This class exists solely for Transformer; it has an annotation stating
 # that bias is never None, which appeases TorchScript
 class _LinearWithBias(Linear):
     bias: Tensor

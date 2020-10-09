@@ -55,8 +55,8 @@ cc_library(
         "-fno-strict-overflow",
         "-fopenmp",
     ] + select({
-        "@//tools/config:thread_sanitizer": ["-DMKLDNN_THR=0"],
-        "//conditions:default": ["-DMKLDNN_THR=2"],
+        "@//tools/config:thread_sanitizer": ["-DDNNL_CPU_RUNTIME=0"],
+        "//conditions:default": ["-DDNNL_CPU_RUNTIME=2"],
     }),
     includes = [
         "include/",

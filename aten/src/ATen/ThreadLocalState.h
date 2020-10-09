@@ -30,8 +30,8 @@ class TORCH_API ThreadLocalState {
   // with DebugInfoGuard
   std::shared_ptr<c10::ThreadLocalDebugInfo> debug_info_;
 
-  // RecordFunction TLS callbacks
-  RecordFunctionCallbacks callbacks_;
+  // RecordFunction TLS
+  RecordFunctionTLS rf_tls_;
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   bool keep_grad_mode_ = true;
@@ -58,5 +58,15 @@ class TORCH_API ThreadLocalStateGuard {
  private:
   const ThreadLocalState prev_state_;
 };
+
+template <typename T>
+std::function<T(void)> wrapPropagateTLSState(
+    std::function<T(void)> callback) {
+  return [tls_state = ThreadLocalState(), callback = std::move(callback)]() {
+    ThreadLocalStateGuard g(tls_state);
+    // Propagate value returned by callback().
+    return callback();
+  };
+}
 
 } // namespace at

@@ -32,13 +32,19 @@ def generate_code(ninja_global=None,
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
+    from tools.autograd.gen_annotated_fn_args import gen_annotated
+    from tools.autograd.utils import load_op_list_and_strip_overload
     from tools.jit.gen_unboxing_wrappers import gen_unboxing_wrappers
 
     # Build ATen based Variable classes
-    install_dir = install_dir or 'torch/csrc'
+    if install_dir is None:
+        install_dir = 'torch/csrc'
+        python_install_dir = 'torch/testing/_internal/generated'
+    else:
+        python_install_dir = install_dir
     autograd_gen_dir = os.path.join(install_dir, 'autograd', 'generated')
     jit_gen_dir = os.path.join(install_dir, 'jit', 'generated')
-    for d in (autograd_gen_dir, jit_gen_dir):
+    for d in (autograd_gen_dir, jit_gen_dir, python_install_dir):
         if not os.path.exists(d):
             os.makedirs(d)
     runfiles_dir = os.environ.get("RUNFILES_DIR", None)
@@ -50,6 +56,8 @@ def generate_code(ninja_global=None,
         gen_autograd_python(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, autograd_dir)
 
     if subset == "libtorch" or not subset:
+        selected_op_list = load_op_list_and_strip_overload(selected_op_list, selected_op_list_path)
+
         gen_autograd(
             declarations_path or DECLARATIONS_PATH,
             autograd_gen_dir,
@@ -62,9 +70,14 @@ def generate_code(ninja_global=None,
             jit_gen_dir,
             tools_jit_templates,
             disable_autograd=disable_autograd,
-            selected_op_list_path=selected_op_list_path,
             selected_op_list=selected_op_list,
             force_schema_registration=force_schema_registration)
+
+    if subset == "python" or not subset:
+        gen_annotated(
+            declarations_path or DECLARATIONS_PATH,
+            python_install_dir,
+            autograd_dir)
 
 
 def main():

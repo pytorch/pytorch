@@ -8,49 +8,6 @@
 #define ERROR_ONLY_FP_TYPES(func) \
   THError("%s for CUDA tensors only supports floating-point types. Try converting the tensors with .float()", func);
 
-accreal THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
-{
-  at::NoNamesGuard guard;
-  if ( (THTensor_nDimension(self) != 1) || (THTensor_nDimension(src) != 1) ) {
-    THError("1D tensors expected, got %dD, %dD tensors",
-       THTensor_nDimension(self), THTensor_nDimension(src));
-  }
-
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
-  THArgCheck(THCTensor_(nElement)(state, self) ==
-             THCTensor_(nElement)(state, src), 2, "sizes do not match");
-
-  self = THCTensor_(newContiguous)(state, self);
-  src = THCTensor_(newContiguous)(state, src);
-
-#ifdef THC_REAL_IS_FLOAT
-  accreal result = THCudaBlas_Sdot(state,
-                                THCTensor_(nElement)(state, self),
-                                THCTensor_(data)(state, self), 1,
-                                THCTensor_(data)(state, src), 1);
-#elif defined(THC_REAL_IS_DOUBLE)
-  accreal result = THCudaBlas_Ddot(state,
-                                THCTensor_(nElement)(state, self),
-                                THCTensor_(data)(state, self), 1,
-                                THCTensor_(data)(state, src), 1);
-#elif defined(THC_REAL_IS_HALF)
-  accreal result = THCudaBlas_Hdot(state,
-                                THCTensor_(nElement)(state, self),
-                                THCTensor_(data)(state, self), 1,
-                                THCTensor_(data)(state, src), 1);
-#endif
-
-  THCTensor_(free)(state, src);
-  THCTensor_(free)(state, self);
-  return result;
-
-#else
-  ERROR_ONLY_FP_TYPES("dot");
-  return ScalarConvert<int, accreal>::to(0);
-#endif
-}
-
 __global__ void createBatchGemmBuffer3(const scalar_t** buffer1, const scalar_t ** buffer2, const scalar_t ** buffer3, scalar_t* data1,
                                        scalar_t * data2, scalar_t * data3, int64_t stride1, int64_t stride2, int64_t stride3, int64_t num_batches) {
   const int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -94,13 +51,15 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
   char transpose_batch1, transpose_batch2;
   int64_t lda, ldb, ldc;
   THCTensor *result_, *batch1_, *batch2_;
-  if (result->stride(1) == 1)
+  if (result->stride(1) == 1 &&
+   (result->size(2) == 1 || result->stride(2) >= std::max<int64_t>(1, result->size(1))))
   {
     transpose_result = false;
     result_ = result;
     ldc = result_->stride(2);
   }
-  else if (result->stride(2) == 1)
+  else if (result->stride(2) == 1 &&
+   (result->size(1) == 1 || result->stride(1) >= std::max<int64_t>(1, result->size(2))))
   {
     transpose_result = true;
 
@@ -123,15 +82,19 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
     ldc = result_->stride(2);
   }
 
+  const int64_t m = result->size(transpose_result ? 2 : 1);
+  const int64_t n = result->size(transpose_result ? 1 : 2);
+  const int64_t k = batch1->size(transpose_result ? 1 : 2);
+
   if (batch1->stride(transpose_result ? 2 : 1) == 1 &&
-   batch1->stride(transpose_result ? 1 : 2) != 0)
+   batch1->stride(transpose_result ? 1 : 2) >= std::max<int64_t>(1, m))
   {
     transpose_batch1 = 'n';
     batch1_ = batch1;
     lda = batch1_->stride(transpose_result ? 1 : 2);
   }
   else if (batch1->stride(transpose_result ? 1 : 2) == 1 &&
-   batch1->stride(transpose_result ? 2 : 1) != 0)
+   batch1->stride(transpose_result ? 2 : 1) >= std::max<int64_t>(1, k))
   {
     transpose_batch1 = 't';
     batch1_ = batch1;
@@ -150,14 +113,14 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
   }
 
   if (batch2->stride(transpose_result ? 2 : 1) == 1 &&
-   batch2->stride(transpose_result ? 1 : 2) != 0)
+   batch2->stride(transpose_result ? 1 : 2) >= std::max<int64_t>(1, k))
   {
     transpose_batch2 = 'n';
     batch2_ = batch2;
     ldb = batch2_->stride(transpose_result ? 1 : 2);
   }
   else if (batch2->stride(transpose_result ? 1 : 2) == 1 &&
-   batch2->stride(transpose_result ? 2 : 1) != 0)
+   batch2->stride(transpose_result ? 2 : 1) >= std::max<int64_t>(1, n))
   {
     transpose_batch2 = 't';
     batch2_ = batch2;
@@ -318,7 +281,7 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
 #endif //CUDA_VERSION
 
 #elif defined(THC_REAL_IS_BFLOAT16)
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(__HIP_PLATFORM_HCC__) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   THCudaBlas_BgemmStridedBatched(
       state,
       transpose_batch1,
@@ -347,15 +310,13 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
     THCTensor_(freeCopyTo)(state, result_, result);
   }
 
-#if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
+#if defined(THC_REAL_IS_BFLOAT16) && !(defined(__HIP_PLATFORM_HCC__) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000)
   // To avoid "variable was set but never used" warning
   [&transpose_batch1, &transpose_batch2, &lda, &ldb, &ldc]{}();
   TORCH_CHECK(false, "BgemmStridedBatched is not supported with at::BFloat16 type");
 #endif
   }
-#if !defined(THC_REAL_IS_BFLOAT16) || defined(__HIP_PLATFORM_HCC__)
   at::namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-#endif
 
 #else
   ERROR_ONLY_FP_TYPES("baddbmm");

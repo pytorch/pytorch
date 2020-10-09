@@ -27,7 +27,7 @@ import os
 import yaml
 import re
 from collections import defaultdict
-from .utils import YamlLoader, split_name_params, signature_without_args
+from .utils import YamlLoader, split_name_params, op_name_without_overload
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
 # If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
@@ -45,10 +45,11 @@ VIEW_FUNCTIONS = {
     'as_strided': 'self',
     'diagonal': 'self',
     'expand': 'self',
-    'narrow': 'self',
     'permute': 'self',
     'select': 'self',
     'slice': 'self',
+    'split': 'self',
+    'split_with_sizes': 'self',
     'squeeze': 'self',
     't': 'self',
     'transpose': 'self',
@@ -71,14 +72,22 @@ VIEW_FUNCTIONS = {
 for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
     VIEW_FUNCTIONS[key] = 'self'
 
+# Functions for which we use CreationMeta::MULTI_OUTPUT_SAFE. I.e., the ones for
+# which inplace modification of outputs is being gradually deprecated.
+MULTI_OUTPUT_SAFE_FUNCTIONS = {
+    'split',
+    'split_with_sizes',
+}
+
 # note: some VIEW_FUNCTIONS are just compositions of the view functions above
 # this list contains both the root view functions and any that are purely composed
 # of viewing functions, and is used by the JIT to determine when an operator
 # may return a view of its inputs; however they may sometimes return a copy.
 # (e.g. `contiguous`)
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
-    'chunk', 'split', 'detach', 'contiguous', 'reshape', 'reshape_as',
-    'expand_as', 'view_as', 'real', 'imag',
+    'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
+    'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
+    'tensor_split'
 })
 
 def format_return_type(returns):
@@ -107,20 +116,6 @@ def has_tensoroptions_argument(declaration):
             return True
     return False
 
-def process_schema_order_arg(schema_order_arg):
-    if schema_order_arg == 'dtype':
-        return 'optTypeMetaToScalarType(options.dtype_opt())'
-    elif schema_order_arg == 'layout':
-        return 'options.layout_opt()'
-    elif schema_order_arg == 'device':
-        return 'options.device_opt()'
-    elif schema_order_arg == 'pin_memory':
-        return 'options.pinned_memory_opt()'
-    elif schema_order_arg == 'memory_format':
-        return 'c10::impl::process_memory_format(options, memory_format)'
-    else:
-        return schema_order_arg
-
 
 def load_aten_declarations(path):
     with open(path, 'r') as f:
@@ -134,6 +129,8 @@ def load_aten_declarations(path):
 
         for arg in declaration['arguments']:
             arg['simple_type'] = get_simple_type(arg)
+        for arg in declaration['schema_order_arguments']:
+            arg['simple_type'] = get_simple_type(arg)
         for ret in declaration['returns']:
             ret['simple_type'] = get_simple_type(ret)
 
@@ -143,10 +140,7 @@ def load_aten_declarations(path):
                                                for arg in declaration['schema_order_arguments']]
         declaration['args'] = [arg['name'] for arg in declaration['arguments']]
         declaration['schema_order_args'] = [arg['name'] for arg in declaration['schema_order_arguments']]
-        if has_tensoroptions_argument(declaration):
-            declaration['schema_order_args'] = [process_schema_order_arg(arg) for arg in declaration['schema_order_args']]
         declaration['api_name'] = declaration['name']
-        # NB: keep this in sync with common_with_cwrap.py
         if declaration.get('overload_name'):
             declaration['type_wrapper_name'] = "{}_{}".format(
                 declaration['name'], declaration['overload_name'])
@@ -230,7 +224,7 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, selected_
     def filter_decls(aten_decls, selected_op_list):
         if selected_op_list is None:
             return aten_decls
-        return [decl for decl in aten_decls if signature_without_args(decl) in selected_op_list]
+        return [decl for decl in aten_decls if op_name_without_overload(decl) in selected_op_list]
 
     aten_decls = filter_decls(full_aten_decls, selected_op_list)
 
@@ -253,7 +247,8 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, selected_
 
     # Generate variable_factories.h
     from .gen_variable_factories import gen_variable_factories
-    gen_variable_factories(out, aten_decls, template_path)
+    # Some non-selectable ops (e.g. prim ops) need factory methods so we pass in `full_aten_decls` here.
+    gen_variable_factories(out, full_aten_decls, template_path)
 
 
 def gen_autograd_python(aten_path, out, autograd_dir):
@@ -285,6 +280,10 @@ def gen_autograd_python(aten_path, out, autograd_dir):
     gen_python_functions.gen_py_torch_functions(
         out, aten_decls + deprecated, template_path)
     gen_python_functions.gen_py_nn_functions(
+        out, aten_decls, template_path)
+    gen_python_functions.gen_py_fft_functions(
+        out, aten_decls, template_path)
+    gen_python_functions.gen_py_linalg_functions(
         out, aten_decls, template_path)
 
 

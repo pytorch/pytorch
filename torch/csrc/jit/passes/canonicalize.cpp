@@ -129,20 +129,36 @@ bool isBefore(const Use& a, const Use& b) {
   return isBefore(a.user, b.user);
 }
 
-std::vector<c10::optional<Use>> gatherFirstUses(at::ArrayRef<Value*> values) {
-  return fmap(values, [](Value* v) -> c10::optional<Use> {
-    if (v->uses().size() == 0) {
-      return c10::nullopt;
-    }
-    Use first_use = v->uses()[0];
-    for (size_t i = 1; i < v->uses().size(); ++i) {
-      auto n_use = v->uses()[i];
-      if (!isBefore(first_use, n_use)) {
-        first_use = n_use;
-      }
-    }
+bool isAfter(const Use& a, const Use& b) {
+  if (a.user == b.user && a.offset == b.offset) {
+    return false;
+  }
+  return !isBefore(a, b);
+}
 
-    return first_use;
+bool isBeforeOrAfter(const Use& a, const Use& b, bool checking_before) {
+  return checking_before ? isBefore(a, b) : isAfter(a, b);
+}
+
+c10::optional<const Use> firstOrLastUse(Value* v, bool find_first) {
+  if (v->uses().size() == 0) {
+    return c10::nullopt;
+  }
+  Use extreme_use = v->uses()[0];
+  for (size_t i = 1; i < v->uses().size(); ++i) {
+    auto n_use = v->uses()[i];
+    if (!isBeforeOrAfter(extreme_use, n_use, find_first)) {
+      extreme_use = n_use;
+    }
+  }
+
+  return extreme_use;
+}
+
+std::vector<c10::optional<const Use>> gatherFirstUses(
+    at::ArrayRef<Value*> values) {
+  return fmap(values, [&](Value* v) -> c10::optional<const Use> {
+    return firstOrLastUse(v, true);
   });
 }
 
@@ -151,7 +167,7 @@ std::vector<size_t> sort_indexes(at::ArrayRef<Value*> values) {
   std::vector<size_t> idx(values.size());
   std::iota(idx.begin(), idx.end(), 0);
 
-  std::vector<c10::optional<Use>> first_uses = gatherFirstUses(values);
+  std::vector<c10::optional<const Use>> first_uses = gatherFirstUses(values);
 
   // Sort values based on canonical ordering of their first usage
   std::sort(idx.begin(), idx.end(), [&first_uses](size_t i1, size_t i2) {

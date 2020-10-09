@@ -46,7 +46,7 @@ will throw errors.
     .Input(
         3,
         "Qparam",
-        "Optional Qparam blob that constans quant param computed on activation histogram data"
+        "Optional Qparam blob that contains quant param computed on activation histogram data"
         "Will overwrite Y_scale and Y_zero_point argument if specified")
     .Output(0, "Y", "2D output tensor");
 

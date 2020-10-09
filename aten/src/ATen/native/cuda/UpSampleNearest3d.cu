@@ -161,7 +161,7 @@ static void upsample_nearest3d_out_cuda_template(
                   output_depth,
                   output_height,
                   output_width});
-  
+
   if (input.numel() == 0) {
     return;
   }
@@ -340,6 +340,37 @@ Tensor upsample_nearest3d_backward_cuda(
   Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_nearest3d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, scales_d, scales_h, scales_w);
+  return grad_input;
+}
+
+using at::native::upsample::compute_output_size;
+using at::native::upsample_cuda::get_scale_value;
+
+Tensor upsample_nearest3d_cuda(
+    const Tensor& input,
+    c10::optional<IntArrayRef> output_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  auto scale_d = get_scale_value(scale_factors, 0);
+  auto scale_h = get_scale_value(scale_factors, 1);
+  auto scale_w = get_scale_value(scale_factors, 2);
+  upsample_nearest3d_out_cuda_template(output, input, osize, scale_d, scale_h, scale_w);
+  return output;
+}
+
+Tensor upsample_nearest3d_backward_cuda(
+    const Tensor& grad_output,
+    c10::optional<IntArrayRef> output_size,
+    IntArrayRef input_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input_size, output_size, scale_factors);
+  auto scale_d = get_scale_value(scale_factors, 0);
+  auto scale_h = get_scale_value(scale_factors, 1);
+  auto scale_w = get_scale_value(scale_factors, 2);
+  auto grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  upsample_nearest3d_backward_out_cuda_template(
+      grad_input, grad_output, osize, input_size, scale_d, scale_h, scale_w);
   return grad_input;
 }
 
