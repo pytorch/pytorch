@@ -688,6 +688,7 @@ Example:
     beginning of the tensor.
 
     This also works for multi-dimensional transforms:
+
     >>> x = torch.fft.fftfreq(5, d=1/5) + 0.1 * torch.fft.fftfreq(5, d=1/5).unsqueeze(1)
     >>> x
     tensor([[ 0.0000,  1.0000,  2.0000, -2.0000, -1.0000],
