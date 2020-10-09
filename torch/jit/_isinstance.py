@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple, Union
+from typing import List, Dict, Tuple, Union, Optional
 
 
 def get_origin(the_type):
@@ -9,8 +9,36 @@ def get_args(the_type):
     return getattr(the_type, "__args__", None)
 
 
+def check_args_exist(the_type):
+    if the_type is List or the_type is list:
+        raise RuntimeError(
+            "Attempted to use List without a "
+            "contained type. Please add a contained type, e.g. "
+            "List[int]"
+        )
+    elif the_type is Tuple or the_type is tuple:
+        raise RuntimeError(
+            "Attempted to use Tuple without a "
+            "contained type. Please add a contained type, e.g. "
+            "Tuple[int]"
+        )
+    elif the_type is Dict or the_type is dict:
+        raise RuntimeError(
+            "Attempted to use Dict without "
+            "contained types. Please add contained type, e.g. "
+            "Dict[int, int]"
+        )
+    elif the_type is None or the_type is Optional:
+        raise RuntimeError(
+            "Attempted to use Optional without a "
+            "contained type. Please add a contained type, e.g. "
+            "Optional[int]"
+        )
+
+
 def generics_checker(the_obj, the_type):
     origin_type = get_origin(the_type)
+    check_args_exist(the_type)
     if origin_type is None:
         pass
     elif origin_type is list or origin_type is List:
@@ -57,7 +85,7 @@ def generics_checker(the_obj, the_type):
         if isinstance(the_obj, tuple):
             arg_types = get_args(the_type)
             if len(the_obj) != len(arg_types):
-                return False  # TODO actually figure out what should happen here
+                return False
             for el, el_type in zip(the_obj, arg_types):
                 el_origin = get_origin(el_type)
                 if el_origin:
@@ -74,5 +102,8 @@ def _isinstance(the_obj, the_type) -> bool:
     origin_type = get_origin(the_type)
     if origin_type:
         return generics_checker(the_obj, the_type)
+    # handle odd case of non typed optional origin returning as none
+    if origin_type is None and the_type is Optional:
+        check_args_exist(the_type)
     # handle non-generics
     return isinstance(the_obj, the_type)

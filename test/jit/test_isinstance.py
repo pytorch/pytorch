@@ -187,3 +187,107 @@ class TestIsinstance(JitTestCase):
         self.checkScript(list_switch_on_type, (x,))
         x = {"1": "111", "2": "222"}
         self.checkScript(list_switch_on_type, (x,))
+
+    def test_list_no_contained_type(self):
+        def list_no_contained_type(x: Any):
+            assert torch.jit.isinstance(x, List)
+
+        x = ["1", "2", "3"]
+
+        try:
+            torch.jit.script(list_no_contained_type)
+        except RuntimeError as e:
+            self.assertEqual(
+                str(e),
+                "Attempted to use List without a "
+                "contained type. Please add a contained type, e.g. "
+                "List[int]",
+            )
+
+        try:
+            list_no_contained_type(x)
+        except RuntimeError as e:
+            self.assertEqual(
+                str(e),
+                "Attempted to use List without a "
+                "contained type. Please add a contained type, e.g. "
+                "List[int]",
+            )
+
+    def test_tuple_no_contained_type(self):
+        def tuple_no_contained_type(x: Any):
+            assert torch.jit.isinstance(x, Tuple)
+
+        x = ("1", "2", "3")
+
+        try:
+            torch.jit.script(tuple_no_contained_type)
+        except RuntimeError as e:
+            self.assertEqual(
+                str(e),
+                "Attempted to use Tuple without a "
+                "contained type. Please add a contained type, e.g. "
+                "Tuple[int]",
+            )
+
+        try:
+            tuple_no_contained_type(x)
+        except RuntimeError as e:
+            self.assertEqual(
+                str(e),
+                "Attempted to use Tuple without a "
+                "contained type. Please add a contained type, e.g. "
+                "Tuple[int]",
+            )
+
+    def test_optional_no_contained_type(self):
+        def optional_no_contained_type(x: Any):
+            assert torch.jit.isinstance(x, Optional)
+
+        x = ("1", "2", "3")
+
+        try:
+            torch.jit.script(optional_no_contained_type)
+        except RuntimeError as e:
+            self.assertEqual(
+                str(e),
+                "Attempted to use Optional without a "
+                "contained type. Please add a contained type, e.g. "
+                "Optional[int]",
+            )
+
+        try:
+            optional_no_contained_type(x)
+        except RuntimeError as e:
+            self.assertEqual(
+                str(e),
+                "Attempted to use Optional without a "
+                "contained type. Please add a contained type, e.g. "
+                "Optional[int]",
+            )
+
+    def test_dict_no_contained_type(self):
+        def dict_no_contained_type(x: Any):
+            assert torch.jit.isinstance(x, Dict)
+
+        x = {"a": "aa"}
+
+        try:
+            torch.jit.script(dict_no_contained_type)
+        except RuntimeError as e:
+            self.assertEqual(
+                str(e),
+                "Attempted to use Dict without "
+                "contained types. Please add contained type, e.g. "
+                "Dict[int, int]",
+            )
+
+        try:
+            dict_no_contained_type(x)
+        except RuntimeError as e:
+            self.assertEqual(
+                str(e),
+                "Attempted to use Dict without "
+                "contained types. Please add contained type, e.g. "
+                "Dict[int, int]",
+            )
