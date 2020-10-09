@@ -140,17 +140,17 @@ class TestQuantizedOps(TestCase):
             quantized_fn: a list of the quantized functions to be tested
             reference_fn: the original reference function to be called on the
             the dequantized X
-            inplace_kwarg: the additional inplace keyword argument to test in-place
+            extra_kwargs: the additional keyword arguments
             for each test entry in ops_under_test, it must have at least the fields
-            for quantized_fn and reference_fn. If inplace_kwarg is missing, the
-            quantized function is assumed to be either inplace by default or the
-            test is not testing an inplace function.
+            for quantized_fn and reference_fn.
             output_range: the output range the operator will map to. By default, if it is
             no specified, the range will not be controlled and depend on Xmin and Xmax.
             change_zero_point: a boolean flag indicating if the zero point parameter should
             be determined based on torch_type during quantization (see sigmoid/hardsigmoid for
             examples). By default, if it is not specified, change_zero_point is assumed to be
             False and zero point will just take on the default value from X.
+            `output_is_observed`: if specified and is True, we'll append extra
+             output_scale/output_zero_point keyword argument when calling quantized op
         """
         # Retrives the default parameters from X.
         X, (scale, zero_point, torch_type) = X
@@ -162,15 +162,15 @@ class TestQuantizedOps(TestCase):
         for op_group in test_configs:
             ref_op = op_group['reference_fn']
             for q_op in op_group['quantized_fn']:
+                # Retrieves the inplace keyword arguments
+                # some functions require inplace=True to test in-place.
+                extra_kwargs = op_group.get('extra_kwargs', dict())
+                output_is_observed = op_group.get('output_is_observed', False)
                 # Quantizes and dequantizes to account for max error.
                 qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                                dtype=torch_type)
                 dqX = qX.dequantize()
-                dqY_hat = ref_op(dqX.clone())
-
-                # Retrieves the inplace keyword arguments
-                # some functions require inplace=True to test in-place.
-                inplace_kwarg = op_group.get('inplace_kwarg', dict())
+                dqY_hat = ref_op(dqX.clone(), **extra_kwargs)
 
                 # Adjusts output_scale if needed.
                 # The output_scale determines the quantization scale for functions that
@@ -194,8 +194,11 @@ class TestQuantizedOps(TestCase):
                                                    zero_point=output_zero_point,
                                                    dtype=torch_type)
 
+                if output_is_observed:
+                    extra_kwargs.update({'output_scale': output_scale, 'output_zero_point': output_zero_point})
+
                 # Finds qY using in-place or non-in-place quantized operators.
-                qY = q_op(qX, **inplace_kwarg)
+                qY = q_op(qX, **extra_kwargs)
 
                 self.assertEqual(qY, qY_hat, msg='{} - {} failed: ({} vs. {})'.format(
                     fn_name, q_op, qY, qY_hat
@@ -222,7 +225,7 @@ class TestQuantizedOps(TestCase):
                     torch.nn.quantized.functional.relu,
                 ],
                 'reference_fn': torch.nn.functional.relu,
-                'inplace_kwarg': {
+                'extra_kwargs': {
                     'inplace': True
                 }
             }
@@ -250,7 +253,7 @@ class TestQuantizedOps(TestCase):
     @override_qengines
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
-    def test_qsigmoid(self, X):
+    def test_sigmoid_non_observed(self, X):
         sigmoid_test_configs = [
             {
                 'quantized_fn': [
@@ -259,6 +262,26 @@ class TestQuantizedOps(TestCase):
                 'reference_fn': torch.sigmoid,
                 'output_range': (0.0, 1.0),
                 'change_zero_point': True
+            }
+        ]
+        self._test_activation_function(X, 'sigmoid', sigmoid_test_configs)
+
+    """Tests the correctness of the quantized::sigmoid op."""
+    # TODO: enable after observed output is supported in qnnpack
+    # @override_qengines
+    @skipIfNoFBGEMM
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_sigmoid(self, X):
+        sigmoid_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.ops.quantized.sigmoid
+                ],
+                'reference_fn': torch.sigmoid,
+                'output_range': (0.0, 1.0),
+                'change_zero_point': True,
+                'output_is_observed': True,
             }
         ]
         self._test_activation_function(X, 'sigmoid', sigmoid_test_configs)
@@ -280,11 +303,30 @@ class TestQuantizedOps(TestCase):
         ]
         self._test_activation_function(X, 'hardsigmoid', hardsigmoid_test_configs)
 
+    @override_qengines
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_leaky_relu_observed_output(self, X):
+        leaky_relu_test_configs = [
+            {
+                'quantized_fn': [
+                    torch.ops.quantized.leaky_relu
+                ],
+                'reference_fn': torch.nn.functional.leaky_relu,
+                'extra_kwargs': {
+                    'negative_slope': 0.1,
+                    'inplace': False,
+                },
+                'output_is_observed': True,
+            }
+        ]
+        self._test_activation_function(X, 'leaky_relu', leaky_relu_test_configs)
+
     """Tests the correctness of the quantized::relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()),
            alpha=st.floats(0.0, 1.0, allow_nan=False, allow_infinity=False))
-    def test_qrelu_leaky(self, X, alpha):
+    def test_leaky_relu(self, X, alpha):
         X, (scale, zero_point, torch_type) = X
 
         X = torch.from_numpy(X)
@@ -2771,23 +2813,24 @@ class TestQuantizedEmbeddingOps(TestCase):
     def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate, optimized_qparams):
         weights = torch.from_numpy((np.random.random_sample((
             num_embeddings, embedding_dim)) + 1).astype(np.float32))
-
+        qtype = torch.quint8
         if bit_rate == 8:
             w_packed = pack_fn(weights)
         else:
             w_packed = pack_fn(weights, optimized_qparams=optimized_qparams)
         w_unpacked = unpack_fn(w_packed)
 
-        if bit_rate == 8:
+        if bit_rate == 8 or bit_rate == 4:
             # Check numerics of prepack function that accepts qtensor as input.
             # We use min-max observer to mimic the quantization performed in the original function.
             obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
             obs(weights)
             # Get the scale and zero point for the weight tensor
             qparams = obs.calculate_qparams()
-
+            if bit_rate == 4:
+                qtype = torch.quint4x2
             # Quantize the weights to 8bits
-            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=qtype)
             real_packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
             self.assertEqual(isinstance(real_packed_weight, torch._C.ScriptObject), True)
             unpacked_weight = torch.ops.quantized.embedding_bag_unpack(real_packed_weight)
@@ -2941,20 +2984,28 @@ class TestQuantizedEmbeddingOps(TestCase):
         torch.testing.assert_allclose(reference_result, result, atol=atol,
                                       rtol=rtol)
 
-        if bit_rate == 8:
+
+        if bit_rate == 8 or bit_rate == 4:
             # Test operator that accepts TorchBind packed weights.
-            obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+            if bit_rate == 4:
+                qdtype = torch.quint4x2
+                op = torch.ops.quantized.embedding_bag_4bit
+            else:
+                qdtype = torch.quint8
+                op = torch.ops.quantized.embedding_bag_byte
+            obs = PerChannelMinMaxObserver(dtype=qdtype, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
             obs(weights)
             # Get the scale and zero point for the weight tensor
             qparams = obs.calculate_qparams()
 
             # Quantize the weights to 8bits
-            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=qdtype)
             packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
-            result = torch.ops.quantized.embedding_bag_byte(packed_weight, indices, offsets, mode=0,
-                                                            per_sample_weights=per_sample_weights,
-                                                            include_last_offset=include_last_offset)
+            result = op(packed_weight, indices, offsets, mode=0,
+                        per_sample_weights=per_sample_weights,
+                        include_last_offset=include_last_offset)
             torch.testing.assert_allclose(reference_result, result, atol=atol, rtol=rtol)
+
 
 
     """ Tests the correctness of the embedding_bag_8bit quantized operator """
@@ -2964,10 +3015,10 @@ class TestQuantizedEmbeddingOps(TestCase):
            num_offsets=st.integers(1, 20),
            enable_per_sample_weights=st.booleans(),
            include_last_offset=st.booleans())
-    def test_embedding_bag_byte_rowwise_offsets(self, num_embeddings,
-                                                embedding_dim, num_offsets,
-                                                enable_per_sample_weights,
-                                                include_last_offset):
+    def test_embedding_bag_byte(self, num_embeddings,
+                                embedding_dim, num_offsets,
+                                enable_per_sample_weights,
+                                include_last_offset):
         self.embedding_bag_rowwise_offsets_run(
             8, num_embeddings, embedding_dim, num_offsets,
             enable_per_sample_weights, include_last_offset,
@@ -2979,10 +3030,10 @@ class TestQuantizedEmbeddingOps(TestCase):
            num_offsets=st.integers(1, 20),
            enable_per_sample_weights=st.booleans(),
            include_last_offset=st.booleans())
-    def test_embedding_bag_4bit_rowwise_offsets(self, num_embeddings,
-                                                embedding_dim, num_offsets,
-                                                enable_per_sample_weights,
-                                                include_last_offset):
+    def test_embedding_bag_4bit(self, num_embeddings,
+                                embedding_dim, num_offsets,
+                                enable_per_sample_weights,
+                                include_last_offset):
         self.embedding_bag_rowwise_offsets_run(4, num_embeddings,
                                                embedding_dim, num_offsets,
                                                enable_per_sample_weights,
@@ -3016,7 +3067,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
 
         packed_weight = prepack_op(qweight)
-        qresult = quant_op(packed_weight, indices, sparse=False)
+        qresult = quant_op(packed_weight, indices, pruned_weights=False)
 
         ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
         torch.testing.assert_allclose(ref, qresult, atol=0.005, rtol=1e-3)

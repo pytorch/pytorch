@@ -111,6 +111,11 @@ allow_list = [
     ("aten::_amp_non_finite_check_and_unscale_", datetime.date(9999, 1, 1)),
     ("aten::choose_qparams_optimized", datetime.date(2020, 10, 5)),
     ("aten::smooth_l1_loss_backward", datetime.date(2020, 10, 15)),
+    ("quantized::embedding_bag_byte", datetime.date(2020, 10, 15)),
+    ("quantized::embedding_bag_4bit", datetime.date(2020, 10, 15)),
+    ("quantized::embedding_byte", datetime.date(2020, 10, 15)),
+    ("quantized::embedding_bag_byte_rowwise_offsets", datetime.date(2020, 10, 15)),
+    ("quantized::embedding_bag_4bit_rowwise_offsets", datetime.date(2020, 10, 15)),
 ]
 
 

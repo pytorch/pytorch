@@ -1085,10 +1085,10 @@ TEST(NVFuserTest, FusionDependency_CUDA) {
 TEST(NVFuserTest, FusionParser_CUDA) {
   auto g = std::make_shared<Graph>();
   const auto graph0_string = R"IR(
-    graph(%0 : Float(2:1),
-          %1 : Float(2:1)):
-      %c0 : Float(2:1) = aten::mul(%0, %1)
-      %d0 : Float(2:1) = aten::mul(%c0, %0)
+    graph(%0 : Float(2, strides=[1]),
+          %1 : Float(2, strides=[1])):
+      %c0 : Float(2, strides=[1]) = aten::mul(%0, %1)
+      %d0 : Float(2, strides=[1]) = aten::mul(%c0, %0)
       return (%d0))IR";
   torch::jit::parseIR(graph0_string, g.get());
 
