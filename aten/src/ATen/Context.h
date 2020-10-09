@@ -327,4 +327,20 @@ static inline void manual_seed(uint64_t seed) {
   }
 }
 
+// When the global flag `allow_tf32` is set to true, cuBLAS handles are
+// automatically configured to use math mode CUBLAS_TF32_TENSOR_OP_MATH.
+// For some operators, such as addmv, TF32 offers no performance improvement
+// but causes precision loss. To help this case, this class implements
+// a RAII guard that can be used to quickly disable TF32 within its scope.
+//
+// Usage:
+//     NoTF32Guard disable_tf32;
+struct TORCH_API NoTF32Guard {
+  NoTF32Guard();
+  ~NoTF32Guard();
+  static bool should_disable_tf32();
+private:
+  bool changed = false;
+};
+
 } // namespace at

@@ -210,11 +210,24 @@ class NativeFunction:
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
+# Represents a bundle of native functions that are semantically related.
 @dataclass(frozen=True)
 class NativeFunctionGroup:
     functional: Optional[NativeFunction]
     inplace: Optional[NativeFunction]
     out: Optional[NativeFunction]
+
+    def __post_init__(self) -> None:
+        test_sig: Optional[FunctionSchema] = None
+        for f in self.functions():
+            if test_sig is None:
+                test_sig = f.func.signature()
+            else:
+                if test_sig != f.func.signature():
+                    raise AssertionError(
+                        "NativeFunctionGroup constructed from two NativeFunctions "
+                        f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
+                    )
 
     def structured(self) -> bool:
         if self.out is None:
@@ -239,8 +252,6 @@ class NativeFunctionGroup:
         if self.inplace is not None:
             yield self.inplace
 
-    # TODO: check signature() equality
-
     @staticmethod
     def from_dict(d: Dict[SchemaKind, NativeFunction]) -> 'NativeFunctionGroup':
         functional = d.get(SchemaKind.functional)
@@ -251,11 +262,6 @@ class NativeFunctionGroup:
             inplace=inplace,
             out=out,
         )
-
-    # This is an abuse
-    @staticmethod
-    def singleton(f: NativeFunction) -> 'NativeFunctionGroup':
-        return NativeFunctionGroup.from_dict({f.func.kind(): f})
 
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,
@@ -362,7 +368,11 @@ class FunctionSchema:
         if self.name.name.inplace:
             # TODO: fixme
             if str(self.name) not in [
-                    '_amp_non_finite_check_and_unscale_',
+                    '_amp_foreach_non_finite_check_and_unscale_',
+                    '_foreach_add_scalar_list_',
+                    '_foreach_sub_scalar_list_',
+                    '_foreach_mul_scalar_list_',
+                    '_foreach_div_scalar_list_',
                     '_foreach_add_.Scalar',
                     '_foreach_sub_.Scalar',
                     '_foreach_mul_.Scalar',

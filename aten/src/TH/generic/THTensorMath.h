@@ -14,8 +14,6 @@ TH_API void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTe
 
 TH_API ptrdiff_t THTensor_(numel)(THTensor *t);
 
-TH_API void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, scalar_t beta, scalar_t alpha);
-
 #if !defined(TH_REAL_IS_BOOL)
 TH_API void THTensor_(mul)(THTensor *r_, THTensor *t, scalar_t value);
 #endif
