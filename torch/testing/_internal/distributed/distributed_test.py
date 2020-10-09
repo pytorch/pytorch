@@ -606,19 +606,18 @@ class DistributedTest:
                 for src in range(0, dist.get_world_size()):
                     send_tensor = _build_tensor(rank + 1, device_id=device_id)
                     recv_tensor = _build_tensor(src + 1, value=-1, device_id=device_id)
-                    recv_op = dist._P2POp(dist.irecv, recv_tensor, src)
+                    recv_op = dist.P2POp(dist.irecv, recv_tensor, src)
                     p2p_op_list.append(recv_op)
-                    send_op = dist._P2POp(dist.isend, send_tensor, src)
+                    send_op = dist.P2POp(dist.isend, send_tensor, src)
                     p2p_op_list.append(send_op)
 
-                reqs = dist._batch_isend_irecv(p2p_op_list)
+                reqs = dist.batch_isend_irecv(p2p_op_list)
                 for req in reqs:
                     req.wait()
 
             self._barrier()
 
         @skip_if_no_gpu
-        @unittest.skip("NCCL P2P is not enabled for OSS builds")
         @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_self_nccl(self):
@@ -631,12 +630,12 @@ class DistributedTest:
             if rank == 0:
                 send_tensor = _build_tensor(rank + 1, device_id=device_id)
                 recv_tensor = _build_tensor(rank + 1, value=-1, device_id=device_id)
-                recv_op = dist._P2POp(dist.irecv, recv_tensor, 0)
+                recv_op = dist.P2POp(dist.irecv, recv_tensor, 0)
                 p2p_op_list.append(recv_op)
-                send_op = dist._P2POp(dist.isend, send_tensor, 0)
+                send_op = dist.P2POp(dist.isend, send_tensor, 0)
                 p2p_op_list.append(send_op)
 
-                reqs = dist._batch_isend_irecv(p2p_op_list)
+                reqs = dist.batch_isend_irecv(p2p_op_list)
                 for req in reqs:
                     req.wait()
 
@@ -662,12 +661,12 @@ class DistributedTest:
             if rank in [1, 2]:
                 send_tensor = _build_tensor(rank + 1, device_id=device_id)
                 recv_tensor = _build_tensor(peer + 1, value=-1, device_id=device_id)
-                recv_op = dist._P2POp(dist.irecv, recv_tensor, peer)
+                recv_op = dist.P2POp(dist.irecv, recv_tensor, peer)
                 p2p_op_list.append(recv_op)
-                send_op = dist._P2POp(dist.isend, send_tensor, peer)
+                send_op = dist.P2POp(dist.isend, send_tensor, peer)
                 p2p_op_list.append(send_op)
 
-                reqs = dist._batch_isend_irecv(p2p_op_list)
+                reqs = dist.batch_isend_irecv(p2p_op_list)
                 for req in reqs:
                     req.wait()
 
@@ -686,12 +685,12 @@ class DistributedTest:
                     continue
                 send_tensor = _build_tensor(rank + 1)
                 recv_tensor = _build_tensor(src + 1, value=-1)
-                recv_op = dist._P2POp(dist.irecv, recv_tensor, src)
+                recv_op = dist.P2POp(dist.irecv, recv_tensor, src)
                 p2p_op_list.append(recv_op)
-                send_op = dist._P2POp(dist.isend, send_tensor, src)
+                send_op = dist.P2POp(dist.isend, send_tensor, src)
                 p2p_op_list.append(send_op)
 
-            reqs = dist._batch_isend_irecv(p2p_op_list)
+            reqs = dist.batch_isend_irecv(p2p_op_list)
             for req in reqs:
                 req.wait()
 
@@ -709,19 +708,18 @@ class DistributedTest:
                     continue
                 send_tensor = _build_tensor(rank + 1)
                 recv_tensor = _build_tensor(src + 1, value=-1)
-                recv_op = dist._P2POp(dist.irecv, recv_tensor, src, tag=src)
+                recv_op = dist.P2POp(dist.irecv, recv_tensor, src, tag=src)
                 p2p_op_list.append(recv_op)
-                send_op = dist._P2POp(dist.isend, send_tensor, src, tag=rank)
+                send_op = dist.P2POp(dist.isend, send_tensor, src, tag=rank)
                 p2p_op_list.append(send_op)
 
-            reqs = dist._batch_isend_irecv(p2p_op_list)
+            reqs = dist.batch_isend_irecv(p2p_op_list)
             for req in reqs:
                 req.wait()
 
             self._barrier()
 
         # NCCL Batch SEND RECV Tensor Error
-        @unittest.skip("NCCL P2P is not enabled for OSS builds")
         @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_tensor_err(self):
@@ -734,12 +732,11 @@ class DistributedTest:
                     RuntimeError, "Tensors must be CUDA and dense"
                 ):
                     send_tensor = _build_tensor(rank + 1)
-                    send_op = dist._P2POp(dist.isend, send_tensor, 1)
-                    req = dist._batch_isend_irecv([send_op])
+                    send_op = dist.P2POp(dist.isend, send_tensor, 1)
+                    req = dist.batch_isend_irecv([send_op])
                     req.wait()
 
         # NCCL Batch SEND RECV Op Error
-        @unittest.skip("NCCL P2P is not enabled for OSS builds")
         @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_op_err(self):
@@ -752,12 +749,11 @@ class DistributedTest:
                     RuntimeError, "^Invalid ``op``"
                 ):
                     send_tensor = _build_tensor(rank + 1, device_id=device_id)
-                    send_op = dist._P2POp(dist.broadcast, send_tensor, 1)
-                    req = dist._batch_isend_irecv([send_op])
+                    send_op = dist.P2POp(dist.broadcast, send_tensor, 1)
+                    req = dist.batch_isend_irecv([send_op])
                     req.wait()
 
         # NCCL Batch SEND RECV p2p_op_list Error
-        @unittest.skip("NCCL P2P is not enabled for OSS builds")
         @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_op_list_err(self):
@@ -770,11 +766,10 @@ class DistributedTest:
                     RuntimeError, "^Invalid ``p2p_op_list``"
                 ):
                     send_tensor = _build_tensor(rank + 1)
-                    req = dist._batch_isend_irecv([1, 2])
+                    req = dist.batch_isend_irecv([1, 2])
                     req.wait()
 
         # NCCL Batch SEND RECV Mixed Backend Error
-        @unittest.skip("NCCL P2P is not enabled for OSS builds")
         @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
         def test_batch_isend_irecv_mixed_backend_err(self):
@@ -789,13 +784,12 @@ class DistributedTest:
                     RuntimeError, "All groups need to use the same backend"
                 ):
                     send_tensor = _build_tensor(rank + 1)
-                    send_op_gloo = dist._P2POp(dist.isend, send_tensor, 1, group_gloo)
-                    send_op_nccl = dist._P2POp(dist.isend, send_tensor, 1, group_nccl)
-                    req = dist._batch_isend_irecv([send_op_gloo, send_op_nccl])
+                    send_op_gloo = dist.P2POp(dist.isend, send_tensor, 1, group_gloo)
+                    send_op_nccl = dist.P2POp(dist.isend, send_tensor, 1, group_nccl)
+                    req = dist.batch_isend_irecv([send_op_gloo, send_op_nccl])
                     req.wait()
 
         # NCCL SEND RECV
-        @unittest.skip("NCCL P2P is not enabled for OSS builds")
         @skip_if_no_gpu
         @unittest.skipIf(BACKEND != "nccl", "NCCL Send Recv Only")
         @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
