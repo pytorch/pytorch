@@ -1431,6 +1431,30 @@ class DistributedTest:
         def test_sparse_all_reduce_sum_cuda(self):
             self._test_sparse_all_reduce_sum(lambda t: t.clone().cuda())
 
+        def test_strip_prefix_if_present(self):
+            model = Net()
+            ddp_model = nn.parallel.DistributedDataParallel(copy.deepcopy(model))
+
+            with tempfile.TemporaryFile() as tmp_file:
+                torch.save(ddp_model, tmp_file)
+                tmp_file.seek(0)
+                saved_model = torch.load(tmp_file)
+
+            state_dict = ddp_model.state_dict()
+
+            for k in list(state_dict.keys()):
+                v = state_dict[k]
+                if not isinstance(v, np.ndarray) and not isinstance(v, torch.Tensor):
+                    raise ValueError(
+                        "Unsupported type found in checkpoint! {}: {}".format(k, type(v))
+                    )
+                if not isinstance(v, torch.Tensor):
+                    state_dict[k] = torch.from_numpy(v)
+
+            nn.modules.module.strip_prefix_if_present(state_dict, "module.")
+            ddp_model.load_state_dict(state_dict)
+            self.assertFalse(isinstance(ddp_model, nn.parallel.DistributedDataParallel))
+
         # ALL REDUCE - COALESCED
         @staticmethod
         def _all_reduce_coalesced_sum_test_cases(group_size):

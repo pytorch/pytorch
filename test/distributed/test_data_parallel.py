@@ -805,6 +805,22 @@ class TestDataParallel(TestCase):
                 r"nn\.ParameterDict is being used with DataParallel but this"):
             model(input)
 
+    @unittest
+    def test_strip_prefix_if_present(self):
+        state_dict = nn.Module.model.state_dict()
+
+        for k in list(state_dict.keys()):
+            v = state_dict[k]
+            if not isinstance(v, np.ndarray) and not isinstance(v, torch.Tensor):
+                raise ValueError(
+                    "Unsupported type found in checkpoint! {}: {}".format(k, type(v))
+                )
+            if not isinstance(v, torch.Tensor):
+                state_dict[k] = torch.from_numpy(v)
+
+        nn.modules.module.strip_prefix_if_present(state_dict, "module.")
+        self.assertFalse("module." in state_dict)
+
 
 if __name__ == '__main__':
     run_tests()
