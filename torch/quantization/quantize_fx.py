@@ -72,6 +72,7 @@ def _prepare_standalone_module_fx(model, qconfig_dict, inplace=False):
                                    custom module is observed or not
 
     """
+    torch._C._log_api_usage_once("quantization_api.quantize_fx._prepare_standalone_module_fx")
     return _prepare_fx(model, qconfig_dict, inplace, is_standalone_module=True)
 
 
@@ -89,6 +90,7 @@ def fuse_fx(model, inplace=False):
     m = fuse_fx(m)
     ```
     """
+    torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
     assert not model.training, 'fuse_fx only works on models in eval mode'
     graph_module = torch.fx.symbolic_trace(model)
     return _fuse_fx(graph_module, inplace)
@@ -160,6 +162,7 @@ def prepare_fx(model, qconfig_dict, inplace=False):
     calibrate(prepared_model, sample_inference_data)
     ```
     """
+    torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_fx")
     assert not model.training, 'prepare_fx only works for models in' + \
         'eval mode'
     return _prepare_fx(model, qconfig_dict, inplace)
@@ -195,6 +198,7 @@ def prepare_qat_fx(model, qconfig_dict, inplace=False):
     train_loop(prepared_model, train_loop)
     ```
     """
+    torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_qat_fx")
     assert model.training, 'prepare_qat_fx only works for models in ' + \
         'train mode'
     return _prepare_fx(model, qconfig_dict, inplace)
@@ -222,6 +226,7 @@ def convert_fx(graph_module, inplace=False, debug=False):
     quantized_model = convert_fx(prepared_model)
     ```
     """
+    torch._C._log_api_usage_once("quantization_api.quantize_fx.convert_fx")
     return _convert_fx(graph_module, inplace, debug)
 
 def _convert_standalone_module_fx(graph_module, inplace=False, debug=False):
@@ -235,4 +240,5 @@ def _convert_standalone_module_fx(graph_module, inplace=False, debug=False):
       A quantized standalone module which accepts quantized input(if needed)
       and produces quantized output (if needed).
     """
+    torch._C._log_api_usage_once("quantization_api.quantize_fx._convert_standalone_module_fx")
     return _convert_fx(graph_module, inplace, debug, is_standalone_module=True)
