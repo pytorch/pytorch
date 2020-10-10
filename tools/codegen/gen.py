@@ -273,7 +273,7 @@ def compute_type_method(
             assert returns_type == dispatcher.returns_type(f.func.returns)
             dispatcher_args = dispatcher.arguments(f.func)
             dispatcher_args_types_str = ', '.join(map(lambda a: a.type, dispatcher_args))
-            if dispatch is None or dispatch == 'Math':
+            if dispatch is None or dispatch == 'Math' or dispatch == 'DefaultBackend':
                 type_name = f'TypeDefault::{name}'
             else:
                 type_name = f'{dispatch}Type::{name}'
@@ -1115,10 +1115,17 @@ def main() -> None:
             native_functions)) +
         list(mapMaybe(
             compute_type_method('Math', target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
+            native_functions)) +
+        list(mapMaybe(
+            compute_type_method('DefaultBackend', target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
             native_functions)),
 
         'function_registrations': list(mapMaybe(
             compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
+            native_functions)),
+
+        'default_backend_function_registrations': list(mapMaybe(
+            compute_type_method('DefaultBackend', target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
             native_functions)),
 
         'math_function_registrations': list(mapMaybe(
