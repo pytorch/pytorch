@@ -257,6 +257,11 @@ void revertRenamedExternalOutputForIfOp(
   }
 }
 
+inline bool isInplaceOp(const OperatorDef& op) {
+  return op.input().size() == 1 && op.output().size() == 1 &&
+      op.input(0) == op.output(0);
+}
+
 } // namespace
 
 ::ONNX_NAMESPACE::TensorProto::DataType Caffe2TypeToOnnxType(
@@ -305,7 +310,8 @@ void rewriteSubnet(
 
 std::unordered_map<std::string, std::string> SsaRewrite(
     caffe2::NetDef* init_net,
-    caffe2::NetDef* pred_net) {
+    caffe2::NetDef* pred_net,
+    bool allowInPlace) {
   std::unordered_map<std::string, std::string> input_mapping;
   std::unordered_map<std::string, int> blob_versions;
 
@@ -339,6 +345,17 @@ std::unordered_map<std::string, std::string> SsaRewrite(
       // may get modified inside ssaRewriteForIfOp
       if (op.type() == "If" || op.type() == "AsyncIf") {
         ssaRewriteForIfOp(&op, &blob_versions, &is_initialized_tensor);
+      }
+
+      if (allowInPlace && isInplaceOp(op)) {
+        auto& input = *op.mutable_input(0);
+        const auto it = blob_versions.find(input);
+        // Keep input/output the same for in-place ops
+        if (it != blob_versions.end()) {
+          input = SsaName(input, it->second);
+          *op.mutable_output(0) = input;
+        }
+        continue;
       }
 
       for (auto& input : *op.mutable_input()) {
