@@ -15,7 +15,7 @@ from torch.fx.proxy import TraceError
 
 from fx.quantization import Quantizer
 
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -32,6 +32,10 @@ class SimpleTest(torch.nn.Module):
 
 def a_non_torch_leaf(a, b):
     return a + b
+
+class Pair(NamedTuple):
+    x : torch.Tensor
+    y : torch.Tensor
 
 class TestFX(JitTestCase):
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
@@ -131,7 +135,8 @@ class TestFX(JitTestCase):
         # Custom delegate to disallow in-place tensor operations
         class NoMutableCallTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
-                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
+                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None,
+                            type_expr : Optional[Any] = None) -> Node:
                 name = target if isinstance(target, str) else torch.typename(target)
                 if name[-1] == '_':
                     raise RuntimeError('In-place operations are not supported')
@@ -448,7 +453,8 @@ class TestFX(JitTestCase):
     def test_node_tagging(self):
         class TaggingTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
-                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
+                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None,
+                            type_expr : Optional[Any] = None) -> Node:
                 n = super().create_node(kind, target, args, kwargs, name)
                 n.tag = 'foo'
                 return n
@@ -764,6 +770,26 @@ class TestFX(JitTestCase):
 
         # Test shape propogation and make sure results match actual
         self.assertEqual(output_shape, ref_out.shape)
+
+    def test_fn_type_annotations(self):
+        class Foo(torch.nn.Module):
+            def forward(self, p : Pair, z : torch.Tensor, i : int) -> Dict[str, torch.Tensor]:
+                return {'a': p.x + p.y + z + i}
+
+        foo_scripted = torch.jit.script(Foo())
+        foo_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
+
+        fxed = symbolic_trace(Foo())
+        fxed_scripted = torch.jit.script(fxed)
+        fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
+
+    def test_typename_print(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,),
+                                              type_expr=List[float])
+        output : torch.fx.Node = graph.output(b)
+        self.assertTrue('typing.List[float]' in str(graph))
 
     def test_find_single_partition(self):
         class testModule(torch.nn.Module):
