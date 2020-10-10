@@ -1065,6 +1065,21 @@ class TestTensorExprFuser(BaseTestClass):
         # FIXME: interp.elapsed_value() also increments due to simplifier
         assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
+    def test_half_gelu(self):
+        devices = ["cuda"] if torch.cuda.is_available() else []
+
+        @torch.jit.script
+        def bias_gelu(bias, y):
+            x = bias + y
+            return x * 0.5 * (1.0 + torch.erf(x / 1.41421))
+
+
+        for device in devices:
+            a = torch.rand(1024, dtype=torch.half, device=device)
+            b = torch.rand(1024, dtype=torch.half, device=device)
+            traced = torch.jit.trace(bias_gelu, (a, b))
+            x = traced(a, b)
+
     def test_transpose(self):
         @torch.jit.script
         def test(x, y, z):
