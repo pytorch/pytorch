@@ -9077,9 +9077,14 @@ class TestTorchDeviceType(TestCase):
         # non-contiguous [Reference: https://github.com/pytorch/pytorch/issues/45721]
         non_contig_t = torch.tensor([0, -1, 1, -2, 2], dtype=dtype, device=device)[::2]
         expected_val, expected_ind = non_contig_t.contiguous().kthvalue(2)
+        non_contig_cpu_t = non_contig_t.cpu()
+        expected_val_cpu, expected_ind_cpu = non_contig_cpu_t.kthvalue(2)
+
         out_val, out_ind = non_contig_t.kthvalue(2)
         self.assertEqual(expected_val, out_val, atol=0, rtol=0)
         self.assertEqual(expected_ind, out_ind, atol=0, rtol=0)
+        self.assertEqual(expected_val_cpu, out_val, atol=0, rtol=0)
+        self.assertEqual(expected_ind_cpu, out_ind, atol=0, rtol=0)
 
         # check that the input wasn't modified
         self.assertEqual(x, x0, atol=0, rtol=0)
