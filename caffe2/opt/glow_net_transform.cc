@@ -222,9 +222,6 @@ void onnxifi(
 
   OnnxifiTransformer ts(opts);
   ts.transform(ws, net, weight_names, more_shape_hints, more_blacklist);
-  if (FLAGS_onnxifi_debug_mode) {
-    WriteProtoToTextFile(*net, "debug_transformed_net.pb_txt");
-  }
 
   // Cleanup the input from the workspace
   for (const auto& i : input_names) {
