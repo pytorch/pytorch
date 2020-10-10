@@ -786,9 +786,9 @@ jobs:
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
             if [[ "${JOB_BASE_NAME}" == *-test3 ]]; then
-            .jenkins/caffe2/test.sh
-            fi
-            .jenkins/pytorch/win-test.sh
+              .jenkins/caffe2/test.sh
+            else
+              .jenkins/pytorch/win-test.sh
       - store_test_results:
           path: test/test-reports
   binary_linux_build:
