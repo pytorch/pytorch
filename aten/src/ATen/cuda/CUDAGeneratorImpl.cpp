@@ -266,6 +266,11 @@ uint64_t CUDAGeneratorImplDeviceState::philox_offset_per_thread() const {
 }
 
 philox_cuda_state_t CUDAGeneratorImplDeviceState::philox_cuda_state(uint64_t increment) {
+  // Constraint:  The state update stream is supposed to handle a few small ops,
+  // and run ahead of the workhorse ambient_stream.
+  // Whatever we do to hand back a state safely MUST NOT sync state_update_stream
+  // on ambient_stream.
+  // (Syncing ambient_stream on state_update_stream is fine.)
   auto ambient_stream = at::cuda::getCurrentCUDAStream();
   // See Note: Device-side RNG state update ordering
   c10::OptionalStreamGuard stream_guard{state_update_stream_};
@@ -280,6 +285,9 @@ philox_cuda_state_t CUDAGeneratorImplDeviceState::philox_cuda_state(uint64_t inc
   auto frozen_offset = this->philox_offset_per_thread_.clone();
   this->philox_offset_per_thread_.add_(static_cast<int64_t>(increment));
 
+  // Allows safely handing frozen states back to ambient_stream.
+  // If cuda graphs doesn't like the resulting event queries,
+  // we may need a 2 stage copy to frozen dests allocated on ambient stream.
   c10::cuda::CUDACachingAllocator::recordStream(frozen_seed.storage().data_ptr(),
                                                 ambient_stream);
   c10::cuda::CUDACachingAllocator::recordStream(frozen_offset.storage().data_ptr(),
