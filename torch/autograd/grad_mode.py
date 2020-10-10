@@ -62,6 +62,8 @@ class no_grad(_DecoratorContextManager):
 
     Also functions as a decorator. (Make sure to instantiate with parenthesis.)
 
+    Additionally, consider using :meth:`~torch.nn.eval` when evaluating a model.
+
 
     Example::
 
