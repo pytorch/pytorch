@@ -198,6 +198,27 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
   DispatchKey::AutogradOther,
 });
 
+// backend dispatch keys that map to DispatchKey::AutogradOther
+constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
+  DispatchKey::HIP,
+  DispatchKey::FPGA,
+  DispatchKey::MSNPU,
+  DispatchKey::Vulkan,
+  DispatchKey::MKLDNN,
+  DispatchKey::OpenGL,
+  DispatchKey::OpenCL,
+  DispatchKey::IDEEP,
+  DispatchKey::QuantizedCPU,
+  DispatchKey::QuantizedCUDA,
+  DispatchKey::ComplexCPU,
+  DispatchKey::ComplexCUDA,
+  DispatchKey::CustomRNGKeyId,
+  DispatchKey::MkldnnCPU,
+  DispatchKey::SparseCPU,
+  DispatchKey::SparseCUDA,
+  DispatchKey::SparseHIP,
+});
+
 // Resolve alias dispatch key to DispatchKeySet if applicable
 C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
 

@@ -284,9 +284,13 @@
 - func: sgn(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    DefaultBackend: sgn
 
 - func: sgn_(Tensor(a!) self) -> Tensor(a!)
   variants: method
+  dispatch:
+    DefaultBackend: sgn_
 
 - func: sgn.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -911,6 +915,14 @@
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
+
+- func: tensor_split.sections(Tensor(a) self, int sections, int dim=0) -> Tensor(a)[]
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: tensor_split.indices(Tensor(a) self, int[] indices, int dim=0) -> Tensor(a)[]
+  use_c10_dispatcher: full
+  variants: function, method
 
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   use_c10_dispatcher: full
@@ -1981,6 +1993,16 @@
     CPU: layer_norm_backward_cpu
     CUDA: layer_norm_backward_cuda
 
+- func: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: nan_to_num_(Tensor(a!) self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: nan_to_num.out(Tensor self, float? nan=None, float? posinf=None, float? neginf=None, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
@@ -2289,16 +2311,47 @@
 
 - func: mean.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
+- func: median(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU: median_cpu
+    CUDA: median_cuda
+
 - func: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
   variants: function, method
 
 - func: median.dim_values(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  dispatch:
+    CPU: median_out_cpu
+    CUDA: median_out_cuda
 
 - func: median.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
 
 - func: median.names_dim_values(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+
+- func: nanmedian(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU: nanmedian_cpu
+    CUDA: nanmedian_cuda
+
+- func: nanmedian.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: nanmedian.dim_values(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  dispatch:
+    CPU: nanmedian_out_cpu
+    CUDA: nanmedian_out_cuda
+
+- func: nanmedian.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  variants: function, method
+
+- func: nanmedian.names_dim_values(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
 - func: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
@@ -6070,13 +6123,6 @@
   use_c10_dispatcher: full
   variants: method, function
 
-- func: median(Tensor self) -> Tensor
-  use_c10_dispatcher: full
-  variants: method, function
-  dispatch:
-    CPU: median_cpu
-    CUDA: median_cuda
-
 - func: quantile.scalar_out(Tensor self, float q, int? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: quantile.scalar(Tensor self, float q, int? dim=None, bool keepdim=False) -> Tensor
@@ -6960,7 +7006,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: leaky_relu
-    QuantizedCPU: heaky_relu_quantized_cpu
+    QuantizedCPU: leaky_relu_quantized_cpu
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, bool self_is_result) -> Tensor
   use_c10_dispatcher: full
@@ -8201,6 +8247,26 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: fft_fftfreq(int n, float d=1.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_rfftfreq(int n, float d=1.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_fftshift(Tensor self, int[1]? dim=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft_ifftshift(Tensor self, int[1]? dim=None) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
 - func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -8278,3 +8344,8 @@
   python_module: nn
   dispatch:
     CPU: _test_optional_floatlist
+
+# Note: this function is only for testing.
+- func: _test_string_default(Tensor dummy, str a="\"'\\", str b='"\'\\') -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
