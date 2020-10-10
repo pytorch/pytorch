@@ -350,7 +350,7 @@ AutogradCUDA: default_def_name_t_t [math kernel]
 AutogradXLA: fn_autograd [autograd kernel]
 ''')
 
-    def test_computed_table_with_cpu_catchall(self):
+    def test_computed_table_with_cpu_math_autogradcpu_fallthrough(self):
         global_m = C._dispatch_library("IMPL", "_", "AutogradCPU")
         result = self.commute("foo", [
             # m.def("foo", [](const Tensor & x) { return x })
@@ -473,41 +473,6 @@ AutogradXLA: impl_t_t [autograd kernel]
 
     # Now that catchAll maps to Math, registering to both catchAll and Math breaks commutativity.
     def test_computed_table_with_cpu_autograd_math(self):
-        result = self.commute("foo", [
-            # m.def("foo(Tensor x) -> Tensor")
-            lambda m: m.def_("foo(Tensor x) -> Tensor"),
-            # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
-            # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "Autograd", debug="fn_autograd"),
-            # m.impl("foo", torch::kMath, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "Math", debug="fn_math"),
-        ])
-        state, table = result.state, result.table
-        self.assertExpectedInline(state, '''\
-name: test::foo
-schema: test::foo(Tensor x) -> (Tensor)
-debug: registered at /dev/null:0
-alias analysis kind: FROM_SCHEMA
-CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-Autograd[alias]: fn_autograd :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-Math[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-''')
-
-        # computed dispatch table is too big, so we only check on a few entries we're interested in.
-        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
-
-        self.assertExpectedInline(extracted_table, '''\
-CPU: fn_cpu [kernel]
-CUDA: fn_math [math kernel]
-XLA: fn_math [math kernel]
-AutogradOther: fn_math [math kernel]
-AutogradCPU: fn_autograd [autograd kernel]
-AutogradCUDA: fn_math [math kernel]
-AutogradXLA: fn_math [math kernel]
-''')
-
-    def test_computed_table_with_cpu_autograd_catchall(self):
         result = self.commute("foo", [
             # m.def("foo", [](const Tensor & x) { return x })
             lambda m: m.def_name_t_t("foo"),
@@ -782,7 +747,7 @@ alias analysis kind: PURE_FUNCTION
         else:
             self.assertTrue(False)
 
-    def test_overwrite_catchall(self):
+    def test_overwrite_math(self):
         ops = [
             lambda m: m.impl_t_t("foo", debug="fn1"),
             lambda m: m.impl_t_t("foo", debug="fn2"),
