@@ -117,23 +117,4 @@ std::ostream& operator<<(std::ostream& str, DispatchKey rhs) {
   return str << toString(rhs);
 }
 
-DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
-  switch (t) {
-    case DispatchKey::CPU:
-      return DispatchKey::AutogradCPU;
-    case DispatchKey::CUDA:
-      return DispatchKey::AutogradCUDA;
-    case DispatchKey::XLA:
-      return DispatchKey::AutogradXLA;
-    case DispatchKey::PrivateUse1:
-      return DispatchKey::AutogradPrivateUse1;
-    case DispatchKey::PrivateUse2:
-      return DispatchKey::AutogradPrivateUse2;
-    case DispatchKey::PrivateUse3:
-      return DispatchKey::AutogradPrivateUse3;
-    default:
-      return DispatchKey::AutogradOther;
-  }
-}
-
 } // namespace c10
