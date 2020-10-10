@@ -400,7 +400,7 @@ class _ValgrindWrapper(object):
             self._supported_platform: bool = bindings.valgrind_supported_platform()
 
         self._commands_available: Dict[str, bool] = {}
-        if torch._C.valgrind_supported_platform():
+        if self._supported_platform:
             # Only bother checking on supported platforms.
             for cmd in ("valgrind", "callgrind_control", "callgrind_annotate"):
                 self._commands_available[cmd] = not subprocess.run(
@@ -417,7 +417,7 @@ class _ValgrindWrapper(object):
         self._baseline_cache: Dict[Tuple[int, int], Tuple[FunctionCounts, FunctionCounts]] = {}
 
     def _validate(self) -> None:
-        if not torch._C.valgrind_supported_platform():
+        if not self._supported_platform:
             raise OSError("Valgrind is not supported on this platform.")
 
         missing_cmds = [cmd for cmd, available in self._commands_available.items() if not available]
