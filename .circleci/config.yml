@@ -789,6 +789,7 @@ jobs:
               .jenkins/caffe2/test.sh
             else
               .jenkins/pytorch/win-test.sh
+            fi
       - store_test_results:
           path: test/test-reports
   binary_linux_build:
