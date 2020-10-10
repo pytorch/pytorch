@@ -1265,6 +1265,8 @@ class Module:
         mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
         etc.
 
+        Additionally, consider using :class:`~no_grad` when evaluating a model.
+
         Args:
             mode (bool): whether to set training mode (``True``) or evaluation
                          mode (``False``). Default: ``True``.
@@ -1286,6 +1288,8 @@ class Module:
         etc.
 
         This is equivalent with :meth:`self.train(False) <torch.nn.Module.train>`.
+
+        Additionally, consider using :class:`~no_grad` when evaluating a model.
 
         Returns:
             Module: self
