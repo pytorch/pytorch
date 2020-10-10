@@ -3368,7 +3368,7 @@ See :func:`torch.symeig`
 """)
 
 add_docstr_all('swapdim', r"""
-swapdim(source, destination) -> Tensor
+swapdim(dim1, dim2) -> Tensor
 
 See :func:`torch.swapdim`
 """)

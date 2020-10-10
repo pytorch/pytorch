@@ -5332,15 +5332,15 @@ Examples::
 """.format(**common_args))
 
 add_docstr(torch.swapdim, r"""
-swapdim(input, source, destination) -> Tensor
+swapdim(input, dim1, dim2) -> Tensor
 
-Swaps the dimension of :attr:`input` at the position in :attr:`source`
-to the position in :attr:`destination`.
+Swaps the dimension of :attr:`input` at the position in :attr:`dim1`
+to the position in :attr:`dim2`.
 
 Args:
     {input}
-    source (int): Original position of the dim to move
-    destination (int): Destination position
+    dim1 (int): Original position of the dim to move
+    dim2 (int): Destination position
 
 Examples::
 

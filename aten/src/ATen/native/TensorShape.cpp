@@ -1939,8 +1939,8 @@ Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
   return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
 }
 
-Tensor swapdim(const Tensor& self, int64_t src, int64_t dst) {
-  return self.transpose(src, dst);
+Tensor swapdim(const Tensor& self, int64_t dim1, int64_t dim2) {
+  return self.transpose(dim1, dim2);
 }
 
 }} // at::native
