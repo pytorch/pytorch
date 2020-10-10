@@ -1,0 +1,55 @@
+Metadata-Version: 2.1
+Name: numpy
+Version: 1.19.2
+Summary: NumPy is the fundamental package for array computing with Python.
+Home-page: https://www.numpy.org
+Author: Travis E. Oliphant et al.
+Maintainer: NumPy Developers
+Maintainer-email: numpy-discussion@python.org
+License: BSD
+Download-URL: https://pypi.python.org/pypi/numpy
+Project-URL: Bug Tracker, https://github.com/numpy/numpy/issues
+Project-URL: Documentation, https://numpy.org/doc/1.19
+Project-URL: Source Code, https://github.com/numpy/numpy
+Platform: Windows
+Platform: Linux
+Platform: Solaris
+Platform: Mac OS-X
+Platform: Unix
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Science/Research
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved
+Classifier: Programming Language :: C
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Programming Language :: Python :: Implementation :: CPython
+Classifier: Topic :: Software Development
+Classifier: Topic :: Scientific/Engineering
+Classifier: Operating System :: Microsoft :: Windows
+Classifier: Operating System :: POSIX
+Classifier: Operating System :: Unix
+Classifier: Operating System :: MacOS
+Requires-Python: >=3.6
+
+It provides:
+
+- a powerful N-dimensional array object
+- sophisticated (broadcasting) functions
+- tools for integrating C/C++ and Fortran code
+- useful linear algebra, Fourier transform, and random number capabilities
+- and much more
+
+Besides its obvious scientific uses, NumPy can also be used as an efficient
+multi-dimensional container of generic data. Arbitrary data-types can be
+defined. This allows NumPy to seamlessly and speedily integrate with a wide
+variety of databases.
+
+All NumPy wheels distributed on PyPI are BSD licensed.
+
+
+
