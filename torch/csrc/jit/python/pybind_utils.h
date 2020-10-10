@@ -936,6 +936,11 @@ inline py::object toPyObject(IValue ivalue) {
       return py::cast(Module(obj));
     }
 
+    auto pyCu = get_python_cu();
+    if (obj->name().find("__torch__.torch.classes") == 0) {
+      return py::cast(Object(obj));
+    }
+
     return py::module::import("torch.jit._recursive")
         .attr("wrap_cpp_class")(py::cast(Object(obj)));
   } else if (ivalue.isPyObject()) {
