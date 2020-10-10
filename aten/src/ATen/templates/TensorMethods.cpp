@@ -166,9 +166,11 @@ bool is_quantized(Tensor self) {
   TORCH_API T* Tensor::data_ptr() const {           \
     TORCH_CHECK(                                 \
         scalar_type() == ScalarType::name,       \
-        "expected scalar type ",                 \
-        #name,                                   \
-        " but found ",                           \
+        "Input and parameter tensors are not ",  \
+        "the same dtype, found input tensor ",   \
+        "with ",                                 \
+        #name                                    \
+        " and parameter tensor with ",           \
         c10::toString(scalar_type()));           \
     return static_cast<T*>(this->unsafeGetTensorImpl()->data());    \
   }
