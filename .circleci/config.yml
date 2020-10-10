@@ -785,6 +785,9 @@ jobs:
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
+            if [[ ${BUILD_ENVIRONMENT} == *"test3"* ]]; then
+            .jenkins/caffe2/test.sh
+            fi
             .jenkins/pytorch/win-test.sh
       - store_test_results:
           path: test/test-reports
@@ -7401,6 +7404,24 @@ workflows:
           requires:
             - pytorch_windows_vs2019_py36_cuda10.1_build
           test_name: pytorch-windows-test1
+          use_cuda: "0"
+          vc_product: Community
+          vc_version: ""
+          vc_year: "2019"
+      - pytorch_windows_test:
+          build_environment: pytorch-win-vs2019-cpu-py3
+          cuda_version: cpu
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          name: pytorch_windows_vs2019_py36_cpu_test3
+          python_version: "3.6"
+          requires:
+            - pytorch_windows_vs2019_py36_cpu_build
+          test_name: pytorch-windows-test3
           use_cuda: "0"
           vc_product: Community
           vc_version: ""
