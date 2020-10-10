@@ -23,7 +23,6 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 , dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
 , manuallyBoxedKernel_()
 , kernels_()
-, catchAllKernel_()
 , cpp_signature_()
 , is_observed_(ObservedOperators::isObserved(name_))
 {
@@ -54,11 +53,6 @@ void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug)
       if (j->inferred_function_schema != nullptr) {
         checkSchema(name_, schema, debug, *j->inferred_function_schema, j->debug);
       }
-    }
-  }
-  for (auto j = catchAllKernel_.begin(); j != catchAllKernel_.end(); ++j) {
-    if (j->inferred_function_schema != nullptr) {
-      checkSchema(name_, schema, debug, *j->inferred_function_schema, j->debug);
     }
   }
   // NB: don't register schema until after we've checked everything!
@@ -191,18 +185,10 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //          cause confusion for AutogradOther. It's pretty straightforward to use Autograd (if available)
   //          in this case.
   //    (2.3) Use kernel from DispatchKey::Autograd if available
-  //    (2.4) Special logic to handle catchAll for Autograd keys
-  //          For autograd backend keys, we use kernel from alias Math key (catchAll will be moved to Math)
-  //          if there's no direct registration to the backend key.
-  //          Tensor factory functions used to have no registration to Autograd key but only to catchAll.
-  //          In the past we directly call into backends(filled with catchAll) after BackendSelect.
-  //          Now that we first call Autograd backend keys after BackendSelect, we should fill those
-  //          with catchAll as well.
-  //    The implementation of (2.2) & (2.4) relies on the invariant that for a given backend,
+  //    The implementation of (2.2) relies on the invariant that for a given backend,
   //    `computeDispatchTableEntryWithDebug()` will be called for that backend's autograd key after the
   //    backend key. See Note [Refresh Runtime Autograd entries in dispatchTable_]
   //  (3) Use fallthrough kernel that are registered as fallback.
-  //  (4) Use catchAll kernel if available
   // Alias Key Precedence:
   //   DefaultBackend > Math > Autograd
   // Note [DefaultBackend and Math]
@@ -210,8 +196,6 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //   and Autograd kernels will be picked up and Math is overriden.
   //   This is fine and in practice DefaultBackend and Math shouldn't co-exist for an op.
   // TODO: Update alias key precedence after we add new alias keys AutogradDispatchCPUOrCUDA .
-  // TODO: we can remove (2.4) and (4) after TypeDefault registrations are moved from catchAll to Math
-  //       so that Math can populate to Autograd backend keys before fallback kernels.
 
   // 1. Operator registration
   if (auto direct_registration = getKernelForDispatchKey(dispatch_key)) {
@@ -251,29 +235,11 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
     }
   }
 
-  // 2.4. For autograd backend keys, we use kernel from catchAll if there's no direct
-  //      registration to the backend key or DefaultBackend. Once CatchAll is moved to Math, this should
-  //      fit 2.1 and we can remove 2.3 entirely.
-  if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)
-      && !has_backend_kernel && !catchAllKernel_.empty()) {
-    TORCH_INTERNAL_ASSERT(catchAllKernel_.front().kernel.isValid());
-    // Prepare for catchAll removal, make sure it's not used in dispatchTable
-    TORCH_INTERNAL_ASSERT(false);
-    return {catchAllKernel_.front(), "catch all"};
-  }
-
   // 3. Backend fallback
   if (dispatcher.backendFallbackKernels_[dispatch_ix].kernel.isValid()) {
     return {dispatcher.backendFallbackKernels_[dispatch_ix], "backend fallback"};
 
-  // 4. Catch all
-  } else if (!catchAllKernel_.empty()) {
-    TORCH_INTERNAL_ASSERT(catchAllKernel_.front().kernel.isValid());
-    // Prepare for catchAll removal, make sure it's not used in dispatchTable
-    TORCH_INTERNAL_ASSERT(false);
-    return {catchAllKernel_.front(), "catch all"};
-
-  // 5. Default to error
+  // 4. Default to error
   } else {
     return {missingKernel_, "missing"};
   }
@@ -327,10 +293,6 @@ void OperatorEntry::setManuallyBoxedKernel_(const c10::Dispatcher& dispatcher, K
       k.kernel.setManuallyBoxedKernel_(func);
     }
   }
-  for (auto& k : catchAllKernel_) {
-    k.kernel.setManuallyBoxedKernel_(func);
-  }
-
   // Refresh entries in dispatchTable_
   updateDispatchTableFull_(dispatcher);
 }
@@ -449,7 +411,6 @@ std::string OperatorEntry::dumpState() const {
       print_kernel(toString(k), it->second, c10::isAliasDispatchKey(k));
     }
   }
-  print_kernel("catchall", catchAllKernel_);
   return oss.str();
 }
 
