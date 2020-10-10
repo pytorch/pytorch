@@ -85,12 +85,13 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t>> inferExpandGeometry(
       expandedSizes, expandedStrides);
 }
 
-// This function returns a dense and non-overlapping strides based on the shape of input
-// tensor. The returned strides also keeps the same memory layout as the input tensor.
-// If the input tensor is a dense and non-overlapping tensor, the returned strides will
+// This function returns a dense and non-overlapping strides, which keeps the same memory
+// layout as the input tensor, based on the shape of input tensor.
+// If the input tensor is a dense and non-overlapping tensor, the output strides will
 // be the same as input tensor's strides. Otherwise, the input tensor's strides will be
-// sorted, a contiguous strides will be computed and returned based on the sorted input
-// tensor's strides and shape, so the input tensor's memory layout is also preserved.
+// sorted (see note inside the code), the output strides will be computed based on the
+// sorted input tensor's strides and shape, so the input tensor's memory layout is preserved
+// as well.
 std::vector<int64_t> infer_dense_strides(const Tensor& tensor) {
 
   // Note: numel() == 0 is also treated as contiguous which is in the scope of
@@ -109,19 +110,54 @@ std::vector<int64_t> infer_dense_strides(const Tensor& tensor) {
   // initialize perm with n-1, n-2, ..., 1, 0
   std::iota(perm.rbegin(), perm.rend(), 0);
 
-  // Stable sort indices in `perm` based on `ori_strides` and `ori_sizes` in ascending order.
-  // Note that stable sort is needed here to ensure we keep the original order when strides
-  // and sizes are both equal. eg. given size/stride (3,2,2,3)/(4,3,3,4), the output strides
-  // should be garanteed to (12, 2, 1, 4), no (12, 1, 2, 4) occurs.
-  std::stable_sort(perm.begin(), perm.end(), [&](size_t dim0, size_t dim1) {
-    // smaller size goes inner dimension when strides are the same
-    if (ori_strides[dim0] == ori_strides[dim1]) {
-      return ori_sizes[dim0] > ori_sizes[dim1];
-    }
-    return ori_strides[dim0] < ori_strides[dim1];
-  });
+  // The following sorting algorithm has exactly the same behavior as TensorIterator
+  // This is to make sure we have the same stride propagation everywhere.
 
-  // get dense strides with preserved memory layout
+  // return -1 if dim0 should come before dim1
+  // return  1 if dim0 should come after dim1
+  // return  0 if comparison is ambiguous
+  auto should_swap = [&](size_t dim0, size_t dim1) {
+    int64_t stride0 = ori_strides[dim0];
+    int64_t stride1 = ori_strides[dim1];
+
+    // if any stride is 0, treat it as ambiguous comparison to
+    // keep the same behavior as TensorIterator
+    if (stride0 == 0 || stride1 == 0) {
+      return 0;
+    }
+
+    if (stride0 < stride1) {
+      return -1;
+    }
+    if (stride0 > stride1) {
+      return 1;
+    }
+    // for equal strides, the dimension with smaller size goes front
+    if (ori_sizes[dim0] > ori_sizes[dim1]) {
+      return 1;
+    }
+    return 0;
+  };
+
+  // Insertion sort (stable) indices in `perm` based on input tensor's stride and shape,
+  // all dimensions with 0 stride won't move. This is the same behavior as TensorIterator.
+  // eg. Given tensor with size/stride (6, 5, 4, 3, 2)/(6, 0, 120, 0, 1), the initial `perm`
+  //     is (4, 3, 2, 1, 0) and the sorted `perm` will be (4, 3, 0, 1, 2)
+  for (int i = 1; i < ndim; ++i) {
+    int dim1 = i;
+    for (int dim0 = i - 1; dim0 >= 0; --dim0) {
+      int comparison = should_swap(perm[dim0], perm[dim1]);
+      if (comparison > 0) {
+        std::swap(perm[dim0], perm[dim1]);
+        dim1 = dim0;
+      }
+      else if (comparison < 0) {
+        break;
+      }
+    }
+  }
+
+  // compute output strides which preserves the input tensor's memory layout
   std::vector<int64_t> out_strides(ndim);
   int64_t curr_stride = 1;
   for (size_t i = 0; i < ndim; ++i) {

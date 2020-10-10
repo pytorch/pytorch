@@ -1102,7 +1102,7 @@ class AbstractTestCases:
         def test_topk_arguments(self):
             q = torch.randn(10, 2, 10)
             # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
-            self.assertRaises(TypeError, lambda: q.topk(4, True))        
+            self.assertRaises(TypeError, lambda: q.topk(4, True))
 
         def test_mode(self):
             x = torch.arange(1., SIZE * SIZE + 1).clone().resize_(SIZE, SIZE)
@@ -4551,6 +4551,42 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 model.weight.data = weight
                 out = model(input)
 
+        # Test like (use empty_like) function against tensoriterator based unary operator (exp) to
+        # make sure the returned tensor from like function follows the same stride propergation
+        # rule as what tensoriterator does for unary operator. The like function's  output strides
+        # is computed on CPU side always, no need to test GPU here.
+        def test_like_fn_stride_proparation_vs_tensoriterator_unary_op(self):
+            def compare_helper_(t):
+                te = torch.exp(t)
+                tl = torch.empty_like(t)
+                self.assertEqual(te.stride(), tl.stride())
+                self.assertEqual(te.size(), tl.size())
+
+            # dense non-overlapping tensor,
+            # non-dense non-overlapping sliced tensor
+            # non-dense non-overlapping gapped tensor
+            # non-dense non-overlapping 0 strided tensor
+            # non-dense overlapping general tensor
+            # non-dense overlapping sliced tensor
+            # non-dense overlapping gapped tensor
+            # non-dense overlapping 0 strided tensor
+            # non-dense overlapping equal strides
+            tset = (
+                torch.randn(4, 3, 2),
+                torch.randn(4, 3, 2)[:, :, ::2],
+                torch.empty_strided((4, 3, 2), (10, 3, 1)).fill_(1.0),
+                torch.empty_strided((4, 3, 2), (10, 0, 3)).fill_(1.0),
+                torch.empty_strided((4, 3, 2), (10, 1, 2)).fill_(1.0),
+                torch.empty_strided((4, 3, 2), (4, 2, 1))[:, :, ::2].fill_(1.0),
+                torch.empty_strided((4, 3, 2), (10, 1, 1)).fill_(1.0),
+                torch.empty_strided((4, 1, 1, 2), (10, 0, 0, 2)).fill_(1.0),
+                torch.empty_strided((4, 2, 3), (10, 3, 3)).fill_(1.0))
+
+            for t in tset:
+                for p in permutations(range(t.dim())):
+                    tp = t.permute(p)
+                    compare_helper_(tp)
+
 
 # Functions to test negative dimension wrapping
 METHOD = 1
@@ -6377,7 +6413,7 @@ class TestTorchDeviceType(TestCase):
     # Tests clamp and its alias, clip
     @dtypes(torch.int64, torch.float32)
     def test_clamp(self, device, dtype):
-        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_, 
+        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_,
                    torch.clip, torch.Tensor.clip, torch.Tensor.clip_)
 
         # min/max argument product
@@ -6405,7 +6441,7 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(Y_expected, Y_out)
 
     def test_clamp_propagates_nans(self, device):
-        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_, 
+        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_,
                    torch.clip, torch.Tensor.clip, torch.Tensor.clip_)
 
         # min/max argument product
@@ -6416,9 +6452,9 @@ class TestTorchDeviceType(TestCase):
                 if min_val is None and max_val is None:
                     continue
 
-                X, Y_expected = self.generate_clamp_baseline(device, torch.float, 
-                                                             min_vals=min_val, 
-                                                             max_vals=max_val, 
+                X, Y_expected = self.generate_clamp_baseline(device, torch.float,
+                                                             min_vals=min_val,
+                                                             max_vals=max_val,
                                                              with_nans=True)
                 Y_expected = torch.isnan(Y_expected)
 
