@@ -5331,6 +5331,40 @@ Examples::
             [[-0.8437,  0.1727, -0.1398]]])
 """.format(**common_args))
 
+add_docstr(torch.swapdim, r"""
+swapdim(input, source, destination) -> Tensor
+
+Swaps the dimension of :attr:`input` at the position in :attr:`source`
+to the position in :attr:`destination`.
+
+Args:
+    {input}
+    source (int): Original position of the dim to move
+    destination (int): Destination position
+
+Examples::
+
+    >>> x = torch.tensor([[[0,1],[2,3]],[[4,5],[6,7]]])
+    >>> x
+    tensor([[[0, 1],
+            [2, 3]],
+
+            [[4, 5],
+            [6, 7]]])
+    >>> torch.swapdim(x, 0, 1)
+    tensor([[[0, 1],
+            [4, 5]],
+
+            [[2, 3],
+            [6, 7]]])
+    >>> torch.swapdim(x, 0, 2)
+    tensor([[[0, 4],
+            [2, 6]],
+
+            [[1, 5],
+            [3, 7]]])    
+""".format(**common_args))
+
 add_docstr(torch.narrow,
            r"""
 narrow(input, dim, start, length) -> Tensor

@@ -3367,6 +3367,12 @@ symeig(eigenvectors=False, upper=True) -> (Tensor, Tensor)
 See :func:`torch.symeig`
 """)
 
+add_docstr_all('swapdim', r"""
+swapdim(source, destination) -> Tensor
+
+See :func:`torch.swapdim`
+""")
+
 add_docstr_all('t',
                r"""
 t() -> Tensor
