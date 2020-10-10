@@ -499,6 +499,20 @@ PyObject *THPModule_allowTF32CuBLAS(PyObject *_unused, PyObject *noargs)
   else Py_RETURN_FALSE;
 }
 
+PyObject *THPModule_setStatefulCUDAOpStatesOnDevice(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "_set_stateful_cuda_op_states_on_device expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setStatefulCUDAOpStatesOnDevice(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_statefulCUDAOpStatesOnDevice(PyObject *_unused, PyObject *noargs)
+{
+  if (at::globalContext().statefulCUDAOpStatesOnDevice()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
+}
+
 PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
   THPUtils_assert(PyBool_Check(arg), "flush_denormal expects a bool, "
           "but got %s", THPUtils_typename(arg));
@@ -608,6 +622,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_deterministic", (PyCFunction)THPModule_setDeterministic, METH_O,  nullptr},
   {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS,     nullptr},
   {"_set_cublas_allow_tf32", (PyCFunction)THPModule_setAllowTF32CuBLAS, METH_O,  nullptr},
+  {"_get_stateful_cuda_op_states_on_device", THPModule_statefulCUDAOpStatesOnDevice, METH_NOARGS,     nullptr},
+  {"_set_stateful_cuda_op_states_on_device", (PyCFunction)THPModule_setStatefulCUDAOpStatesOnDevice, METH_O,  nullptr},
   {"_vmapmode_increment_nesting", THPModule_vmapmode_increment_nesting, METH_NOARGS, nullptr},
   {"_vmapmode_decrement_nesting", THPModule_vmapmode_decrement_nesting, METH_NOARGS, nullptr},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       nullptr},

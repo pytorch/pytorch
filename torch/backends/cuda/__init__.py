@@ -93,5 +93,16 @@ class cuBLASModule:
         return torch._C._set_cublas_allow_tf32(value)
 
 
+class statefulOpsModule:
+    def __getattr__(self, name):
+        assert name == "state_on_device", "Unknown attribute " + name
+        return torch._C._get_stateful_cuda_op_states_on_device()
+
+    def __setattr__(self, name, value):
+        assert name == "state_on_device", "Unknown attribute " + name
+        return torch._C._set_stateful_cuda_op_states_on_device(value)
+
+
 cufft_plan_cache = cuFFTPlanCacheManager()
 matmul = cuBLASModule()
+_stateful_ops = statefulOpsModule()

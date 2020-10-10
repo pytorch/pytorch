@@ -124,17 +124,6 @@ uint64_t CUDAGeneratorImpl::seed() {
   return random;
 }
 
-/*
- * Retrieve engine inputs on the host, regardless of whether
- * the derived instance is HostState or DeviceState.
- * If the instance is DeviceState, this WILL break Cuda graph capture.
- * Callers could should prefer philox_cuda_state() as shown in
- * CUDAGeneratorImpl.h.
- */
-std::pair<uint64_t, uint64_t> CUDAGeneratorImpl::philox_engine_inputs(uint64_t increment) {
-  return std::make_pair(current_seed(), philox_offset_per_thread());
-}
-
 /**
  * Public clone method implementation
  *
@@ -206,9 +195,19 @@ uint64_t CUDAGeneratorImplHostState::philox_offset_per_thread() const {
  * See Note [Acquire lock when using random generators]
  */
 philox_cuda_state_t CUDAGeneratorImplHostState::philox_cuda_state(uint64_t increment) {
+  // What's with all the "this->" explicitness?
+  // Virtual calls in methods should work without "this->".
   uint64_t offset = this->philox_offset_per_thread_;
   this->philox_offset_per_thread_ += increment;
   return philox_cuda_state_t{this->seed_, offset};
+}
+
+
+/**
+ * Temporary, allows incremental refactor of call sites to use philox_cuda_state.
+ */
+std::pair<uint64_t, uint64_t> CUDAGeneratorImplHostState::philox_engine_inputs(uint64_t increment) {
+  return this->philox_cuda_state(increment).to_kernel_arg().state_;
 }
 
 std::shared_ptr<CUDAGeneratorImplHostState> CUDAGeneratorImplHostState::clone() const {
@@ -277,9 +276,6 @@ philox_cuda_state_t CUDAGeneratorImplDeviceState::philox_cuda_state(uint64_t inc
   // (set_current_seed, set_philox_offset_per_thread, or philox_cuda_state)
   // it won't affect the values the current caller's kernels are using.
   // This is equivalent to returning CPU-side states by value.
-
-  // To discuss: what's with all the this-> here?  im imitating what i inherited but i don't
-  // know why they were there in the first place.
   auto frozen_seed = this->seed_.clone();
   auto frozen_offset = this->philox_offset_per_thread_.clone();
   this->philox_offset_per_thread_.add_(static_cast<int64_t>(increment));
@@ -295,6 +291,18 @@ philox_cuda_state_t CUDAGeneratorImplDeviceState::philox_cuda_state(uint64_t inc
   event.block(ambient_stream);
 
   return philox_cuda_state_t{std::move(frozen_seed), std::move(frozen_offset)};
+}
+
+/**
+ * Unlike the HostState version, this version throws an error, so if we requested
+ * DeviceState, it points out ops that need refactoring to use philox_cuda_state.
+ */
+std::pair<uint64_t, uint64_t> CUDAGeneratorImplDeviceState::philox_engine_inputs(uint64_t increment) {
+  TORCH_CHECK(false,
+              "An op called philox_engine_inputs, which is incompatible with maintaining "
+              "cuda rng states on the device.  The op should be refactored to use "
+              "philox_cuda_state instead.");
+  return std::pair<uint64_t, uint64_t>{};
 }
 
 std::shared_ptr<CUDAGeneratorImplDeviceState> CUDAGeneratorImplDeviceState::clone() const {
