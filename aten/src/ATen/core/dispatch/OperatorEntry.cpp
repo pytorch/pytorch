@@ -132,6 +132,7 @@ void OperatorEntry::deregisterKernel_(
   c10::optional<DispatchKey> dispatch_key,
   std::list<AnnotatedKernel>::iterator kernel
 ) {
+  // Redirect registrations to catchAll to Math.
   DispatchKey dk = dispatch_key.has_value() ? *dispatch_key : DispatchKey::Math;
   auto found = kernels_.find(dk);
   TORCH_INTERNAL_ASSERT(found != kernels_.end(), "Tried to deregister a kernel for dispatch key ", toString(dispatch_key), " but there are no kernels registered for this dispatch key. The operator is ", toString(name_));
@@ -256,6 +257,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)
       && !has_backend_kernel && !catchAllKernel_.empty()) {
     TORCH_INTERNAL_ASSERT(catchAllKernel_.front().kernel.isValid());
+    // Prepare for catchAll removal, make sure it's not used in dispatchTable
     TORCH_INTERNAL_ASSERT(false);
     return {catchAllKernel_.front(), "catch all"};
   }
@@ -267,6 +269,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // 4. Catch all
   } else if (!catchAllKernel_.empty()) {
     TORCH_INTERNAL_ASSERT(catchAllKernel_.front().kernel.isValid());
+    // Prepare for catchAll removal, make sure it's not used in dispatchTable
     TORCH_INTERNAL_ASSERT(false);
     return {catchAllKernel_.front(), "catch all"};
 
