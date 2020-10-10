@@ -1157,6 +1157,22 @@ class TestTensorExprFuser(BaseTestClass):
         self._test_softmax('cuda')
         assert cuda.elapsed_value() == 1
 
+    def test_half_gelu(self):
+        devices = ["cuda"] if torch.cuda.is_available() else []
+
+        @torch.jit.script
+        def bias_gelu(bias, y):
+            x = bias + y
+            return x * 0.5 * (1.0 + torch.erf(x / 1.41421))
+
+
+        for device in devices:
+            a = torch.rand(1024, dtype=torch.half, device=device)
+            b = torch.rand(1024, dtype=torch.half, device=device)
+            traced = torch.jit.trace(bias_gelu, (a, b))
+            x = warmup_and_run_forward(traced, a, b)
+            self.assertLastGraphAllFused()
+
     def test_transpose(self):
         @torch.jit.script
         def test(x, y, z):
