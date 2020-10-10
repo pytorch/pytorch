@@ -1887,6 +1887,23 @@ class AbstractTestCases:
         def test_gather(self):
             self._test_gather(self, lambda t: t)
 
+        @staticmethod
+        def _test_ravel(self, tensors, size, nc=False):
+            for src in tensors:
+                # Continuous Tensor -> View
+                flat = src.ravel()
+                self.assertEqual(flat.shape, torch.Size([size]))
+                self.assertEqual(src.view(-1), flat)
+                self.assertEqual(flat._base, src)
+
+                # Non-continuous Tensor -> Copy
+                if nc:
+                    nc_src = src.t()
+                    nc_flat = nc_src.ravel()
+                    self.assertEqual(nc_flat.shape, torch.Size([size]))
+                    self.assertEqual(nc_src.reshape(-1), nc_flat)
+                    self.assertTrue(nc_flat._base != nc_src)
+
         def test_ravel(self):
             # Test that flatten returns 1-dim tensor when given a 0-dim tensor
             zero_dim_tensor = torch.tensor(123)
@@ -1903,24 +1920,31 @@ class AbstractTestCases:
             self.assertEqual(flat0.shape, flat1.shape)
 
             # Test both float tensor and quantized tensor
+            tensors = [torch.randn(5, 5, 5, 5),
+                       torch._empty_affine_quantized([5, 5, 5, 5],
+                                                     scale=2,
+                                                     zero_point=3,
+                                                     dtype=torch.quint8)]
+            self._test_ravel(self, tensors, 625)
+
+            tensors = [torch.randn(0, 2, 3),
+                       torch.randn(3, 0, 2),
+                       torch._empty_affine_quantized([0, 2, 3],
+                                                     scale=2,
+                                                     zero_point=3,
+                                                     dtype=torch.quint8),
+                       torch._empty_affine_quantized([3, 0, 2],
+                                                     scale=2,
+                                                     zero_point=3,
+                                                     dtype=torch.quint8)]
+            self._test_ravel(self, tensors, 0)
+
             tensors = [torch.randn(5, 5),
                        torch._empty_affine_quantized([5, 5],
                                                      scale=2,
                                                      zero_point=3,
                                                      dtype=torch.quint8)]
-            for src in tensors:
-                # Continuous Tensor -> View
-                flat = src.ravel()
-                self.assertEqual(flat.shape, torch.Size([25]))
-                self.assertEqual(src.view(-1), flat.view(-1))
-                self.assertEqual(flat._base, src)
-
-                # Non-continuous Tensor -> Copy
-                nc_src = src.t()
-                nc_flat = nc_src.ravel()
-                self.assertEqual(nc_flat.shape, torch.Size([25]))
-                self.assertEqual(nc_src.reshape(-1), nc_flat.reshape(-1))
-                self.assertTrue(nc_flat._base != nc_src)
+            self._test_ravel(self, tensors, 25, True)
 
         @staticmethod
         def _test_scatter_add_mult_index_base(self, cast):
