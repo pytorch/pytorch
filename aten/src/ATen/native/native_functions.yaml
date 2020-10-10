@@ -5701,7 +5701,7 @@
 
 - func: swapdim(Tensor(a) self, int source, int destination) -> Tensor(a)
   use_c10_dispatcher: full
-  variants: function
+  variants: function, method
 
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
 
