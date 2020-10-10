@@ -1,9 +1,15 @@
 #pragma once
 
 #include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAEvent.h>
+#include <c10/core/StreamGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 
 namespace at {
 namespace cuda {
+
+c10::optional<c10::Stream> stateUpdateStream(DeviceIndex device_index);
+
 namespace philox {
 
 // We can't write a __device__ function in CUDAGeneratorImpl.h, because it's in ATen.
@@ -12,12 +18,13 @@ namespace philox {
 // Any cuda consumer can include this header.
 __device__ __forceinline__ std::pair<uint64_t, uint64_t> unpack(at::philox_kernelarg_t arg) {
   if (arg.has_device_ptrs_) {
-    return std::make_pair(*(arg.state_ptrs_.first), *(arg.state_ptrs_.second));
+    return std::make_pair(static_cast<uint64_t>(*(arg.state_ptrs_.first)),
+                          static_cast<uint64_t>(*(arg.state_ptrs_.second)));
   } else {
     return arg.state_;
   }
 }
 
-}
-}
-}
+} // namespace philox
+} // namespace cuda
+} // namespace at

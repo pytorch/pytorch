@@ -6,7 +6,7 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/cuda/PhiloxUtils.cuh>
+#include <ATen/cuda/StatefulCUDAOpsUtils.cuh>
 
 #include <THC/THCReduceApplyUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
@@ -114,7 +114,7 @@ __device__ int binarySearchForMultinomial(scalar_t* cumdist,
 
 template <typename scalar_t>
 __global__ void
-sampleMultinomialWithReplacement(philox_kernelarg_t state,
+sampleMultinomialWithReplacement(philox_kernelarg_t philox_args,
                                  int totalSamples,
                                  int64_t* dest,
                                  int64_t distributions,
@@ -387,7 +387,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
 
         sampleMultinomialWithReplacement
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-            rng_engine_inputs.to_kernel_arg(),
+                rng_engine_inputs.to_kernel_arg(),
                 n_sample,
                 result.data_ptr<int64_t>(),
                 numDist, numCategories,

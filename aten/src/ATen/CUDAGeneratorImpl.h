@@ -1,18 +1,18 @@
 #pragma once
 
 #include <c10/core/GeneratorImpl.h>
-#include <c10/core/StreamGuard.h>
 #include <ATen/core/Generator.h>
+#include <ATen/Tensor.h>
+#include <ATen/Context.h>
 
 // TODO: this file should be in ATen/cuda, not top level
 // Should I move it to ATen/cuda as part of this PR?
-// Then I wouldn't need cuda/PhiloxUtils.cuh.
 
 namespace at {
 
 /*
 philox_kernelarg_t, philox_cuda_state_t, and unpack() in
-cuda/PhiloxUtils.cuh allow non-divergent use of
+cuda/StatefulCUDAOpsUtils.cuh allow non-divergent use of
 CUDAGeneratorImplHostState::philox_cuda_state() and
 CUDAGeneratorImplDeviceState::philox_cuda_state()
 in callers without synchronization.
@@ -43,9 +43,6 @@ host_caller(...) {
   // MUST REMAIN ALIVE on the host across the kernel launch.
   kernel<<<...>>>(..., rng_engine_inputs.to_kernel_arg());
 }
-
-We could rig implicit conversion constructors and type conversion operators
-as alternatives to to_kernel_args() and get().  But i like the explicitness.
 */
 
 struct philox_kernelarg_t {
@@ -53,16 +50,18 @@ struct philox_kernelarg_t {
     : has_device_ptrs_{false} {
     state_ = std::make_pair(seed, offset);
   }
-  philox_kernelarg_t(uint64_t* seed, uint64_t* offset)
+  philox_kernelarg_t(int64_t* seed, int64_t* offset)
     : has_device_ptrs_{true} {
     state_ptrs_ = std::make_pair(seed, offset);
   }
 
-  // Not private, directly accessible by at::cuda::philox::unpack.
+  // Public members, directly accessible by at::cuda::philox::unpack.
   // If we made them private with getters/setters, the getters/setters
   // would have to be __device__, and we can't do that in ATen.
   std::pair<uint64_t, uint64_t> state_;
-  std::pair<uint64_t*, uint64_t*> state_ptrs_;
+  // state_ptrs_, if present, are int64_t* (there's no such thing as
+  // uint64_t tensors).
+  std::pair<int64_t*, int64_t*> state_ptrs_;
   const bool has_device_ptrs_;
 };
 
@@ -76,10 +75,13 @@ struct philox_cuda_state_t {
     : has_device_tensors_{true} {
     state_tensors_ = std::make_pair(seed, offset);
   }
+
+  // We could rig an a conversion "operator philox_kernelarg_t()"
+  // instead of to_kernel_arg(). But i like the explicitness.
   philox_kernelarg_t to_kernel_arg() const {
     if (has_device_tensors_) {
-      return philox_kernelarg_t{state_tensors_.first.data_ptr<uint64_t>(),
-                                state_tensors_.second.data_ptr<uint64_t>()};
+      return philox_kernelarg_t{state_tensors_.first.data_ptr<int64_t>(),
+                                state_tensors_.second.data_ptr<int64_t>()};
     } else {
       return philox_kernelarg_t{state_.first, state_.second};
     }
@@ -96,6 +98,7 @@ struct philox_cuda_state_t {
 // Some callers cast to CUDAGeneratorImpl, so we need it as an interface.
 struct TORCH_CUDA_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
+  CUDAGeneratorImpl(DeviceIndex device_index = -1);
   virtual ~CUDAGeneratorImpl() = 0;
 
   // CUDAGeneratorImpl methods
@@ -119,7 +122,7 @@ struct TORCH_CUDA_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // Adds methods specific to the CUDAGeneratorImpl interface:
   virtual void set_philox_offset_per_thread(uint64_t offset) = 0;
   virtual uint64_t philox_offset_per_thread() const = 0;
-  virtual philox_cuda_state_t philox_cuda_state(uint64_t increment) const = 0;
+  virtual philox_cuda_state_t philox_cuda_state(uint64_t increment) = 0;
   virtual bool state_on_device() const = 0;
 };
 
@@ -134,7 +137,7 @@ struct TORCH_CUDA_API CUDAGeneratorImplHostState : public CUDAGeneratorImpl {
   uint64_t current_seed() const override;
   void set_philox_offset_per_thread(uint64_t offset) override;
   uint64_t philox_offset_per_thread() const override;
-  philox_cuda_state_t philox_cuda_state(uint64_t increment) const override;
+  philox_cuda_state_t philox_cuda_state(uint64_t increment) override;
   bool state_on_device() const override { return false; }
 
   std::shared_ptr<CUDAGeneratorImplHostState> clone() const;
@@ -156,7 +159,7 @@ struct TORCH_CUDA_API CUDAGeneratorImplDeviceState : public CUDAGeneratorImpl {
   uint64_t current_seed() const override;
   void set_philox_offset_per_thread(uint64_t offset) override;
   uint64_t philox_offset_per_thread() const override;
-  philox_cuda_state_t philox_cuda_state(uint64_t increment) const override;
+  philox_cuda_state_t philox_cuda_state(uint64_t increment) override;
   bool state_on_device() const override { return false; }
 
   std::shared_ptr<CUDAGeneratorImplDeviceState> clone() const;
@@ -165,7 +168,7 @@ struct TORCH_CUDA_API CUDAGeneratorImplDeviceState : public CUDAGeneratorImpl {
   CUDAGeneratorImplDeviceState* clone_impl() const override;
   Tensor seed_;
   Tensor philox_offset_per_thread_;
-  c10::optional<c10::Stream>& state_update_stream_;
+  c10::optional<c10::Stream> state_update_stream_;
 };
 
 

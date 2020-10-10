@@ -83,6 +83,14 @@ void Context::alertNotDeterministic(c10::string_view const& caller) {
   }
 }
 
+bool Context::statefulCUDAOpStatesOnDevice() const {
+  return stateful_cuda_op_state_on_device;
+}
+
+void Context::setStatefulCUDAOpStatesOnDevice(bool b) {
+  stateful_cuda_op_state_on_device = b;
+}
+
 bool Context::allowTF32CuDNN() const {
   return allow_tf32_cudnn;
 }

@@ -59,7 +59,13 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   if (device.type() == at::kCPU) {
     self->cdata = make_generator<CPUGeneratorImpl>();
   } else if (device.type() == at::kCUDA){
-    self->cdata = make_generator<CUDAGeneratorImpl>(device.index());
+    self->cdata = at::cuda::detail::createCUDAGenerator(device.index());
+    // or do we prefer:
+    // if (at::globalContext().statefulCUDAOpStatesOnDevice()) {
+    //   self->cdata = make_generator<CUDAGeneratorImplDeviceState>(device.index());
+    // } else {
+    //   self->cdata = make_generator<CUDAGeneratorImplHostState>(device.index());
+    // }
   } else {
     AT_ERROR("Device type ", c10::DeviceTypeName(device.type()),
              " is not supported for torch.Generator() api.");

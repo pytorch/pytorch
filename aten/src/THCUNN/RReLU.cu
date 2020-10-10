@@ -7,7 +7,7 @@
 #include <THC/THCApply.cuh>
 #include <THCUNN/common.h>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <ATen/cuda/PhiloxUtils.cuh>
+#include <ATen/cuda/StatefulCUDAOpsUtils.cuh>
 #include <curand.h>
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>

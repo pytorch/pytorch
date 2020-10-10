@@ -1,8 +1,17 @@
-#include <ATen/CUDAGeneratorImpl.h>
-#include <c10/cuda/CUDAFunctions.h>
 #include <ATen/Utils.h>
+#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/StatefulCUDAOpsUtils.cuh>
+#include <c10/core/StreamGuard.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAFunctions.h>
+
 
 namespace at {
+
+// forward-declares full
+namespace native {
+  Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions& options);
+}
 
 namespace cuda { namespace detail {
 
@@ -28,8 +37,6 @@ void initCUDAGenVector(){
   cuda_gens_init_flag.resize(num_gpus);
   default_gens_cuda.resize(num_gpus);
 }
-
-bool cuda_rng_state_on_device = false;
 } // anonymous namespace
 
 /**
@@ -48,14 +55,15 @@ const Generator& getDefaultCUDAGenerator(DeviceIndex device_index) {
   } else {
     TORCH_CHECK(idx >= 0 && idx < num_gpus);
   }
-  std::call_once(cuda_gens_init_flag[idx], [&] {
-    if (cuda_rng_state_on_device) {
-      default_gens_cuda[idx] = make_generator<CUDAGeneratorImplHostState>(idx);
-    } else {
-      default_gens_cuda[idx] = make_generator<CUDAGeneratorImplDeviceState>(idx);
-    }
-    default_gens_cuda[idx].seed();
-  });
+  std::call_once(cuda_gens_init_flag[idx],
+                 [&] {
+                   if (at::globalContext().statefulCUDAOpStatesOnDevice()) {
+                     default_gens_cuda[idx] = make_generator<CUDAGeneratorImplDeviceState>(idx);
+                   } else {
+                     default_gens_cuda[idx] = make_generator<CUDAGeneratorImplHostState>(idx);
+                   }
+                   default_gens_cuda[idx].seed();
+                 });
   return default_gens_cuda[idx];
 }
 
@@ -70,16 +78,19 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
   }
   TORCH_CHECK(idx >= 0 && idx < num_gpus, "The device_index is invalid.");
 
-  if (cuda_rng_state_on_device) {
-    auto gen = make_generator<CUDAGeneratorImplHostState>(idx);
-    auto cuda_gen = check_generator<CUDAGeneratorImplHostState>(gen);
-  } else {
+  if (at::globalContext().statefulCUDAOpStatesOnDevice()) {
     auto gen = make_generator<CUDAGeneratorImplDeviceState>(idx);
     auto cuda_gen = check_generator<CUDAGeneratorImplDeviceState>(gen);
+    cuda_gen->set_current_seed(default_rng_seed_val);
+    cuda_gen->set_philox_offset_per_thread(0);
+    return gen;
+  } else {
+    auto gen = make_generator<CUDAGeneratorImplHostState>(idx);
+    auto cuda_gen = check_generator<CUDAGeneratorImplHostState>(gen);
+    cuda_gen->set_current_seed(default_rng_seed_val);
+    cuda_gen->set_philox_offset_per_thread(0);
+    return gen;
   }
-  cuda_gen->set_current_seed(default_rng_seed_val);
-  cuda_gen->set_philox_offset_per_thread(0);
-  return gen;
 }
 
 } // namespace detail
@@ -90,11 +101,15 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
  */
 
 /**
- * CUDAGeneratorImplBase methods
+ * CUDAGeneratorImpl methods
  */
 
+CUDAGeneratorImpl::CUDAGeneratorImpl(DeviceIndex device_index)
+  : c10::GeneratorImpl{Device(DeviceType::CUDA, device_index),
+                       DispatchKeySet(c10::DispatchKey::CUDA)} {}
+
 // a pure virtual destructor must have a definition
-CUDAGeneratorImplBase::~CUDAGeneratorImplBase() {}
+CUDAGeneratorImpl::~CUDAGeneratorImpl() {}
 
 /**
  * Gets a nondeterministic random number from /dev/urandom or time,
@@ -103,7 +118,7 @@ CUDAGeneratorImplBase::~CUDAGeneratorImplBase() {}
  * FIXME: You can move this function to Generator.cpp if the algorithm
  * in getNonDeterministicRandom is unified for both CPU and CUDA
  */
-uint64_t CUDAGeneratorImplBase::seed() {
+uint64_t CUDAGeneratorImpl::seed() {
   auto random = c10::detail::getNonDeterministicRandom(true);
   this->set_current_seed(random);
   return random;
@@ -116,7 +131,7 @@ uint64_t CUDAGeneratorImplBase::seed() {
  * Callers could should prefer philox_cuda_state() as shown in
  * CUDAGeneratorImpl.h.
  */
-std::pair<uint64_t, uint64_t> CUDAGeneratorImplBase::philox_engine_inputs(uint64_t increment) {
+std::pair<uint64_t, uint64_t> CUDAGeneratorImpl::philox_engine_inputs(uint64_t increment) {
   return std::make_pair(current_seed(), philox_offset_per_thread());
 }
 
@@ -126,7 +141,9 @@ std::pair<uint64_t, uint64_t> CUDAGeneratorImplBase::philox_engine_inputs(uint64
  * See Note [Acquire lock when using random generators]
  */
 std::shared_ptr<CUDAGeneratorImpl> CUDAGeneratorImpl::clone() const {
-  return std::shared_ptr<CUDAGeneratorImpl>(this->clone_impl());
+  // The concrete type will always be CUDAGeneratorImplDeviceState or
+  // CUDAGeneratorImplHostState, so safe to cast
+  return std::shared_ptr<CUDAGeneratorImpl>(static_cast<CUDAGeneratorImpl*>(this->clone_impl()));
 }
 
 /**
@@ -134,8 +151,7 @@ std::shared_ptr<CUDAGeneratorImpl> CUDAGeneratorImpl::clone() const {
  */
 
 CUDAGeneratorImplHostState::CUDAGeneratorImplHostState(DeviceIndex device_index)
-  : c10::GeneratorImpl{Device(DeviceType::CUDA, device_index),
-                       DispatchKeySet(c10::DispatchKey::CUDA)} {}
+  : CUDAGeneratorImpl(device_index) {}
 
 /**
  * Sets the seed to be used by curandStatePhilox4_32_10
@@ -167,7 +183,7 @@ void CUDAGeneratorImplHostState::set_philox_offset_per_thread(uint64_t offset) {
 /**
  * Gets the current philox_offset_per_thread_ of CUDAGeneratorImpl.
  */
-uint64_t CUDAGeneratorImplHostState::philox_offset_per_thread() {
+uint64_t CUDAGeneratorImplHostState::philox_offset_per_thread() const {
   return philox_offset_per_thread_;
 }
 
@@ -195,11 +211,11 @@ philox_cuda_state_t CUDAGeneratorImplHostState::philox_cuda_state(uint64_t incre
   return philox_cuda_state_t{this->seed_, offset};
 }
 
-std::shared_ptr<CUDAGeneratorImplHostState> clone() const {
+std::shared_ptr<CUDAGeneratorImplHostState> CUDAGeneratorImplHostState::clone() const {
   return std::shared_ptr<CUDAGeneratorImplHostState>(this->clone_impl());
 }
 
-CUDAGeneratorImplHostState* clone_impl() const override {
+CUDAGeneratorImplHostState* CUDAGeneratorImplHostState::clone_impl() const {
   auto gen = new CUDAGeneratorImplHostState(this->device().index());
   gen->set_current_seed(this->seed_);
   gen->set_philox_offset_per_thread(this->philox_offset_per_thread_);
@@ -209,22 +225,24 @@ CUDAGeneratorImplHostState* clone_impl() const override {
 /**
  * CUDAGeneratorImplDeviceState methods
  * See descriptions of corresponding HostState methods.
+ *
+ * Some casts back and forth between uint64_t and int64_t occur because there's
+ * no such thing as uint64_t tensors in pytorch, but I want DeviceState to match
+ * HostState's uint64_t interface.
  */
 
 CUDAGeneratorImplDeviceState::CUDAGeneratorImplDeviceState(DeviceIndex device_index)
-  : c10::GeneratorImpl{Device(DeviceType::CUDA, device_index),
-                       DispatchKeySet(c10::DispatchKey::CUDA)} {
-  state_update_stream_ = at::cuda::getStreamFromPool(/*isHighPriority=*/true,
-                                                     /*index=*/device_index);
+  : CUDAGeneratorImpl(device_index) {
+  state_update_stream_ = at::cuda::stateUpdateStream(device_index);
   c10::OptionalStreamGuard stream_guard{state_update_stream_};
   auto options = TensorOptions().device(at::kCUDA).dtype(at::kLong);
-  seed_ = at::native::full({1}, default_rng_seed_val, options);
+  seed_ = at::native::full({1}, static_cast<int64_t>(default_rng_seed_val), options);
   philox_offset_per_thread_ = at::native::full({1}, 0, options);
 }
 
 void CUDAGeneratorImplDeviceState::set_current_seed(uint64_t seed) {
   c10::OptionalStreamGuard stream_guard{state_update_stream_};
-  seed_.fill_(seed);
+  seed_.fill_(static_cast<int64_t>(seed));
   philox_offset_per_thread_.fill_(0);
 }
 
@@ -232,20 +250,20 @@ uint64_t CUDAGeneratorImplDeviceState::current_seed() const {
   // See Note: Device-side RNG state update ordering
   c10::OptionalStreamGuard stream_guard{state_update_stream_};
   // .item() syncs on the current stream.
-  return seed_.item().to<uint64_t>();
+  return static_cast<uint64_t>(seed_.item().to<int64_t>());
 }
 
 void CUDAGeneratorImplDeviceState::set_philox_offset_per_thread(uint64_t offset) {
   // See Note: Device-side RNG state update ordering
   c10::OptionalStreamGuard stream_guard{state_update_stream_};
-  philox_offset_per_thread_.fill_(offset);
+  philox_offset_per_thread_.fill_(static_cast<int64_t>(offset));
 }
 
-uint64_t CUDAGeneratorImplDeviceState::philox_offset_per_thread() {
+uint64_t CUDAGeneratorImplDeviceState::philox_offset_per_thread() const {
   // See Note: Device-side RNG state update ordering
   c10::OptionalStreamGuard stream_guard{state_update_stream_};
   // .item() syncs on the current stream.
-  return philox_offset_per_thread_.item().to<uint64_t>();
+  return static_cast<uint64_t>(philox_offset_per_thread_.item().to<int64_t>());
 }
 
 philox_cuda_state_t CUDAGeneratorImplDeviceState::philox_cuda_state(uint64_t increment) {
@@ -264,7 +282,7 @@ philox_cuda_state_t CUDAGeneratorImplDeviceState::philox_cuda_state(uint64_t inc
   // know why they were there in the first place.
   auto frozen_seed = this->seed_.clone();
   auto frozen_offset = this->philox_offset_per_thread_.clone();
-  this->philox_offset_per_thread_.add_(increment);
+  this->philox_offset_per_thread_.add_(static_cast<int64_t>(increment));
 
   c10::cuda::CUDACachingAllocator::recordStream(frozen_seed.storage().data_ptr(),
                                                 ambient_stream);
@@ -272,21 +290,21 @@ philox_cuda_state_t CUDAGeneratorImplDeviceState::philox_cuda_state(uint64_t inc
                                                 ambient_stream);
 
   // Makes ambient thread wait for its state copies.
-  auto event = c10::Event{c10::DeviceType::CUDA};
-  event.record(*state_update_stream_);
-  ambient_stream->wait(event);
+  at::cuda::CUDAEvent event;
+  event.record(c10::cuda::CUDAStream(*state_update_stream_));
+  event.block(ambient_stream);
 
   return philox_cuda_state_t{std::move(frozen_seed), std::move(frozen_offset)};
 }
 
-std::shared_ptr<CUDAGeneratorImplDeviceState> clone() const {
+std::shared_ptr<CUDAGeneratorImplDeviceState> CUDAGeneratorImplDeviceState::clone() const {
   return std::shared_ptr<CUDAGeneratorImplDeviceState>(this->clone_impl());
 }
 
-CUDAGeneratorImplDeviceState* clone_impl() const override {
+CUDAGeneratorImplDeviceState* CUDAGeneratorImplDeviceState::clone_impl() const {
   auto gen = new CUDAGeneratorImplDeviceState(this->device().index());
-  gen->set_current_seed(this->seed_);
-  gen->set_philox_offset_per_thread(this->philox_offset_per_thread_);
+  gen->set_current_seed(this->current_seed());
+  gen->set_philox_offset_per_thread(this->philox_offset_per_thread());
   return gen;
 }
 

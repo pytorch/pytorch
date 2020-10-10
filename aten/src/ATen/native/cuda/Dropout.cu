@@ -4,7 +4,7 @@
 #include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
-#include <ATen/cuda/PhiloxUtils.cuh>
+#include <ATen/cuda/StatefulCUDAOpsUtils.cuh>
 #include <c10/macros/Macros.h>
 #include <curand_kernel.h>
 
@@ -290,7 +290,8 @@ fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
                                                                                                                                  rng_engine_inputs.to_kernel_arg());
               break;
           default:
-              fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+              fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa,
+                                                                                                                                  rng_engine_inputs.to_kernel_arg());
         }
       }
      });

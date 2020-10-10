@@ -8,7 +8,7 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <ATen/cuda/PhiloxUtils.cuh>
+#include <ATen/cuda/StatefulCUDAOpsUtils.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/core/DistributionsHelper.h>
 

@@ -180,6 +180,22 @@ class CAFFE2_API Context {
   // https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
   void alertCuBLASConfigNotDeterministic();
 
+  // Note [CUDA Graph Safety] (experimental)
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // This flag enables easier experimentation with CUDA Graphs.
+  //
+  // Some operations, like CUDA RNG consumers (Dropout and Distributions) update
+  // some CPU-side state across calls by default.  CPU-side state updates are
+  // invisible to CUDA Graph capture.
+  //
+  // The following flag tells stateful CUDA ops to maintain and update
+  // cross-call states on the GPU instead, which CUDA graphs will capture.
+  //
+  // (In eager mode, maintaining states on the GPU may add modest latency,
+  // so it's off by default.)
+  bool statefulCUDAOpStatesOnDevice() const;
+  void setStatefulCUDAOpStatesOnDevice(bool);
+
   bool allowTF32CuDNN() const;
   void setAllowTF32CuDNN(bool);
   bool allowTF32CuBLAS() const;
@@ -212,6 +228,7 @@ class CAFFE2_API Context {
   bool deterministic_cudnn = false;
   bool _deterministic = false;
   bool benchmark_cudnn = false;
+  bool stateful_cuda_op_state_on_device = false;
   bool allow_tf32_cudnn = true;
   bool allow_tf32_cublas = true;
   bool enabled_mkldnn = true;
