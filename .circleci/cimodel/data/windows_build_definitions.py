@@ -131,6 +131,8 @@ WORKFLOW_DATA = [
     WindowsJob(None, _VC2019, CudaVersion(10, 1)),
     WindowsJob(1, _VC2019, CudaVersion(10, 1)),
     WindowsJob(2, _VC2019, CudaVersion(10, 1)),
+    # temp support caffe2 ops test
+    WindowsJob(3, _VC2019, CudaVersion(10, 1)),
     # VS2019 CUDA-11.0
     WindowsJob(None, _VC2019, CudaVersion(11, 0)),
     WindowsJob(1, _VC2019, CudaVersion(11, 0), master_only_pred=TruePred),
@@ -140,8 +142,6 @@ WORKFLOW_DATA = [
     WindowsJob(1, _VC2019, None, master_only_pred=TruePred),
     WindowsJob(2, _VC2019, None, master_only_pred=TruePred),
     WindowsJob(1, _VC2019, CudaVersion(10, 1), force_on_cpu=True, master_only_pred=TruePred),
-    # temp support caffe2 ops test
-    WindowsJob(3, _VC2019, None, master_only_pred=TruePred),
 ]
 
 
