@@ -424,8 +424,9 @@ std::tuple<Tensor,Tensor> _histogram_cuda_template_uniform_bins(
 
   if (density) { // Compute the density
     hist = hist.to(ScalarType::Double);
-    hist *= static_cast<double>(nbins) /
-        static_cast<double>(maxvalue - minvalue) / hist.sum();
+    double bin_volume =
+        static_cast<double>(max - min) / static_cast<double>(nbins);
+    hist /= bin_volume * hist.sum();
   }
 
   Tensor edges;

@@ -134,7 +134,8 @@ std::tuple<Tensor, Tensor> _histogram_cpu_template_uniform_bins(
 
   if (density) { // Compute the density
     hist = hist.to(ScalarType::Double);
-    hist *= nbins / (max - min) / hist.sum();
+    double bin_volume = static_cast<double>(max - min) / static_cast<double>(nbins);
+    hist /= bin_volume * hist.sum();
   }
 
   Tensor edges;
