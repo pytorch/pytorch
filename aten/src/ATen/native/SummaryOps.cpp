@@ -207,7 +207,10 @@ std::tuple<Tensor, Tensor> histogram(
     const Tensor& weights,
     bool density) {
 
-  TORCH_CHECK(bins.dim() == 1, "bins must be 1d, when a tensor");
+  TORCH_CHECK(
+      bins.dim() == 1,
+      "custom bin edges must be represented as a one dimensional tensor, but got a tensor with dimension ",
+      bins.dim());
 
   //Skip the input check for CUDA to avoid device synchronization.
   if (self.device().type() == kCPU) {

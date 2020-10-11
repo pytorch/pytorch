@@ -4258,7 +4258,8 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
             torch.histogram(torch.tensor([1], dtype=torch.float, device=device), bins=-1)
         # bins dimension mismatch
-        with self.assertRaisesRegex(RuntimeError, 'bins must be 1d, when a tensor'):
+        with self.assertRaisesRegex(RuntimeError, 'custom bin edges must be represented as a one dimensional tensor, '
+                                                  + 'but got a tensor with dimension 2'):
             torch.histogram(torch.tensor([1], dtype=torch.float, device=device),
                             bins=torch.tensor([[1, 2], [3, 4]], dtype=torch.float, device=device))
 
@@ -4396,7 +4397,7 @@ class TestTorchDeviceType(TestCase):
 
                 expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
                 test_against_np_custombins(expanded, torch.randn(101, device=device).sort()[0])
-            #Restore default dtype
+            # Restore default dtype
             torch.set_default_dtype(default_dtype)
 
     def test_bool_tensor_value_change(self, device):
