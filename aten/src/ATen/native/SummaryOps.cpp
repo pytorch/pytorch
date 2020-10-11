@@ -71,7 +71,7 @@ template <typename input_t, typename weights_t>
 std::tuple<Tensor, Tensor> _histogram_cpu_template_uniform_bins(
     const Tensor& self,
     int64_t nbins,
-    const Tensor& weights,
+    const Tensor& weights /* optional */,
     c10::optional<ArrayRef<double>> range,
     bool density) {
   // If range is not defined, compute min and max from the values in the Tensor.
@@ -167,7 +167,7 @@ std::tuple<Tensor,Tensor> _histogram_cpu_uniform_bins(
     const Tensor& self,
     int64_t nbins,
     c10::optional<ArrayRef<double>> range,
-    const Tensor& weights,
+    const Tensor& weights /* optional */,
     bool density) {
 
   // Weights having a different shape from input is not supported yet. TO DO:

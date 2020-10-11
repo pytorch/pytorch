@@ -493,7 +493,7 @@ std::tuple<Tensor,Tensor> _histogram_cuda_uniform_bins(
     const Tensor& self,
     int64_t nbins,
     c10::optional<ArrayRef<double>> range,
-    const Tensor& weights,
+    const Tensor& weights /* optional */,
     bool density) {
   // Weights having a different shape from input is not supported yet. TO DO:
   // Add support for weights broadcastable to input
