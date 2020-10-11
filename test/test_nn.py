@@ -529,12 +529,10 @@ class TestNN(NNTestCase):
         test_bwd.remove()
 
     def test_hook_cpp(self):
-        counter = [0]
         bn = nn.BatchNorm1d(5)
 
         def hook(module, grad_inputs, grad_outputs):
-            counter[0] += 1
-            self.assertEqual(len(grad_inputs), 3)
+            self.assertEqual(len(grad_inputs), 1)
             self.assertEqual(len(grad_outputs), 1)
             self.assertEqual(module, bn)
 
@@ -559,6 +557,108 @@ class TestNN(NNTestCase):
         with module.register_backward_hook(bw_fail2):
             with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
                 module(input).sum().backward()
+
+    def test_hook_requires_grad(self):
+        class MyModule(nn.Module):
+            def forward(mod, arg1, arg2, arg3):
+                self.assertTrue(arg1.requires_grad)
+                self.assertFalse(arg2.requires_grad)
+                self.assertTrue(arg3.requires_grad)
+                return arg1.sum() + arg2.sum() + arg3.sum()
+
+        inp = torch.rand(2, requires_grad=True)
+        mod = MyModule()
+
+        mod(inp, inp.detach(), inp)
+        # Ensure that requires grad is properly propagated
+        mod.register_backward_hook(lambda mod, gI, gO: None)
+        mod(inp, inp.detach(), inp)
+
+    def test_hook_extra_input(self):
+        class MyModule(nn.Module):
+            def forward(mod, non_tensor, tensor):
+                return tensor.clone(), non_tensor
+
+        inp = torch.rand(2, requires_grad=True)
+        mod = MyModule()
+
+        def hook(mod, grad_input, grad_output):
+            self.assertIsNone(grad_input[0])
+            self.assertIsInstance(grad_input[1], torch.Tensor)
+
+            self.assertIsInstance(grad_output[0], torch.Tensor)
+            self.assertIsNone(grad_output[1])
+
+        mod.register_backward_hook(hook)
+        out, _ = mod(True, inp)
+        out.sum().backward()
+
+    def test_hook_inplace(self):
+        class MyModule(nn.Module):
+            def forward(mod, inp, do_inplace):
+                if do_inplace:
+                    inp += 1
+                return inp.clone()
+
+        hook_called = [0]
+        def hook(mod, grad_input, grad_output):
+            hook_called[0] += 1
+
+        inp = torch.rand(10, requires_grad=True)
+        mod = MyModule()
+        mod.register_backward_hook(hook)
+
+        # No inplace should work
+        mod(inp, False).sum().backward()
+        self.assertEqual(hook_called[0], 1)
+
+        # Input inplace error should throw an error (warning during deprecation cycle)
+        with self.assertWarnsRegex(UserWarning, "BackwardHookFunctionBackward is a view "
+                                   "and is being modified inplace."):
+            mod(inp, True)
+
+        # Input inplace error should throw an error
+        with self.assertRaisesRegex(RuntimeError, "leaf variable has been moved into the graph interior"):
+            out = mod(inp, False)
+            inp += 1
+            out.sum().backward()
+
+        # Output inplace error should throw an error (warning during deprecation cycle)
+        with self.assertWarnsRegex(UserWarning, "BackwardHookFunctionBackward is a view "
+                                   "and is being modified inplace."):
+            # This error won't happen once the warning above is a proper error
+            with self.assertRaisesRegex(RuntimeError, "Module backward hook for grad input is called "
+                                        "before the grad output one"):
+                out = mod(inp, False)
+                out += 1
+                out.sum().backward()
+
+
+
+    def test_hook_backward_size(self):
+        # Make module with multiple operations in forward
+        # And different size for input and outputs
+        class MyModule(nn.Module):
+            def forward(self, arg1, arg2):
+                tmp = arg1.sum() * arg2
+                tmp = tmp + arg2.sum() * arg1.sum()
+                tmp = tmp.sum().view(1)
+                tmp = tmp.expand(8).contiguous()
+                return tmp
+
+        module = MyModule()
+        inp1 = torch.randn(5, 5, requires_grad=True)
+        inp2 = torch.randn(10, 10, requires_grad=True)
+
+        def bw_hook(module, grad_input, grad_output):
+            self.assertEqual(len(grad_input), 2)
+            self.assertEqual(grad_input[0].size(), torch.Size([5, 5]))
+            self.assertEqual(grad_input[1].size(), torch.Size([10, 10]))
+            self.assertEqual(len(grad_output), 1)
+            self.assertEqual(grad_output[0].size(), torch.Size([8]))
+
+        with module.register_backward_hook(bw_hook):
+            module(inp1, inp2).sum().backward()
 
     def test_hook_backward_writeable(self):
         module = nn.Sigmoid()
@@ -792,25 +892,6 @@ class TestNN(NNTestCase):
         self.assertEqual(
             names(s.named_buffers()),
             ['0.dummy_buf', '0.l1.layer_dummy_buf'])
-
-    def test_call_supports_python_dict_output(self):
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.l1 = nn.Linear(10, 20)
-                self.register_backward_hook(self.hook)
-                self.check_backward_hook_flag = False
-
-            def hook(self, module, grad_out, grad_in):
-                self.check_backward_hook_flag = True
-
-            def forward(self, inputs):
-                return {"output": self.l1(inputs).sum()}
-
-        net = Net()
-        model_output = net(torch.randn([5, 10]))
-        model_output["output"].backward()
-        self.assertTrue(net.check_backward_hook_flag)
 
     def test_children(self):
         l1 = nn.Linear(2, 2)
@@ -13365,7 +13446,7 @@ class TestModuleGlobalHooks(TestCase):
     def test_module_backward_global_hook_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
-        sig_x = torch.nn.functional.sigmoid(input)
+        sig_x = torch.sigmoid(input)
 
         def bw_hook(module, grad_input, grad_output):
             for grad in grad_input:
@@ -13382,7 +13463,7 @@ class TestModuleGlobalHooks(TestCase):
     def test_module_global_forward_preforward_hook_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
-        sig_x = torch.nn.functional.sigmoid(input)
+        sig_x = torch.sigmoid(input)
 
         def forward_pre_hook(m, input):
             return torch.nn.functional.relu(input[0])
@@ -13393,7 +13474,7 @@ class TestModuleGlobalHooks(TestCase):
         nn.modules.module.register_module_forward_pre_hook(forward_pre_hook)
         nn.modules.module.register_module_forward_hook(forward_hook)
         output = module(input)
-        expected_res = -torch.nn.functional.sigmoid(torch.nn.functional.relu(input))
+        expected_res = -torch.sigmoid(torch.nn.functional.relu(input))
         self.assertEqual(output, expected_res)
         output.backward(torch.ones(5, 5) * 2, retain_graph=True)
         mask = (input > 0).double()

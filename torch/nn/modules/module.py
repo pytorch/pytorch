@@ -633,26 +633,21 @@ class Module:
     ) -> RemovableHandle:
         r"""Registers a backward hook on the module.
 
-        .. warning ::
-
-            The current implementation will not have the presented behavior
-            for complex :class:`Module` that perform many operations.
-            In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
-            contain the gradients for a subset of the inputs and outputs.
-            For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
-            directly on a specific input or output to get the required gradients.
-
         The hook will be called every time the gradients with respect to module
         inputs are computed. The hook should have the following signature::
 
-            hook(module, grad_input, grad_output) -> Tensor or None
+            hook(module, grad_input, grad_output) -> tuple(Tensor) or None
 
-        The :attr:`grad_input` and :attr:`grad_output` may be tuples if the
-        module has multiple inputs or outputs. The hook should not modify its
-        arguments, but it can optionally return a new gradient with respect to
-        input that will be used in place of :attr:`grad_input` in subsequent
-        computations. :attr:`grad_input` will only correspond to the inputs given
-        as positional arguments.
+        The :attr:`grad_input` and :attr:`grad_output` are tuples. The hook should
+        not modify its arguments, but it can optionally return a new gradient with
+        respect to the input that will be used in place of :attr:`grad_input` in
+        subsequent computations. :attr:`grad_input` will only correspond to the inputs given
+        as positional arguments. Entries in :attr:`grad_input` and :attr:`grad_output` will
+        be ``None`` for all non-Tensor arguments.
+
+        .. warn::
+            Modifying inputs or outputs inplace is not allowed when using backward hooks and
+            will raise an error.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -738,6 +733,13 @@ class Module:
                 if not isinstance(result, tuple):
                     result = (result,)
                 input = result
+
+        has_bw_hooks = (len(self._backward_hooks) > 0) or (len(_global_backward_hooks) > 0)
+        if has_bw_hooks:
+            user_hooks = itertools.chain(_global_backward_hooks.values(), self._backward_hooks.values())
+            bw_hook = hooks.BackwardHook(self, user_hooks)
+            input = bw_hook.setup_input_hook(input)
+
         if torch._C._get_tracing_state():
             result = self._slow_forward(*input, **kwargs)
         else:
@@ -748,21 +750,9 @@ class Module:
             hook_result = hook(self, input, result)
             if hook_result is not None:
                 result = hook_result
-        if (len(self._backward_hooks) > 0) or (len(_global_backward_hooks) > 0):
-            var = result
-            while not isinstance(var, torch.Tensor):
-                if isinstance(var, dict):
-                    var = next((v for v in var.values() if isinstance(v, torch.Tensor)))
-                else:
-                    var = var[0]
-            grad_fn = var.grad_fn
-            if grad_fn is not None:
-                for hook in itertools.chain(
-                        _global_backward_hooks.values(),
-                        self._backward_hooks.values()):
-                    wrapper = functools.partial(hook, self)
-                    functools.update_wrapper(wrapper, hook)
-                    grad_fn.register_hook(wrapper)
+
+        if has_bw_hooks:
+            result = bw_hook.setup_output_hook(result)
         return result
 
     __call__ : Callable[..., Any] = _call_impl
