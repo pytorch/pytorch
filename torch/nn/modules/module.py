@@ -997,6 +997,41 @@ class Module:
                     if input_name not in self._modules and input_name not in local_state:
                         unexpected_keys.append(key)
 
+    def _remove_prefix_from_state_dict_if_exists(self, state_dict, prefix: str):
+        """This function strips a prefix if it exists in the model
+        state_dict and metadata.
+
+        Args:
+            state_dict : DP/DDP pytorch model state_dict
+            prefix (str) : Prefix to be removed from the DP/DDP model state_dict to
+                           to make it compatible with regular pytorch model.
+        """
+        keys = sorted(state_dict.keys())
+        if not all(len(key) == 0 or key.startswith(prefix) for key in keys):
+            return
+
+        for key in list(state_dict.keys()):
+            new_key = key[len(prefix):]
+            state_dict[new_key] = state_dict.pop(key)
+
+        try:
+            metadata = state_dict._metadata
+        except AttributeError:
+            pass
+
+        else:
+            for key in list(metadata.keys()):
+                # for the metadata dict, the key can be:
+                # '': for the DDP module, which we want to remove.
+                # 'module': for the actual model.
+                # 'module.xx.xx': for the rest.
+
+                if len(key) == 0:
+                    continue
+                newkey = key[len(prefix):]
+                metadata[newkey] = metadata.pop(key)
+        return state_dict
+
     def load_state_dict(self, state_dict: Union[Dict[str, Tensor], Dict[str, Tensor]],
                         strict: bool = True):
         r"""Copies parameters and buffers from :attr:`state_dict` into
@@ -1019,6 +1054,7 @@ class Module:
         missing_keys = []
         unexpected_keys = []
         error_msgs = []
+        state_dict = self._remove_prefix_from_state_dict_if_exists(state_dict, prefix='module.')
 
         # copy state_dict so _load_from_state_dict can modify it
         metadata = getattr(state_dict, '_metadata', None)

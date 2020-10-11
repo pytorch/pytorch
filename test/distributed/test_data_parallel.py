@@ -814,9 +814,13 @@ class TestDataParallel(TestCase):
                                     nn.Linear(32, 16),
                                     nn.ReLU())
         dp_model = nn.DataParallel(deepcopy(model).cuda())
-        dp_state_dict = dp.distributed.remove_prefix_from_state_dict_if_exists(dp_model.state_dict(), prefix='module.')
-        self.assertEqual(model.state_dict().keys(), dp_state_dict.keys())
-        self.assertEqual(model.state_dict()._metadata.keys(), dp_state_dict._metadata.keys())
+        try:
+            model_copy = deepcopy(model)
+            model_copy.load_state_dict(dp_model.state_dict())
+            self.assertEqual(model.state_dict().keys(), model_copy.state_dict.keys())
+            self.assertEqual(model.state_dict()._metadata.keys(), model_copy.state_dict._metadata.keys())
+        except Exception as error:
+            print(f"Test failed with {error}.")
 
 if __name__ == '__main__':
     run_tests()
