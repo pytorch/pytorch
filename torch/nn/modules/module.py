@@ -541,7 +541,7 @@ class Module:
 
         Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
         floating point or complex :attr:`dtype`s. In addition, this method will
-        only cast the floating point parameters and buffers to :attr:`dtype`
+        only cast the floating point or complex parameters and buffers to :attr:`dtype`
         (if given). The integral parameters and buffers will be moved
         :attr:`device`, if that is given, but with dtypes unchanged. When
         :attr:`non_blocking` is set, it tries to convert/move asynchronously
@@ -556,8 +556,8 @@ class Module:
         Args:
             device (:class:`torch.device`): the desired device of the parameters
                 and buffers in this module
-            dtype (:class:`torch.dtype`): the desired floating point type of
-                the floating point parameters and buffers in this module
+            dtype (:class:`torch.dtype`): the desired floating point or complex dtype of
+                the parameters and buffers in this module
             tensor (torch.Tensor): Tensor whose dtype and device are the desired
                 dtype and device for all parameters and buffers in this module
             memory_format (:class:`torch.memory_format`): the desired memory
@@ -574,6 +574,12 @@ class Module:
             Parameter containing:
             tensor([[ 0.1913, -0.3420],
                     [-0.5113, -0.2325]])
+            >>> linear.to(torch.cdouble)
+            Linear(in_features=2, out_features=2, bias=True)
+            >>> linear.weight
+            Parameter containing:
+            tensor([[ 0.1913+0.j, -0.3420+0.j],
+                    [-0.5113+0.j, -0.2325+0.j]], dtype=torch.complex128)
             >>> linear.to(torch.double)
             Linear(in_features=2, out_features=2, bias=True)
             >>> linear.weight
