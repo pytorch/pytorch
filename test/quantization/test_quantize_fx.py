@@ -6,11 +6,6 @@ import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
 import torch.multiprocessing as mp
 
-# symbolic trace
-from torch.fx import symbolic_trace
-
-from torch.fx.symbolic_trace import Tracer
-
 # graph mode quantization based on fx
 from torch.quantization import (
     QuantType,
@@ -175,10 +170,9 @@ class TestQuantizeFx(QuantizationTestCase):
                 return F.linear(x, self.weight)
 
         m = M(torch.rand(1, 1)).eval()
-        original = symbolic_trace(m)
         qconfig = default_dynamic_qconfig
         qconfig_dict = {'': qconfig}
-        prepared = prepare_fx(original, qconfig_dict)
+        prepared = prepare_fx(m, qconfig_dict)
         quantized = convert_fx(prepared, debug=True)
         qparams = (quantized._scale_0, quantized._zero_point_0)
         weight_obs = qconfig.weight()
@@ -224,7 +218,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 if weight_prepack_node:
                     node_occurrence[weight_prepack_node] = 0
                 m = ModuleClass(*module_constructor_inputs).eval()
-                m = symbolic_trace(m)
                 qconfig_dict = {"": float16_dynamic_qconfig}
                 m = prepare_fx(m, qconfig_dict)
                 m = convert_fx(m, debug=debug)
@@ -259,9 +252,6 @@ class TestQuantizeFx(QuantizationTestCase):
         device = torch.device('cuda:0')
         model.to(device)
 
-        # symbolically trace
-        model = symbolic_trace(model)
-
         # QAT prepare
         model = prepare_qat_fx(model, qconfig_dict)
 
@@ -287,7 +277,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 return self.conv(x)
 
         model = M().eval()
-        model = symbolic_trace(model)
         qconfig_dict = {'': default_qconfig}
         prepared = prepare_fx(
             model, qconfig_dict, inplace=False)
@@ -316,7 +305,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 return {"output": self.conv(x["input"])}
 
         dict_input = {"input": torch.randn(1, 1, 1, 1)}
-        m = symbolic_trace(M()).eval()
+        m = M().eval()
         qconfig_dict = {"": default_qconfig}
         m = prepare_fx(m, qconfig_dict)
         m(dict_input)
@@ -331,12 +320,6 @@ class TestQuantizeFx(QuantizationTestCase):
 
             def forward(self, x):
                 return self.conv(x)
-
-        class CustomTracer(Tracer):
-            def is_leaf_module(self, m, module_qualified_name):
-                return (m.__module__.startswith('torch.nn') and
-                        not isinstance(m, torch.nn.Sequential)) or \
-                    isinstance(m, StandaloneModule)
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -362,17 +345,16 @@ class TestQuantizeFx(QuantizationTestCase):
 
         data = torch.randn(1, 1, 1, 1)
         # instantiate M and RefM and align the parameters
-        original_m = M()
-        original_ref_m = RefM()
+        original_m = M().eval()
+        original_ref_m = RefM().eval()
         original_ref_m.conv1.weight = torch.nn.Parameter(original_m.conv.weight.detach())
         original_ref_m.conv1.bias = torch.nn.Parameter(original_m.conv.bias.detach())
         original_ref_m.conv2.weight = torch.nn.Parameter(original_m.standalone.conv.weight.detach())
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.standalone.conv.bias.detach())
 
-        m = torch.fx.GraphModule(original_m, CustomTracer().trace(original_m)).eval()
         qconfig_dict = {'': default_qconfig, 'standalone_module_name': ['standalone']}
         # check prepared model
-        m = prepare_fx(m, qconfig_dict)
+        m = prepare_fx(original_m, qconfig_dict)
         # calibration
         m(data)
         # input and output of first conv, observer for standalone module
@@ -406,8 +388,7 @@ class TestQuantizeFx(QuantizationTestCase):
         res = m(data)
 
         # quantize the reference model
-        ref_m = symbolic_trace(original_ref_m).eval()
-        ref_m = prepare_fx(ref_m, qconfig_dict)
+        ref_m = prepare_fx(original_ref_m, qconfig_dict)
         ref_m(data)
         ref_m = convert_fx(ref_m)
         ref_res = ref_m(data)
@@ -427,7 +408,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x
 
         m = M().eval()
-        m = symbolic_trace(m)
         qconfig_dict = {"": default_qconfig,
                         "module_name": [("conv2", None)]}
         m = prepare_fx(m, qconfig_dict)
@@ -457,7 +437,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x
 
         m = M().eval()
-        m = symbolic_trace(m)
         qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
         m = prepare_fx(m, qconfig_dict)
         data = torch.randn(1, 1, 1, 1)
@@ -482,7 +461,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x + y
 
         m = M().eval()
-        m = symbolic_trace(m)
         qconfig_dict = {"object_type": [(operator.add, default_qconfig)]}
         m = prepare_fx(m, qconfig_dict)
         data = torch.randn(1, 1, 1, 1)
@@ -510,7 +488,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x
 
         m = M().eval()
-        m = symbolic_trace(m)
         qconfig_dict = {"module_name_regex": [("conv*", default_qconfig)]}
         m = prepare_fx(m, qconfig_dict)
         data = torch.randn(1, 1, 1, 1)
@@ -547,7 +524,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x
 
         m = M().eval()
-        m = symbolic_trace(m)
         global_qconfig = default_qconfig
         object_type_qconfig = default_dynamic_qconfig
         module_name_regex_qconfig = float16_dynamic_qconfig
@@ -574,7 +550,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 return self.avg_pool(x)
 
         m = M().eval()
-        m = symbolic_trace(m)
         qconfig_dict = {'': default_qconfig}
         m = prepare_fx(m, qconfig_dict)
         data = torch.randn(1, 1, 1, 1)
@@ -587,13 +562,9 @@ class TestQuantizeFx(QuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_qat_and_script(self):
-
-        model = LinearModelWithSubmodule()
+        model = LinearModelWithSubmodule().train()
         qengine = torch.backends.quantized.engine
         qconfig_dict = {'': torch.quantization.get_default_qat_qconfig(qengine)}
-
-        # symbolically trace
-        model = symbolic_trace(model)
         model = prepare_qat_fx(model, qconfig_dict)
 
         # ensure scripting works
@@ -629,8 +600,6 @@ class TestQuantizeFx(QuantizationTestCase):
         orig = LinearModelWithSubmodule().eval()
         model = orig
         qconfig_dict = {'': torch.quantization.get_default_qconfig('fbgemm')}
-        # symbolically trace
-        model = symbolic_trace(model)
         model = prepare_fx(model, qconfig_dict)
 
         # run it through input
@@ -647,7 +616,6 @@ class TestQuantizeFx(QuantizationTestCase):
 
         # Load the stats into new model
         model_2 = orig
-        model_2 = symbolic_trace(model_2)
         model_2 = prepare_fx(model_2, qconfig_dict)
 
         loaded_dict = torch.load(b)
@@ -659,6 +627,7 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(quant(x), quant_2(x))
 
     @skipIfNoFBGEMM
+    @unittest.skip("Fix in next PR, will need to change API")
     def test_custom_module_class(self):
         class CustomModule(torch.nn.Module):
             def __init__(self):
@@ -739,8 +708,8 @@ class TestQuantizeFx(QuantizationTestCase):
 
         data = torch.randn(1, 1, 1, 1)
         # instantiate M and RefM and align the parameters
-        original_m = M()
-        original_ref_m = RefM()
+        original_m = M().eval()
+        original_ref_m = RefM().eval()
         original_ref_m.conv1.weight = torch.nn.Parameter(original_m.conv.weight.detach())
         original_ref_m.conv1.bias = torch.nn.Parameter(original_m.conv.bias.detach())
         original_ref_m.conv2.weight = torch.nn.Parameter(original_m.custom.conv.weight.detach())
@@ -762,7 +731,7 @@ class TestQuantizeFx(QuantizationTestCase):
             register_observed_custom_module_mapping(CustomModule, ObservedCustomModule)
             register_quantized_custom_module_mapping(CustomModule, QuantizedCustomModule)
 
-            m = torch.fx.GraphModule(original_m, CustomTracer().trace(original_m)).eval()
+            m = torch.fx.GraphModule(original_m, CustomTracer().trace(original_m))
             qconfig_dict = {'': default_qconfig}
             # check prepared model
             m = prepare_fx(m, qconfig_dict)
@@ -785,8 +754,7 @@ class TestQuantizeFx(QuantizationTestCase):
             res = m(data)
 
             # quantize the reference model
-            ref_m = symbolic_trace(original_ref_m).eval()
-            ref_m = prepare_fx(ref_m, qconfig_dict)
+            ref_m = prepare_fx(original_ref_m, qconfig_dict)
             ref_m(data)
             ref_m = convert_fx(ref_m)
             ref_res = ref_m(data)
@@ -1351,10 +1319,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # This model is not executable since we just put all ops
         # in the same forward
         m = M().eval()
-        original = symbolic_trace(m)
         # nothing to fuse so skipping the fuse step
         qconfig_dict = {'': default_qconfig}
-        prepared = prepare_fx(original, qconfig_dict)
+        prepared = prepare_fx(m, qconfig_dict)
         # not runnable
         quantized = convert_fx(prepared)
 
@@ -1440,10 +1407,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # This model is not executable since we just put all ops
         # in the same forward
         m = M().eval()
-        original = symbolic_trace(m)
         # nothing to fuse so skipping the fuse step
         qconfig_dict = {'': default_qconfig}
-        prepared = prepare_fx(original, qconfig_dict)
+        prepared = prepare_fx(m, qconfig_dict)
         # not runnable
         quantized = convert_fx(prepared)
 
@@ -1492,12 +1458,11 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
         qconfig = default_qconfig if mode == 'static' else default_qat_qconfig
         qconfig_dict = {'': qconfig}
-        graph_module = symbolic_trace(model)
         # print('graph module:', graph_module.src)
-        script = torch.jit.script(graph_module)
+        script = torch.jit.script(model)
 
         # make sure graph module and script module are both runanble
-        original_out = graph_module(input_value)
+        original_out = model(input_value)
         is_not_tuple_out = not isinstance(original_out, tuple)
         script_out = script(input_value)
         self.assertEqual(
@@ -1508,7 +1473,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
         if mode != 'static':
             model.train()
 
-        prepared = prepare_fx(graph_module, qconfig_dict)
+        prepared = prepare_fx(model, qconfig_dict)
 
         if mode == 'ddp':
             mp.spawn(run_ddp,
