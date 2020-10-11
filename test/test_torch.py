@@ -19152,13 +19152,13 @@ else:
             for dim in range(ndim):
                 x = self._generate_input(shape, dtype, device, with_extremal=False)
                 _test_all_any_with_dim(x, dim)
-                
+
                 x = self._generate_input(shape, dtype, device, with_extremal=True)
                 _test_all_any_with_dim(x, dim)
 
                 x = torch.zeros_like(x)
                 _test_all_any_with_dim(x, dim)
-                
+
                 x = torch.ones_like(x)
                 _test_all_any_with_dim(x, dim)
 
