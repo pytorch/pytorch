@@ -18317,6 +18317,8 @@ else:
                     x[torch.randn(*shape) > 0.5] = complex('nan')
                     x[torch.randn(*shape) > 0.5] = complex('inf')
                     x[torch.randn(*shape) > 0.5] = complex('-inf')
+            elif dtype is torch.bool:
+                x = torch.randn(*shape, dtype=torch.float, device=device) > 0
             else:
                 x = torch.randint(15, 100, shape, dtype=dtype, device=device)
 
@@ -18836,6 +18838,50 @@ else:
             actual = torch.dstack(torch_input)
             expected = np.dstack(np_input)
             self.assertEqual(actual, expected)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
+                                           include_bool=True, include_complex=False)))
+    def test_all_any_vs_numpy(self, device, dtype):
+        def _test_all_any(x):
+            self.compare_with_numpy(torch.all, np.all, x)
+            self.compare_with_numpy(torch.any, np.any, x)
+
+        def _test_all_any_with_dim(x, dim):
+            torch_fn = partial(torch.all, dim=dim)
+            np_fn = partial(np.all, axis=dim)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=False)
+
+            torch_fn = partial(torch.any, dim=dim)
+            np_fn = partial(np.any, axis=dim)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=False)
+
+        for ndim in range(5):
+            shape = self._rand_shape(ndim, 1, 5)
+            x = self._generate_input(shape, dtype, device, with_extremal=False)
+            _test_all_any(x)
+
+            x = self._generate_input(shape, dtype, device, with_extremal=True)
+            _test_all_any(x)
+
+            x = torch.zeros_like(x)
+            _test_all_any(x)
+
+            x = torch.ones_like(x)
+            _test_all_any(x)
+
+            for dim in range(ndim):
+                x = self._generate_input(shape, dtype, device, with_extremal=False)
+                _test_all_any_with_dim(x, dim)
+                
+                x = self._generate_input(shape, dtype, device, with_extremal=True)
+                _test_all_any_with_dim(x, dim)
+
+                x = torch.zeros_like(x)
+                _test_all_any_with_dim(x, dim)
+                
+                x = torch.ones_like(x)
+                _test_all_any_with_dim(x, dim)
 
     @onlyOnCPUAndCUDA
     def test_repeated_dim(self, device):
