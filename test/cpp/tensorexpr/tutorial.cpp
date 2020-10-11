@@ -125,54 +125,30 @@ int main(int argc, char* argv[]) {
     //   independent computations over the same domain) for its elements, as a
     //   function of indices
     //
-    // We use Function objects to represent this. Let's build one.
-    //
-    // First, we need to specify the domain, or dimensions in which the
-    // computation would be performed. Let's create a 64x32 domain:
+    // TODO: Update this section once Tensor/Function cleanup is done
     std::vector<const Expr*> dims = {
         new IntImm(64), new IntImm(32)}; // IntImm stands for Integer Immediate
                                          // and represents an integer constant
 
-    // Next we need to create Function arguments. The arguments of a Function
-    // are Vars, and they play role of placeholders. The computation that the
-    // function would describe would use these arguments.
+    // Next we need to create arguments. The arguments are Vars, and they play
+    // role of placeholders. The computation that the tensor would describe
+    // would use these arguments.
     const Var* i = new Var("i", kInt);
     const Var* j = new Var("j", kInt);
     std::vector<const Var*> args = {i, j};
 
-    // Now we can define the function computations using these arguments. Let's
-    // create two computations, the first would add the arguments of the
-    // function, the second would multiply them.
-    Expr* func_body1 = new Mul(i, j);
-    Expr* func_body2 = new Add(i, j);
+    // Now we can define the body of the tensor computation using these
+    // arguments.
+    Expr* body = new Mul(i, j);
 
-    // Finally, we pass all these pieces together to Function constructor:
-    Function* func =
-        new Function({"X", "Y"}, dims, args, {func_body1, func_body2});
-    // Under the hood function constructor would create separate `Buf`
-    // expressions for each computation (which can be accessed via
-    // `func->func_var(idx)`) with the names specified by the first parameter of
-    // the constructor call. In our example two `Buf` variables will be created
-    // with names 'X' and 'Y', each of them would signify a domain of 64x32.
-
-    // We can now print out our function:
-    std::cout << "Tensor function: " << *func << std::endl;
-    // Prints:
-    // Tensor function: Function F(i[64], j[32]) {
-    //   X = i * j
-    //   Y = i + j
-    // }
-
-    // A Tensor refers to an individual computation defined by a Function. For
-    // instance, we could create a following tensor given the function above:
-    int output_idx = 0; // Used to index the computation
-    Tensor* X = new Tensor(func, output_idx);
+    // Finally, we pass all these pieces together to Tensor constructor:
+    Tensor* X = new Tensor("X", dims, args, body);
     std::cout << "Tensor computation: " << *X << std::endl;
     // Prints: Tensor computation: Tensor X(i[64], j[32]) = i * j
 
     // Similarly to how we provide a more convenient way of using handles for
     // constructing Exprs, Tensors also have a more convenient API for
-    // construction. It is based on Compute functions, which take a name:
+    // construction. It is based on Compute API, which takes a name,
     // dimensions, and a lambda specifying the computation body:
     Tensor* Z = Compute(
         "Z",
@@ -204,14 +180,6 @@ int main(int argc, char* argv[]) {
     // Tensor and we use 'load' for accessing elements of an external tensor
     // through its Placeholder. This is an implementation detail and could be
     // changed in future.
-    //
-    // Why do we have Functions and Tensors and what is the relationship between
-    // them? Functions are used to represent several computations performed over
-    // the same domain. Tensors refer to individual computations of a Function.
-    //
-    // Also note that currently a lot of code only supports single-output
-    // Functions, in which case they become almost identical to Tensors. This
-    // probably will be changed in future.
 
     // TODO: Show how reductions are represented and constructed
   }
