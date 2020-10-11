@@ -108,6 +108,8 @@ class Graph:
         Nodes switched to refer to nodes in `self`.
         """
         for node in g._nodes:
+            if node in val_map:
+                continue
             if node.op == 'output':
                 rv = map_arg(node.args[0], lambda n: val_map[n])
                 return rv
