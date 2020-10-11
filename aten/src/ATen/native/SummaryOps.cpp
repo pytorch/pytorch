@@ -214,6 +214,8 @@ std::tuple<Tensor,Tensor> _histogram_cpu_uniform_bins(
                 range,
                 density);
         }
+        AT_ERROR("Scalar type not supported for weights");
+        return std::make_tuple(Tensor(), Tensor());
     });
 
 }
