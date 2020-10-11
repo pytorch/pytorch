@@ -4381,6 +4381,9 @@ class TestTorchDeviceType(TestCase):
                                            weights=torch.rand(5000, device=device, dtype=torch.double))
                 test_against_np_custombins(torch.randn(5000, device=device), torch.randn(101, device=device).sort()[0],
                                            weights=torch.rand(5000, device=device), rtol=1e-3, atol=1e-5)
+                test_against_np_custombins(torch.randn(5000, device=device, dtype=torch.double),
+                                           torch.randn(101, device=device, dtype=torch.double).sort()[0],
+                                           weights=torch.randint(100, (5000, ), device=device))
 
                 # test density arg
                 test_against_np_custombins(torch.randn(5000, device=device),

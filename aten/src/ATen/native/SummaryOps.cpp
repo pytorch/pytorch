@@ -261,7 +261,12 @@ std::tuple<Tensor, Tensor> histogram(
     hist = hist.to(ScalarType::Double);
     hist /= hist.sum() *
         (bins.slice(0, 1, bins.numel()) - bins.slice(0, 0, -1)).to(kDouble);
-    }
+  } else {
+    // This is a hack for integral types of weights, as bincount casts them to double when computing the histogram
+    // and disabling that would be a bc-breaking change
+    if (weights.defined())
+      hist = hist.to(weights.dtype());
+  }
 
   return std::make_tuple(hist, bins);
 }
