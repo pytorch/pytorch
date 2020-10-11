@@ -360,18 +360,33 @@ Tensor _histc_cuda_template(
 
 ///////////////// histogram /////////////////
 template <typename input_t, typename weights_t>
-Tensor _histogram_cuda_template_uniform_bins(
+std::tuple<Tensor,Tensor> _histogram_cuda_template_uniform_bins(
     const Tensor& self,
     int64_t nbins,
     const Tensor& weights,
-    input_t min,
-    input_t max) {
-  input_t minvalue = min;
-  input_t maxvalue = max;
-  if (minvalue == maxvalue) {
-    minvalue -= .5;
-    maxvalue += .5;
+    c10::optional<ArrayRef<double>> range,
+    bool density) {
+  input_t minvalue;
+  input_t maxvalue;
+  if (range.has_value()) {
+    // If range is defined, max must be larger than min.
+    TORCH_CHECK(
+        range.value()[0] < range.value()[1], "max must be larger than min");
+    minvalue = static_cast<input_t>(range.value()[0]);
+    maxvalue = static_cast<input_t>(range.value()[1]);
+  } else {
+    minvalue = *self.min().cpu().data_ptr<input_t>();
+    maxvalue = *self.max().cpu().data_ptr<input_t>();
+    // This is done to avoid divide by zero if input min is equal to input max.
+    // In this case computing the histogram can also be skipped altogether, as
+    // it's equal to the sum of weights in the middle bin, and zero everywhere
+    // else.
+    if (minvalue == maxvalue) {
+      minvalue -= 1;
+      maxvalue += 1;
+    }
   }
+
   TORCH_CHECK(nbins > 0, "bins must be > 0");
 #ifndef __HIP_PLATFORM_HCC__
   TORCH_CHECK(
@@ -395,17 +410,40 @@ Tensor _histogram_cuda_template_uniform_bins(
       "] is not finite");
 #endif
   bool has_weights = weights.defined();
-  Tensor output;
+  Tensor hist;
   if (has_weights) {
-    output = native::zeros({nbins}, weights.options());
+    hist = native::zeros({nbins}, weights.options());
     auto ret = cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
-        output, self, weights, nbins, minvalue, maxvalue);  
+        hist, self, weights, nbins, minvalue, maxvalue);  
   } else {
-    output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(kLong));
+    hist = native::zeros({nbins}, device(DeviceType::CUDA).dtype(kLong));
     auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
-        output, self, weights, nbins, minvalue, maxvalue); 
+        hist, self, weights, nbins, minvalue, maxvalue);     
+
   }
-  return output;
+
+  if (density) { // Compute the density
+    hist = hist.to(ScalarType::Double);
+    hist *= static_cast<double>(nbins) /
+        static_cast<double>(maxvalue - minvalue) / hist.sum();
+  }
+
+  Tensor edges;
+  if (c10::isFloatingType(self.scalar_type())) {
+    edges = at::linspace(
+        static_cast<double>(minvalue),
+        static_cast<double>(maxvalue),
+        nbins + 1,
+        self.options());
+  } else {
+    edges = at::linspace(
+        static_cast<double> (minvalue),
+        static_cast<double> (maxvalue),
+        nbins + 1,
+        self.options().dtype(c10::get_default_dtype()));
+  }
+
+  return std::make_tuple(hist, edges);
 }
 
 } // namespace
@@ -468,61 +506,18 @@ std::tuple<Tensor,Tensor> _histogram_cuda_uniform_bins(
   }
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_histogram_cuda");
-  // If range is not defined, compute min and max
-  Scalar min;
-  Scalar max;
-  if (range.has_value()) {
-    // If range is defined, max must be larger than min. Otherwise, they can be
-    // equal.
-    TORCH_CHECK(
-        range.value()[0] < range.value()[1], "max must be larger than min");
-    min = range.value()[0];
-    max = range.value()[1];
-  } else {
-    min = self.min().item();
-    max = self.max().item();
-  }
-
-  Tensor hist =
-      AT_DISPATCH_ALL_TYPES(
+  return AT_DISPATCH_ALL_TYPES(
       self.scalar_type(), "histogram_cuda_uniform_bins", [&] {
         const auto scalar = weights.scalar_type();
         if (scalar == ScalarType::Float || scalar == ScalarType::Undefined) {
           return _histogram_cuda_template_uniform_bins<scalar_t, float>(
-              self, nbins, weights, min.to<scalar_t>(), max.to<scalar_t>());
+              self, nbins, weights, range, density);
         }
         return _histogram_cuda_template_uniform_bins<scalar_t, double>(
-            self,
-            nbins,
-            weights.to(kDouble),
-            min.to<scalar_t>(),
-            max.to<scalar_t>());
+            self, nbins, weights.to(kDouble), range, density);
       });
-  if (density) { // Compute the density function
-    double minval = min.to<double>();
-    double maxval = max.to<double>();
-    if (minval == maxval) {
-      minval = self.min().to(kDouble).item<double>();
-      maxval = self.max().to(kDouble).item<double>();
-    }
-    if (minval == maxval) {
-      minval -= 1.0;
-      maxval += 1.0;
-    }
-    hist = hist.to(kDouble);
-    hist *= nbins / (maxval - minval) / hist.sum();
   }
 
-  Tensor edges;
-  if (c10::isFloatingType(self.scalar_type())) {
-    edges = at::linspace(min, max, nbins + 1, self.options());
-  } else {
-    edges = at::linspace(
-        min, max, nbins + 1, self.options().dtype(c10::get_default_dtype()));
-  }
-
-  return std::make_tuple(hist, edges);
-}
 
 } // namespace native
 } // namespace at

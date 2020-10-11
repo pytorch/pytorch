@@ -58,32 +58,48 @@ Tensor _bincount_cpu_template(
 // i.e. [start, end) the last bin is inclusive at both, i.e. [start, end], in
 // order to include maxvalue if exists
 template <typename input_t>
-inline int64_t getbin(input_t x, input_t min, input_t max, int64_t bins) {
-  if (x == max)
-    return bins - 1;
-  return static_cast<int64_t>((x - min) * bins / (max - min));
+inline int64_t getbin(input_t x, input_t min, input_t max, int64_t nbins) {
+  if (x >= max)
+    return nbins - 1;
+  return static_cast<int64_t>((x - min) * nbins / (max - min));
 }
 
 ///////////////// histogram /////////////////
-//This template assumes that input and weights are contiguous and have the same size, and that min is not greater than max.
+// This template assumes that input and weights are contiguous (possibly
+// flattened) 1D Tensors of the same size. This can be fixed later on.
 template <typename input_t, typename weights_t>
-Tensor _histogram_cpu_template_uniform_bins(
+std::tuple<Tensor, Tensor> _histogram_cpu_template_uniform_bins(
     const Tensor& self,
     int64_t nbins,
     const Tensor& weights,
-    input_t min,
-    input_t max,
+    c10::optional<ArrayRef<double>> range,
     bool density) {
-  // This is done to avoid divide by zero if input min is equal to input max. As specifying range with min=max is not allowed, this should be correct.
-  if (min == max) {
-    min -= .5;
-    max += .5;
+  // If range is not defined, compute min and max from the values in the Tensor.
+  input_t min;
+  input_t max;
+  if (range.has_value()) {
+    // If range is defined, max must be larger than min.
+    TORCH_CHECK(
+        range.value()[0] < range.value()[1], "max must be larger than min");
+    min = static_cast<input_t>(range.value()[0]);
+    max = static_cast<input_t>(range.value()[1]);
+  } else {
+    min = *self.min().data_ptr<input_t>();
+    max = *self.max().data_ptr<input_t>();
+    // This is done to avoid divide by zero if input min is equal to input max.
+    // In this case computing the histogram can also be skipped altogether, as
+    // it's equal to the sum of weights in the middle bin, and zero everywhere
+    // else.
+    if (min == max) {
+      min -= 1;
+      max += 1;
+    }
   }
+
   TORCH_CHECK(nbins > 0, "bins must be > 0");
   TORCH_CHECK(
       !(std::isinf(static_cast<double>(min)) ||
-        std::isinf(static_cast<double>(max)) ||
-        _isnan(min) || _isnan(max)),
+        std::isinf(static_cast<double>(max)) || _isnan(min) || _isnan(max)),
       "range of [",
       min,
       ", ",
@@ -92,30 +108,44 @@ Tensor _histogram_cpu_template_uniform_bins(
 
   bool has_weights = weights.defined();
 
-  Tensor output;
+  Tensor hist;
   int64_t self_size = self.size(0);
 
   const input_t* self_p = self.data_ptr<input_t>();
   if (has_weights) {
-    output = native::zeros({nbins}, weights.options());
-    weights_t* output_p = output.data_ptr<weights_t>();
+    hist = native::zeros({nbins}, weights.options());
+    weights_t* output_p = hist.data_ptr<weights_t>();
     const weights_t* weights_p = weights.data_ptr<weights_t>();
     // This does the actual work of computing the histogram.
-    // This is single threaded, as other similar operators are single-threaded in PyTorch today, and a multi-threaded one would be tricky to implement.
+    // This is single threaded, as other similar operators are single-threaded
+    // in PyTorch today, and a multi-threaded one would be tricky to implement.
     for (int64_t i = 0; i < self_size; i++) {
       if (self_p[i] >= min && self_p[i] <= max)
         output_p[getbin(self_p[i], min, max, nbins)] += weights_p[i];
     }
   } else {
-    output = native::zeros({nbins}, kLong);
-    int64_t* output_p = output.data_ptr<int64_t>();
+    hist = native::zeros({nbins}, kLong);
+    int64_t* output_p = hist.data_ptr<int64_t>();
     for (int64_t i = 0; i < self_size; i++) {
       if (self_p[i] >= min && self_p[i] <= max)
         output_p[getbin(self_p[i], min, max, nbins)] += 1L;
     }
   }
 
-  return output;
+  if (density) { // Compute the density
+    hist = hist.to(ScalarType::Double);
+    hist *= nbins / (max - min) / hist.sum();
+  }
+
+  Tensor edges;
+  if (c10::isFloatingType(self.scalar_type())) {
+    edges = at::linspace(min, max, nbins + 1, self.options());
+  } else {
+    edges = at::linspace(
+        min, max, nbins + 1, self.options().dtype(c10::get_default_dtype()));
+  }
+
+  return std::make_tuple(hist, edges);
 
 }
 
@@ -134,13 +164,13 @@ Tensor _bincount_cpu(const Tensor& self, const Tensor& weights, int64_t minlengt
 
 std::tuple<Tensor,Tensor> _histogram_cpu_uniform_bins(
     const Tensor& self,
-    int64_t bins,
+    int64_t nbins,
     c10::optional<ArrayRef<double>> range,
     const Tensor& weights,
     bool density) {
 
   // Weights having a different shape from input is not supported yet. TO DO:
-  // Add support for weights broadcastable to input
+  // Add support for weights broadcastable to input. As 
   bool has_weights = weights.defined();
   Tensor flattened_weights;
   if (has_weights) {
@@ -150,62 +180,25 @@ std::tuple<Tensor,Tensor> _histogram_cpu_uniform_bins(
     flattened_weights = weights.flatten(0).contiguous();
   }
 
-
-  // If range is not defined, compute min and max from the values in the Tensor
-  Scalar min;
-  Scalar max;
-  if (range.has_value()) {
-    // If range is defined, max must be larger than min. Otherwise, they can be
-    // equal.
-    TORCH_CHECK(
-        range.value()[0] < range.value()[1], "max must be larger than min");
-    min = range.value()[0];
-    max = range.value()[1];
-  } else {
-    min = self.min().item();
-    max = self.max().item();
-  }
-
-  Tensor hist = AT_DISPATCH_ALL_TYPES(
-      self.scalar_type(), "histogram_cpu_uniform_bins", [&] {
+  return AT_DISPATCH_ALL_TYPES(
+      self.scalar_type(), "histogram_cuda_uniform_bins", [&] {
         const auto scalar = weights.scalar_type();
-        if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
+        if (scalar == ScalarType::Float || scalar == ScalarType::Undefined) {
           return _histogram_cpu_template_uniform_bins<scalar_t, float>(
-              self.flatten(0).contiguous(),
-              bins,
+              self.flatten().contiguous(),
+              nbins,
               flattened_weights,
-              min.to<scalar_t>(),
-              max.to<scalar_t>(),
+              range,
               density);
+        }
         return _histogram_cpu_template_uniform_bins<scalar_t, double>(
-            self.flatten(0).contiguous(),
-            bins,
+            self.flatten().contiguous(),
+            nbins,
             flattened_weights.to(kDouble),
-            min.to<scalar_t>(),
-            max.to<scalar_t>(),
+            range,
             density);
       });
 
-  if (density) { // Compute the density
-    double minval = min.to<double>();
-    double maxval = max.to<double>();
-    if (minval == maxval) {
-      minval -= 1;
-      maxval += 1;
-    }
-    hist = hist.to(kDouble);
-    hist *= bins / (maxval - minval) / hist.sum();
-  }
-
-  Tensor edges;
-  if (c10::isFloatingType(self.scalar_type())) {
-    edges = at::linspace(min, max, bins + 1, self.options());
-  } else {
-    edges = at::linspace(
-        min, max, bins + 1, self.options().dtype(c10::get_default_dtype()));
-  }
-
-  return std::make_tuple(hist, edges);
 }
 
 std::tuple<Tensor, Tensor> histogram(
@@ -224,6 +217,7 @@ std::tuple<Tensor, Tensor> histogram(
         "bin edges must increase monotonically"); 
   }
 
+  // Flatten the weights as bincount only accepts weights as a 1D Tensor.
   Tensor flattened_weights;
   if (weights.defined()) {
     TORCH_CHECK(
@@ -232,19 +226,18 @@ std::tuple<Tensor, Tensor> histogram(
     flattened_weights = weights.flatten(0).contiguous();
   }
 
-  // This uses existing PyTorch operators to compute the histogram.
-  // First, it takes the sorted array of bin edges and performs the binsearch.
-  // The second line makes the uppermost bin inclusive to include the max value if it is present, by decrementing them by 1.
-  // The third line computes the actual histogram.
   int64_t nbins = bins.size(0) - 1;
+  // Perform the bin search
   Tensor index = searchsorted(bins, self, false, true);
+  // Make the last bin inclusive
   index = index.where(self != bins[-1], index - 1);
+  // Compute the histogram - nbins+2 because of also counting in the overflow bins.
   Tensor hist = bincount(index.flatten(0), flattened_weights, nbins + 2);
-
+  // Remove the overflow bins
   hist = hist.slice(0, 1, -1);
 
   if (density) { // Compute the density
-    hist = hist.to(kDouble);
+    hist = hist.to(ScalarType::Double);
     hist /= hist.sum() *
         (bins.slice(0, 1, bins.numel()) - bins.slice(0, 0, -1)).to(kDouble);
     }
