@@ -111,6 +111,11 @@ Works only with Python3.\n A few examples:
         action='store_true',
         help="Print generated kernel(s).",
     )
+    parser.add_argument(
+        "--no-dynamic-shape",
+        action='store_true',
+        help="Disable shape randomization in dynamic benchmarks.",
+    )
 
     args = parser.parse_args()
 
