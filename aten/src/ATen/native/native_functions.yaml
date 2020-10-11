@@ -3639,13 +3639,13 @@
     CPU: _unique2_cpu
     CUDA: _unique2_cuda
 
-- func: unique_good.dim(Tensor self, int dim, bool return_inverse=False, bool return_indices=False, bool return_counts=False) -> (Tensor values, Tensor inverse, Tensor indices)
+- func: _unique_good.dim(Tensor self, int dim, *, bool return_inverse=False, bool return_indices=False, bool return_counts=False) -> (Tensor values, Tensor inverse, Tensor indices, Tensor counts)
   variants: function, method
   use_c10_dispatcher: full
   dispatch:
     CUDA: unique_good_dim_cuda
 
-- func: unique_good(Tensor self, bool return_inverse=False, bool return_indices=False, bool return_counts=False) -> (Tensor values, Tensor inverse, Tensor indices)
+- func: _unique_good(Tensor self, *, bool return_inverse=False, bool return_indices=False, bool return_counts=False) -> (Tensor values, Tensor inverse, Tensor indices, Tensor counts)
   variants: function, method
   use_c10_dispatcher: full
   dispatch:

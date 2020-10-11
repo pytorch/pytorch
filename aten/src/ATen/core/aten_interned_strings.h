@@ -152,6 +152,7 @@ _(aten, _trilinear) \
 _(aten, _trunc) \
 _(aten, _unique) \
 _(aten, _unique_dim) \
+_(aten, _unique_good) \
 _(aten, _unsafe_view) \
 _(aten, _validate_sparse_coo_tensor_args) \
 _(aten, _values) \

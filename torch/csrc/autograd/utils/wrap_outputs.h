@@ -109,6 +109,16 @@ inline PyObject* wrap(PyTypeObject *type, std::tuple<at::Tensor, at::Tensor, at:
   return r.release();
 }
 
+inline PyObject* wrap(PyTypeObject *type, std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> tensors) {
+  auto r = THPObjectPtr{PyStructSequence_New(type)};
+  if (!r) throw python_error();
+  PyStructSequence_SET_ITEM(r.get(), 0, wrap(std::get<0>(tensors)));
+  PyStructSequence_SET_ITEM(r.get(), 1, wrap(std::get<1>(tensors)));
+  PyStructSequence_SET_ITEM(r.get(), 2, wrap(std::get<2>(tensors)));
+  PyStructSequence_SET_ITEM(r.get(), 3, wrap(std::get<3>(tensors)));
+  return r.release();
+}
+
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, int64_t> tensors) {
   auto r = THPObjectPtr{PyTuple_New(4)};
   if (!r) throw python_error();

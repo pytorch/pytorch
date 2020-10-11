@@ -11,6 +11,7 @@
 #include <thrust/sort.h>
 #include <thrust/scan.h>
 #include <thrust/scatter.h>
+#include <thrust/iterator/zip_iterator.h>
 
 namespace at {
 namespace native{
@@ -36,12 +37,14 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> compute_unique(
 ) {
 
   // inverse indices
+  if (return_inverse || return_indices) {
+    TORCH_CHECK(sorted_indices.defined(),
+    "return_inverse or return_indices is set to true, but sorted_indices is undefined. Send a bug report!");
+  }
   Tensor inverse_indices;
   if (!return_inverse || num_inp == 0) {
     inverse_indices = at::empty({0}, options);
   } else {
-    TORCH_CHECK(sorted_indices.defined(),
-      "return_inverse is set to true, but sorted_indices is undefined. Send a bug report!");
     const int64_t *sorted_indices_ptr = sorted_indices.data_ptr<int64_t>();
     Tensor inv_loc = at::empty({num_inp}, options);
     inverse_indices = at::empty({num_inp}, options);
@@ -55,19 +58,41 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> compute_unique(
 
   // unique and count
   Tensor counts = at::empty({0}, options);
+  Tensor indices;
   int64_t num_out;
-  if (!return_counts) {
+  if (!return_counts && !return_indices) {
     num_out = thrust::unique(policy, data, data + num_inp, equal) - data;
   } else {
-    Tensor range = at::arange(0, num_inp + 1, options);
-    int64_t *range_ptr = range.data_ptr<int64_t>();
-    num_out = thrust::unique_by_key(policy, data, data + num_inp, range_ptr, equal).first - data;
-    range[num_out] = num_inp;
-    counts.resize_(num_out);
-    int64_t* counts_ptr = counts.data_ptr<int64_t>();
-    thrust::adjacent_difference(policy, range_ptr + 1, range_ptr + num_out + 1, counts_ptr);
+    if (return_counts) {
+      Tensor range = at::arange(0, num_inp + 1, options);
+      int64_t *range_ptr = range.data_ptr<int64_t>();
+      if (!return_indices) {
+        num_out = thrust::unique_by_key(policy, data, data + num_inp, range_ptr, equal).first - data;
+      } else { //both r_c and r_i requested
+        indices = at::empty({num_inp}, options).copy_(sorted_indices); // cannot operate directly on sorted indices, because
+        //for unique_dim they are also used in unique key
+        int64_t *indices_ptr = indices.data_ptr<int64_t>();
+        num_out = thrust::unique_by_key(policy, data, data + num_inp,
+        thrust::make_zip_iterator(thrust::make_tuple(range_ptr, indices_ptr)), equal).first - data;
+        indices.resize_(num_out);
+      }
+      range[num_out] = num_inp;
+      counts.resize_(num_out);
+      int64_t* counts_ptr = counts.data_ptr<int64_t>();
+      thrust::adjacent_difference(policy, range_ptr + 1, range_ptr + num_out + 1, counts_ptr);
+    } else if (return_indices) { //r_c=false, r_i = true
+      //we don't know exact number of future unique items, so unfortunately will have to allocate full size indices
+      indices = at::empty({num_inp}, options).copy_(sorted_indices); // cannot operate directly on sorted indices, because
+      //for unique_dim they are also used in unique key
+      int64_t *indices_ptr = indices.data_ptr<int64_t>();
+      num_out = thrust::unique_by_key(policy, data, data + num_inp, indices_ptr, equal).first - data;
+      indices.resize_(num_out);
+    }
+
+
+
   }
-  Tensor indices;
+
 
   AT_CUDA_CHECK(cudaGetLastError());
   return std::tuple<Tensor, Tensor, Tensor, int64_t>(inverse_indices, counts, indices, num_out);
@@ -92,7 +117,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> unique_cuda_template(
   scalar_t* output_data = output.data_ptr<scalar_t>();
 
   Tensor sorted_indices;
-  if (!return_inverse) {
+  if (!return_inverse && !return_indices) {
     if (!consecutive) {
       thrust::sort(policy, output_data, output_data + num_inp);
     }
@@ -280,7 +305,7 @@ unique_consecutive_cuda(const Tensor& self, const bool return_inverse, const boo
   return unique_dim_consecutive_cuda(self, dim.value(), return_inverse, return_counts);
 }
 
-std::tuple<Tensor,Tensor,Tensor>
+std::tuple<Tensor,Tensor,Tensor,Tensor>
 unique_good_dim_cuda(const Tensor & self, int64_t dim, bool return_inverse, bool return_indices, bool return_counts){
   Tensor inverse;
   Tensor indices;
@@ -288,11 +313,11 @@ unique_good_dim_cuda(const Tensor & self, int64_t dim, bool return_inverse, bool
   return AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, self.scalar_type(), "unique_dim", [&] {
     Tensor output, inverse, counts, indices;
     std::tie(output, inverse, counts, indices) = unique_dim_cuda_template<scalar_t>(self, dim, false, return_inverse, return_counts, return_indices);
-    return std::make_tuple(output, inverse, indices);
+    return std::make_tuple(output, inverse, indices, counts);
   });
 }
 
-std::tuple<Tensor,Tensor,Tensor>
+std::tuple<Tensor,Tensor,Tensor,Tensor>
 unique_good_cuda(const Tensor & self, bool return_inverse, bool return_indices, bool return_counts){
   Tensor inverse;
   Tensor indices;
@@ -300,7 +325,7 @@ unique_good_cuda(const Tensor & self, bool return_inverse, bool return_indices, 
   return AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, self.scalar_type(), "unique_dim", [&] {
     Tensor output, inverse, counts, indices;
     std::tie(output, inverse, counts, indices) = unique_cuda_template<scalar_t>(self, false, return_inverse, return_counts, return_indices);
-    return std::make_tuple(output, inverse, indices);
+    return std::make_tuple(output, inverse, indices, counts);
   });
 }
 
