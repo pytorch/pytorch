@@ -265,5 +265,27 @@ unique_consecutive_cuda(const Tensor& self, const bool return_inverse, const boo
   return unique_dim_consecutive_cuda(self, dim.value(), return_inverse, return_counts);
 }
 
+std::tuple<Tensor,Tensor,Tensor>
+unique_good_dim_cuda(const Tensor & self, int64_t dim, bool return_inverse, bool return_indices, bool return_counts){
+  Tensor inverse;
+  Tensor indices;
+  Tensor counts;
+  inverse = return_inverse ? at::zeros_like(self, self.options().dtype(kLong)) : inverse;
+  indices = return_indices ? at::zeros_like(self, self.options().dtype(kLong)) : indices;
+  counts = return_counts ? at::zeros_like(self, self.options().dtype(kLong)) : counts;
+  return std::make_tuple(self, inverse, indices);
+}
+
+std::tuple<Tensor,Tensor,Tensor>
+unique_good_cuda(const Tensor & self, bool return_inverse, bool return_indices, bool return_counts){
+  Tensor inverse;
+  Tensor indices;
+  Tensor counts;
+  inverse = return_inverse ? at::zeros_like(self, self.options().dtype(kLong)) : inverse;
+  indices = return_indices ? at::zeros_like(self, self.options().dtype(kLong)) : indices;
+  counts = return_counts ? at::zeros_like(self, self.options().dtype(kLong)) : counts;
+  return std::make_tuple(self, inverse, indices);
+}
+
 }  // namespace native
 }  // namespace at
