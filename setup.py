@@ -346,7 +346,6 @@ def build_deps():
 install_requires = [
     'future',
     'typing_extensions',
-    'dataclasses; python_version < "3.7"'
 ]
 
 missing_pydep = '''
@@ -606,6 +605,9 @@ def configure_extension_build():
 
     if cmake_cache_vars['USE_NUMPY']:
         extra_install_requires += ['numpy']
+
+    if sys.version_info < (3, 7):
+        extra_install_requires += ['dataclasses']
 
     if build_type.is_debug():
         if IS_WINDOWS:
