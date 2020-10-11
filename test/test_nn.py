@@ -12874,15 +12874,15 @@ class TestNNDeviceType(NNTestCase):
     def test_to_complex(self, device):
         m = nn.Linear(3, 5).to(device)
         self.assertIs(m, m.to(device))
-        m.to(torch.complex64)
-        self.assertIs(m.weight.dtype, torch.complex64)
-        m.to(torch.complex128)
-        self.assertIs(m.weight.dtype, torch.complex128)
-        m.to(torch.float32)
-        self.assertIs(m.weight.dtype, torch.float32)
+        m.to(torch.cfloat)
+        self.assertIs(m.weight.dtype, torch.cfloat)
+        m.to(torch.cdouble)
+        self.assertIs(m.weight.dtype, torch.cdouble)
+        m.to(torch.float)
+        self.assertIs(m.weight.dtype, torch.float)
         with warnings.catch_warnings(record=True) as w:
             # Trigger warning
-            m.to(torch.complex64)
+            m.to(torch.cfloat)
             # Check warning occurs
             self.assertEqual(len(w), 1)
             self.assertTrue("Complex modules are a new feature" in str(w[-1].message))
