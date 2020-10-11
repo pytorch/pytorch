@@ -425,7 +425,7 @@ std::tuple<Tensor,Tensor> _histogram_cuda_template_uniform_bins(
   if (density) { // Compute the density
     hist = hist.to(ScalarType::Double);
     double bin_volume =
-        static_cast<double>(max - min) / static_cast<double>(nbins);
+        static_cast<double>(maxvalue - minvalue) / static_cast<double>(nbins);
     hist /= bin_volume * hist.sum();
   }
 
@@ -508,15 +508,24 @@ std::tuple<Tensor,Tensor> _histogram_cuda_uniform_bins(
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_histogram_cuda");
   return AT_DISPATCH_ALL_TYPES(
-      self.scalar_type(), "histogram_cuda_uniform_bins", [&] {
-        const auto scalar = weights.scalar_type();
-        if (scalar == ScalarType::Float || scalar == ScalarType::Undefined) {
-          return _histogram_cuda_template_uniform_bins<scalar_t, float>(
-              self, nbins, weights, range, density);
+      self.scalar_type(), "histogram_cpu_uniform_bins", [&] {
+    const auto scalar = weights.scalar_type();
+        switch (scalar) {
+          case ScalarType::Float:
+            return _histogram_cuda_template_uniform_bins<scalar_t, float>(
+                self, nbins, weights, range, density);
+          case ScalarType::Double:
+            return _histogram_cuda_template_uniform_bins<scalar_t, double>(
+                self, nbins, weights, range, density);
+          case ScalarType::Int:
+            return _histogram_cuda_template_uniform_bins<scalar_t, int32_t>(
+                self, nbins, weights, range, density);
+          case ScalarType::Long:
+          case ScalarType::Undefined:
+            return _histogram_cuda_template_uniform_bins<scalar_t, int64_t>(
+                self, nbins, weights, range, density);
         }
-        return _histogram_cuda_template_uniform_bins<scalar_t, double>(
-            self, nbins, weights.to(kDouble), range, density);
-      });
+    });
   }
 
 

@@ -4343,6 +4343,7 @@ class TestTorchDeviceType(TestCase):
 
                 # test weights arg
                 test_against_np_uniformbins(torch.randn(5000, device=device), weights=torch.rand(5000, device=device))
+                test_against_np_uniformbins(torch.randn(5000, device=device), weights=torch.randint(100, (5000, ), device=device))
 
                 # test density arg
                 test_against_np_uniformbins(torch.randn(5000, dtype=torch.double, device=device), density=True)
@@ -4350,6 +4351,8 @@ class TestTorchDeviceType(TestCase):
                 # test weights and density arg
                 test_against_np_uniformbins(torch.randn(5000, dtype=torch.double, device=device),
                                             weights=torch.rand(5000, dtype=torch.double, device=device), density=True)
+                test_against_np_uniformbins(torch.randn(5000, dtype=torch.double, device=device),
+                                            weights=torch.randint(100, (5000, ), dtype=torch.double, device=device), density=True)
 
                 # Test bins arg
                 test_against_np_uniformbins(torch.randn(301, device=device), bins=20)

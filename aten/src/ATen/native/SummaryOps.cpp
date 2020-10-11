@@ -182,23 +182,40 @@ std::tuple<Tensor,Tensor> _histogram_cpu_uniform_bins(
   }
 
   return AT_DISPATCH_ALL_TYPES(
-      self.scalar_type(), "histogram_cuda_uniform_bins", [&] {
-        const auto scalar = weights.scalar_type();
-        if (scalar == ScalarType::Float || scalar == ScalarType::Undefined) {
-          return _histogram_cpu_template_uniform_bins<scalar_t, float>(
-              self.flatten().contiguous(),
-              nbins,
-              flattened_weights,
-              range,
-              density);
+      self.scalar_type(), "histogram_cpu_uniform_bins", [&] {
+    const auto scalar = weights.scalar_type();
+        switch (scalar) {
+          case ScalarType::Float:
+            return _histogram_cpu_template_uniform_bins<scalar_t, float>(
+                self.flatten(0).contiguous(),
+                nbins,
+                flattened_weights,
+                range,
+                density);
+          case ScalarType::Double:
+            return _histogram_cpu_template_uniform_bins<scalar_t, double>(
+                self.flatten(0).contiguous(),
+                nbins,
+                flattened_weights,
+                range,
+                density);
+          case ScalarType::Int:
+            return _histogram_cpu_template_uniform_bins<scalar_t, int32_t>(
+                self.flatten(0).contiguous(),
+                nbins,
+                flattened_weights,
+                range,
+                density);
+          case ScalarType::Long:
+          case ScalarType::Undefined:
+            return _histogram_cpu_template_uniform_bins<scalar_t, int64_t>(
+                self.flatten(0).contiguous(),
+                nbins,
+                flattened_weights,
+                range,
+                density);
         }
-        return _histogram_cpu_template_uniform_bins<scalar_t, double>(
-            self.flatten().contiguous(),
-            nbins,
-            flattened_weights.to(kDouble),
-            range,
-            density);
-      });
+    });
 
 }
 
