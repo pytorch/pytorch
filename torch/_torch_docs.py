@@ -5066,7 +5066,8 @@ If :attr:`input` is a :math:`(n \times m)` tensor, :attr:`mat2` is a
 .. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
           For broadcasting matrix products, see :func:`torch.matmul`.
 
-This function supports backward for strided matrices only.
+Supports strided and sparse 2-D tensors as inputs, autograd with
+respect to strided inputs.
 
 {tf32_note}
 
@@ -5101,20 +5102,6 @@ Args:
 
 Keyword args:
     {out}
-""")
-
-add_docstr(torch.spmm,
-           r"""
-spmm(mat1, mat2, *, out=None) -> Tensor
-
-Alias for :func:`torch.mm`.
-""")
-
-add_docstr(torch.dsmm,
-           r"""
-dsmm(mat1, mat2, *, out=None) -> Tensor
-
-Alias for :func:`torch.mm`.
 """)
 
 add_docstr(torch.matmul,
@@ -7050,9 +7037,11 @@ sparse_coo_tensor(indices, values, size=None, *, dtype=None, device=None, requir
 
 Constructs a :ref:`sparse tensor in COO(rdinate) format
 <sparse-coo-docs>` with specified values at the given
-:attr:`indices`. A sparse tensor can be `uncoalesced`, in that case,
-there are duplicate coordinates in the indices, and the value at that
-index is the sum of all duplicate value entries: `torch.sparse`_.
+:attr:`indices`.
+
+.. note::
+
+   This function returns an :ref:`uncoalesced tensor <_sparse-uncoalesced-coo-docs>`.
 
 Args:
     indices (array_like): Initial data for the tensor. Can be a list, tuple,
