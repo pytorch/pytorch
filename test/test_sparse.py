@@ -1107,14 +1107,16 @@ class TestSparse(TestCase):
 
         # Test code from issue https://github.com/pytorch/pytorch/issues/45113
         batch_size, input_size, hidden_size = 5, 3, 7
-        # Create uncoalesced sparse tensors:
-        weight = torch.randn(hidden_size, 1).to_sparse()
-        weight = torch.cat([weight] * input_size, dim=1)
+        
+        # Create coalesced sparse tensor as in the issue
+        weight = torch.randn(hidden_size, input_size).to_sparse()
+        self.assertTrue(weight.is_coalesced())
+        self.assertFalse(weight._indices().is_contiguous())
+        # Create un/coalesced sparse tensor
         bias = torch.randn((hidden_size, 1)).to_sparse()
         bias = torch.cat([bias] * batch_size, dim=1)
 
         if not self.is_uncoalesced:
-            weight = weight.coalesce()
             bias = bias.coalesce()
 
         x = torch.randn(input_size, batch_size)
