@@ -103,7 +103,7 @@ Tensor pinverse(const Tensor& self, double rcond) {
   std::tie(U, S, V) = self.svd();
   Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);
   Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, S.options())).to(self.dtype());
-  // computes V.conj() * diag(S_pseudoinv) * U.T.conj()
+  // computes V.conj() @ diag(S_pseudoinv) @ U.T.conj()
   return at::matmul(V.conj() * S_pseudoinv.unsqueeze(-2), U.transpose(-2, -1).conj());
 }
 
