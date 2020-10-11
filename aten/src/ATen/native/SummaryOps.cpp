@@ -162,7 +162,6 @@ Tensor _bincount_cpu(const Tensor& self, const Tensor& weights, int64_t minlengt
   });
 }
 
-
 std::tuple<Tensor,Tensor> _histogram_cpu_uniform_bins(
     const Tensor& self,
     int64_t nbins,
@@ -171,7 +170,7 @@ std::tuple<Tensor,Tensor> _histogram_cpu_uniform_bins(
     bool density) {
 
   // Weights having a different shape from input is not supported yet. TO DO:
-  // Add support for weights broadcastable to input. As 
+  // Add support for weights broadcastable to input
   bool has_weights = weights.defined();
   Tensor flattened_weights;
   if (has_weights) {
@@ -219,6 +218,7 @@ std::tuple<Tensor,Tensor> _histogram_cpu_uniform_bins(
 
 }
 
+//Device-generic implementation for histogram with custom, possibly non-uniform binning
 std::tuple<Tensor, Tensor> histogram(
     const Tensor& self,
     const Tensor& bins,
