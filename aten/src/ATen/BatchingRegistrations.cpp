@@ -172,6 +172,22 @@ std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int6
   return result;
 }
 
+std::vector<Tensor> tensor_split_sections_batching_rule(const Tensor& self, int64_t sections, int64_t dim) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = at::tensor_split(self_physical.tensor(), sections, dim_physical);
+  self_physical.makeLogicalFromPhysicalListInplace(result);
+  return result;
+}
+
+std::vector<Tensor> tensor_split_indices_batching_rule(const Tensor& self, IntArrayRef indices, int64_t dim) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = at::tensor_split(self_physical.tensor(), indices, dim_physical);
+  self_physical.makeLogicalFromPhysicalListInplace(result);
+  return result;
+}
+
 Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   // NB: unsqueeze has some special handling of its `dim` argument so we can't call
@@ -522,9 +538,13 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
 
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
+  m.impl("is_complex", native::is_complex);
+  m.impl("conj", native::conj);
 
   // view operations
   m.impl("chunk", chunk_batching_rule);
+  m.impl("tensor_split.sections", tensor_split_sections_batching_rule);
+  m.impl("tensor_split.indices", tensor_split_indices_batching_rule);
   m.impl("diagonal", diagonal_batching_rule);
   m.impl("expand", expand_batching_rule);
   m.impl("expand_as", native::expand_as); // composite wrt autograd
@@ -560,6 +580,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   UNARY_POINTWISE(ceil);
   UNARY_POINTWISE(cos);
   UNARY_POINTWISE(cosh);
+  UNARY_POINTWISE(_conj);
   UNARY_POINTWISE(digamma);
   UNARY_POINTWISE(exp);
   UNARY_POINTWISE(expm1);

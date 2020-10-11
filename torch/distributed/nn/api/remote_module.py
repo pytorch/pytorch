@@ -1,6 +1,17 @@
 #!/usr/bin/python3
 import types
-from typing import Any, Callable, Dict, Iterator, Optional, Set, Tuple, TypeVar, Union, List
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import torch
 import torch.distributed.rpc as rpc
@@ -26,7 +37,7 @@ def _instantiate_template(module_interface_cls):
     instantiator.instantiate_scriptable_remote_module_template(module_interface_cls)
 
 
-def _create_module(module_cls, args, kwargs, module_interface_cls=None):
+def _create_module(module_cls, args, kwargs, device="cpu", module_interface_cls=None):
     module = module_cls(*args, **kwargs)
     if not isinstance(module, nn.Module):
         raise ValueError(
@@ -35,6 +46,7 @@ def _create_module(module_cls, args, kwargs, module_interface_cls=None):
         )
     if module_interface_cls is not None:
         module = torch.jit.script(module)
+    module.to(device)
     return rpc.RRef(module, module_interface_cls)
 
 
@@ -53,6 +65,7 @@ class _RemoteModule(nn.Module):
     def __init__(
         self,
         on: str,
+        device: torch.device,
         module_cls: nn.Module,
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
@@ -88,6 +101,7 @@ class _RemoteModule(nn.Module):
 
         Arguments:
             on (str or WorkerInfo): id or name of the destination worker.
+            device (torch.device): Device on the destination worker where we‘d like to place this module.
             module_cls (nn.Module): For example,
                 >>> class MyModule(nn.Module):
                 >>>     def forward(input):
@@ -118,7 +132,7 @@ class _RemoteModule(nn.Module):
             >>>
             >>> rpc.init_rpc("worker0", rank=0, world_size=2)
             >>> remote_linear_module = RemoteModule(
-            >>>     "worker1", nn.Linear, args=(20, 30),
+            >>>     "worker1", "cpu", nn.Linear, args=(20, 30),
             >>> )
             >>> input = torch.randn(128, 20)
             >>> ret_fut = remote_linear_module.forward_async(input)
@@ -164,7 +178,9 @@ class _RemoteModule(nn.Module):
 
         # Create the module on the remote side.
         self.module_rref = rpc.rpc_sync(
-            on, _create_module, (module_cls, args, kwargs, _module_interface_cls)
+            on,
+            _create_module,
+            (module_cls, args, kwargs, device, _module_interface_cls),
         )
 
         # Install generated methods.
@@ -314,6 +330,7 @@ class RemoteModule(_RemoteModule):
 
     Arguments:
         to (str or WorkerInfo): id or name of the destination worker.
+        device (torch.device): Device on the destination worker where we‘d like to place this module.
         module_cls (nn.Module): For example,
             >>> class MyModule(nn.Module):
             >>>     def forward(input):
@@ -358,8 +375,9 @@ class RemoteModule(_RemoteModule):
     def __init__(
         self,
         on: str,
+        device: torch.device,
         module_cls: nn.Module,
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
     ):
-        super().__init__(on, module_cls, args, kwargs)
+        super().__init__(on, device, module_cls, args, kwargs)

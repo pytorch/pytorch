@@ -63,6 +63,14 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       Function& m,
       const std::string& field) override;
 
+  Value* asValue(const SourceRange& loc, Function& m) override {
+    throw ErrorReport(loc)
+        << kind() << " cannot be used as a value. "
+        << "Perhaps it is a closed over global variable? If so, please "
+        << "consider passing it in as an argument or use a local varible "
+        << "instead.";
+  }
+
  protected:
   py::object getattr(const SourceRange& loc, const std::string& name);
 
@@ -295,6 +303,22 @@ struct VISIBILITY_HIDDEN PythonExceptionValue : public ExceptionValue {
 
   std::string kind() const override {
     return "Python exception";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+};
+
+// Python Slice class.
+struct VISIBILITY_HIDDEN PythonSliceClass : public SugaredValue {
+  explicit PythonSliceClass() {}
+
+  std::string kind() const override {
+    return "Python slice class";
   }
 
   std::shared_ptr<SugaredValue> call(

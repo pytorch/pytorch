@@ -3,17 +3,25 @@ import enum
 from typing import Tuple
 
 import torch
+import torch.distributed.rpc as rpc
 import torch.testing._internal.dist_utils as dist_utils
 from torch import Tensor, nn
 from torch._jit_internal import Future
 from torch.distributed.nn import RemoteModule
 from torch.distributed.nn.api.remote_module import _RemoteModule
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 
 
 _PARAM_VAL = torch.nn.Parameter(torch.ones(1))
+
+
+# RPC handler for querying the device on the destination worker.
+def remote_device(module_rref):
+    for param in module_rref.local_value().parameters():
+        return param.device
 
 
 class ModuleCreationMode(enum.Enum):
@@ -70,7 +78,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
         return 2
 
     @staticmethod
-    def _create_remote_module_iter(dst_worker_name, modes=None):
+    def _create_remote_module_iter(dst_worker_name, device="cpu", modes=None):
         if modes is None:
             modes = ModuleCreationMode.__members__.values()
 
@@ -78,12 +86,15 @@ class RemoteModuleTest(RpcAgentTestFixture):
         kwargs = dict(first_kwarg=2)
 
         if ModuleCreationMode.MODULE_CTOR in modes:
-            remote_module = RemoteModule(dst_worker_name, MyModule, args, kwargs)
+            remote_module = RemoteModule(
+                dst_worker_name, device, MyModule, args, kwargs
+            )
             yield remote_module
 
         if ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE in modes:
             remote_module = _RemoteModule(
                 dst_worker_name,
+                device,
                 create_scripted_module,
                 args,
                 kwargs,
@@ -104,13 +115,13 @@ class RemoteModuleTest(RpcAgentTestFixture):
             ValueError,
             r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
-            RemoteModule(dst_worker_name, BadModule, args, kwargs)
+            RemoteModule(dst_worker_name, "cpu", BadModule, args, kwargs)
 
         with self.assertRaisesRegex(
             ValueError,
             r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
-            RemoteModule(dst_worker_name, BadModule, args, kwargs)
+            RemoteModule(dst_worker_name, "cpu", BadModule, args, kwargs)
 
     @dist_utils.dist_init
     def test_forward_async(self):
@@ -207,6 +218,72 @@ class RemoteModuleTest(RpcAgentTestFixture):
             param_rrefs = remote_module.remote_parameters()
             self.assertEqual(len(param_rrefs), 1)
             self.assertTrue(torch.equal(param_rrefs[0].to_here(), _PARAM_VAL))
+
+    @skip_if_lt_x_gpu(1)
+    @dist_utils.dist_init
+    def test_valid_device(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        for remote_module in self._create_remote_module_iter(
+            dst_worker_name, device="cuda:0", modes=[ModuleCreationMode.MODULE_CTOR]
+        ):
+            device = rpc.rpc_sync(
+                dst_worker_name, remote_device, (remote_module.module_rref,)
+            )
+            self.assertEqual(device.type, "cuda")
+            self.assertEqual(device.index, 0)
+
+    @skip_if_lt_x_gpu(1)
+    @dist_utils.dist_init
+    def test_invalid_devices(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Expected one of cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu, xla device type at start of device string",
+        ):
+            list(
+                self._create_remote_module_iter(
+                    dst_worker_name,
+                    device="foo",
+                    modes=[ModuleCreationMode.MODULE_CTOR],
+                )
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"CUDA error: invalid device ordinal"
+        ):
+            list(
+                self._create_remote_module_iter(
+                    dst_worker_name,
+                    device="cuda:100",
+                    modes=[ModuleCreationMode.MODULE_CTOR],
+                )
+            )
+
+        with self.assertRaisesRegex(RuntimeError, r"Invalid device string: 'cpu2'"):
+            list(
+                self._create_remote_module_iter(
+                    dst_worker_name,
+                    modes=[ModuleCreationMode.MODULE_CTOR],
+                    device="cpu2",
+                )
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"CPU device index must be -1 or zero, got 2"
+        ):
+            list(
+                self._create_remote_module_iter(
+                    dst_worker_name,
+                    device="cpu:2",
+                    modes=[ModuleCreationMode.MODULE_CTOR],
+                )
+            )
 
     @dist_utils.dist_init
     def test_unsupported_methods(self):

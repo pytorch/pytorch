@@ -503,6 +503,62 @@ static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int6
   return args;
 }
 
+// Parse a string literal to remove quotes and escape sequences
+static std::string parse_string_literal(c10::string_view str) {
+  TORCH_CHECK(str.length() >= 2, "String defaults must be quoted");
+
+  if (str.front() == '"') {
+    TORCH_CHECK(str.back() == '"',
+                "Mismatched quotes in string default: ", str);
+  } else {
+    TORCH_CHECK(str.front() == '\'' && str.back() == '\'',
+                "Invalid quotes in string default: ", str)
+  }
+
+  std::string parsed;
+  parsed.reserve(str.size());
+  for (size_t i = 1; i < str.size() - 1;) {
+    if (str[i] != '\\') {
+      parsed.push_back(str[i]);
+      ++i;
+      continue;
+    }
+
+    // Handle escape sequences
+    TORCH_CHECK(i < str.size() - 2, "String ends with escaped final quote: ", str)
+    char c = str[i + 1];
+    switch (c) {
+      case '\\':
+      case '\'':
+      case '\"':
+        break;
+      case 'a':
+        c = '\a';
+        break;
+      case 'b':
+        c = '\b';
+        break;
+      case 'f':
+        c = '\f';
+        break;
+      case 'n':
+        c = '\n';
+        break;
+      case 'v':
+        c = '\v';
+        break;
+      case 't':
+        c = '\t';
+        break;
+      default:
+        TORCH_CHECK(false, "Unsupported escape sequence in string default: \\", str[i + 1]);
+    }
+    parsed.push_back(c);
+    i += 2;
+  }
+  return parsed;
+}
+
 void FunctionParameter::set_default_str(const std::string& str) {
   if (str == "None") {
     allow_none = true;
@@ -558,8 +614,8 @@ void FunctionParameter::set_default_str(const std::string& str) {
       throw std::runtime_error("invalid device: " + str);
     }
   } else if (type_ == ParameterType::STRING) {
-    if (str != "None" && str != "") {
-      throw std::runtime_error("invalid default string: " + str);
+    if (str != "None") {
+      default_string = parse_string_literal(str);
     }
   }
 }
@@ -900,6 +956,7 @@ PythonArgs PythonArgParser::raw_parse(PyObject* self, PyObject* args, PyObject* 
 
   print_error(self, args, kwargs, parsed_args);
 }
+
 
 void PythonArgParser::print_error(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {  // NOLINT
   auto num_args = PyTuple_GET_SIZE(args) + (kwargs ? PyDict_Size(kwargs) : 0);

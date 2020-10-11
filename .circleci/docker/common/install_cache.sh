@@ -16,7 +16,7 @@ fi
 chmod a+x /opt/cache/bin/sccache
 
 function write_sccache_stub() {
-  printf "#!/bin/sh\nexec sccache $(which $1) \$*" > "/opt/cache/bin/$1"
+  printf "#!/bin/sh\nexec sccache $(which $1) \"\$@\"" > "/opt/cache/bin/$1"
   chmod a+x "/opt/cache/bin/$1"
 }
 
@@ -57,8 +57,8 @@ if [ -n "$ROCM_VERSION" ]; then
     TOPDIR=$(dirname $OLDCOMP)
     WRAPPED="$TOPDIR/original/$COMPNAME"
     mv "$OLDCOMP" "$WRAPPED"
-    printf "#!/bin/sh\nexec sccache $WRAPPED \$*" > "$OLDCOMP"
-    chmod a+x "$1"
+    printf "#!/bin/sh\nexec sccache $WRAPPED \"\$@\"" > "$OLDCOMP"
+    chmod a+x "$OLDCOMP"
   }
 
   if [[ -e "/opt/rocm/hcc/bin/hcc" ]]; then

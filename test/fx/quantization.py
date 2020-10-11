@@ -164,7 +164,7 @@ def matches(modules, node, pattern, max_uses=sys.maxsize):
         self_match = pattern
         arg_matches = None
 
-    if node.uses > max_uses:
+    if len(node.users) > max_uses:
         return False
 
     if isinstance(self_match, type) and issubclass(self_match, torch.nn.Module):
@@ -219,10 +219,11 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
+        output_node : Optional[Node] = None
         for node in self.graph.nodes:
             if node.op == 'placeholder':
                 result = next(args_iter)
-            elif node.op == 'get_param':
+            elif node.op == 'get_attr':
                 result = self.state_dict[node.target]
             elif node.op == 'call_function':
                 result = node.target(*load_arg(node.args), **load_arg(node.kwargs))
@@ -232,6 +233,8 @@ class Quantizer:
                 result = getattr(self_obj, node.target)(*args, **kwargs)
             elif node.op == 'call_module':
                 result = self.modules[node.target](*load_arg(node.args), **load_arg(node.kwargs))
+            elif node.op == 'output':
+                return load_arg(node.args[0])
 
             env[node.name] = result
             root_node, obj = self.matches.get(node.name, (None, None))
@@ -240,7 +243,7 @@ class Quantizer:
             if node.name in self.quants:
                 self.quants[node.name].observe(node, env)
 
-        return load_arg(self.graph.result)
+        raise RuntimeError('Graph had no output node!')
 
     def quantize(self):
         self.quantized_graph = Graph()
@@ -281,7 +284,6 @@ class Quantizer:
                 else:
                     quant_env[node.name] = r
 
-        self.quantized_graph.output(load_arg(self.graph.result, quantized=False))
         return GraphModule(self.root, self.quantized_graph)
 
     def _find_matches(self, patterns):
