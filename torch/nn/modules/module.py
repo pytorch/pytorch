@@ -997,14 +997,16 @@ class Module:
                     if input_name not in self._modules and input_name not in local_state:
                         unexpected_keys.append(key)
 
-    def _remove_prefix_from_state_dict_if_exists(self, state_dict, prefix: str):
-        """This function strips a prefix if it exists in the model
+    def _strip_prefix_from_state_dict_if_exists(self, state_dict, prefix: str):
+        r"""This function strips a prefix if it exists in the model
         state_dict and metadata.
 
-        Args:
-            state_dict : DP/DDP pytorch model state_dict
+        Arguments:
+            state_dict (dict) : DP/DDP pytorch model state_dict
             prefix (str) : Prefix to be removed from the DP/DDP model state_dict to
                            to make it compatible with regular pytorch model.
+        Returns:
+            state_dict (dict)
         """
         keys = sorted(state_dict.keys())
         if not all(len(key) == 0 or key.startswith(prefix) for key in keys):
@@ -1033,7 +1035,7 @@ class Module:
         return state_dict
 
     def load_state_dict(self, state_dict: Union[Dict[str, Tensor], Dict[str, Tensor]],
-                        strict: bool = True):
+                        strict: bool = True, is_parallel: bool = False):
         r"""Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. If :attr:`strict` is ``True``, then
         the keys of :attr:`state_dict` must exactly match the keys returned
@@ -1045,6 +1047,8 @@ class Module:
             strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
+            is_parallel (bool, optional): is the :attr:`state_dict` being loaded
+                from a DP or DDP model. Default: ``False``
 
         Returns:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
@@ -1054,7 +1058,8 @@ class Module:
         missing_keys = []
         unexpected_keys = []
         error_msgs = []
-        state_dict = self._remove_prefix_from_state_dict_if_exists(state_dict, prefix='module.')
+        if is_parallel:
+            state_dict = self._strip_prefix_from_state_dict_if_exists(state_dict, prefix='module.')
 
         # copy state_dict so _load_from_state_dict can modify it
         metadata = getattr(state_dict, '_metadata', None)

@@ -3741,7 +3741,7 @@ class DistributedTest:
                                                                   device_ids=[self.rank])
             try:
                 model_copy = copy.deepcopy(model)
-                model_copy.load_state_dict(ddp_model.state_dict())
+                model_copy.load_state_dict(ddp_model.state_dict(), is_parallel=True)
                 self.assertEqual(model.state_dict().keys(), model_copy.state_dict().keys())
                 self.assertEqual(model.state_dict()._metadata.keys(), model_copy.state_dict()._metadata.keys())
             except Exception as error:
