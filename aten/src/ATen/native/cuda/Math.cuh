@@ -175,10 +175,10 @@ static inline __host__ __device__ scalar_t calc_polygamma(int n, scalar_t x) {
 }
 
 template <typename scalar_t>
-static inline __host__ __device__ scalar_t calc_igammac(scalar_t a, scalar_t x);
+static inline C10_HOST_DEVICE scalar_t calc_igammac(scalar_t a, scalar_t x);
 
 template <typename scalar_t>
-static inline __host__ __device__ scalar_t calc_igamma(scalar_t a, scalar_t x) {
+static inline C10_HOST_DEVICE scalar_t calc_igamma(scalar_t a, scalar_t x) {
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   accscalar_t ans, ax, c, r;
   static accscalar_t MAXLOG = std::is_same<accscalar_t, double>::value ?
@@ -239,7 +239,7 @@ static inline __host__ __device__ scalar_t calc_igamma(scalar_t a, scalar_t x) {
 }
 
 template <typename scalar_t>
-static inline __host__ __device__ scalar_t calc_igammac(scalar_t a, scalar_t x) {
+static inline C10_HOST_DEVICE scalar_t calc_igammac(scalar_t a, scalar_t x) {
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   accscalar_t ans, ax, c, yc, r, t, y, z;
   accscalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
