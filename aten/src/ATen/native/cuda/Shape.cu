@@ -83,7 +83,6 @@ struct OutputTensorSizeStride {
   */
 
 
-#ifdef __HIP_PLATFORM_HCC__
 // Use pinned memory and and pass the struct by pointer on ROCm
 template <typename T, typename IndexType>
 struct CatArrInputTensor {
@@ -95,7 +94,7 @@ struct CatArrInputTensor {
 
 template <typename T, typename IndexType, int Dims>
 C10_LAUNCH_BOUNDS_1(512)
-__global__ void CatArrayBatchedCopy(
+__global__ void HIP_CatArrayBatchedCopy(
     T* output,
     CatArrInputTensor<T, IndexType>* inputs,
     OutputTensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> os,
@@ -122,8 +121,6 @@ __global__ void CatArrayBatchedCopy(
     tid += stride;
     }
 }
-
-#else
 
 // pass meta data directly through kernel argument instead of pin memory
 template <typename T, typename IndexType, int n>
@@ -162,7 +159,6 @@ __global__ void CatArrayBatchedCopy(
     tid += stride;
     }
 }
-#endif
 
 void check_shape_except_dim(const Tensor &first, const Tensor &second,
                             int dimension, int index)
@@ -186,9 +182,8 @@ void check_shape_except_dim(const Tensor &first, const Tensor &second,
   }
 }
 
-#ifdef __HIP_PLATFORM_HCC__
 template <typename scalar_t>
-void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
+void hip_parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
                   int nDims, c10::MemoryFormat memory_format) {
   // First, let's set up our kernel parameters. We start with a raw pointer to
   // the storage for the output Tensor.
@@ -282,7 +277,7 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
     }
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
-    CatArrayBatchedCopy<scalar_t, unsigned int, DIMS><<<\
+    HIP_CatArrayBatchedCopy<scalar_t, unsigned int, DIMS><<<\
         catGrid, applyBlock, 0, stream.stream()>>>(\
             data, d_inputs, param, dimension, param.outputStride[dimension]);
     switch (nDims) {
@@ -303,7 +298,7 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
     AT_CUDA_CHECK(cudaGetLastError());
   }
 }
-#else
+
 template <typename scalar_t>
 void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
                   int nDims, c10::MemoryFormat memory_format) {
@@ -398,7 +393,6 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
     AT_CUDA_CHECK(cudaGetLastError());
   }
 }
-#endif
 } // namespace
 
 Tensor cat_cuda(TensorList inputs, int64_t dimension) {
@@ -536,12 +530,19 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
       all32BitIndexable &&
       allSameType) {
 
+#ifdef __HIP_PLATFORM_HCC__
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+          at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+          out.scalar_type(), "cat_cuda", [&]() {
+        hip_parallel_cat<scalar_t>(out, inputs, dimension, nDims, memory_format);
+      });
+#else
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
           at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
           out.scalar_type(), "cat_cuda", [&]() {
         parallel_cat<scalar_t>(out, inputs, dimension, nDims, memory_format);
       });
-
+#endif
   } else {
     int64_t offset = 0;
     for (int j = 0; j < inputs.size(); j++)
