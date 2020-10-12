@@ -18,7 +18,7 @@
 #include <sstream>
 #include "torch/script.h"
 #include "torch/csrc/jit/api/module.h"
-#include "torch/csrc/jit/passes/metal_rewrite.h"
+#include <torch/csrc/jit/passes/metal_rewrite.h>
 #include "torch/csrc/jit/passes/vulkan_rewrite.h"
 #include "torch/csrc/jit/passes/xnnpack_rewrite.h"
 #include "torch/csrc/jit/serialization/import.h"
