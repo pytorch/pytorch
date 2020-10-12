@@ -3039,14 +3039,14 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
                 self.embedding1 = torch.nn.EmbeddingBag(num_embeddings=10,
                                                         embedding_dim=12,
                                                         include_last_offset=True,
-                                                        sparse=False,
+                                                        sparse=True,
                                                         _weight=weights,
                                                         mode='sum')
 
                 self.embedding2 = torch.nn.EmbeddingBag(num_embeddings=10,
                                                         embedding_dim=12,
                                                         include_last_offset=True,
-                                                        sparse=False,
+                                                        sparse=True,
                                                         _weight=weights,
                                                         mode='sum')
 
@@ -3077,6 +3077,7 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
             FileCheck().check("quantized::embedding_bag_4bit_rowwise_offsets") \
                        .check_next("quantized::embedding_bag_byte_rowwise_offsets") \
                        .run(m.graph)
+            m(*dummy_inputs)
 
 
 
