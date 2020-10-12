@@ -1107,7 +1107,7 @@ class TestSparse(TestCase):
 
         # Test code from issue https://github.com/pytorch/pytorch/issues/45113
         batch_size, input_size, hidden_size = 5, 3, 7
-        
+
         # Create coalesced sparse tensor as in the issue
         weight = torch.randn(hidden_size, input_size).to_sparse()
         self.assertTrue(weight.is_coalesced())
