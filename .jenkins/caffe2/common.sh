@@ -24,12 +24,11 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|
     fi
 fi
 
-# /usr/local/caffe2 is where the cpp bits are installed to in in cmake-only
-# builds. In +python builds the cpp tests are copied to /usr/local/caffe2 so
-# that the test code in .jenkins/test.sh is the same
-INSTALL_PREFIX="/usr/local/caffe2"
-
 if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
+    # /usr/local/caffe2 is where the cpp bits are installed to in in cmake-only
+    # builds. In +python builds the cpp tests are copied to /usr/local/caffe2 so
+    # that the test code in .jenkins/test.sh is the same
+    INSTALL_PREFIX="/usr/local/caffe2"
 fi
 
 mkdir -p "$gtest_reports_dir" || true
