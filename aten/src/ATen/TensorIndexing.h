@@ -340,6 +340,7 @@ static inline IntArrayRef slicePrefix1sSize(const IntArrayRef& sizes) {
 
 static inline void copy_to(const Tensor& dst, const Tensor& src) {
   if (dst.sizes().equals(src.sizes())) {
+    // A shortcut to avoid generating hard-coded constant sizes during tracing.
     dst.copy_(src);
     return;
   }
