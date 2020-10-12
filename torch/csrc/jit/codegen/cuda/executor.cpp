@@ -15,6 +15,8 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <cstdlib>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -28,7 +30,7 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
       FusionExecutor::kernelNamespace() + " {\n" +
       executor_utils::kernelPreamble() + kernel + "}\n";
 
-  const char* debug_env = getenv("PYTORCH_CUDA_FUSER_DEBUG");
+  const char* debug_env = std::getenv("PYTORCH_CUDA_FUSER_DEBUG");
   if (debug_env && atoi(debug_env)) {
     std::cout << "\n==== codegen output for kernel: " << kernelName()
               << " ====" << std::endl
@@ -50,7 +52,7 @@ void FusionExecutor::debugCompileFusionFromStr(
   FusionGuard fg(&fusion_);
   options_ = options;
 
-  const char* debug_env = getenv("PYTORCH_CUDA_FUSER_DEBUG");
+  const char* debug_env = std::getenv("PYTORCH_CUDA_FUSER_DEBUG");
   if (debug_env && atoi(debug_env)) {
     std::cout << "\n==== codegen output for kernel: " << kernelName()
               << " ====" << std::endl
@@ -64,6 +66,11 @@ void FusionExecutor::debugCompileFusionFromStr(
   fusion_id_ = id;
   lowered_ = GpuLower(&fusion_);
   const auto kernel = lowered_.kernel();
+
+  const char* dump_kir_env = std::getenv("PYTORCH_CUDA_FUSER_DUMP_KIR");
+  if (dump_kir_env && atoi(dump_kir_env)) {
+    kernel->print();
+  }
 
   const auto& kernel_summary = kernel->summary();
   has_block_reductions = kernel_summary.has_block_reductions;
@@ -111,6 +118,12 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
   fusion_id_ = ++fusion_id_counter_;
   lowered_ = GpuLower(&fusion_);
   const auto kernel = lowered_.kernel();
+
+  const char* dump_kir_env = std::getenv("PYTORCH_CUDA_FUSER_DUMP_KIR");
+  if (dump_kir_env && atoi(dump_kir_env)) {
+    kernel->print();
+  }
+
   const auto kernel_code = codegen::generateCudaKernel(kernel, kernelName());
   const auto structured_code = getStructuredCode(kernel_code);
 
