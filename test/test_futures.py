@@ -160,7 +160,7 @@ class TestFuture(TestCase):
         # set2 called last, callback_result = 2
         self.assertEqual(callback_result, 2)
 
-    def _test_add_done_calback_error_ignored(self, cb):
+    def _test_add_done_callback_error_ignored(self, cb):
         fut = Future[int]()
         fut.add_done_callback(cb)
 
