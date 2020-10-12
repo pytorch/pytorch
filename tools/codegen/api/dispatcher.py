@@ -28,7 +28,7 @@ from typing import Sequence, Optional, Tuple
 #
 
 def argumenttype_type(t: Type, *, mutable: bool) -> str:
-    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+    if local.use_c10_dispatcher().dispatcher_uses_new_style():
         # This is a faux amis.  If it makes sense in the future to add
         # more special cases here, or invert things so cpp.argument_type
         # calls this, or just completely inline the function, please do
@@ -48,7 +48,7 @@ def returns_type(rs: Sequence[Return]) -> str:
     return cpp.returns_type(rs)
 
 def argument(a: Argument) -> DispatcherArgument:
-    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+    if local.use_c10_dispatcher().dispatcher_uses_new_style():
         return DispatcherArgument(
             type=argument_type(a),
             name=a.name,
@@ -66,7 +66,7 @@ def name(func: FunctionSchema) -> str:
     return cpp.name(func)
 
 def arguments(func: FunctionSchema) -> Tuple[DispatcherArgument, ...]:
-    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+    if local.use_c10_dispatcher().dispatcher_uses_new_style():
         return tuple(map(argument, itertools.chain(func.out_arguments, func.arguments, func.kwarg_only_arguments)))
     else:
         return tuple(
@@ -88,7 +88,7 @@ def cppargument_exprs(
 ) -> Sequence[DispatcherExpr]:
     if isinstance(a, CppSingleArgumentPack):
         if isinstance(a.this.argument, TensorOptionsArguments):
-            if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+            if local.use_c10_dispatcher().dispatcher_uses_new_style():
                 # Scatter
                 ta = a.this.argument
                 name = a.this.name
@@ -104,7 +104,7 @@ def cppargument_exprs(
         elif isinstance(a.this.argument, Argument):
             if a.this.name == 'memory_format' and \
                     tensor_options is not None and \
-                    local.use_c10_dispatcher() is UseC10Dispatcher.full:
+                    local.use_c10_dispatcher().dispatcher_uses_new_style():
                 return [DispatcherExpr(
                     type=argument_type(a.this.argument),
                     expr=f'c10::impl::check_tensor_options_and_extract_memory_format({tensor_options.name}, {a.this.name})')
@@ -114,7 +114,7 @@ def cppargument_exprs(
         else:
             assert_never(a.this.argument)
     elif isinstance(a, CppTensorOptionsArgumentPack):
-        if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+        if local.use_c10_dispatcher().dispatcher_uses_new_style():
             # No-op
             return [
                 expr
