@@ -8,12 +8,11 @@ pytest_reports_dir="${TEST_DIR}/python"
 
 # Figure out which Python to use
 PYTHON="$(which python)"
-echo $PYTHON
-if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
-  PYTHON=$(which "python${BASH_REMATCH[1]}")
-fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+# Figure out which Python to use for ROCm
+if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+    PYTHON=$(which "python${BASH_REMATCH[1]}")
+    alias python="$PYTHON"
     if which sccache > /dev/null; then
         # Save sccache logs to file
         sccache --stop-server || true
@@ -29,6 +28,9 @@ fi
 # builds. In +python builds the cpp tests are copied to /usr/local/caffe2 so
 # that the test code in .jenkins/test.sh is the same
 INSTALL_PREFIX="/usr/local/caffe2"
+
+if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
+fi
 
 mkdir -p "$gtest_reports_dir" || true
 mkdir -p "$pytest_reports_dir" || true
