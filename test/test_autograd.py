@@ -3487,7 +3487,9 @@ class TestAutograd(TestCase):
         x = torch.zeros(1, requires_grad=True)
         y = x.view_as(x)
         with self.assertRaisesRegex(RuntimeError,
-                "a view of a leaf Variable that requires grad is being used in an in-place operation."):
+                                    "a view of a leaf Variable that "
+                                    "requires grad is being used in "
+                                    "an in-place operation."):
             y.add_(1)
 
     def test_inplace_view_backward(self):
