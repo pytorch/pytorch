@@ -39,14 +39,14 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
   // 23, 16, 14, 14
   // Flattened shape = 23, 3136
   at::Tensor linear_weight = at::rand({32, 3136});
-  at::Tensor output;
+  at::Tensor output, ref_output;
   std::vector<void*> pointers;
 
   auto valid_allocation_plan = [&]() {
     c10::AllocationPlan plan;
     {
       c10::WithProfileAllocationsGuard profile_guard(&plan);
-      output = run_with_control_flow(
+      ref_output = run_with_control_flow(
           a, conv_weight, linear_weight, true, pointers);
     }
   };
@@ -57,7 +57,7 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
     c10::AllocationPlan plan;
     {
       c10::WithProfileAllocationsGuard profile_guard(&plan);
-      output =
+      ref_output =
         run_with_control_flow(a, conv_weight, linear_weight, record_mode, pointers);
     }
     bool success{true};
@@ -86,14 +86,14 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
   // 23, 16, 14, 14
   // Flattened shape = 23, 3136
   at::Tensor linear_weight = at::rand({32, 3136});
-  at::Tensor output;
+  at::Tensor output, ref_output;
   std::vector<void*> pointers;
 
   auto valid_allocation_plan = [&]() {
     c10::AllocationPlan plan;
     {
       c10::WithProfileAllocationsGuard profile_guard(&plan);
-      output = run_with_control_flow(
+      ref_output = run_with_control_flow(
           a, conv_weight, linear_weight, false, pointers);
     }
   };
@@ -107,7 +107,7 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
       c10::AllocationPlan plan;
       {
         c10::WithProfileAllocationsGuard profile_guard(&plan);
-        output = run_with_control_flow(
+        ref_output = run_with_control_flow(
             a,
             conv_weight,
             linear_weight,
@@ -147,11 +147,15 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
   // When control flow conditions are same between profiling and evaluation
   // profiling allocator should not throw.
   ASSERT_NO_THROW(validate_allocation_plan(true, true, false));
+  ASSERT_TRUE(ref_output.equal(output));
   ASSERT_NO_THROW(validate_allocation_plan(false, false, false));
+  ASSERT_TRUE(ref_output.equal(output));
   // Furthermore profiling allocator should return the same pointers
   // back for the intermediate tensors
   ASSERT_NO_THROW(validate_allocation_plan(true, true, true));
+  ASSERT_TRUE(ref_output.equal(output));
   ASSERT_NO_THROW(validate_allocation_plan(false, false, true));
+  ASSERT_TRUE(ref_output.equal(output));
 
   // When control flow conditions are different between profiling and evaluation
   // profiling allocator should throw.

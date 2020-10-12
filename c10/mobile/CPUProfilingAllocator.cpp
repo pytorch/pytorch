@@ -198,19 +198,27 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
       // Merge when another free block exist at the end of this block
       auto end_it = free_start_offset_to_size_iter.find(end_offset);
       if (end_it != free_start_offset_to_size_iter.end()) {
-        auto size_to_end_offset_iter = end_it->second;
-        freed_size += size_to_end_offset_iter->first;
-        free_size_to_offset.erase(size_to_end_offset_iter);
+        auto merge_block_iter = end_it->second;
+        auto merge_block_size = merge_block_iter->first;
+        freed_size += merge_block_size;
+        free_size_to_offset.erase(merge_block_iter);
         free_start_offset_to_size_iter.erase(end_it);
+        // If the block is being merged then also remove it from
+        // free_end_offset_to_size_iter
+        free_end_offset_to_size_iter.erase(end_offset + merge_block_size);
       }
       // Merge when freed block exist at the end of another free block
       auto start_it = free_end_offset_to_size_iter.find(freed_offset);
       if (start_it != free_end_offset_to_size_iter.end()) {
-        auto size_to_start_offset_iter = start_it->second;
-        freed_size += size_to_start_offset_iter->first;
-        freed_offset -= size_to_start_offset_iter->first;
-        free_size_to_offset.erase(size_to_start_offset_iter);
+        auto merge_block_iter = start_it->second;
+        auto merge_block_size = merge_block_iter->first;
+        freed_size += merge_block_size;
+        freed_offset -= merge_block_size;
+        free_size_to_offset.erase(merge_block_iter);
         free_end_offset_to_size_iter.erase(start_it);
+        // If the block is being merged then also remove it from
+        // free_start_offset_to_size_iter
+        free_start_offset_to_size_iter.erase(freed_offset);
       }
       auto freed_block_it =
         free_size_to_offset.emplace(freed_size, freed_offset).first;
