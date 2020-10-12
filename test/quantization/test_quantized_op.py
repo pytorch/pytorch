@@ -3699,7 +3699,7 @@ class TestQuantizedConv(TestCase):
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         if torch.backends.quantized.engine == 'qnnpack':
-            assume(not use_channelwise)
+            use_channelwise = False
         true_conv1d = torch.nn.Conv1d(
             input_channels,
             output_channels,
