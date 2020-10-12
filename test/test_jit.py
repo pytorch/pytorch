@@ -7396,6 +7396,7 @@ dedent """
         self.assertEqual(any_refinement2(3), torch.tensor(3))
         self.assertEqual(any_refinement2(torch.tensor(5)), torch.tensor(5))
 
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.LEGACY, "bug persists in deprecated executor")
     def test_unspecialized_any_binding(self):
         # any binding will infer the type, if it infers
         # a specialized tensor type `x` Dict type will fail isinstance check
