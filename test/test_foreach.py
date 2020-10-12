@@ -188,10 +188,10 @@ class TestForeach(TestCase):
             expected_min = [torch.min(tensors1[i].to(dtype=control_dtype),
                                       tensors2[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
 
-            res_max = torch._foreach_max(tensors1, tensors2)
+            res_max = torch._foreach_maximum(tensors1, tensors2)
             self.assertEqual(res_max, expected_max)
 
-            res_min = torch._foreach_min(tensors1, tensors2)
+            res_min = torch._foreach_minimum(tensors1, tensors2)
             self.assertEqual(res_min, expected_min)
 
 
@@ -212,11 +212,11 @@ class TestForeach(TestCase):
         ]
 
         expected = [torch.max(a1, b1) for a1, b1 in zip(a, b)]
-        res = torch._foreach_max(a, b)
+        res = torch._foreach_maximum(a, b)
         self.assertEqual(expected, res)
 
         expected = [torch.min(a1, b1) for a1, b1 in zip(a, b)]
-        res = torch._foreach_min(a, b)
+        res = torch._foreach_minimum(a, b)
         self.assertEqual(expected, res)
 
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False)))

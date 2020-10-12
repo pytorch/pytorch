@@ -6619,21 +6619,21 @@
     CPU: foreach_tensor_addcmul_slow
     CUDA: foreach_tensor_addcmul_cuda
 
-- func: _foreach_max.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+- func: _foreach_maximum.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
   use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_tensor_max_slow
-    CUDA: foreach_tensor_max_cuda
+    CPU: foreach_tensor_maximum_slow
+    CUDA: foreach_tensor_maximum_cuda
 
-- func: _foreach_min.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+- func: _foreach_minimum.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
   use_c10_dispatcher: full
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_tensor_min_slow
-    CUDA: foreach_tensor_min_cuda
+    CPU: foreach_tensor_minimum_slow
+    CUDA: foreach_tensor_minimum_cuda
 
 - func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
   use_c10_dispatcher: full
