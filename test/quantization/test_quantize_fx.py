@@ -312,7 +312,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m = convert_fx(m)
         m(dict_input)
 
-    def test_standalone_module_class(self):
+    def test_standalone_module(self):
         class StandaloneModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -352,9 +352,11 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.conv2.weight = torch.nn.Parameter(original_m.standalone.conv.weight.detach())
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.standalone.conv.bias.detach())
 
-        qconfig_dict = {'': default_qconfig, 'standalone_module_name': ['standalone']}
+        qconfig_dict = {"": default_qconfig}
+        prepare_custom_config_dict = {"standalone_module_name": ["standalone"]}
         # check prepared model
-        m = prepare_fx(original_m, qconfig_dict)
+        m = prepare_fx(
+            original_m, qconfig_dict, prepare_custom_config_dict=prepare_custom_config_dict)
         # calibration
         m(data)
         # input and output of first conv, observer for standalone module
