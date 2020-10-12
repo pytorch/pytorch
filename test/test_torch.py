@@ -1101,7 +1101,7 @@ class AbstractTestCases:
         def test_topk_arguments(self):
             q = torch.randn(10, 2, 10)
             # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
-            self.assertRaises(TypeError, lambda: q.topk(4, True))        
+            self.assertRaises(TypeError, lambda: q.topk(4, True))
 
         def test_mode(self):
             x = torch.arange(1., SIZE * SIZE + 1).clone().resize_(SIZE, SIZE)
@@ -6376,7 +6376,7 @@ class TestTorchDeviceType(TestCase):
     # Tests clamp and its alias, clip
     @dtypes(torch.int64, torch.float32)
     def test_clamp(self, device, dtype):
-        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_, 
+        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_,
                    torch.clip, torch.Tensor.clip, torch.Tensor.clip_)
 
         # min/max argument product
@@ -6404,7 +6404,7 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(Y_expected, Y_out)
 
     def test_clamp_propagates_nans(self, device):
-        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_, 
+        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_,
                    torch.clip, torch.Tensor.clip, torch.Tensor.clip_)
 
         # min/max argument product
@@ -6415,9 +6415,9 @@ class TestTorchDeviceType(TestCase):
                 if min_val is None and max_val is None:
                     continue
 
-                X, Y_expected = self.generate_clamp_baseline(device, torch.float, 
-                                                             min_vals=min_val, 
-                                                             max_vals=max_val, 
+                X, Y_expected = self.generate_clamp_baseline(device, torch.float,
+                                                             min_vals=min_val,
+                                                             max_vals=max_val,
                                                              with_nans=True)
                 Y_expected = torch.isnan(Y_expected)
 
@@ -13789,6 +13789,14 @@ class TestTorchDeviceType(TestCase):
         tensor = torch.tensor(floats, dtype=torch.float32, device=device)
         for base in floats:
             self._test_pow(base, tensor)
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_cuda_tensor_pow_scalar_tensor(self, device):
+        cuda_tensor = torch.randn((3, 3), device='cuda')
+        scalars_tensors = [torch.tensor(5), torch.tensor(4.2), torch.tensor(-0.5)]
+        for exp in scalars_tensors:
+            self._test_pow(cuda_tensor, exp)
 
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
