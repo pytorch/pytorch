@@ -1,5 +1,6 @@
 #include <c10d/Utils.hpp>
 
+#ifndef _WIN32
 #include <netdb.h>
 #include <sys/poll.h>
 
@@ -354,6 +355,6 @@ std::tuple<int, std::string> accept(
   return std::make_tuple(
       socket, sockaddrToString(reinterpret_cast<struct ::sockaddr*>(&addr)));
 }
-
 } // namespace tcputil
 } // namespace c10d
+#endif

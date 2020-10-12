@@ -31,6 +31,7 @@ STATIC_QUANT_MODULE_MAPPINGS = {
     nn.InstanceNorm2d: nnq.InstanceNorm2d,
     nn.InstanceNorm3d: nnq.InstanceNorm3d,
     nn.LayerNorm: nnq.LayerNorm,
+    nn.LeakyReLU: nnq.LeakyReLU,
     nn.Linear: nnq.Linear,
     nn.ReLU6: nnq.ReLU6,
     nn.ReLU: nnq.ReLU,
@@ -48,14 +49,14 @@ STATIC_QUANT_MODULE_MAPPINGS = {
     nniqat.ConvReLU2d: nniq.ConvReLU2d,
     nniqat.LinearReLU: nniq.LinearReLU,
     # QAT modules:
-    nnqat.Conv2d: nnq.Conv2d,
     nnqat.Linear: nnq.Linear,
+    nnqat.Conv2d: nnq.Conv2d,
 }
 
 # Map for swapping float module to qat modules
 QAT_MODULE_MAPPINGS = {
-    nn.Linear: nnqat.Linear,
     nn.Conv2d: nnqat.Conv2d,
+    nn.Linear: nnqat.Linear,
     # Intrinsic modules:
     nni.ConvBn2d: nniqat.ConvBn2d,
     nni.ConvBnReLU2d: nniqat.ConvBnReLU2d,
@@ -86,6 +87,7 @@ FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS = {
     F.hardswish: torch._ops.ops.quantized.hardswish,
     F.instance_norm: torch._ops.ops.quantized.instance_norm,
     F.layer_norm: torch._ops.ops.quantized.layer_norm,
+    F.leaky_relu: torch._ops.ops.quantized.leaky_relu,
 }
 
 def register_static_quant_module_mapping(
@@ -150,11 +152,12 @@ def get_qconfig_propagation_list():
     attribute to in prepare
     '''
     QCONFIG_PROPAGATE_MODULE_CLASS_LIST = (
-        set(DYNAMIC_QUANT_MODULE_MAPPINGS.keys())
-        | set(QAT_MODULE_MAPPINGS.keys())
-        | set(STATIC_QUANT_MODULE_MAPPINGS.keys())
-        | _INCLUDE_QCONFIG_PROPAGATE_LIST
-    ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
+        (set(STATIC_QUANT_MODULE_MAPPINGS.keys()) |
+         set(QAT_MODULE_MAPPINGS.keys()) |
+         set(DYNAMIC_QUANT_MODULE_MAPPINGS.keys()) |
+         _INCLUDE_QCONFIG_PROPAGATE_LIST) -
+        _EXCLUDE_QCONFIG_PROPAGATE_LIST
+    )
     return QCONFIG_PROPAGATE_MODULE_CLASS_LIST
 
 def get_compare_output_module_list():
@@ -162,12 +165,12 @@ def get_compare_output_module_list():
     in numeric suite
     '''
     NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST = (
-        set(DYNAMIC_QUANT_MODULE_MAPPINGS.keys())
-        | set(DYNAMIC_QUANT_MODULE_MAPPINGS.values())
-        | set(QAT_MODULE_MAPPINGS.keys())
+        set(STATIC_QUANT_MODULE_MAPPINGS.values())
         | set(QAT_MODULE_MAPPINGS.values())
+        | set(DYNAMIC_QUANT_MODULE_MAPPINGS.values())
         | set(STATIC_QUANT_MODULE_MAPPINGS.keys())
-        | set(STATIC_QUANT_MODULE_MAPPINGS.values())
+        | set(QAT_MODULE_MAPPINGS.keys())
+        | set(DYNAMIC_QUANT_MODULE_MAPPINGS.keys())
         | _INCLUDE_QCONFIG_PROPAGATE_LIST
     ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
     return NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST

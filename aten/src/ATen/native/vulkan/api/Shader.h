@@ -32,7 +32,7 @@ namespace api {
 // and destruct the aforementioned Vulkan objects.
 //
 
-struct C10_EXPORT Shader final {
+struct Shader final {
   //
   // Layout
   //
@@ -52,7 +52,7 @@ struct C10_EXPORT Shader final {
 
     class Factory final {
      public:
-      explicit Factory(VkDevice device);
+      explicit Factory(const GPU& gpu);
 
       typedef Layout::Descriptor Descriptor;
       typedef VK_DELETER(DescriptorSetLayout) Deleter;
@@ -75,8 +75,8 @@ struct C10_EXPORT Shader final {
     typedef api::Cache<Factory> Cache;
     Cache cache;
 
-    explicit Layout(const VkDevice device)
-      : cache(Factory(device)) {
+    explicit Layout(const GPU& gpu)
+      : cache(Factory(gpu)) {
     }
   } layout;
 
@@ -122,7 +122,7 @@ struct C10_EXPORT Shader final {
 
   class Factory final {
    public:
-    explicit Factory(VkDevice device);
+    explicit Factory(const GPU& gpu);
     Factory(const Factory&) = delete;
     Factory& operator=(const Factory&) = delete;
     Factory(Factory&&);
@@ -152,9 +152,9 @@ struct C10_EXPORT Shader final {
   typedef api::Cache<Factory> Cache;
   Cache cache;
 
-  explicit Shader(const VkDevice device)
-    : layout(device),
-      cache(Factory(device)) {
+  explicit Shader(const GPU& gpu)
+    : layout(gpu),
+      cache(Factory(gpu)) {
   }
 };
 
@@ -187,11 +187,11 @@ inline size_t Shader::Layout::Factory::Hasher::operator()(
 }
 
 inline bool operator==(
-    const Shader::WorkGroup& work_group_1,
-    const Shader::WorkGroup& work_group_2) {
-  return (work_group_1.x == work_group_2.x) &&
-         (work_group_1.y == work_group_2.y) &&
-         (work_group_1.z == work_group_2.z);
+    const Shader::WorkGroup& _1,
+    const Shader::WorkGroup& _2) {
+  return (_1.x == _2.x) &&
+         (_1.y == _2.y) &&
+         (_1.z == _2.z);
 }
 
 inline bool operator==(

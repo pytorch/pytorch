@@ -1238,6 +1238,32 @@ TEST(AliasRegistrationTest, PureWithAnnotationsShouldError) {
       "Tried to register operator foo::rand11(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
 }
 
+TEST(AliasRegistrationTest, AliasMoveAtenListOp) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  auto graph_string = R"IR(
+  graph():
+    %x : Tensor = prim::MakeTestTensor()
+    %8 : int = prim::Constant[value=0]()
+    %5 : int = prim::Constant[value=1]()
+    %4 : int = prim::Constant[value=2]()
+    %y : Tensor[] = prim::ListConstruct(%x)
+    %6 : Tensor = aten::add_(%x, %4, %5)
+    %9 : Tensor = aten::cat(%y, %8)
+    return (%9))IR";
+
+  torch::jit::parseIR(graph_string, graph.get(), vmap);
+  AliasDb aliasDb(graph);
+
+  // bc y.1 has a single used in a single non-aliasing aten op,
+  // x is added to y.1 contained elements instead of wildcard set
+  EXPECT_TRUE(!aliasDb.mayAlias(vmap["x"], vmap["9"]));
+
+  // write to contained element should prevent move
+  EXPECT_TRUE(!aliasDb.moveBeforeTopologicallyValid(
+      vmap["y"]->node(), vmap["9"]->node()));
+}
+
 TEST(AliasRegistrationTest, PureWithAnnotationsShouldError2) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand12(Tensor(a) arg1) -> Tensor(b)",
