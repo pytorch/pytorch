@@ -236,11 +236,11 @@ class TestForeach(TestCase):
         ]
 
         expected_max = [torch.max(a1, b1) for a1, b1 in zip(a, b)]
-        res_max = torch._foreach_max(a, b)
+        res_max = torch._foreach_maximum(a, b)
         self.assertEqual(expected_max, res_max)
 
         expected_min = [torch.min(a1, b1) for a1, b1 in zip(a, b)]
-        res_min = torch._foreach_min(a, b)
+        res_min = torch._foreach_minimum(a, b)
         self.assertEqual(expected_min, res_min)
 
     #
