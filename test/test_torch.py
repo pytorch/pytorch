@@ -17503,7 +17503,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             (torch.rand((10, 1), device=device).to(dtype), torch.rand((10, 1), device=device).to(dtype).transpose(0, 1)),
             (torch.randint(100, (10, ), device=device, dtype=torch.long), torch.rand(10, device=device).to(dtype))
         ]
-        for i,input in enumerate(inputs):
+        for input in inputs:
             actual = torch.igamma(input[0], input[1])
             input0, input1 = input[0], input[1]
             if dtype == torch.bfloat16:

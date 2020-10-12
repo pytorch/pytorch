@@ -174,6 +174,159 @@ static inline __host__ __device__ scalar_t calc_polygamma(int n, scalar_t x) {
   return ((n % 2) ? 1.0 : -1.0) * ::exp(::lgamma(static_cast<scalar_t>(n) + 1.0)) * zeta(static_cast<scalar_t>(n + 1), x);
 }
 
+template <typename scalar_t>
+static inline __host__ __device__ scalar_t calc_igammac(scalar_t n, scalar_t x);
+
+template <typename scalar_t>
+static inline __host__ __device__ scalar_t calc_igamma(scalar_t n, scalar_t x) {
+  using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
+  accscalar_t ans, ax, c, r;
+  static accscalar_t MAXLOG = std::is_same<accscalar_t, double>::value ?
+    7.09782712893383996843E2 : 88.72283905206835;
+  static accscalar_t MACHEP = std::is_same<accscalar_t, double>::value ?
+    1.11022302462515654042E-16 : 5.9604644775390625E-8;
+
+  // boundary values following SciPy
+  if ((x < 0) || (a < 0)) {
+    // out of defined-region of the function
+    return std::numeric_limits<accscalar_t>::quiet_NaN();
+  }
+  else if (a == 0) {
+    if (x > 0) {
+      return 1.0;
+    }
+    else {
+      return std::numeric_limits<scalar_t>::quiet_NaN();
+    }
+  }
+  else if (x == 0) {
+    return 0.0; // zero integration limit
+  }
+  else if (::isinf(a)) {
+    if (::isinf(x)) {
+      return std::numeric_limits<scalar_t>::quiet_NaN();
+    }
+    return 0.0;
+  }
+  else if (::isinf(x)) {
+    return 1.0;
+  }
+
+  if ((x > 1.0) && (x > a)) {
+    return 1.0 - calc_igammac(a, x);
+  }
+
+  /* Compute  x**a * exp(-x) / gamma(a)  */
+  ax = a * ::log(x) - x - ::lgamma(a);
+  if(ax < -MAXLOG) {
+    return 0.0; // underflow
+  }
+  ax = ::exp(ax);
+
+  /* power series */
+  r = a;
+  c = 1.0;
+  ans = 1.0;
+
+  do {
+    r += 1.0;
+    c *= x / r;
+    ans += c;
+  }
+  while (c > MACHEP * ans);
+
+  return ans * ax / a;
+}
+
+template <typename scalar_t>
+static inline __host__ __device__ scalar_t calc_igammac(scalar_t n, scalar_t x) {
+  using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
+  accscalar_t ans, ax, c, yc, r, t, y, z;
+  accscalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
+  static accscalar_t MAXLOG = std::is_same<accscalar_t,double>::value ?
+    7.09782712893383996843E2 : 88.72283905206835;
+  static accscalar_t MACHEP = std::is_same<accscalar_t,double>::value ?
+    1.11022302462515654042E-16 : 5.9604644775390625E-8;
+  static accscalar_t BIG = std::is_same<accscalar_t,double>::value ?
+    4.503599627370496e15 : 16777216.;
+  static accscalar_t BIGINV = std::is_same<accscalar_t,double>::value ?
+    2.22044604925031308085e-16 : 5.9604644775390625E-8;
+
+  if ((x < 0) || (a < 0)) {
+    // out of defined-region of the function
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  else if (a == 0) {
+    if (x > 0) {
+      return 0.0;
+    }
+    else {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+  }
+  else if (x == 0) {
+    return 1.0;
+  }
+  else if (::isinf(a)) {
+    if (::isinf(x)) {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+    return 1.0;
+  }
+  else if (::isinf(x)) {
+    return 0.0;
+  }
+
+  if ((x < 1.0) || (x < a)) {
+    return 1.0 - calc_igamma(a, x);
+  }
+
+  ax = a * ::log(x) - x - ::lgamma(a);
+  if (ax < -MAXLOG) {
+    return 0.0; // underflow
+  }
+  ax = ::exp(ax);
+
+  /* continued fraction */
+  y = 1.0 - a;
+  z = x + y + 1.0;
+  c = 0.0;
+  pkm2 = 1.0;
+  qkm2 = x;
+  pkm1 = x + 1.0;
+  qkm1 = z * x;
+  ans = pkm1/qkm1;
+
+  do {
+    c += 1.0;
+    y += 1.0;
+    z += 2.0;
+    yc = y * c;
+    pk = pkm1 * z  -  pkm2 * yc;
+    qk = qkm1 * z  -  qkm2 * yc;
+    if (qk != 0) {
+      r = pk / qk;
+      t = ::fabs((ans - r) / r);
+      ans = r;
+    }
+    else {
+      t = 1.0;
+    }
+    pkm2 = pkm1;
+    pkm1 = pk;
+    qkm2 = qkm1;
+    qkm1 = qk;
+    if (::fabs(pk) > BIG) {
+      pkm2 *= BIGINV;
+      pkm1 *= BIGINV;
+      qkm2 *= BIGINV;
+      qkm1 *= BIGINV;
+    }
+  }
+  while (t > MACHEP);
+
+  return ans * ax;
+}
 
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {

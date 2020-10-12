@@ -452,8 +452,8 @@ c10::BFloat16 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
 // regularized upper incomplete gamma
 template <typename scalar_t>
 static inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
-  double ans, ax, c, yc, r, t, y, z;
-  double pk, pkm1, pkm2, qk, qkm1, qkm2;
+  scalar_t ans, ax, c, yc, r, t, y, z;
+  scalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
   static scalar_t MAXLOG = std::is_same<scalar_t,double>::value ?
     7.09782712893383996843E2 : 88.72283905206835;
   static scalar_t MACHEP = std::is_same<scalar_t,double>::value ?
