@@ -58,6 +58,10 @@ void check_foreach_api_restrictions(TensorList tensors, ArrayRef<double> scalars
 // - Resulting tensor must have the same dtype as the input one
 bool can_use_fast_route(TensorList tensors, Scalar scalar) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+
+#ifdef __HIP_PLATFORM_HCC__
+  return false;
+#else
   auto expected_device = tensors[0].device();
 
   for (auto t : tensors) {
@@ -94,9 +98,13 @@ bool can_use_fast_route(TensorList tensors, Scalar scalar) {
   }
 
   return true;
+#endif
 }
 
 bool can_use_fast_route(TensorList tensors) {
+#ifdef __HIP_PLATFORM_HCC__
+  return false;
+#else
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
   auto expected_device = tensors[0].device();
 
@@ -118,6 +126,9 @@ bool can_use_fast_route(TensorList tensors) {
 }
 
 bool can_use_fast_route(TensorList tensors1, TensorList tensors2) {
+#ifdef __HIP_PLATFORM_HCC__
+  return false;
+#else
   auto expected_device = tensors1[0].device();
 
   for (int64_t i = 0; i < tensors1.size(); i++) {
@@ -149,10 +160,15 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2) {
   }
 
   return true;
+#endif
 }
 
 bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList tensors3) {
-  auto expected_device = tensors1[0].device();
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+#ifdef __HIP_PLATFORM_HCC__
+  return false;
+#else
+  auto expected_device = tensors[0].device();
 
   for (int64_t i = 0; i < tensors1.size(); i++) {
     TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), 
@@ -192,11 +208,16 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
   }
 
   return true;
+#endif
 }
 
 bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList tensors3, ArrayRef<double> scalars) {
   TORCH_CHECK(tensors1.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
+#ifdef __HIP_PLATFORM_HCC__
+  return false;
+#else
   return can_use_fast_route(tensors1, tensors2, tensors3);
+#endif
 }
 
 bool can_use_fast_route(TensorList tensors, ArrayRef<double> scalars) {
@@ -204,7 +225,11 @@ bool can_use_fast_route(TensorList tensors, ArrayRef<double> scalars) {
   TORCH_CHECK(scalars.size() > 0, "Scalars list must have at least one value.");
   TORCH_CHECK(tensors.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
 
+#ifdef __HIP_PLATFORM_HCC__
+  return false;
+#else
   return can_use_fast_route(tensors);
+#endif
 }
 
 }
