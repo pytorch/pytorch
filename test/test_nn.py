@@ -11738,7 +11738,7 @@ class TestNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, 'have the same type as'):
                 es(input, offsets, per_sample_weights)
         else:
-            with self.assertRaisesRegex(RuntimeError, 'expected scalar type'):
+            with self.assertRaisesRegex(RuntimeError, 'Input and parameter tensors are not the same dtype'):
                 es(input, offsets, per_sample_weights)
 
         # Failure 2.1: input/per_sample_weights have different sizes (1d input)
