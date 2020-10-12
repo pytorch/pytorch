@@ -846,6 +846,10 @@ Tensor grid_sampler(const Tensor& input, const Tensor& grid,
     grid.size(-1) == input.dim() - 2,
     "grid_sampler(): expected grid to have size ", input.dim() - 2, " in last "
     "dimension, but got grid with sizes ", grid.sizes());
+  TORCH_CHECK(
+    !(input.dim() == 5 && static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Bicubic),
+    "grid_sampler(): bicubic interpolation only support 4D input"
+  );
   for (int64_t i = 2; i < input.dim(); i++) {
     TORCH_CHECK(input.size(i) > 0,
       "grid_sampler(): expected input to have non-empty spatial dimensions, "
