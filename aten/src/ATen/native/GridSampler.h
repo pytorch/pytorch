@@ -227,11 +227,29 @@ static inline scalar_t get_value_bounded(
 
   int64_t ix = static_cast<int64_t>(x);
   int64_t iy = static_cast<int64_t>(y);
-  
-  if (padding_mode == GridSamplerPadding::Zeros && !within_bounds_2d(iy, ix, H, W)) {
-    return static_cast<scalar_t>(0);
-  } else {
+
+  if (within_bounds_2d(iy, ix, H, W)) {
     return data[iy * sH + ix * sW];
+  }
+  return static_cast<scalar_t>(0);
+}
+
+template<typename scalar_t>
+static inline void safe_add_2d(scalar_t *data, int64_t h, int64_t w,
+                               int64_t sH, int64_t sW, int64_t H, int64_t W,
+                               scalar_t delta) {
+  if (within_bounds_2d(h, w, H, W)) {
+    data[h * sH + w * sW] += delta;
+  }
+}
+
+template<typename scalar_t>
+static inline void safe_add_3d(scalar_t *data, int64_t d, int64_t h, int64_t w,
+                               int64_t sD, int64_t sH, int64_t sW,
+                               int64_t D, int64_t H, int64_t W,
+                               scalar_t delta) {
+  if (within_bounds_3d(d, h, w, D, H, W)) {
+    data[d * sD + h * sH + w * sW] += delta;
   }
 }
 
@@ -254,30 +272,7 @@ static inline void add_value_bounded(
   int64_t ix = static_cast<int64_t>(x);
   int64_t iy = static_cast<int64_t>(y);
 
-  if (padding_mode == GridSamplerPadding::Zeros && !within_bounds_2d(iy, ix, H, W)) {
-    return;
-  } else {
-    data[iy * sH + ix * sW] += delta;
-  }
-}
-
-template<typename scalar_t>
-static inline void safe_add_2d(scalar_t *data, int64_t h, int64_t w,
-                               int64_t sH, int64_t sW, int64_t H, int64_t W,
-                               scalar_t delta) {
-  if (within_bounds_2d(h, w, H, W)) {
-    data[h * sH + w * sW] += delta;
-  }
-}
-
-template<typename scalar_t>
-static inline void safe_add_3d(scalar_t *data, int64_t d, int64_t h, int64_t w,
-                               int64_t sD, int64_t sH, int64_t sW,
-                               int64_t D, int64_t H, int64_t W,
-                               scalar_t delta) {
-  if (within_bounds_3d(d, h, w, D, H, W)) {
-    data[d * sD + h * sH + w * sW] += delta;
-  }
+  safe_add_2d(data, iy, ix, sH, sW, H, W, delta);
 }
 
 template<typename scalar_t>
