@@ -57,7 +57,7 @@ def argument(a: Argument) -> DispatcherArgument:
         )
     else:
         la = legacy_dispatcher.argument(a)
-        assert len(la) == 1, "TensorOptions arguments not supported"
+        assert len(la) == 1, "Operators using the legacy signature in the dispatcher don't scatter TensorOptions. This shouldn't happen."
         return DispatcherArgument(
             type=la[0].type,
             name=la[0].name,

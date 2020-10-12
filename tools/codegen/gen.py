@@ -259,7 +259,7 @@ def compute_type_method(
                 if f.device_guard and (dispatch is None or 'Vulkan' == dispatch) and has_tensor_options:
                     cuda_guard = cuda_guard_from_tensor_options
                 elif f.device_guard and dispatch is not None and 'CUDA' in dispatch and has_tensor_options:
-                    cuda_guard = """\
+                    cuda_guard = f"""\
     globalContext().lazyInitCUDA();
     {cuda_guard_from_tensor_options}
 """
