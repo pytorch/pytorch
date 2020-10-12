@@ -98,7 +98,8 @@ std::vector<Tensor> foreach_tensor_##NAME##_slow(TensorList tensors) {     \
                                                                            \
   return result;                                                           \
 }                                                                          \
-                                                                           \
+
+#define FOREACH_UNARY_OP_(NAME)                                            \
 void foreach_tensor_##NAME##_slow_(TensorList tensors) {                   \
   check_foreach_api_restrictions(tensors);                                 \
                                                                            \
@@ -145,6 +146,9 @@ FOREACH_BINARY_OP_LIST(mul);
 FOREACH_BINARY_OP_LIST(div);
 FOREACH_UNARY_OP(sqrt);
 FOREACH_UNARY_OP(exp);
+FOREACH_UNARY_OP_(sqrt);
+FOREACH_UNARY_OP_(exp);
+FOREACH_UNARY_OP_(zero);
 FOREACH_POINTWISE_OP(addcdiv);
 FOREACH_POINTWISE_OP(addcmul);
 

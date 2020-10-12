@@ -180,6 +180,7 @@ class Optimizer(object):
                 the step altogether).
         """
         for group in self.param_groups:
+            grads_to_zero = []
             for p in group['params']:
                 if p.grad is not None:
                     if set_to_none:
@@ -189,7 +190,14 @@ class Optimizer(object):
                             p.grad.detach_()
                         else:
                             p.grad.requires_grad_(False)
-                        p.grad.zero_()
+
+                        if p.grad.is_sparse:
+                            p.grad.zero_()
+                        else:
+                            grads_to_zero.append(p.grad)
+
+            if len(grads_to_zero) > 0:
+                torch._foreach_zero_(grads_to_zero)
 
     def step(self, closure):
         r"""Performs a single optimization step (parameter update).

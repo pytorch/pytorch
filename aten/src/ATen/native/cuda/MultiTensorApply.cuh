@@ -172,5 +172,6 @@ void multi_tensor_apply(
             }
         }
     }
+
 } // namespace
 }} // at::native
