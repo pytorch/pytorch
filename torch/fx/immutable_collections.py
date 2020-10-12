@@ -10,4 +10,7 @@ def _create_immutable_container(base, mutable_functions):
 immutable_list = _create_immutable_container(list,
                                              ['__delitem__', '__iadd__', '__imul__', '__setitem__', 'append',
                                               'clear', 'extend', 'insert', 'pop', 'remove'])
+immutable_list.__reduce__ = lambda self: (immutable_list, (tuple(iter(self)),))
+
 immutable_dict = _create_immutable_container(dict, ['__delitem__', '__setitem__', 'clear', 'pop', 'popitem', 'update'])
+immutable_dict.__reduce__ = lambda self: (immutable_dict, (iter(self.items()),))
