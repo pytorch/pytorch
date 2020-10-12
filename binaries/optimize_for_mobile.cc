@@ -30,7 +30,7 @@ C10_DEFINE_string(
     "",
     "Name of the output model to be saved.");
 C10_DEFINE_string(backend, "", "The backend to be optimized");
-C10_DEFINE_string(skip, "", "The methods to be preserved")
+C10_DEFINE_string(preserved_methods, "", "Methods to be preserved")
 
 int main(int argc, char** argv) {
   c10::SetUsageMessage(
@@ -38,8 +38,8 @@ int main(int argc, char** argv) {
     "./optimize_for_mobile"
     " --model=<model_file>"
     " [--output=<output_file_name>]"
-    " [--backend=<cpu|vulkan>]"
-    " [--skip=<method_names>]"
+    " [--backend=<cpu|vulkan|metal>]"
+    " [--preserved_methods=<method_names>]"
   );
 
   if (!c10::ParseCommandLineFlags(&argc, &argv)) {
@@ -58,15 +58,15 @@ int main(int argc, char** argv) {
   }
 
   std::vector<std::string> preserved_methods;
-  if(FLAGS_skip != ""){
-    std::stringstream ss(FLAGS_skip);
+  if(FLAGS_preserved_methods != ""){
+    std::stringstream ss(FLAGS_preserved_methods);
     std::string m;
     while(std::getline(ss, m, ';')){
       if(m != ""){
         preserved_methods.emplace_back(std::move(m));
       }
     }
-    std::cout<<"The following methods were preserved:"<<std::endl;
+    std::cout<<"The following methods will be preserved:"<<std::endl;
     for(auto& str : preserved_methods){
       std::cout<<str<<std::endl;
     }
