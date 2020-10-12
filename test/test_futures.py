@@ -173,7 +173,7 @@ class TestFuture(TestCase):
         def raise_value_error(fut):
             raise ValueError("Expected error")
 
-        _test_add_done_callback_error_ignored(raise_value_error)
+        self._test_add_done_callback_error_ignored(raise_value_error)
 
     def test_add_done_callback_no_arg_error_is_ignored(self):
 
@@ -182,7 +182,7 @@ class TestFuture(TestCase):
 
         # Adding another level of function indirection here on purpose.
         # Otherwise mypy will pick up on no_arg having an incompatible type and fail CI
-        _test_add_done_callback_error_ignored(raise_value_error)
+        self._test_add_done_callback_error_ignored(no_arg)
 
     def test_interleaving_then_and_add_done_callback_maintains_callback_order(self):
         callback_result = 0
