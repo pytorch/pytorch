@@ -74,8 +74,8 @@ def annotate(the_type, the_value):
     return the_value
 
 
-def isinstance(the_obj, the_type) -> bool:
-    return _isinstance(the_obj, the_type)
+# for torch.jit.isinstance 
+isinstance = _isinstance
 
 
 if not torch._C._jit_init():
