@@ -419,7 +419,7 @@ static inline scalar_t calc_igamma(scalar_t a, scalar_t x) {
   }
 
   if ((x > 1.0) && (x > a)) {
-  	return 1.0 - calc_igammac(a, x);
+    return 1.0 - calc_igammac(a, x);
   }
 
   /* Compute  x**a * exp(-x) / gamma(a)  */
@@ -435,9 +435,9 @@ static inline scalar_t calc_igamma(scalar_t a, scalar_t x) {
   ans = 1.0;
 
   do {
-  	r += 1.0;
-  	c *= x/r;
-  	ans += c;
+    r += 1.0;
+    c *= x/r;
+    ans += c;
   }
   while (c > MACHEP * ans);
 
@@ -445,7 +445,7 @@ static inline scalar_t calc_igamma(scalar_t a, scalar_t x) {
 }
 
 template <>
-static inline c10::BFloat16 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+c10::BFloat16 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
@@ -489,7 +489,7 @@ static inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
   }
 
   if ((x < 1.0) || (x < a)) {
-  	return 1.0 - calc_igamma(a, x);
+    return 1.0 - calc_igamma(a, x);
   }
 
   ax = a * log(x) - x - lgamma(a);
@@ -509,31 +509,31 @@ static inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
   ans = pkm1/qkm1;
 
   do {
-  	c += 1.0;
-  	y += 1.0;
-  	z += 2.0;
-  	yc = y * c;
-  	pk = pkm1 * z  -  pkm2 * yc;
-  	qk = qkm1 * z  -  qkm2 * yc;
-  	if (qk != 0) {
-  		r = pk / qk;
-  		t = fabs((ans - r) / r);
-  		ans = r;
-		}
-  	else {
-  		t = 1.0;
+    c += 1.0;
+    y += 1.0;
+    z += 2.0;
+    yc = y * c;
+    pk = pkm1 * z  -  pkm2 * yc;
+    qk = qkm1 * z  -  qkm2 * yc;
+    if (qk != 0) {
+      r = pk / qk;
+      t = fabs((ans - r) / r);
+      ans = r;
     }
-  	pkm2 = pkm1;
-  	pkm1 = pk;
-  	qkm2 = qkm1;
-  	qkm1 = qk;
-  	if (fabs(pk) > BIG) {
-  		pkm2 *= BIGINV;
-  		pkm1 *= BIGINV;
-  		qkm2 *= BIGINV;
-  		qkm1 *= BIGINV;
-		}
-	}
+    else {
+      t = 1.0;
+    }
+    pkm2 = pkm1;
+    pkm1 = pk;
+    qkm2 = qkm1;
+    qkm1 = qk;
+    if (fabs(pk) > BIG) {
+      pkm2 *= BIGINV;
+      pkm1 *= BIGINV;
+      qkm2 *= BIGINV;
+      qkm1 *= BIGINV;
+    }
+  }
   while (t > MACHEP);
 
   return ans * ax;

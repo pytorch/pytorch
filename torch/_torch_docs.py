@@ -3286,6 +3286,36 @@ Example::
 
 """.format(**common_args))
 
+add_docstr(torch.igamma,
+           r"""
+igamma(input, other, *, out=None) -> Tensor
+
+Regularized lower incomplete gamma function
+
+.. math::
+    \text{out}_{i} = \frac{1}{\Gamma(\text{input})} \int_0^\text{other} t^{\text{input}-1} e^{-t} dt
+
+The shapes of ``input`` and ``other`` must be
+:ref:`broadcastable <broadcasting-semantics>`.
+
+.. note::
+    The backward pass is not currently supported.
+
+""" + r"""
+Args:
+    input (Tensor): the first input tensor
+    other (Tensor): the second input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.igamma(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
+    tensor([0.3528, 0.5665, 0.7350])
+
+""".format(**common_args))
+
 add_docstr(torch.index_select,
            r"""
 index_select(input, dim, index, *, out=None) -> Tensor
