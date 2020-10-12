@@ -8698,6 +8698,10 @@ Please look at `Moore-Penrose inverse`_ for more details
     could be unstable. Double-backward will also be unstable due to the usage of SVD internally.
     See :meth:`~torch.svd` for more details.
 
+.. note::
+    Supports real and complex inputs.
+    Batched version for complex inputs is only supported on the CPU.
+
 Arguments:
     input (Tensor): The input tensor of size :math:`(*, m, n)` where :math:`*` is zero or more batch dimensions
     rcond (float): A floating point value to determine the cutoff for small singular values.
