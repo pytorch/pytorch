@@ -16,8 +16,8 @@ conflicts with the :func:`torch.fft` function.
 
 .. currentmodule:: torch.fft
 
-Functions
----------
+Fast Fourier Transforms
+-----------------------
 
 .. autofunction:: fft
 .. autofunction:: ifft
@@ -33,3 +33,11 @@ Functions
 .. autofunction:: irfftn
 .. autofunction:: hfft
 .. autofunction:: ihfft
+
+Helper Functions
+----------------
+
+.. autofunction:: fftfreq
+.. autofunction:: rfftfreq
+.. autofunction:: fftshift
+.. autofunction:: ifftshift

@@ -1325,6 +1325,15 @@ class TestDict(JitTestCase):
         self.checkScript(update, (self.dict(), self.dict()))
         self.checkScript(update, (self.dict(), self.dict2()))
 
+    def test_update_existing_key(self):
+        def foo() -> Dict[str, int]:
+            a: Dict[str, int] = {}
+            for i in range(3):
+                a.update({'a': i})
+            return a
+
+        self.checkScript(foo, ())
+
     def test_aug_assign(self):
         def aug_assign_dict_tensor(a):
             # type: (Dict[str, Tensor]) -> Dict[str, Tensor]

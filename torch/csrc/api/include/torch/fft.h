@@ -35,7 +35,7 @@ inline Tensor ifft(const Tensor& self,
   return torch::fft_ifft(self, n, dim, norm);
 }
 
-/// Computes the 2 dimensional fast Fourier transform over given dimensions.
+/// Computes the 2-dimensional fast Fourier transform over the given dimensions.
 /// See https://pytorch.org/docs/master/fft.html#torch.fft.fft2.
 ///
 /// Example:
@@ -50,7 +50,7 @@ inline Tensor fft2(const Tensor& self,
   return torch::fft_fft2(self, s, dim, norm);
 }
 
-/// Computes the 2 dimensional fast Fourier transform over given dimensions.
+/// Computes the inverse of torch.fft.fft2
 /// See https://pytorch.org/docs/master/fft.html#torch.fft.ifft2.
 ///
 /// Example:
@@ -129,7 +129,7 @@ inline Tensor irfft(const Tensor& self,
   return torch::fft_irfft(self, n, dim, norm);
 }
 
-/// Computes the 2 dimensional FFT of real input with onesided Hermitian output.
+/// Computes the 2-dimensional FFT of real input. Returns a onesided Hermitian output.
 /// See https://pytorch.org/docs/master/fft.html#torch.fft.rfft2
 ///
 /// Example:
@@ -150,7 +150,7 @@ inline Tensor rfft2(const Tensor& self,
 /// Example:
 /// ```
 /// auto t = torch::randn({128, 128}, dtype=kComplexDouble);
-/// torch::fft::irfftn(t);
+/// torch::fft::irfft2(t);
 /// ```
 inline Tensor irfft2(const Tensor& self,
                      c10::optional<IntArrayRef> s=c10::nullopt,

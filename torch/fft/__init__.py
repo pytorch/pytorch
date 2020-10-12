@@ -97,11 +97,7 @@ fft2 = _add_docstr(_fft.fft_fft2, r"""
 fft2(input, s=None, dim=(-2, -1), norm=None) -> Tensor
 
 Computes the 2 dimensional discrete Fourier transform of :attr:`input`.
-
-Note:
-    :func:`~torch.fft.fft2` is a convenience alias for :func:`~torch.fft.fftn`
-    with new defaults for :attr:`dim`. There are no other implications (e.g. to
-    performance) of using one or the other.
+Equivalent to :func:`~torch.fft.fftn` but FFTs only the last two dimensions by default.
 
 Note:
     The Fourier domain representation of any real signal satisfies the
@@ -153,11 +149,7 @@ ifft2 = _add_docstr(_fft.fft_ifft2, r"""
 ifftn(input, s=None, dim=(-2, -1), norm=None) -> Tensor
 
 Computes the 2 dimensional inverse discrete Fourier transform of :attr:`input`.
-
-Note:
-    :func:`~torch.fft.ifft2` is a convenience alias for
-    :func:`~torch.fft.ifftn` with new defaults for :attr:`dim`. There are no
-    other implications (e.g. to performance) of using one or the other.
+Equivalent to :func:`~torch.fft.ifftn` but IFFTs only the last two dimensions by default.
 
 Args:
     input (Tensor): the input tensor
@@ -407,17 +399,13 @@ Example:
 rfft2 = _add_docstr(_fft.fft_rfft2, r"""
 rfft2(input, s=None, dim=(-2, -1), norm=None) -> Tensor
 
-Computes the N-dimensional discrete Fourier transform of real :attr:`input`.
+Computes the 2-dimensional discrete Fourier transform of real :attr:`input`.
+Equivalent to :func:`~torch.fft.rfftn` but FFTs only the last two dimensions by default.
 
 The FFT of a real signal is Hermitian-symmetric, ``X[i, j] = conj(X[-i, -j])``,
 so the full :func:`~torch.fft.fft2` output contains redundant information.
 :func:`~torch.fft.rfft2` instead omits the negative frequencies in the last
 dimension.
-
-Note:
-    :func:`~torch.fft.rfft2` is a convenience alias for
-    :func:`~torch.fft.rfftn` with new defaults for :attr:`dim`. There are no
-    other implications (e.g. to performance) of using one or the other.
 
 Args:
     input (Tensor): the input tensor
@@ -471,15 +459,11 @@ irfft2 = _add_docstr(_fft.fft_irfft2, r"""
 irfft2(input, s=None, dim=(-2, -1), norm=None) -> Tensor
 
 Computes the inverse of :func:`~torch.fft.rfft2`.
+Equivalent to :func:`~torch.fft.irfftn` but IFFTs only the last two dimensions by default.
 
 :attr:`input` is interpreted as a one-sided Hermitian signal in the Fourier
 domain, as produced by :func:`~torch.fft.rfft2`. By the Hermitian property, the
 output will be real-valued.
-
-Note:
-    :func:`~torch.fft.irfft2` is a convenience alias for
-    :func:`~torch.fft.irfftn` with new defaults for :attr:`dim`. There are no
-    other implications (e.g. to performance) of using one or the other.
 
 Note:
     Some input frequencies must be real-valued to satisfy the Hermitian
@@ -931,6 +915,7 @@ Example:
     beginning of the tensor.
 
     This also works for multi-dimensional transforms:
+
     >>> x = torch.fft.fftfreq(5, d=1/5) + 0.1 * torch.fft.fftfreq(5, d=1/5).unsqueeze(1)
     >>> x
     tensor([[ 0.0000,  1.0000,  2.0000, -2.0000, -1.0000],
