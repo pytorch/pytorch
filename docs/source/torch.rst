@@ -310,6 +310,7 @@ Pointwise Ops
     logit
     hypot
     i0
+    igamma
     mul
     multiply
     mvlgamma

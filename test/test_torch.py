@@ -1102,7 +1102,7 @@ class AbstractTestCases:
         def test_topk_arguments(self):
             q = torch.randn(10, 2, 10)
             # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
-            self.assertRaises(TypeError, lambda: q.topk(4, True))        
+            self.assertRaises(TypeError, lambda: q.topk(4, True))
 
         def test_mode(self):
             x = torch.arange(1., SIZE * SIZE + 1).clone().resize_(SIZE, SIZE)
@@ -6377,7 +6377,7 @@ class TestTorchDeviceType(TestCase):
     # Tests clamp and its alias, clip
     @dtypes(torch.int64, torch.float32)
     def test_clamp(self, device, dtype):
-        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_, 
+        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_,
                    torch.clip, torch.Tensor.clip, torch.Tensor.clip_)
 
         # min/max argument product
@@ -6405,7 +6405,7 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(Y_expected, Y_out)
 
     def test_clamp_propagates_nans(self, device):
-        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_, 
+        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_,
                    torch.clip, torch.Tensor.clip, torch.Tensor.clip_)
 
         # min/max argument product
@@ -6416,9 +6416,9 @@ class TestTorchDeviceType(TestCase):
                 if min_val is None and max_val is None:
                     continue
 
-                X, Y_expected = self.generate_clamp_baseline(device, torch.float, 
-                                                             min_vals=min_val, 
-                                                             max_vals=max_val, 
+                X, Y_expected = self.generate_clamp_baseline(device, torch.float,
+                                                             min_vals=min_val,
+                                                             max_vals=max_val,
                                                              with_nans=True)
                 Y_expected = torch.isnan(Y_expected)
 
@@ -13754,6 +13754,8 @@ class TestTorchDeviceType(TestCase):
             ("atan2", True, True, 'cuda'),
             ("hypot", True, True, 'cpu'),
             ("hypot", True, True, 'cuda'),
+            ("igamma", True, True, 'cpu'),
+            ("igamma", True, True, 'cuda'),
             ("nextafter", True, True, 'cpu'),
             ("nextafter", True, True, 'cuda'),
             ("le", True, True, 'cpu'),
@@ -15186,6 +15188,8 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.frac(),
                 lambda x, y: x.hypot(y),
                 lambda x, y: x.hypot_(y),
+                lambda x, y: x.igamma(y),
+                lambda x, y: x.igamma_(y),
                 lambda x, y: x.i0(),
                 lambda x, y: x.i0_(),
                 lambda x, y: x.lerp(y, 0.5),
@@ -17487,6 +17491,27 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 expected = torch.sqrt(input[0] * input[0] + input[1] * input[1])
             else:
                 expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
+            self.assertEqual(actual, expected)
+
+    @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    def test_igamma(self, device, dtype):
+        inputs = [
+            (torch.rand(10, device=device).to(dtype), torch.rand(10, device=device).to(dtype)),
+            (torch.rand((3, 3, 3), device=device).to(dtype), torch.rand((3, 3, 3), device=device).to(dtype)),
+            (torch.rand((10, 1), device=device).to(dtype), torch.rand((10, 1), device=device).to(dtype).transpose(0, 1)),
+            (torch.randint(100, (10, ), device=device, dtype=torch.long), torch.rand(10, device=device).to(dtype))
+        ]
+        for i,input in enumerate(inputs):
+            actual = torch.igamma(input[0], input[1])
+            input0, input1 = input[0], input[1]
+            if dtype == torch.bfloat16:
+                input0 = input0.to(torch.float)
+                input1 = input1.to(torch.float)
+            expected = scipy.special.gammainc(input0.cpu().numpy(), input1.cpu().numpy())
+            expected = torch.from_numpy(expected).to(dtype)
+            assert torch.allclose(actual, expected)
             self.assertEqual(actual, expected)
 
     @dtypes(torch.int64, torch.float64)
