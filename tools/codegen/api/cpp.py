@@ -84,7 +84,7 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
             if mutable:
                 return 'Tensor &'  # TODO: fix this discrepancy
             else:
-                if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+                if local.use_c10_dispatcher().dispatcher_uses_new_style():
                     return 'const c10::optional<Tensor>&'
                 else:
                     return 'const Tensor &'
@@ -99,7 +99,7 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
         elif str(t.elem) == 'Dimname':
             return "DimnameList"
         # TODO: do something reasonable about lists of optional tensors
-        elif not local.use_c10_dispatcher() is UseC10Dispatcher.full and str(t.elem) == 'Tensor?':
+        elif (not local.use_c10_dispatcher().dispatcher_uses_new_style()) and str(t.elem) == 'Tensor?':
             return "TensorList"
         elem = argumenttype_type(t.elem, mutable=mutable)
         # TODO: explicitly qualify namespace here
