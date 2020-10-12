@@ -951,7 +951,7 @@ class TestFX(JitTestCase):
         combined_graph = torch.fx.Graph()
         output_node = combined_graph.graph_copy(inline_into.graph, {})
 
-        input_node = to_inline.graph.nodes[0]
+        input_node = list(to_inline.graph.nodes)[0]
         assert input_node and input_node.op == 'placeholder'
 
         val_map = {input_node : output_node}
