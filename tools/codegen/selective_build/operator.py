@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
 
 # This class holds information about a single operator used to determine
@@ -45,7 +45,7 @@ class SelectiveBuildOperator():
     include_all_overloads: bool
 
     # Debug Information at the operator level
-    debug_info: Optional[List[str]]
+    _debug_info: Optional[Tuple[str, ...]]
 
     @staticmethod
     def from_yaml_dict(op_name: str, op_info: Dict[str, object]) -> 'SelectiveBuildOperator':
@@ -68,14 +68,11 @@ class SelectiveBuildOperator():
         include_all_overloads = op_info.get('include_all_overloads', True)
         assert isinstance(include_all_overloads, bool)
 
-        debug_info: Optional[List[str]] = None
+        debug_info: Optional[Tuple[str, ...]] = None
         if 'debug_info' in op_info:
             di_list = op_info['debug_info']
             assert isinstance(di_list, list)
-            debug_info = list(map(
-                lambda x: str(x),
-                di_list,
-            ))
+            debug_info = tuple(map(lambda x: str(x), di_list))
 
         return SelectiveBuildOperator(
             op_name,
@@ -101,21 +98,21 @@ class SelectiveBuildOperator():
             'is_used_for_training': self.is_used_for_training,
             'include_all_overloads': self.include_all_overloads,
         }
-        if self.debug_info is not None:
-            ret['debug_info'] = self.debug_info
+        if self._debug_info is not None:
+            ret['debug_info'] = self._debug_info
 
         return ret
 
 
 def merge_debug_info(
-        lhs: Optional[List[str]],
-        rhs: Optional[List[str]],
-) -> Optional[List[str]]:
+        lhs: Optional[Tuple[str, ...]],
+        rhs: Optional[Tuple[str, ...]],
+) -> Optional[Tuple[str, ...]]:
     # Ensure that when merging, each entry shows up just once.
     if lhs is None and rhs is None:
         return None
 
-    return list(set((lhs or []) + (rhs or [])))
+    return tuple(set((lhs or ()) + (rhs or ())))
 
 
 def combine_operators(
@@ -140,7 +137,7 @@ def combine_operators(
         # in this instance of the pytorch library.
         lhs.is_used_for_training or rhs.is_used_for_training,
         lhs.include_all_overloads or rhs.include_all_overloads,
-        merge_debug_info(lhs.debug_info, rhs.debug_info),
+        merge_debug_info(lhs._debug_info, rhs._debug_info),
     )
 
 def merge_operator_dicts(

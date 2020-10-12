@@ -967,7 +967,6 @@ def get_custom_build_selector(
     if provided_op_registration_allowlist is not None:
         op_registration_allowlist = set(provided_op_registration_allowlist)
 
-    selector: SelectiveBuilder = SelectiveBuilder.get_nop_selector()
     if op_registration_allowlist is not None:
         selector = SelectiveBuilder.from_legacy_op_registration_allow_list(
             op_registration_allowlist,
@@ -976,6 +975,8 @@ def get_custom_build_selector(
         )
     elif op_selection_yaml_path is not None:
         selector = SelectiveBuilder.from_yaml_path(op_selection_yaml_path)
+    else:
+        selector = SelectiveBuilder.get_nop_selector()
 
     return selector
 

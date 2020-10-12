@@ -1,4 +1,4 @@
-from typing import Dict, Set, List, Optional
+from typing import Dict, Set, Optional, Tuple
 import yaml
 
 from dataclasses import dataclass
@@ -20,7 +20,7 @@ class SelectiveBuilder:
     include_all_operators: bool
 
     # Debug Information at the selective/custom build level.
-    debug_info: Optional[List[str]]
+    _debug_info: Optional[Tuple[str, ...]]
 
     # A dictionary of operator -> operator metadata.
     operators: Dict[str, SelectiveBuildOperator]
@@ -49,7 +49,7 @@ class SelectiveBuilder:
             di_list = data['debug_info']
             assert isinstance(di_list, list)
 
-            debug_info = list(map(lambda x: str(x), di_list))
+            debug_info = tuple(map(lambda x: str(x), di_list))
 
         operators = {}
         operators_dict = data.get('operators', {})
@@ -141,14 +141,14 @@ class SelectiveBuilder:
             operators[op_name] = op.to_dict()
         ret['operators'] = operators
 
-        if self.debug_info is not None:
-            ret['debug_info'] = self.debug_info
+        if self._debug_info is not None:
+            ret['debug_info'] = self._debug_info
 
         return ret
 
 
 def combine_selective_builders(lhs: SelectiveBuilder, rhs: SelectiveBuilder) -> SelectiveBuilder:
     include_all_operators = lhs.include_all_operators or rhs.include_all_operators
-    debug_info = merge_debug_info(lhs.debug_info, rhs.debug_info)
+    debug_info = merge_debug_info(lhs._debug_info, rhs._debug_info)
     operators = merge_operator_dicts(lhs.operators, rhs.operators)
     return SelectiveBuilder(include_all_operators, debug_info, operators)
