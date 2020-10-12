@@ -695,7 +695,7 @@ TEST_F(FunctionalTest, TripletMarginWithDistanceLossDefaultParity) {
   for (auto& reduction : reductions) {
     for (auto& margin : margins) {
       for (const auto& swap : swaps) {
-        auto anchor = 
+        auto anchor =
             torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
         auto positive =
             torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -1227,6 +1227,21 @@ TEST_F(FunctionalTest, Linear) {
        {{45113, 45563, 46013},
         {45915, 46373, 46831},
         {46717, 47183, 47649}}},
+      torch::kFloat
+    );
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+  {
+    const auto x = torch::arange(100., 118).resize_({3, 3, 2});
+    const auto w = torch::arange(200., 212).resize_({2, 6});
+    const auto b = torch::tensor({1}, torch::kFloat);
+    const auto y = F::linear(x, w, b, 1);
+    ASSERT_EQ(y.ndimension(), 2);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 2}));
+    const auto y_exp = torch::tensor(
+      {{124556, 128246},
+        {131846, 135752},
+        {139136, 143258}},
       torch::kFloat
     );
     ASSERT_TRUE(torch::allclose(y, y_exp));

@@ -2003,7 +2003,7 @@
 
 - func: nan_to_num.out(Tensor self, float? nan=None, float? posinf=None, float? neginf=None, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
+- func: linear(Tensor input, Tensor weight, Tensor? bias=None, int? axis=None) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
 

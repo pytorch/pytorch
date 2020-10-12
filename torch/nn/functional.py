@@ -1641,17 +1641,20 @@ def hardsigmoid(input, inplace=False):
     return torch._C._nn.hardsigmoid(input)
 
 
-def linear(input, weight, bias=None):
-    # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
+def linear(input, weight, bias=None, axis=None):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[int]) -> Tensor
     r"""
-    Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
+    Applies a linear transformation to the incoming data: :math:`y = xA^T + b`. If axis
+    is specified, do a linear operation on the last k dimension of input. axis is the
+    starting axis.
 
     This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
     Shape:
 
         - Input: :math:`(N, *, in\_features)` N is the batch size, `*` means any number of
-          additional dimensions
+          additional dimensions. If axis is specified, a\_k * a\_{k+1} * ... * a\_{n-1},
+          where k is the axis provided, equals in\_features.
         - Weight: :math:`(out\_features, in\_features)`
         - Bias: :math:`(out\_features)`
         - Output: :math:`(N, *, out\_features)`
@@ -1659,16 +1662,8 @@ def linear(input, weight, bias=None):
     tens_ops = (input, weight)
     if not torch.jit.is_scripting():
         if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
-            return handle_torch_function(linear, tens_ops, input, weight, bias=bias)
-    if input.dim() == 2 and bias is not None:
-        # fused op is marginally faster
-        ret = torch.addmm(bias, input, weight.t())
-    else:
-        output = input.matmul(weight.t())
-        if bias is not None:
-            output += bias
-        ret = output
-    return ret
+            return handle_torch_function(linear, tens_ops, input, weight, bias=bias, axis=axis)
+    return torch._C._nn.linear(input, weight, bias, axis)
 
 
 def bilinear(input1, input2, weight, bias=None):

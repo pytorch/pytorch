@@ -15375,6 +15375,25 @@ dedent """
         ref = a * b
         self.assertEqual(test, ref)
 
+    def test_eager_vs_scripting_linear(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, input, w, b):
+                return F.linear(input, w, b)
+
+        input = torch.rand([2, 2048])
+        w = torch.rand(128, 2048)
+        b = torch.rand([128])
+
+        f = Foo()
+        fs = torch.jit.script(f)
+
+        self.assertEqual(torch.equal(f(input, w, b), fs(input, w, b)), True)
+
+
+
 # known to be failing in tracer
 EXCLUDE_TRACED = {
     # The following fail due to #12024.

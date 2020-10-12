@@ -13,20 +13,28 @@
 
 namespace at { namespace native {
 
-Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
-  if (input.is_mkldnn()) {
-    return at::mkldnn_linear(input, weight, bias);
+Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias, const optional<int64_t> axis) {
+  Tensor new_input = input;
+  if (axis.has_value()) {
+    int _axis = axis.value();
+    auto sizes = new_input.sizes().vec();
+    sizes.resize(_axis + 1);
+    sizes[_axis] = weight.sizes().vec()[1];
+    new_input = new_input.view(sizes);
+  }
+  if (new_input.is_mkldnn()) {
+    return at::mkldnn_linear(new_input, weight, bias);
   }
 #if defined(C10_MOBILE)
-  if (xnnpack::use_linear(input, weight, bias)) {
-    return xnnpack::linear(input, weight, bias);
+  if (xnnpack::use_linear(new_input, weight, bias)) {
+    return xnnpack::linear(new_input, weight, bias);
   }
 #endif
-  if (input.dim() == 2 && bias.defined()) {
+  if (new_input.dim() == 2 && bias.defined()) {
     // Fused op is marginally faster.
-    return at::addmm(bias, input, weight.t());
+    return at::addmm(bias, new_input, weight.t());
   }
-  auto output = at::matmul(input, weight.t());
+  auto output = at::matmul(new_input, weight.t());
   if (bias.defined()) {
     output.add_(bias);
   }
