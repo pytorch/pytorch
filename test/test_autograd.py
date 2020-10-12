@@ -4833,7 +4833,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
-                'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot'] + separate_complex_tests
+                'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split'] + separate_complex_tests
 
 # TODO(@anjali411): add tests for 'sub', 'div
 # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition - @anjali411
@@ -6082,7 +6082,7 @@ class TestAutogradFunctional(TestCase):
 class TestAutogradDeviceType(TestCase):
 
     def test_min_max_median_backprops_to_all_values(self, device):
-        for f in [torch.min, torch.max, torch.median]:
+        for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
             x1 = torch.tensor([1., 0., 1., 0., 1., 0.], device=device, requires_grad=True)
             x2 = torch.tensor([float('nan'), float('nan'), float('nan')], requires_grad=True)
             for x in [x1, x2]:
