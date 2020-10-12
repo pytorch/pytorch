@@ -3485,8 +3485,8 @@ class TestAutograd(TestCase):
     def test_inplace_view_leaf_errors(self):
         # Issue #21875: Fail faster (when we try to modify the view vs. in backward())
         x = torch.zeros(1, requires_grad=True)
-        y = x
-        with self.assertRaises(RuntimeError):
+        y = x.view_as(x)
+        with self.assertRaisesRegex(RuntimeError, "a view of a leaf Variable that requires grad is being used in an in-place operation."):
             y.add_(1)
 
     def test_inplace_view_backward(self):
