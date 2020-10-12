@@ -843,6 +843,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # It does not mean that a worker is dead. In case of `_persistent_workers`, 
         # the worker will be reset to available in the next epoch.
         self._workers_status = [True for i in range(self._num_workers)]
+        self._workers_offset = [0 for i in range(self._num_workers)]
         # We resume the prefetching in case it was enabled
         if not first_iter:
             for idx in range(self._num_workers):
@@ -853,8 +854,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 if isinstance(data, _utils.worker._ResumeIteration):
                     resume_iteration_cnt -= 1
         # prime the prefetch loop
-        for _ in range(self._prefetch_factor * self._num_workers):
-            self._try_put_index()
+        for i in range(self._prefetch_factor * self._num_workers):
+            self._try_put_index(i % self._num_workers)
 
     def _try_get_data(self, timeout=_utils.MP_STATUS_CHECK_INTERVAL):
         # Tries to fetch data from `self._data_queue` once for a given timeout.
@@ -1074,9 +1075,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                         self._workers_status[data.worker_id] = False
                     else:
                         self._mark_worker_as_unavailable(data.worker_id)
-                    self._try_put_index()
+                    self._try_put_index(data.worker_id + 1)
                     continue
 
+            self._try_put_index(self._task_info[idx][0])
             if idx != self._rcvd_idx:
                 # store out-of-order samples
                 self._task_info[idx] += (data,)
@@ -1084,20 +1086,25 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 del self._task_info[idx]
                 return self._process_data(data)
 
-    def _try_put_index(self):
+    def _try_put_index(self, worker_queue_idx: int):
         assert self._tasks_outstanding < self._prefetch_factor * self._num_workers
 
         try:
             index = self._next_index()
         except StopIteration:
             return
-        for _ in range(self._num_workers):  # find the next active worker, if any
-            worker_queue_idx = next(self._worker_queue_idx_cycle)
-            if self._workers_status[worker_queue_idx]:
-                break
-        else:
-            # not found (i.e., didn't break)
-            return
+        if not self._workers_status[worker_queue_idx]:
+            # One whole round, back to the previous offset if all other works inactive
+            for _ in range(self._num_workers):
+                self._workers_offset[worker_queue_idx] += 1
+                idx = (worker_queue_idx + self._workers_offset[worker_queue_idx]) % self._num_workers
+                if self._workers_status[idx]:
+                    self._workers_offset[worker_queue_idx] %= self._num_workers
+                    worker_queue_idx = idx
+                    break
+            else:
+                # not found (i.e., didn't break)
+                return
 
         self._index_queues[worker_queue_idx].put((self._send_idx, index))
         self._task_info[self._send_idx] = (worker_queue_idx,)
@@ -1106,7 +1113,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
     def _process_data(self, data):
         self._rcvd_idx += 1
-        self._try_put_index()
+        # self._try_put_index()
         if isinstance(data, ExceptionWrapper):
             data.reraise()
         return data
