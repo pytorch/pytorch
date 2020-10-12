@@ -11,7 +11,8 @@ class TracerBase:
     graph: Graph
 
     def create_node(self, kind : str, target : Target,
-                    args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None) -> Node:
+                    args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None,
+                    type_expr : Optional[Any] = None) -> Node:
         """
         Inserts a graph node given target, args, kwargs, and name.
 
@@ -19,17 +20,18 @@ class TracerBase:
         modification of values used in node creation. For example, one might
         want to disallow in-place operations from being recorded.
         """
-        return self.graph.create_node(kind, target, args, kwargs, name)
+        return self.graph.create_node(kind, target, args, kwargs, name, type_expr)
 
     def proxy(self, node: Node) -> 'Proxy':
         return Proxy(node, self)
 
-    def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...], kwargs: Dict[str, Any], name: Optional[str] = None):
+    def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...], kwargs: Dict[str, Any],
+                     name: Optional[str] = None, type_expr : Optional[Any] = None):
         args_ = self.create_arg(args)
         kwargs_ = self.create_arg(kwargs)
         assert isinstance(args_, tuple)
         assert isinstance(kwargs_, dict)
-        return self.proxy(self.create_node(kind, target, args_, kwargs_, name))
+        return self.proxy(self.create_node(kind, target, args_, kwargs_, name, type_expr))
 
     def create_arg(self, a: Any) -> Argument:
         """
