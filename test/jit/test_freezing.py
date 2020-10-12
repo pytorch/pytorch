@@ -1035,9 +1035,7 @@ class TestFreezing(JitTestCase):
         model = torch.jit.script(Net())
         model.train()
 
-        with self.assertRaisesRegex(RuntimeError, 'Freezing module in training mode is not yet supported'):
-            mTrain_freezed = torch._C._freeze_module(model._c)
-
+        mTrain_freezed = torch._C._freeze_module(model._c)
         model.eval()
         mEval_freezed = torch._C._freeze_module(model._c)
         self.assertFalse(mEval_freezed.hasattr('conv1'))

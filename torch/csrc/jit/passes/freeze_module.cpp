@@ -70,6 +70,23 @@ class AttributePropagator {
       TORCH_CHECK(checkName(name), "Unknown name: " + name);
     }
   }
+  Value* addParamAsArgument(
+      Function* function,
+      std::string& name,
+      IValue& attr) {
+    auto schema = function->getSchema();
+    auto args = schema.arguments();
+    args.emplace_back(Argument(name, nullptr, c10::nullopt, attr));
+    auto new_schema = FunctionSchema(
+        schema.name(),
+        schema.overload_name(),
+        args,
+        schema.returns(),
+        schema.is_vararg(),
+        schema.is_varret());
+    function->setSchema(new_schema);
+    return function->graph()->addInput(name);
+  }
 
   void optimizeSubGraphs(
       std::shared_ptr<Graph>& graph,
@@ -114,6 +131,7 @@ class AttributePropagator {
     for (auto function : preservedMethods_) {
       GRAPH_DEBUG("Propagating function: " + function->name());
       auto graph = function->graph();
+      function_ = function;
       propagateAttributes(graph);
       optimizeSubGraphs(graph, applyOptimizations);
     }
@@ -436,12 +454,23 @@ class AttributePropagator {
           }
           if (!paramConst) {
             auto attr = attrModule.attr(name);
+            auto type = attrModule.type();
 
             if (isEval) {
               attr = overrideGradient(attr);
             }
-            if (auto attrVal = tryInsertConstant(*graph, attr)) {
+
+            std::string fullName("self_");
+            for (auto& name : names_) {
+              fullName += name + '_';
+            }
+            fullName += name;
+            if (type->is_parameter(*type->findAttributeSlot(name))) {
+              TORCH_INTERNAL_ASSERT(attr.isTensor());
+              paramConst = addParamAsArgument(function_, fullName, attr);
+            } else if (auto attrVal = tryInsertConstant(*graph, attr)) {
               paramConst = *attrVal;
+              paramConst->setDebugName(fullName);
             } else {
               GRAPH_DEBUG(
                   attr.type()->cast<ClassType>() ? "" : "attribute: ",
@@ -449,12 +478,6 @@ class AttributePropagator {
                   " is not materializable.");
               continue;
             }
-            std::string fullName("self.");
-            for (auto& name : names_) {
-              fullName += name + '.';
-            }
-            fullName += name;
-            paramConst->setDebugName(fullName);
             attrValues[attrModule._ivalue()][name] = paramConst;
           }
           GRAPH_UPDATE(
@@ -705,6 +728,9 @@ class AttributePropagator {
 
   Module& module_;
 
+  // Current function
+  Function* function_;
+
   // Allow to freeze modules containing interfaces.
   bool freezeInterfaces_;
 
@@ -717,17 +743,6 @@ Module freeze_module(
     const Module& module,
     std::vector<std::string> preservedAttrs,
     bool freezeInterfaces) {
-  // Currently freezing module is supported only in eval mode.
-  // If assertion below is commented and module is in training mode then this
-  // implementation folds attributes correctly. Tensor attributes with
-  // required_grad set are not folded and 'training' attribute is also not
-  // folded.
-  // TODO: Determine if freezing in training mode is useful and further clarify
-  // its semantics.
-  TORCH_CHECK(
-      !module.hasattr("training") || !module.is_training(),
-      "Freezing module in training mode is not yet supported");
-
   Method method = module.get_method("forward");
   // Check that module does not return itself.
   for (auto& output : method.graph()->outputs()) {
