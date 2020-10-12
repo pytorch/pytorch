@@ -7150,7 +7150,18 @@ svd(input, some=True, compute_uv=True, out=None) -> (Tensor, Tensor, Tensor)
 
 This function returns a namedtuple ``(U, S, V)`` which is the singular value
 decomposition of a input real matrix or batches of real matrices :attr:`input` such that
-:math:`input = U \times diag(S) \times V^T`.
+:math:`input = U \times diag(S) \times V^H`, where :math:`V^H` is the conjugate transpose
+of ``V``.
+
+In Python, :math:`V^H` is computed by ``v.T.conj()``. Note that for
+non-complex types, ``.conj()`` is a no-op and can be omittted. To summarize,
+the original Tensor can be reconstructed by::
+
+    U @ diag(S) @ V.T.conj() # for real and complex numbers
+    U @ diag(S) @ V.T        # only for real numbers
+
+The dtype of ``U`` and ``V`` is the same as the ``input`` matrix. The dtype of
+``S`` is always real numbers, even if ``input`` is complex.
 
 If :attr:`some` is ``True`` (default), the method returns the reduced singular value decomposition
 i.e., if the last two dimensions of :attr:`input` are ``m`` and ``n``, then the returned
