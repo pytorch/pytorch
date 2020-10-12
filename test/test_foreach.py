@@ -537,7 +537,7 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_bool_scalarlist(self, device, dtype):
         for N in N_values:
-            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
                                                                      self.foreach_bin_ops_,
                                                                      self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
