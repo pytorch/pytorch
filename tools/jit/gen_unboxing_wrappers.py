@@ -335,7 +335,7 @@ def gen_unboxing_wrappers(
                                                   return_type=return_type,
                                                   formals_types_with_leading_comma=argument_types_with_leading_comma)
         else:
-            assert decl['use_c10_dispatcher'] == 'full'
+            assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
             if is_namespace_function:
                 return CALL_NAMESPACE.substitute(name=decl['name'],
                                                  args=pack_arguments(args),
@@ -382,7 +382,7 @@ def gen_unboxing_wrappers(
                                                  op_capture=op_capture,
                                                  lvalues=lvalues)
         else:
-            assert decl['use_c10_dispatcher'] == 'full'
+            assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
 
         return constructor
 
@@ -490,7 +490,7 @@ def gen_unboxing_wrappers(
                 shards[x].append(OPERATOR.substitute(signature=decl['schema_string'],
                                                      op=emit_decl_variant(decl)))
             else:
-                assert decl['use_c10_dispatcher'] == 'full'
+                assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
 
     for i, shard in enumerate(shards):
         env = {

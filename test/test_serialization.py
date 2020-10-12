@@ -18,6 +18,7 @@ from torch.serialization import check_module_version_greater_or_equal
 
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
     TEST_DILL, run_tests, download_file, BytesIOContext
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision
@@ -583,17 +584,22 @@ class serialization_method(object):
     def __exit__(self, *args, **kwargs):
         torch.save = self.torch_save
 
-class TestBothSerialization(TestCase, SerializationMixin):
-    def test_serialization_new_format_old_format_compat(self):
-        x = [torch.ones(200, 200) for i in range(30)]
-        torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=True)
-        x_new_load = torch.load("big_tensor.zip")
-        self.assertEqual(x, x_new_load)
+class TestBothSerialization(TestCase):
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_serialization_new_format_old_format_compat(self, device):
+        x = [torch.ones(200, 200, device=device) for i in range(30)]
 
-        torch.save(x, "big_tensor.zip", _use_new_zipfile_serialization=False)
-        x_old_load = torch.load("big_tensor.zip")
-        self.assertEqual(x_old_load, x_new_load)
-        os.remove("big_tensor.zip")
+        def test(filename):
+            torch.save(x, filename, _use_new_zipfile_serialization=True)
+            x_new_load = torch.load(filename)
+            self.assertEqual(x, x_new_load)
+
+            torch.save(x, filename, _use_new_zipfile_serialization=False)
+            x_old_load = torch.load(filename)
+            self.assertEqual(x_old_load, x_new_load)
+
+        with tempfile.NamedTemporaryFile() as f:
+            test(f.name)
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
@@ -742,6 +748,7 @@ class TestSerialization(TestCase, SerializationMixin):
         with serialization_method(use_zip=True):
             return super(TestSerialization, self).run(*args, **kwargs)
 
+instantiate_device_type_tests(TestBothSerialization, globals())
 
 if __name__ == '__main__':
     run_tests()
