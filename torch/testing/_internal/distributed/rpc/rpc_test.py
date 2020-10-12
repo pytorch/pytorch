@@ -541,6 +541,31 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(ret, torch.ones(2, 2) + 1)
 
     @dist_init
+    def test_send_to_rank(self):
+        dst_rank = (self.rank + 1) % self.world_size
+
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            ret = self._run_func_in_mode(dst_rank, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+            self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+        # Test invalid ranks
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            with self.assertRaises(RuntimeError):
+                self._run_func_in_mode(self.world_size + 1, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            with self.assertRaises(RuntimeError):
+                self._run_func_in_mode(-1, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            with self.assertRaises(ValueError):
+                self._run_func_in_mode(dst_rank + 0.5, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            with self.assertRaises(ValueError):
+                self._run_func_in_mode(dst_rank - 0.5, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+
+    @dist_init
     def test_self_py_udf_remote(self):
         self_worker_info = rpc.get_worker_info()
         rref = rpc.remote(self_worker_info, my_function, args=(torch.ones(2, 2), 1, 3))

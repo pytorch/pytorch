@@ -324,13 +324,13 @@ def get_worker_info(worker_name=None):
         return _get_current_rpc_agent().get_worker_info()
 
 
-def _to_worker_info(name_or_info):
-    if isinstance(name_or_info, WorkerInfo):
-        return name_or_info
-    elif isinstance(name_or_info, str):
-        return get_worker_info(name_or_info)
+def _to_worker_info(to):
+    if isinstance(to, WorkerInfo):
+        return to
+    elif isinstance(to, str) or isinstance(to, int):
+        return get_worker_info(to)
     else:
-        raise ValueError("Cannot get WorkerInfo from name {}".format(name_or_info))
+        raise ValueError("Cannot get WorkerInfo from name {}".format(to))
 
 
 def _rref_typeof_on_owner(rref):
@@ -417,7 +417,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     are no living references to it.
 
     Arguments:
-        to (str or WorkerInfo): id or name of the destination worker.
+        to (str or WorkerInfo or int): name/rank/WorkerInfo of the destination worker.
         func (callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
@@ -672,7 +672,7 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     method is thread-safe.
 
     Arguments:
-        to (str or WorkerInfo): id or name of the destination worker.
+        to (str or WorkerInfo or int): name/rank/WorkerInfo of the destination worker.
         func (callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
@@ -751,7 +751,7 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     :class:`~torch.futures.Future` that can be awaited on.
 
     Arguments:
-        to (str or WorkerInfo): id or name of the destination worker.
+        to (str or WorkerInfo or int): name/rank/WorkerInfo of the destination worker.
         func (callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
