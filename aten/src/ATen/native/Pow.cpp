@@ -62,6 +62,9 @@ Tensor& pow_(Tensor& base, Scalar alpha) {
 }
 
 Tensor pow(const Tensor& base, const Tensor& exp) {
+  if (exp.dim() == 0) {
+    return native::pow(base, exp.item());
+  }
   auto dtype = at::result_type(base, exp);
   Tensor result = at::empty({0}, base.options().dtype(dtype));
   return native::pow_out(result, base, exp);
