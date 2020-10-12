@@ -168,6 +168,9 @@ class NativeFunction:
                 for k in ks.split(","):
                     dispatch[k.strip()] = v
 
+        # Throws if both DefaultBackend and Math are provided
+        assert not (dispatch is not None and 'DefaultBackend' in dispatch and 'Math' in dispatch)
+
         e.pop('__line__')
         assert not e, f"leftover entries: {e}"
 
