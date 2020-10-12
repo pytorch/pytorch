@@ -271,7 +271,7 @@ def compute_type_method(
         elif target is Target.REGISTRATION:
             dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
-            if dispatch is None or dispatch == 'Math':
+            if dispatch is None or dispatch == 'Math' or dispatch == 'DefaultBackend':
                 type_name = f'TypeDefault::{name}'
             else:
                 type_name = f'{dispatch}Type::{name}'
@@ -1025,10 +1025,17 @@ def main() -> None:
             native_functions)) +
         list(mapMaybe(
             compute_type_method('Math', target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
+            native_functions)) +
+        list(mapMaybe(
+            compute_type_method('DefaultBackend', target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
             native_functions)),
 
         'function_registrations': list(mapMaybe(
             compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
+            native_functions)),
+
+        'default_backend_function_registrations': list(mapMaybe(
+            compute_type_method('DefaultBackend', target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
             native_functions)),
 
         'math_function_registrations': list(mapMaybe(
