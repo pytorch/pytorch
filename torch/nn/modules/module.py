@@ -567,19 +567,13 @@ class Module:
         Returns:
             Module: self
 
-        Example::
+        Examples::
 
             >>> linear = nn.Linear(2, 2)
             >>> linear.weight
             Parameter containing:
             tensor([[ 0.1913, -0.3420],
                     [-0.5113, -0.2325]])
-            >>> linear.to(torch.cdouble)
-            Linear(in_features=2, out_features=2, bias=True)
-            >>> linear.weight
-            Parameter containing:
-            tensor([[ 0.1913+0.j, -0.3420+0.j],
-                    [-0.5113+0.j, -0.2325+0.j]], dtype=torch.complex128)
             >>> linear.to(torch.double)
             Linear(in_features=2, out_features=2, bias=True)
             >>> linear.weight
@@ -601,6 +595,16 @@ class Module:
             tensor([[ 0.1914, -0.3420],
                     [-0.5112, -0.2324]], dtype=torch.float16)
 
+            >>> linear = nn.Linear(2, 2, bias=None).to(torch.cdouble)
+            >>> linear.weight
+            Parameter containing:
+            tensor([[ 0.3741+0.j,  0.2382+0.j],
+                    [ 0.5593+0.j, -0.4443+0.j]], dtype=torch.complex128)
+            >>> linear(torch.ones(3, 2, dtype=torch.cdouble))
+            tensor([[0.6122+0.j, 0.1150+0.j],
+                    [0.6122+0.j, 0.1150+0.j],
+                    [0.6122+0.j, 0.1150+0.j]], dtype=torch.complex128)
+
         """
 
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(*args, **kwargs)
@@ -613,7 +617,8 @@ class Module:
                 warnings.warn(
                     "Complex modules are a new feature, and some modules might not work as expected "
                     "when using complex tensors as parameters or buffers. "
-                    "Please report an issue to PyTorch team if something doesn't work as expected.")
+                    "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+                    "if a complex module does not work as expected.")
 
         def convert(t):
             if convert_to_format is not None and t.dim() == 4:
