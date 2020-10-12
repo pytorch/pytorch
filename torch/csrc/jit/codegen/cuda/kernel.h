@@ -106,6 +106,9 @@ class TORCH_CUDA_API Kernel final : public NonCopyable {
     ir_nodes_.push_back(std::move(node));
   }
 
+  //! Debug dump of the Kernel IR
+  void print() const;
+
  private:
   // Analyze the kernel IR and caches the summary of interesting data
   void analyze();

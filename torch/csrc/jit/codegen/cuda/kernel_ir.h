@@ -222,6 +222,10 @@ class TORCH_CUDA_API IterDomain : public Val {
 
   Val* extent() const;
 
+  Val* rawExtent() const {
+    return extent_;
+  }
+
  private:
   Val* const start_ = nullptr;
   Val* const extent_ = nullptr;

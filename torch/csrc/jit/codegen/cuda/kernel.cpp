@@ -2,7 +2,9 @@
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 
+#include <iostream>
 #include <unordered_set>
 
 namespace torch {
@@ -151,6 +153,11 @@ void Kernel::analyze() {
       }
     }
   }
+}
+
+void Kernel::print() const {
+  kir::IrPrinter ir_printer(std::cout);
+  ir_printer.printKernel(this);
 }
 
 } // namespace cuda

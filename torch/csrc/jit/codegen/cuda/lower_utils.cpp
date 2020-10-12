@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 
@@ -659,7 +660,7 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
 
     if (loops_it == loops.end()) {
       for (auto loop : loops) {
-        std::cout << loop->iter_domain() << "  ";
+        std::cout << kir::toString(loop->iter_domain()) << "  ";
       }
       std::cout << std::endl;
     }
