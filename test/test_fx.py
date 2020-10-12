@@ -10,6 +10,8 @@ from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
 from torch.fx.experimental.Partitioner import DAG, Partitioner
 from torch.fx.experimental.subgraph_creation_example import split_module
+from torch.fx.immutable_collections import immutable_dict, immutable_list
+from copy import deepcopy
 
 from torch.fx.proxy import TraceError
 
@@ -920,6 +922,13 @@ class TestFX(JitTestCase):
                 with self.assertRaisesRegex(RuntimeError, 'but it still had .* users in the graph'):
                     traced.graph.erase_node(node)
 
+    def test_copy_it(self):
+        d = immutable_dict([(3, 4), (5, 6)])
+        l = immutable_list([(3, 4), (5, 6)])
+
+        self.assertEqual(d, deepcopy(d))
+        self.assertEqual(l, deepcopy(l))
+
     def test_find_uses(self):
         graph = torch.fx.Graph()
         x = torch.fx.Proxy(graph.placeholder('x'))
@@ -994,74 +1003,6 @@ class TestFX(JitTestCase):
         # z = x + y -> z = y + y
         z.node.args = (y.node, y.node)
         self.assertEqual(x.node.users.keys(), [zed.node])
-
-    def test_iterable_inputs(self):
-        def apply_shape(shape, obj):
-            if isinstance(shape, dict):
-                return {k: obj[k] for k, v in shape.items()}
-            if isinstance(shape, list):
-                return [obj[i] for i, _ in enumerate(shape)]
-
-        class Custom(Tracer):
-            def __init__(self, input_shape):
-                self.input_shape = input_shape
-                super().__init__()
-
-            def iter(self, obj: 'Proxy') -> iter:
-                if obj.node.op == 'placeholder' and obj.node.target in self.input_shape:
-                    shape = self.input_shape[obj.node.target]
-                    return iter(apply_shape(shape, obj))
-                return super().iter(obj)
-
-            def keys(self, obj: 'Proxy'):
-                if obj.node.op == 'placeholder' and obj.node.target in self.input_shape:
-                    shape = self.input_shape[obj.node.target]
-                    return shape.keys()
-                return super().keys(obj)
-
-        class Model(torch.nn.Module):
-            def what(self, c, a, b):
-                return c * a + b
-
-            def forward(self, *args, **kwargs):
-                return self.what(*args, **kwargs)
-
-        m = Model()
-        r = Custom({'*args': ['*'], '**kwargs': {'a': '*', 'b': '*'}}).trace(m)
-        self.assertIn('args[0]', r.python_code(m))
-
-    def test_custom_proxies(self):
-        # this is another approach to above that simply enforces the shape at the creation
-        # of the proxy. It is simpler than above approach when you can return an aggregate
-        # object directly at creation.
-        def apply_shape(shape, obj):
-            if isinstance(shape, dict):
-                return {k: obj[k] for k, v in shape.items()}
-            if isinstance(shape, list):
-                return [obj[i] for i, _ in enumerate(shape)]
-
-        class Custom(Tracer):
-            def __init__(self, input_shape):
-                self.input_shape = input_shape
-                super().__init__()
-
-            def create_proxy(self, kind, target, args, kwargs, name=None, type_expr=None):
-                r = super().create_proxy(kind, target, args, kwargs, name)
-                if kind == 'placeholder':
-                    r = apply_shape(self.input_shape[target], r)
-                return r
-
-        class Model(torch.nn.Module):
-            def what(self, c, a, b):
-                return c * a + b
-
-            def forward(self, *args, **kwargs):
-                return self.what(*args, **kwargs)
-
-        m = Model()
-        r = Custom({'*args': ['*'], '**kwargs': {'a': '*', 'b': '*'}}).trace(m)
-        self.assertIn('args[0]', r.python_code(m))
-
 
 if __name__ == '__main__':
     run_tests()
