@@ -444,7 +444,8 @@ class TestBenchmarkUtils(TestCase):
         with self.assertRaisesRegex(
             # Subprocess raises AttributeError (from pickle),
             # _ValgrindWrapper re-raises as generic OSError.
-            OSError, "AttributeError: Can't get attribute 'MyModule'"):
+            OSError, "AttributeError: Can't get attribute 'MyModule'"
+        ):
             benchmark_utils.Timer(
                 "model(1)",
                 globals={"model": benchmark_utils.CopyIfCallgrind(MyModule())}
