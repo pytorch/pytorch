@@ -54,28 +54,23 @@ bool validate_allocation_plan(
     MemBlock mem_block(start_offset, end_offset);
     if (event.type == EventType::Allocate) {
       auto it = allocations.lower_bound(mem_block);
-      if (!allocations.empty()) {
-        if (it != allocations.end()) {
-          auto next_block = *it;
-          if (overlaps(next_block, mem_block)) {
-            return false;
-          }
-          if (it != allocations.begin()) {
-            auto prev_block = *(--it);
-            if (overlaps(prev_block, mem_block)) {
-              return false;
-            }
-          }
-        } else {
-          auto prev_block = *(--it);
-          if (overlaps(prev_block, mem_block)) {
-            return false;
-          }
+      if (it != allocations.end()) {
+        auto next_block = *it;
+        if (overlaps(next_block, mem_block)) {
+          return false;
+        }
+      }
+      if (it != allocations.begin()) {
+        auto prev_block = *(--it);
+        if (overlaps(prev_block, mem_block)) {
+          return false;
         }
       }
       allocations.emplace(mem_block);
     } else if (event.type == EventType::Free) {
       auto it = allocations.find(mem_block);
+      TORCH_CHECK((*it).end_offset == end_offset,
+          "Enf offset of allocation being freed must match the one recorded.");
       TORCH_CHECK(
           it != allocations.end(),
           "ProfilingAllocator: Allocate event "
