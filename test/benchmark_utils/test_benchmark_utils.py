@@ -1,9 +1,8 @@
 import json
 import os
 import re
-import sys
 import textwrap
-from typing import Any, Callable, Dict, List, NoReturn, Optional, Tuple, Union
+from typing import Any, List, Tuple
 import unittest
 
 import torch
@@ -31,6 +30,7 @@ def generate_callgrind_artifacts() -> None:
     ).collect_callgrind(number=1000)
 
     user = os.getenv("USER")
+
     def to_entry(fn_counts):
         return [f"{c} {fn.replace(f'/{user}/', '/test_user/')}" for c, fn in fn_counts]
 
@@ -466,6 +466,7 @@ class TestBenchmarkUtils(TestCase):
         )
 
         deltas = stats_with_data.as_standardized().delta(stats_no_data.as_standardized())
+
         def custom_transforms(fn: str):
             fn = re.sub(re.escape("/usr/include/c++/8/bits/"), "", fn)
             fn = re.sub(r"build/../", "", fn)
@@ -569,7 +570,7 @@ class TestBenchmarkUtils(TestCase):
                 -134  /tmp/build/80754af9/python_1599604603603/work/Objects/rangeobject.c:range_new [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
                 -180  /tmp/build/80754af9/python_1599604603603/work/Objects/longobject.c:PyLong_FromLong [/home/test_user/miniconda3/envs/throwaway/bin/python3.6]
 
-            Total: 8863284""",
+            Total: 8863284"""  # noqa
         )
 
         self.regularizeAndAssertExpectedInline(
@@ -763,9 +764,14 @@ class TestBenchmarkUtils(TestCase):
                     ).blocked_autorange(min_run_time=10)
                 )
 
+        def rstrip_lines(s: str) -> str:
+            # VSCode will rstrip the `expected` string literal whether you like
+            # it or not. So we have to rstrip the compare table as well.
+            return "\n".join([i.rstrip() for i in s.splitlines(keepends=False)])
+
         compare = benchmark_utils.Compare(results)
         self.regularizeAndAssertExpectedInline(
-            str(compare).strip(),
+            rstrip_lines(str(compare).strip()),
             """\
             [------------------------------------------------- fn ------------------------------------------------]
                                          |  (16, 16)  |  (16, 128)  |  (128, 128)  |  (4096, 1024)  |  (2048, 2048)
@@ -779,7 +785,7 @@ class TestBenchmarkUtils(TestCase):
 
         compare.trim_significant_figures()
         self.regularizeAndAssertExpectedInline(
-            str(compare).strip(),
+            rstrip_lines(str(compare).strip()),
             """\
             [------------------------------------------------- fn ------------------------------------------------]
                                          |  (16, 16)  |  (16, 128)  |  (128, 128)  |  (4096, 1024)  |  (2048, 2048)
@@ -790,11 +796,6 @@ class TestBenchmarkUtils(TestCase):
 
             Times are in microseconds (us)."""
         )
-
-        def rstrip_lines(s: str) -> str:
-            # VSCode will rstrip the `expected` string literal whether you like
-            # it or not. So we have to rstrip the compare table as well.
-            return "\n".join([i.rstrip() for i in s.splitlines(keepends=False)])
 
         compare.colorize()
         columnwise_colored_actual = rstrip_lines(str(compare).strip())
@@ -807,7 +808,7 @@ class TestBenchmarkUtils(TestCase):
                   compute_optimized      |  \x1b[2m\x1b[91m   3    \x1b[0m\x1b[0m  |     4.0     |      11      |  \x1b[92m\x1b[1m    2100    \x1b[0m\x1b[0m  |      2100
                   special_case (square)  |  \x1b[92m\x1b[1m   1    \x1b[0m\x1b[0m  |             |  \x1b[92m\x1b[1m     8    \x1b[0m\x1b[0m  |                |  \x1b[92m\x1b[1m    1700    \x1b[0m\x1b[0m
 
-            Times are in microseconds (us). aaa"""
+            Times are in microseconds (us)."""  # noqa
         )
 
         compare.colorize(rowwise=True)
@@ -821,7 +822,7 @@ class TestBenchmarkUtils(TestCase):
                   compute_optimized      |  \x1b[92m\x1b[1m   3    \x1b[0m\x1b[0m  |     4.0     |  \x1b[2m\x1b[91m    11    \x1b[0m\x1b[0m  |  \x1b[31m\x1b[1m    2100    \x1b[0m\x1b[0m  |  \x1b[31m\x1b[1m    2100    \x1b[0m\x1b[0m
                   special_case (square)  |  \x1b[92m\x1b[1m   1    \x1b[0m\x1b[0m  |             |  \x1b[31m\x1b[1m     8    \x1b[0m\x1b[0m  |                |  \x1b[31m\x1b[1m    1700    \x1b[0m\x1b[0m
 
-            Times are in microseconds (us). aaa"""
+            Times are in microseconds (us)."""  # noqa
         )
 
         def print_new_expected(s: str) -> None:
