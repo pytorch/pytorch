@@ -144,6 +144,36 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
         PyObjectType::get()));
   }
 
+  void add_done_callback(py::function cb) {
+    auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
+    fut->addCallback(std::bind(
+        [pyFut(this->getPtr())](std::shared_ptr<PythonFunctionGuard> pf) {
+          try {
+            pybind11::gil_scoped_acquire ag;
+            pf->func_(pyFut);
+          } catch (py::error_already_set& e) {
+            {
+              pybind11::gil_scoped_acquire ag;
+              // Release ownership on py::objects and also restore Python
+              // Error Indicator.
+              e.restore();
+              // Clear the Python Error Indicator as we has recorded the
+              // exception in the response message.
+              PyErr_Clear();
+            }
+            // Log and ignore exceptions raised through the callback
+            VLOG(1) << "Got the following error when running the callback: "
+                    << e.what();
+
+          } catch (std::exception& e) {
+            // Log and ignore exceptions raised through the callback
+            VLOG(1) << "Got the following error when running the callback: "
+                    << e.what();
+          }
+        },
+        std::move(pf)));
+  }
+
   void markCompleted(const py::object& pyValue) {
     DCHECK(PyGILState_Check());
     IValue value = toIValue(pyValue, PyObjectType::get());

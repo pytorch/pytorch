@@ -66,6 +66,14 @@ file(GLOB native_mkl_cpp "native/mkl/*.cpp")
 file(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
 file(GLOB vulkan_cpp "vulkan/*.cpp")
 file(GLOB native_vulkan_cpp "native/vulkan/api/*.cpp" "native/vulkan/*.cpp")
+
+file(GLOB metal_h "metal/*.h")
+file(GLOB metal_cpp "metal/*.cpp")
+file(GLOB_RECURSE native_metal_h "native/metal/*.h")
+file(GLOB metal_test_srcs "native/metal/mpscnn/tests/*.mm")
+file(GLOB_RECURSE native_metal_srcs "native/metal/*.mm", "native/metal/*.cpp")
+EXCLUDE(native_metal_srcs "${native_metal_srcs}" ${metal_test_srcs})
+
 file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
@@ -115,6 +123,12 @@ if(USE_VULKAN)
   set(all_cpu_cpp ${all_cpu_cpp} ${vulkan_cpp} ${native_vulkan_cpp} ${vulkan_generated_cpp})
 else()
   set(all_cpu_cpp ${all_cpu_cpp} ${vulkan_cpp})
+endif()
+
+if(USE_METAL)
+  set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${native_metal_srcs})
+else()
+  set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp})
 endif()
 
 if(USE_CUDA AND USE_ROCM)
@@ -375,6 +389,10 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
   list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${miopen_h})
+else()
+  if(USE_METAL)
+    list(APPEND INSTALL_HEADERS ${metal_h} ${native_metal_h})
+  endif()
 endif()
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
