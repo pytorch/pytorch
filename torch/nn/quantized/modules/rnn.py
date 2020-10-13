@@ -1,5 +1,3 @@
-from __future__ import absolute_import
-
 import numbers
 from typing import Optional, Tuple
 
