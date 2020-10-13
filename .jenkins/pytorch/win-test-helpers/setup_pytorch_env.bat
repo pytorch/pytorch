@@ -95,7 +95,10 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
     popd
 ) else (
     xcopy /s %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %TMP_DIR_WIN%\build\torch\
+    xcopy /s %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %TMP_DIR_WIN%\build\caffe2\
 )
+
+dir %TMP_DIR_WIN%\build
 
 @echo off
 echo @echo off >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat

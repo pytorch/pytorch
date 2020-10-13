@@ -37,6 +37,8 @@ if [ -n "$CIRCLE_PULL_REQUEST" ]; then
   file_diff_from_base "$DETERMINE_FROM"
 fi
 
+
+pytorch_installation="$(dirname $(dirname $(cd $TMP_DIR && python -c 'import os; import torch; print(os.path.realpath(torch.__file__))')))"
 python_installation="$(dirname $(dirname $(cd $TMP_DIR && python -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
 caffe2_pypath="$python_installation/caffe2"
 
