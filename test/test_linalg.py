@@ -937,7 +937,8 @@ class TestLinalg(TestCase):
 
         shapes = (0, 3, 5)
         batches = ((), (3, ), (2, 2))
-        for shape, batch in itertools.product(shapes, batches):
+        larger_input_case = [(100, (5, ))]
+        for shape, batch in list(itertools.product(shapes, batches)) + larger_input_case:
             run_test(shape, batch)
 
         # cholesky requires a square matrix
