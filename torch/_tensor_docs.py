@@ -893,7 +893,7 @@ add_docstr_all('coalesce',
 coalesce() -> Tensor
 
 Returns a coalesced copy of :attr:`self` if :attr:`self` is an
-:ref:`uncoalesced tensor <sparse-uncoalesed-coo-docs>`.
+:ref:`uncoalesced tensor <sparse-uncoalesced-coo-docs>`.
 
 Returns :attr:`self` if :attr:`self` is a coalesced tensor.
 
@@ -1071,7 +1071,7 @@ Return the number of dense dimensions in a :ref:`sparse tensor <sparse-docs>` :a
 .. warning::
   Throws an error if :attr:`self` is not a sparse tensor.
 
-See also :meth:`Tensor.sparse_dim` and :ref:`hybrid tensors <sparse-hybrid-docs>`.
+See also :meth:`Tensor.sparse_dim` and :ref:`hybrid tensors <sparse-hybrid-coo-docs>`.
 """)
 
 add_docstr_all('diag',
@@ -1877,7 +1877,7 @@ Returns ``True`` if :attr:`self` is a :ref:`sparse COO tensor
 .. warning::
   Throws an error if :attr:`self` is not a sparse COO tensor.
 
-See :meth:`coalesce` and :ref:`uncoalesced tensors <sparse-uncoalesed-coo-docs>`.
+See :meth:`coalesce` and :ref:`uncoalesced tensors <sparse-uncoalesced-coo-docs>`.
 """)
 
 add_docstr_all('is_contiguous',
@@ -3271,7 +3271,7 @@ Return the number of sparse dimensions in a :ref:`sparse tensor <sparse-docs>` :
 .. warning::
   Throws an error if :attr:`self` is not a sparse tensor.
 
-See also :meth:`Tensor.dense_dim` and :ref:`hybrid tensors <sparse-hybrid-docs>`.
+See also :meth:`Tensor.dense_dim` and :ref:`hybrid tensors <sparse-hybrid-coo-docs>`.
 """)
 
 add_docstr_all('sparse_resize_',
