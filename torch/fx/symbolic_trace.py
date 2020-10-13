@@ -174,7 +174,7 @@ class Tracer(TracerBase):
 
 # Symbolic tracing API
 #
-# Given an `nn.Module` instance `root`, this function will return a `GraphModule`
+# Given an `nn.Module` or function instance `root`, this function will return a `GraphModule`
 # constructed by recording operations seen while tracing through `root`.
 #
 # Args:
