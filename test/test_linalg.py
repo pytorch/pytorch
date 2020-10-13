@@ -922,6 +922,8 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
+
+    @precisionOverride({torch.float: 1e-2, torch.cfloat: 1e-4})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -941,10 +943,27 @@ class TestLinalg(TestCase):
         for shape, batch in list(itertools.product(shapes, batches)) + larger_input_case:
             run_test(shape, batch)
 
-        # cholesky requires a square matrix
-        t = torch.randn(2, 3, device=device, dtype=dtype)
-        with self.assertRaises(RuntimeError):
-            torch.linalg.cholesky(t)
+        # cholesky requires the input to be a square matrix
+        A = torch.randn(2, 3, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
+            torch.linalg.cholesky(A)
+        with self.assertRaisesRegex(np.linalg.LinAlgError, r'Last 2 dimensions of the array must be square'):
+            np.linalg.cholesky(A.cpu().numpy())
+
+        # cholesky requires the input to be a matrix
+        A = torch.randn(2, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, r'must have at least 2 dimensions'):
+            torch.linalg.cholesky(A)
+        with self.assertRaisesRegex(np.linalg.LinAlgError, r'1-dimensional array given\. Array must be at least two-dimensional'):
+            np.linalg.cholesky(A.cpu().numpy())
+
+        # if the input matrix is singular, an error should be raised
+        A = torch.eye(3, 3, dtype=dtype, device=device)
+        A[-1, -1] = 0  # Now A is singular
+        with self.assertRaisesRegex(RuntimeError, r'U\(3,3\) is zero, singular U\.'):
+            torch.linalg.cholesky(A)
+        with self.assertRaisesRegex(np.linalg.LinAlgError, r'Matrix is not positive definite'):
+            np.linalg.cholesky(A.cpu().numpy())
 
     # TODO: once there is more support for complex dtypes on GPU, they shall be added to above test
     # particularly when RuntimeError: _th_bmm_out not supported on CUDAType for ComplexFloat is fixed
