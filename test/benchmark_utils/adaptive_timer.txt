@@ -1,0 +1,197 @@
+================================================================================
+== Plaintext cases for: test_adaptive_timer ====================================
+================================================================================
+MockTimer(stmt='pass', setup='pass')
+  blocked_autorange:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    pass
+      Median: 7.98 ns
+      IQR:    0.52 ns (7.74 to 8.26)
+      125 measurements, 10000000 runs per measurement, 1 thread
+
+  adaptive_autorange:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    pass
+      Median: 7.96 ns
+      IQR:    0.56 ns (7.62 to 8.18)
+      4 measurements, 1000000 runs per measurement, 1 thread
+
+  mean: 8.001365835795602e-09
+  median: 7.983151323215967e-09
+  repeats: 125
+  number_per_run: 10000000
+
+
+MockTimer(stmt='cheap_fn()', setup='pass')
+  blocked_autorange:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    cheap_fn()
+      Median: 3.98 us
+      IQR:    0.27 us (3.85 to 4.12)
+      252 measurements, 10000 runs per measurement, 1 thread
+
+  adaptive_autorange:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    cheap_fn()
+      Median: 4.05 us
+      IQR:    0.19 us (3.97 to 4.15)
+      4 measurements, 1000 runs per measurement, 1 thread
+
+  mean: 3.978642327450413e-06
+  median: 3.9791192787009905e-06
+  repeats: 252
+  number_per_run: 10000
+
+
+MockTimer(stmt='expensive_fn()', setup='pass')
+  blocked_autorange:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    expensive_fn()
+      Median: 19.97 us
+      IQR:    1.35 us (19.31 to 20.65)
+      501 measurements, 1000 runs per measurement, 1 thread
+
+  adaptive_autorange:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    expensive_fn()
+      Median: 19.85 us
+      IQR:    0.72 us (19.36 to 20.08)
+      5 measurements, 100 runs per measurement, 1 thread
+
+  mean: 1.99904835788062e-05
+  median: 1.9974413711400142e-05
+  repeats: 501
+  number_per_run: 1000
+
+
+MockCudaTimer(stmt='pass', setup='pass')
+  blocked_autorange:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    pass
+      Median: 7.92 ns
+      IQR:    0.43 ns (7.75 to 8.17)
+      13 measurements, 100000000 runs per measurement, 1 thread
+
+  adaptive_autorange:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    pass
+      Median: 7.71 ns
+      IQR:    0.32 ns (7.66 to 7.98)
+      4 measurements, 10000000 runs per measurement, 1 thread
+
+  mean: 7.961079321090606e-09
+  median: 7.91509134109237e-09
+  repeats: 13
+  number_per_run: 100000000
+
+
+MockCudaTimer(stmt='cheap_fn()', setup='pass')
+  blocked_autorange:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    cheap_fn()
+      Median: 4.04 us
+      IQR:    0.30 us (3.90 to 4.19)
+      25 measurements, 100000 runs per measurement, 1 thread
+
+  adaptive_autorange:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    cheap_fn()
+      Median: 4.11 us
+      IQR:    0.27 us (3.96 to 4.23)
+      4 measurements, 100000 runs per measurement, 1 thread
+
+  mean: 4.045229906330263e-06
+  median: 4.035674588133058e-06
+  repeats: 25
+  number_per_run: 100000
+
+
+MockCudaTimer(stmt='expensive_fn()', setup='pass')
+  blocked_autorange:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    expensive_fn()
+      Median: 4.98 us
+      IQR:    0.31 us (4.83 to 5.13)
+      20 measurements, 100000 runs per measurement, 1 thread
+
+  adaptive_autorange:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    expensive_fn()
+      Median: 5.08 us
+      IQR:    0.27 us (4.96 to 5.22)
+      4 measurements, 100000 runs per measurement, 1 thread
+
+  mean: 5.013295551315292e-06
+  median: 4.980618167585018e-06
+  repeats: 20
+  number_per_run: 100000
+
+
+MockTimer: [0]
+  __repr__:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    stmt:
+      with torch.no_grad():
+          y = x + 1
+
+      Median: 10.02 us
+      IQR:    0.67 us (9.67 to 10.34)
+      100 measurements, 10000 runs per measurement, 1 thread
+
+
+
+MockTimer: [1]
+  __repr__:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    stmt: (scalar_add)
+      with torch.no_grad():
+          y = x + 1
+
+      Median: 10.02 us
+      IQR:    0.67 us (9.67 to 10.34)
+      100 measurements, 10000 runs per measurement, 1 thread
+
+
+
+MockTimer: [2]
+  __repr__:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    x + 1: scalar_add
+      Median: 10.02 us
+      IQR:    0.67 us (9.67 to 10.34)
+      100 measurements, 10000 runs per measurement, 1 thread
+
+
+
+MockTimer: [3]
+  __repr__:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    stmt: (scalar_add)
+      with torch.no_grad():
+          y = x + 1
+
+    setup: setup_fn()
+      Median: 10.02 us
+      IQR:    0.67 us (9.67 to 10.34)
+      100 measurements, 10000 runs per measurement, 1 thread
+
+
+
+MockTimer: [4]
+  __repr__:
+    <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
+    stmt: (scalar_add)
+      with torch.no_grad():
+          y = x + 1
+
+    Multi-threaded scalar math!
+    setup:
+      x = torch.ones((1,), requires_grad=True)
+      for _ in range(5):
+          x = x + 1.0
+
+      Median: 10.02 us
+      IQR:    0.67 us (9.67 to 10.34)
+      100 measurements, 10000 runs per measurement, 16 threads
+
+
