@@ -97,7 +97,7 @@ class TestForeach(TestCase):
                 control_dtype = torch.float32 if (self.device_type == 'cuda' and 
                                                   (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
 
-                if vals == 2:
+                if not isinstance(vals, list):
                     expected = [torch_op(tensors[i].to(dtype=control_dtype),
                                          tensors1[i].to(dtype=control_dtype),
                                          tensors2[i].to(dtype=control_dtype),
