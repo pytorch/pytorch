@@ -13793,9 +13793,9 @@ class TestTorchDeviceType(TestCase):
     @onlyCUDA
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_cuda_tensor_pow_scalar_tensor(self, device):
-        cuda_tensor = torch.randn((3, 3), device='cuda')
-        scalars_tensors = [torch.tensor(5), torch.tensor(4.2), torch.tensor(-0.5)]
-        for exp in scalars_tensors:
+        cuda_tensor = torch.randn((3, 3), device=device)
+        scalar_tensors = [torch.tensor(5), torch.tensor(-3), torch.tensor(1)]
+        for exp in scalar_tensors:
             self._test_pow(cuda_tensor, exp)
 
     @onlyOnCPUAndCUDA
