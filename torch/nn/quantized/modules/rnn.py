@@ -6,7 +6,6 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 import torch.nn as nn
-import torch.nn.functional as F
 
 from .functional_modules import FloatFunctional
 
@@ -232,7 +231,7 @@ class LSTM(nn.Module):
                                 self.hidden_size, dtype=x.dtype,
                                 device=x.device)
             zeros.squeeze_(0)
-            hidden = [ (zeros, zeros) for _ in range(self.num_layers) ]
+            hidden = [(zeros, zeros) for _ in range(self.num_layers)]
         elif isinstance(hidden[0], Tensor):
             hx = hidden[0].reshape(self.num_layers, num_directions,
                                    max_batch_size, self.hidden_size).unbind(0)

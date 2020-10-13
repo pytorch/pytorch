@@ -63,6 +63,6 @@ _all__ = [
     'fuse_modules',
 ]
 
-## Importing here to avoid importing the function in the `nn.quantized` to
-## avoid the cyclic import
+# Importing here to avoid importing the function in the `nn.quantized` to
+# avoid the cyclic import
 register_observed_custom_module_mapping(torch.nn.LSTM, torch.nn.quantized.LSTM)
