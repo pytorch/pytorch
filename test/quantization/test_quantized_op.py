@@ -79,7 +79,9 @@ def qlinear_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
     )
     if b_q is not None:
         Prod_XqWq_ref += b_q
-    Y_q_ref = _quantize(Prod_XqWq_ref, Y_scale / (X_scale * W_scale), Y_zp)
+    Y_q_ref, _, _ = _quantize(Prod_XqWq_ref,
+                              Y_scale / (X_scale * W_scale),
+                              Y_zp)
     return Y_q_ref
 
 """Computes the output shape given pooling parameters."""
@@ -722,7 +724,7 @@ class TestQuantizedOps(TestCase):
 
             # Add ReLU ground truth
             C = (qA.dequantize() + qB.dequantize()).numpy()
-            qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
+            qC, _, _ = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
             qC_hat = add(qA, qB, scale=scale, zero_point=zero_point)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
                                     "Quantized addition failed.")
@@ -736,7 +738,8 @@ class TestQuantizedOps(TestCase):
             # Add + ReLU ground truth
             Crelu = C.copy()
             Crelu[C < 0] = 0
-            qCrelu = _quantize(Crelu, scale, zero_point, dtype=np_dtype[dtype])
+            qCrelu, _, _ = _quantize(Crelu, scale, zero_point,
+                                     dtype=np_dtype[dtype])
             qCrelu_hat = add_relu(qA, qB, scale=scale, zero_point=zero_point)
             np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
                                     "Quantized addition with ReLU failed.")
@@ -777,7 +780,8 @@ class TestQuantizedOps(TestCase):
 
             # Add ground truth
             C = (qA.dequantize() + qB.dequantize()).numpy()
-            qC = _quantize(C, scale_C, zero_point_C, dtype=np_dtype[dtype])
+            qC, _, _ = _quantize(C, scale_C, zero_point_C,
+                                 dtype=np_dtype[dtype])
             qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point_C)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
                                     "Quantized addition failed.")
@@ -791,7 +795,8 @@ class TestQuantizedOps(TestCase):
             # Add + ReLU ground truth
             Crelu = C.copy()
             Crelu[C < 0] = 0
-            qCrelu = _quantize(Crelu, scale_C, zero_point_C, dtype=np_dtype[dtype])
+            qCrelu, _, _ = _quantize(Crelu, scale_C, zero_point_C,
+                                     dtype=np_dtype[dtype])
             qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
             np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
                                     "Quantized addition with ReLU failed.")
@@ -822,7 +827,7 @@ class TestQuantizedOps(TestCase):
 
             # mul ReLU ground truth
             C = (qA.dequantize() * qB.dequantize()).numpy()
-            qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
+            qC, _, _ = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
             qC_hat = mul(qA, qB, scale=scale, zero_point=zero_point)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
                                     "Quantized mulition failed.")
@@ -836,7 +841,8 @@ class TestQuantizedOps(TestCase):
             # mul + ReLU ground truth
             Crelu = C.copy()
             Crelu[C < 0] = 0
-            qCrelu = _quantize(Crelu, scale, zero_point, dtype=np_dtype[dtype])
+            qCrelu, _, _ = _quantize(Crelu, scale, zero_point,
+                                     dtype=np_dtype[dtype])
             qCrelu_hat = mul_relu(qA, qB, scale=scale, zero_point=zero_point)
             np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
                                     "Quantized mulition with ReLU failed.")
@@ -888,7 +894,7 @@ class TestQuantizedOps(TestCase):
 
             # mul ground truth
             C = (qA.dequantize() * qB.dequantize()).numpy()
-            qC = _quantize(C, scale_C, zero_point_C, dtype=np_dtype[dtype])
+            qC, _, _ = _quantize(C, scale_C, zero_point_C, dtype=np_dtype[dtype])
             qC_hat = mul(qA, qB, scale=scale_C, zero_point=zero_point_C)
             np.testing.assert_equal(qC, qC_hat.int_repr(),
                                     "Quantized multiplication failed.")
@@ -902,7 +908,8 @@ class TestQuantizedOps(TestCase):
             # mul + ReLU ground truth
             Crelu = C.copy()
             Crelu[C < 0] = 0
-            qCrelu = _quantize(Crelu, scale_C, zero_point_C, dtype=np_dtype[dtype])
+            qCrelu, _, _ = _quantize(Crelu, scale_C, zero_point_C,
+                                     dtype=np_dtype[dtype])
             qCrelu_hat = mul_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
             np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
                                     "Quantized multiplication with ReLU failed.")
@@ -940,7 +947,7 @@ class TestQuantizedOps(TestCase):
 
         # mul ground truth
         C = (qA.dequantize() * qB.dequantize()).numpy()
-        qC = _quantize(C, scale_C, zero_point_C)
+        qC, _, _ = _quantize(C, scale_C, zero_point_C)
         qC_hat = mul(qA, qB, scale=scale_C, zero_point=zero_point_C)
         np.testing.assert_equal(qC, qC_hat.int_repr(),
                                 "Quantized multiplication failed.")
@@ -4043,7 +4050,7 @@ class TestQNNPackOps(TestCase):
             # Add ground truth
             C = (qA.dequantize() + qB.dequantize()).numpy()
 
-            qC = _quantize(C, scale_C, zero_point_C)
+            qC, _, _ = _quantize(C, scale_C, zero_point_C)
 
             qC_qnnp = torch.ops.quantized.add(qA, qB, scale_C, zero_point_C)
 
