@@ -1,8 +1,4 @@
 import torch._C
-from torch.jit._isinstance import _isinstance
-from typing import List, Dict, Optional, Tuple, Union
-import typing
-from sys import version_info
 
 from torch.utils import set_module
 
@@ -25,6 +21,7 @@ from torch.jit._script import (
     RecursiveScriptModule,
     ScriptWarning,
     interface,
+    _isinstance,
     CompilationUnit,
     ScriptFunction,
     _unwrap_optional,
