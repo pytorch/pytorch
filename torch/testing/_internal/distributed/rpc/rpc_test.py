@@ -3128,6 +3128,33 @@ class RpcTest(RpcAgentTestFixture):
             rpc.rpc_async(dst, raise_func).then(None)
 
     @dist_init
+    def test_add_done_callback(self):
+        set_by_cb = False
+        n = self.rank + 1
+
+        def callback(fut):
+            nonlocal set_by_cb
+            fut.wait()
+            set_by_cb = True
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n))
+        )
+
+        fut.add_done_callback(callback)
+        fut_then = fut.then(lambda _: True)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+        # We have no guarantee that the add_done_callback fn will execute before the test finishes.
+        # Adding a 'then' callback that runs afterwards to guarantee we wait for the first callback
+        fut_then.wait()
+        self.assertTrue(set_by_cb)
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+    @dist_init
     def test_mark_future_twice(self):
         fut = rpc.rpc_async(
             worker_name((self.rank + 1) % self.world_size),
@@ -4535,7 +4562,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def _test_device_maps_missing_config(self, mode):
         dst = worker_name((self.rank + 1) % self.world_size)
         errMsg = (
-            "TensorPipeAgent only supports CPU tensors by default.*"
+            "TensorPipe RPC backend only supports CPU tensors by default.*"
             "`set_device_map` on `TensorPipeRpcBackendOptions`"
         )
 
@@ -4579,6 +4606,28 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     @dist_init
     def test_device_maps_missing_config(self):
         self._test_device_maps_missing_config(RPCExecMode.SYNC)
+
+    @skip_if_lt_x_gpu(1)
+    def test_device_maps_missing_config_not_timeout(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options
+        )
+
+        timeout = rpc.get_rpc_timeout()
+
+        tik = time.time()
+        self._test_device_maps_missing_config(RPCExecMode.SYNC)
+        rpc.shutdown()
+        tok = time.time()
+
+        self.assertTrue(tok - tik < timeout)
 
     @skip_if_lt_x_gpu(1)
     @dist_init

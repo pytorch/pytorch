@@ -220,6 +220,8 @@ An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
 Note that ``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
 using the ``NCCL`` backend.
 
+Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex tensors.
+
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
 :func:`reduce`, :func:`all_reduce_multigpu`, etc.)")
@@ -949,6 +951,12 @@ Arguments:
       .def(py::init<>())
       .def_readwrite("is_high_priority", &::c10d::ProcessGroupNCCL::Options::isHighPriorityStream)
       .def_readwrite("op_timeout", &::c10d::ProcessGroupNCCL::Options::opTimeout);
+  processGroupNCCL.def_static("_group_start", []() {
+    ::c10d::ProcessGroupNCCL::groupStart();
+  });
+  processGroupNCCL.def_static("_group_end", []() {
+    ::c10d::ProcessGroupNCCL::groupEnd();
+  });
 #endif
 
 #ifdef USE_C10D_MPI
