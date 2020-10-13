@@ -166,7 +166,11 @@ class Timer(object):
         )
 
     def timeit(self, number: int = 1000000) -> common.Measurement:
-        """Mirrors the semantics of timeit.Timer.timeit()."""
+        """Mirrors the semantics of timeit.Timer.timeit().
+
+        Execute the main statement (`stmt`) `number` times.
+        https://docs.python.org/3/library/timeit.html#timeit.Timer.timeit
+        """
         with common.set_torch_threads(self._task_spec.num_threads):
             # Warmup
             self._timer.timeit(number=max(int(number // 100), 1))
@@ -260,9 +264,21 @@ class Timer(object):
     ) -> common.Measurement:
         """Measure many replicates while keeping timer overhead to a minimum.
 
-        This method repeats `stmt` until a time quota (set by `min_run_time`)
-        has been met. It dynamically chooses the block size by balancing two
-        criteria:
+        At a high level, blocked_autorange executes the following pseudo-code:
+        ```
+        `setup`
+
+        total_time = 0
+        while total_time < min_run_time
+            start = timer()
+            for _ in range(block_size):
+                `stmt`
+            total_time += (timer() - start)
+        ```
+
+        Note the variable `block_size` in the inner loop. The choice of block
+        size is important to measurement quality, and must balance two
+        competing objectives:
             1) A small block size results in more replicates and generally
                better statistics.
             2) A large block size better amortizes the cost of `timer`
@@ -271,8 +287,14 @@ class Timer(object):
                (order single to low double digit microseconds) and would
                otherwise bias the measurement.
 
+        blocked_autorange sets block_size by running a warmup period,
+        increasing block size until timer overhead is less than 0.1% of
+        the overall computation. This value is then used for the main
+        measurement loop.
+
         Returns:
-            A `Measurement` object which can be used to compute statistics.
+            A `Measurement` object that contains measured runtimes and
+            repetition counts, and can be used to compute statistics.
             (mean, median, etc.)
         """
         number = self._estimate_block_size(min_run_time)
