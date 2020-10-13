@@ -21,7 +21,8 @@ const char* toString(DispatchKey t) {
       return "XLA";
     case DispatchKey::Vulkan:
       return "Vulkan";
-
+    case DispatchKey::Metal:
+      return "Metal";
     case DispatchKey::MKLDNN:
       return "MKLDNN";
     case DispatchKey::OpenGL:
@@ -30,7 +31,6 @@ const char* toString(DispatchKey t) {
       return "OpenCL";
     case DispatchKey::IDEEP:
       return "IDEEP";
-
     case DispatchKey::QuantizedCPU:
       return "QuantizedCPU";
     case DispatchKey::QuantizedCUDA:

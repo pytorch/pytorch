@@ -417,7 +417,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     are no living references to it.
 
     Arguments:
-        to (str or WorkerInfo or int): name/rank/WorkerInfo of the destination worker.
+        to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
         func (callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
@@ -672,7 +672,7 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     method is thread-safe.
 
     Arguments:
-        to (str or WorkerInfo or int): name/rank/WorkerInfo of the destination worker.
+        to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
         func (callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
@@ -751,7 +751,7 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     :class:`~torch.futures.Future` that can be awaited on.
 
     Arguments:
-        to (str or WorkerInfo or int): name/rank/WorkerInfo of the destination worker.
+        to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
         func (callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.

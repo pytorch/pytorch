@@ -2,6 +2,7 @@ import torch
 from torch.distributions.distribution import Distribution
 from torch.distributions import Categorical
 from torch.distributions import constraints
+from typing import Dict
 
 
 class MixtureSameFamily(Distribution):
@@ -45,7 +46,7 @@ class MixtureSameFamily(Distribution):
         component_distribution: `torch.distributions.Distribution`-like
             instance. Right-most batch dimension indexes component.
     """
-    arg_constraints = {}
+    arg_constraints: Dict[str, constraints.Constraint] = {}
     has_rsample = False
 
     def __init__(self,
