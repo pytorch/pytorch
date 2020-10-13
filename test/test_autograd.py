@@ -4363,12 +4363,13 @@ for shape in [(1,), ()]:
                         bw_called[0] = 0
                         ga_nz[0] = True  # For the case where the backward is called
                         with warnings.catch_warnings(record=True) as w:
-                            if inplace and output_is_a_view:
+                            if inplace and make_view:
                                 with self.assertRaisesRegex(RuntimeError,
                                                             "a view of a leaf Variable that requires grad "
                                                             "is being used in an in-place operation."):
                                     fn(a, b).backward()
                             else:
+                                print("fn_id: " + str(fn_id))
                                 fn(a, b).backward()
 
                         expected_called = 1
