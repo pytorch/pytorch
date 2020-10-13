@@ -321,6 +321,12 @@ void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard() {
   std::lock_guard<std::mutex> lock(mutex_);
   completed_ = true;
   if (exception_) {
+    auto exceptionMsg = c10::str(
+        "Some NCCL operations have failed or timed out. Due to the ",
+        "asynchronous nature of CUDA kernels, subsequent GPU operations ",
+        "might run on corrupted/incomplete data. To avoid this inconsistency, ",
+        "we are taking the entire process down.");
+    LOG(ERROR) << exceptionMsg;
     std::rethrow_exception(exception_);
   }
 }
