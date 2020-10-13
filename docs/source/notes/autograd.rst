@@ -222,7 +222,7 @@ The short version:
   the gradients are computed under the assumption that the function is a part of a larger real-valued
   loss function :math:`g(input)=L`. The gradient computed is :math:`\frac{\partial L}{\partial z^*}`
   (note the conjugation of z), which is precisely the direction of the step
-  you should take in gradient descent. Thus, all the existing optimizers work out of
+  you should take in gradient ascent. Thus, all the existing optimizers work out of
   the box with complex parameters.
 - This convention matches TensorFlow's convention for complex
   differentiation, but is different from JAX (which computes
