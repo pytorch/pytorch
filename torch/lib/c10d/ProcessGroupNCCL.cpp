@@ -598,12 +598,18 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
         // Check for Timeouts in the WorkNCCL Operations, and abort all
         // communicators accordingly.
         if (work.timedOut()) {
+          auto currentTimepoint = std::chrono::steady_clock::now();
+          auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+              currentTimepoint - workStartTime_);
           LOG(INFO)
               << "[Rank " << rank_
-              << "] Watchdog caught collective operation timeout for work: "
-              << work;
+              << "] Watchdog caught collective operation timeout: "
+              << work
+              << " ran for "
+              << timeElapsed.count()
+              << " milliseconds before timing out.";
           std::exception_ptr exception_ptr = std::make_exception_ptr(
-              std::runtime_error("NCCL Operation Timed Out"));
+              std::runtime_error("NCCL Operation Timed Out");
           work.setException(exception_ptr);
           for (const auto& ncclComm : work.ncclComms_) {
             ncclComm->ncclCommAbort();
