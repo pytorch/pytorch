@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <iostream>
 
 #include <benchmark/benchmark.h>
 
@@ -10,7 +11,8 @@ static void quantize_per_channel_4d_contiguous(benchmark::State& state) {
 
   at::Tensor a = at::rand({batches, channels, height, width});
   at::Tensor scales = at::rand({channels});
-  at::Tensor zero_points = at::randint(-10, 10, {channels});
+  at::Tensor zero_points = at::randint(
+      0, 10, {channels}, at::TensorOptions().dtype(at::ScalarType::Int));
 
   at::Tensor qa;
   for (auto _ : state) {
@@ -29,7 +31,8 @@ static void quantize_per_channel_4d_channels_last(benchmark::State& state) {
       {batches, channels, height, width},
       at::TensorOptions().memory_format(at::MemoryFormat::ChannelsLast));
   at::Tensor scales = at::rand({channels});
-  at::Tensor zero_points = at::randint(-10, 10, {channels});
+  at::Tensor zero_points = at::randint(
+      0, 10, {channels}, at::TensorOptions().dtype(at::ScalarType::Int));
 
   at::Tensor qa;
   for (auto _ : state) {
@@ -44,7 +47,8 @@ static void quantize_per_channel_2d(benchmark::State& state) {
 
   at::Tensor a = at::rand({channels, nelem});
   at::Tensor scales = at::rand({channels});
-  at::Tensor zero_points = at::randint(-10, 10, {channels});
+  at::Tensor zero_points = at::randint(
+      0, 10, {channels}, at::TensorOptions().dtype(at::ScalarType::Int));
 
   at::Tensor qa;
   for (auto _ : state) {

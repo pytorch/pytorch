@@ -3,6 +3,181 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+namespace registerizer {
+
+// AccessInfo
+
+void AccessInfo::addStore(
+    const Store* store,
+    const std::shared_ptr<Scope>& scope) {
+  block_ =
+      block_ ? Block::getSharedParent(block_, scope->block()) : scope->block();
+
+  // If there is already a usage and it's this store, that means the same
+  // access is present in the RHS.
+  firstUsageOverlapped_ |= first_usage_ == store;
+  first_usage_ = first_usage_ ? block_->getEnclosedRoot(first_usage_) : store;
+  last_usage_ = store;
+
+  store_cost_ = IRSimplifier::simplify(new Add(store_cost_, new IntImm(1)));
+  stores_.push_back(store);
+
+  conditionId_ = scope->conditionId();
+  hiddenAccess_.reset();
+}
+
+void AccessInfo::addLoad(
+    const Load* load,
+    const std::shared_ptr<Scope>& scope,
+    const Stmt* usage) {
+  block_ =
+      block_ ? Block::getSharedParent(block_, scope->block()) : scope->block();
+  first_usage_ = first_usage_ ? block_->getEnclosedRoot(first_usage_) : usage;
+  last_usage_ = usage;
+
+  load_cost_ = IRSimplifier::simplify(new Add(load_cost_, new IntImm(1)));
+  loads_.push_back(load);
+
+  conditionId_ = scope->conditionId();
+  hiddenAccess_.reset();
+}
+
+void AccessInfo::merge(const std::shared_ptr<AccessInfo>& other) {
+  TORCH_INTERNAL_ASSERT(hash_ == other->hash());
+  TORCH_INTERNAL_ASSERT(indices_.size() == other->indices().size());
+
+  last_usage_ = other->last_usage();
+  for (auto* s : other->stores()) {
+    stores_.push_back(s);
+  }
+  for (auto* l : other->loads()) {
+    loads_.push_back(l);
+  }
+
+  store_cost_ =
+      IRSimplifier::simplify(new Add(store_cost_, other->store_cost()));
+  load_cost_ = IRSimplifier::simplify(new Add(load_cost_, other->load_cost()));
+
+  block_ = Block::getSharedParent(block_, other->block());
+  // update first and last usage to be in the parent Block.
+  first_usage_ = block_->getEnclosedRoot(first_usage_);
+  last_usage_ = block_->getEnclosedRoot(last_usage_);
+  hiddenAccess_.reset();
+}
+
+bool AccessInfo::overlaps(const std::shared_ptr<AccessInfo>& other) {
+  // All accesses to a buf must have the same dimensionality.
+  TORCH_INTERNAL_ASSERT(indices_.size() == other->indices().size());
+
+  const auto& other_indices = other->indices();
+
+  // They don't overlap if there is a guaranteed difference in any
+  // dimension.
+  bool overlap = true;
+  for (size_t i = 0; i < indices_.size(); ++i) {
+    const Expr* diff = new Sub(indices_[i], other_indices[i]);
+    diff = IRSimplifier::simplify(diff);
+
+    if (diff->isConstant() && !immediateEquals(diff, 0)) {
+      overlap = false;
+      break;
+    }
+  }
+
+  return overlap;
+}
+
+bool AccessInfo::dependsOnVar(const Var* v) {
+  VarFinder vf;
+  for (auto* i : indices_) {
+    i->accept(&vf);
+  }
+
+  return vf.vars().count(v);
+}
+
+std::shared_ptr<AccessInfo> AccessInfo::cloneWithHiddenInfo(
+    const std::shared_ptr<AccessInfo>& orig) {
+  std::shared_ptr<AccessInfo> newInfo = std::make_shared<AccessInfo>(
+      orig->hash(), orig->buf(), orig->indices(), orig->accessOrder());
+
+  newInfo->block_ = orig->block_;
+  newInfo->first_usage_ = orig->first_usage_;
+  newInfo->last_usage_ = orig->last_usage_;
+  newInfo->firstUsageOverlapped_ = orig->firstUsageOverlapped_;
+  newInfo->store_cost_ = orig->store_cost_;
+  newInfo->load_cost_ = orig->load_cost_;
+  for (auto* s : orig->stores_) {
+    newInfo->stores_.push_back(s);
+  }
+  for (auto* s : orig->loads_) {
+    newInfo->loads_.push_back(s);
+  }
+
+  newInfo->conditionId_ = orig->conditionId_;
+  newInfo->hiddenAccess_ = orig;
+  return newInfo;
+}
+
+void AccessInfo::print() const {
+  std::cout << "Access: " << *buf_ << "{";
+  for (auto* i : indices_) {
+    std::cout << *i << " ";
+  }
+  std::cout << "} stores: " << stores_.size() << " (" << *store_cost_ << ") -";
+  std::cout << " loads: " << loads_.size() << " (" << *load_cost_ << ")";
+  if (conditionId_) {
+    std::cout << " cond: " << conditionId_;
+  }
+
+  std::cout << "\n";
+}
+
+// Scope
+
+void Scope::closeAccess(const std::shared_ptr<AccessInfo>& info) {
+  closedAccesses_.push_back(info);
+}
+
+AccessHashMap& Scope::getAccessMapByBuf(const Buf* b) {
+  auto it = openAccesses_.find(b);
+  if (it == openAccesses_.end()) {
+    // create and return
+    return openAccesses_[b];
+  }
+
+  return it->second;
+}
+
+void Scope::filterClosed() {
+  closedAccesses_.erase(
+      std::remove_if(
+          closedAccesses_.begin(),
+          closedAccesses_.end(),
+          [](auto info) {
+            return info->store_cost()->isConstant() &&
+                immediateAs<int>(info->store_cost()) <= 1 &&
+                info->load_cost()->isConstant() &&
+                immediateAs<int>(info->load_cost()) <= 1;
+          }),
+      closedAccesses_.end());
+}
+
+// RegisterizerAnalysis
+
+void RegisterizerAnalysis::closeAccessIntoScope(
+    const std::shared_ptr<AccessInfo>& info,
+    const std::shared_ptr<Scope>& scope) {
+  if (exprConditionals_.count(info->conditionId()) != 0) {
+    return;
+  }
+
+  if (info->hiddenAccess()) {
+    closeAccessIntoScope(info->hiddenAccess(), scope);
+    return;
+  }
+  scope->closeAccess(info);
+}
 
 void RegisterizerAnalysis::visit(const For* v) {
   if (v->loop_options().is_gpu_block_index() ||
@@ -11,28 +186,196 @@ void RegisterizerAnalysis::visit(const For* v) {
         "Registerization must occur after parallelism flattening");
   }
 
-  const Expr* old_loopCost = loopCost_;
-  loopCost_ = IRSimplifier::simplify(
-      new Mul(loopCost_, new Sub(v->stop(), v->start())));
+  auto parent = currentScope_;
+  currentScope_ = std::make_shared<Scope>(v->body(), parent);
+
+  currentScope_->addLocalVar(v->var());
+
   stmtStack_.push_front(v);
   v->body()->accept(this);
   stmtStack_.pop_front();
 
-  loopCost_ = old_loopCost;
+  const Expr* loopExtent =
+      IRSimplifier::simplify(new Sub(v->stop(), v->start()));
+
+  // now we need to see which accesses we can hoist out of the for loop, their
+  // costs should be multiplied by the loop extent.
+  for (auto& pair : currentScope_->openAccesses()) {
+    const Buf* buf = pair.first;
+    if (pair.second.empty()) {
+      continue;
+    }
+
+    auto& childAccesses = pair.second;
+
+    for (auto it = childAccesses.begin(); it != childAccesses.end();) {
+      std::shared_ptr<AccessInfo>& candidate = it->second;
+
+      // If the access is open, but conditional, then we have a problem. It's
+      // possible that an access at a higher scope could "unhide" the
+      // conditional access, in which case we need to hoist. If there is no
+      // access to this element at a higher scope then we cannot safely hoist.
+      // We cannot know at this level whether that will or wont occur.
+      //
+      // The solution we take here is to split the space-time continuum, and
+      // keep both versions of the access handy. If the hoisted access is not
+      // used above, we'll fall back to using the hidden, conditional
+      // AccessInfo - if it is, we'll delete the copy.
+      if (candidate->conditionId() != 0) {
+        candidate = AccessInfo::cloneWithHiddenInfo(candidate);
+      }
+
+      bool closed = false;
+      // If this access depends on a locally scoped variable, it cannot be
+      // hosted out of the loop.
+      for (auto* v : currentScope_->localVars()) {
+        if (candidate->dependsOnVar(v)) {
+          closeAccessIntoScope(candidate, currentScope_);
+          closed = true;
+          break;
+        }
+      }
+      if (closed) {
+        it = childAccesses.erase(it);
+        continue;
+      }
+
+      // hoist!
+      // By hoisting we pull the reads and writes out of the loop, and so the
+      // benefit of registerizing this access is multiplied by the loop extent.
+      candidate->setEnclosingBlock(parent->block());
+      candidate->hoistCosts(loopExtent);
+
+      // in the parent block, this loop Stmt is the insertion point for the
+      // initializer and finalizer.
+      candidate->setUsageMarks(v, v);
+
+      ++it;
+    }
+  }
+
+  // If an access is closed within a loop then it cannot be merged into an
+  // existing open access, but will still close that existing access. This is
+  // somewhat different from the regular merge so we need to handle closed
+  // accesses first.
+  mergeHiddenScope(true);
+
+  // having hoisted, now we can merge normally.
+  mergeCurrentScopeIntoParent();
 };
 
-void RegisterizerAnalysis::visit(const Block* v) {
-  const Block* last = enclosingBlock_;
-  enclosingBlock_ = v;
+void RegisterizerAnalysis::visit(const Cond* v) {
+  const Expr* condition = v->condition();
+  Block* true_stmt = v->true_stmt();
+  Block* false_stmt = v->false_stmt();
+
   stmtStack_.push_front(v);
-  costByBlock_[v] = loopCost_;
-  IRVisitor::visit(v);
+
+  // condition is in the enclosing scope.
+  condition->accept(this);
+
+  auto prev_scope = currentScope_;
+  auto true_scope =
+      std::make_shared<Scope>(true_stmt, prev_scope, ++conditionId_);
+  auto false_scope =
+      std::make_shared<Scope>(false_stmt, prev_scope, ++conditionId_);
+
+  if (true_stmt) {
+    currentScope_ = true_scope;
+    true_stmt->accept(this);
+    mergeHiddenScope(true);
+    mergeCurrentScopeIntoParent();
+  }
+  if (false_stmt) {
+    currentScope_ = false_scope;
+    false_stmt->accept(this);
+    mergeHiddenScope(true);
+    mergeCurrentScopeIntoParent();
+  }
+
+  // TODO: even though both scopes are conditional, we can merge accesses if
+  // they totally overlap in both branches, since we can guarantee one
+  // definition will be hit. We might need a 3-way merge? Not as simple as
+  // merging the true and false scopes together first.
+
   stmtStack_.pop_front();
-  enclosingBlock_ = last;
+}
+
+// IfThenElses are just like Conds except they are not Stmts, which means no
+// registerization can occur internally. However, the first reference to an
+// access can occur within one if its visible outside the condition.
+void RegisterizerAnalysis::visit(const IfThenElse* v) {
+  const Expr* condition = v->condition();
+  const Expr* true_value = v->true_value();
+  const Expr* false_value = v->false_value();
+
+  // condition is in enclosing scope.
+  condition->accept(this);
+
+  auto prev_scope = currentScope_;
+  auto true_scope =
+      std::make_shared<Scope>(prev_scope->block(), prev_scope, ++conditionId_);
+  auto false_scope =
+      std::make_shared<Scope>(prev_scope->block(), prev_scope, ++conditionId_);
+
+  // We store IfThenElse scopes in a global map, which we use to prevent closing
+  // any access that would require inserting statements in the values, which
+  // cannot enclose Stmts.
+  exprConditionals_.insert(true_scope->conditionId());
+  exprConditionals_.insert(false_scope->conditionId());
+
+  if (true_value) {
+    currentScope_ = true_scope;
+    true_value->accept(this);
+    mergeHiddenScope(false);
+    mergeCurrentScopeIntoParent();
+  }
+
+  if (false_value) {
+    currentScope_ = false_scope;
+    false_value->accept(this);
+    mergeHiddenScope(false);
+    mergeCurrentScopeIntoParent();
+  }
+}
+
+void RegisterizerAnalysis::visit(const Let* v) {
+  currentScope_->addLocalVar(v->var());
+
+  stmtStack_.push_front(v);
+  v->value()->accept(this);
+  stmtStack_.pop_front();
+}
+
+void RegisterizerAnalysis::visit(const Block* v) {
+  auto prev_scope = currentScope_;
+  if (currentScope_->block() != v) {
+    currentScope_ = std::make_shared<Scope>(v, prev_scope);
+  }
+
+  stmtStack_.push_front(v);
+
+  for (auto* s : *v) {
+    s->accept(this);
+    if (currentScope_->block() != v) {
+      // merge the inner block's accesses into this Block's accesses.
+      mergeCurrentScopeIntoParent();
+    }
+  }
+
+  stmtStack_.pop_front();
+
+  if (prev_scope->block() == nullptr) {
+    // close any open candidates.
+    for (auto& p1 : currentScope_->openAccesses()) {
+      for (auto& p2 : p1.second) {
+        closeAccessIntoScope(p2.second, currentScope_);
+      }
+    }
+  }
 }
 
 void RegisterizerAnalysis::visit(const Store* v) {
-  // path into value first.
   stmtStack_.push_front(v);
   v->value()->accept(this);
   stmtStack_.pop_front();
@@ -42,26 +385,49 @@ void RegisterizerAnalysis::visit(const Store* v) {
     return;
   }
 
+  // hash the Store:
   SimplifierHashType accessHash = hasher_.hash(v->buf());
   for (auto* i : v->indices()) {
     accessHash = hasher_.hash_combine(accessHash, i);
   }
   accessHash = hasher_.hash_combine(accessHash, v->mask());
 
-  std::shared_ptr<AccessInfo> info;
-  auto candidateIt = candidates_.find(accessHash);
-  if (candidateIt != candidates_.end()) {
-    info = candidateIt->second;
-  } else {
-    info = std::make_shared<AccessInfo>(v->buf(), v->indices());
-    candidates_[accessHash] = info;
-    encounterOrder_.push_back(info);
+  auto& bufAccesses = currentScope_->getAccessMapByBuf(v->buf());
+  auto candidateIt = bufAccesses.find(accessHash);
+
+  // If an identical access already exists, add this Store to it.
+  if (candidateIt != bufAccesses.end()) {
+    candidateIt->second->addStore(v, currentScope_);
+    return;
   }
 
-  if (nested_conditions_ > 0) {
-    info->invalid = true;
+  // Otherwise make a new AccessInfo and add this store.
+  auto info = std::make_shared<AccessInfo>(
+      accessHash, v->buf(), v->indices(), accessOrder_++);
+  info->addStore(v, currentScope_);
+
+  // This new access may overlap an existing open access, in which case we need
+  // to close the older of the two.
+  bool alreadyOverlapped = false;
+  for (auto it = bufAccesses.begin(); it != bufAccesses.end();) {
+    auto other = it->second;
+    if (info->overlaps(other)) {
+      if (other->last_usage() == v) {
+        // we are already overlapped by an access in the RHS.
+        alreadyOverlapped = true;
+      }
+      closeAccessIntoScope(other, currentScope_);
+      it = bufAccesses.erase(it);
+    } else {
+      ++it;
+    }
   }
-  info->addStore(v, enclosingBlock_, loopCost_);
+
+  if (alreadyOverlapped) {
+    closeAccessIntoScope(info, currentScope_);
+  } else {
+    bufAccesses.emplace(accessHash, info);
+  }
 }
 
 void RegisterizerAnalysis::visit(const Load* v) {
@@ -69,281 +435,360 @@ void RegisterizerAnalysis::visit(const Load* v) {
     // already a scalar.
     return;
   }
-
+  // hash the Load:
   SimplifierHashType accessHash = hasher_.hash(v->buf());
   for (auto* i : v->indices()) {
     accessHash = hasher_.hash_combine(accessHash, i);
   }
   accessHash = hasher_.hash_combine(accessHash, v->mask());
 
-  std::shared_ptr<AccessInfo> info;
-  auto candidateIt = candidates_.find(accessHash);
-  if (candidateIt != candidates_.end()) {
-    info = candidateIt->second;
+  auto& bufAccesses = currentScope_->getAccessMapByBuf(v->buf());
+  auto candidateIt = bufAccesses.find(accessHash);
+  if (candidateIt != bufAccesses.end()) {
+    // found the right access, can just insert.
+    candidateIt->second->addLoad(v, currentScope_, stmtStack_.front());
+    return;
+  }
+
+  std::shared_ptr<AccessInfo> info = std::make_shared<AccessInfo>(
+      accessHash, v->buf(), v->indices(), accessOrder_++);
+  info->addLoad(v, currentScope_, stmtStack_.front());
+
+  bool alreadyOverlapped = false;
+  // This new access may overlap an existing open access, in which case we need
+  // to finalize the older of the two.
+  for (auto it = bufAccesses.begin(); it != bufAccesses.end();) {
+    auto other = it->second;
+    if (info->overlaps(other)) {
+      if (info->last_usage() == other->last_usage()) {
+        // if these two accesses are from the same Stmt, they already overlap
+        // each other.
+        alreadyOverlapped = true;
+      }
+      closeAccessIntoScope(other, currentScope_);
+      it = bufAccesses.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  if (alreadyOverlapped) {
+    closeAccessIntoScope(info, currentScope_);
   } else {
-    info = std::make_shared<AccessInfo>(v->buf(), v->indices());
-    candidates_[accessHash] = info;
-    encounterOrder_.push_back(info);
+    bufAccesses.emplace(accessHash, info);
   }
-
-  if (nested_conditions_ > 0) {
-    info->invalid = true;
-  }
-
-  info->addLoad(v, enclosingBlock_, loopCost_, stmtStack_.front());
 }
 
-void RegisterizerAnalysis::visit(const IfThenElse* v) {
-  v->condition()->accept(this);
-  nested_conditions_++;
-  v->true_value()->accept(this);
-  v->false_value()->accept(this);
-  nested_conditions_--;
-}
+// Loop and Conditional scopes are different in that it may or may not be
+// possible to hoist the intializer of a scalar variable outside the block
+// depending on if we can tell that the Buffer access is valid outside. This is
+// tricky because the access that demonstrates this may be later in the tree and
+// we haven't encountered it yet.
+// The allowClosed flag indicates whether we want to keep the closed accesses
+// (For and Cond), or not (IfThenElse).
+void RegisterizerAnalysis::mergeHiddenScope(bool allowClosed) {
+  // The rule is that if any access is closed within the conditional block, any
+  // accesses which overlap it must also be closed - since their initializer
+  // cannot be hoisted out of the block.
+  std::list<std::shared_ptr<AccessInfo>> newClosed;
+  for (auto& info : currentScope_->closedAccesses()) {
+    auto& candidates = currentScope_->getAccessMapByBuf(info->buf());
+    for (auto it = candidates.begin(); it != candidates.end();) {
+      std::shared_ptr<AccessInfo> candidate = it->second;
 
-void RegisterizerAnalysis::visit(const Cond* v) {
-  const Expr* condition = v->condition();
-  Stmt* true_stmt = v->true_stmt();
-  Stmt* false_stmt = v->false_stmt();
-  condition->accept(this);
-
-  stmtStack_.push_front(v);
-  nested_conditions_++;
-
-  if (true_stmt) {
-    true_stmt->accept(this);
-  }
-  if (false_stmt) {
-    false_stmt->accept(this);
-  }
-
-  nested_conditions_--;
-  stmtStack_.pop_front();
-}
-
-std::vector<std::shared_ptr<AccessInfo>> RegisterizerAnalysis::getCandidates() {
-  std::vector<std::shared_ptr<AccessInfo>> ret;
-
-  // Group accesses by the base buffer they refer to, so it's easier to
-  // determine which accesses may overlap.
-  std::unordered_map<const Buf*, std::vector<std::shared_ptr<AccessInfo>>>
-      access_by_buf;
-  for (const auto& pair : candidates_) {
-    std::shared_ptr<AccessInfo> info = pair.second;
-
-    // We can "hoist" an access up the syntax tree if it's indices do not
-    // depend on any loop vars.
-    VarFinder vf;
-    for (auto* i : info->indices) {
-      i->accept(&vf);
-    }
-
-    const Stmt* ancestor = info->parent;
-    const Stmt* target = nullptr;
-    while (ancestor) {
-      if (const For* f = dynamic_cast<const For*>(ancestor)) {
-        if (vf.vars().count(f->var()) != 0) {
-          break;
-        }
-        target = f->get_parent();
-      }
-
-      ancestor = ancestor->get_parent();
-    }
-
-    if (info->parent != target) {
-      if (const Block* new_parent = dynamic_cast<const Block*>(target)) {
-        info->parent = new_parent;
+      if (info->hash() == candidate->hash() || info->overlaps(candidate)) {
+        newClosed.push_back(candidate);
+        it = candidates.erase(it);
+      } else {
+        ++it;
       }
     }
-
-    // Now that analysis is complete we must normalize the costs by the
-    // parent Block we plan to insert the scalar var into.
-    info->store_cost = IRSimplifier::simplify(
-        new Div(info->store_cost, costByBlock_[info->parent]));
-
-    if (!info->loads.empty()) {
-      info->load_cost = IRSimplifier::simplify(
-          new Div(info->load_cost, costByBlock_[info->parent]));
-    }
-
-    access_by_buf[info->buf].push_back(info);
   }
 
-  // For each buffer, for each access, determine if another access to the
-  // buffer could possibly write to the same region.
-  for (const auto& pair : access_by_buf) {
-    const Buf* buf = pair.first;
-    const std::vector<std::shared_ptr<AccessInfo>>& accesses = pair.second;
-    for (const auto& info : accesses) {
-      // Filter out low cost accesses.
-      if (info->store_cost->isConstant() &&
-          immediateAs<int>(info->store_cost) <= 1 &&
-          info->load_cost->isConstant() &&
-          immediateAs<int>(info->load_cost) <= 1) {
-        info->invalid = true;
+  if (allowClosed) {
+    for (auto& info : newClosed) {
+      closeAccessIntoScope(info, currentScope_);
+    }
+  } else {
+    currentScope_->closedAccesses().clear();
+  }
+}
+
+// Merge currentScope_ into it's parent, and make parent the new currentScope_.
+void RegisterizerAnalysis::mergeCurrentScopeIntoParent() {
+  auto parent = currentScope_->parent();
+
+  // copy across current closed accceses, merging / closing as necessary
+  for (auto& candidate : currentScope_->closedAccesses()) {
+    auto& parentAccesses = parent->getAccessMapByBuf(candidate->buf());
+
+    auto parentIt = parentAccesses.find(candidate->hash());
+    if (parentIt != parentAccesses.end()) {
+      std::shared_ptr<AccessInfo> pCandidate = parentIt->second;
+
+      // if the access is closed inside a condition, it can only be merged if
+      // the parent is in the same condition.
+      if (candidate->conditionId() &&
+          pCandidate->conditionId() != candidate->conditionId()) {
+        // the parent's access must be closed.
+        closeAccessIntoScope(pCandidate, parent);
+        parentAccesses.erase(parentIt);
+
+        // the childs access inserted into the parent scope.
+        closeAccessIntoScope(candidate, parent);
         continue;
       }
 
-      // TODO: this is n^2 by the number of accesses to a single buffer
-      // program wide, may be an issue in large programs.
-      for (const auto& i2 : accesses) {
-        if (info == i2) {
+      // merge totally overlapping accesses.
+      parentIt->second->merge(candidate);
+      closeAccessIntoScope(parentIt->second, parent);
+      parentAccesses.erase(parentIt);
+      continue;
+    }
+
+    // we didn't find a perfect match, but we need to check all open accesses of
+    // this buf for partial overlap.
+    for (auto it = parentAccesses.begin(); it != parentAccesses.end();) {
+      std::shared_ptr<AccessInfo> pCandidate = it->second;
+      // Partial overlap of parent access: close parent access.
+      if (candidate->overlaps(pCandidate)) {
+        closeAccessIntoScope(pCandidate, parent);
+        it = parentAccesses.erase(it);
+        continue;
+      }
+      ++it;
+    }
+
+    // Insert the childs closed access into the parent scope.
+    closeAccessIntoScope(candidate, parent);
+  }
+
+  // copy across current open accesses, merging as necessary.
+  // for each Buf with an open access:
+  for (auto& pair : currentScope_->openAccesses()) {
+    const Buf* buf = pair.first;
+    if (pair.second.empty()) {
+      continue;
+    }
+
+    auto& parentAccesses = parent->getAccessMapByBuf(buf);
+
+    // for each open access in the child scope for this Buf:
+    for (auto& hpair : pair.second) {
+      bool handled{false};
+      std::shared_ptr<AccessInfo> candidate = hpair.second;
+
+      for (auto it = parentAccesses.begin(); it != parentAccesses.end();) {
+        std::shared_ptr<AccessInfo> pCandidate = it->second;
+
+        // If it completely overlaps then merge.
+        if (candidate->hash() == pCandidate->hash()) {
+          // if both accesses are found in conditional blocks, they cannot be
+          // merged, but the earlier must be closed.
+          if (pCandidate->conditionId() != parent->conditionId() &&
+              pCandidate->conditionId() != candidate->conditionId()) {
+            closeAccessIntoScope(pCandidate, parent);
+            it = parentAccesses.erase(it);
+            continue;
+          }
+          pCandidate->merge(candidate);
+          handled = true;
+          ++it;
           continue;
         }
 
-        // All accesses to a buf must have the same dimensionality.
-        assert(info->indices.size() == i2->indices.size());
-
-        // They don't overlap if there is a guaranteed difference in any
-        // dimension.
-        bool overlap = true;
-        for (size_t i = 0; i < info->indices.size(); ++i) {
-          const Expr* diff = new Sub(info->indices[i], i2->indices[i]);
-          diff = IRSimplifier::simplify(diff);
-          if (diff->isConstant() && !immediateEquals(diff, 0)) {
-            overlap = false;
-            break;
-          }
+        // It can overlap an access in the parent: close the parent access.
+        // The child access may still be open.
+        if (candidate->overlaps(pCandidate)) {
+          closeAccessIntoScope(pCandidate, parent);
+          it = parentAccesses.erase(it);
+          continue;
         }
 
-        if (overlap) {
-          info->invalid = true;
+        ++it;
+      }
+
+      // If this access depends on a locally scoped variable, it cannot be
+      // lifted out of the loop.
+      for (auto* v : currentScope_->localVars()) {
+        if (candidate->dependsOnVar(v)) {
+          closeAccessIntoScope(candidate, parent);
+          handled = true;
           break;
         }
+      }
+
+      if (!handled) {
+        // If the inner scope was not conditional, but the outer scope is: all
+        // current accesses are now conditional in the parent scope.
+        if (candidate->conditionId() == 0) {
+          candidate->setConditionId(parent->conditionId());
+        }
+        parentAccesses[candidate->hash()] = candidate;
       }
     }
   }
 
-  // Return valid access candidates in the order they were first seen.
-  for (const auto& info : encounterOrder_) {
-    if (!info->invalid) {
-      ret.push_back(info);
-    }
-  }
-
-  return ret;
+  currentScope_ = parent;
 }
 
+std::vector<std::shared_ptr<AccessInfo>> RegisterizerAnalysis::getCandidates() {
+  currentScope_->filterClosed();
+  std::sort(
+      currentScope_->closedAccesses().begin(),
+      currentScope_->closedAccesses().end(),
+      [](auto i1, auto i2) { return i1->accessOrder() < i2->accessOrder(); });
+  return currentScope_->closedAccesses();
+}
+
+// RegisterizerReplacer
+
 const Expr* RegisterizerReplacer::mutate(const Load* v) {
-  if (v->buf() != info_->buf) {
-    return IRMutator::mutate(v);
+  auto it = loadToAccess_.find(v);
+  if (it == loadToAccess_.end()) {
+    // This access cannot be registerized.
+    return v;
   }
 
-  initializerReady_ = false;
+  auto& info = it->second;
 
-  // sanity check indices for the same buf must have the same dimensionality.
-  assert(v->indices().size() == info_->indices.size());
-  for (size_t i = 0; i < info_->indices.size(); ++i) {
-    if (!exprEquals(v->indices()[i], info_->indices[i])) {
-      return IRMutator::mutate(v);
-    }
-  }
-
-  return var_;
+  return info->replacement().var;
 }
 
 Stmt* RegisterizerReplacer::mutate(const Store* v) {
-  if (v->buf() != info_->buf) {
+  if (eliminatedIntializers_.count(v) != 0) {
+    // This store is the intializer for a scalar var that is already inserted.
+    return nullptr;
+  }
+
+  auto it = storeToAccess_.find(v);
+  if (it == storeToAccess_.end()) {
+    // This access cannot be registerized.
     return IRMutator::mutate(v);
   }
 
-  if (initializerReady_ && info_->parent == v->get_parent()) {
-    initializer_ = v;
-    initializerReady_ = false;
-    // This is the easiest way to return an empty statement;
-    return new Block({});
-  }
+  auto& info = it->second;
 
-  initializerReady_ = false;
-
-  // sanity check indices for the same buf must have the same dimensionality.
-  assert(v->indices().size() == info_->indices.size());
-  for (size_t i = 0; i < info_->indices.size(); ++i) {
-    if (!exprEquals(v->indices()[i], info_->indices[i])) {
-      return IRMutator::mutate(v);
-    }
-  }
   const Expr* new_val = v->value()->accept_mutator(this);
 
-  Store* s = new Store(var_wrapper_, {}, new_val, v->mask());
-  return s;
-}
-
-// Finds the Stmt in parent which contains stmt.
-const Stmt* RegisterizerReplacer::findInsertionPoint(
-    const Stmt* stmt,
-    const Block* parent) {
-  while (stmt) {
-    if (stmt->get_parent() == parent) {
-      return stmt;
-    }
-    stmt = stmt->get_parent();
-  }
-  return nullptr;
+  return new Store(info->replacement().var_wrapper, {}, new_val, v->mask());
 }
 
 Stmt* RegisterizerReplacer::mutate(const Block* v) {
-  // We need to mutate this block in place, rather than clone - since other
-  // AccessInfo objects may hold a pointer to it.
-  Block* v1 = const_cast<Block*>(v); // NOLINT
-  assert(v1);
+  auto& scope = parentToAccesses_[v];
 
-  Stmt* first_changed{nullptr};
-  Stmt* last_changed{nullptr};
-  std::list<Stmt*> stmts = v1->stmts();
-  for (Stmt* stmt : stmts) {
-    dirty_ = false;
+  std::vector<Stmt*> stmts;
+  for (Stmt* stmt : v->stmts()) {
+    {
+      // Insert the initializer for any Scalars scoped to this block.
+      auto it = scope.initializerPoints_.find(stmt);
+      if (it != scope.initializerPoints_.end()) {
+        for (auto& info : it->second) {
+          Stmt* initializer =
+              info->replacement().initializer->accept_mutator(this);
+          stmts.push_back(initializer);
+        }
+        scope.initializerPoints_.erase(it);
+      }
+    }
+
     Stmt* stmt_new = stmt->accept_mutator(this);
-    if (dirty_) {
-      first_changed = first_changed ? first_changed : stmt_new;
-      last_changed = stmt_new;
+    if (stmt_new) {
+      if (stmt_new->get_parent()) {
+        stmt_new = Stmt::clone(stmt_new);
+      }
+      stmts.push_back(stmt_new);
     }
 
-    if (stmt_new == stmt) {
-      continue;
+    {
+      // Insert the finalizer for any Scalars scoped to this block.
+      auto it = scope.finalizePoints_.find(stmt);
+      if (it != scope.finalizePoints_.end()) {
+        for (auto& info : it->second) {
+          Store* finalizer = new Store(
+              info->buf(),
+              info->indices(),
+              info->replacement().var,
+              new IntImm(1));
+          stmts.push_back(finalizer);
+        }
+        scope.finalizePoints_.erase(it);
+      }
     }
-    v1->replace_stmt(stmt, stmt_new);
-    first_changed = first_changed ? first_changed : stmt_new;
-    last_changed = stmt_new;
   }
 
-  dirty_ = first_changed != nullptr;
-
-  if (v != info_->parent) {
-    return v1;
-  }
-
-  Stmt* let;
-  // If we didn't find an initial store: intialize with the original buffer.
-  if (!initializer_) {
-    let = new Let(
-        var_,
-        new Load(
-            info_->buf->dtype(), info_->buf, info_->indices, new IntImm(1)));
-  } else {
-    let = new Let(var_, initializer_->value());
-  }
-  v1->insert_stmt_before(let, first_changed);
-
-  // If it was written to the buffer, make sure we write it out.
-  if (info_->stores.size() > 0) {
-    v1->insert_stmt_after(
-        new Store(info_->buf, info_->indices, var_, new IntImm(1)),
-        last_changed);
-  }
-  return v1;
+  return new Block(stmts);
 }
+
+void RegisterizerReplacer::buildReplacements() {
+  // Traverse the list of replacements, creating vars and updating our local
+  // maps.
+  for (auto& info : infoSet_) {
+    Var* v = new Var(
+        info->buf()->name_hint() + "_" +
+            c10::to_string(getBufferAccessCount(info->buf())),
+        info->buf()->dtype());
+
+    info->replacement().var = v;
+
+    // we need to wrap the Var in a Buf so we can Load or Store it.
+    info->replacement().var_wrapper = new Buf(v, {}, info->buf()->dtype());
+
+    bool first = true;
+    for (auto* s : info->stores()) {
+      if (first && info->first_usage() == s && !info->firstUsageOverlapped()) {
+        info->replacement().initializer = new Let(v, s->value());
+        eliminatedIntializers_.insert(s);
+      } else {
+        storeToAccess_[s] = info;
+      }
+
+      first = false;
+    }
+
+    for (auto* s : info->loads()) {
+      loadToAccess_[s] = info;
+    }
+
+    auto& scope = parentToAccesses_[info->block()];
+    scope.initializerPoints_[info->first_usage()].push_back(info);
+
+    // Only finalize if the scalar is written.
+    if (!info->stores().empty()) {
+      // push front to finalize in reverse order of encounter.
+      scope.finalizePoints_[info->last_usage()].push_front(info);
+    }
+
+    // create a default initializer by reading the access.
+    if (info->replacement().initializer == nullptr) {
+      info->replacement().initializer = new Let(
+          v,
+          new Load(
+              info->buf()->dtype(),
+              info->buf(),
+              info->indices(),
+              new IntImm(1)));
+    }
+  }
+}
+
+} // namespace registerizer
 
 // Apply scalar replacement to all accesses in s.
 Stmt* registerize(Stmt* s) {
-  RegisterizerAnalysis analysis;
+  s = IRSimplifier::simplify(s);
+
+  // The outermost node must be a Block so we have somewhere to put outer scope
+  // scalars.
+  if (!dynamic_cast<Block*>(s)) {
+    s = new Block({s});
+  }
+  registerizer::RegisterizerAnalysis analysis;
   s->accept(&analysis);
   auto candidates = analysis.getCandidates();
-  for (const auto& info : candidates) {
-    RegisterizerReplacer replacer(info);
-    s = s->accept_mutator(&replacer);
-  }
+
+  registerizer::RegisterizerReplacer replacer(candidates);
+  s = s->accept_mutator(&replacer);
   return s;
 }
 
