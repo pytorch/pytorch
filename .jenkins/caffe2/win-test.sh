@@ -36,7 +36,7 @@ if [ -n "$CIRCLE_PULL_REQUEST" ]; then
   file_diff_from_base "$DETERMINE_FROM"
 fi
 
-python_installation="$(dirname $(dirname $(cd /usr && $PYTHON -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
+python_installation="$(dirname $(dirname $(cd $TMP_DIR && python -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
 caffe2_pypath="$python_installation/caffe2"
 
 run_tests() {
@@ -46,7 +46,7 @@ run_tests() {
             -x \
             -v \
             --disable-warnings \
-            --junit-xml="$pytest_reports_dir/result.xml" \
+            --junit-xml="$TMP_DIR/result.xml" \
             --ignore "$caffe2_pypath/python/test/executor_test.py" \
             --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
             --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
