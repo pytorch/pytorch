@@ -86,39 +86,56 @@ class TestForeach(TestCase):
                 self.assertEqual(tensors1, expected)
 
     def _test_pointwise_op(self, device, dtype, foreach_op, foreach_op_, torch_op):
-        value = 2
         for N in N_values:
-            tensors = self._get_test_data(device, dtype, N)
-            tensors1 = self._get_test_data(device, dtype, N)
-            tensors2 = self._get_test_data(device, dtype, N)
+            values = [2 + i for i in range(N)]
+            for vals in [values[0], values]:
+                tensors = self._get_test_data(device, dtype, N)
+                tensors1 = self._get_test_data(device, dtype, N)
+                tensors2 = self._get_test_data(device, dtype, N)
 
-            for values in [value, [value for _ in range(N)]]:
                 # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
                 control_dtype = torch.float32 if (self.device_type == 'cuda' and 
                                                   (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
-                expected = [torch_op(tensors[i].to(dtype=control_dtype),
-                                     tensors1[i].to(dtype=control_dtype),
-                                     tensors2[i].to(dtype=control_dtype),
-                                     value=value).to(dtype=dtype) for i in range(N)]
 
-                res = foreach_op(tensors, tensors1, tensors2, values)
-                foreach_op_(tensors, tensors1, tensors2, values)
+                if vals == 2:
+                    expected = [torch_op(tensors[i].to(dtype=control_dtype),
+                                         tensors1[i].to(dtype=control_dtype),
+                                         tensors2[i].to(dtype=control_dtype),
+                                         value=values[0]).to(dtype=dtype) for i in range(N)]
+                else:
+                    expected = [torch_op(tensors[i].to(dtype=control_dtype),
+                                         tensors1[i].to(dtype=control_dtype),
+                                         tensors2[i].to(dtype=control_dtype),
+                                         value=values[i]).to(dtype=dtype) for i in range(N)]
+
+                res = foreach_op(tensors, tensors1, tensors2, vals)
+                foreach_op_(tensors, tensors1, tensors2, vals)
                 self.assertEqual(res, tensors)
+
                 if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
                     self.assertEqual(tensors, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
                 else:
                     self.assertEqual(tensors, expected)
 
-        # test error cases
-        tensors = self._get_test_data(device, dtype, N)
-        tensors1 = self._get_test_data(device, dtype, N)
-        tensors2 = self._get_test_data(device, dtype, N)
+                # test error cases
+                for op in [torch._foreach_addcmul, torch._foreach_addcmul_, torch._foreach_addcdiv, torch._foreach_addcdiv_]:
+                    tensors = self._get_test_data(device, dtype, N)
+                    tensors1 = self._get_test_data(device, dtype, N)
+                    tensors2 = self._get_test_data(device, dtype, N)
 
-        for op in [torch._foreach_addcmul, torch._foreach_addcmul_, torch._foreach_addcdiv, torch._foreach_addcdiv_]:
-            with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
-                torch._foreach_addcmul(tensors, tensors1, tensors2, [value for _ in range(N + 1)])
-            with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
-                torch._foreach_addcmul(tensors, tensors1, tensors2, [value for _ in range(N - 1)])
+                    with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
+                        op(tensors, tensors1, tensors2, [2 for _ in range(N + 1)])
+
+                    with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
+                        op(tensors, tensors1, tensors2, [2 for _ in range(N - 1)])
+
+                    tensors = self._get_test_data(device, dtype, N + 1)
+                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must be of the same length, got 21 and 20"):
+                        op(tensors, tensors1, tensors2, [2 for _ in range(N)])
+
+                    tensors1 = self._get_test_data(device, dtype, N + 1)
+                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must be of the same length, got 21 and 20"):
+                        op(tensors, tensors1, tensors2, [2 for _ in range(N)])
 
     def _test_bin_op_list_alpha(self, device, dtype, foreach_op, foreach_op_, torch_op):
         for N in [30, 300]:
