@@ -5,66 +5,101 @@
 torch.sparse
 ============
 
-Torch supports sparse tensors which provide memory-efficient storage
-and processing algorithms of tensors for which the majority of
-elements have the same value (fill value). This allows saving storage
-and processing resources when the size and sparsity levels of tensors
-are high.  Otherwise, for small-sized or low-sparsity tensors using
-strided tensors is likely the most efficient approach.
+Introduction
+++++++++++++
 
-.. _sparse-fill-value-docs:
+PyTorch provides :class:`torch.Tensor` to represent a
+multi-dimensional array containing elements of a single data type. By
+default, array elements are stored contiguously in memory leading to
+highly-efficient implementations of various array processing
+algorithms because the memory locations of array elements can be
+efficiently computed. However, there exists an important class of
+multi-dimensional arrays, so-called sparse arrays, where the
+contiguous storage of array elements in memory turns out to be
+suboptimal. Namely, sparse arrays have a property of having a vast
+portion of elements being equal to zero which means that a lot of
+memory as well as processor resources can be saved if only the
+non-zero elements of such arrays are stored or processed. However,
+depending on a particular stucture of the locations of non-zero
+elements in an array, different sparse storage formats have been
+developed (see [Wikipedia:Sparse
+Matrix](https://en.wikipedia.org/wiki/Sparse_matrix) for an overview)
+that require storing the indicies of non-zero elements leading to
+additional memory usage.
 
-Fill value
-++++++++++
+.. note::
 
-In Torch, the fill value is not specified explicitly but is implicitly
-interpreted by sparse algorithms. The implicit interpretation may vary
-in-between algorithms of different fields and applications. The most
-commonly assumed fill value is zero and it is assumed for all tools
-that are available via :mod:`torch` namespace. When some sparse tensor
-functionality assumes a non-zero or indefinite fill value, the
-corresponding tools are provided via the :mod:`torch.sparse`
-namespace. Please see the documentation strings of the corresponding
-functions for a particular definition of the fill value.
+   When talking about storing only non-zero elements of a sparse
+   array, in practice, the usage of adjective "non-zero" is not
+   strict: one is allowed to store zero values in the sparse array
+   data structure. Hence, in the following, we use "specified
+   elements" instead of "non-zero elements" when talking about storing
+   elements of sparse arrays in some sparse storage format. In
+   addition, since the unspecified elements are assumed to be the
+   same, we use a single "fill value" to represent the values of
+   unspecified array elements.
 
-.. _sparse-hybrid-docs:
+.. warning::
 
-Hybrid tensors
-++++++++++++++
+   Using a sparse storage format for storing sparse arrays can be
+   advantageous only when the size and sparsity levels of arrays are
+   high. Otherwise, for small-sized or low-sparsity arrays using the
+   contiguous memory storage format is likely the most efficient
+   approach.
 
-Torch supports hybrid sparse tensors with dimensions split into sparse
-dimensions and dense dimensions. Dense dimensions always follow sparse
-dimensions, that is, mixing of dense and sparse dimensions is not
-supported. One can interpret hybrid tensors as sparse tensors with
-elements being (contiguous) strided tensors. We use (M +
-K)-dimensional tensor to denote a N-dimensional hybrid sparse tensor
-where M and K are the number of sparse and dense dimensions,
-respectively, such that M + K == N holds.
+.. warning::
 
-See :ref:`Hybrid COO tensors <sparse-hybrid-coo-docs>`.
-
-Sparse tensor formats
-+++++++++++++++++++++
-
-Torch supported sparse storage formats are:
-
-- COO(rdinate) format where tensor elements are stored using the lists
-  of indices and the corresponding values. Unspecified elements have
-  values equal to the fill value. To construct a sparse tensor in COO
-  format, use the :func:`torch.sparse_coo_tensor` function.
+  The PyTorch API of sparse tensors is in beta and may change in the near future.
 
 .. _sparse-coo-docs:
 
 Sparse COO tensors
-******************
+++++++++++++++++++
 
-The sparse COO tensor is represented as a pair of dense tensors: a 2D
-tensor of indices and a tensor of values. A sparse COO tensor can be
-constructed by providing these two tensors, as well as the size of the
-sparse tensor (which cannot be inferred from the indices and values
-tensors!). Suppose we want to define a sparse tensor with the entry 3
-at location (0, 2), entry 4 at location (1, 0), and entry 5 at
-location (1, 2).  We would then write:
+Currently, PyTorch implements the so-called Coordinate format, or COO
+format, as the default sparse storage format for storing sparse
+tensors efficiently.  Conceptually, when using the COO format, the
+specified elements of sparse tensors are stored as tuples of element
+indices and the corresponding values. In PyTorch implementation of the
+COO format:
+
+  - the element indices are collected in ``indices`` tensor of size
+    ``(ndim, nse)`` and with element type ``torch.int64``,
+
+  - the corresponding values are collected in ``values`` tensor of
+    size ``(nse,)`` and arbitrary integer or floating point number
+    element type,
+
+where ``ndim`` is the dimensionality of the tensor and ``nse`` is the
+number of specified elements.
+
+.. note::
+
+   The memory consumption of a sparse COO tensor is at least ``(ndim *
+   8 + <size of element type in bytes>) * nse`` bytes (plus a constant
+   overhead from storing the shape and type information of the
+   tensor).
+
+   The memory consumption of a strided tensor is at least
+   ``product(<tensor shape>) * <size of element type in bytes>``.
+
+   For instance, the memory consumption of a 10 000 x 10 000 tensor with
+   100 000 non-zero 32-bit floating point numbers is at least ``(2 *
+   8 + 4) * 100 000 = 2 000 000`` bytes when using COO format layout and
+   ``10 000 * 10 000 * 4 = 400 000 000`` bytes when using the default
+   strided tensor layout.
+
+Construction
+------------
+
+A sparse COO tensor can be constructed by providing the two tensors of
+indices and values, as well as the size of the sparse tensor (when it
+cannot be inferred from the indices and values tensors) to a function
+:func:`torch.sparse_coo_tensor`. Suppose we want to define a sparse
+tensor with the entry 3 at location (0, 2), entry 4 at location (1,
+0), and entry 5 at location (1, 2).  Unspecified elements are assumed
+to have the same value, fill value, which is zero by default. We would
+then write:
 
     >>> i = [[0, 1, 1],
              [2, 0, 2]]
@@ -92,78 +127,81 @@ the sparse constructor:
     tensor([[0, 0, 3],
             [4, 0, 5]])
 
-Sparse COO tensors support indexing operations (except slicing in
-sparse dimensions):
-
-    >>> s[1]
-    tensor(indices=tensor([[0, 2]]),
-           values=tensor(  [4, 5]),
-           size=(3,), nnz=2, layout=torch.sparse_coo)
-    >>> s[1, 0]
-    tensor(4)
-
-An empty sparse tensor can be constructed by specifying its size:
+An empty sparse COO tensor can be constructed by specifying its size:
 
     >>> torch.sparse_coo_tensor(size=(2, 3))
     tensor(indices=tensor([], size=(2, 0)),
            values=tensor([], size=(0,)),
            size=(2, 3), nnz=0, layout=torch.sparse_coo)
 
-.. _sparse-hybrid-coo-docs:
+Hybrid sparse COO tensors
+-------------------------
 
-Hybrid COO tensors
-------------------
+Pytorch implements an extension of sparse tensors of scalar values to
+sparse tensors of tensor values. Such tensors are called hybrid
+tensors.
 
-You can also construct hybrid tensors, where only the first dimensions
-are sparse, and the rest of the dimensions are dense. For instance,
+PyTorch hybrid sparse COO tensor extends the sparse COO tensor by
+allowing the ``values`` tensor to be multi-dimensional so that we have:
 
-    >>> i = [[2, 4]]
-    >>> v = [[1, 3], [5, 7]]
-    >>> s = torch.sparse_coo_tensor(i, v, (5, 2))
+- the element indices are collected in ``indices`` tensor of size
+  ``(sparse_dims, nse)`` and with element type ``torch.int64``,
+- the corresponding values are collected in ``values`` tensor of size
+  ``(nse, dense_dims)`` and arbitrary integer or floating point number
+  element type.
+
+We use (M + K)-dimensional tensor to denote a N-dimensional hybrid
+sparse tensor such that M + K == N holds.
+
+Suppose we want to create a (2 + 1)-dimensional tensor with the entry
+[3, 4] at location (0, 2), entry [5, 6] at location (1, 0), and entry
+[7, 8] at location (1, 2). We would write
+
+    >>> i = [[0, 1, 1],
+             [2, 0, 2]]
+    >>> v =  [[3, 4], [5, 6], [7, 8]]
+    >>> s = torch.sparse_coo_tensor(i, v, (2, 3, 2))
+    >>> s
+    tensor(indices=tensor([[0, 1, 1],
+                           [2, 0, 2]]),
+           values=tensor([[3, 4],
+                          [5, 6],
+                          [7, 8]]),
+           size=(2, 3, 2), nnz=3, layout=torch.sparse_coo)
+
     >>> s.to_dense()
-    tensor([[0, 0],
-            [0, 0],
-            [1, 3],
-            [0, 0],
-            [5, 7]])
+    tensor([[[0, 0],
+             [0, 0],
+             [3, 4]],
 
-where ``s`` is a (1+1)-dimensional :ref:`hybrid tensor
-<sparse-hybrid-docs>`:
+            [[5, 6],
+             [0, 0],
+             [7, 8]]])
 
-    >>> s[0]
-    tensor([0, 0])
-    >>> s[2]
-    tensor([1, 3])
+In general, if ``s`` is a sparse COO tensor and set
+``M=s.sparse_dim()``, ``K=s.dense_dim()`` then the following
+invariants hold:
 
-Notice that slicing in dense dimensions is supported (except with
-negative step):
+- ``M + K == len(s.shape) == s.ndim`` - dimensionality of a tensor is a sum of the number of sparse and dense dimensions,
+- ``s.indices().shape == (M, nse)`` - sparse indices are stored explicitly,
+- ``s.values().shape == (nse,) + s.shape[M : M + K]`` - values are K-dimensional tensors,
+- ``s.values().layout == torch.strided`` - values are stored as strided tensors.
 
-    >>> s[2, 1:]
-    tensor([3])
+.. note::
 
-In general, a (M + K)-dimensional coalesced sparse COO tensor ``s``
-with the number of specified elements ``nse`` has the following
-invariants:
+   Dense dimensions always follow sparse dimensions, that is, mixing
+   of dense and sparse dimensions is not supported.
 
-    >>> s = s.coalesce()
-    >>> M, K = s.sparse_dim(), s.dense_dim()
-    >>> assert M + K == len(s.shape) == s.ndim
-    >>> assert s.indices().shape == (M, nse)
-    >>> assert s.values().shape == (nse,) + s.shape[M:]
-
-Since ``s.indices()`` is always a 2D tensor, the smallest sparse
-dimension M = 1.  Therefore, representation of a sparse tensor of M =
-0 is simply a dense tensor.
-
-.. _sparse-uncoalesed-coo-docs:
 
 Uncoalesced sparse COO tensors
 ------------------------------
 
-Torch sparse COO tensor format permits *uncoalesced* sparse tensors,
+PyTorch sparse COO tensor format permits *uncoalesced* sparse tensors,
 where there may be duplicate coordinates in the indices; in this case,
 the interpretation is that the value at that index is the sum of all
-duplicate value entries:
+duplicate value entries. For example, one can specify multiple values,
+``3`` and ``4``, for the same index ``1``, that leads to an
+uncoalesced tensor:
 
     >>> i = [[1, 1]]
     >>> v =  [3, 4]
@@ -172,39 +210,118 @@ duplicate value entries:
     tensor(indices=tensor([[1, 1]]),
            values=tensor(  [3, 4]),
            size=(3,), nnz=2, layout=torch.sparse_coo)
-    >>> s.to_dense()
-    tensor([0, 7, 0])
 
-Uncoalesced tensors permit us to implement certain operators more
-efficiently.  For the most part, you shouldn't have to care whether or
-not a sparse tensor is coalesced or not, as most operations will work
-identically given a coalesced or uncoalesced sparse tensor.  However,
-there are two cases in which you may need to care.
+while coalescing process will accumulate the multi-valued elements
+into a single value using summation:
 
-First, if you repeatedly perform an operation that can produce
-duplicate entries (e.g., :func:`torch.Tensor.add`), you should
-occasionally coalesce your sparse tensors to prevent them from growing
-too large:
-
-    >>> s.add_(torch.sparse_coo_tensor([[2, 2]], [5, 6]))
-    tensor(indices=tensor([[1, 1, 2, 2]]),
-           values=tensor(  [3, 4, 5, 6]),
-           size=(3,), nnz=4, layout=torch.sparse_coo)
     >>> s.coalesce()
-    tensor(indices=tensor([[1,  2]]),
-           values=tensor(  [7, 11]),
-           size=(3,), nnz=2, layout=torch.sparse_coo)
+    tensor(indices=tensor([[1]]),
+           values=tensor([7]),
+           size=(3,), nnz=1, layout=torch.sparse_coo)
+
+In general, the output of :meth:`torch.Tensor.coalesce` method is a
+sparse tensor with the following properties:
+
+- the indices of specified tensor elements are unique,
+- the indices are sorted in lexicographical order,
+- :meth:`torch.Tensor.is_coalesced()` returns ``True``.
 
 .. note::
 
-   A coalesced tensor is a sparse COO tensor with unique indices in
-   lexicographical ordering.
+  For the most part, you shouldn't have to care whether or not a
+  sparse tensor is coalesced or not, as most operations will work
+  identically given a coalesced or uncoalesced sparse tensor.
 
-Second, some operators can be implemented on uncoalesced sparse
-tensors. The corresponding implementations would use
-:func:`torch.Tensor._values()` and :func:`torch.Tensor._indices()` to
-retrieve the uncoalesced data of a tensor. One must take into an
-account the additive nature of uncoalesced data: the values of the
+  However, some operations can be implemented more efficiently on
+  uncoalesced tensors, and some on coalesced tensors.
+
+  For instance, addition of sparse COO tensors is implemented by
+  simply concatenating the indices and values tensors:
+
+    >>> a = torch.sparse_coo_tensor([[1, 1]], [5, 6], (2,))
+    >>> b = torch.sparse_coo_tensor([[0, 0]], [7, 8], (2,))
+    >>> a + b
+    tensor(indices=tensor([[0, 0, 1, 1]]),
+           values=tensor([7, 8, 5, 6]),
+           size=(2,), nnz=4, layout=torch.sparse_coo)
+
+  If you repeatedly perform an operation that can produce duplicate
+  entries (e.g., :func:`torch.Tensor.add`), you should occasionally
+  coalesce your sparse tensors to prevent them from growing too large.
+
+  On the other hand, the lexicographical ordering of indices can be
+  advantageous for implementing algorithms that involve many element
+  selection operations, such as slicing or matrix products.
+
+
+Working with sparse COO tensors
+-------------------------------
+
+Let's consider the following example:
+
+    >>> i = [[0, 1, 1],
+             [2, 0, 2]]
+    >>> v =  [[3, 4], [5, 6], [7, 8]]
+    >>> s = torch.sparse_coo_tensor(i, v, (2, 3, 2))
+
+As mentioned above, a sparse COO tensor is a :class:`torch.Tensor`
+instance and to distinguish it from the `Tensor` instances that use
+some other layout, on can use :attr:`torch.Tensor.is_sparse` or
+:attr:`torch.Tensor.layout` properties:
+
+    >>> isinstance(s, torch.Tensor)
+    True
+    >>> s.is_sparse
+    True
+    >>> s.layout == torch.sparse_coo
+    True
+
+When working with hybrid sparse COO tensors then the number of sparse
+and dense dimensions can be acquired using methods
+:meth:`torch.Tensor.sparse_dim` and :meth:`torch.Tensor.dense_dim`,
+respectively. For instance:
+
+    >>> s.sparse_dim(), s.dense_dim()
+    (2, 1)
+
+
+If ``s`` is a sparse COO tensor then its COO format data can be
+acquired using methods :meth:`torch.Tensor.indices()` and
+:meth:`torch.Tensor.values()`.
+
+.. note::
+
+   Currently, one can acquire the COO format data only when the tensor
+   instance is coalesced:
+
+     >>> s.indices()
+     RuntimeError: Cannot get indices on an uncoalesced tensor, please call .coalesce() first
+
+   For acquiring the COO format data of uncoalesced tensor, the
+   following methods are provided: :func:`torch.Tensor._values()` and
+   :func:`torch.Tensor._indices()`.
+
+     >>> s._indices()
+     tensor([[0, 1, 1],
+             [2, 0, 2]])
+
+   .. See https://github.com/pytorch/pytorch/pull/45695 for a new API.
+
+Constructing a new sparse COO tensor is not considered coalesced:
+
+    >>> s.is_coalesced()
+    False
+
+but one can construct a coalesced copy by using the
+:meth:`torch.Tensor.coalesce` method:
+
+    >>> s2 = s.coalesce()
+    >>> s2.indices()
+    tensor([[0, 1, 1],
+           [2, 0, 2]])
+
+When working with uncoalesced sparse COO tensors, one must take into
+an account the additive nature of uncoalesced data: the values of the
 same indices are the terms of a sum that evaluation gives the value of
 the corresponding tensor element. For example, the scalar
 multiplication on an uncoalesced sparse tensor could be implemented by
@@ -214,19 +331,49 @@ say, a square root, cannot be implemented on applying the operation to
 uncoalesced data because ``sqrt(a + b) == sqrt(a) + sqrt(b)`` does not
 hold, for instance.
 
-Linear Algebra operations
-+++++++++++++++++++++++++
+Slicing (with positive step) of a sparse COO tensor is supported only
+for dense dimensions. Indexing is supported for both sparse and dense
+dimensions:
+
+    >>> s[1]
+    tensor(indices=tensor([[0, 2]]),
+           values=tensor([[5, 6],
+                          [7, 8]]),
+           size=(3, 2), nnz=2, layout=torch.sparse_coo)
+    >>> s[1, 0, 1]
+    tensor(6)
+    >>> s[1, 0, 1:]
+    tensor([6])
+
+Fill value
+----------
+
+.. See https://github.com/Quansight-Labs/rfcs/tree/pearu/rfc-fill-value/RFC-0004-sparse-fill-value for a new API
+
+In PyTorch, the fill value is not specified explicitly but is
+implicitly interpreted by sparse algorithms. The implicit
+interpretation may vary in-between algorithms of different fields and
+applications. The most commonly assumed fill value is zero and it is
+assumed for all tools that are available via :mod:`torch`
+namespace. When some sparse tensor functionality assumes a non-zero or
+indefinite fill value, the corresponding tools are provided via the
+:mod:`torch.sparse` namespace. Please see the documentation strings of
+the corresponding functions for a particular definition of the fill
+value.
+
+Supported Linear Algebra operations
++++++++++++++++++++++++++++++++++++
 
 The following table summarizes supported Linear Algebra operations on
 sparse matrices with different storage layouts. Here ``T[layout]``
 denotes a tensor with a give layout. Similarly, ``M[layout]`` denotes
-a matrix (2-D Torch tensor), and ``V[layout]`` denotes a vector (1-D
-Torch tensor). In addition, ``f`` denotes a scalar (float or 0-D Torch
+a matrix (2-D PyTorch tensor), and ``V[layout]`` denotes a vector (1-D
+PyTorch tensor). In addition, ``f`` denotes a scalar (float or 0-D PyTorch
 tensor), ``*`` is element-wise multiplication, ``@`` is matrix
 multiplication.
 
 .. csv-table::
-   :header: "Torch operation", "Sparse grad?", "Layout signature"
+   :header: "PyTorch operation", "Sparse grad?", "Layout signature"
    :widths: 20, 5, 60
    :delim: ;
 
@@ -244,18 +391,14 @@ multiplication.
    :func:`torch.pca_lowrank`; yes; ``PCA(M[sparse_coo]) -> M[strided], M[strided], M[strided]``
    :func:`torch.svd_lowrank`; yes; ``SVD(M[sparse_coo]) -> M[strided], M[strided], M[strided]``
 
-where "Sparse grad?" column indicates if the Torch operation supports
-backward with respect to sparse matrix argument. All Torch operations,
+where "Sparse grad?" column indicates if the PyTorch operation supports
+backward with respect to sparse matrix argument. All PyTorch operations,
 except :func:`torch.smm`, support backward with respect to strided
 matrix arguments.
 
 .. note::
 
-   :func:`torch.spmm` and :func:`torch.dsmm` are aliases to :func:`torch.mm`.
-
-.. note::
-
-   Currently, Torch does not support matrix multiplication with the
+   Currently, PyTorch does not support matrix multiplication with the
    layout signature ``M[strided] @ M[sparse_coo]``. However,
    applications can still compute this using the matrix relation ``D @
    S == (S.t() @ D.t()).t()``.
@@ -346,8 +489,6 @@ Sparse tensor functions
 .. autofunction:: torch.sparse.mm
 .. autofunction:: torch.sspaddmm
 .. autofunction:: torch.hspmm
-.. autofunction:: torch.dsmm
-.. autofunction:: torch.spmm
 .. autofunction:: torch.smm
 .. autofunction:: torch.sparse.softmax
 .. autofunction:: torch.sparse.log_softmax
