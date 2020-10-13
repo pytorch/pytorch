@@ -1195,7 +1195,7 @@ def emit_body(declaration):
 
     def emit_any_requires_grad():
         return [SETUP_ANY_REQUIRES_GRAD.substitute(
-                    args_with_derivatives=[arg['name'] for arg in args_with_derivatives]),]
+            args_with_derivatives=[arg['name'] for arg in args_with_derivatives]), ]
 
     def emit_check_inplace():
         if not inplace:
