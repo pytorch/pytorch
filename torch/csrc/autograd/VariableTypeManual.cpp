@@ -201,10 +201,10 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   // it automatically
   auto& self_ = unpack(self, "self", 0);
   auto& src_ = unpack(src, "src", 1);
-  check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
   requires_grad &= isDifferentiableType(self.scalar_type());
+  check_inplace(self, requires_grad);
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
