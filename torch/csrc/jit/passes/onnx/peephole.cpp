@@ -637,11 +637,21 @@ static void fuseListConstructListUnpack(Block* b) {
     for (auto* child_block : it->blocks()) {
       fuseListConstructListUnpack(child_block);
     }
-    if (it->kind() == prim::ListUnpack &&
-        it->input()->node()->kind() == prim::ListConstruct) {
+    if (it->kind() == prim::ListUnpack){
       for (size_t i = 0; i < it->outputs().size(); i++) {
         auto output = it->outputs().at(i);
-        output->replaceAllUsesWith(it->input()->node()->inputs().at(i));
+        if (it->input()->node()->kind() == prim::ListConstruct) {
+          output->replaceAllUsesWith(it->input()->node()->inputs().at(i));
+        } else if (it->input()->type()->cast<ListType>()) {
+          Node* gather_indices = b->owningGraph()->create(onnx::Constant, 1);
+          gather_indices->insertBefore(*it);
+          gather_indices->t_(attr::value, at::scalar_to_tensor(at::Scalar(int(i))));
+          Node* gather_node = b->owningGraph()->create(onnx::Gather, 1);
+          gather_node->insertBefore(*it);
+          gather_node->addInput(it->input());
+          gather_node->addInput(gather_indices->output());
+          output->replaceAllUsesWith(gather_node->output());
+        }
       }
     }
   }
