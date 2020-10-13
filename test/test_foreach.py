@@ -1,7 +1,7 @@
 import torch
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, skipCUDAIfRocm
 from torch._six import inf, nan
 
 N_values = [20] if not TEST_WITH_SLOW else [30, 300]
@@ -245,6 +245,7 @@ class TestForeach(TestCase):
     #
     # Ops with scalar
     #
+    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
     def test_int_scalar(self, device, dtype):
         for N in N_values:
@@ -286,6 +287,7 @@ class TestForeach(TestCase):
     # We need to update codegen to correctly handle function overloads with float[] and int[].
     # As optimizers work with float tensors, the result will always be torch.float32 for now.
     # Current schema is using 'float[]' as scalar list type.
+    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
     def test_int_scalarlist(self, device, dtype):
         for N in N_values:
@@ -434,6 +436,7 @@ class TestForeach(TestCase):
                 else:
                     self.assertEqual(tensors, expected)
 
+    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
     def test_complex_scalar(self, device, dtype):
         for N in N_values:
@@ -497,6 +500,7 @@ class TestForeach(TestCase):
                 with self.assertRaisesRegex(TypeError, "argument 'scalars' must be tuple of floats"):
                     foreach_bin_op_(tensors, scalars)
 
+    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
     def test_bool_scalar(self, device, dtype):
         for N in N_values:
