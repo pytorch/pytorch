@@ -346,8 +346,9 @@ class Quantizer:
 
         # match the patterns that will get quantized
         standalone_module_names = prepare_custom_config_dict.get("standalone_module_name", None)
-        matches = self._find_matches(
-            model.graph, self.modules, self.patterns, standalone_module_names)
+        custom_module_class_mapping = prepare_custom_config_dict.get("custom_module_class_mapping", None)
+        matches = self._find_matches
+            model.graph, self.modules, self.patterns, standalone_module_names, custom_module_class_mapping)
 
         # find _inputs_ to matched nodes that are not quantized, these
         # have to be quantized, which requires measuring stats,
@@ -568,7 +569,10 @@ class Quantizer:
         model.eval().cpu()
         self.modules = dict(model.named_modules())
 
-        matches = self._find_matches(model.graph, self.modules, self.patterns)
+        custom_module_class_mapping = prepare_custom_config_dict.get("custom_module_class_mapping", None)
+        matches = self._find_matches(
+            model.graph, self.modules, self.patterns,
+            custom_module_class_mapping=custom_module_class_mapping)
 
         quants = self._find_quants(model.graph, matches)
 
@@ -812,7 +816,9 @@ class Quantizer:
             quantized = self._fold_weight(quantized)
         return quantized
 
-    def _find_matches(self, graph, modules, patterns, standalone_module_names=None):
+    def _find_matches(
+            self, graph, modules, patterns,
+            standalone_module_names=None, custom_module_class_mapping=None):
         """
         Matches the nodes in the input graph to quantization patterns, and
         outputs the information needed to quantize them in future steps.
@@ -833,6 +839,9 @@ class Quantizer:
           ...
         }
         """
+        if custom_module_class_mapping is None:
+            custom_module_class_mapping = {}
+
         match_map = {}
         all_matched = set()
 
@@ -861,8 +870,7 @@ class Quantizer:
         # add custom module instances to the match result
         for node in graph.nodes:
             if node.op == 'call_module' and \
-               (is_custom_module_class(type(self.modules[node.target])) or
-                    is_observed_custom_module(self.modules[node.target])):
+               type(self.modules[node.target]) in custom_module_class_mapping:
                 custom_module_qconfig = self.qconfig_map[node.name]
                 match_map[node.name] = (
                     node, [node], CustomModuleQuantizeHandler(self, node), custom_module_qconfig)

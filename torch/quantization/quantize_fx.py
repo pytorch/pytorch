@@ -168,6 +168,12 @@ def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=No
         # These modules are symbolically traced and quantized as one unit
         "standalone_module_name": [
            "submodule.standalone"
+        ],
+        # user will manually define the corresponding observed
+        # module class which has a from_float class method that converts
+        # float custom module to observed custom module
+        "custom_module_class": [
+           (CustomModule, ObservedCustomModule),
         ]
       }
 
@@ -254,6 +260,12 @@ def convert_fx(graph_module, inplace=False, debug=False, convert_custom_config_d
         `debug`: flag for producing a debug friendly model (preserve weight attribute)
         `convert_custom_config_dict`: dictionary for custom configurations for convert function:
         convert_custom_config_dict = {
+          # user will manually define the corresponding quantized
+          # module class which has a from_observed class method that converts
+          # observed custom module to quantized custom module
+          "custom_module_class": [
+             (ObservedCustomModule, QuantizedCustomModule),
+          ]
         }
 
     Return:
