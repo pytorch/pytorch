@@ -1399,7 +1399,7 @@ int ceilDiv_(int a, int b) {
   return (a + b - 1) / b;
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAt_CUDA) {
+TEST(NVFuserTest, FusionAdvancedComputeAt1) {
   // Case 1
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
@@ -1408,74 +1408,74 @@ TEST(NVFuserTest, FusionAdvancedComputeAt_CUDA) {
   // tv5 = tv3 + tv2
   // tv6 = tv5 + tv4
   // tv7 = tv1 + tv4
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
+  Fusion fusion;
+  FusionGuard fg(&fusion);
 
-    TensorView* tv0 = makeDummyTensor(2);
-    fusion.addInput(tv0);
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
 
-    TensorView* tv1 = mul(tv0, new Float(0.5));
-    TensorView* tv2 = mul(tv1, new Float(-1.0));
-    TensorView* tv3 = add(tv1, new Float(3.0));
-    TensorView* tv4 = mul(tv1, new Float(2.0));
-    TensorView* tv5 = add(tv3, tv2);
+  TensorView* tv1 = mul(tv0, new Float(0.5));
+  TensorView* tv2 = mul(tv1, new Float(-1.0));
+  TensorView* tv3 = add(tv1, new Float(3.0));
+  TensorView* tv4 = mul(tv1, new Float(2.0));
+  TensorView* tv5 = add(tv3, tv2);
 
-    TensorView* tv6 = add(tv5, tv4);
-    TensorView* tv7 = add(tv1, tv4);
+  TensorView* tv6 = add(tv5, tv4);
+  TensorView* tv7 = add(tv1, tv4);
 
-    fusion.addOutput(tv6);
-    fusion.addOutput(tv7);
+  fusion.addOutput(tv6);
+  fusion.addOutput(tv7);
 
-    // Lets setup to actually run
-    tv7->merge(0);
-    tv7->split(0, 128);
-    tv7->split(0, 4);
+  // Lets setup to actually run
+  tv7->merge(0);
+  tv7->split(0, 128);
+  tv7->split(0, 4);
 
-    tv7->axis(0)->parallelize(ParallelType::BIDx);
+  tv7->axis(0)->parallelize(ParallelType::BIDx);
 
-    tv0->computeAt(tv7, 1);
+  tv0->computeAt(tv7, 1);
 
-    TORCH_CHECK(tv1->hasComputeAt() && tv1->nDims() == 3);
-    TORCH_CHECK(tv2->getComputeAtView() == tv5 && tv2->nDims() == 3);
-    TORCH_CHECK(tv3->getComputeAtView() == tv5 && tv3->nDims() == 3);
-    TORCH_CHECK(tv4->hasComputeAt() && tv4->nDims() == 3);
-    TORCH_CHECK(tv5->getComputeAtView() == tv6 && tv5->nDims() == 3);
-    TORCH_CHECK(tv6->getComputeAtView() == tv7 && tv6->nDims() == 3);
-    TORCH_CHECK(!tv7->hasComputeAt());
+  TORCH_CHECK(tv1->hasComputeAt() && tv1->nDims() == 3);
+  TORCH_CHECK(tv2->getComputeAtView() == tv5 && tv2->nDims() == 3);
+  TORCH_CHECK(tv3->getComputeAtView() == tv5 && tv3->nDims() == 3);
+  TORCH_CHECK(tv4->hasComputeAt() && tv4->nDims() == 3);
+  TORCH_CHECK(tv5->getComputeAtView() == tv6 && tv5->nDims() == 3);
+  TORCH_CHECK(tv6->getComputeAtView() == tv7 && tv6->nDims() == 3);
+  TORCH_CHECK(!tv7->hasComputeAt());
 
-    for (Val* val : fusion.vals()) {
-      if (!fusion.hasInput(val) &&
-          val->getValType().value() == ValType::TensorView) {
-        TensorView* tv = static_cast<TensorView*>(val);
-        tv->axis(1)->parallelize(ParallelType::Unroll);
-        tv->axis(-1)->parallelize(ParallelType::TIDx);
-      }
+  for (Val* val : fusion.vals()) {
+    if (!fusion.hasInput(val) &&
+        val->getValType().value() == ValType::TensorView) {
+      TensorView* tv = static_cast<TensorView*>(val);
+      tv->axis(1)->parallelize(ParallelType::Unroll);
+      tv->axis(-1)->parallelize(ParallelType::TIDx);
     }
-
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-
-    at::Tensor t0 = at::randn({129, 127}, options);
-
-    auto t1 = t0.mul({0.5});
-    auto t2 = t1.mul({-1.0});
-    auto t3 = t1.add({3.0});
-    auto t4 = t1.mul({2.0});
-    auto t5 = t3.add(t2);
-    auto t6 = t5.add(t4);
-    auto t7 = t1.add(t4);
-
-    at::Tensor kernel_tv6 = at::empty_like(t0, options);
-    at::Tensor kernel_tv7 = at::empty_like(t0, options);
-
-    FusionExecutor fe;
-    fe.compileFusion(&fusion);
-    fe.runFusion({t0}, {kernel_tv6, kernel_tv7});
-
-    TORCH_CHECK(at::allclose(kernel_tv6, t6));
-    TORCH_CHECK(at::allclose(kernel_tv7, t7));
   }
 
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({129, 127}, options);
+
+  auto t1 = t0.mul({0.5});
+  auto t2 = t1.mul({-1.0});
+  auto t3 = t1.add({3.0});
+  auto t4 = t1.mul({2.0});
+  auto t5 = t3.add(t2);
+  auto t6 = t5.add(t4);
+  auto t7 = t1.add(t4);
+
+  at::Tensor kernel_tv6 = at::empty_like(t0, options);
+  at::Tensor kernel_tv7 = at::empty_like(t0, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  fe.runFusion({t0}, {kernel_tv6, kernel_tv7});
+
+  TORCH_CHECK(at::allclose(kernel_tv6, t6));
+  TORCH_CHECK(at::allclose(kernel_tv7, t7));
+}
+
+TEST(NVFuserTest, FusionAdvancedComputeAt2) {
   // Case 2
   // tv1 = tv0 * -1
   // tv2 = tv0 + 3
@@ -1483,218 +1483,216 @@ TEST(NVFuserTest, FusionAdvancedComputeAt_CUDA) {
   // tv4 = tv2 + tv1
   // tv5 = tv4 + tv3
   // tv6 = tv5 + tv3
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
+  Fusion fusion;
+  FusionGuard fg(&fusion);
 
-    TensorView* tv0 = makeDummyTensor(2);
-    fusion.addInput(tv0);
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
 
-    TensorView* tv1 = mul(tv0, new Float(-1.0));
-    TensorView* tv2 = add(tv0, new Float(3.0));
-    TensorView* tv3 = mul(tv0, new Float(2.0));
-    TensorView* tv4 = add(tv2, tv1);
+  TensorView* tv1 = mul(tv0, new Float(-1.0));
+  TensorView* tv2 = add(tv0, new Float(3.0));
+  TensorView* tv3 = mul(tv0, new Float(2.0));
+  TensorView* tv4 = add(tv2, tv1);
 
-    TensorView* tv5 = add(tv4, tv3);
-    TensorView* tv6 = add(tv5, tv3);
+  TensorView* tv5 = add(tv4, tv3);
+  TensorView* tv6 = add(tv5, tv3);
 
-    fusion.addOutput(tv5);
-    fusion.addOutput(tv6);
+  fusion.addOutput(tv5);
+  fusion.addOutput(tv6);
 
-    // Lets setup to actually run
-    tv6->merge(0);
-    tv6->split(0, 128);
-    tv6->split(0, 4);
+  // Lets setup to actually run
+  tv6->merge(0);
+  tv6->split(0, 128);
+  tv6->split(0, 4);
 
-    tv6->axis(0)->parallelize(ParallelType::BIDx);
+  tv6->axis(0)->parallelize(ParallelType::BIDx);
 
-    tv0->computeAt(tv6, 1);
+  tv0->computeAt(tv6, 1);
 
-    for (Val* val : fusion.vals()) {
-      if (!fusion.hasInput(val) &&
-          val->getValType().value() == ValType::TensorView) {
-        TensorView* tv = static_cast<TensorView*>(val);
+  for (Val* val : fusion.vals()) {
+    if (!fusion.hasInput(val) &&
+        val->getValType().value() == ValType::TensorView) {
+      TensorView* tv = static_cast<TensorView*>(val);
 
-        tv->axis(1)->parallelize(ParallelType::Unroll);
-        tv->axis(-1)->parallelize(ParallelType::TIDx);
-      }
+      tv->axis(1)->parallelize(ParallelType::Unroll);
+      tv->axis(-1)->parallelize(ParallelType::TIDx);
     }
-
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-    at::Tensor t0 = at::randn({129, 127}, options);
-
-    auto t1 = t0.mul({-1.0});
-    auto t2 = t0.add({3.0});
-    auto t3 = t0.mul({2.0});
-    auto t4 = t2.add(t1);
-    auto t5 = t4.add(t3);
-    auto t6 = t5.add(t3);
-
-    FusionExecutor fe;
-    fe.compileFusion(&fusion);
-    auto outputs = fe.runFusion({t0});
-
-    TORCH_CHECK(at::allclose(outputs[0], t5));
-    TORCH_CHECK(at::allclose(outputs[1], t6));
   }
 
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({129, 127}, options);
+
+  auto t1 = t0.mul({-1.0});
+  auto t2 = t0.add({3.0});
+  auto t3 = t0.mul({2.0});
+  auto t4 = t2.add(t1);
+  auto t5 = t4.add(t3);
+  auto t6 = t5.add(t3);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0});
+
+  TORCH_CHECK(at::allclose(outputs[0], t5));
+  TORCH_CHECK(at::allclose(outputs[1], t6));
+}
+
+TEST(NVFuserTest, FusionAdvancedComputeAt3) {
   // Case 3
   // T2 = T1 * 0.979361
   // T3 = T2 * T0
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
+  Fusion fusion;
+  FusionGuard fg(&fusion);
 
-    TensorView* tv0 = makeDummyTensor(4);
-    fusion.addInput(tv0);
+  TensorView* tv0 = makeDummyTensor(4);
+  fusion.addInput(tv0);
 
-    TensorView* tv1 = makeDummyTensor(4);
-    fusion.addInput(tv1);
+  TensorView* tv1 = makeDummyTensor(4);
+  fusion.addInput(tv1);
 
-    TensorView* tv2 = mul(tv1, new Float(.979361));
-    TensorView* tv3 = mul(tv2, tv0);
+  TensorView* tv2 = mul(tv1, new Float(.979361));
+  TensorView* tv3 = mul(tv2, tv0);
 
-    fusion.addOutput(tv3);
+  fusion.addOutput(tv3);
 
-    // Lets setup to actually run
-    while (tv3->nDims() > 1)
-      tv3->merge(0);
-    tv3->split(0, 128);
-    tv3->split(0, 4);
+  // Lets setup to actually run
+  while (tv3->nDims() > 1)
+    tv3->merge(0);
+  tv3->split(0, 128);
+  tv3->split(0, 4);
 
-    tv0->computeAt(tv3, 1);
-    tv1->computeAt(tv3, 1);
+  tv0->computeAt(tv3, 1);
+  tv1->computeAt(tv3, 1);
 
-    tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
 
-    for (Val* val : fusion.vals()) {
-      if (!fusion.hasInput(val) &&
-          val->getValType().value() == ValType::TensorView) {
-        TensorView* tv = static_cast<TensorView*>(val);
+  for (Val* val : fusion.vals()) {
+    if (!fusion.hasInput(val) &&
+        val->getValType().value() == ValType::TensorView) {
+      TensorView* tv = static_cast<TensorView*>(val);
 
-        tv->axis(1)->parallelize(ParallelType::Unroll);
-        tv->axis(-1)->parallelize(ParallelType::TIDx);
-      }
+      tv->axis(1)->parallelize(ParallelType::Unroll);
+      tv->axis(-1)->parallelize(ParallelType::TIDx);
     }
-
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-    at::Tensor t0 = at::randn({129, 127, 63, 65}, options);
-    at::Tensor t1 = at::rand_like(t0, options);
-
-    auto t2 = t1.mul({0.979361});
-    auto t3 = t2.mul(t0);
-
-    at::Tensor kernel_tv3 = at::empty_like(t0, options);
-
-    FusionExecutor fe;
-    fe.compileFusion(&fusion);
-    fe.runFusion({t0, t1}, {kernel_tv3});
-
-    TORCH_CHECK(at::allclose(kernel_tv3, t3));
   }
 
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({129, 127, 63, 65}, options);
+  at::Tensor t1 = at::rand_like(t0, options);
+
+  auto t2 = t1.mul({0.979361});
+  auto t3 = t2.mul(t0);
+
+  at::Tensor kernel_tv3 = at::empty_like(t0, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  fe.runFusion({t0, t1}, {kernel_tv3});
+
+  TORCH_CHECK(at::allclose(kernel_tv3, t3));
+}
+
+TEST(NVFuserTest, FusionAdvancedComputeAt4) {
   // Case 4
   // T4 = T2 - T3
   // T5 = T1 + T4
   // T6 = T5 - T0
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
+  Fusion fusion;
+  FusionGuard fg(&fusion);
 
-    TensorView* tv0 = makeDummyTensor(4);
-    fusion.addInput(tv0);
+  TensorView* tv0 = makeDummyTensor(4);
+  fusion.addInput(tv0);
 
-    TensorView* tv1 = makeDummyTensor(4);
-    fusion.addInput(tv1);
+  TensorView* tv1 = makeDummyTensor(4);
+  fusion.addInput(tv1);
 
-    TensorView* tv2 = makeDummyTensor(4);
-    fusion.addInput(tv2);
+  TensorView* tv2 = makeDummyTensor(4);
+  fusion.addInput(tv2);
 
-    TensorView* tv3 = makeDummyTensor(4);
-    fusion.addInput(tv3);
+  TensorView* tv3 = makeDummyTensor(4);
+  fusion.addInput(tv3);
 
-    TensorView* tv4 = sub(tv2, tv3);
-    TensorView* tv5 = add(tv1, tv4);
-    TensorView* tv6 = sub(tv5, tv0);
+  TensorView* tv4 = sub(tv2, tv3);
+  TensorView* tv5 = add(tv1, tv4);
+  TensorView* tv6 = sub(tv5, tv0);
 
-    fusion.addOutput(tv6);
+  fusion.addOutput(tv6);
 
-    // Lets setup to actually run
-    while (tv6->nDims() > 1)
-      tv6->merge(0);
-    tv6->split(0, 128);
-    tv6->split(0, 4);
+  // Lets setup to actually run
+  while (tv6->nDims() > 1)
+    tv6->merge(0);
+  tv6->split(0, 128);
+  tv6->split(0, 4);
 
-    tv0->computeAt(tv6, 1);
-    tv1->computeAt(tv6, 1);
-    tv2->computeAt(tv6, 1);
-    tv3->computeAt(tv6, 1);
+  tv0->computeAt(tv6, 1);
+  tv1->computeAt(tv6, 1);
+  tv2->computeAt(tv6, 1);
+  tv3->computeAt(tv6, 1);
 
-    tv6->axis(0)->parallelize(ParallelType::BIDx);
+  tv6->axis(0)->parallelize(ParallelType::BIDx);
 
-    for (Val* val : fusion.vals()) {
-      if (!fusion.hasInput(val) &&
-          val->getValType().value() == ValType::TensorView) {
-        TensorView* tv = static_cast<TensorView*>(val);
+  for (Val* val : fusion.vals()) {
+    if (!fusion.hasInput(val) &&
+        val->getValType().value() == ValType::TensorView) {
+      TensorView* tv = static_cast<TensorView*>(val);
 
-        tv->axis(1)->parallelize(ParallelType::Unroll);
-        tv->axis(-1)->parallelize(ParallelType::TIDx);
-      }
+      tv->axis(1)->parallelize(ParallelType::Unroll);
+      tv->axis(-1)->parallelize(ParallelType::TIDx);
     }
-
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-    at::Tensor t0 = at::randn({129, 127, 63, 65}, options);
-    at::Tensor t1 = at::rand_like(t0, options);
-    at::Tensor t2 = at::rand_like(t0, options);
-    at::Tensor t3 = at::rand_like(t0, options);
-
-    auto t4 = t2.sub(t3);
-    auto t5 = t1.add(t4);
-    auto t6 = t5.sub(t0);
-
-    FusionExecutor fe;
-    fe.compileFusion(&fusion);
-    auto outputs = fe.runFusion({t0, t1, t2, t3});
-
-    TORCH_CHECK(at::allclose(outputs[0], t6));
   }
 
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({129, 127, 63, 65}, options);
+  at::Tensor t1 = at::rand_like(t0, options);
+  at::Tensor t2 = at::rand_like(t0, options);
+  at::Tensor t3 = at::rand_like(t0, options);
+
+  auto t4 = t2.sub(t3);
+  auto t5 = t1.add(t4);
+  auto t6 = t5.sub(t0);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, t1, t2, t3});
+
+  TORCH_CHECK(at::allclose(outputs[0], t6));
+}
+
+TEST(NVFuserTest, FusionAdvancedComputeAt5) {
   // Case 5
   // tv2 = tv0 + 2.0
   // tv3 = tv1 * tv2
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
+  Fusion fusion;
+  FusionGuard fg(&fusion);
 
-    // Set up your input tensor views
-    TensorView* tv0 = makeDummyTensor(2);
-    fusion.addInput(tv0);
-    TensorView* tv1 = makeDummyTensor(2);
-    fusion.addInput(tv1);
-    TensorView* tv2 = add(tv0, new Float(2.0));
-    TensorView* tv3 = mul(tv1, tv2);
-    fusion.addOutput(tv3);
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+  TensorView* tv1 = makeDummyTensor(2);
+  fusion.addInput(tv1);
+  TensorView* tv2 = add(tv0, new Float(2.0));
+  TensorView* tv3 = mul(tv1, tv2);
+  fusion.addOutput(tv3);
 
-    tv3->merge(0);
-    tv3->split(-1, 8);
-    tv3->split(-1, 4);
+  tv3->merge(0);
+  tv3->split(-1, 8);
+  tv3->split(-1, 4);
 
-    tv2->computeAt(tv3, 1);
-    tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->computeAt(tv3, 1);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
 
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-    at::Tensor t0 = at::randn({63, 65}, options);
-    at::Tensor t1 = at::rand_like(t0, options);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({63, 65}, options);
+  at::Tensor t1 = at::rand_like(t0, options);
 
-    auto t2 = t0.add(2.0);
-    auto t3 = t1.mul(t2);
+  auto t2 = t0.add(2.0);
+  auto t3 = t1.mul(t2);
 
-    FusionExecutor fe;
-    fe.compileFusion(&fusion);
-    auto outputs = fe.runFusion({t0, t1});
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, t1});
 
-    TORCH_CHECK(at::allclose(outputs[0], t3));
-  }
+  TORCH_CHECK(at::allclose(outputs[0], t3));
 }
 
 TEST(NVFuserTest, FusionAdvancedComputeAt6_CUDA) {
@@ -3839,172 +3837,166 @@ TEST(NVFuserTest, FusionComplexBCast_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing_CUDA) {
-  // Merging left to right is still broken in some instances. Indexing can't
-  // complete because we assume we can simply traverse consumer->producer in the
-  // index/extent map, but this case breaks this assumption.
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
+TEST(NVFuserTest, FusionAdvancedIndexing1) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
 
-    int w = 3, x = 4, y = 7, z = 8;
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  int w = 3, x = 4, y = 7, z = 8;
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
-    auto tv0 = makeDummyTensor(3);
-    auto tv1 = makeDummyTensor(4);
-    fusion.addInput(tv0);
-    fusion.addInput(tv1);
+  auto tv0 = makeDummyTensor(3);
+  auto tv1 = makeDummyTensor(4);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
 
-    auto tv2 = add(tv0, new Float(1.0));
-    auto tv3 = broadcast(tv2, {true, false, false, false});
-    auto tv4 = add(tv3, tv1);
+  auto tv2 = add(tv0, new Float(1.0));
+  auto tv3 = broadcast(tv2, {true, false, false, false});
+  auto tv4 = add(tv3, tv1);
 
-    fusion.addOutput(tv4);
+  fusion.addOutput(tv4);
 
-    tv4->merge(0);
-    tv4->merge(0);
-    tv4->merge(0);
+  tv4->merge(0);
+  tv4->merge(0);
+  tv4->merge(0);
 
-    tv4->split(0, 128);
-    tv4->split(0, 4);
+  tv4->split(0, 128);
+  tv4->split(0, 4);
 
-    tv2->computeAt(tv4, 1);
+  tv2->computeAt(tv4, 1);
 
-    tv4->axis(0)->parallelize(ParallelType::BIDx);
-    tv4->axis(1)->parallelize(ParallelType::Unroll);
-    tv4->axis(2)->parallelize(ParallelType::TIDx);
+  tv4->axis(0)->parallelize(ParallelType::BIDx);
+  tv4->axis(1)->parallelize(ParallelType::Unroll);
+  tv4->axis(2)->parallelize(ParallelType::TIDx);
 
-    tv3->axis(1)->parallelize(ParallelType::Unroll);
-    tv3->axis(2)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::Unroll);
+  tv3->axis(2)->parallelize(ParallelType::TIDx);
 
-    tv2->axis(1)->parallelize(ParallelType::Unroll);
-    tv2->axis(2)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::Unroll);
+  tv2->axis(2)->parallelize(ParallelType::TIDx);
 
-    FusionExecutor fe;
+  FusionExecutor fe;
 
-    at::Tensor t0 = at::randn({x, y, z}, options);
-    at::Tensor t1 = at::randn({w, x, y, z}, options);
+  at::Tensor t0 = at::randn({x, y, z}, options);
+  at::Tensor t1 = at::randn({w, x, y, z}, options);
 
-    fe.compileFusion(&fusion);
-    auto outputs = fe.runFusion({t0, t1});
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, t1});
 
-    auto t3 = t0.add(1.0);
-    auto t4 = t3.add(t1);
+  auto t3 = t0.add(1.0);
+  auto t4 = t3.add(t1);
 
-    TORCH_CHECK(t4.allclose(outputs[0]));
-  }
+  TORCH_CHECK(t4.allclose(outputs[0]));
+}
 
-  // Merging right to left actually does work.
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
+TEST(NVFuserTest, FusionAdvancedIndexing2) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
 
-    int w = 3, x = 4, y = 7, z = 8;
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  int w = 3, x = 4, y = 7, z = 8;
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
-    auto tv0 = makeDummyTensor(3);
-    auto tv1 = makeDummyTensor(4);
-    fusion.addInput(tv0);
-    fusion.addInput(tv1);
+  auto tv0 = makeDummyTensor(3);
+  auto tv1 = makeDummyTensor(4);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
 
-    auto tv2 = add(tv0, new Float(1.0));
-    auto tv3 = broadcast(tv2, {true, false, false, false});
-    auto tv4 = add(tv3, tv1);
+  auto tv2 = add(tv0, new Float(1.0));
+  auto tv3 = broadcast(tv2, {true, false, false, false});
+  auto tv4 = add(tv3, tv1);
 
-    fusion.addOutput(tv4);
+  fusion.addOutput(tv4);
 
-    tv4->merge(-2);
-    tv4->merge(-2);
-    tv4->merge(-2);
+  tv4->merge(-2);
+  tv4->merge(-2);
+  tv4->merge(-2);
 
-    tv4->split(0, 128);
-    tv4->split(0, 4);
+  tv4->split(0, 128);
+  tv4->split(0, 4);
 
-    tv2->computeAt(tv4, 1);
+  tv2->computeAt(tv4, 1);
 
-    tv4->axis(0)->parallelize(ParallelType::BIDx);
-    tv4->axis(1)->parallelize(ParallelType::Unroll);
-    tv4->axis(2)->parallelize(ParallelType::TIDx);
+  tv4->axis(0)->parallelize(ParallelType::BIDx);
+  tv4->axis(1)->parallelize(ParallelType::Unroll);
+  tv4->axis(2)->parallelize(ParallelType::TIDx);
 
-    tv3->axis(1)->parallelize(ParallelType::Unroll);
-    tv3->axis(2)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::Unroll);
+  tv3->axis(2)->parallelize(ParallelType::TIDx);
 
-    tv2->axis(1)->parallelize(ParallelType::Unroll);
-    tv2->axis(2)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::Unroll);
+  tv2->axis(2)->parallelize(ParallelType::TIDx);
 
-    FusionExecutor fe;
+  FusionExecutor fe;
 
-    at::Tensor t0 = at::randn({x, y, z}, options);
-    at::Tensor t1 = at::randn({w, x, y, z}, options);
+  at::Tensor t0 = at::randn({x, y, z}, options);
+  at::Tensor t1 = at::randn({w, x, y, z}, options);
 
-    fe.compileFusion(&fusion);
-    auto outputs = fe.runFusion({t0, t1});
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, t1});
 
-    auto t3 = t0.add(1.0);
-    auto t4 = t3.add(t1);
+  auto t3 = t0.add(1.0);
+  auto t4 = t3.add(t1);
 
-    TORCH_CHECK(t4.allclose(outputs[0]));
-  }
-  // Same issue as the first one in this section
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
+  TORCH_CHECK(t4.allclose(outputs[0]));
+}
 
-    int w = 3, x = 4, y = 7, z = 8;
+TEST(NVFuserTest, FusionAdvancedIndexing3) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
 
-    auto tv0 = makeDummyTensor(3);
-    auto tv1 = makeDummyTensor(4);
-    fusion.addInput(tv0);
-    fusion.addInput(tv1);
+  int w = 3, x = 4, y = 7, z = 8;
 
-    auto tv2 = add(tv0, new Float(1.0));
-    auto tv3 = add(tv2, tv1);
-    fusion.addOutput(tv3);
+  auto tv0 = makeDummyTensor(3);
+  auto tv1 = makeDummyTensor(4);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
 
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-    at::Tensor t0 = at::randn({x, y, z}, options);
-    at::Tensor t1 = at::randn({w, x, y, z}, options);
+  auto tv2 = add(tv0, new Float(1.0));
+  auto tv3 = add(tv2, tv1);
+  fusion.addOutput(tv3);
 
-    scheduleFusion(&fusion, {t0, t1});
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({x, y, z}, options);
+  at::Tensor t1 = at::randn({w, x, y, z}, options);
 
-    FusionExecutor fe;
-    fe.compileFusion(&fusion);
-    auto outputs = fe.runFusion({t0, t1});
+  scheduleFusion(&fusion, {t0, t1});
 
-    auto t2 = t0.add(1.0);
-    auto t3 = t2.add(t1);
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, t1});
 
-    TORCH_CHECK(t3.allclose(outputs[0]));
-  }
+  auto t2 = t0.add(1.0);
+  auto t3 = t2.add(t1);
 
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
+  TORCH_CHECK(t3.allclose(outputs[0]));
+}
 
-    // Set up your input tensor views
-    TensorView* tv0 = makeConcreteTensor({10, 20});
-    fusion.addInput(tv0);
-    TensorView* tv1 = makeConcreteTensor({10, 10, 20});
-    fusion.addInput(tv1);
+TEST(NVFuserTest, FusionAdvancedIndexing4) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
 
-    TensorView* tv2 = add(tv0, new Float(1));
-    TensorView* tv3 = broadcast(tv2, {true, false, false});
-    TensorView* tv4 = add(tv3, tv1);
-    fusion.addOutput(tv4);
+  // Set up your input tensor views
+  TensorView* tv0 = makeConcreteTensor({10, 20});
+  fusion.addInput(tv0);
+  TensorView* tv1 = makeConcreteTensor({10, 10, 20});
+  fusion.addInput(tv1);
 
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-    at::Tensor t0 = at::randn({10, 20}, options);
-    at::Tensor t1 = at::randn({10, 10, 20}, options);
+  TensorView* tv2 = add(tv0, new Float(1));
+  TensorView* tv3 = broadcast(tv2, {true, false, false});
+  TensorView* tv4 = add(tv3, tv1);
+  fusion.addOutput(tv4);
 
-    FusionExecutor fe;
-    fe.compileFusion(&fusion);
-    auto outputs = fe.runFusion({t0, t1});
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({10, 20}, options);
+  at::Tensor t1 = at::randn({10, 10, 20}, options);
 
-    auto t2 = t0.add(1.0);
-    auto t3 = t2.add(t1);
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, t1});
 
-    TORCH_CHECK(t3.allclose(outputs[0]));
-  }
+  auto t2 = t0.add(1.0);
+  auto t3 = t2.add(t1);
+
+  TORCH_CHECK(t3.allclose(outputs[0]));
 }
 
 // Test a simple Gemm but also play around with fusion executor features
@@ -4909,74 +4901,73 @@ TEST(NVFuserTest, FusionReductionMultiConsumer_CUDA) {
       tv1->getThisComputeAtAxis() == 2 && tv1->getRelativeComputeAtAxis() == 2);
 }
 
-TEST(NVFuserTest, FusionComputeAtExprOrder_CUDA) {
-  {
-    for (int i = 0; i < 2; ++i) {
-      Fusion fusion;
-      FusionGuard fg(&fusion);
-
-      // Set up your input tensor views
-      TensorView* tv0 = makeDummyTensor(1);
-      fusion.addInput(tv0);
-
-      auto tv1 = add(tv0, new Float(1));
-      auto tv2 = add(tv0, new Float(1));
-      TensorView* tv3 = add(tv1, tv2);
-      if (i == 0) {
-        tv1->computeAt(tv3, -1);
-        fusion.addOutput(tv2);
-      } else {
-        tv2->computeAt(tv3, -1);
-        fusion.addOutput(tv1);
-      }
-      fusion.addOutput(tv3);
-
-      auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-      at::Tensor input = at::rand({100}, options);
-
-      FusionExecutor fe;
-      fe.compileFusion(&fusion);
-      auto outputs = fe.runFusion({input});
-
-      auto aten_output = (input + 1) * 2;
-      TORCH_CHECK(
-          aten_output.allclose(outputs[1]),
-          "Error of: ",
-          aten_output.sub(outputs[1]).abs().max());
-    }
-  }
-  {
+TEST(NVFuserTest, FusionComputeAtExprOrder1) {
+  for (int i = 0; i < 2; ++i) {
     Fusion fusion;
     FusionGuard fg(&fusion);
 
     // Set up your input tensor views
-    TensorView* tv0 = makeDummyTensor(2);
+    TensorView* tv0 = makeDummyTensor(1);
     fusion.addInput(tv0);
 
     auto tv1 = add(tv0, new Float(1));
     auto tv2 = add(tv0, new Float(1));
     TensorView* tv3 = add(tv1, tv2);
+    if (i == 0) {
+      tv1->computeAt(tv3, -1);
+      fusion.addOutput(tv2);
+    } else {
+      tv2->computeAt(tv3, -1);
+      fusion.addOutput(tv1);
+    }
     fusion.addOutput(tv3);
 
-    tv3->split(-1, 32);
-
-    tv1->computeAt(tv3, -1);
-    tv2->computeAt(tv3, -2);
-
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-    at::Tensor input = at::rand({100, 100}, options);
-    at::Tensor output = at::empty_like(input, options);
+    at::Tensor input = at::rand({100}, options);
 
     FusionExecutor fe;
     fe.compileFusion(&fusion);
-    fe.runFusion({input}, {output});
+    auto outputs = fe.runFusion({input});
 
     auto aten_output = (input + 1) * 2;
     TORCH_CHECK(
-        aten_output.allclose(output),
+        aten_output.allclose(outputs[1]),
         "Error of: ",
-        aten_output.sub(output).abs().max());
+        aten_output.sub(outputs[1]).abs().max());
   }
+}
+
+TEST(NVFuserTest, FusionComputeAtExprOrder2) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Float(1));
+  auto tv2 = add(tv0, new Float(1));
+  TensorView* tv3 = add(tv1, tv2);
+  fusion.addOutput(tv3);
+
+  tv3->split(-1, 32);
+
+  tv1->computeAt(tv3, -1);
+  tv2->computeAt(tv3, -2);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({100, 100}, options);
+  at::Tensor output = at::empty_like(input, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  fe.runFusion({input}, {output});
+
+  auto aten_output = (input + 1) * 2;
+  TORCH_CHECK(
+      aten_output.allclose(output),
+      "Error of: ",
+      aten_output.sub(output).abs().max());
 }
 
 TEST(NVFuserTest, FusionZeroDimComputeAt_CUDA) {
