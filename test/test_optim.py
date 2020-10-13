@@ -334,7 +334,7 @@ class TestOptim(TestCase):
             ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=1)),
         ]
 
-        kIterations = 1001
+        kIterations = 11
         device = 'cuda'
 
         for optimizers, params in optimizer_pairs_with_flags:
