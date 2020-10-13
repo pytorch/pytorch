@@ -77,9 +77,7 @@ WORKFLOW_DATA = [
         ["cudnn7", "py3", "jit_legacy", "test"],
         ["pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build"],
         use_cuda_docker=True,
-        # TODO Why does the build environment specify cuda10.1, while the
-        # job name is cuda10_2?
-        build_env_override="pytorch-linux-xenial-cuda10.1-cudnn7-jit_legacy-test"),
+    ),
 ]
 
 
