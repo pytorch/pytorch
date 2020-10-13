@@ -17500,7 +17500,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         inputs = [
             (torch.rand(10, device=device).to(dtype), torch.rand(10, device=device).to(dtype)),
             (torch.rand((3, 3, 3), device=device).to(dtype), torch.rand((3, 3, 3), device=device).to(dtype)),
-            (torch.rand((10, 1), device=device).to(dtype), torch.rand((10, 1), device=device).to(dtype).transpose(0, 1)),
+            (torch.rand((100, 1), device=device).to(dtype), torch.rand((100, 1), device=device).to(dtype).transpose(0, 1)),
             (torch.randint(100, (10, ), device=device, dtype=torch.long), torch.rand(10, device=device).to(dtype))
         ]
         for input0, input1 in inputs:

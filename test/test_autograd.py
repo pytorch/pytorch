@@ -2846,8 +2846,8 @@ class TestAutograd(TestCase):
     def test_igamma(self):
         # 1e-3 offset to avoid zeros
         # NOTE: derivative for s is not implemented
-        s = (torch.rand(3, dtype=torch.double) + 1e-3)
-        x = (torch.rand(3, dtype=torch.double) + 1e-3).requires_grad_()
+        s = (torch.rand(100, dtype=torch.double) + 1e-3)
+        x = (torch.rand(100, dtype=torch.double) + 1e-3).requires_grad_()
         gradcheck(torch.igamma, (s, x))
         gradgradcheck(torch.igamma, (s, x))
 

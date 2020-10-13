@@ -712,7 +712,83 @@ static scalar_t _igamc_helper_continued_fraction(scalar_t a, scalar_t x) {
 }
 
 template <typename scalar_t>
-static scalar_t calc_igammac(scalar_t a, scalar_t x);
+static inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
+  scalar_t ans, ax, c, yc, r, t, y, z;
+  scalar_t absxma_a;
+  scalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
+  static scalar_t MAXLOG = std::is_same<scalar_t,double>::value ?
+    7.09782712893383996843E2 : 88.72283905206835;
+  static scalar_t MACHEP = std::is_same<scalar_t,double>::value ?
+    1.11022302462515654042E-16 : 5.9604644775390625E-8;
+  static scalar_t BIG = std::is_same<scalar_t,double>::value ?
+    4.503599627370496e15 : 16777216.;
+  static scalar_t BIGINV = std::is_same<scalar_t,double>::value ?
+    2.22044604925031308085e-16 : 5.9604644775390625E-8;
+
+  static scalar_t SMALL = 20.0;
+  static scalar_t LARGE = 200.0;
+  static scalar_t SMALLRATIO = 0.3;
+  static scalar_t LARGERATIO = 4.5;
+
+  if ((x < 0) || (a < 0)) {
+    // out of defined-region of the function
+    return std::numeric_limits<scalar_t>::quiet_NaN();
+  }
+  else if (a == 0) {
+    if (x > 0) {
+      return 0.0;
+    }
+    else {
+      return std::numeric_limits<scalar_t>::quiet_NaN();
+    }
+  }
+  else if (x == 0) {
+    return 1.0;
+  }
+  else if (std::isinf(a)) {
+    if (std::isinf(x)) {
+      return std::numeric_limits<scalar_t>::quiet_NaN();
+    }
+    return 1.0;
+  }
+  else if (std::isinf(x)) {
+    return 0.0;
+  }
+
+  absxma_a = std::fabs(x - a) / a;
+  if ((a > SMALL) && (a < LARGE) && (absxma_a < SMALLRATIO)) {
+     return _igam_helper_asymptotic_series(a, x, 0);
+  }
+  else if ((a > LARGE) && (absxma_a < LARGERATIO / std::sqrt(a))) {
+     return _igam_helper_asymptotic_series(a, x, 0);
+  }
+
+  if (x > 1.1) {
+    if (x < a) {
+      return 1.0 - _igam_helper_series(a, x);
+    }
+    else {
+      return _igamc_helper_continued_fraction(a, x);
+    }
+  }
+  else if (x <= 0.5) {
+    if (-0.4 / std::log(x) < a) {
+      return 1.0 - _igam_helper_series(a, x);
+    }
+    else {
+      return _igamc_helper_series(a, x);
+    }
+  }
+  else {
+    if (x * 1.1 < a) {
+      return 1.0 - _igam_helper_series(a, x);
+    }
+    else {
+      return _igamc_helper_series(a, x);
+    }
+  }
+}
+
 template <typename scalar_t>
 static inline scalar_t calc_igamma(scalar_t a, scalar_t x) {
   scalar_t ans, ax, c, r, absxma_a;
@@ -770,85 +846,6 @@ static inline scalar_t calc_igamma(scalar_t a, scalar_t x) {
 template <>
 c10::BFloat16 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
   return calc_igamma<float>(float(a), float(x));
-}
-
-// regularized upper incomplete gamma
-template <typename scalar_t>
-static inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
-  scalar_t ans, ax, c, yc, r, t, y, z;
-  scalar_t absxma_a;
-  scalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
-  static scalar_t MAXLOG = std::is_same<scalar_t,double>::value ?
-    7.09782712893383996843E2 : 88.72283905206835;
-  static scalar_t MACHEP = std::is_same<scalar_t,double>::value ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
-  static scalar_t BIG = std::is_same<scalar_t,double>::value ?
-    4.503599627370496e15 : 16777216.;
-  static scalar_t BIGINV = std::is_same<scalar_t,double>::value ?
-    2.22044604925031308085e-16 : 5.9604644775390625E-8;
-
-  static scalar_t SMALL = 20.0;
-  static scalar_t LARGE = 200.0;
-  static scalar_t SMALLRATIO = 0.3;
-  static scalar_t LARGERATIO = 4.5;
-
-  if ((x < 0) || (a < 0)) {
-    // out of defined-region of the function
-    return std::numeric_limits<double>::quiet_NaN();
-  }
-  else if (a == 0) {
-    if (x > 0) {
-      return 0.0;
-    }
-    else {
-      return std::numeric_limits<double>::quiet_NaN();
-    }
-  }
-  else if (x == 0) {
-    return 1.0;
-  }
-  else if (std::isinf(a)) {
-    if (std::isinf(x)) {
-      return std::numeric_limits<double>::quiet_NaN();
-    }
-    return 1.0;
-  }
-  else if (std::isinf(x)) {
-    return 0.0;
-  }
-
-  absxma_a = fabs(x - a) / a;
-  if ((a > SMALL) && (a < LARGE) && (absxma_a < SMALLRATIO)) {
-     return _igam_helper_asymptotic_series(a, x, 0);
-  }
-  else if ((a > LARGE) && (absxma_a < LARGERATIO / sqrt(a))) {
-     return _igam_helper_asymptotic_series(a, x, 0);
-  }
-
-  if (x > 1.1) {
-    if (x < a) {
-      return 1.0 - _igam_helper_series(a, x);
-    }
-    else {
-      return _igamc_helper_continued_fraction(a, x);
-    }
-  }
-  else if (x <= 0.5) {
-    if (-0.4 / log(x) < a) {
-      return 1.0 - _igam_helper_series(a, x);
-    }
-    else {
-      return _igamc_helper_series(a, x);
-    }
-  }
-  else {
-    if (x * 1.1 < a) {
-      return 1.0 - _igam_helper_series(a, x);
-    }
-    else {
-      return _igamc_helper_series(a, x);
-    }
-  }
 }
 
 inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }
