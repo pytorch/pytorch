@@ -7032,6 +7032,10 @@ class TestNN(NNTestCase):
                 torch.nn.L1Loss()(input, torch.zeros_like(input)),
                 input.abs().mean())
 
+    def test_smoothl1loss_negative_beta_not_supported(self):
+        with self.assertRaises(RuntimeError):
+            F.smooth_l1_loss(torch.randn(2, 2), torch.randn(2, 2), beta=-1.0)
+
     def test_cosine_similarity(self):
         input1 = torch.randn(4, 4, requires_grad=True)
         input2 = torch.randn(4, 4, requires_grad=True)
