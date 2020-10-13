@@ -175,46 +175,14 @@ static inline __host__ __device__ scalar_t calc_polygamma(int n, scalar_t x) {
 }
 
 template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t calc_igammac(scalar_t a, scalar_t x);
+static inline C10_HOST_DEVICE scalar_t _igamma_frac(scalar_t a, scalar_t x) {
 
-template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t calc_igamma(scalar_t a, scalar_t x) {
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   accscalar_t ans, ax, c, r;
   static accscalar_t MAXLOG = std::is_same<accscalar_t, double>::value ?
     7.09782712893383996843E2 : 88.72283905206835;
   static accscalar_t MACHEP = std::is_same<accscalar_t, double>::value ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
-
-  // boundary values following SciPy
-  if ((x < 0) || (a < 0)) {
-    // out of defined-region of the function
-    return std::numeric_limits<accscalar_t>::quiet_NaN();
-  }
-  else if (a == 0) {
-    if (x > 0) {
-      return 1.0;
-    }
-    else {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
-    }
-  }
-  else if (x == 0) {
-    return 0.0; // zero integration limit
-  }
-  else if (::isinf(a)) {
-    if (::isinf(x)) {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
-    }
-    return 0.0;
-  }
-  else if (::isinf(x)) {
-    return 1.0;
-  }
-
-  if ((x > 1.0) && (x > a)) {
-    return 1.0 - calc_igammac(a, x);
-  }
 
   /* Compute  x**a * exp(-x) / gamma(a)  */
   ax = a * ::log(x) - x - ::lgamma(a);
@@ -239,7 +207,8 @@ static inline C10_HOST_DEVICE scalar_t calc_igamma(scalar_t a, scalar_t x) {
 }
 
 template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t calc_igammac(scalar_t a, scalar_t x) {
+static inline C10_HOST_DEVICE scalar_t _igammac_frac(scalar_t a, scalar_t x) {
+
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   accscalar_t ans, ax, c, yc, r, t, y, z;
   accscalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
@@ -251,35 +220,6 @@ static inline C10_HOST_DEVICE scalar_t calc_igammac(scalar_t a, scalar_t x) {
     4.503599627370496e15 : 16777216.;
   static accscalar_t BIGINV = std::is_same<accscalar_t,double>::value ?
     2.22044604925031308085e-16 : 5.9604644775390625E-8;
-
-  if ((x < 0) || (a < 0)) {
-    // out of defined-region of the function
-    return std::numeric_limits<double>::quiet_NaN();
-  }
-  else if (a == 0) {
-    if (x > 0) {
-      return 0.0;
-    }
-    else {
-      return std::numeric_limits<double>::quiet_NaN();
-    }
-  }
-  else if (x == 0) {
-    return 1.0;
-  }
-  else if (::isinf(a)) {
-    if (::isinf(x)) {
-      return std::numeric_limits<double>::quiet_NaN();
-    }
-    return 1.0;
-  }
-  else if (::isinf(x)) {
-    return 0.0;
-  }
-
-  if ((x < 1.0) || (x < a)) {
-    return 1.0 - calc_igamma(a, x);
-  }
 
   ax = a * ::log(x) - x - ::lgamma(a);
   if (ax < -MAXLOG) {
@@ -326,6 +266,73 @@ static inline C10_HOST_DEVICE scalar_t calc_igammac(scalar_t a, scalar_t x) {
   while (t > MACHEP);
 
   return ans * ax;
+}
+
+template <typename scalar_t>
+static inline C10_HOST_DEVICE scalar_t calc_igamma(scalar_t a, scalar_t x) {
+  // boundary values following SciPy
+  if ((x < 0) || (a < 0)) {
+    // out of defined-region of the function
+    return std::numeric_limits<scalar_t>::quiet_NaN();
+  }
+  else if (a == 0) {
+    if (x > 0) {
+      return 1.0;
+    }
+    else {
+      return std::numeric_limits<scalar_t>::quiet_NaN();
+    }
+  }
+  else if (x == 0) {
+    return 0.0; // zero integration limit
+  }
+  else if (::isinf(a)) {
+    if (::isinf(x)) {
+      return std::numeric_limits<scalar_t>::quiet_NaN();
+    }
+    return 0.0;
+  }
+  else if (::isinf(x)) {
+    return 1.0;
+  }
+
+  if ((x > 1.0) && (x > a)) {
+    return 1.0 - _igammac_frac(a, x);
+  }
+  return _igamma_frac(a, x);
+}
+
+template <typename scalar_t>
+static inline C10_HOST_DEVICE scalar_t calc_igammac(scalar_t a, scalar_t x) {
+  if ((x < 0) || (a < 0)) {
+    // out of defined-region of the function
+    return std::numeric_limits<scalar_t>::quiet_NaN();
+  }
+  else if (a == 0) {
+    if (x > 0) {
+      return 0.0;
+    }
+    else {
+      return std::numeric_limits<scalar_t>::quiet_NaN();
+    }
+  }
+  else if (x == 0) {
+    return 1.0;
+  }
+  else if (::isinf(a)) {
+    if (::isinf(x)) {
+      return std::numeric_limits<scalar_t>::quiet_NaN();
+    }
+    return 1.0;
+  }
+  else if (::isinf(x)) {
+    return 0.0;
+  }
+
+  if ((x < 1.0) || (x < a)) {
+    return 1.0 - _igamma_frac(a, x);
+  }
+  return _igammac_frac(a, x);
 }
 
 template <typename scalar_t>
