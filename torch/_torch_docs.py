@@ -3732,9 +3732,9 @@ spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
 
 .. math::
     (\text{start},
-    \text{start} + \frac{\text{end} - \text{start}}{\text{steps}},
+    \text{start} + \frac{\text{end} - \text{start}}{\text{steps} - 1},
     \ldots,
-    \text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{\text{steps}},
+    \text{start} + (\text{steps} - 2) * \frac{\text{end} - \text{start}}{\text{steps} - 1},
     \text{end})
 """ + """
 
@@ -4057,9 +4057,9 @@ with base :attr:`base`. That is, the values are:
 
 .. math::
     (\text{base}^{\text{start}},
-    \text{base}^{(\text{start} + \frac{\text{end} - \text{start}}{ \text{steps}})},
+    \text{base}^{(\text{start} + \frac{\text{end} - \text{start}}{ \text{steps} - 1})},
     \ldots,
-    \text{base}^{(\text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{ \text{steps}})},
+    \text{base}^{(\text{start} + (\text{steps} - 2) * \frac{\text{end} - \text{start}}{ \text{steps} - 1})},
     \text{base}^{\text{end}})
 """ + """
 
@@ -6489,6 +6489,25 @@ Example::
     >>> torch.arange(1, 2.5, 0.5)
     tensor([ 1.0000,  1.5000,  2.0000])
 """.format(**factory_common_args))
+
+add_docstr(torch.ravel,
+           r"""
+ravel(input) -> Tensor
+
+Return a contiguous flattened tensor. A copy is made only if needed.
+
+Args:
+    {input}
+
+Example::
+
+    >>> t = torch.tensor([[[1, 2],
+    ...                    [3, 4]],
+    ...                   [[5, 6],
+    ...                    [7, 8]]])
+    >>> torch.ravel(t)
+    tensor([1, 2, 3, 4, 5, 6, 7, 8])
+""".format(**common_args))
 
 add_docstr(torch.remainder,
            r"""

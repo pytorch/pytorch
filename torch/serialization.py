@@ -488,7 +488,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
         else:
             # Copy to a buffer, then serialize that
             buf = io.BytesIO()
-            storage._write_file(buf, _should_read_directly(buf))
+            storage._write_file(buf, _should_read_directly(buf), False)
             buf_value = buf.getvalue()
             zip_file.write_record(name, buf_value, len(buf_value))
 

@@ -55,7 +55,11 @@ def fp16_compress_hook(process_group: object, bucket: dist._GradBucket):
     ).get_future()
 
     def decompress(fut):
-        return [fut.value()[0].to(torch.float32).div_(world_size)]
+        decompressed_tensor = bucket.get_tensors()[0]
+        # Decompress in place to reduce the peak memory.
+        # See: https://github.com/pytorch/pytorch/issues/45968
+        decompressed_tensor.copy_(fut.value()[0].div_(world_size))
+        return [decompressed_tensor]
 
     return fut.then(decompress)
 
