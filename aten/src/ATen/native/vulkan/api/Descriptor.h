@@ -78,7 +78,7 @@ struct Descriptor final {
     VkDescriptorSet handle() const;
 
    private:
-    struct Stream final {
+    struct Item final {
       uint32_t binding;
       VkDescriptorType type;
       union {
@@ -87,14 +87,14 @@ struct Descriptor final {
       } info;
     };
 
-    void update(const Stream& stream);
+    void update(const Item& item);
 
    private:
     VkDevice device_;
     VkDescriptorSet descriptor_set_;
 
     struct {
-      c10::SmallVector<Stream, 8u> streams;
+      c10::SmallVector<Item, 8u> items;
       mutable bool dirty;
     } bindings_;
   };
