@@ -30,6 +30,14 @@ using ClassTypePtr = std::shared_ptr<ClassType>;
 
 TORCH_API bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs);
 
+TORCH_API torch::jit::Function* checkObjectSortSchema(const c10::ClassTypePtr& t, std::stringstream& why_not);
+
+// A comparator that checks ordering of two IValues of same type.
+typedef std::function<bool(const IValue& a, const IValue& b)> IValueComparator;
+
+TORCH_API IValueComparator getLessThanComparator(const IValue& v);
+TORCH_API IValueComparator getGreaterThanComparator(const IValue& v);
+
 namespace ivalue {
 struct Tuple;
 struct Future;
@@ -90,6 +98,7 @@ struct OptionalArray {
   _(GenericDict)             \
   _(Future)                  \
   _(Device)                  \
+  _(Stream)                  \
   _(Object)                  \
   _(PyObject)                \
   _(Uninitialized)           \
@@ -542,6 +551,15 @@ struct CAFFE2_API IValue final {
     AT_ASSERT(isDevice());
     return c10::Device(payload.as_device.type, payload.as_device.index);
   }
+
+  //Stream
+  IValue(c10::Stream stream)
+    : tag(Tag::Stream), is_intrusive_ptr(false) {
+    payload.as_int = stream.pack();
+  }
+  c10::Stream toStream() &&;
+  c10::Stream toStream() const &;
+  bool isStream() const { return Tag::Stream == tag; }
 
   // ScalarType
   IValue(ScalarType t)

@@ -4,7 +4,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
 #include <unordered_map>
 #include <unordered_set>
@@ -13,14 +12,6 @@
 namespace torch {
 namespace jit {
 namespace fuser {
-
-// https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
-struct TypeHash {
-  template <typename T>
-  std::size_t operator()(T t) const {
-    return static_cast<std::size_t>(t);
-  }
-};
 
 /*
  * Usage: FusionGuard and Fusion are required user interfaces for any operation
@@ -51,10 +42,6 @@ struct TypeHash {
 class Fusion;
 class TensorView;
 
-namespace cuda {
-class CudaKernel;
-}
-
 // Fusion Guard is our "context manager". It holds the actrive fusion and allows
 // it to be accessed anywhere through FusionGuard::getCurFusion().
 class TORCH_CUDA_API FusionGuard {
@@ -62,38 +49,11 @@ class TORCH_CUDA_API FusionGuard {
   Fusion* prev_fusion;
 
   // Set the active fusion so it can be manipulated.
-  FusionGuard(Fusion* fusion);
-  FusionGuard(const cuda::CudaKernel* cuda_kernel);
+  explicit FusionGuard(Fusion* fusion);
 
   ~FusionGuard();
 
   static Fusion* getCurFusion();
-};
-
-// Expr sort will take a fusion and return a topologically sorted list of
-// expressions.
-class ExprSort : public IterVisitor {
- private:
-  std::vector<Expr*> exprs;
-
-  void handle(Expr* expr) override;
-
- public:
-  static std::vector<Expr*> getExprs(
-      Fusion* fusion,
-      bool from_outputs_only,
-      bool breadth_first,
-      bool respect_compute_at);
-};
-
-class InputsOf : public IterVisitor {
- private:
-  std::unordered_set<Val*> inputs;
-
-  void handle(Val* v) final;
-
- public:
-  static std::unordered_set<Val*> output(Fusion* fusion, Val* output_);
 };
 
 /*
@@ -130,10 +90,10 @@ class TORCH_CUDA_API Fusion final {
   void removeVal(Val* val);
 
   // Register input as an input of the fusion
-  void addInput(Val* const input);
+  void addInput(Val* input);
 
   // Register output as an output of the fusion
-  void addOutput(Val* const output);
+  void addOutput(Val* output);
 
   // Check if stmt is properly registered with this fusion
   bool inFusion(const Statement* stmt) const;
@@ -145,22 +105,15 @@ class TORCH_CUDA_API Fusion final {
   /*
    * Return a list of topologically sorted expressions. We can start
    * by only traversing back from registered outputs, or from all terminating
-   * Vals. Can also select depth first traversal, or breadth first.1
+   * Vals.
    *
    * from_outputs_only:
    *   True - Sort from DAG associated with registered outputs
    *   False - Sort from all terminating Vals.
-   * breadth_first :
-   *   False - Sort from depth first traversal
-   *   True - Sort from breadth first traversal - Not Implemented Yet!
-   *
-   * TODO: Implement breadth_first
    */
-  std::vector<Expr*> exprs(
-      bool from_outputs_only = false,
-      bool breadth_first = false,
-      bool respect_compute_at = false);
+  std::vector<Expr*> exprs(bool from_outputs_only = false);
 
+  // Return a vector of fusion inputs that feed this Val
   std::unordered_set<Val*> inputsOf(Val* val);
 
   // Assert that all leaves found from outputs are registered as an input.
@@ -169,16 +122,15 @@ class TORCH_CUDA_API Fusion final {
   // Print this fusion to cout.
   void print();
 
-  // Print value mapping
-  void printValuesMap();
-
   // Print Arith exprs used in outputs
   void printMath();
 
   // Print transformations used in fusion (can be very verbose)
   void printTransforms();
+
   // Lower the fusion and print a kernel
   void printKernel();
+
   // Register the Val with this fusion
   StmtNameType registerVal(Val* val);
 
@@ -190,6 +142,15 @@ class TORCH_CUDA_API Fusion final {
 
   // Register stmt with this fusion.
   StmtNameType registerStatement(Statement* stmt);
+
+  // Lowered nodes
+  // TODO(kir): to be removed
+  StmtNameType registerLoweredVal(Val* val);
+  StmtNameType registerLoweredExpr(Expr* expr);
+
+  // Lowered counterpart to inFusion()
+  // TODO(kir): to be removed
+  bool inKernelIr(const Statement* stmt) const;
 
   // Check if val is used in this fusion. Not equivelent to DCE
   bool used(Val* val) const;
@@ -206,32 +167,18 @@ class TORCH_CUDA_API Fusion final {
   std::unordered_set<Expr*> unordered_uses(Val* val) const;
 
   // Return the Expr that produces val
-  Expr* origin(Val* val) const;
-
-  // Return the Expr that produces val (const version)
-  const Expr* origin(const Val* val) const;
+  Expr* origin(const Val* val) const;
 
   // Indicate to kernel to set itself up to generate random numbers
-  bool hasRNG();
+  bool isStochastic();
 
+  // TODO(kir): revisit to see how many of these are still needed
   bool hasReduction();
   bool hasBlockReduction();
   bool hasGridReduction();
+  bool hasBlockBroadcast();
+  bool hasBroadcast();
   size_t gridReductionTempBufferSize();
-
-  void setValuesMap(std::unordered_map<Val*, Val*> values_map) {
-    values_map_ = std::move(values_map);
-  }
-
-  Val* loweredVal(Val* value) const {
-    auto it = values_map_.find(value);
-    return it != values_map_.end() ? it->second : value;
-  }
-
-  const Val* loweredVal(const Val* value) const {
-    auto it = values_map_.find(const_cast<Val*>(value));
-    return it != values_map_.end() ? it->second : value;
-  }
 
   const auto& inputs() const {
     return inputs_;
@@ -240,6 +187,8 @@ class TORCH_CUDA_API Fusion final {
   const auto& outputs() const {
     return outputs_;
   }
+
+  std::vector<Val*> getTerminatingOutputs();
 
   bool hasInput(const Val* val) const;
   bool hasOutput(const Val* val) const;
@@ -260,27 +209,24 @@ class TORCH_CUDA_API Fusion final {
   std::deque<Val*> val_deque_;
   std::unordered_set<Expr*> expr_set_;
 
-  // map from valtype to individual name counters
-  std::unordered_map<ValType, StmtNameType, TypeHash> val_type_name_map_ = {
-      {ValType::TensorView, 0},
-      {ValType::TensorDomain, 0},
-      {ValType::IterDomain, 0},
-      {ValType::Scalar, 0}};
+  // Values names counters
+  std::unordered_map<ValType, StmtNameType, TypeHash> val_type_name_map_;
 
-  // Generic counters
-  StmtNameType val_name_counter_ = 0;
+  // Expression names counter
   StmtNameType expr_name_counter_ = 0;
 
   // Dependency tracking for Vals. Where did it come from? Where is it used?
-  std::unordered_map<Val*, Expr*> origin_;
+  std::unordered_map<const Val*, Expr*> origin_;
   std::unordered_map<Val*, std::unordered_set<Expr*>> uses_;
-
-  // Map a subset of values to the lowered equivalent (ex. sizes)
-  std::unordered_map<Val*, Val*> values_map_;
 
   // Fusion inputs and outputs
   std::vector<Val*> inputs_;
   std::vector<Val*> outputs_;
+
+  // Lowered IR
+  std::unordered_set<Val*> lowered_val_set_;
+  std::unordered_set<Expr*> lowered_expr_set_;
+  std::unordered_map<const Val*, Expr*> lowered_origin_;
 };
 
 } // namespace fuser

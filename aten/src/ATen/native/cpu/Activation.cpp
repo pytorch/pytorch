@@ -189,12 +189,12 @@ void GeluBackwardMKLKernelImpl(TensorIterator* it) {
 
 template <typename T>
 void GeluMKLKernelImpl(TensorIterator* /* it */) {
-  AT_ASSERTM(false, "ATen not compiled with MKL");
+  TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
 template <typename T>
 void GeluBackwardMKLKernelImpl(TensorIterator* /* it */) {
-  AT_ASSERTM(false, "ATen not compiled with MKL");
+  TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
 #endif // AT_MKL_ENABLED()

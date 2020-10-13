@@ -277,6 +277,18 @@ them the same thing!)
 If two backends have the same dispatch function, you can write `CPU, CUDA: func`
 to reuse the same function name in both cases.
 
+Available backend options can be found at
+https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py#L970.
+In addition to backends above, we also support keyword `Math` which is an alias
+that maps to all backend and autograd backend keys. In other words, function registered to `Math` key
+should be a plain mathematical composition of other `at::` functions and works for any backend.
+
+If you add `dispatch` section to any API that didn't have it before, you **have to** move
+the old implementation to `Math` field so that it's still available for other backends to use.
+
+This work is currently WIP and you can find the design proposal in
+https://github.com/pytorch/pytorch/issues/44680.
+
 ### `device_guard`
 
 ```
@@ -318,6 +330,7 @@ set of reviewers.
 
 ```
 use_c10_dispatcher: 'with_codegenerated_unboxing_wrapper'
+use_c10_dispatcher: 'hacky_wrapper_for_legacy_signatures'
 use_c10_dispatcher: 'full'
 ```
 
@@ -328,6 +341,10 @@ Some ops use features that aren't supported by those templates yet,
 and enabling `use_c10_dispatcher: full` for those will result in a compiler error.
 For those, use `use_c10_dispatcher: 'with_codegenerated_unboxing_wrapper'` instead,
 or just omit the argument because 'with_codegenerated_unboxing_wrapper' is the default.
+`use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` is similar to `full`
+but adds a wrapper around the kernel before registering it with the dispatcher
+to support some legacy function signatures for kernels that we didn't migrate to
+the new signatures yet.
 
 ### `manual_kernel_registration`
 

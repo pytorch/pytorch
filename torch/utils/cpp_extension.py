@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import copy
 import glob
 import imp
@@ -153,6 +152,7 @@ MSVC_IGNORE_CUDAFE_WARNINGS = [
 COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
     '-D__CUDA_NO_HALF_CONVERSIONS__',
+    '-D__CUDA_NO_BFLOAT16_CONVERSIONS__',
     '-D__CUDA_NO_HALF2_OPERATORS__',
     '--expt-relaxed-constexpr'
 ]
@@ -348,6 +348,18 @@ class BuildExtension(build_ext, object):
     def build_extensions(self) -> None:
         self._check_abi()
         for extension in self.extensions:
+            # Ensure at least an empty list of flags for 'cxx' and 'nvcc' when
+            # extra_compile_args is a dict. Otherwise, default torch flags do
+            # not get passed. Necessary when only one of 'cxx' and 'nvcc' is
+            # passed to extra_compile_args in CUDAExtension, i.e.
+            #   CUDAExtension(..., extra_compile_args={'cxx': [...]})
+            # or
+            #   CUDAExtension(..., extra_compile_args={'nvcc': [...]})
+            if isinstance(extension.extra_compile_args, dict):
+                for ext in ['cxx', 'nvcc']:
+                    if ext not in extension.extra_compile_args:
+                        extension.extra_compile_args[ext] = []
+
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
@@ -372,9 +384,11 @@ class BuildExtension(build_ext, object):
                 cflags.append(cpp_flag)
 
         def unix_cuda_flags(cflags):
+            _ccbin = os.getenv("CC")
             return (COMMON_NVCC_FLAGS +
                     ['--compiler-options', "'-fPIC'"] +
-                    cflags + _get_cuda_arch_flags(cflags))
+                    cflags + _get_cuda_arch_flags(cflags) +
+                    (['-ccbin', _ccbin] if _ccbin is not None else []))
 
         def convert_to_absolute_paths_inplace(paths):
             # Helper function. See Note [Absolute include_dirs]
@@ -1388,11 +1402,11 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Pascal', '6.0;6.1+PTX'),
         ('Volta', '7.0+PTX'),
         ('Turing', '7.5+PTX'),
-        ('Ampere', '8.0+PTX'),
+        ('Ampere', '8.0;8.6+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5', '8.0']
+                        '7.0', '7.2', '7.5', '8.0', '8.6']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
@@ -1525,7 +1539,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
                 stderr=subprocess.STDOUT,
                 cwd=build_directory,
                 env=env)
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as e:
         # Python 2 and 3 compatible way of getting the error object.
         _, error, _ = sys.exc_info()
         # error.output contains the stdout and stderr of the build attempt.
@@ -1534,7 +1548,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
         # mypy thinks it's Optional[BaseException] and doesn't narrow
         if hasattr(error, 'output') and error.output:  # type: ignore
             message += ": {}".format(error.output.decode())  # type: ignore
-        raise RuntimeError(message)
+        raise RuntimeError(message) from e
 
 
 def _import_module_from_library(module_name, path, is_python_module):
@@ -1611,6 +1625,8 @@ def _write_ninja_file_to_build_library(path,
             cuda_flags += extra_cuda_cflags
             if not any(flag.startswith('-std=') for flag in cuda_flags):
                 cuda_flags.append('-std=c++14')
+            if os.getenv("CC") is not None:
+                cuda_flags = ['-ccbin', os.getenv("CC")] + cuda_flags
     else:
         cuda_flags = None
 

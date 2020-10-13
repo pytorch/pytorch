@@ -35,7 +35,6 @@ if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT"
   else
     sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
   fi
-  sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
   sudo mkdir -p /var/run/sshd
 fi
 
@@ -120,6 +119,11 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
     build_args+=("-DUSE_VULKAN=ON")
   fi
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
+fi
+
+if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
+  export USE_VULKAN=1
+  export VULKAN_SDK=/var/lib/jenkins/vulkansdk/
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -214,9 +218,11 @@ else
     # set only when building other architectures
     # only use for "python setup.py install" line
     if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
-      WERROR=1 python setup.py install
+      WERROR=1 python setup.py bdist_wheel
+      python -mpip install dist/*.whl
     else
-      python setup.py install
+      python setup.py bdist_wheel
+      python -mpip install dist/*.whl
     fi
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
@@ -228,6 +234,11 @@ else
     fi
 
     assert_git_not_dirty
+    # Copy ninja build logs to dist folder
+    mkdir -p dist
+    if [ -f build/.ninja_log ]; then
+      cp build/.ninja_log dist
+    fi
 
     # Build custom operator tests.
     CUSTOM_OP_BUILD="$PWD/../custom-op-build"

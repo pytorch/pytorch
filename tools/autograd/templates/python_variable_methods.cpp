@@ -12,7 +12,6 @@
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/jit/frontend/tracer.h"
 #ifdef USE_CUDA
-#include "torch/csrc/cuda/Stream.h"
 #include "torch/csrc/cuda/Event.h"
 #endif
 #include "torch/csrc/utils/cuda_lazy_init.h"
@@ -30,6 +29,7 @@
 
 #include <ATen/ATen.h>
 #include "c10/util/Optional.h"
+#include "c10/core/Stream.h"
 
 #include <stdexcept>
 
@@ -40,6 +40,7 @@ using at::Backend;
 using at::Scalar;
 using at::ScalarType;
 using at::Tensor;
+using c10::Stream;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
@@ -325,13 +326,22 @@ static bool dispatch_to_Bool(const Tensor & self) {
 static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
-    HANDLE_TH_ERRORS
-    return handle_torch_function(self, "__bool__");
-    END_HANDLE_TH_ERRORS
+    return handle_torch_function(self, "__float__");
   }
   jit::tracer::warn("Converting a tensor to a Python float", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   return wrap(dispatch_to_CDouble(self_));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_complex_scalar(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function(self)) {
+    return handle_torch_function(self, "__complex__");
+  }
+  jit::tracer::warn("Converting a tensor to a Python complex", jit::tracer::WARN_PYTHON_DATAFLOW);
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  return wrap(dispatch_to_CComplexDouble(self_));
   END_HANDLE_TH_ERRORS
 }
 
@@ -379,7 +389,7 @@ static Tensor dispatch_invert(const Tensor & self) {
 static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
-    return handle_torch_function(self, "__float__");
+    return handle_torch_function(self, "__invert__");
   }
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (!isIntegralType(self_.scalar_type(), /*includeBool=*/true)) {
@@ -692,27 +702,6 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
   jit::tracer::warn("Converting a tensor to a NumPy array", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   return torch::utils::tensor_to_numpy(self_);
-  END_HANDLE_TH_ERRORS
-}
-
-// TODO: move this to ATen. We would need to expose Stream objects in ATen.
-static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
-{
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
-    auto args = py::make_tuple(py::handle(arg));
-    return handle_torch_function(self, "record_stream", args.ptr());
-  }
-#ifdef USE_CUDA
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  if (!THCPStream_Check(arg)) {
-    return PyErr_Format(PyExc_TypeError, "expected Stream object");
-  }
-  c10::cuda::CUDACachingAllocator::recordStream(self_.storage().data_ptr(), at::cuda::CUDAStream::unpack(((THCPStream*)arg)->cdata));
-  Py_RETURN_NONE;
-#else
-  throw std::runtime_error("PyTorch compiled without CUDA support");
-#endif
   END_HANDLE_TH_ERRORS
 }
 
@@ -1133,6 +1122,7 @@ PyMethodDef variable_methods[] = {
   {"__mod__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_remainder>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__bool__", (PyCFunction)THPVariable_bool_scalar, METH_NOARGS, NULL},
   {"__float__", (PyCFunction)THPVariable_float_scalar, METH_NOARGS, NULL},
+  {"__complex__", (PyCFunction)THPVariable_complex_scalar, METH_NOARGS, NULL},
   {"__int__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__long__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__index__", (PyCFunction)THPVariable_index_scalar, METH_NOARGS, NULL},
@@ -1171,7 +1161,6 @@ PyMethodDef variable_methods[] = {
   {"nonzero", (PyCFunction)(void(*)(void))THPVariable_nonzero, METH_VARARGS | METH_KEYWORDS, NULL},
   {"numel", (PyCFunction)THPVariable_numel, METH_NOARGS, NULL},
   {"numpy", (PyCFunction)THPVariable_numpy, METH_NOARGS, NULL},
-  {"record_stream", (PyCFunction)THPVariable_record_stream, METH_O, NULL},
   {"requires_grad_", (PyCFunction)(void(*)(void))THPVariable_requires_grad_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"set_", (PyCFunction)(void (*)(void))THPVariable_set_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"short", (PyCFunction)(void(*)(void))THPVariable_short, METH_VARARGS | METH_KEYWORDS, NULL},

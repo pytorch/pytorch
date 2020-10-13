@@ -141,13 +141,16 @@ def get_class_properties(cls, self_name):
     """
     props = inspect.getmembers(
         cls, predicate=lambda m: isinstance(m, property))
+    # Any property that should not compiled must be in this list on the Module.
+    unused_properties = getattr(cls, "__jit_unused_properties__", [])
 
     # Create Property TreeView objects from inspected property objects.
     properties = []
     for prop in props:
-        getter = get_jit_def(prop[1].fget, f"__{prop[0]}_getter", self_name=self_name)
-        setter = get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name) if prop[1].fset else None
-        properties.append(Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter))
+        if prop[0] not in unused_properties and not should_drop(prop[1].fget):
+            getter = get_jit_def(prop[1].fget, f"__{prop[0]}_getter", self_name=self_name)
+            setter = get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name) if prop[1].fset else None
+            properties.append(Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter))
 
     return properties
 
@@ -175,6 +178,34 @@ def get_jit_class_def(cls, self_name):
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
     return build_class_def(ctx, py_ast.body[0], methods, properties, self_name)
 
+def check_and_indent_multiline_strings(sourcelines):
+    """
+    This is a helper function which checks for multiline strings and
+    indents the strings by calculating the leading space and appending
+    the spaces to each line of the multiline string.The failure to indent
+    multiline strings causes failures during downstream dedent
+    Arguments:
+        sourcelines: This is an array of source lines of the function
+    Returns:
+        This function returns the updated indented sources,i.e,sourcelines
+    """
+    indices = []
+    triple_quotes = '\"\"\"'
+    # Extract the start and end line number of the multiline string
+    for index, source in enumerate(sourcelines):
+        if triple_quotes in source and source.find(triple_quotes) == source.rfind(triple_quotes):
+            indices.append(index)
+
+    # Adding leading space for every line of the multiline string
+    indices_length = len(indices)
+    for i in range(0, indices_length, 2):
+        if i + 1 < indices_length:
+            start = indices[i]
+            end = indices[i + 1]
+            leading_space = len(sourcelines[start]) - len(sourcelines[start].lstrip())
+            for lines in range(start + 1, end + 1):
+                sourcelines[lines] = ' ' * leading_space + sourcelines[lines]
+    return sourcelines
 
 def get_jit_def(fn, def_name, self_name=None):
     """
@@ -192,11 +223,12 @@ def get_jit_def(fn, def_name, self_name=None):
         self_name: If this function is a method, what the type name of `self` is.
     """
     sourcelines, file_lineno, filename = get_source_lines_and_file(fn, torch._C.ErrorReport.call_stack())
+    sourcelines = check_and_indent_multiline_strings(sourcelines)
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-        raise RuntimeError("Expected a single top-level function")
+        raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, True)
@@ -204,13 +236,16 @@ def get_jit_def(fn, def_name, self_name=None):
 
     # Swap out the function signature and body if it is unused
     if should_drop(fn):
-        unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")").body[0]
-        fn_def.body = unused_fn_def.body
+        unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")")
+        if len(unused_fn_def.body) != 1 or not isinstance(unused_fn_def.body[0], ast.FunctionDef):
+            raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
+        unused_def = unused_fn_def.body[0]
+        fn_def.body = unused_def.body
         # kwarg/vararg not supported by `build_def`
         fn_def.args.kwarg = fn_def.args.vararg = None
         for arg in fn_def.args.args + fn_def.args.kwonlyargs:
             # Replace potentially unsupported type annotations by "Any"
-            arg.annotation = unused_fn_def.args.args[0].annotation
+            arg.annotation = unused_def.args.args[0].annotation
 
     return build_def(ctx, fn_def, type_line, def_name, self_name=self_name)
 
@@ -299,18 +334,39 @@ def get_default_args(fn):
     }
 
 
+def get_default_args_for_class(cls):
+    """
+    Get default arguments for all methods in a class (except for static methods).
+
+    Args:
+        cls: type - The class type to inspect for default arguments.
+    Returns:
+        A Dict[str, Dict[str, Any]] which maps each method name to a Dict[str, Any]
+        that maps each argument name to its default value.
+    """
+    # Get methods (except static methods because those are compiled separately as
+    # if they were independent script functions).
+    methods = inspect.getmembers(
+        cls,
+        predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m))
+        and not is_static_fn(cls, m.__name__)
+        and m.__name__ in cls.__dict__
+    )
+
+    # Get method defaults. Property defaults do not need to be considered
+    # because setters cannot be invoked without a value.
+    defaults = {method_name: get_default_args(method_impl) for method_name, method_impl in methods}
+
+    return defaults
+
+
 class WithItemBuilder(Builder):
     @staticmethod
     def build_withitem(ctx, item):
         lineno = item.context_expr.lineno
         start = item.context_expr.col_offset
+        end = start + len(pretty_node_names[ast.With])
         op_vars = item.optional_vars
-
-        if op_vars:
-            end = op_vars.col_offset + len(op_vars.id)
-        else:
-            end = start + len(item.context_expr.id)
-
         r = ctx.make_range(lineno, start, end)
 
         return WithItem(r, build_expr(ctx, item.context_expr), build_expr(ctx, op_vars) if op_vars else None)
@@ -570,10 +626,9 @@ class ExprBuilder(Builder):
         sub_expr = build_expr(ctx, expr.operand)
         op = type(expr.op)
         op_token = ExprBuilder.unop_map.get(op)
-        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(op_token))
         if op_token is None:
-            err_range = ctx.make_raw_range(r.start, sub_expr.range().end)
-            raise NotSupportedError(err_range, "unsupported unary operator: " + op.__name__)
+            raise NotSupportedError(expr.range(), "unsupported unary operator: " + op.__name__)
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(op_token))
         return UnaryOp(r, op_token, sub_expr)
 
     @staticmethod
@@ -631,11 +686,10 @@ class ExprBuilder(Builder):
             return SliceExpr(base.range(), lower, upper, step)
 
         def build_Index(ctx, base, index_expr):
-            if isinstance(index_expr.value, ast.Tuple) or \
-                    isinstance(index_expr.value, ast.List):
+            if isinstance(index_expr.value, ast.Tuple):
                 raise NotSupportedError(base.range(),
                                         "slicing multiple dimensions with "
-                                        "sequences not supported yet")
+                                        "tuples not supported yet")
             return build_expr(ctx, index_expr.value)
 
         def build_ExtSlice(ctx, base, extslice):

@@ -272,6 +272,10 @@ public:
     return operatorIterator_->op.dumpState();
   }
 
+  std::string dumpComputedTable() const {
+    return operatorIterator_->op.dumpComputedTable();
+  }
+
   void checkInvariants() const {
     return operatorIterator_->op.checkInvariants();
   }
@@ -340,6 +344,8 @@ template<class... Args> inline void unused_arg_(const Args&...) {}
 template<class Return, class... Args>
 inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKey dispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  // No alias dispatch key is allowed at runtime.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKey));
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
@@ -355,7 +361,7 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
       int64_t seq_num = -1;
       // Setting sequence number in the Autograd case to associate
       // the forward range with the coresponding Autograd's node
-      if (dispatchKey == DispatchKey::Autograd && at::GradMode::is_enabled()) {
+      if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
         seq_num = at::sequence_number::peek();
       }
       if (guard.needs_inputs) {
@@ -406,7 +412,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   if (C10_UNLIKELY(guard.active)) {
     if (shouldRecord(dispatchKey) && entry.isObserved()) {
       int64_t seq_num = -1;
-      if (dispatchKey == DispatchKey::Autograd && at::GradMode::is_enabled()) {
+      if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
         seq_num = at::sequence_number::peek();
       }
       if (guard.needs_inputs) {
