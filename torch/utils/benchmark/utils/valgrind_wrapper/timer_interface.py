@@ -269,10 +269,11 @@ class CopyIfCallgrind:
 
     See `GlobalsBridge` for why this matters.
     """
-    def __init__(self, value: Any):
+    def __init__(self, value: Any, *, setup: Optional[str] = None):
         for method, supported_types in _GLOBALS_TYPES_WHITELIST.items():
             if any(isinstance(value, t) for t in supported_types):
                 self._value: Any = value
+                self._setup: Optional[str] = setup
                 self._serialization: Serialization = method
                 break
         else:
@@ -289,6 +290,10 @@ class CopyIfCallgrind:
     @property
     def value(self) -> Any:
         return self._value
+
+    @property
+    def setup(self) -> Optional[str]:
+        return self._setup
 
     @property
     def serialization(self) -> Serialization:
@@ -401,6 +406,9 @@ class GlobalsBridge:
     def construct(self) -> str:
         load_lines = []
         for name, wrapped_value in self._globals.items():
+            if wrapped_value.setup is not None:
+                load_lines.append(textwrap.dedent(wrapped_value.setup))
+
             if wrapped_value.serialization == Serialization.PICKLE:
                 path = os.path.join(self._data_dir, f"{name}.pkl")
                 load_lines.append(
@@ -692,12 +700,11 @@ class _ValgrindWrapper(object):
             # =============================================================================
             # == User specified setup =====================================================
             # =============================================================================
+            # Load serialized globals
+            {load_globals}
 
             # User setup str
             {setup}
-
-            # Load serialized globals
-            {load_globals}
 
             for _ in range({warmup_number}):
             {indented_stmt}

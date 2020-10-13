@@ -106,6 +106,11 @@ def load_callgrind_artifacts() -> Tuple[benchmark_utils.CallgrindStats, benchmar
     return stats_no_data, stats_with_data
 
 
+class MyModule(torch.nn.Module):
+    def forward(self, x):
+        return x + 1
+
+
 class TestBenchmarkUtils(TestCase):
     def regularizeAndAssertExpectedInline(
         self, x: Any,
@@ -436,6 +441,15 @@ class TestBenchmarkUtils(TestCase):
                 globals={"x": 1}
             ).collect_callgrind(collect_baseline=False)
 
+        with self.assertRaisesRegex(
+            # Subprocess raises AttributeError (from pickle),
+            # _ValgrindWrapper re-raises as generic OSError.
+            OSError, "AttributeError: Can't get attribute 'MyModule'"):
+            benchmark_utils.Timer(
+                "model(1)",
+                globals={"model": benchmark_utils.CopyIfCallgrind(MyModule())}
+            ).collect_callgrind(collect_baseline=False)
+
 
         @torch.jit.script
         def add_one(x):
@@ -446,7 +460,15 @@ class TestBenchmarkUtils(TestCase):
             setup="x = torch.ones((1,))",
             globals={
                 "add_one": benchmark_utils.CopyIfCallgrind(add_one),
-                "k": benchmark_utils.CopyIfCallgrind(5)
+                "k": benchmark_utils.CopyIfCallgrind(5),
+                "model": benchmark_utils.CopyIfCallgrind(
+                    MyModule(),
+                    setup=f"""\
+                    import sys
+                    sys.path.append({repr(os.path.split(os.path.abspath(__file__))[0])})
+                    from test_benchmark_utils import MyModule
+                    """
+                )
             }
         )
 
