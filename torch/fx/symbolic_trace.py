@@ -1,6 +1,6 @@
 import inspect
 from types import CodeType, FunctionType
-from typing import Any, Optional, List
+from typing import Any, Callable, Optional, List, Union
 import torch
 
 from .node import Argument
@@ -119,22 +119,31 @@ class Tracer(TracerBase):
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
-    def trace(self, root: torch.nn.Module) -> Graph:
-        self.root = root
-        fn = type(root).forward
+    def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
+        if isinstance(root, torch.nn.Module):
+            self.root = root
+            fn = type(root).forward
+        else:
+            self.root = torch.nn.Module()
+            fn = root
+
         self.graph = Graph()
 
         assert isinstance(fn, FunctionType)
         co = fn.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
         names_iter = iter(co.co_varnames)
-        next(names_iter)  # skip self
-        args : List[Any] = [root]
+        args : List[Any] = []
+        skip_arg_idx = 0
+        if isinstance(root, torch.nn.Module):
+            skip_arg_idx = 1
+            next(names_iter)  # skip self
+            args.append(root)
 
         def make_proxy_placeholder():
             name = next(names_iter)
             return self._proxy_placeholder(name, fn.__annotations__.get(name, None))
-        args.extend(make_proxy_placeholder() for _ in range(1, total_args))
+        args.extend(make_proxy_placeholder() for _ in range(skip_arg_idx, total_args))
 
         if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
             # TODO: type annotations for *args and **kwargs
@@ -170,5 +179,5 @@ class Tracer(TracerBase):
 #
 # Args:
 #   - root - the `nn.Module` instance to trace
-def symbolic_trace(root : torch.nn.Module) -> GraphModule:
-    return GraphModule(root, Tracer().trace(root))
+def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
+    return GraphModule(root if isinstance(root, torch.nn.Module) else torch.nn.Module(), Tracer().trace(root))
