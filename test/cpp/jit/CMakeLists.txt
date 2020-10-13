@@ -58,7 +58,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_utils.cpp
 )
 
-if(USE_CUDA)
+if(USE_CUDA OR USE_ROCM)
   list(APPEND JIT_TEST_SRCS ${JIT_TEST_ROOT}/test_gpu.cpp)
 endif()
 

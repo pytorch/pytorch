@@ -134,9 +134,8 @@ TEST(InterpreterTest, Basic_CUDA) {
   InterpreterState lstm_interp(lstm_function);
   auto outputs = run(lstm_interp, {input[0], hx, cx, w_ih, w_hh});
   std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
-
-  ASSERT_TRUE(exactlyEqual(outputs[0], hx));
-  ASSERT_TRUE(exactlyEqual(outputs[1], cx));
+  ASSERT_TRUE(outputs[0].allclose(hx));
+  ASSERT_TRUE(outputs[1].allclose(cx));
 }
 } // namespace jit
 } // namespace torch
