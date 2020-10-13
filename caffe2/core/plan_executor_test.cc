@@ -220,6 +220,7 @@ struct HandleExecutorThreadExceptionsGuard {
 TEST(PlanExecutorTest, ErrorAsyncPlan) {
   HandleExecutorThreadExceptionsGuard guard;
 
+  cancelCount = 0;
   PlanDef plan_def = parallelErrorPlan();
   Workspace ws;
   ASSERT_THROW(ws.RunPlan(plan_def), TestError);
@@ -267,6 +268,17 @@ TEST(PlanExecutorTest, BlockingErrorPlan) {
       "failed to stop concurrent workers after exception: test error");
 }
 #endif
+
+TEST(PlanExecutorTest, ErrorPlanWithCancellableStuckNet) {
+  HandleExecutorThreadExceptionsGuard guard;
+
+  cancelCount = 0;
+  PlanDef plan_def = parallelErrorPlanWithCancellableStuckNet();
+  Workspace ws;
+
+  ASSERT_THROW(ws.RunPlan(plan_def), TestError);
+  ASSERT_EQ(cancelCount, 1);
+}
 
 } // namespace caffe2
 
