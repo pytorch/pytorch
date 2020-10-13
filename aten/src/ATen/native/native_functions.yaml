@@ -1134,7 +1134,7 @@
   variants: method
   device_guard: False
   dispatch:
-    DefaultBackend: copy_
+    CPU, CUDA: copy_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   use_c10_dispatcher: full
