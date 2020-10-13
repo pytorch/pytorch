@@ -582,6 +582,7 @@ BaseTy = Enum('BaseTy', (
     'MemoryFormat',
     'QScheme',
     'Storage',
+    'Stream',
     'ConstQuantizerPtr',  # TODO: rename
 ))
 

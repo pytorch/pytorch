@@ -8161,6 +8161,12 @@
   variants: function, method
   device_guard: False
 
+- func: record_stream(Tensor(a!) self, Stream s) -> ()
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    CUDA: record_stream_cuda
+
 - func: isposinf(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
