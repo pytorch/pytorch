@@ -179,8 +179,8 @@ class Optimizer(object):
                 (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
+        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
         for group in self.param_groups:
-            grads_to_zero = []
             for p in group['params']:
                 if p.grad is not None:
                     if set_to_none:
@@ -194,10 +194,11 @@ class Optimizer(object):
                         if p.grad.is_sparse:
                             p.grad.zero_()
                         else:
-                            grads_to_zero.append(p.grad)
+                            per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
 
-            if len(grads_to_zero) > 0:
-                torch._foreach_zero_(grads_to_zero)
+            for _, per_dtype_grads in per_device_and_dtype_grads.items():
+                for grads in per_dtype_grads.values():
+                    torch._foreach_zero_(grads)
 
     def step(self, closure):
         r"""Performs a single optimization step (parameter update).
