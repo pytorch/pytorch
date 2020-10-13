@@ -3299,7 +3299,7 @@ The shapes of ``input`` and ``other`` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
 .. note::
-    The backward pass is not currently supported.
+    The backward pass for :math:`\text{input}` has not been implemented.
 
 """ + r"""
 Args:
