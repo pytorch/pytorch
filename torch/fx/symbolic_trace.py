@@ -156,7 +156,7 @@ class Tracer(TracerBase):
         orig_call = torch.nn.Module.__call__
 
         def module_call_wrapper(mod, *args, **kwargs):
-            module_qualified_name = _find_module(root, mod)
+            module_qualified_name = _find_module(self.root, mod)
             if not self.is_leaf_module(mod, module_qualified_name):
                 return orig_call(mod, *args, **kwargs)
             else:
