@@ -940,6 +940,12 @@ class TestLinalg(TestCase):
         for a_shape, d in itertools.product(a_shapes, dims):
             run_test(a_shape, d)
 
+        # Check for empty inputs. NumPy does not work for these cases.
+        a = torch.empty(0, 0, 1, 2, 3, 0)
+        b = torch.empty(a.shape[:2])
+        x = torch.linalg.tensorsolve(a, b)
+        self.assertTrue(x.shape == a.shape[2:])
+
     # TODO: once "solve_cuda" supports complex dtypes, they shall be added to above test
     @unittest.expectedFailure
     @onlyCUDA
