@@ -30,15 +30,13 @@ class TestSparseNormalize(hu.HypothesisTestCase):
     def test_sparse_normalize(
         self, inputs, use_max_norm, norm, data_strategy, use_fp16, gc, dc
     ):
-        use_fp16 = True
         param, grad = inputs
         param += 0.02 * np.sign(param)
         param[param == 0.0] += 0.02
 
         if use_fp16:
             param = param.astype(np.float16)
-            if grad is not None:
-                grad = grad.astype(np.float16)
+            grad = grad.astype(np.float16)
 
         # Create an indexing array containing values that are lists of indices,
         # which index into param
@@ -58,7 +56,7 @@ class TestSparseNormalize(hu.HypothesisTestCase):
         )
 
         op1 = core.CreateOperator(
-            "Float16SparseNormalize" if use_fp16 else "Float16SparseNormalize",
+            "Float16SparseNormalize" if use_fp16 else "SparseNormalize",
             ["param", "indices"],
             ["param"],
             use_max_norm=use_max_norm,
