@@ -205,8 +205,8 @@ class TestUnaryUfuncs(TestCase):
         t = make_tensor((5, 5), device, dtype, low=op.domain[0], high=op.domain[1])
         expected = op(t)
 
-        for inplace, alt in ((False, op.get_method()), (True, op.get_inplace()),
-                             (False, torch.jit.script(_fn))):
+        for alt, inplace in ((op.get_method(), False), (op.get_inplace(), True),
+                             (torch.jit.script(_fn), False)):
             if alt is None:
                 with self.assertRaises(RuntimeError):
                     alt(t.clone())
@@ -448,9 +448,8 @@ class TestUnaryUfuncs(TestCase):
             out = torch.empty_like(input, dtype=out_dtype)
             if op.promotes_integers_to_float:
                 self._test_out_promote_int_to_float_op(op, input, out)
-                continue
-
-            self._test_out_arg(op, input, out)
+            else:
+                self._test_out_arg(op, input, out)
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_nan_to_num(self, device, dtype):
