@@ -128,13 +128,6 @@ class TestStringFormatting(JitTestCase):
             return "%s %d %f in template" % (arg1, arg2, arg3)
         self.assertEqual("foo 1 1.000000 in template", fn("foo", 1, 1))
 
-    #def test_string_interpolation_with_double_tuple(self):
-    #    with self.assertRaisesRegex(RuntimeError, "Argument to format string must be a single str or Tuple"):
-    #        @torch.jit.script
-    #        def fn(arg1: str, arg2: int, arg3: float, arg4: str) -> str:
-    #            return "%s %d %f %s in template" % (arg1, arg2) (arg3, arg4)
-    #        fn("foo", 1, 1.0, "bar")
-
     def test_string_interpolation_with_subscript(self):
         @torch.jit.script
         def fn(arg1: List[str]) -> str:

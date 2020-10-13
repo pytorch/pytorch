@@ -41,17 +41,23 @@ void format(Stack& stack, size_t num_inputs) {
 
 // IValue tags are intentionally private, so we need additional logic to cast
 // the IValue type to the specified format.
-void addFormattedArg(char key, const IValue& ival, std::stringstream& ss, int precision=6) {
-  //TODO: Implement precison-based formatting
+void addFormattedArg(
+    char key,
+    const IValue& ival,
+    std::stringstream& ss,
+    int precision = 6) {
+  // TODO: Implement precison-based formatting
   switch (key) {
     case 'd':
     case 'i': {
       TORCH_CHECK(
-          ival.isScalar(), "Got ", ival.tagKind(), ", but a number is required for formatting");
+          ival.isScalar(),
+          "Got ",
+          ival.tagKind(),
+          ", but a number is required for formatting");
       if (ival.isInt()) {
         ss << ival.toInt();
-      }
-      else {
+      } else {
         ss << static_cast<int>(ival.toDouble());
       }
       break;
@@ -59,7 +65,10 @@ void addFormattedArg(char key, const IValue& ival, std::stringstream& ss, int pr
     case 'e':
     case 'E': {
       TORCH_CHECK(
-        ival.isScalar(), "Got ", ival.tagKind(), ", but a number is required for formatting");
+          ival.isScalar(),
+          "Got ",
+          ival.tagKind(),
+          ", but a number is required for formatting");
       ss << std::setprecision(precision) << std::scientific;
       if (key == 'E') {
         ss << std::uppercase;
@@ -74,7 +83,10 @@ void addFormattedArg(char key, const IValue& ival, std::stringstream& ss, int pr
     case 'f':
     case 'F': {
       TORCH_CHECK(
-        ival.isScalar(), "Got ", ival.tagKind(), ", but a number is required for formatting");
+          ival.isScalar(),
+          "Got ",
+          ival.tagKind(),
+          ", but a number is required for formatting");
       ss << std::setprecision(precision) << std::fixed;
       if (ival.isInt()) {
         ss << static_cast<float>(ival.toInt());
@@ -84,11 +96,14 @@ void addFormattedArg(char key, const IValue& ival, std::stringstream& ss, int pr
       break;
     }
     case 'c': {
-      TORCH_CHECK(ival.isInt() || (ival.isString() && ival.toStringRef().length() == 1), "Got ", ival.tagKind(), ", but an int or char is required for formatting");
+      TORCH_CHECK(
+          ival.isInt() || (ival.isString() && ival.toStringRef().length() == 1),
+          "Got ",
+          ival.tagKind(),
+          ", but an int or char is required for formatting");
       if (ival.isInt()) {
         ss << static_cast<char>(ival.toInt());
-      }
-      else {
+      } else {
         ss << ival.toStringRef();
       }
       break;
@@ -96,14 +111,14 @@ void addFormattedArg(char key, const IValue& ival, std::stringstream& ss, int pr
     case 's': {
       if (ival.isString()) {
         ss << ival.toStringRef();
-      }
-      else {
+      } else {
         ss << ival;
       }
       break;
     }
     default: {
-      TORCH_CHECK(false, "The specifier ", key, " is not supported in TorchScript");
+      TORCH_CHECK(
+          false, "The specifier ", key, " is not supported in TorchScript");
     }
   }
 }
@@ -111,7 +126,7 @@ void addFormattedArg(char key, const IValue& ival, std::stringstream& ss, int pr
 void percentFormat(Stack& stack, size_t num_inputs) {
   auto format = peek(stack, 0, num_inputs).toStringRef();
   auto args = last(stack, num_inputs - 1)[0];
-  auto args_size = 1;     // assumed size
+  auto args_size = 1; // assumed size
   if (args.isTuple()) {
     args_size = args.toTuple()->elements().size();
   }
@@ -136,8 +151,7 @@ void percentFormat(Stack& stack, size_t num_inputs) {
     IValue arg;
     if (args.isTuple()) {
       arg = args.toTuple()->elements()[used_args];
-    }
-    else {
+    } else {
       arg = args;
     }
     addFormattedArg(key, arg, ss);

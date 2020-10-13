@@ -3137,16 +3137,18 @@ struct to_ir {
             tree->range(), *method.graph(), kind, named_values, {});
       }
       case '%': {
-        auto first_arg = emitSugaredExpr(Expr(tree->tree(0)), 0)->asValue(tree->tree(0)->range(), method);
-        auto first_arg_type = first_arg->type()->kind();
-        auto first_arg_type_string = std::string(typeKindToString(first_arg_type));
-        if (type_string.compare("StringType") == 0) {
+        auto lhs = emitSugaredExpr(Expr(tree->tree(0)), 0)
+                       ->asValue(tree->tree(0)->range(), method);
+        auto lhs_type = first_arg->type();
+        if (lhs_type == StringType::get()) {
           auto values = getValues(tree->trees(), /*maybe_unpack=*/false);
           auto node = graph->create(aten::percentFormat, values, 1)
                           ->setSourceRange(tree->range());
           Value* output = graph->insertNode(node)->output();
           output->setType(StringType::get());
           return output;
+        } else {
+          continue;
         }
       }
       case TK_IN:

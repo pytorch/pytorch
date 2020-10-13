@@ -211,7 +211,7 @@ RegisterOperators reg(
            push(stack, c10::Device(pop(stack).toStringRef()));
          },
          aliasAnalysisFromSchema()),
-      Operator(
+     Operator(
          "aten::percentFormat(str self, ...) -> str",
          [](Stack* stack) {
            size_t num_inputs = pop(stack).toInt();
