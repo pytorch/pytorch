@@ -974,44 +974,48 @@ Arguments:
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
-      .def("is_success",
-           [](::c10d::ProcessGroup::Work& work) -> bool {
-             TORCH_WARN_ONCE("ProcessGroup::Work::is_success API is being "
-                  "deprecated, please ping "
-                  "https://github.com/pytorch/pytorch/issues/46291 "
-                  "if you see this warning");
-               return work.isSuccess();
-           })
-      .def("exception",
-           [](::c10d::ProcessGroup::Work& work) -> std::exception_ptr {
-             TORCH_WARN_ONCE("ProcessGroup::Work::exception API is being "
-                  "deprecated, please ping "
-                  "https://github.com/pytorch/pytorch/issues/46291 "
-                  "if you see this warning");
-               return work.exception();
-           })
-      .def("source_rank",
-           [](::c10d::ProcessGroup::Work& work) -> int {
-             TORCH_WARN_ONCE("ProcessGroup::Work::source_rank API is being "
-                  "deprecated, please ping "
-                  "https://github.com/pytorch/pytorch/issues/46291 "
-                  "if you see this warning");
-               return work.sourceRank();
-           })
+      .def(
+          "is_success",
+          [](::c10d::ProcessGroup::Work& work) -> bool {
+            TORCH_WARN_ONCE("ProcessGroup::Work::is_success API is being "
+                "deprecated, please ping "
+                "https://github.com/pytorch/pytorch/issues/46291 "
+                "if you see this warning");
+            return work.isSuccess();
+          })
+      .def(
+          "exception",
+          [](::c10d::ProcessGroup::Work& work) -> std::exception_ptr {
+            TORCH_WARN_ONCE("ProcessGroup::Work::exception API is being "
+                "deprecated, please ping "
+                "https://github.com/pytorch/pytorch/issues/46291 "
+                "if you see this warning");
+            return work.exception();
+          })
+      .def(
+          "source_rank",
+          [](::c10d::ProcessGroup::Work& work) -> int {
+            TORCH_WARN_ONCE("ProcessGroup::Work::source_rank API is being "
+                "deprecated, please ping "
+                "https://github.com/pytorch/pytorch/issues/46291 "
+                "if you see this warning");
+            return work.sourceRank();
+          })
       .def("_source_rank", &::c10d::ProcessGroup::Work::sourceRank)
       .def(
           "result",
           [](::c10d::ProcessGroup::Work& work) -> std::vector<at::Tensor> {
             return work.result();
           })
-      .def("synchronize",
+      .def(
+          "synchronize",
           [](::c10d::ProcessGroup::Work& work) -> void {
-             TORCH_WARN_ONCE("ProcessGroup::Work::synchronize API is being "
-                  "deprecated, please ping "
-                  "https://github.com/pytorch/pytorch/issues/46291 "
-                  "if you see this warning");
-               work.synchronize();
-           })
+            TORCH_WARN_ONCE("ProcessGroup::Work::synchronize API is being "
+                "deprecated, please ping "
+                "https://github.com/pytorch/pytorch/issues/46291 "
+                 "if you see this warning");
+            work.synchronize();
+          })
       .def(
           "wait",
           &::c10d::ProcessGroup::Work::wait,
