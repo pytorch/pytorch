@@ -263,7 +263,6 @@ void hip_parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
     dim3 catGrid;
     getCatGrid(batchCounter, catGrid);
 
-
     if (memory_format != c10::MemoryFormat::Contiguous) {
       switch (dimension) {
       case 0:
