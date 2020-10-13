@@ -8,9 +8,9 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN, make_tensor)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCPU, dtypesIfCUDA,
-     onlyCUDA, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
+     onlyCUDA, onlyCPU, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
-from torch.autograd import gradcheck
+from torch.autograd import gradcheck, gradgradcheck
 
 if TEST_NUMPY:
     import numpy as np
@@ -977,6 +977,35 @@ class TestLinalg(TestCase):
         expected_L = np.linalg.cholesky(A.cpu().numpy())
         actual_L = torch.linalg.cholesky(A)
         self.assertEqual(actual_L, expected_L)
+
+    # TODO: enable CUDA tests once
+    # RuntimeError: "triangular_solve_cuda" not implemented for 'ComplexDouble' is fixed
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.float64, torch.complex128)
+    def test_cholesky_autograd(self, device, dtype):
+        def func(root):
+            x = 0.5 * (root + root.transpose(-1, -2).conj())
+            return torch.linalg.cholesky(x)
+
+        def run_test(shape):
+            root = torch.rand(*shape, dtype=dtype, device=device, requires_grad=True)
+            root = root + torch.eye(shape[-1], dtype=dtype, device=device)
+
+            gradcheck(func, root)
+            # TODO: gradgradcheck does not work correctly yet for complex
+            if not dtype.is_complex:
+                gradgradcheck(func, root)
+
+            root = torch.rand(*shape, dtype=dtype, device=device)
+            root = torch.matmul(root, root.transpose(-1, -2).conj())
+            root.requires_grad_()
+            chol = torch.linalg.cholesky(root).sum().backward()
+            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())  # Check the gradient is hermitian
+
+        shapes = ((3, 3), (4, 3, 2, 2))
+        for shape in shapes:
+            run_test(shape)
 
 instantiate_device_type_tests(TestLinalg, globals())
 
