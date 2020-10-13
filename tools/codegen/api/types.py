@@ -260,17 +260,12 @@ class CppSignatureGroup:
 
 # ------------------------------------------------------------------- #
 
-#                   dispatcher/legacy_dispatcher types
+#                           dispatcher types
 
 # ------------------------------------------------------------------- #
 
 @dataclass(frozen=True)
 class DispatcherExpr:
-    type: str
-    expr: str
-
-@dataclass(frozen=True)
-class LegacyDispatcherExpr:
     type: str
     expr: str
 
@@ -284,6 +279,17 @@ class DispatcherArgument:
 
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
+
+# ------------------------------------------------------------------- #
+
+#                        legacy_dispatcher types
+
+# ------------------------------------------------------------------- #
+
+@dataclass(frozen=True)
+class LegacyDispatcherExpr:
+    type: str
+    expr: str
 
 @dataclass(frozen=True)
 class LegacyDispatcherArgument:
