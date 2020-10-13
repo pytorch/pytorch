@@ -160,7 +160,6 @@ class LSTMLayer(nn.Module):
         result = torch.cat([result_fw, result_bw], result_fw.dim() - 1)
         h = torch.stack([hidden_fw[0], hidden_bw[0]], 0)
         c = torch.stack([hidden_fw[1], hidden_bw[1]], 0)
-
         return result, (h, c)
 
     @classmethod
@@ -199,6 +198,7 @@ class LSTM(nn.Module):
         self.batch_first = batch_first
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
+        self.training = False  # We don't want to train using this module
         num_directions = 2 if bidirectional else 1
 
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
@@ -206,11 +206,15 @@ class LSTM(nn.Module):
             raise ValueError("dropout should be a number in range [0, 1] "
                              "representing the probability of an element being "
                              "zeroed")
-        if dropout > 0 and num_layers == 1:
-            warnings.warn("dropout option adds dropout after all but last "
-                          "recurrent layer, so non-zero dropout expects "
-                          "num_layers greater than 1, but got dropout={} and "
-                          "num_layers={}".format(dropout, num_layers))
+        if dropout > 0:
+            warnings.warn("dropout option for quantizable LSTM is ignored. "
+                          "If you are training, please, use  nn.LSTM version "
+                          "followed by `prepare` step.")
+            if num_layers == 1:
+                warnings.warn("dropout option adds dropout after all but last "
+                              "recurrent layer, so non-zero dropout expects "
+                              "num_layers greater than 1, but got dropout={} "
+                              "and num_layers={}".format(dropout, num_layers))
 
         layers = [LSTMLayer(self.input_size, self.hidden_size,
                             self.bias, self.batch_first,
@@ -226,9 +230,12 @@ class LSTM(nn.Module):
         num_directions = 2 if self.bidirectional else 1
         if hidden is None:
             zeros = torch.zeros(num_directions, max_batch_size,
-                                self.hidden_size, dtype=x.dtype,
+                                self.hidden_size, dtype=torch.float,
                                 device=x.device)
             zeros.squeeze_(0)
+            if x.is_quantized:
+                zeros = torch.quantize_per_tensor(zeros, scale=1.0,
+                                                  zero_point=0, dtype=x.dtype)
             hidden = [(zeros, zeros) for _ in range(self.num_layers)]
         elif isinstance(hidden[0], Tensor):
             hx = hidden[0].reshape(self.num_layers, num_directions,
@@ -241,8 +248,22 @@ class LSTM(nn.Module):
 
         for idx in range(self.num_layers):
             x, hidden[idx] = self.layers[idx](x, hidden[idx])
-        hidden = hidden[-1]
-        return x, hidden
+
+        hx = []
+        cx = []
+        for idx in range(self.num_layers):
+            hx.append(hidden[idx][0])
+            cx.append(hidden[idx][1])
+        hx = torch.stack(hx)
+        cx = torch.stack(cx)
+
+        # We are creating another dimension for bidirectional case
+        # need to collapse it
+        hx = hx.reshape(-1, *hx.shape[-2:])
+        cx = cx.reshape(-1, *hx.shape[-2:])
+
+
+        return x, (hx, cx)
 
     @classmethod
     def from_float(cls, other, qconfig=None):
@@ -254,4 +275,5 @@ class LSTM(nn.Module):
         observed.qconfig = getattr(other, 'qconfig', qconfig)
         for idx in range(other.num_layers):
             observed.layers[idx] = LSTMLayer.from_float(other, idx, qconfig)
+        observed.eval()
         return observed

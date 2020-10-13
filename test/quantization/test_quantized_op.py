@@ -2673,18 +2673,73 @@ class TestDynamicQuantizedRNNOp(TestCase):
 
 
 """Tests recurrent layers."""
-class TestQuantizedRNN(TestCase):
+class TestPTQRNN(TestCase):
+    def _snr(self, x, x_hat):
+        if isinstance(x, (list, tuple)):
+            assert(len(x) == len(x_hat))
+            res = []
+            for idx in range(len(x)):
+                res.append(self._snr(x[idx], x_hat[idx]))
+            return res
+        if x_hat.is_quantized:
+            x_hat = x_hat.dequantize()
+        noise = (x - x_hat).square().mean().item()
+        if noise == 0:
+            return float('inf')
+        signal = x.square().mean().item()
+        snr = 10 * np.log10(signal / noise)
+        return snr
+
     @override_qengines
-    def test_ptq_lstm(self):
-        batch_size = 16
-        seq_len = 256
-        input_size = 32
-        num_layers = 8
+    def test_lstm(self):
+        qengine = torch.backends.quantized.engine
+
+        batch_size = 3
+        seq_len = 5
+        input_size = 7
+
+        hidden_size = 11
+        num_layers = 13
+
+        bias = True
+        batch_first = False
+        dropout = 0
+        bidirectional = True
+
+        dtype = np.uint8
+        qtype = torch.quint8
+
 
         x = np.random.randn(seq_len, batch_size, input_size)
-        qx = _quantize(x)
-        print(x, qx)
+        qx, scale, zero_point = _quantize(x, dtype=dtype)
 
+        x = torch.from_numpy(x).to(torch.float)
+        qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point,
+                                       dtype=qtype)
+
+        lstm = torch.nn.LSTM(input_size, hidden_size, num_layers=num_layers,
+                             bias=bias, batch_first=batch_first,
+                             dropout=dropout, bidirectional=bidirectional)
+        lstm.eval()
+        y_ref = lstm(x)
+
+        # Prepare
+        lstm.qconfig = torch.quantization.get_default_qconfig('qengine')
+        lstm_prepared = torch.quantization.prepare(lstm)
+        self.assertTrue(hasattr(lstm_prepared, 'layers'))
+        self.assertEqual(num_layers, len(lstm_prepared.layers))
+
+        # Calibrate
+        y = lstm_prepared(x)
+        self.assertEqual(y_ref, y)
+
+        # Quantize
+        lstm_quantized = torch.quantization.convert(lstm_prepared)
+        qy = lstm_quantized(qx)
+        snr = self._snr(y, qy)
+        snr = [snr[0]] + snr[1]
+        for power in snr:
+            self.assertTrue(power > 20)  # Assume 20dB is enough
 
 
 class TestQuantizedLinear(unittest.TestCase):
