@@ -215,6 +215,7 @@ def prepare(model, inplace=False, allow_list=None,
         observer_non_leaf_module_list: list of non-leaf modules we want to add observer
         prehook: observer we want to add to forward_pre_hook
     """
+    torch._C._log_api_usage_once("quantization_api.quantize.prepare")
     if not inplace:
         model = copy.deepcopy(model)
 
@@ -262,6 +263,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     Return:
         Quantized model.
     """
+    torch._C._log_api_usage_once("quantization_api.quantize.quantize")
     if mapping is None:
         mapping = get_static_quant_module_mappings()
     if not inplace:
@@ -302,6 +304,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
             with which the submodule needs to be replaced
 
     """
+    torch._C._log_api_usage_once("quantization_api.quantize.quantize_dynamic")
     if qconfig_spec is None:
         if dtype == torch.qint8:
             qconfig_spec = {
@@ -364,6 +367,7 @@ def prepare_qat(model, mapping=None, inplace=False):
         inplace: carry out model transformations in-place, the original module
                  is mutated
     """
+    torch._C._log_api_usage_once("quantization_api.quantize.prepare_qat")
     if mapping is None:
         mapping = get_qat_module_mappings()
     if not inplace:
@@ -387,6 +391,7 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
     Return:
         Quantized model.
     """
+    torch._C._log_api_usage_once("quantization_api.quantize.quantize_qat")
     if not inplace:
         model = copy.deepcopy(model)
     model.train()
@@ -409,6 +414,7 @@ def convert(module, mapping=None, inplace=False, remove_qconfig=True):
                  is mutated
 
     """
+    torch._C._log_api_usage_once("quantization_api.quantize.convert")
     if not inplace:
         module = copy.deepcopy(module)
     _convert(module, mapping, inplace=True)
