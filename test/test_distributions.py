@@ -4005,6 +4005,7 @@ class TestNumericalStability(TestCase):
                                  expected_gradient=tensor_type([0.]))
 
 
+# TODO: make this a pytest parameterized test
 class TestLazyLogitsInitialization(TestCase):
     def setUp(self):
         super(TestLazyLogitsInitialization, self).setUp()
@@ -4015,7 +4016,7 @@ class TestLazyLogitsInitialization(TestCase):
 
     def test_lazy_logits_initialization(self):
         for Dist, params in self.examples:
-            param = params[0]
+            param = params[0].copy()
             if 'probs' in param:
                 probs = param.pop('probs')
                 param['logits'] = probs_to_logits(probs)
@@ -4034,7 +4035,7 @@ class TestLazyLogitsInitialization(TestCase):
 
     def test_lazy_probs_initialization(self):
         for Dist, params in self.examples:
-            param = params[0]
+            param = params[0].copy()
             if 'probs' in param:
                 dist = Dist(**param)
                 dist.sample()
