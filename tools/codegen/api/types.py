@@ -198,9 +198,11 @@ class CppSignature:
 
     # Render the C++ definition for this signature, not including
     # the body (with curly braces)
-    def defn(self, prefix: str = "") -> str:
+    def defn(self, name: Optional[str] = None, *, prefix: str = "") -> str:
         cpp_args_str = ', '.join(a.str_no_default() for a in self.arguments())
-        return f"{self._returns_type} {prefix}{cpp.name(self.func)}({cpp_args_str})"
+        if name is None:
+            name = prefix + cpp.name(self.func)
+        return f"{self._returns_type} {name}({cpp_args_str})"
 
     # NB: This constructor knows how to disambiguate defaults when
     # faithful is True.  Ideally this would live as an external process
@@ -280,6 +282,47 @@ class DispatcherArgument:
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
 
+@dataclass(frozen=True)
+class DispatcherSignature:
+    # The schema this signature is derived from
+    func: FunctionSchema
+
+    # Note to self: if we ever need to reassemble tensor options, we may need to
+    # also preserve grouping with DispatcherTensorOptionsArguments.  This should
+    # be an unlikely situation, however, since the general direction we are
+    # headed is to make native:: take everything in expanded form, so you
+    # shouldn't need to reassemble
+    _arguments: Tuple[DispatcherArgument, ...]
+    _returns_type: str
+
+    def arguments(self) -> Tuple[DispatcherArgument, ...]:
+        return self._arguments
+
+    def defn(self, name: Optional[str] = None) -> str:
+        args_str = ', '.join(map(str, self.arguments()))
+        if name is None:
+            name = native.name(self.func)
+        return f"{self._returns_type} {name}({args_str})"
+
+    def exprs(self) -> Sequence[DispatcherExpr]:
+        return dispatcher.exprs(self.arguments())
+
+    # Return the C++ function type, e.g., something like int(bool)
+    def type(self) -> str:
+        dispatcher_args_types_str = ', '.join(map(lambda a: a.type, self._arguments))
+        return f'{self._returns_type} ({dispatcher_args_types_str})'
+
+    @staticmethod
+    def from_schema(func: FunctionSchema) -> 'DispatcherSignature':
+        arguments = dispatcher.arguments(func)
+        returns_type = dispatcher.returns_type(func.returns)
+
+        return DispatcherSignature(
+            func=func,
+            _arguments=arguments,
+            _returns_type=returns_type,
+        )
+
 # ------------------------------------------------------------------- #
 
 #                    native types (NativeFunctions.h)
@@ -320,5 +363,36 @@ class NativeArgument:
             mb_default = f"={self.default}"
         return f"{self.type} {self.name}{mb_default}"
 
+@dataclass(frozen=True)
+class NativeSignature:
+    # The schema this signature is derived from
+    func: FunctionSchema
+
+    _arguments: Tuple[NativeArgument, ...]
+    _returns_type: str
+
+    def defn(self, name: Optional[str] = None) -> str:
+        args_str = ', '.join(map(str, self.arguments()))
+        if name is None:
+            name = dispatcher.name(self.func)
+        return f"{self._returns_type} {name}({args_str})"
+
+    def arguments(self) -> Tuple[NativeArgument, ...]:
+        return self._arguments
+
+    def dispatcher_exprs(self) -> Sequence['DispatcherExpr']:
+        return dispatcher.nativearguments_exprs(self.arguments())
+
+    @staticmethod
+    def from_schema(func: FunctionSchema) -> 'NativeSignature':
+        arguments = native.arguments(func)
+        returns_type = native.returns_type(func.returns)
+
+        return NativeSignature(
+            func=func,
+            _arguments=arguments,
+            _returns_type=returns_type,
+        )
+
 # Functions only, no types
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp, dispatcher, native

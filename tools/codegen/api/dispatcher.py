@@ -6,7 +6,7 @@ import tools.codegen.api.native as native
 import tools.codegen.local as local
 
 import itertools
-from typing import Sequence, Optional
+from typing import Sequence, Optional, Tuple
 
 # This file describes the translation of JIT schema to the dispatcher
 # API, the *unboxed* calling convention by which invocations through
@@ -65,14 +65,14 @@ def argument(a: Argument) -> DispatcherArgument:
 def name(func: FunctionSchema) -> str:
     return cpp.name(func)
 
-def arguments(func: FunctionSchema) -> Sequence[DispatcherArgument]:
+def arguments(func: FunctionSchema) -> Tuple[DispatcherArgument, ...]:
     if local.use_c10_dispatcher().dispatcher_uses_new_style():
-        return list(map(argument, itertools.chain(func.out_arguments, func.arguments, func.kwarg_only_arguments)))
+        return tuple(map(argument, itertools.chain(func.out_arguments, func.arguments, func.kwarg_only_arguments)))
     else:
-        return [
+        return tuple(
             DispatcherArgument(type=la.type, name=la.name, argument=la.argument)
             for la in native.arguments(func)
-        ]
+        )
 
 # Given a set of CppArguments in scope, return a sequence of dispatcher
 # expressions that translate the cpp API into dispatcher API
