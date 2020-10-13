@@ -926,7 +926,6 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @dtypesIfCPU(torch.float, torch.double, torch.cfloat, torch.cdouble)
     @dtypesIfCUDA(torch.float, torch.double)
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     def test_tensorsolve(self, device, dtype):
