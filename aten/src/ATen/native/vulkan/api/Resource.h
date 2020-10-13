@@ -10,6 +10,7 @@ namespace native {
 namespace vulkan {
 namespace api {
 
+
 struct Resource final {
   class Pool;
 
@@ -25,6 +26,16 @@ struct Resource final {
     struct Barrier final {
       VkAccessFlags src;
       VkAccessFlags dst;
+    };
+
+    /*
+      Descriptor
+    */
+
+    struct Descriptor final {
+      VmaMemoryUsage usage;
+      VkMemoryPropertyFlags /* optional */ required;
+      VkMemoryPropertyFlags /* optional */ preferred;
     };
 
     VmaAllocator allocator;
@@ -89,7 +100,7 @@ struct Resource final {
 
       struct {
         VkBufferUsageFlags buffer;
-        VmaMemoryUsage memory;
+        Memory::Descriptor memory;
       } usage;
     };
 
@@ -186,7 +197,7 @@ struct Resource final {
 
       struct {
         VkImageUsageFlags image;
-        VmaMemoryUsage memory;
+        Memory::Descriptor memory;
       } usage;
 
       struct {

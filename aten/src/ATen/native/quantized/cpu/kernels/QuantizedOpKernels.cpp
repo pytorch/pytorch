@@ -629,6 +629,56 @@ void qclamp_kernel(
   });
 }
 
+void qclamp_min_kernel(const Tensor& qx, Scalar min_scalar, Tensor& qy) {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
+    qy = at::_empty_affine_quantized(
+        qx.sizes(),
+        at::device(kCPU)
+            .dtype(SCALAR_TYPE)
+            .memory_format(qx.suggest_memory_format()),
+        qx.q_scale(),
+        qx.q_zero_point(),
+        c10::nullopt);
+    using Vec = Vec256<scalar_t>;
+    auto iter = TensorIterator::unary_op(qy, qx);
+    auto min = min_scalar.to<float>();
+    scalar_t min_q = at::native::quantize_val<scalar_t>(
+        qx.q_scale(), qx.q_zero_point(), min);
+    auto min_vec = Vec(min_q);
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value) -> scalar_t {
+          return scalar_t(std::max<underlying_t>(value.val_, min_q.val_));
+        },
+        [&](Vec val) -> Vec { return val.maximum(min_vec); });
+  });
+}
+
+void qclamp_max_kernel(const Tensor& qx, Scalar max_scalar, Tensor& qy) {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
+    qy = at::_empty_affine_quantized(
+        qx.sizes(),
+        at::device(kCPU)
+            .dtype(SCALAR_TYPE)
+            .memory_format(qx.suggest_memory_format()),
+        qx.q_scale(),
+        qx.q_zero_point(),
+        c10::nullopt);
+    using Vec = Vec256<scalar_t>;
+    auto iter = TensorIterator::unary_op(qy, qx);
+    auto max = max_scalar.to<float>();
+    scalar_t max_q = at::native::quantize_val<scalar_t>(
+        qx.q_scale(), qx.q_zero_point(), max);
+    auto max_vec = Vec(max_q);
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value) -> scalar_t {
+          return scalar_t(std::min<underlying_t>(value.val_, max_q.val_));
+        },
+        [&](Vec val) -> Vec { return val.minimum(max_vec); });
+  });
+}
+
 void qthreshold_kernel(
   // TODO: For future tasks, since output quantization parameters are set equal to
   // the input ones, it might make sense to implement this completely in the
@@ -2811,6 +2861,8 @@ REGISTER_DISPATCH(qbatch_norm_stub, &q_batch_norm_kernel<false>);
 REGISTER_DISPATCH(qcat_nhwc_stub, &qcat_nhwc_kernel<false>);
 REGISTER_DISPATCH(qcat_relu_nhwc_stub, &qcat_nhwc_kernel<true>);
 REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
+REGISTER_DISPATCH(qclamp_min_stub, &qclamp_min_kernel);
+REGISTER_DISPATCH(qclamp_max_stub, &qclamp_max_kernel);
 REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
 REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
 REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
