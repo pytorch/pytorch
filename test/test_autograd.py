@@ -6951,8 +6951,6 @@ class TestAutogradDeviceType(TestCase):
             x = torch.rand(*sizes, device=device, dtype=torch.double).requires_grad_(True)
 
             gradcheck(lambda x: x.lu(get_infos=True), x)
-            # should fail
-            gradgradcheck(lambda x: x.lu(get_infos=True), x)
 
             gradcheck(lambda x: x.lu(get_infos=False), x)
 
