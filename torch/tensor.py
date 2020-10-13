@@ -394,6 +394,13 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.norm, relevant_args, self, p=p, dim=dim, keepdim=keepdim, dtype=dtype)
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
+    def _lu(self, pivot=True, get_infos=False):
+        LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
+        if get_infos:
+            return LU, pivots, infos
+        else:
+            return LU, pivots
+
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa
@@ -401,11 +408,37 @@ class Tensor(torch._C._TensorBase):
         from torch.overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.lu, relevant_args, self, pivot=pivot, get_infos=get_infos)
-        LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
-        if get_infos:
-            return LU, pivots, infos
+
+        if not self.requires_grad:
+            return torch.Tensor._lu(self, pivot=pivot, get_infos=get_infos)
         else:
-            return LU, pivots
+            class _LU(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, self, pivot=True, get_infos=False):
+                    LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
+                    P, L, U = torch.lu_unpack(LU, pivots)
+                    ctx.save_for_backward(P, L, U)
+                    ctx.mark_non_differentiable(pivots, infos)
+                    return LU, pivots, infos
+
+                @staticmethod
+                def backward(ctx, LU_grad, pivots_grad, infos_grad):
+                    P, L, U = ctx.saved_tensors
+
+                    Lt_inv = L.inverse().transpose(-1, -2)
+                    Ut_inv = U.inverse().transpose(-1, -2)
+
+                    phi_L = (L.transpose(-1, -2) @ LU_grad).tril_()
+                    phi_L.diagonal(dim1=-2, dim2=-1).mul_(0.0)
+                    phi_U = (LU_grad @ U.transpose(-1, -2)).triu_()
+
+                    self_grad_perturbed = Lt_inv @ (phi_L + phi_U) @ Ut_inv
+                    return P @ self_grad_perturbed, None, None
+
+            if get_infos:
+                return _LU.apply(self, pivot, get_infos)
+            else:
+                return _LU.apply(self, pivot, get_infos)[:-1]
 
     def stft(self, n_fft: int, hop_length: Optional[int] = None,
              win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
