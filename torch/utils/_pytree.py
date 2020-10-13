@@ -1,5 +1,3 @@
-import torch
-from collections import defaultdict
 from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Optional
 
 """
@@ -27,9 +25,9 @@ To improve the performance we can move parts of the implementation to C++.
 #   (returned by flatten_fn). It returns the collection by reconstructing
 #   it from the list and the context.
 Context = Any
-Collection = Any
-flatten_fn_t = Callable[[Collection], Tuple[List, Context]]
-unflatten_fn_t = Callable[[List, Context], Collection]
+pytree_t = Any
+flatten_fn_t = Callable[[pytree_t], Tuple[List, Context]]
+unflatten_fn_t = Callable[[List, Context], pytree_t]
 NodeDef = NamedTuple('NodeDef', [
     ('flatten_fn', flatten_fn_t),
     ('unflatten_fn', unflatten_fn_t),
@@ -64,12 +62,12 @@ _register_pytree_node(tuple, _tuple_flatten, _tuple_unflatten)
 
 
 # A leaf is defined as anything that is not a Node.
-def _is_leaf(pytree: 'pytree') -> bool:
+def _is_leaf(pytree: pytree_t) -> bool:
     return type(pytree) not in SUPPORTED_NODES.keys()
 
 
 # A TreeSpec represents the structure of a pytree. It holds:
-# type: the type of root Node of the pytree
+# "type": the type of root Node of the pytree
 # context: some context that is useful in unflattening the pytree
 # children_specs: specs for each child of the root Node
 # num_leaves: the number of leaves
@@ -78,7 +76,7 @@ class TreeSpec:
         self.type = typ
         self.context = context
         self.children_specs = children_specs
-        self.num_leaves = sum([spec.num_leaves for spec in children_specs])
+        self.num_leaves: int = sum([spec.num_leaves for spec in children_specs])
 
     def __repr__(self):
         return f'TreeSpec({self.type.__name__}, {self.context}, {self.children_specs})'
@@ -101,7 +99,7 @@ class LeafSpec(TreeSpec):
         return '*'
 
 
-def tree_flatten(pytree: 'pytree') -> Tuple[List, TreeSpec]:
+def tree_flatten(pytree: pytree_t) -> Tuple[List, TreeSpec]:
     """Flattens a pytree into a list of values and a TreeSpec that can be used
     to reconstruct the pytree.
     """
@@ -122,7 +120,7 @@ def tree_flatten(pytree: 'pytree') -> Tuple[List, TreeSpec]:
     return result, TreeSpec(type(pytree), context, children_specs)
 
 
-def tree_unflatten(values: List, spec: TreeSpec) -> 'pytree':
+def tree_unflatten(values: List, spec: TreeSpec) -> pytree_t:
     """Given a list of values and a TreeSpec, builds a pytree.
     This is the inverse operation of `tree_flatten`.
     """
@@ -160,7 +158,7 @@ def tree_unflatten(values: List, spec: TreeSpec) -> 'pytree':
 # a user can pass in vmap(fn, in_dims)(*inputs). `in_dims` should be
 # broadcastable to the tree structure of `inputs` and we use
 # _broadcast_to_and_flatten to check this.
-def _broadcast_to_and_flatten(pytree: 'pytree', spec: TreeSpec) -> Optional[List]:
+def _broadcast_to_and_flatten(pytree: pytree_t, spec: TreeSpec) -> Optional[List]:
     assert isinstance(spec, TreeSpec)
 
     if _is_leaf(pytree):
