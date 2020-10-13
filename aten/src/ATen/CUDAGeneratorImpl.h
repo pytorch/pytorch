@@ -46,35 +46,64 @@ host_caller(...) {
 */
 
 struct philox_kernelarg_t {
+  // Called by philox_cuda_state_t::to_kernel_arg if state lives on the CPU.
   philox_kernelarg_t(uint64_t seed, uint64_t offset)
     : has_device_ptrs_{false} {
     state_ = std::make_pair(seed, offset);
   }
-  philox_kernelarg_t(int64_t* seed, int64_t* offset)
-    : has_device_ptrs_{true} {
-    state_ptrs_ = std::make_pair(seed, offset);
-  }
+  // Called by philox_cuda_state_t::to_kernel_arg if state lives on the GPU.
+  // Pointers are int64_t*, not uint64_t* (there's no such thing as uint64_t Tensors)
+  philox_kernelarg_t(int64_t* seed_this_launch,
+                     int64_t* offset_this_launch,
+                     int64_t* offset_next_launch,
+                     uint64_t increment)
+    : has_device_ptrs_{true},
+      seed_ptr_this_launch_(seed_this_launch),
+      offset_ptr_this_launch(offset_this_launch),
+      offset_ptr_next_launch(offset_next_launch
+      increment_(increment) {}
 
   // Public members, directly accessible by at::cuda::philox::unpack.
   // If we made them private with getters/setters, the getters/setters
-  // would have to be __device__, and we can't do that in ATen.
-  std::pair<uint64_t, uint64_t> state_;
-  // state_ptrs_, if present, are int64_t* (there's no such thing as
-  // uint64_t tensors).
-  std::pair<int64_t*, int64_t*> state_ptrs_;
+  // would have to be __device__, and we can't declare __device__ in ATen.
+
+  // Helps select a subsequence from the active stream's pool
+  int64_t stream_id;
+
+  // false if the state came from the CPU, true if it lives on the GPU.
   const bool has_device_ptrs_;
+
+  // Contains the state if has_device_ptrs_ is false.
+  std::pair<uint64_t, uint64_t> state_;
+
+  // The following are only populated and used by unpack() if has_device_ptrs is true.
+
+  // State to be used in the current kernel
+  int64_t* seed_ptr_this_launch_;
+  int64_t* offset_ptr_this_launch;
+  // State for the next kernel in the same stream, safely writeable by thread 0
+  // without disturbing other threads in the current kernel
+  int64_t* offset_ptr_next_launch_;
+  // Added to this launch's offset to compute next launch's offset
+  uint64_t increment_;
 };
 
+// Lives on the host, returned by philox_cuda_state(), keeps 
 struct philox_cuda_state_t {
   philox_cuda_state_t() {}
   philox_cuda_state_t(uint64_t seed, uint64_t offset)
     : has_device_tensors_{false} {
     state_ = std::make_pair(seed, offset);
   }
-  philox_cuda_state_t(Tensor seed, Tensor offset)
-    : has_device_tensors_{true} {
-    state_tensors_ = std::make_pair(seed, offset);
-  }
+  philox_cuda_state_t(Tensor seed_this_launch,
+                      Tensor offset_this_launch,
+                      Tensor offset_next_launch,
+                      uint64_t increment)
+    : has_device_tensors_{true},
+      seed_this_launch_{seed_this_launch},
+      offset_this_launch_{offset_this_launch},
+      offset_next_launch_{offset_next_launch},
+      increment_{increment} {}
 
   // We could rig an a conversion "operator philox_kernelarg_t()"
   // instead of to_kernel_arg(). But i like the explicitness.
@@ -88,11 +117,16 @@ struct philox_cuda_state_t {
   }
 
   private:
+  bool has_device_tensors_;
+  // Used if has_device_tensors_ is false.
   std::pair<uint64_t, uint64_t> state_;
+  // Used if has_device_tensors_ is true.
   // Must be Tensor, not Tensor&.
   // Part of philox_cuda_state_t's job is to keep allocations alive.
-  std::pair<Tensor, Tensor> state_tensors_;
-  bool has_device_tensors_;
+  Tensor seed_this_launch_;
+  Tensor offset_this_launch_;
+  Tensor offset_next_launch_;
+  uint64_t increment;
 };
 
 // Some callers cast to CUDAGeneratorImpl, so we need it as an interface.

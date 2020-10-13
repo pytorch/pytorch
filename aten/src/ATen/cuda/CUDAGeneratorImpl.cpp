@@ -16,6 +16,16 @@ namespace native {
 namespace cuda { namespace detail {
 
 namespace {
+// CUDA generators assign a pool of subsequences (of the overall Philox
+// sequence) to each stream.
+// For a given RNG consumer kernel in a given stream, each thread
+// is assigned a subsequence from the active stream's pool.
+// max_threads_per_kernel is an estimated upper limit of the maximum
+// number of threads any kernel may possibly need.
+// In other words, it estimates how many subsequences we should assign
+// to each stream's pool.
+constexpr uint64_t max_threads_per_kernel =  (uint64_t(1) << 40);
+
 // Ensures we only call cudaGetDeviceCount only once.
 std::once_flag num_gpu_init_flag;
 

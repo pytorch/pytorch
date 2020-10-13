@@ -18,8 +18,13 @@ namespace philox {
 // Any cuda consumer can include this header.
 __device__ __forceinline__ std::pair<uint64_t, uint64_t> unpack(at::philox_kernelarg_t arg) {
   if (arg.has_device_ptrs_) {
-    return std::make_pair(static_cast<uint64_t>(*(arg.state_ptrs_.first)),
-                          static_cast<uint64_t>(*(arg.state_ptrs_.second)));
+    uint64_t seed = *args.seed_ptr_this_launch_;
+    uint64_t offset = *arg.offset_ptr_this_launch_;
+    if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 &&
+        blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0) {
+      *offset_next_launch = offset + args.increment;
+    }
+    return std::make_pair(seed, offset);
   } else {
     return arg.state_;
   }
