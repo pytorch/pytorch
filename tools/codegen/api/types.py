@@ -282,20 +282,23 @@ class DispatcherArgument:
 
 # ------------------------------------------------------------------- #
 
-#                        legacy_dispatcher types
+#                    native types (NativeFunctions.h)
 
 # ------------------------------------------------------------------- #
 
+# NB: the "native" here is not to be confused with the native in
+# native_functions.yaml
+
 @dataclass(frozen=True)
-class LegacyDispatcherExpr:
+class NativeExpr:
     type: str
     expr: str
 
 @dataclass(frozen=True)
-class LegacyDispatcherArgument:
+class NativeArgument:
     type: str
     name: str
-    # Legacy dispatcher arguments have defaults for some reasons (e.g.,
+    # Native function arguments have defaults for some reasons (e.g.,
     # the function prototypes in CPUType.h are defaulted).  There isn't
     # really any good reason to do this, as these functions are only
     # ever called from a context where all defaulted arguments are
@@ -304,8 +307,10 @@ class LegacyDispatcherArgument:
     default: Optional[str]
     argument: Union[Argument, TensorOptionsArguments]
 
-    # Convention here is swapped because arguably legacy
-    # dispatcher shouldn't have defaults...
+    # Convention here is swapped because arguably NativeFunctions.h
+    # shouldn't have defaults (they should be handled during dispatching).
+    # The defaults are a mild convenience, however, for people who directly
+    # call native:: functions
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
 
