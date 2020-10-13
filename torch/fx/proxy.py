@@ -4,7 +4,7 @@ import inspect
 import operator
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
-from typing import Tuple, Dict, Optional, Iterable, Any
+from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
 from .node import Target, Node, Argument, base_types
 
 class TracerBase:
@@ -69,7 +69,7 @@ class TracerBase:
         """
         raise TraceError('symbolically traced variables cannot be used as inputs to control flow')
 
-    def iter(self, obj: 'Proxy') -> iter:
+    def iter(self, obj: 'Proxy') -> Iterator:
         """Called when a proxy object is being iterated over, such as
         when used in control flow.  Normally we don't know what to do because
         we don't know the value of the proxy, but a custom tracer can attach more

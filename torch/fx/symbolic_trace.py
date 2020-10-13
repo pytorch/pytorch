@@ -1,6 +1,6 @@
 import inspect
 from types import CodeType, FunctionType
-from typing import Any, Optional, List
+from typing import Any, Optional, List, Callable
 import torch
 
 from .node import Argument
@@ -119,7 +119,7 @@ class Tracer(TracerBase):
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
-    def call_module(self, m: torch.nn.Module, module_qualified_name: str, forward: callable, args, kwargs):
+    def call_module(self, m: torch.nn.Module, module_qualified_name: str, forward: Callable[..., Any], args, kwargs):
         if not self.is_leaf_module(m, module_qualified_name):
             return forward(*args, **kwargs)
         return self.create_proxy('call_module', module_qualified_name, args, kwargs)
