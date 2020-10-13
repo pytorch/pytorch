@@ -155,6 +155,9 @@ def cpp_string(s: str) -> str:
 # code we want.
 Target = Enum('Target', ('DEFINITION', 'DECLARATION', 'REGISTRATION'))
 
+# Dispatch keywords in native_functions.yaml that support all backends.
+KEYWORD_ALL_BACKENDS = ('DefaultBackend', 'Math')
+
 # Generates {dispatch}Type.cpp and {dispatch}Type.h (e.g., CPUType.cpp
 # and CPUType.h).  This function is also reused to implement per-operator
 # registration.  It also generates TypeDefault.cpp and TypeDefault.h when
@@ -273,7 +276,7 @@ def compute_type_method(
             assert returns_type == dispatcher.returns_type(f.func.returns)
             dispatcher_args = dispatcher.arguments(f.func)
             dispatcher_args_types_str = ', '.join(map(lambda a: a.type, dispatcher_args))
-            if dispatch is None or dispatch == 'Math' or dispatch == 'DefaultBackend':
+            if dispatch is None or dispatch in KEYWORD_ALL_BACKENDS:
                 type_name = f'TypeDefault::{name}'
             else:
                 type_name = f'{dispatch}Type::{name}'
@@ -901,7 +904,7 @@ def compute_registration_declarations(f: NativeFunction) -> str:
     comment_data : Dict[str, str] = {
         'schema': f'aten::{f.func}',
         'dispatch': str(f.dispatch is not None),
-        'default': str(f.dispatch is not None and ('Math' in f.dispatch or 'DefaultBackend' in f.dispatch))
+        'default': str(f.dispatch is not None and any(k in f.dispatch for k in KEYWORD_ALL_BACKENDS))
     }
     return f"""{returns_type} {name}({args_str}); // {json.dumps(comment_data)}
 """
