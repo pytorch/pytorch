@@ -786,7 +786,7 @@ jobs:
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
             if [[ "${JOB_BASE_NAME}" == *-test3 ]]; then
-              .jenkins/caffe2/test.sh
+              .jenkins/caffe2/win-test.sh
             else
               .jenkins/pytorch/win-test.sh
             fi
