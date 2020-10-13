@@ -299,6 +299,11 @@ filegroup(
 )
 
 filegroup(
+    name = "aten_base_metal",
+    srcs = glob(["aten/src/ATen/metal/*.cpp"]),
+)
+
+filegroup(
     name = "ATen_QUANTIZED_SRCS",
     srcs = glob(
         [
@@ -650,6 +655,7 @@ cc_library(
         ":ATen_CORE_SRCS",
         ":ATen_QUANTIZED_SRCS",
         ":aten_base_cpp",
+        ":aten_base_metal",
         ":aten_base_vulkan",
         ":aten_native_cpp",
         ":aten_native_mkl_cpp",
