@@ -29,8 +29,9 @@ if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
     # builds. In +python builds the cpp tests are copied to /usr/local/caffe2 so
     # that the test code in .jenkins/test.sh is the same
     INSTALL_PREFIX="/usr/local/caffe2"
+    mkdir -p "$INSTALL_PREFIX" || true
 fi
 
 mkdir -p "$gtest_reports_dir" || true
 mkdir -p "$pytest_reports_dir" || true
-mkdir -p "$INSTALL_PREFIX" || true
+
