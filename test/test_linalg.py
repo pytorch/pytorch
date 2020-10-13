@@ -924,7 +924,6 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @dtypesIfCUDA(torch.float32, torch.float64)
     def test_cholesky(self, device, dtype):
@@ -949,7 +948,6 @@ class TestLinalg(TestCase):
     # TODO: once there is more support for complex dtypes on GPU, they shall be added to above test
     # particularly when RuntimeError: _th_bmm_out not supported on CUDAType for ComplexFloat is fixed
     @unittest.expectedFailure
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @onlyCUDA
     @skipCUDAIfNoMagma
     @dtypes(torch.complex64, torch.complex128)
