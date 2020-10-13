@@ -3761,9 +3761,9 @@ class TestONNXRuntime(unittest.TestCase):
         self.assertEqual('Unsupported: ONNX export of Pad in opset 9. The sizes of the padding must be constant. ' +
                          'Please try opset version 11.', the_exception.args[0])
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_uninitialized(self):
-        class UninitializedModel(torch.jit.ScriptModule):
-            @torch.jit.script_method
+        class UninitializedModel(torch.nn.Module):
             def forward(self, y):
                 if y.shape[1] < 5:
                     if y.size(0) == 1:
@@ -3774,7 +3774,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.ones((3, 4), dtype=torch.int)
         y = torch.ones((6, 7), dtype=torch.int)
-        self.onnx_shape_inference=True
         self.run_test(UninitializedModel(), x, test_with_inputs=[y],
                       input_names=['input_1'],
                       dynamic_axes={'input_1': [0, 1]})
