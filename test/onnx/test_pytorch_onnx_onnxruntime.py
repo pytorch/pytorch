@@ -1712,6 +1712,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3)
         self.run_test(ListUnpack(), x)
 
+        class ListUnpackSlice(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                a, b = x.shape[2:]
+                return x.new_zeros((a, b))
+
+        x = torch.randn(2, 3, 4, 5)
+        self.run_test(ListUnpackSlice(), x)
+
     def test_std(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
