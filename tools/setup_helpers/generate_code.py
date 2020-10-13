@@ -5,7 +5,7 @@ import sys
 source_files = {'.py', '.cpp', '.h'}
 
 DECLARATIONS_PATH = 'torch/share/ATen/Declarations.yaml'
-
+NATIVE_FUNCTIONS_PATH = 'aten/src/ATen/native/native_functions.yaml'
 
 # TODO: This is a little inaccurate, because it will also pick
 # up setup_helper scripts which don't affect code generation
@@ -22,6 +22,7 @@ def all_generator_source():
 def generate_code(ninja_global=None,
                   declarations_path=None,
                   nn_path=None,
+                  native_functions_path=None,
                   install_dir=None,
                   subset=None,
                   disable_autograd=False,
@@ -53,7 +54,11 @@ def generate_code(ninja_global=None,
     tools_jit_templates = os.path.join(data_dir, 'tools', 'jit', 'templates')
 
     if subset == "pybindings" or not subset:
-        gen_autograd_python(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, autograd_dir)
+        gen_autograd_python(
+            declarations_path or DECLARATIONS_PATH,
+            native_functions_path or NATIVE_FUNCTIONS_PATH,
+            autograd_gen_dir,
+            autograd_dir)
 
     if subset == "libtorch" or not subset:
         selected_op_list = load_op_list_and_strip_overload(selected_op_list, selected_op_list_path)
@@ -84,6 +89,7 @@ def main():
     parser = argparse.ArgumentParser(description='Autogenerate code')
     parser.add_argument('--declarations-path')
     parser.add_argument('--nn-path')
+    parser.add_argument('--native-functions-path')
     parser.add_argument('--ninja-global')
     parser.add_argument('--install_dir')
     parser.add_argument(
@@ -118,6 +124,7 @@ def main():
         options.ninja_global,
         options.declarations_path,
         options.nn_path,
+        options.native_functions_path,
         options.install_dir,
         options.subset,
         options.disable_autograd,

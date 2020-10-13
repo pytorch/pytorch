@@ -251,8 +251,7 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, selected_
     gen_variable_factories(out, full_aten_decls, template_path)
 
 
-def gen_autograd_python(aten_path, out, autograd_dir):
-
+def gen_autograd_python(aten_path, native_functions_path, out, autograd_dir):
     # TODO Deduplicate these four variable assignments
 
     aten_decls = load_aten_declarations(aten_path)
@@ -275,6 +274,9 @@ def gen_autograd_python(aten_path, out, autograd_dir):
 
     # Generate Python bindings
     from . import gen_python_functions
+    # TODO: change gen_python_functions to process native functions directly.
+    gen_python_functions.init(native_functions_path)
+
     gen_python_functions.gen_py_variable_methods(
         out, aten_decls + deprecated, template_path)
     gen_python_functions.gen_py_torch_functions(
