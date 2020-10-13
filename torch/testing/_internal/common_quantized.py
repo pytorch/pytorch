@@ -41,7 +41,7 @@ def _quantize(x, scale=None, zero_point=None, qmin=None, qmax=None,
     qx = np.round(x / scale + zero_point).astype(np.int64)
     qx = np.clip(qx, qmin, qmax)
     qx = qx.astype(dtype)
-    return qx
+    return qx, scale, zero_point
 
 
 def _dequantize(qx, scale, zero_point):
