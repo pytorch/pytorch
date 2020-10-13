@@ -152,6 +152,7 @@ MSVC_IGNORE_CUDAFE_WARNINGS = [
 COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
     '-D__CUDA_NO_HALF_CONVERSIONS__',
+    '-D__CUDA_NO_BFLOAT16_CONVERSIONS__',
     '-D__CUDA_NO_HALF2_OPERATORS__',
     '--expt-relaxed-constexpr'
 ]
@@ -347,6 +348,18 @@ class BuildExtension(build_ext, object):
     def build_extensions(self) -> None:
         self._check_abi()
         for extension in self.extensions:
+            # Ensure at least an empty list of flags for 'cxx' and 'nvcc' when
+            # extra_compile_args is a dict. Otherwise, default torch flags do
+            # not get passed. Necessary when only one of 'cxx' and 'nvcc' is
+            # passed to extra_compile_args in CUDAExtension, i.e.
+            #   CUDAExtension(..., extra_compile_args={'cxx': [...]})
+            # or
+            #   CUDAExtension(..., extra_compile_args={'nvcc': [...]})
+            if isinstance(extension.extra_compile_args, dict):
+                for ext in ['cxx', 'nvcc']:
+                    if ext not in extension.extra_compile_args:
+                        extension.extra_compile_args[ext] = []
+
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)

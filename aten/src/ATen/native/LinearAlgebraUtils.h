@@ -318,4 +318,19 @@ static inline std::vector<int64_t> create_reverse_permutation(std::vector<int64_
   return reverse_permutation;
 }
 
+// Compute R-work array size for MAGMA/LAPACK cgesdd/zgesdd
+// See https://github.com/Reference-LAPACK/lapack/blob/122506cd8b6ce050a200920c3d4c0b153b150fd8/SRC/cgesdd.f#L186
+static inline int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n) {
+  auto mn = std::min(m, n);
+  auto mx = std::max(m, n);
+  // These settings are valid for on LAPACK 3.6+
+  if (jobz == 'N') {
+    return 5 * mn;
+  }
+  if (mx > 10 * mn) {
+    return 5 * mn * mn + 5 * mn;
+  }
+  return std::max(5 * mn * mn + 5 * mn, 2 * mx * mn + 2 * mn * mn + mn);
+}
+
 }}  // namespace at::native

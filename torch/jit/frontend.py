@@ -228,7 +228,7 @@ def get_jit_def(fn, def_name, self_name=None):
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-        raise RuntimeError("Expected a single top-level function")
+        raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, True)
@@ -238,7 +238,7 @@ def get_jit_def(fn, def_name, self_name=None):
     if should_drop(fn):
         unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")")
         if len(unused_fn_def.body) != 1 or not isinstance(unused_fn_def.body[0], ast.FunctionDef):
-            raise RuntimeError("Expected a single top-level function")
+            raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
         unused_def = unused_fn_def.body[0]
         fn_def.body = unused_def.body
         # kwarg/vararg not supported by `build_def`
@@ -686,11 +686,10 @@ class ExprBuilder(Builder):
             return SliceExpr(base.range(), lower, upper, step)
 
         def build_Index(ctx, base, index_expr):
-            if isinstance(index_expr.value, ast.Tuple) or \
-                    isinstance(index_expr.value, ast.List):
+            if isinstance(index_expr.value, ast.Tuple):
                 raise NotSupportedError(base.range(),
                                         "slicing multiple dimensions with "
-                                        "sequences not supported yet")
+                                        "tuples not supported yet")
             return build_expr(ctx, index_expr.value)
 
         def build_ExtSlice(ctx, base, extslice):
