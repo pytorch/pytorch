@@ -4303,71 +4303,85 @@ for shape in [(1,), ()]:
                 return res, None
 
         for fn_id in ["one_output", "two_output", "view_of_temp"]:
-            for make_view in [True, False]:
-                # Used for special casing the tests below
-                output_is_a_view = (make_view or fn_id == "view_of_temp")
+            for inplace in [True, False]:
+                for make_view in [True, False]:
+                    # Used for special casing the tests below
+                    output_is_a_view = (make_view or fn_id == "view_of_temp")
 
-                def fn(a, b):
-                    # never modify a, b inplace for gracheck
-                    a = a.clone()
-                    b = b.clone()
-                    if fn_id == "two_output":
-                        tmp1, tmp2 = IdTwoOutput.apply(a, b, make_view)
-                        tmp1 = tmp1 + 3
-                        tmp2 = tmp2 + 3
-                        tmp = tmp1 * tmp2
-                    else:
-                        if fn_id == "one_output":
-                            tmp = IdOneOutput.apply(a, b, make_view)
+                    def fn(a, b):
+                        # never modify a, b inplace for gracheck
+                        a = a.clone()
+                        b = b.clone()
+                        if fn_id == "two_output":
+                            tmp1, tmp2 = IdTwoOutput.apply(a, b, make_view)
+                            if inplace:
+                                tmp1 += 3
+                                tmp2 += 3
+                            else:
+                                tmp1 = tmp1 + 3
+                                tmp2 = tmp2 + 3
+                            tmp = tmp1 * tmp2
                         else:
-                            tmp = ViewOfTemp.apply(a + b, make_view)
-                        tmp = tmp + 3
+                            if fn_id == "one_output":
+                                tmp = IdOneOutput.apply(a, b, make_view)
+                            else:
+                                tmp = ViewOfTemp.apply(a + b, make_view)
+                            if inplace:
+                                tmp += 3
+                            else:
+                                tmp = tmp + 3
 
-                    return tmp.sum()
+                        return tmp.sum()
 
-                a = torch.ones(2, dtype=dtype, requires_grad=True)
-                b = torch.ones(2, dtype=dtype, requires_grad=True)
+                    a = torch.ones(2, dtype=dtype, requires_grad=True)
+                    b = torch.ones(2, dtype=dtype, requires_grad=True)
 
 
-                if fn_id == "two_output" and inplace and output_is_a_view:
-                    with self.assertRaisesRegex(RuntimeError, err_msg_two_outputs):
-                        fn(a, b)
-                else:
-                    # Are the computed gradients correct ?
-                    if inplace and output_is_a_view:
+                    if fn_id == "two_output" and inplace and output_is_a_view:
+                        with self.assertRaisesRegex(RuntimeError, err_msg_two_outputs):
+                            fn(a, b)
+                    else:
+                        # Are the computed gradients correct ?
+                        if inplace and output_is_a_view:
+                            with warnings.catch_warnings(record=True) as w:
+                                if fn_id == "view_of_temp":
+                                    # This will be fixed after the deprecation cycle and the warning becomes
+                                    # an error.
+                                    with self.assertRaisesRegex(RuntimeError,
+                                                                "a view of a leaf Variable that requires grad "
+                                                                "is being used in an in-place operation."):
+                                        gradcheck(fn, (a, b))
+                                else:
+                                    # This works but the custom backward is not called (or called with partial)
+                                    # gradients as tested below
+                                    gradcheck(fn, (a, b))
+                            self.assertTrue(len(w) > 0)
+                        else:
+                            gradcheck(fn, (a, b))
+
+                        # Was the custom backward called properly
+                        bw_called[0] = 0
+                        ga_nz[0] = True  # For the case where the backward is called
                         with warnings.catch_warnings(record=True) as w:
-                            if fn_id == "view_of_temp":
-                                # This will be fixed after the deprecation cycle and the warning becomes
-                                # an error.
+                            if inplace:
                                 with self.assertRaisesRegex(RuntimeError,
                                                             "a view of a leaf Variable that requires grad "
                                                             "is being used in an in-place operation."):
-                                    gradcheck(fn, (a, b))
+                                    fn(a, b).backward()
                             else:
-                                # This works but the custom backward is not called (or called with partial)
-                                # gradients as tested below
-                                gradcheck(fn, (a, b))
-                        self.assertTrue(len(w) > 0)
-                    else:
-                        gradcheck(fn, (a, b))
+                                fn(a, b).backward()
 
-                    # Was the custom backward called properly
-                    bw_called[0] = 0
-                    ga_nz[0] = True  # For the case where the backward is called
-                    with warnings.catch_warnings(record=True) as w:
-                        fn(a, b).backward()
+                        expected_called = 1
+                        expected_ga_nz = True
+                        expected_warning = False
 
-                    expected_called = 1
-                    expected_ga_nz = True
-                    expected_warning = False
+                        if output_is_a_view and inplace:
+                            expected_called = 0
+                            expected_warning = True
 
-                    if output_is_a_view and inplace:
-                        expected_called = 0
-                        expected_warning = True
-
-                    self.assertTrue(bw_called[0] == expected_called)
-                    self.assertTrue(ga_nz[0] == expected_ga_nz)
-                    self.assertTrue((len(w) == 1) == expected_warning)
+                        self.assertTrue(bw_called[0] == expected_called)
+                        self.assertTrue(ga_nz[0] == expected_ga_nz)
+                        self.assertTrue((len(w) == 1) == expected_warning)
 
     def test_autograd_simple_views_python(self):
         self._do_test_autograd_simple_views_python(torch.double)
