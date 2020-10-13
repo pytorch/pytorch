@@ -395,9 +395,10 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
       case at::kPerChannelAffine: {
         const auto* quantizer = static_cast<at::PerChannelAffineQuantizer*>(
             tensor.quantizer().get());
-        pushTensor(quantizer->scales());
-        pushTensor(quantizer->zero_points());
-        pushInt(quantizer->axis());
+        pushTensor(tensor.q_per_channel_scales());
+        pushTensor(tensor.q_per_channel_zero_points());
+        pushTensor(tensor.q_per_channel_axis());
+
       } break;
       default:
         TORCH_CHECK(
