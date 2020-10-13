@@ -1602,6 +1602,15 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, opt
 }
 
 Tensor linalg_tensorsolve(const Tensor& self, const Tensor& input2, optional<IntArrayRef> axes) {
+  /*
+  The idea is to reduce the problem to 2D matrix solve.
+  Step 1. (optional) `self` is permuted with `axes` such that dimensions from `axes` are moved to the right.
+  For example, if we have 4D input with the shape (1, 2, 3, 4) and axes=(0, 2),
+  then the result of permutation would have the shape (2, 4, 1, 3).
+  Step 2. reshape `self` to 2D matrix.
+  Step 3. solve the matrix equation self.to_2D() @ result = input2.to_1D()
+  Step 4. reshape the result.
+  */
   int64_t ndim = self.dim();
   Tensor self_ = self;
 
