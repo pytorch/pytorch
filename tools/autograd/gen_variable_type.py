@@ -752,8 +752,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         # In other words, this op must have dispatch section in native_functions.yaml.
         if declaration['name'] in MANUAL_AUTOGRAD_AND_TRACER or declaration['derivative']:
             msg = (f'Did you add a formula for {declaration["name"]}(or its functional variant) in derivatives.yaml?'
-                   f'If so please add a dispatch section for it with DefaultBackend in'
-                   f'native_functions.yaml.')
+                   f'If so please add a dispatch section for it with DefaultBackend in native_functions.yaml.')
             assert declaration['abstract'], msg
 
         # Emit TraceType code
