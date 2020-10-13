@@ -17,10 +17,18 @@ C10_DEFINE_bool(
     "If used we will handle exceptions in executor threads. "
     "This avoids SIGABRT but may cause process to deadlock");
 
+C10_DEFINE_int(
+    caffe2_plan_executor_exception_timeout,
+    60,
+    "Number of seconds to wait for concurrent threads to stop on exception"
+    "before terminating.");
+
 namespace caffe2 {
 
 namespace {
 
+// ExceptionWrapper holds an exception. If exception pointers are being used,
+// it'll hold the original exception pointer otherwise just the message.
 class ExceptionWrapper {
  public:
   ExceptionWrapper() : hasException_(false) {}
@@ -39,6 +47,10 @@ class ExceptionWrapper {
 #endif
   }
 
+  const std::string& what() const {
+    return exceptionMsg_;
+  }
+
   operator bool() {
     return hasException_;
   }
@@ -51,10 +63,37 @@ class ExceptionWrapper {
   std::string exceptionMsg_;
 };
 
+// ExceptionWrapperTerminate terminates the program with the specified
+// exception. This preserves the exception ptr and ExceptionTracer will
+// correctly grab it on exit.
+class ExceptionWrapperTerminate {
+ public:
+  explicit ExceptionWrapperTerminate(ExceptionWrapper&& ew) : ew_(std::move(ew)) {}
+
+  ~ExceptionWrapperTerminate() {
+    ew_.rethrowException();
+  }
+
+ private:
+  ExceptionWrapper ew_;
+};
+
+// ScopeExitGuard runs the provided function when it's destructed.
+class ScopeExitGuard {
+ public:
+  explicit ScopeExitGuard(std::function<void()>&& f) : f_(std::move(f)) {}
+  ~ScopeExitGuard() {
+    f_();
+  }
+
+ private:
+  std::function<void()> f_;
+};
+
 struct NetDefInfo {
   const NetDef* netDef;
   // in order to keep the "override existing nets" on the top-level workflow,
-  // we need to makr the nets that already exist so that we can override them
+  // we need to mark the nets that already exist so that we can override them
   // exactly once.
   bool needsOverride;
 };
@@ -144,7 +183,7 @@ inline bool getShouldStop(const Blob* b) {
 /**
  * Injects a blob named 'GLOBAL_WORKSPACE_ID' for each workspace, only if
  * another blob named 'NODE_ID' is present. 'NODE_ID' blob can be used in a
- * distribued run and in this case 'GLOBAL_WORKSPACE_ID' can be used across
+ * distributed run and in this case 'GLOBAL_WORKSPACE_ID' can be used across
  * machines for other purposes (e.g. to support model parallelism). Essentially,
  * 'GLOBAL_WORKSPACE_ID' is an identifier for a workspace that is unique across
  * all 'NODE_ID's.
@@ -460,9 +499,17 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
                 << " with " << step.substep().size() << " concurrent substeps";
 
         std::atomic<int> next_substep{0};
-        std::mutex exception_mutex;
+        std::condition_variable cv;
+        std::mutex exception_mutex; // exception_mutex protects done and first_exception
+        int done{0};
         ExceptionWrapper first_exception;
         auto worker = [&]() {
+          ScopeExitGuard on_exit([&] {
+            std::lock_guard<std::mutex> guard(exception_mutex);
+            done += 1;
+            cv.notify_all();
+          });
+
           auto num_substeps = compiledStep->recurringSubsteps.size();
           int substep_id = next_substep++ % num_substeps;
           if (compiledStep->gotFailure) {
@@ -492,6 +539,8 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
           }
         };
 
+        std::unique_lock<std::mutex> guard(exception_mutex);
+
         std::vector<std::thread> threads;
         auto numThreads = compiledStep->recurringSubsteps.size();
         if (step.has_num_concurrent_instances()) {
@@ -500,6 +549,22 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
         for (size_t i = 0; i < numThreads; ++i) {
           threads.emplace_back(worker);
         }
+
+        auto workersDone = [&] { return done == numThreads; };
+
+        // If we get an exception, try to wait for all threads to stop
+        // gracefully.
+        cv.wait(guard, [&] { return workersDone() || first_exception; });
+        cv.wait_for(
+            guard,
+            std::chrono::seconds(FLAGS_caffe2_plan_executor_exception_timeout),
+            [&] { return workersDone(); });
+        if (!workersDone() && first_exception) {
+          LOG(ERROR) << "failed to stop concurrent workers after exception: "
+                     << first_exception.what();
+          ExceptionWrapperTerminate(std::move(first_exception));
+        }
+
         for (auto& thread : threads) {
           thread.join();
         }
@@ -550,10 +615,6 @@ bool RunPlanOnWorkspace(
     LOG(INFO) << "Processing net '" << net_def.name() << "', type: '"
               << net_def.type() << "', #ops: " << net_def.op_size()
               << ", num_workers: " << net_def.num_workers();
-    for (int j = 0; j < net_def.op_size(); j++) {
-      auto op = net_def.op(j);
-      LOG(INFO) << op.type();
-    }
     CAFFE_ENFORCE(
         net_defs.count(net_def.name()) == 0,
         "Your plan contains networks of the same name \"",

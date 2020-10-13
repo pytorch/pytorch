@@ -72,7 +72,7 @@ struct TORCH_API MultiBatchVmapTransform {
 //
 // Given inputs of size (B, 2) and (2,), BroadcastingVmapTransform returns
 // VmapPhysicalViews wrapping tensors of size (B, 2) and (1, 2). We don't
-// actually *need* to return a tensor of size (B, 2) for the second tensor
+// actually *need* to return a tensor of size (1, 2) for the second tensor
 // because the broadcasting operation takes care of that for us, but we do
 // it anyways to keep things simple.
 struct TORCH_API BroadcastingVmapTransform {
@@ -97,7 +97,7 @@ struct TORCH_API BroadcastingVmapTransform {
 struct TORCH_API VmapPhysicalView {
   VmapPhysicalView(Tensor&& tensor, std::bitset<kVmapNumLevels> levels)
       : levels_(levels), tensor_(tensor) {
-    TORCH_INTERNAL_ASSERT(!isBatched(tensor));
+    TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
   }
 
   Tensor& tensor() { return tensor_; }

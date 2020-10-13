@@ -52,6 +52,13 @@ encode the operation history. Every new function requires you to implement 2 met
     mark any input that is modified inplace by the forward function.
   - :meth:`~torch.autograd.function._ContextMethodMixin.mark_non_differentiable` must
     be used to tell the engine if an output is not differentiable.
+  - :meth:`~torch.autograd.function._ContextMethodMixin.set_materialize_grads` can be
+    used to tell the autograd engine to optimize gradient computations in the cases where
+    the output does not depend on the input by not materializing grad tensors given to backward
+    function. That is, if set to False, None object in python or "undefined tensor" (tensor x for
+    which x.defined() is False) in C++ will not be converted to a tensor filled with zeros prior
+    to calling backward. However, supporting this optimization means your custom autograd function
+    has to handle gradients that are represented in this way and is thus opt-in. Default value is True.
 
 .. note::
 
@@ -119,6 +126,26 @@ non-Tensor arguments::
 
         @staticmethod
         def backward(ctx, grad_output):
+            # We return as many input gradients as there were arguments.
+            # Gradients of non-Tensor arguments to forward must be None.
+            return grad_output * ctx.constant, None
+
+And here, we optimize the above example by calling set_materialize_grads(False)::
+
+    class MulConstant(Function):
+        @staticmethod
+        def forward(ctx, tensor, constant):
+            ctx.set_materialize_grads(False)
+            ctx.constant = constant
+            return tensor * constant
+
+        @staticmethod
+        def backward(ctx, grad_output):
+            # Here we must handle None grad_output tensor. In this case we
+            # can skip unnecessary computations and just return None.
+            if grad_output is None:
+                return None, None
+
             # We return as many input gradients as there were arguments.
             # Gradients of non-Tensor arguments to forward must be None.
             return grad_output * ctx.constant, None

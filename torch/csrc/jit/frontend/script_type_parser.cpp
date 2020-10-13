@@ -248,7 +248,13 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
       List<Stmt>::create(r, {ret}));
 
   CompilationUnit cu;
-  cu.define(c10::nullopt, {def}, {resolver_}, nullptr);
+  cu.define(
+      c10::nullopt,
+      /*properties=*/{},
+      /*propResolvers=*/{},
+      {def},
+      {resolver_},
+      nullptr);
   Stack stack;
   // XXX: We need to turn optimization off here because otherwise we try to
   // recursively initialize stuff in DecomposeOps.

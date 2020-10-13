@@ -23,8 +23,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 """
-
-from __future__ import absolute_import, division, print_function
 import argparse
 import fnmatch
 import re
@@ -36,11 +34,13 @@ from . import constants
 from .cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 from .cuda_to_hip_mappings import MATH_TRANSPILATIONS
 
+from typing import Dict, List
+from collections.abc import Mapping
+
 # Hardcode the PyTorch template map
 """This dictionary provides the mapping from PyTorch kernel template types
 to their actual types."""
 PYTORCH_TEMPLATE_MAP = {"Dtype": "scalar_t", "T": "scalar_t"}
-CAFFE2_TEMPLATE_MAP = {}
 
 
 class InputError(Exception):
@@ -109,7 +109,7 @@ class GeneratedFileCleaner:
             for d in self.dirs_to_clean[::-1]:
                 os.rmdir(d)
 
-def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), out_of_place_only=False):
+def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), out_of_place_only=False, is_pytorch_extension=False):
     def _fnmatch(filepath, patterns):
         return any(fnmatch.fnmatch(filepath, pattern) for pattern in patterns)
 
@@ -143,10 +143,11 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), ou
                 and (not _fnmatch(filepath, ignores))
                 and (match_extensions(filepath) or filepath in exact_matches)
             ):
-                if not is_pytorch_file(filepath) and not is_caffe2_gpu_file(filepath):
-                    continue
-                if out_of_place_only and not is_out_of_place(filepath):
-                    continue
+                if not is_pytorch_extension:  # for pytorch extensions, consider all files
+                    if not is_pytorch_file(filepath) and not is_caffe2_gpu_file(filepath):
+                        continue
+                    if out_of_place_only and not is_out_of_place(filepath):
+                        continue
                 yield filepath
 
 
@@ -169,7 +170,7 @@ def preprocess(
         clean_ctx = GeneratedFileCleaner(keep_intermediates=True)
 
     # Preprocessing statistics.
-    stats = {"unsupported_calls": [], "kernel_launches": []}
+    stats: Dict[str, List] = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
         result = preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension, clean_ctx)
@@ -205,7 +206,7 @@ def add_dim3(kernel_string, cuda_kernel):
     count = 0
     closure = 0
     kernel_string = kernel_string.replace("<<<", "").replace(">>>", "")
-    arg_locs = [{} for _ in range(2)]
+    arg_locs: List[Dict[str, int]] = [{} for _ in range(2)]
     arg_locs[count]['start'] = 0
     for ind, c in enumerate(kernel_string):
         if count > 1:
@@ -445,6 +446,7 @@ def hip_header_magic(input_string):
         return output_string
 
     # Rough logic to detect if we're inside device code
+    hasDeviceLogic: int
     hasDeviceLogic = "hipLaunchKernelGGL" in output_string
     hasDeviceLogic += "__global__" in output_string
     hasDeviceLogic += "__shared__" in output_string
@@ -633,6 +635,7 @@ CAFFE2_MAP = {}
 PYTORCH_TRIE = Trie()
 PYTORCH_MAP = {}
 for mapping in CUDA_TO_HIP_MAPPINGS:
+    assert isinstance(mapping, Mapping)
     for src, value in mapping.items():
         dst = value[0]
         meta_data = value[1:]
@@ -847,7 +850,8 @@ def hipify(
 
     all_files = list(matched_files_iter(output_directory, includes=includes,
                                         ignores=ignores, extensions=extensions,
-                                        out_of_place_only=out_of_place_only))
+                                        out_of_place_only=out_of_place_only,
+                                        is_pytorch_extension=is_pytorch_extension))
     all_files_set = set(all_files)
     all_files += [f for f in extra_files if f not in all_files_set]
 

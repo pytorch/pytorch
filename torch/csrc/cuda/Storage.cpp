@@ -2,6 +2,7 @@
 
 #include <torch/csrc/python_headers.h>
 #include <structmember.h>
+#include <fmt/format.h>
 
 // See Note [TH abstraction violation]
 //    - Used to get at allocator from storage

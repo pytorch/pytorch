@@ -87,6 +87,7 @@ MULTI_OUTPUT_SAFE_FUNCTIONS = {
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
     'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
+    'tensor_split'
 })
 
 def format_return_type(returns):
@@ -115,20 +116,6 @@ def has_tensoroptions_argument(declaration):
             return True
     return False
 
-def process_schema_order_arg(schema_order_arg):
-    if schema_order_arg == 'dtype':
-        return 'optTypeMetaToScalarType(options.dtype_opt())'
-    elif schema_order_arg == 'layout':
-        return 'options.layout_opt()'
-    elif schema_order_arg == 'device':
-        return 'options.device_opt()'
-    elif schema_order_arg == 'pin_memory':
-        return 'options.pinned_memory_opt()'
-    elif schema_order_arg == 'memory_format':
-        return 'c10::impl::check_tensor_options_and_extract_memory_format(options, memory_format)'
-    else:
-        return schema_order_arg
-
 
 def load_aten_declarations(path):
     with open(path, 'r') as f:
@@ -142,6 +129,8 @@ def load_aten_declarations(path):
 
         for arg in declaration['arguments']:
             arg['simple_type'] = get_simple_type(arg)
+        for arg in declaration['schema_order_arguments']:
+            arg['simple_type'] = get_simple_type(arg)
         for ret in declaration['returns']:
             ret['simple_type'] = get_simple_type(ret)
 
@@ -151,10 +140,7 @@ def load_aten_declarations(path):
                                                for arg in declaration['schema_order_arguments']]
         declaration['args'] = [arg['name'] for arg in declaration['arguments']]
         declaration['schema_order_args'] = [arg['name'] for arg in declaration['schema_order_arguments']]
-        if has_tensoroptions_argument(declaration):
-            declaration['schema_order_args'] = [process_schema_order_arg(arg) for arg in declaration['schema_order_args']]
         declaration['api_name'] = declaration['name']
-        # NB: keep this in sync with common_with_cwrap.py
         if declaration.get('overload_name'):
             declaration['type_wrapper_name'] = "{}_{}".format(
                 declaration['name'], declaration['overload_name'])

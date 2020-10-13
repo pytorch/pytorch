@@ -68,13 +68,17 @@ class CAFFE2_API CPUContext final : public BaseContext {
 
   inline rand_gen_type& RandGenerator() {
     if (!random_generator_.get()) {
-      if (!random_seed_set_) {
-        random_seed_ = RandomNumberSeed();
-        random_seed_set_ = true;
-      }
-      random_generator_.reset(new rand_gen_type(random_seed_));
+      random_generator_.reset(new rand_gen_type(RandSeed()));
     }
     return *random_generator_.get();
+  }
+
+  inline uint32_t RandSeed() {
+    if (!random_seed_set_) {
+      random_seed_ = RandomNumberSeed();
+      random_seed_set_ = true;
+    }
+    return static_cast<uint32_t>(random_seed_);
   }
 
   inline static at::DataPtr New(size_t nbytes) {

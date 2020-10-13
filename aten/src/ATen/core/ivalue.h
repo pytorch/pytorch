@@ -30,6 +30,14 @@ using ClassTypePtr = std::shared_ptr<ClassType>;
 
 TORCH_API bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs);
 
+TORCH_API torch::jit::Function* checkObjectSortSchema(const c10::ClassTypePtr& t, std::stringstream& why_not);
+
+// A comparator that checks ordering of two IValues of same type.
+typedef std::function<bool(const IValue& a, const IValue& b)> IValueComparator;
+
+TORCH_API IValueComparator getLessThanComparator(const IValue& v);
+TORCH_API IValueComparator getGreaterThanComparator(const IValue& v);
+
 namespace ivalue {
 struct Tuple;
 struct Future;

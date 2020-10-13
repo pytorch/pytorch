@@ -376,7 +376,9 @@ void copy_image_to_buffer(
 void copy_buffer_to_buffer(
     const VBuffer& srcBuffer,
     VBuffer& dstBuffer,
-    VkDeviceSize size);
+    VkDeviceSize size,
+    VkDeviceSize srcOffset = 0,
+    VkDeviceSize dstOffset = 0);
 
 VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(
     uint32_t binding,
@@ -453,9 +455,9 @@ class ComputeUnit final {
 #ifdef USE_VULKAN_SHADERC_RUNTIME
   void createComputePipelineCompile(
       const std::string& glslSrc,
-      VkPipelineCache pipelineCache,
-      VkDescriptorSetLayout descrSetLayout,
-      WorkGroupSize workGroupSize);
+      const VkPipelineCache pipelineCache,
+      const VkDescriptorSetLayout descrSetLayout,
+      const WorkGroupSize workGroupSize);
 #endif
 
   void createCommandBuffer(VkDescriptorSet& descriptorSet);

@@ -325,16 +325,22 @@ static bool dispatch_to_Bool(const Tensor & self) {
 static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
-    try {
-      return handle_torch_function(self, "__bool__");
-    }
-    catch(const python_error&) {
-      return nullptr;
-    }
+    return handle_torch_function(self, "__float__");
   }
   jit::tracer::warn("Converting a tensor to a Python float", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   return wrap(dispatch_to_CDouble(self_));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_complex_scalar(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function(self)) {
+    return handle_torch_function(self, "__complex__");
+  }
+  jit::tracer::warn("Converting a tensor to a Python complex", jit::tracer::WARN_PYTHON_DATAFLOW);
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  return wrap(dispatch_to_CComplexDouble(self_));
   END_HANDLE_TH_ERRORS
 }
 
@@ -382,7 +388,7 @@ static Tensor dispatch_invert(const Tensor & self) {
 static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
-    return handle_torch_function(self, "__float__");
+    return handle_torch_function(self, "__invert__");
   }
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (!isIntegralType(self_.scalar_type(), /*includeBool=*/true)) {
@@ -1016,12 +1022,9 @@ ${py_methods}
 
 static PyObject * THPVariable_bool_scalar(PyObject* self, PyObject* args) {
   if (check_has_torch_function(self)) {
-    try {
-      return handle_torch_function(self, "__bool__");
-    }
-    catch(const python_error&) {
-      return nullptr;
-    }
+    HANDLE_TH_ERRORS
+    return handle_torch_function(self, "__bool__");
+    END_HANDLE_TH_ERRORS
   }
   jit::tracer::warn("Converting a tensor to a Python boolean", jit::tracer::WARN_PYTHON_DATAFLOW);
   return THPVariable_is_nonzero(self, args);
@@ -1139,6 +1142,7 @@ PyMethodDef variable_methods[] = {
   {"__mod__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_remainder>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__bool__", (PyCFunction)THPVariable_bool_scalar, METH_NOARGS, NULL},
   {"__float__", (PyCFunction)THPVariable_float_scalar, METH_NOARGS, NULL},
+  {"__complex__", (PyCFunction)THPVariable_complex_scalar, METH_NOARGS, NULL},
   {"__int__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__long__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__index__", (PyCFunction)THPVariable_index_scalar, METH_NOARGS, NULL},

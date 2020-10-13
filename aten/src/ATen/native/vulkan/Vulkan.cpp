@@ -102,7 +102,6 @@ void VContext::createInstance() {
     };
 
     for (const auto& wantedLayer : instanceLayers) {
-      bool found = false;
       for (const auto& presentLayer : layerProps) {
         if (strcmp(wantedLayer, presentLayer.layerName) == 0) {
           enabledValidationLayers_.push_back(wantedLayer);
@@ -829,11 +828,13 @@ void ComputeUnit::createComputePipeline(
 void ComputeUnit::createComputePipelineCompile(
     const std::string& glslSrc,
     const VkPipelineCache pipelineCache,
-    const VkDescriptorSetLayout& descrSetLayout,
+    const VkDescriptorSetLayout descrSetLayout,
     const WorkGroupSize workGroupSize) {
   shaderc::Compiler compiler{};
-  shaderc::CompileOptions options[];
+  shaderc::CompileOptions options{};
+#ifdef DEBUG
   options.SetGenerateDebugInfo();
+#endif
   options.SetTargetEnvironment(
       shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_0);
   options.SetForcedVersionProfile(450, shaderc_profile_core);
@@ -1036,7 +1037,6 @@ ComputeUnit& ComputeUnitFactory::get(
 // VBuffer <-> VImage
 void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
   const auto device = context().device();
-  const auto physicalDevice = context().physicalDevice();
   struct ConstBlock {
     int32_t w;
     int32_t h;
@@ -1093,7 +1093,6 @@ void copy_image_to_buffer(
     VBuffer& buffer,
     bool addBufferMemoryBarrierForHost) {
   const auto device = context().device();
-  const auto physicalDevice = context().physicalDevice();
   TORCH_INTERNAL_ASSERT(
       buffer.sizeBytes() >= image.capacityBytes(),
       "VulkanBuffer's capacity is less than VulkanImage capacity to copy from");
@@ -1153,15 +1152,17 @@ void copy_image_to_buffer(
 void copy_buffer_to_buffer(
     const VBuffer& srcBuffer,
     VBuffer& dstBuffer,
-    VkDeviceSize size) {
+    VkDeviceSize size,
+    VkDeviceSize srcOffset,
+    VkDeviceSize dstOffset) {
   auto device = context().device();
   VkCommandBuffer commandBuffer{};
   allocateCommandBuffer(device, &commandBuffer);
   beginCommandBuffer(commandBuffer);
 
   VkBufferCopy copyRegion{};
-  copyRegion.srcOffset = 0;
-  copyRegion.dstOffset = 0;
+  copyRegion.srcOffset = srcOffset;
+  copyRegion.dstOffset = dstOffset;
   copyRegion.size = size;
   vkCmdCopyBuffer(
       commandBuffer,
@@ -1241,24 +1242,26 @@ class VulkanTensor::Impl final {
         can_be_image(),
         "Vulkan: Only Tensors with dim <= 4 can be represented as Vulkam Image");
     auto d = dim();
-    uint32_t wd = 1;
-    uint32_t hd = 1;
-    uint32_t dd = 1;
+    int64_t _wd = 1;
+    int64_t _hd = 1;
+    int64_t _dd = 1;
     if (d == 4) {
-      wd = sizes_[3];
-      hd = sizes_[2];
-      dd = sizes_[1] * sizes_[0];
+      _wd = sizes_[3];
+      _hd = sizes_[2];
+      _dd = sizes_[1] * sizes_[0];
     } else if (d == 3) {
-      wd = sizes_[2];
-      hd = sizes_[1];
-      dd = sizes_[0];
+      _wd = sizes_[2];
+      _hd = sizes_[1];
+      _dd = sizes_[0];
     } else if (d == 2) {
-      wd = sizes_[1];
-      hd = sizes_[0];
+      _wd = sizes_[1];
+      _hd = sizes_[0];
     } else if (d == 1) {
-      wd = sizes_[0];
+      _wd = sizes_[0];
     }
-
+    int32_t wd = safe_downcast<int64_t>(_wd);
+    int32_t hd = safe_downcast<int64_t>(_hd);
+    int32_t dd = safe_downcast<int64_t>(_dd);
     return {{wd, hd, UP_DIV(dd, 4)}, {wd, hd, dd}};
   }
 

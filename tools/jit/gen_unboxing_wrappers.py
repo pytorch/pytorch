@@ -45,6 +45,7 @@ TYPE_MAP = {
     'std::array<bool,3>': 'bool[3]',
     'std::array<bool,4>': 'bool[4]',
     'std::string': 'str',
+    'std::string?': 'str?',
     'Scalar': 'Scalar',
     'MemoryFormat': 'MemoryFormat',
     'MemoryFormat?': 'MemoryFormat?',
@@ -135,6 +136,7 @@ FROM_IVALUE = {
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
     'std::string': '{}.toStringRef()',
+    'std::string?': '{}.toOptional<std::string>()',
     'Generator?': '{}.toOptional<at::Generator>()',
     'std::array<bool,2>': 'as_bool_array<2>({}.toBoolList())',
     'std::array<bool,3>': 'as_bool_array<3>({}.toBoolList())',
@@ -166,11 +168,7 @@ const auto options = TensorOptions()
         .layout(${layout})
         .device(${device})
         .pinned_memory(${pin_memory});
-#ifdef USE_STATIC_DISPATCH
-    auto result_ = at::${name}(${args_with_tensor_options});
-#else
     auto result_ = torch::${name}(${args_with_tensor_options});
-#endif
 """)
 CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
@@ -336,7 +334,7 @@ def gen_unboxing_wrappers(
                                                   return_type=return_type,
                                                   formals_types_with_leading_comma=argument_types_with_leading_comma)
         else:
-            assert decl['use_c10_dispatcher'] == 'full'
+            assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
             if is_namespace_function:
                 return CALL_NAMESPACE.substitute(name=decl['name'],
                                                  args=pack_arguments(args),
@@ -383,7 +381,7 @@ def gen_unboxing_wrappers(
                                                  op_capture=op_capture,
                                                  lvalues=lvalues)
         else:
-            assert decl['use_c10_dispatcher'] == 'full'
+            assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
 
         return constructor
 
@@ -490,7 +488,7 @@ def gen_unboxing_wrappers(
                 shards[x].append(OPERATOR.substitute(signature=decl['schema_string'],
                                                      op=emit_decl_variant(decl)))
             else:
-                assert decl['use_c10_dispatcher'] == 'full'
+                assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
 
     for i, shard in enumerate(shards):
         env = {

@@ -29,6 +29,7 @@ Statement* IrCloner::clone(const Statement* statement) {
     // that something went horribly wrong.
     TORCH_INTERNAL_ASSERT(new_node != nullptr);
     TORCH_INTERNAL_ASSERT(clones_map_[statement] == new_node);
+    TORCH_INTERNAL_ASSERT(new_node->fusion() == fusion_);
 
     return new_node;
   }
@@ -37,6 +38,7 @@ Statement* IrCloner::clone(const Statement* statement) {
 void IrCloner::registerClone(const Statement* src, Statement* clone) {
   TORCH_CHECK(src != nullptr);
   TORCH_CHECK(clone != nullptr);
+  TORCH_CHECK(clone->fusion() == fusion_);
   TORCH_CHECK(clones_map_.insert({src, clone}).second);
 }
 
@@ -58,10 +60,6 @@ void IrCloner::handle(const TensorDomain* td) {
 
 void IrCloner::handle(const IterDomain* id) {
   clone_ = new IterDomain(id, this);
-}
-
-void IrCloner::handle(const TensorIndex* ti) {
-  clone_ = new TensorIndex(ti, this);
 }
 
 void IrCloner::handle(const Bool* b) {
@@ -106,18 +104,6 @@ void IrCloner::handle(const BroadcastOp* op) {
 
 void IrCloner::handle(const ReductionOp* op) {
   clone_ = new ReductionOp(op, this);
-}
-
-void IrCloner::handle(const ForLoop* for_loop) {
-  clone_ = new ForLoop(for_loop, this);
-}
-
-void IrCloner::handle(const IfThenElse* if_then_else) {
-  clone_ = new IfThenElse(if_then_else, this);
-}
-
-void IrCloner::handle(const Allocate* allocate) {
-  clone_ = new Allocate(allocate, this);
 }
 
 void IrCloner::handle(const Split* split) {

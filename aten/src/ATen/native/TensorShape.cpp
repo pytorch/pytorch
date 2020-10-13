@@ -118,6 +118,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
         "unsupported operation: the input tensors cannot refer to any of the "
         "output memory locations. Found overlap in input tensor ", i);
   }
+  at::assert_no_internal_overlap(result);
 
   auto should_skip = [](const Tensor& t) { return t.numel() == 0 && t.dim() == 1; };
   for (auto const &tensor : tensors) {
@@ -196,6 +197,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
 
     auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)  // Already checked above
       .resize_outputs(false)
       .add_output(result_slice)
       .add_input(source_slice)
@@ -222,6 +224,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
       auto result_slice = result.narrow(dim, offset, slice_dim_size);
 
       auto iter = TensorIteratorConfig()
+        .set_check_mem_overlap(false)  // Already checked above
         .resize_outputs(false)
         .add_output(result_slice)
         .add_input(tensor)
@@ -508,6 +511,37 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   } else {
     return self.split(split_size, dim);
   }
+}
+
+std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t dim) {
+  TORCH_CHECK(self.dim() > 0, "expected at least a 1-dimensional tensor");
+  int64_t dim_ = maybe_wrap_dim(dim, self.dim());
+  TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
+  std::vector<Tensor> splits(sections);
+  int64_t min_split_size = self.size(dim_) / sections;
+  int64_t num_splits_one_extra = self.size(dim_) % sections;
+  int64_t start_idx = 0;
+  for (int64_t split_idx = 0; split_idx < sections; split_idx++) {
+    int64_t split_size = (split_idx < num_splits_one_extra) ? (min_split_size + 1) : min_split_size;
+    splits[split_idx] = at::slice(self, dim_, start_idx, start_idx + split_size);
+    start_idx += split_size;
+  }
+  return splits;
+}
+
+std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_t dim) {
+  TORCH_CHECK(self.dim() > 0, "expected at least a 1-dimensional tensor");
+  int64_t dim_ = maybe_wrap_dim(dim, self.dim());
+  int64_t num_indices = indices.size();
+  std::vector<Tensor> splits(num_indices + 1);
+  int64_t start_idx = 0;
+  for (int64_t split_idx = 0; split_idx < num_indices; split_idx++) {
+    int64_t end_idx = indices[split_idx];
+    splits[split_idx] = at::slice(self, dim_, start_idx, end_idx);
+    start_idx = end_idx;
+  }
+  splits[num_indices] = at::slice(self, dim_, start_idx, self.size(dim_));
+  return splits;
 }
 
 std::vector<Tensor> unsafe_chunk(const Tensor& self, int64_t chunks, int64_t dim) {
@@ -927,6 +961,12 @@ Tensor select(const Tensor& self, Dimname dim, int64_t index) {
   return at::select(self, dimname_to_position(self, dim), index);
 }
 
+Tensor select_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.select(dim, index).copy_(grad);
+  return grad_input;
+}
+
 Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index) {
   /*
     Algorithm:
@@ -1047,6 +1087,12 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   return result;
 }
 
+Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.slice(dim, start, end, step).copy_(grad);
+  return grad_input;
+}
+
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
   TORCH_CHECK(split_size >= 0,  "split expects split_size be non-negative, but got split_size=", split_size);
@@ -1135,6 +1181,53 @@ Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
            "stack expects a non-empty TensorList");
   dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
   return at::cat_out(result, get_stack_inputs(tensors, dim), dim);
+}
+
+Tensor hstack(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "hstack expects a non-empty TensorList");
+  auto rep = at::atleast_1d(tensors);
+  if (rep[0].dim() == 1) {
+    return at::cat(rep, 0);
+  }
+  return at::cat(rep, 1);
+}
+
+Tensor& hstack_out(Tensor& result, TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "hstack expects a non-empty TensorList");
+  auto rep = at::atleast_1d(tensors);
+  if (rep[0].dim() == 1) {
+    return at::cat_out(result, rep, 0);
+  }
+  return at::cat_out(result, rep, 1);
+}
+
+Tensor vstack(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "vstack expects a non-empty TensorList");
+  auto rep = at::atleast_2d(tensors);
+  return at::cat(rep, 0);
+}
+
+Tensor& vstack_out(Tensor& result, TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "vstack expects a non-empty TensorList");
+  auto rep = at::atleast_2d(tensors);
+  return at::cat_out(result, rep, 0);
+}
+
+Tensor dstack(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "dstack expects a non-empty TensorList");
+  auto rep = at::atleast_3d(tensors);
+  return at::cat(rep, 2);
+}
+Tensor& dstack_out(Tensor& result, TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "dstack expects a non-empty TensorList");
+  auto rep = at::atleast_3d(tensors);
+  return at::cat_out(result, rep, 2);
 }
 
 static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
@@ -1531,6 +1624,52 @@ Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
   return native::flatten(self, *dims.begin(), *(dims.end() - 1), out_dim);
 }
 
+Tensor ravel(const Tensor& self) {
+  return self.reshape(-1);
+}
+
+Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  TORCH_CHECK(sizes.size() > 0, "unflatten: sizes must be non-empty");
+  TORCH_INTERNAL_ASSERT(!names || names->size() == sizes.size());
+
+  auto numel = std::accumulate(sizes.begin(), sizes.end(), 1, std::multiplies<int64_t>());
+  if (self.has_names()) {
+    TORCH_CHECK(numel == self.size(dim),
+      "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
+      dim, " (", self.names()[dim], ": ", self.size(dim), ") in Tensor", self.names());
+    TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
+  } else {
+    TORCH_CHECK(numel == self.size(dim),
+      "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
+      dim, " (", self.size(dim), ") in the input tensor");
+  }
+
+  DimVector shape(self.sizes().begin(), self.sizes().end());
+  shape.erase(shape.begin() + dim);
+  shape.insert(shape.begin() + dim, sizes.begin(), sizes.end());
+
+  Tensor result;
+  {
+    NoNamesGuard guard;
+    result = self.view(shape);
+  }
+
+  if (names) {
+    auto outnames = self.names().vec();
+    outnames.erase(outnames.begin() + dim);
+    outnames.insert(outnames.begin() + dim, names->begin(), names->end());
+    at::internal_set_names_inplace(result, outnames);
+  }
+
+  return result;
+}
+
+Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
+  return native::unflatten(self, dimname_to_position(self, dim), sizes, names);
+}
+
 Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view(other.sizes());
 }
@@ -1693,6 +1832,28 @@ Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
   return result;
 }
 
+Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagonal) {
+  auto ndimension = input_sizes.size();
+  AT_ASSERT(ndimension == 1 || ndimension == 2);
+
+  if (ndimension == 1 || input_sizes[0] == input_sizes[1]) {
+    return grad.diag(diagonal);
+  }
+
+  // Input was a matrix but was not square
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  auto diag = grad_input.diagonal(diagonal);
+  diag.copy_(grad);
+  return grad_input;
+}
+
+Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  auto diag = grad_input.diagonal(offset, dim1, dim2);
+  diag.copy_(grad);
+  return grad_input;
+}
+
 Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   TORCH_CHECK(src.size() == dst.size(), "movedim: Invalid source or destination dims: source (",
               src, " dims ) should contain the same number of dims as destination (", dst, " dims)");
@@ -1710,10 +1871,14 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   wrap_dims(src, normalized_src);
   wrap_dims(dst, normalized_dst);
 
-  auto it_src = std::unique(normalized_src.begin(), normalized_src.end());
-  TORCH_CHECK(it_src == normalized_src.end(), "movedim: repeated dim in `source` (", src, ")");
-  auto it_dst = std::unique(normalized_dst.begin(), normalized_dst.end());
-  TORCH_CHECK(it_dst == normalized_dst.end(), "movedim: repeated dim in `destination` (", dst, ")");
+  auto all_unique = [](const DimVector& dims) {
+    DimVector copy = dims;
+    std::sort(copy.begin(), copy.end());
+    auto duplicate = std::adjacent_find(copy.begin(), copy.end());
+    return duplicate == copy.end();
+  };
+  TORCH_CHECK(all_unique(normalized_src), "movedim: repeated dim in `source` (", src, ")");
+  TORCH_CHECK(all_unique(normalized_dst), "movedim: repeated dim in `destination` (", dst, ")");
 
   // TODO: The algorithm below can probably be optimized.
   // Reference: https://github.com/pytorch/pytorch/pull/41480#discussion_r456100505

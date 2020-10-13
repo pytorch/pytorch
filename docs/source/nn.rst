@@ -10,7 +10,7 @@ These are the basic building block for graphs
     :depth: 2
     :local:
     :backlinks: top
-    
+
 
 .. currentmodule:: torch.nn
 
@@ -269,6 +269,7 @@ Loss Functions
     nn.CosineEmbeddingLoss
     nn.MultiMarginLoss
     nn.TripletMarginLoss
+    nn.TripletMarginWithDistanceLoss
 
 Vision Layers
 ----------------
@@ -282,6 +283,16 @@ Vision Layers
     nn.Upsample
     nn.UpsamplingNearest2d
     nn.UpsamplingBilinear2d
+
+Shuffle Layers
+----------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.ChannelShuffle
 
 DataParallel Layers (multi-GPU, distributed)
 --------------------------------------------

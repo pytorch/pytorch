@@ -160,7 +160,6 @@ case "$image" in
     KATEX=yes
     ;;
   pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7)
-    UBUNTU_VERSION=16.04-rc
     CUDA_VERSION=11.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
@@ -173,6 +172,13 @@ case "$image" in
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=5.0
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ;;
+  pytorch-linux-xenial-py3-clang7-onnx)
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -201,6 +207,8 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    VULKAN_SDK_VERSION=1.2.148.0
+    SWIFTSHADER=yes
     ;;
   pytorch-linux-bionic-py3.8-gcc9)
     ANACONDA_PYTHON_VERSION=3.8
@@ -228,7 +236,6 @@ case "$image" in
     VISION=yes
     ;;
   pytorch-linux-bionic-cuda11.0-cudnn8-py3.6-gcc9)
-    UBUNTU_VERSION=18.04-rc
     CUDA_VERSION=11.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
@@ -239,7 +246,6 @@ case "$image" in
     KATEX=yes
     ;;
   pytorch-linux-bionic-cuda11.0-cudnn8-py3.8-gcc9)
-    UBUNTU_VERSION=18.04-rc
     CUDA_VERSION=11.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.8
@@ -249,37 +255,19 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-xenial-rocm3.3-py3.6)
+  pytorch-linux-bionic-rocm3.7-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=3.3
-    # newer cmake version required
-    CMAKE_VERSION=3.6.3
+    ROCM_VERSION=3.7
     ;;
-  pytorch-linux-bionic-rocm3.3-py3.6)
+  pytorch-linux-bionic-rocm3.8-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=3.3
-    ;;
-  pytorch-linux-xenial-rocm3.5.1-py3.6)
-    ANACONDA_PYTHON_VERSION=3.6
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=3.5.1
-    # newer cmake version required
-    CMAKE_VERSION=3.6.3
-    ;;
-  pytorch-linux-bionic-rocm3.5.1-py3.6)
-    ANACONDA_PYTHON_VERSION=3.6
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=3.5.1
+    ROCM_VERSION=3.8
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
@@ -353,6 +341,8 @@ docker build \
        --build-arg "ANDROID=${ANDROID}" \
        --build-arg "ANDROID_NDK=${ANDROID_NDK_VERSION}" \
        --build-arg "GRADLE_VERSION=${GRADLE_VERSION}" \
+       --build-arg "VULKAN_SDK_VERSION=${VULKAN_SDK_VERSION}" \
+       --build-arg "SWIFTSHADER=${SWIFTSHADER}" \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
