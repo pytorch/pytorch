@@ -7,6 +7,7 @@ from .node import Argument
 from .graph import Graph
 from .graph_module import GraphModule
 from .proxy import Proxy, _create_proxy, TracerBase
+from .rewriter import AST_Rewriter
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -123,9 +124,8 @@ class Tracer(TracerBase):
         self.root = root
         fn = type(root).forward
         self.graph = Graph()
-
         assert isinstance(fn, FunctionType)
-        co = fn.__code__
+        co = AST_Rewriter().rewrite(fn)
         total_args = co.co_argcount + co.co_kwonlyargcount
         names_iter = iter(co.co_varnames)
         next(names_iter)  # skip self
