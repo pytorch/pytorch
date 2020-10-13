@@ -130,6 +130,12 @@ inline at::Tensor IValue::toTensor() const & {
   AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
   return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
 }
+inline c10::Stream IValue::toStream() && {
+  return c10::Stream::unpack(payload.as_int);
+}
+inline c10::Stream IValue::toStream() const & {
+  return c10::Stream::unpack(payload.as_int);
+}
 inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() && {
   AT_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
   return moveToIntrusivePtr<caffe2::Blob>();
@@ -645,6 +651,7 @@ inline type IValue::to<type>() const & { \
   return this->method_name(); \
 }
 DEFINE_TO(at::Tensor, toTensor)
+DEFINE_TO(c10::Stream, toStream)
 DEFINE_TO(float, toDouble)
 DEFINE_TO(double, toDouble)
 DEFINE_TO(unsigned char, toInt)

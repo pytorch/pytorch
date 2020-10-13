@@ -146,7 +146,8 @@ def type_to_python(typename, size=None):
         'Dimname': 'Union[str, ellipsis, None]',
         'DimnameList': 'Sequence[Union[str, ellipsis, None]]',
         'QScheme': '_qscheme',
-        'ArrayRef<double>' : 'Sequence[float]'
+        'ArrayRef<double>' : 'Sequence[float]',
+        'Stream': 'Stream',
     }[typename]
 
     return typename
