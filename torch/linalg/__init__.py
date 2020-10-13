@@ -26,6 +26,9 @@ If :attr:`input` is a batch of Hermitian positive-definite
 matrices, then the returned tensor will be composed of lower-triangular Cholesky factors
 of each of the individual matrices.
 
+.. note:: If the :attr:`input` is not Hermitian positive-definite matrix a RuntimeError is raised
+          saying that the input is singular and mentioning which minor of the input matrix is not positive-definite.
+
 Args:
     input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
                 batch dimensions consisting of symmetric positive-definite matrices.
