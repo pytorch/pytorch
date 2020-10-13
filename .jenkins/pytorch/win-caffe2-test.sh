@@ -38,25 +38,8 @@ if [ -n "$CIRCLE_PULL_REQUEST" ]; then
 fi
 
 
-pytorch_installation="$(dirname $(dirname $(cd $TMP_DIR && python -c 'import os; import torch; print(os.path.realpath(torch.__file__))')))"
-python_installation="$(dirname $(dirname $(cd $TMP_DIR && python -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
-caffe2_pypath="$python_installation/caffe2"
-
 run_tests() {
-    if [[ "${JOB_BASE_NAME}" == *-test3 ]]; then
-        python \
-            -m pytest \
-            -x \
-            -v \
-            --disable-warnings \
-            --junit-xml="$TMP_DIR/result.xml" \
-            --ignore "$caffe2_pypath/python/test/executor_test.py" \
-            --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
-            --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
-            --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
-            --ignore "$caffe2_pypath/python/trt/test_pt_onnx_trt.py" \
-            "$caffe2_pypath/python/operator_test/" 
-    fi
+    $SCRIPT_HELPERS_DIR/test_caffe2_ops.bat
 }
 
 run_tests && assert_git_not_dirty && echo "TEST PASSED"
