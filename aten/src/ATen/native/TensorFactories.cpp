@@ -369,13 +369,11 @@ Tensor new_empty(
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt
     ) {
-  return at::empty(size,
-    dtype_opt.value_or_else([&] {return typeMetaToScalarType(self.options().dtype());}),
-    layout_opt.value_or(self.options().layout()),
-    device_opt.value_or(self.options().device()),
-    pin_memory_opt.value_or(self.options().pinned_memory()),
-    c10::nullopt
-  );
+  auto dtype = dtype_opt.has_value() ? dtype_opt : optTypeMetaToScalarType(self.options().dtype_opt());
+  auto layout = layout_opt.has_value() ? layout_opt : self.options().layout_opt();
+  auto device = device_opt.has_value() ? device_opt : self.options().device_opt();
+  auto pin_memory = pin_memory_opt;
+  return at::empty(size, dtype, layout, device, pin_memory, c10::nullopt);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

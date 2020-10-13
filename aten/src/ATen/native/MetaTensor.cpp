@@ -21,7 +21,7 @@ Tensor empty_meta(
     // give the correct result (a CUDA meta tensor "is cuda").  If we don't
     // like this, remove the computeDispatchKey line
     DispatchKeySet{DispatchKey::Meta, computeDispatchKey(dtype, layout, device)},
-    dtype.has_value() ? scalarTypeToTypeMeta(*dtype) : get_default_dtype(),
+    scalarTypeToTypeMeta(dtype_or_default(dtype)),
     device
   );
   if (size.size() != 1 || size[0] != 0) {
