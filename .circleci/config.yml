@@ -6379,6 +6379,12 @@ workflows:
   build:
     jobs:
       - docker_build_job:
+          name: "docker-pytorch-linux-bionic-cuda11.1-cudnn8-py3.6-gcc9"
+          image_name: "pytorch-linux-bionic-cuda11.1-cudnn8-py3.6-gcc9"
+      - docker_build_job:
+          name: "docker-pytorch-linux-bionic-cuda11.1-cudnn8-py3.8-gcc9"
+          image_name: "pytorch-linux-bionic-cuda11.1-cudnn8-py3.8-gcc9"
+      - docker_build_job:
           name: "docker-pytorch-linux-bionic-cuda11.0-cudnn8-py3.6-gcc9"
           image_name: "pytorch-linux-bionic-cuda11.0-cudnn8-py3.6-gcc9"
       - docker_build_job:
@@ -6411,6 +6417,9 @@ workflows:
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7"
           image_name: "pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7"
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
           image_name: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
