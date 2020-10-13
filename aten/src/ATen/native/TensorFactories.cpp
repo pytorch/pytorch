@@ -763,13 +763,14 @@ Tensor range(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor tril_indices_cpu(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  check_args(row, col, options);
+    int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  check_args(row, col, layout_opt);
 
   auto tril_size = get_tril_size(row, col, offset);
 
   // create an empty Tensor with correct size
-  auto result = at::empty({2, tril_size}, options);
+  auto result = at::native::empty_cpu({2, tril_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
   // The following three approaches result in very little performance
   // differences. Hence, the 2nd option is taken for simpler code, and to return
@@ -808,13 +809,14 @@ Tensor tril_indices_cpu(
 }
 
 Tensor triu_indices_cpu(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  check_args(row, col, options);
+    int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  check_args(row, col, layout_opt);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);
 
   // create an empty Tensor with correct size
-  auto result = at::empty({2, triu_size}, options);
+  auto result = at::native::empty_cpu({2, triu_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values

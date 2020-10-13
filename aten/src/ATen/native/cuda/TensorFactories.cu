@@ -43,16 +43,17 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
   return result;
 }
 
-Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<MemoryFormat> optional_memory_format) {
-  AT_ASSERT(options.device().type() == at::DeviceType::CUDA);
+Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
+  AT_ASSERT(device_or_default(device_opt).type() == at::DeviceType::CUDA);
   TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
-  TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
+  TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
   check_size_nonnegative(size);
 
   auto* allocator = at::cuda::getCUDADeviceAllocator();
   int64_t nelements = prod_intlist(size);
-  auto dtype = options.dtype();
-  int64_t size_bytes = nelements * dtype.itemsize();
+  auto dtype = dtype_or_default(dtype_opt);
+  auto dtype_meta = scalarTypeToTypeMeta(dtype);
+  int64_t size_bytes = nelements * dtype_meta.itemsize();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size_bytes,
@@ -61,23 +62,19 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<
       /*resizeable=*/true);
 
   auto tensor =
-      detail::make_tensor<TensorImpl>(storage_impl, DispatchKey::CUDA, dtype);
+      detail::make_tensor<TensorImpl>(storage_impl, DispatchKey::CUDA, dtype_meta);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
 
-  TORCH_CHECK(
-    !(options.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
-  auto memory_format = options.memory_format_opt().value_or(optional_memory_format.value_or(MemoryFormat::Contiguous));
+  auto memory_format = memory_format_opt.value_or(MemoryFormat::Contiguous);
   tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   return tensor;
 }
 
-Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
-  auto t = at::native::empty_cuda({0}, options);
+Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  auto t = at::native::empty_cuda({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   at::native::resize_impl_cuda_(t.unsafeGetTensorImpl(), size, stride);
   return t;
 }
@@ -327,11 +324,12 @@ void tril_indices_kernel(scalar_t * tensor,
 // implementation, please enable them in test/test_cuda.py and make sure they
 // pass on your local server.
 Tensor tril_indices_cuda(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  check_args(row, col, options);
+    int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  check_args(row, col, layout_opt);
 
   auto tril_size = get_tril_size(row, col, offset);
-  auto tensor = empty_cuda({2, tril_size}, options);
+  auto tensor = empty_cuda({2, tril_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
   if (tril_size > 0) {
     auto m_first_row = offset > 0 ?
@@ -401,11 +399,12 @@ void triu_indices_kernel(scalar_t * tensor,
 // implementation, please enable them in test/test_cuda.py and make sure they
 // pass on your local server.
 Tensor triu_indices_cuda(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  check_args(row, col, options);
+    int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  check_args(row, col, layout_opt);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);
-  auto tensor = empty_cuda({2, triu_size}, options);
+  auto tensor = empty_cuda({2, triu_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
   if (triu_size > 0) {
     // # of triu elements in the first row
