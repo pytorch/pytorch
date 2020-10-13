@@ -2685,61 +2685,85 @@ class TestPTQRNN(TestCase):
             x_hat = x_hat.dequantize()
         noise = (x - x_hat).square().mean().item()
         if noise == 0:
-            return float('inf')
+            return 0.0, float('inf'), float('inf')
         signal = x.square().mean().item()
-        snr = 10 * np.log10(signal / noise)
-        return snr
+        snr = signal / noise
+        snr_db = 10 * np.log10(snr)
+        return signal, noise, snr_db
 
     @override_qengines
     def test_lstm(self):
         qengine = torch.backends.quantized.engine
 
-        batch_size = 3
-        seq_len = 5
-        input_size = 7
+        batch_size = 4
+        seq_len = 8
+        input_size = 12
 
-        hidden_size = 11
-        num_layers = 13
+        hidden_size = 8
+        num_layers = 2
 
-        bias = True
-        batch_first = False
-        dropout = 0
-        bidirectional = True
+        dropout = 0  # This is not supported
+
+        Bias = [False, True]
+        Batch_first = [False, True]
+        Bidirectional = [False, True]
 
         dtype = np.uint8
         qtype = torch.quint8
 
-
+        # Moving the mean of the random input to avoid signal being close to 0
         x = np.random.randn(seq_len, batch_size, input_size)
         qx, scale, zero_point = _quantize(x, dtype=dtype)
-
         x = torch.from_numpy(x).to(torch.float)
         qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point,
                                        dtype=qtype)
+        x = qx.dequantize()
 
-        lstm = torch.nn.LSTM(input_size, hidden_size, num_layers=num_layers,
-                             bias=bias, batch_first=batch_first,
-                             dropout=dropout, bidirectional=bidirectional)
-        lstm.eval()
-        y_ref = lstm(x)
+        with torch.no_grad():
+            for bias, batch_first, bidirectional in itertools.product(
+                    Bias, Batch_first, Bidirectional):
+                if batch_first:
+                    x = x.reshape(batch_size, seq_len, input_size)
+                    qx = qx.reshape(batch_size, seq_len, input_size)
+                else:
+                    x = x.reshape(seq_len, batch_size, input_size)
+                    qx = qx.reshape(seq_len, batch_size, input_size)
 
-        # Prepare
-        lstm.qconfig = torch.quantization.get_default_qconfig('qengine')
-        lstm_prepared = torch.quantization.prepare(lstm)
-        self.assertTrue(hasattr(lstm_prepared, 'layers'))
-        self.assertEqual(num_layers, len(lstm_prepared.layers))
+                # Assume 12dB is sufficient for functional equivalence
+                # Without the bias, linear performs poorly
+                min_power = 12 if bias else 6
+                max_mse = 1e-6 if bias else 1e-1
 
-        # Calibrate
-        y = lstm_prepared(x)
-        self.assertEqual(y_ref, y)
+                lstm = torch.nn.LSTM(input_size, hidden_size,
+                                     num_layers=num_layers,
+                                     bias=bias, batch_first=batch_first,
+                                     dropout=dropout,
+                                     bidirectional=bidirectional)
+                lstm.eval()
+                y_ref = lstm(x)
 
-        # Quantize
-        lstm_quantized = torch.quantization.convert(lstm_prepared)
-        qy = lstm_quantized(qx)
-        snr = self._snr(y, qy)
-        snr = [snr[0]] + snr[1]
-        for power in snr:
-            self.assertTrue(power > 20)  # Assume 20dB is enough
+                # Prepare
+                lstm.qconfig = torch.quantization.get_default_qconfig(qengine)
+                lstm_prepared = torch.quantization.prepare(lstm)
+                self.assertTrue(hasattr(lstm_prepared, 'layers'))
+                self.assertEqual(num_layers, len(lstm_prepared.layers))
+
+                # Calibrate
+                y = lstm_prepared(x)
+                self.assertEqual(y_ref, y)
+
+                # Quantize
+                lstm_quantized = torch.quantization.convert(lstm_prepared)
+                qy = lstm_quantized(qx)
+
+                snr = self._snr(y, qy)
+                snr = [snr[0]] + snr[1]
+
+                for signal, mse, power in snr:
+                    self.assertTrue(
+                        power > min_power or mse < max_mse,
+                        msg=(f"Error is too high: SNR(dB): {power}, "
+                             f"Signal: {signal}, MSE: {mse}"))
 
 
 class TestQuantizedLinear(unittest.TestCase):

@@ -39,7 +39,7 @@ class LSTMCell(torch.nn.Module):
 
     def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
         if hidden is None or hidden == (None, None):
-            hidden = self.initialize_hidden(x.shape[0])
+            hidden = self.initialize_hidden(x.shape[0], x.is_quantized)
         hx, cx = hidden
 
         igates = self.igates(x)
@@ -75,7 +75,8 @@ class LSTMCell(torch.nn.Module):
         assert (bi is None) == (bh is None)  # Either both None or both have values
         input_size = wi.shape[1]
         hidden_size = wh.shape[1]
-        cell = cls(input_dim=input_size, hidden_dim=hidden_size, bias=(bi is None))
+        cell = cls(input_dim=input_size, hidden_dim=hidden_size,
+                   bias=(bi is not None))
         cell.igates.weight = nn.Parameter(wi)
         if bi is not None:
             cell.igates.bias = nn.Parameter(bi)
@@ -96,28 +97,22 @@ class LSTMCell(torch.nn.Module):
 
 
 class _LSTMLayer(nn.Module):
-    def __init__(self, input_dim, hidden_dim, bias=True, batch_first=False):
+    def __init__(self, input_dim, hidden_dim, bias=True):
         super().__init__()
-        self.batch_first = batch_first
         self.cell = LSTMCell(input_dim, hidden_dim, bias=bias)
 
     def forward(self, x, hidden=None):
-        if self.batch_first:
-            x = x.transpose(0, 1)
         result = []
         for xx in x:
             output, hidden = self.cell(xx, hidden)
             result.append(_hidden_as_output(hidden))
         result = torch.stack(result, 0)
-        if self.batch_first:
-            result.transpose_(0, 1)
         return result, hidden
 
     @classmethod
-    def from_params(cls, *args, batch_first=False, **kwargs):
+    def from_params(cls, *args, **kwargs):
         cell = LSTMCell.from_params(*args, **kwargs)
-        layer = cls(cell.input_size, cell.hidden_size, cell.bias,
-                    batch_first=batch_first)
+        layer = cls(cell.input_size, cell.hidden_size, cell.bias)
         layer.cell = cell
         return layer
 
@@ -128,13 +123,13 @@ class LSTMLayer(nn.Module):
         super().__init__()
         self.batch_first = batch_first
         self.bidirectional = bidirectional
-        self.layer_fw = _LSTMLayer(input_dim, hidden_dim, bias=bias,
-                                   batch_first=False)
+        self.layer_fw = _LSTMLayer(input_dim, hidden_dim, bias=bias)
         if self.bidirectional:
-            self.layer_bw = _LSTMLayer(input_dim, hidden_dim, bias=bias,
-                                       batch_first=False)
+            self.layer_bw = _LSTMLayer(input_dim, hidden_dim, bias=bias)
 
     def forward(self, x, hidden=None):
+        if self.batch_first:
+            x = x.transpose(0, 1)
         if hidden is None:
             hidden = (None, None)
         hx_fw, cx_fw = hidden
@@ -160,13 +155,21 @@ class LSTMLayer(nn.Module):
         result = torch.cat([result_fw, result_bw], result_fw.dim() - 1)
         h = torch.stack([hidden_fw[0], hidden_bw[0]], 0)
         c = torch.stack([hidden_fw[1], hidden_bw[1]], 0)
+        if self.batch_first:
+            result.transpose_(0, 1)
         return result, (h, c)
 
     @classmethod
-    def from_float(cls, other, layer_idx=0, qconfig=None):
+    def from_float(cls, other, layer_idx=0, qconfig=None, **kwargs):
         assert hasattr(other, 'qconfig') or (qconfig is not None)
-        layer = cls(other.input_size, other.hidden_size, other.bias,
-                    other.batch_first, other.bidirectional)
+
+        input_size = kwargs.get('input_size', other.input_size)
+        hidden_size = kwargs.get('hidden_size', other.hidden_size)
+        bias = kwargs.get('bias', other.bias)
+        batch_first = kwargs.get('batch_first', other.batch_first)
+        bidirectional = kwargs.get('bidirectional', other.bidirectional)
+
+        layer = cls(input_size, hidden_size, bias, batch_first, bidirectional)
         layer.qconfig = getattr(other, 'qconfig', qconfig)
         wi = getattr(other, f'weight_ih_l{layer_idx}')
         wh = getattr(other, f'weight_hh_l{layer_idx}')
@@ -217,16 +220,19 @@ class LSTM(nn.Module):
                               "and num_layers={}".format(dropout, num_layers))
 
         layers = [LSTMLayer(self.input_size, self.hidden_size,
-                            self.bias, self.batch_first,
-                            self.bidirectional)]
+                            self.bias, batch_first=False,
+                            bidirectional=self.bidirectional)]
         for layer in range(1, num_layers):
             layers.append(LSTMLayer(self.hidden_size, self.hidden_size,
-                                    self.bias, self.batch_first,
-                                    self.bidirectional))
+                                    self.bias, batch_first=False,
+                                    bidirectional=self.bidirectional))
         self.layers = nn.ModuleList(layers)
 
     def forward(self, x, hidden=None):
-        max_batch_size = x.size(0) if self.batch_first else x.size(1)
+        if self.batch_first:
+            x = x.transpose(0, 1)
+
+        max_batch_size = x.size(1)
         num_directions = 2 if self.bidirectional else 1
         if hidden is None:
             zeros = torch.zeros(num_directions, max_batch_size,
@@ -262,6 +268,8 @@ class LSTM(nn.Module):
         hx = hx.reshape(-1, *hx.shape[-2:])
         cx = cx.reshape(-1, *hx.shape[-2:])
 
+        if self.batch_first:
+            x = x.transpose(0, 1)
 
         return x, (hx, cx)
 
@@ -274,6 +282,7 @@ class LSTM(nn.Module):
                        other.bidirectional)
         observed.qconfig = getattr(other, 'qconfig', qconfig)
         for idx in range(other.num_layers):
-            observed.layers[idx] = LSTMLayer.from_float(other, idx, qconfig)
+            observed.layers[idx] = LSTMLayer.from_float(other, idx, qconfig,
+                                                        batch_first=False)
         observed.eval()
         return observed
