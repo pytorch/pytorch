@@ -18,7 +18,7 @@ import torch
 from torch.utils.benchmark.utils import common
 
 
-__all__ = ["FunctionCount", "FunctionCounts", "CallgrindStats"]
+__all__ = ["FunctionCount", "FunctionCounts", "CallgrindStats", "CopyIfCallgrind"]
 
 
 FunctionCount = NamedTuple("FunctionCount", [("count", int), ("function", str)])
@@ -264,8 +264,49 @@ _GLOBALS_TYPES_WHITELIST: Dict[Serialization, Tuple[Any, ...]] = {
 }
 
 
+class CopyIfCallgrind:
+    """Signal that a global may be replaced with a deserialized copy.
+
+    See `GlobalsBridge` for why this matters.
+    """
+    def __init__(self, value: Any):
+        for method, supported_types in _GLOBALS_TYPES_WHITELIST.items():
+            if any(isinstance(value, t) for t in supported_types):
+                self._value: Any = value
+                self._serialization: Serialization = method
+                break
+        else:
+            supported_str = "\n".join([
+                getattr(t, "__name__", repr(t))
+                for t in it.chain(_GLOBALS_TYPES_WHITELIST.values())])
+
+            raise ValueError(
+                f"Unsupported type: {type(value)}\n"
+                f"`collect_callgrind` restricts globals to the following types:\n"
+                f"{textwrap.indent(supported_str, '  ')}"
+            )
+
+    @property
+    def value(self) -> Any:
+        return self._value
+
+    @property
+    def serialization(self) -> Serialization:
+        return self._serialization
+
+    @staticmethod
+    def unwrap_all(globals: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            k: (v.value if isinstance(v, CopyIfCallgrind) else v)
+            for k, v in globals.items()
+        }
+
+
 class GlobalsBridge:
     """Handle the transfer of (certain) globals when collecting Callgrind statistics.
+
+    Key takeaway: Any globals passed must be wrapped in `CopyIfCallgrind` to
+                  work with `Timer.collect_callgrind`.
 
     Consider the following code snippet:
     ```
@@ -289,9 +330,9 @@ class GlobalsBridge:
         print(counter.value)  # Still 10
     ```
 
-    In the first case, the timing loop has an observable side effect. In the
-    second case, however, the addition of serialization and deserialization
-    changes the semantics of the side effect.
+    In the first case, `stmt` is executed using the objects in `globals`;
+    however, the addition of serialization and deserialization changes the
+    semantics and may meaningfully change behavior.
 
     This is a practical consideration when collecting Callgrind statistics.
     Unlike `exec` based execution (which `timeit` uses under the hood) which
@@ -314,22 +355,28 @@ class GlobalsBridge:
     behaved and sufficiently common to warrant whitelisting as well. (e.g.
     `globals={"n": 1}` is very convenient.)
 
-    Fortunately, all have well defined serialization
-    semantics. This class is responsible for enabling the Valgrind subprocess
-    to use elements in `globals` so long as they are a whitelisted type.
+    Fortunately, all have well defined serialization semantics. This class
+    is responsible for enabling the Valgrind subprocess to use elements in
+    `globals` so long as they are a whitelisted type.
 
     Caveats:
+        The user is required to acknowledge this serialization by wrapping
+        elements in `globals` with `CopyIfCallgrind`.
+
         While ScriptFunction and ScriptModule are expected to save and load
         quite robustly, it is up to the user to ensure that an nn.Module can
         un-pickle successfully.
 
-        `torch.Tensor` and `np.ndarray` are deliberately excluded, as inplace
-        mutation on such array-like objects is common and would produce
-        surprising semantics.
+        `torch.Tensor` and `np.ndarray` are deliberately excluded. The
+        serialization/deserialization process perturbs the representation of a
+        tensor in ways that could result in incorrect measurements. For example,
+        if a tensor lives in pinned CPU memory, this fact would not be preserved
+        by a dump, and that will in turn change the performance of certain CUDA
+        operations.
     """
 
     def __init__(self, globals: Dict[str, Any], data_dir: str) -> None:
-        self._globals: Dict[str, Tuple[Serialization, Any]] = {}
+        self._globals: Dict[str, CopyIfCallgrind] = {}
         self._data_dir = data_dir
         if not os.path.exists(data_dir):
             os.mkdir(data_dir)
@@ -343,41 +390,34 @@ class GlobalsBridge:
                 # __builtins__ is added by Timer.
                 continue
 
-            for method, supported_types in _GLOBALS_TYPES_WHITELIST.items():
-                if any(isinstance(value, t) for t in supported_types):
-                    self._globals[name] = (method, value)
-                    break
-
-            if name not in self._globals:
-                supported_str = "\n".join([
-                    getattr(t, "__name__", repr(t))
-                    for t in it.chain(_GLOBALS_TYPES_WHITELIST.values())])
-                raise NotImplementedError(
-                    f"Global {name} has unsupported type {type(value)}\n"
-                    f"`collect_callgrind` restricts globals to the following types:\n"
-                    f"{textwrap.indent(supported_str, '  ')}"
+            if not isinstance(value, CopyIfCallgrind):
+                raise ValueError(
+                    "`collect_callgrind` requires that globals be wrapped in "
+                    "`CopyIfCallgrind` so that serialization is explicit."
                 )
+
+            self._globals[name] = value
 
     def construct(self) -> str:
         load_lines = []
-        for name, (method, value) in self._globals.items():
-            if method == Serialization.PICKLE:
+        for name, wrapped_value in self._globals.items():
+            if wrapped_value.serialization == Serialization.PICKLE:
                 path = os.path.join(self._data_dir, f"{name}.pkl")
                 load_lines.append(
                     f"with open({repr(path)}, 'rb') as f:\n    {name} = pickle.load(f)")
                 with open(path, "wb") as f:
-                    pickle.dump(value, f)
+                    pickle.dump(wrapped_value.value, f)
 
-            elif method == Serialization.TORCH:
+            elif wrapped_value.serialization == Serialization.TORCH:
                 path = os.path.join(self._data_dir, f"{name}.pt")
                 load_lines.append(f"{name} = torch.load({repr(path)})")
-                torch.save(value, path)
+                torch.save(wrapped_value.value, path)
 
-            elif method == Serialization.TORCH_JIT:
+            elif wrapped_value.serialization == Serialization.TORCH_JIT:
                 path = os.path.join(self._data_dir, f"{name}.pt")
                 load_lines.append(f"{name} = torch.jit.load({repr(path)})")
                 with open(path, "wb") as f:
-                    torch.jit.save(value, f)
+                    torch.jit.save(wrapped_value.value, f)
 
             else:
                 raise NotImplementedError(f"Unknown serialization method: {method}")

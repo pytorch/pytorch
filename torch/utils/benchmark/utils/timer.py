@@ -154,7 +154,12 @@ class Timer(object):
         setup = textwrap.dedent(setup)
         setup = (setup[1:] if setup[0] == "\n" else setup).rstrip()
 
-        self._timer = self._timer_cls(stmt=stmt, setup=setup, timer=timer, globals=globals)
+        self._timer = self._timer_cls(
+            stmt=stmt,
+            setup=setup,
+            timer=timer,
+            globals=valgrind_timer_interface.CopyIfCallgrind.unwrap_all(globals),
+        )
         self._task_spec = common.TaskSpec(
             stmt=stmt,
             setup=setup,

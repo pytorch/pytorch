@@ -426,6 +426,17 @@ class TestBenchmarkUtils(TestCase):
     @slowTest
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
     def test_collect_callgrind(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"`collect_callgrind` requires that globals be wrapped "
+            r"in `CopyIfCallgrind` so that serialization is explicit."
+        ):
+            benchmark_utils.Timer(
+                "pass",
+                globals={"x": 1}
+            ).collect_callgrind(collect_baseline=False)
+
+
         @torch.jit.script
         def add_one(x):
             return x + 1
@@ -433,7 +444,10 @@ class TestBenchmarkUtils(TestCase):
         timer = benchmark_utils.Timer(
             "y = add_one(x) + k",
             setup="x = torch.ones((1,))",
-            globals={"add_one": add_one, "k": 5}
+            globals={
+                "add_one": benchmark_utils.CopyIfCallgrind(add_one),
+                "k": benchmark_utils.CopyIfCallgrind(5)
+            }
         )
 
         # Don't collect baseline to speed up unit test by ~30 seconds.
