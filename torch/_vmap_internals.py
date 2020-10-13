@@ -5,7 +5,7 @@ from typing import Any, Callable, Optional, Tuple, Union, List
 from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten
 import warnings
 
-in_dims_t = Union[int, Tuple[Optional[int], ...]]
+in_dims_t = Union[int, Tuple]
 out_dims_t = Union[int, Tuple[int, ...]]
 
 # Checks that all args-to-be-batched have the same batch dim size
