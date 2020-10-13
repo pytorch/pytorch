@@ -1629,7 +1629,7 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
   std::vector<int64_t> result_shape = self_.sizes().slice(other.dim(), ndim - other.dim()).vec();
 
   int64_t product = std::accumulate(result_shape.begin(), result_shape.end(), int64_t{1}, std::multiplies<int64_t>());
-  self_ = self_.reshape({-1, product});
+  self_ = self_.reshape({product, product});
 
   // 0th output of at::solve is the solution
   // normally `other` would be flattened by at::solve expects 2D input
