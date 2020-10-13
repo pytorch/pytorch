@@ -17,13 +17,11 @@ def register_observed_custom_module_mapping(float_custom_module_class, observed_
     OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS[float_custom_module_class] = \
         observed_custom_module_class
 
-def get_observed_custom_module_class(float_custom_module_class=None):
+def get_observed_custom_module_class(float_custom_module_class):
     """ Get the corresponding observed module class for a given
     float custom module.
     """
     global OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS
-    if float_custom_module_class is None:
-        return OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS
     if not inspect.isclass(float_custom_module_class):
         float_custom_module_class = type(float_custom_module_class)
     observed_custom_module_class = \

@@ -565,6 +565,7 @@ _(aten, randn_like) \
 _(aten, random) \
 _(aten, randperm) \
 _(aten, range) \
+_(aten, ravel) \
 _(aten, reciprocal) \
 _(aten, reflection_pad1d) \
 _(aten, reflection_pad1d_backward) \

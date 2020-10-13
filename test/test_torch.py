@@ -1101,7 +1101,7 @@ class AbstractTestCases:
         def test_topk_arguments(self):
             q = torch.randn(10, 2, 10)
             # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
-            self.assertRaises(TypeError, lambda: q.topk(4, True))        
+            self.assertRaises(TypeError, lambda: q.topk(4, True))
 
         def test_mode(self):
             x = torch.arange(1., SIZE * SIZE + 1).clone().resize_(SIZE, SIZE)
@@ -1885,6 +1885,65 @@ class AbstractTestCases:
 
         def test_gather(self):
             self._test_gather(self, lambda t: t)
+
+        @staticmethod
+        def _test_ravel(self, tensors, size, nc=False):
+            for src in tensors:
+                # Continuous Tensor -> View
+                flat = src.ravel()
+                self.assertEqual(flat.shape, torch.Size([size]))
+                self.assertEqual(src.view(-1), flat)
+                self.assertEqual(flat._base, src)
+
+                # Non-continuous Tensor -> Copy
+                if nc:
+                    nc_src = src.t()
+                    nc_flat = nc_src.ravel()
+                    self.assertEqual(nc_flat.shape, torch.Size([size]))
+                    self.assertEqual(nc_src.reshape(-1), nc_flat)
+                    self.assertTrue(nc_flat._base != nc_src)
+
+        def test_ravel(self):
+            # Test that flatten returns 1-dim tensor when given a 0-dim tensor
+            zero_dim_tensor = torch.tensor(123)
+            flat0 = zero_dim_tensor.ravel()
+            one_dim_tensor = torch.tensor([123])
+            flat1 = zero_dim_tensor.ravel()
+
+            self.assertEqual(zero_dim_tensor.shape, torch.Size([]))
+            self.assertEqual(flat0.shape, torch.Size([1]))
+            self.assertEqual(one_dim_tensor.shape, torch.Size([1]))
+            self.assertEqual(flat1.shape, torch.Size([1]))
+            self.assertEqual(flat0, one_dim_tensor)
+            self.assertEqual(flat0, flat1)
+            self.assertEqual(flat0.shape, flat1.shape)
+
+            # Test both float tensor and quantized tensor
+            tensors = [torch.randn(5, 5, 5, 5),
+                       torch._empty_affine_quantized([5, 5, 5, 5],
+                                                     scale=2,
+                                                     zero_point=3,
+                                                     dtype=torch.quint8)]
+            self._test_ravel(self, tensors, 625)
+
+            tensors = [torch.randn(0, 2, 3),
+                       torch.randn(3, 0, 2),
+                       torch._empty_affine_quantized([0, 2, 3],
+                                                     scale=2,
+                                                     zero_point=3,
+                                                     dtype=torch.quint8),
+                       torch._empty_affine_quantized([3, 0, 2],
+                                                     scale=2,
+                                                     zero_point=3,
+                                                     dtype=torch.quint8)]
+            self._test_ravel(self, tensors, 0)
+
+            tensors = [torch.randn(5, 5),
+                       torch._empty_affine_quantized([5, 5],
+                                                     scale=2,
+                                                     zero_point=3,
+                                                     dtype=torch.quint8)]
+            self._test_ravel(self, tensors, 25, True)
 
         @staticmethod
         def _test_scatter_add_mult_index_base(self, cast):
@@ -6376,7 +6435,7 @@ class TestTorchDeviceType(TestCase):
     # Tests clamp and its alias, clip
     @dtypes(torch.int64, torch.float32)
     def test_clamp(self, device, dtype):
-        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_, 
+        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_,
                    torch.clip, torch.Tensor.clip, torch.Tensor.clip_)
 
         # min/max argument product
@@ -6404,7 +6463,7 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(Y_expected, Y_out)
 
     def test_clamp_propagates_nans(self, device):
-        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_, 
+        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_,
                    torch.clip, torch.Tensor.clip, torch.Tensor.clip_)
 
         # min/max argument product
@@ -6415,9 +6474,9 @@ class TestTorchDeviceType(TestCase):
                 if min_val is None and max_val is None:
                     continue
 
-                X, Y_expected = self.generate_clamp_baseline(device, torch.float, 
-                                                             min_vals=min_val, 
-                                                             max_vals=max_val, 
+                X, Y_expected = self.generate_clamp_baseline(device, torch.float,
+                                                             min_vals=min_val,
+                                                             max_vals=max_val,
                                                              with_nans=True)
                 Y_expected = torch.isnan(Y_expected)
 
