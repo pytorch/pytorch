@@ -64,7 +64,6 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Variable);
   } else if (strcmp(THPUtils_typename(obj), "NoneType") == 0) {
-    auto none_type = py::cast<py::none>(obj);
     args.desc.structure.push_back(D::NoneType);
   } else {
     std::string msg =

@@ -452,6 +452,29 @@ class TestONNXRuntime(unittest.TestCase):
         x = {"test_key_in": torch.randn(1, 2, 3)}
         self.run_test(MyModel(), (x,))
 
+    def test_none_as_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                if y is not None:
+                    return x + y
+                return x
+
+        x = torch.randn(2, 3)
+        self.run_test(Model(), (x, None))
+
+    def test_none_as_tuple_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                if y[0] is not None:
+                    return x + y[0]
+                if y[1] is not None:
+                    return x + y[1]
+                return x
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        self.run_test(Model(), (x, (None, y)))
+
     def test_none_as_named_input(self):
         class Model(torch.nn.Module):
             def forward(self, x, y=None, z=None):
