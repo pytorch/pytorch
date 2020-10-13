@@ -2667,7 +2667,18 @@ class TestDynamicQuantizedRNNOp(TestCase):
 
 """Tests recurrent layers."""
 class TestQuantizedRNN(TestCase):
-    pass
+    @override_qengines
+    def test_ptq_lstm(self):
+        batch_size = 16
+        seq_len = 256
+        input_size = 32
+        num_layers = 8
+
+        x = np.random.randn(seq_len, batch_size, input_size)
+        qx = _quantize(x)
+        print(x, qx)
+
+
 
 class TestQuantizedLinear(unittest.TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""

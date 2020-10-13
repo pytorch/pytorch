@@ -94,6 +94,8 @@ __all__ = [
     'ConvTranspose2d',
     'DeQuantize',
     'Linear',
+    'LSTM',
+    'LSTMCell',
     'MaxPool2d',
     'Quantize',
     'ReLU',
