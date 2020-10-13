@@ -482,6 +482,8 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
         name = f'data/{key}'
         storage = serialized_storages[key]
         # given that we copy things around anyway, we might use storage.cpu()
+        # this means to that to get tensors serialized, you need to implement
+        # .cpu() on the underlying Storage
         if storage.device.type != 'cpu':
             storage = storage.cpu()
         # Now that it is on the CPU we can directly copy it into the zip file

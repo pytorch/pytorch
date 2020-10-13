@@ -273,7 +273,7 @@ def compute_type_method(
             assert returns_type == dispatcher.returns_type(f.func.returns)
             dispatcher_args = dispatcher.arguments(f.func)
             dispatcher_args_types_str = ', '.join(map(lambda a: a.type, dispatcher_args))
-            if dispatch is None or dispatch == 'Math':
+            if dispatch is None or dispatch == 'Math' or dispatch == 'DefaultBackend':
                 type_name = f'TypeDefault::{name}'
             else:
                 type_name = f'{dispatch}Type::{name}'
@@ -287,11 +287,12 @@ def compute_type_method(
             if not def_only and not f.manual_kernel_registration and (dispatch is not None or f.dispatch is None):
                 # Figure out which signature the function is
                 if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-
+                    payload = f"TORCH_FN({type_name})"
+                elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
                     payload = "c10::impl::hacky_wrapper_for_legacy_signatures<" \
                         f"{returns_type} ({dispatcher_args_types_str})>(TORCH_FN({type_name}))"
-
                 else:
+                    assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
                     payload = f"torch::CppFunction::makeUnboxedOnly(&{type_name})"
 
                 # Annotate it with dispatch information if necessary
@@ -383,7 +384,7 @@ CAFFE2_API {cpp_returns_type} {cpp_name}({signature_group.signature.cpp_argument
     return op.call({exprs_str(signature_group.signature)});
 }}
 """
-        elif local.use_c10_dispatcher() is UseC10Dispatcher.full:
+        elif local.use_c10_dispatcher().dispatcher_uses_new_style():
             # for c10-full ops, the scattered version is the real op and the gathered version is a proxy
             # calling into the scattered version
             return f"""
@@ -473,7 +474,7 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
     return op.call({exprs_str(signature_group.signature)});
 }}
 """
-        elif local.use_c10_dispatcher() is UseC10Dispatcher.full:
+        elif local.use_c10_dispatcher().dispatcher_uses_new_style():
             # for c10-full ops, the scattered version is the real op and the gathered version is a proxy
             # calling into the scattered version
             return f"""
@@ -565,7 +566,7 @@ def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], Opti
         dispatcher_args = dispatcher.arguments(f.func)
 
         args: Union[Sequence[DispatcherArgument], Sequence[LegacyDispatcherArgument]]
-        if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+        if local.use_c10_dispatcher().dispatcher_uses_new_style():
             returns_type = dispatcher_returns_type
             args = dispatcher_args
             exprs = dispatcher.exprs(dispatcher_args)
@@ -605,10 +606,13 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
 """
         elif target is Target.REGISTRATION:
             if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+                return f"""m.impl("aten::{f.func.name}", TORCH_FN({name}));"""
+            elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
                 return f"""m.impl("aten::{f.func.name}",
           c10::impl::hacky_wrapper_for_legacy_signatures<{dispatcher_returns_type} ({', '.join(a.type for a in dispatcher_args)})>(
             TORCH_FN({name})));"""
             else:
+                assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
                 return f"""m.impl_UNBOXED("aten::{f.func.name}", {name});"""
         elif target is Target.DECLARATION:
             raise AssertionError()
@@ -1115,10 +1119,17 @@ def main() -> None:
             native_functions)) +
         list(mapMaybe(
             compute_type_method('Math', target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
+            native_functions)) +
+        list(mapMaybe(
+            compute_type_method('DefaultBackend', target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
             native_functions)),
 
         'function_registrations': list(mapMaybe(
             compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
+            native_functions)),
+
+        'default_backend_function_registrations': list(mapMaybe(
+            compute_type_method('DefaultBackend', target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
             native_functions)),
 
         'math_function_registrations': list(mapMaybe(
