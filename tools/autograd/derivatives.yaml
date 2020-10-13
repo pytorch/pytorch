@@ -162,7 +162,7 @@
   self: grad * self.sgn()
 
 - name: acos(Tensor self) -> Tensor
-  self: grad * -((-self * self + 1).rsqrt())
+  self: grad * -((-self * self + 1).rsqrt()).conj()
 
 - name: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: grad
@@ -213,7 +213,7 @@
   self: grad
 
 - name: angle(Tensor self) -> Tensor
-  self: grad.to(self.scalar_type()) * (self*Scalar(c10::complex<double>{0.0, 1.0})).conj() / self.abs().pow(2)
+  self: angle_backward(grad, self)
 
 # The four items below are necessary because TensorIterator doesn't work on
 # Variables (codegen does not unwrap the input Tensor for all() and any() ).
@@ -230,19 +230,19 @@
   self: not_implemented("all")
 
 - name: acosh(Tensor self) -> Tensor
-  self: grad * (self.pow(2) - 1).rsqrt()
+  self: grad * (self.pow(2) - 1).rsqrt().conj()
 
 - name: acosh_(Tensor(a!) self) -> Tensor(a!)
   self: not_implemented("inplace version of acosh")
 
 - name: asinh(Tensor self) -> Tensor
-  self: grad * (self.pow(2) + 1).rsqrt()
+  self: grad * (self.pow(2) + 1).rsqrt().conj()
 
 - name: asinh_(Tensor(a!) self) -> Tensor(a!)
   self: not_implemented("inplace version of asinh")
 
 - name: atanh(Tensor self) -> Tensor
-  self: grad * 1 / (1 - self.pow(2))
+  self: grad * 1 / (1 - self.pow(2)).conj()
 
 - name: atanh_(Tensor(a!) self) -> Tensor(a!)
   self: not_implemented("inplace version of atanh")
@@ -254,7 +254,7 @@
   self: grad * (-self * self + 1).rsqrt()
 
 - name: atan(Tensor self) -> Tensor
-  self: grad / (self * self + 1)
+  self: grad / (self * self + 1).conj()
 
 - name: atan2(Tensor self, Tensor other) -> Tensor
   self, other: atan2_backward(grad, self, other, grad_input_mask)
@@ -610,16 +610,16 @@
   self: grad * polygamma(n + 1, self)
 
 - name: log(Tensor self) -> Tensor
-  self: grad.div(self)
+  self: grad.div(self.conj())
 
 - name: log10(Tensor self) -> Tensor
-  self: grad / (self * 2.3025850929940456)
+  self: grad / (self.conj() * 2.3025850929940456)
 
 - name: log1p(Tensor self) -> Tensor
   self: log1p_backward(grad, self)
 
 - name: log2(Tensor self) -> Tensor
-  self: grad / (self * 0.6931471805599453)
+  self: grad / (self.conj() * 0.6931471805599453)
 
 - name: logaddexp(Tensor self, Tensor other) -> Tensor
   self: grad / (1 + exp(other - self))
@@ -884,7 +884,7 @@
   self: zeros_like(grad)
 
 - name: reciprocal(Tensor self) -> Tensor
-  self: -grad * result * result
+  self: -grad * (result * result).conj()
 
 - name: remainder.Scalar(Tensor self, Scalar other) -> Tensor
   self: grad
@@ -909,7 +909,7 @@
   self: zeros_like(grad)
 
 - name: rsqrt(Tensor self) -> Tensor
-  self: -0.5 * grad * result.pow(3)
+  self: -0.5 * grad * result.pow(3).conj()
 
 - name: scatter_.src(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   self: grad.clone().scatter_(dim, index, 0)
@@ -1046,7 +1046,7 @@
   index: non_differentiable
 
 - name: tan(Tensor self) -> Tensor
-  self: grad * (1 + result.pow(2))
+  self: grad * (1 + result.pow(2)).conj()
 
 - name: tanh(Tensor self) -> Tensor
   self: tanh_backward(grad, result)
@@ -1670,8 +1670,8 @@
   output: grad * grad_output * (-2 * output + 1)
 
 - name: tanh_backward(Tensor grad_output, Tensor output) -> Tensor
-  grad_output: tanh_backward(grad, output)
-  output: -2 * output * grad * grad_output
+  grad_output: tanh_backward(grad, output.conj())
+  output: grad.conj() * (-2 * output.conj() * grad_output)
 
 # cudnn
 - name: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
