@@ -1122,7 +1122,7 @@ Arguments:
 
 // c10d methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
-    {"_c10d_init", (PyCFunction)c10d_init, METH_NOARGS, nullptr},
+    {"_c10d_init", c10d_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {

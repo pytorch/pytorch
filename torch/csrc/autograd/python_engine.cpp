@@ -118,7 +118,7 @@ std::shared_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
 PyObject *THPEngineClass = nullptr;
 
 // Implementation of torch._C._EngineBase.run_backward
-PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
+PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
   PyObject *tensors = nullptr;
@@ -278,8 +278,8 @@ PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 
 static struct PyMethodDef THPEngine_methods[] = {
   {(char*)"run_backward", (PyCFunction)(void(*)(void))THPEngine_run_backward, METH_VARARGS | METH_KEYWORDS, nullptr},
-  {(char*)"queue_callback", (PyCFunction)THPEngine_queue_callback, METH_O, nullptr},
-  {(char*)"is_checkpoint_valid", (PyCFunction)THPEngine_is_checkpoint_valid, METH_NOARGS, nullptr},
+  {(char*)"queue_callback", THPEngine_queue_callback, METH_O, nullptr},
+  {(char*)"is_checkpoint_valid", THPEngine_is_checkpoint_valid, METH_NOARGS, nullptr},
   {nullptr}
 };
 
