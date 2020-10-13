@@ -86,7 +86,7 @@ def is_custom_module_class(module_class):
     """ Check if a given module class is a custom module class
     """
     return is_custom_observed_module_class(module_class) and \
-           is_custom_quantized_module_class(module_class)
+        is_custom_quantized_module_class(module_class)
 
 def mark_observed_custom_module(module, custom_module_class):
     """ Mark a module as observed custom module, so that
