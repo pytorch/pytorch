@@ -397,7 +397,7 @@ class _ValgrindWrapper(object):
             # invoke unless we know we'll need it.
             from torch.utils.benchmark.utils.valgrind_wrapper.compat_bindings import bindings
             self._bindings_module = bindings
-            self._supported_platform: bool = bindings.valgrind_supported_platform()
+            self._supported_platform = bindings.valgrind_supported_platform()
 
         self._commands_available: Dict[str, bool] = {}
         if self._supported_platform:
