@@ -12,8 +12,6 @@ from torch.quantization import (
     prepare_fx,
     convert_fx,
     prepare_qat_fx,
-    register_observed_custom_module_mapping,
-    register_quantized_custom_module_mapping,
 )
 
 from torch.quantization import (
@@ -627,7 +625,6 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(quant(x), quant_2(x))
 
     @skipIfNoFBGEMM
-    @unittest.skip("Fix in next PR, will need to change API")
     def test_custom_module_class(self):
         class CustomModule(torch.nn.Module):
             def __init__(self):
@@ -715,26 +712,14 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.conv2.weight = torch.nn.Parameter(original_m.custom.conv.weight.detach())
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.custom.conv.bias.detach())
 
-        from torch.fx.symbolic_trace import Tracer
-
-        # define a custom tracer to not trace through the custom module
-
-        class CustomTracer(Tracer):
-            def is_leaf_module(self, m, module_qualified_name):
-                return (m.__module__.startswith('torch.nn') and
-                        not isinstance(m, torch.nn.Sequential)) or \
-                    isinstance(m, CustomModule)
-
         # TODO: add other quant types after mixed mode support
         for quant_type in [QuantType.STATIC]:
-            # register observed and quantized custom module classes
-            register_observed_custom_module_mapping(CustomModule, ObservedCustomModule)
-            register_quantized_custom_module_mapping(CustomModule, QuantizedCustomModule)
-
-            m = torch.fx.GraphModule(original_m, CustomTracer().trace(original_m))
-            qconfig_dict = {'': default_qconfig}
+            qconfig_dict = {
+                '': default_qconfig,
+                'custom_module_class':
+                [(CustomModule, ObservedCustomModule, QuantizedCustomModule)]}
             # check prepared model
-            m = prepare_fx(m, qconfig_dict)
+            m = prepare_fx(original_m, qconfig_dict)
             # calibration
             m(data)
             # all activation observers are inserted in the top level module

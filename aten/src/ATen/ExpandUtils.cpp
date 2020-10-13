@@ -85,28 +85,35 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t>> inferExpandGeometry(
       expandedSizes, expandedStrides);
 }
 
-// This function returns a dense and non-overlapping strides, which keeps the same memory
-// layout as the input tensor, based on the shape of input tensor.
-// If the input tensor is a dense and non-overlapping tensor, the output strides will
-// be the same as input tensor's strides. Otherwise, the input tensor's strides will be
-// sorted (see note inside the code), the output strides will be computed based on the
-// sorted input tensor's strides and shape, so the input tensor's memory layout is preserved
-// as well.
-std::vector<int64_t> infer_dense_strides(const Tensor& tensor) {
 
-  // Note: numel() == 0 is also treated as contiguous which is in the scope of
-  //       non overlapping and dense, so we return the strides as it as well
-  if (tensor.is_non_overlapping_and_dense()) {
-    IntArrayRef strides = tensor.strides();
-    return std::vector<int64_t>(strides.begin(), strides.end());
+// This function returns a dense and non-overlapping strides, which keeps the same layout permutation
+// as the input `tensor_strides`, computed based on the input `tensor_sizes`.
+// Note:
+// 1. This function expects the inputs `tensor_strides` and `tensor_sizes` are non-dense or overlapping,
+//    If the inputs are densed and non-overlapping, the output strides will be the same as `tensor_strides`.
+//    However, this function won't check whether inputs are dense or overlapping, so the whole function will
+//    still be executed even the inputs are already dense and non-overlapping, this will cause slowness.
+//
+//    Please verify whether the inputs are non-dense or overlapping before calling this function if possible,
+//    if the inputs come from a tensor, you can check this through `is_non_overlapping_and_dense()`
+//
+// 2. The strides propagation rule that is used in this function is exactily the same as what is being used in
+//    TensorIterator. Please refer to https://github.com/pytorch/pytorch/pull/42922 for more details
+
+std::vector<int64_t> infer_dense_strides(IntArrayRef tensor_sizes, IntArrayRef tensor_strides) {
+
+  TORCH_CHECK(tensor_sizes.size() == tensor_strides.size(),
+    "Input sizes and strides should have same size but got ", tensor_sizes.size(), " and ", tensor_strides.size());
+
+  size_t ndim = tensor_sizes.size();
+  if (ndim == 0) {
+    return {};
+  }
+  if (ndim == 1) {
+    return {1};
   }
 
-  IntArrayRef ori_sizes(tensor.sizes());
-  IntArrayRef ori_strides(tensor.strides());
-
-  size_t ndim = tensor.dim();
   DimVector perm(ndim);
-
   // initialize perm with n-1, n-2, ..., 1, 0
   std::iota(perm.rbegin(), perm.rend(), 0);
 
@@ -117,15 +124,14 @@ std::vector<int64_t> infer_dense_strides(const Tensor& tensor) {
   // return  1 if dim0 should come after dim1
   // return  0 if comparison is ambiguous
   auto should_swap = [&](size_t dim0, size_t dim1) {
-    int64_t stride0 = ori_strides[dim0];
-    int64_t stride1 = ori_strides[dim1];
+    int64_t stride0 = tensor_strides[dim0];
+    int64_t stride1 = tensor_strides[dim1];
 
     // if any stride is 0, treat it as ambiguous comparison to
     // keep the same behavior as TensorIterator
     if (stride0 == 0 || stride1 == 0) {
       return 0;
     }
-
     if (stride0 < stride1) {
       return -1;
     }
@@ -133,7 +139,7 @@ std::vector<int64_t> infer_dense_strides(const Tensor& tensor) {
       return 1;
     }
     // for equal strides, the dimension with smaller size goes front
-    if (ori_sizes[dim0] > ori_sizes[dim1]) {
+    if (tensor_sizes[dim0] > tensor_sizes[dim1]) {
       return 1;
     }
     return 0;
@@ -163,10 +169,10 @@ std::vector<int64_t> infer_dense_strides(const Tensor& tensor) {
   for (size_t i = 0; i < ndim; ++i) {
     int64_t idx = perm[i];
     out_strides[idx] = curr_stride;
-    // ori_sizes does not have 0 here since the input tensor will be contiguous otherwise,
-    // the function will stoped in the `non overlapping and dense check` block
-    if (ori_sizes[idx] != 1) {
-      curr_stride *= ori_sizes[idx];
+    // Note: for size 0, we simply treated it as 1, it really doesn't matter here
+    // since the total number of element is 0.
+    if (tensor_sizes[idx] > 1) {
+      curr_stride *= tensor_sizes[idx];
     }
   }
   return out_strides;
