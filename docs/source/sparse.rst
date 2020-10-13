@@ -417,10 +417,7 @@ matrix arguments.
     .. automethod:: sparse_resize_and_clear_
     .. automethod:: to_dense
     .. automethod:: to_sparse
-
-   The following methods are specific to :ref:`sparse COO tensors
-   <sparse-coo-docs>`:
-
+    .. The following methods are specific to :ref:`sparse COO tensors <sparse-coo-docs>`:
     .. automethod:: coalesce
     .. automethod:: is_coalesced
     .. automethod:: indices

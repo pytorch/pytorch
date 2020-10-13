@@ -7041,7 +7041,7 @@ Constructs a :ref:`sparse tensor in COO(rdinate) format
 
 .. note::
 
-   This function returns an :ref:`uncoalesced tensor <_sparse-uncoalesced-coo-docs>`.
+   This function returns an :ref:`uncoalesced tensor <sparse-uncoalesced-coo-docs>`.
 
 Args:
     indices (array_like): Initial data for the tensor. Can be a list, tuple,
