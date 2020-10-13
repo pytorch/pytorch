@@ -637,7 +637,7 @@ static void fuseListConstructListUnpack(Block* b) {
     for (auto* child_block : it->blocks()) {
       fuseListConstructListUnpack(child_block);
     }
-    if (it->kind() == prim::ListUnpack){
+    if (it->kind() == prim::ListUnpack) {
       for (size_t i = 0; i < it->outputs().size(); i++) {
         auto output = it->outputs().at(i);
         if (it->input()->node()->kind() == prim::ListConstruct) {
@@ -645,7 +645,8 @@ static void fuseListConstructListUnpack(Block* b) {
         } else if (it->input()->type()->cast<ListType>()) {
           Node* gather_indices = b->owningGraph()->create(onnx::Constant, 1);
           gather_indices->insertBefore(*it);
-          gather_indices->t_(attr::value, at::scalar_to_tensor(at::Scalar(int(i))));
+          gather_indices->t_(
+              attr::value, at::scalar_to_tensor(at::Scalar(int(i))));
           Node* gather_node = b->owningGraph()->create(onnx::Gather, 1);
           gather_node->insertBefore(*it);
           gather_node->addInput(it->input());
