@@ -33,8 +33,8 @@ class Node:
         self.target = target  # for method/module/function, the name of the method/module/function/attr
         # being invoked, e.g add, layer1, or torch.add
 
-        self._uses = {}
-        self._update_args_kwargs(map_arg(args, lambda x: x), map_arg(kwargs, lambda x: x))
+        self._uses : Dict[Node, None] = {}
+        self._update_args_kwargs(map_arg(args, lambda x: x), map_arg(kwargs, lambda x: x))  # type: ignore
 
         # All of the nodes that use the value produced by this Node
         # Note one user may correspond to several uses, e.g. the node fo `x + x`
@@ -100,7 +100,7 @@ class Node:
 
     @args.setter
     def args(self, a : Tuple[Argument, ...]):
-        self._update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)
+        self._update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)  # type: ignore
 
     @property
     def kwargs(self) -> Dict[str, Argument]:
@@ -108,7 +108,7 @@ class Node:
 
     @kwargs.setter
     def kwargs(self, k : Dict[str, Argument]):
-        self._update_args_kwargs(self._args, map_arg(k, lambda x: x))
+        self._update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore
 
     def _update_args_kwargs(self, new_args : Tuple[Argument, ...], new_kwargs : Dict[str, Argument]):
         self._args = new_args
