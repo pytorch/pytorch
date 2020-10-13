@@ -6,11 +6,14 @@
 
 #include <cmath>
 
+#include <torch/csrc/jit/testing/file_check.h>
 #include "test/cpp/tensorexpr/padded_buffer.h"
-#include "torch/csrc/jit/tensorexpr/buffer.h"
 #include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
+#include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
+
+#include <torch/csrc/jit/testing/file_check.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Half.h>
@@ -27,8 +30,8 @@ void testCudaTestVectorAdd01_impl() {
   const int block_count = 16;
   const int block_size = 128;
   Dtype dtype = ToDtype<ctype>();
-  Buffer a_buf("a", dtype, {num_iter, block_count, block_size});
-  Buffer b_buf("b", dtype, {num_iter, block_count, block_size});
+  Placeholder a_buf("a", dtype, {num_iter, block_count, block_size});
+  Placeholder b_buf("b", dtype, {num_iter, block_count, block_size});
   Tensor* c = Compute(
       "c",
       {
@@ -37,7 +40,7 @@ void testCudaTestVectorAdd01_impl() {
           {block_size, "t_id"},
       },
       [&](const VarHandle& n, const VarHandle& b_id, const VarHandle& t_id) {
-        return a_buf(n, b_id, t_id) + b_buf(n, b_id, t_id);
+        return a_buf.load(n, b_id, t_id) + b_buf.load(n, b_id, t_id);
       });
   LoopNest l({c});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
@@ -93,7 +96,7 @@ void testCudaSigmoid() {
   const int block_count = 16;
   const int block_size = 128;
   Dtype dtype = ToDtype<float>();
-  Buffer a_buf("a", dtype, {num_iter, block_count, block_size});
+  Placeholder a_buf("a", dtype, {num_iter, block_count, block_size});
   Tensor* c = Compute(
       "c",
       {
@@ -102,7 +105,7 @@ void testCudaSigmoid() {
           {block_size, "t_id"},
       },
       [&](const VarHandle& n, const VarHandle& b_id, const VarHandle& t_id) {
-        return sigmoid(sigmoid(a_buf(n, b_id, t_id)));
+        return sigmoid(sigmoid(a_buf.load(n, b_id, t_id)));
       });
   LoopNest l({c});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
@@ -158,14 +161,14 @@ void testCudaTestVectorAdd01() {
 
 static void testCudaTestVectorAdd02_impl(int N, int block_size) {
   KernelScope kernel_scope;
-  Buffer a_buf("a", kFloat, {N});
-  Buffer b_buf("b", kFloat, {N});
+  Placeholder a_buf("a", kFloat, {N});
+  Placeholder b_buf("b", kFloat, {N});
   Tensor* c = Compute(
       "c",
       {
           {N, "N"},
       },
-      [&](const VarHandle& n) { return a_buf(n) + b_buf(n); });
+      [&](const VarHandle& n) { return a_buf.load(n) + b_buf.load(n); });
   LoopNest l({c});
   For* n_outer;
   For* n_inner;
@@ -217,16 +220,55 @@ void testCudaTestVectorAdd02() {
   testCudaTestVectorAdd02_impl(1030, 128);
 }
 
+void testCudaHalfCast() {
+  KernelScope ks;
+  auto half = ToDtype<at::Half>();
+  Placeholder a("a", half, {4});
+  Tensor* b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
+    return Cast::make(kFloat, a.load(i));
+  });
+
+  LoopNest l({b});
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+  CudaCodeGen cg(s, {a, b});
+
+  std::vector<at::Half> aData(4, 2.0f);
+  std::vector<float> bData(4, 0.0f);
+  at::Half* aDev = nullptr;
+  float* bDev = nullptr;
+  auto aSize = aData.size() * sizeof(aData[0]);
+  auto bSize = bData.size() * sizeof(bData[0]);
+
+  cudaMalloc(&aDev, aSize);
+  cudaMalloc(&bDev, bSize);
+  cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(bDev, bData.data(), bSize, cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cg.call({aDev, bDev});
+  cudaDeviceSynchronize();
+
+  cudaMemcpy(aData.data(), aDev, aSize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(bData.data(), bDev, bSize, cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  assertAllEqual(bData, 2.0f);
+
+  cudaFree(aDev);
+  cudaFree(bDev);
+}
+
 void testCudaDynamicShape2D() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
     VarHandle n("n", kInt);
-    Buffer a(BufHandle("a", {m, n}, kFloat));
-    Buffer b(BufHandle("b", {m, n}, kFloat));
+    Placeholder a(BufHandle("a", {m, n}, kFloat));
+    Placeholder b(BufHandle("b", {m, n}, kFloat));
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
-          return a(i, j) + b(i, j);
+          return a.load(i, j) + b.load(i, j);
         });
     LoopNest l({c});
     l.prepareForCodegen();
@@ -324,7 +366,7 @@ void testCudaTestRand01() {
     sum1 += v;
     sum2 += v * v;
     sum3 += v * v * v;
-    ASSERT_TRUE(v >= 0 && v < 1, "invalid value: ", i, ", ", v);
+    ASSERT_TRUE(v >= 0 && v < 1);
   }
   sum1 /= N;
   sum2 /= N;
@@ -343,9 +385,9 @@ void testCudaDynamicShapeSplit() {
   KernelScope ks;
   constexpr int N = 4096;
   VarHandle n("n", kInt);
-  Buffer a(BufHandle("a", {n}, kFloat));
-  Tensor* b =
-      Compute("b", {{n, "n"}}, [&](const VarHandle& i) { return a(i) * 2.0f; });
+  Placeholder a(BufHandle("a", {n}, kFloat));
+  Tensor* b = Compute(
+      "b", {{n, "n"}}, [&](const VarHandle& i) { return a.load(i) * 2.0f; });
   LoopNest l({b});
   For* outer;
   For* inner;
@@ -393,8 +435,8 @@ void testCudaDynamicShapeSplit() {
 void testCudaOneBlockOneThreadGlobalReduce1() {
   const static int N = 1024;
   KernelScope kernel_scope;
-  Buffer data_buf("data", kFloat, {N});
-  Buffer output_buf("output", kFloat, {1});
+  Placeholder data_buf("data", kFloat, {N});
+  Placeholder output_buf("output", kFloat, {1});
 
   // The test adds the following code for trivial reduction:
   // for (int bidx = 0; bidx < 1; bidx++) { // blockIdx.x
@@ -406,12 +448,12 @@ void testCudaOneBlockOneThreadGlobalReduce1() {
   //   }
   // }
 
-  Store* init_store = Store::make(output_buf, {0}, 0.f, 1);
+  Store* init_store = output_buf.store({0}, 0.f);
   VarHandle i1("i1", kInt);
-  ExprHandle load_data = Load::make(data_buf, {i1}, 1);
-  ExprHandle load_output = Load::make(output_buf, {0}, 1);
+  ExprHandle load_data = Load::make(BufHandle(data_buf.data()), {i1}, 1);
+  ExprHandle load_output = Load::make(BufHandle(output_buf.data()), {0}, 1);
   ExprHandle add_value = load_output + load_data;
-  Store* store_output = Store::make(output_buf, {0}, add_value, 1);
+  Store* store_output = output_buf.store({0}, add_value);
   For* for_output = For::make(i1, 0, N, store_output);
   Stmt* reduce_block = Block::make({init_store, for_output});
   VarHandle thread_idx("tidx", kInt);
@@ -472,10 +514,10 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
   //      b[0] = b[0] + a[t] // implied atomic
   // clang-format on
 
-  Buffer a_buf("a", kFloat, {N});
-  Buffer b_buf("b", kFloat, {1});
+  Placeholder a_buf("a", kFloat, {N});
+  Placeholder b_buf("b", kFloat, {1});
 
-  Store* init_store = Store::make(b_buf, {0}, 0.f, 1);
+  Store* init_store = b_buf.store({0}, 0.f);
   VarHandle t("t", kInt);
   VarHandle b("b", kInt);
 
@@ -491,10 +533,10 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
 
   //  for t in 0..1024: // thread-idx
   //    b[0] = b[0] + a[t] // implied atomic
-  ExprHandle load_a = Load::make(a_buf, {t}, 1);
-  ExprHandle load_b = Load::make(b_buf, {0}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {t}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {0}, 1);
   ExprHandle add_value = load_b + load_a;
-  Store* store_b = Store::make(b_buf, {0}, add_value, 1);
+  Store* store_b = b_buf.store({0}, add_value);
   For* for_b = For::make(t, 0, N, store_b, thread_idx_options);
 
   Stmt* reduce_block = Block::make({for_init, for_b});
@@ -554,8 +596,8 @@ void testCudaNoThreadIdxWrite_1() {
   //  covered by its own thread-idx
 
   const static int N = 1024;
-  Buffer a_buf("a", kFloat, {2});
-  Buffer b_buf("b", kFloat, {N});
+  Placeholder a_buf("a", kFloat, {2});
+  Placeholder b_buf("b", kFloat, {N});
 
   VarHandle k("k", kInt);
   VarHandle l("l", kInt);
@@ -565,15 +607,15 @@ void testCudaNoThreadIdxWrite_1() {
   //   a[0] = 0
   //   for n in 0..2:
   //     a[0] = a[0] + n
-  Store* store_a0_0 = Store::make(a_buf, {0}, 0.f, 1);
-  ExprHandle load_a0 = Load::make(a_buf, {0}, 1);
+  Store* store_a0_0 = a_buf.store({0}, 0.f);
+  ExprHandle load_a0 = Load::make(BufHandle(a_buf.data()), {0}, 1);
   ExprHandle v1 = load_a0 + n;
-  Store* store_a0_v1 = Store::make(a_buf, {0}, v1, 1);
+  Store* store_a0_v1 = a_buf.store({0}, v1);
   For* loop_a_0 = For::make(n, 0, 2, store_a0_v1);
 
   //   for m in 0..1024: // thread-idx
   //     b[m] = m
-  Store* store_bm_m = Store::make(b_buf, {m}, m + 0.f, 1);
+  Store* store_bm_m = b_buf.store({m}, m + 0.f);
   LoopOptions thread_idx_options;
   thread_idx_options.set_gpu_thread_index(0);
   For* loop_b_1 = For::make(m, 0, N, store_bm_m, thread_idx_options);
@@ -581,10 +623,10 @@ void testCudaNoThreadIdxWrite_1() {
   //   a[1] = 1
   //   for l in 0..2:
   //     a[1] = a[1] + l
-  Store* store_a1_1 = Store::make(a_buf, {1}, 1.f, 1);
-  ExprHandle load_a1 = Load::make(a_buf, {1}, 1);
+  Store* store_a1_1 = a_buf.store({1}, 1.f);
+  ExprHandle load_a1 = a_buf.load(1);
   ExprHandle v2 = load_a1 + l;
-  Store* store_a1_v2 = Store::make(a_buf, {1}, v2, 1);
+  Store* store_a1_v2 = a_buf.store({1}, v2);
   For* loop_a_1 = For::make(l, 0, 2, store_a1_v2);
 
   Stmt* reduce_block =
@@ -633,6 +675,7 @@ void testCudaNoThreadIdxWrite_1() {
 }
 
 void testCudaSharedMemReduce_1() {
+  // FIXME: this test is flaky in CI.
   KernelScope kernel_scope;
   // This test does the following:
   //  for k in 0..1:  // block-idx
@@ -655,8 +698,8 @@ void testCudaSharedMemReduce_1() {
   LoopOptions block_idx_opt;
   block_idx_opt.set_gpu_block_index(0);
 
-  Buffer a("a", kFloat, {1, M, N});
-  Buffer b("b", kFloat, {1});
+  Placeholder a("a", kFloat, {1, M, N});
+  Placeholder b("b", kFloat, {1});
   VarHandle k("k", kInt);
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
@@ -685,7 +728,8 @@ void testCudaSharedMemReduce_1() {
     //    for n in 0..64:  // thread_idx
     //      c(n) = c(n) + a(k, m, n)
     ExprHandle load_cn = Load::make(kFloat, c, {n}, 1);
-    ExprHandle a_kmn = Load::make(a, {k * (M * N) + m * N + n}, 1);
+    ExprHandle a_kmn =
+        Load::make(BufHandle(a.data()), {k * (M * N) + m * N + n}, 1);
     ExprHandle v_add = load_cn + a_kmn;
     Store* store_cn_v = Store::make(c, {n}, v_add);
     For* loop_n2 = For::make(n, 0, N, store_cn_v, thread_idx_opt);
@@ -697,12 +741,12 @@ void testCudaSharedMemReduce_1() {
     //    b(k) = 0
     //    for n in 0..64:  // thread_idx
     //      b(k) = b(k) + c(n)
-    Store* store_bk_0 = Store::make(b, {k}, 0.f, 1);
+    Store* store_bk_0 = b.store({k}, 0.f);
     block.push_back(store_bk_0);
-    ExprHandle load_bk = Load::make(b, {k}, 1);
+    ExprHandle load_bk = b.load(k);
     ExprHandle load_cn = Load::make(kFloat, c, {n}, 1);
     ExprHandle v_add = load_bk + load_cn;
-    Store* store_bk = Store::make(b, {k}, v_add, 1);
+    Store* store_bk = b.store({k}, v_add);
     For* loop_n3 = For::make(n, 0, N, store_bk, thread_idx_opt);
     block.push_back(loop_n3);
   }
@@ -718,6 +762,25 @@ void testCudaSharedMemReduce_1() {
 
   // TODO: check the generated code for correctness.
   CudaCodeGen cuda_cg(loop_k1, a, b);
+
+  std::ostringstream oss;
+  oss << *cuda_cg.stmt();
+
+  // Check the c write is not masked, but the d write is.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: c_1 = 0
+# CHECK: for (int m = 0; m < 128
+# CHECK:   c_1 = c_1 +
+# CHECK: __syncthreads();
+# CHECK: if (threadIdx.x<1
+# CHECK:   b[blockIdx.x] =
+# CHECK: __syncthreads();
+# CHECK: atomicAdd(&b[blockIdx.x], c_1)
+)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
   PaddedBuffer<float> a_v(1, M, N, "a_v");
   PaddedBuffer<float> b_v(1, "b_v");
   PaddedBuffer<float> b_ref(1, "b_ref");
@@ -772,8 +835,8 @@ void testCudaLocalMemReduce_1() {
   LoopOptions block_idx_opt;
   block_idx_opt.set_gpu_block_index(0);
 
-  Buffer a("a", kFloat, {1, M, N});
-  Buffer b("b", kFloat, {1});
+  Placeholder a("a", kFloat, {1, M, N});
+  Placeholder b("b", kFloat, {1});
   VarHandle k("k", kInt);
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
@@ -785,7 +848,7 @@ void testCudaLocalMemReduce_1() {
   std::vector<Stmt*> block_k;
   {
     //    b(k) = 0
-    Store* store_bk_0 = Store::make(b, {k}, 0.f, 1);
+    Store* store_bk_0 = b.store({k}, 0.f);
     block_k.push_back(store_bk_0);
   }
   std::vector<Stmt*> block_n;
@@ -803,7 +866,7 @@ void testCudaLocalMemReduce_1() {
     //      for m in 0..128:
     //        c(0) = c(0) + a(k, m, n)
     ExprHandle load_c0 = Load::make(kFloat, c, {0}, 1);
-    ExprHandle a_kmn = Load::make(a, {k * (M * N) + m * N + n}, 1);
+    ExprHandle a_kmn = a.load(k * (M * N) + m * N + n);
     ExprHandle v_add = load_c0 + a_kmn;
     Store* store_c0_v = Store::make(c, {0}, v_add);
     For* loop_m = For::make(m, 0, M, store_c0_v);
@@ -811,10 +874,10 @@ void testCudaLocalMemReduce_1() {
   }
   {
     //      b(k) = b(k) + c(0)
-    ExprHandle load_bk = Load::make(b, {k}, 1);
+    ExprHandle load_bk = b.load(k);
     ExprHandle load_c0 = Load::make(kFloat, c, {0}, 1);
     ExprHandle v_add = load_bk + load_c0;
-    Store* store_bk = Store::make(b, {k}, v_add, 1);
+    Store* store_bk = b.store({k}, v_add);
     block_n.push_back(store_bk);
   }
   {
@@ -862,6 +925,1364 @@ void testCudaLocalMemReduce_1() {
 
   cudaFree(a_dev);
   cudaFree(b_dev);
+}
+
+void testCudaHalfSupport() {
+  KernelScope ks;
+  auto half = ToDtype<at::Half>();
+  Placeholder a("a", half, {4});
+  Tensor* b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
+    return Cast::make(half, ExprHandle(2.0f) * a.load(i));
+  });
+
+  Tensor* c = Compute("c", {{4, "n"}}, [&](const VarHandle& i) {
+    return Cast::make(kFloat, Cast::make(half, ExprHandle(42)) + b->call(i));
+  });
+
+  Tensor* d = Compute("d", {{4, "n"}}, [&](const VarHandle& i) {
+    return Cast::make(half, c->call(i));
+  });
+
+  LoopNest l({b, c, d});
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+  CudaCodeGen cg(s, {a, b, c, d});
+
+  std::vector<at::Half> aData(4, 2.0f);
+  std::vector<float> cData(4, 0.0f);
+  std::vector<at::Half> dData(4, 0.0f);
+  at::Half* aDev = nullptr;
+  at::Half* bDev = nullptr;
+  at::Half* cDev = nullptr;
+  at::Half* dDev = nullptr;
+  auto aSize = aData.size() * sizeof(aData[0]);
+  auto bSize = aData.size() * sizeof(aData[0]);
+  auto cSize = cData.size() * sizeof(float);
+  auto dSize = dData.size() * sizeof(dData[0]);
+
+  cudaMalloc(&aDev, aSize);
+  cudaMalloc(&bDev, bSize);
+  cudaMalloc(&cDev, cSize);
+  cudaMalloc(&dDev, dSize);
+  cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(cDev, cData.data(), cSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(dDev, dData.data(), dSize, cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cg.call({aDev, bDev, cDev, dDev});
+  cudaDeviceSynchronize();
+
+  cudaMemcpy(aData.data(), aDev, aSize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(cData.data(), cDev, cSize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(dData.data(), dDev, dSize, cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  assertAllEqual(cData, 46.0f);
+
+  cudaFree(aDev);
+  cudaFree(bDev);
+  cudaFree(cDev);
+  cudaFree(dDev);
+}
+
+void testCudaHalfPropagation() {
+  KernelScope kernel_scope;
+  auto half = ToDtype<at::Half>();
+  Placeholder a("a", half, {4});
+  Tensor* relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
+    return Max::make(a.load(i), ExprHandle(new HalfImm(0)), true);
+  });
+
+  LoopNest l({relu});
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+  CudaCodeGen cg(s, {a, relu});
+
+  std::ostringstream oss;
+  oss << *cg.stmt();
+
+  // Check the types used by the Max are Float.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (
+# CHECK:  float v = float(a[n]);
+# CHECK:  relu[n] = half(Max(v, 0.f
+# CHECK: })IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<at::Half> aData(4, 2.0f);
+  std::vector<at::Half> reluData(4, 0.0f);
+  at::Half* aDev = nullptr;
+  at::Half* reluDev = nullptr;
+  auto aSize = aData.size() * sizeof(aData[0]);
+  auto reluSize = reluData.size() * sizeof(reluData[0]);
+
+  cudaMalloc(&aDev, aSize);
+  cudaMalloc(&reluDev, reluSize);
+  cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(reluDev, reluData.data(), reluSize, cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cg.call({aDev, reluDev});
+  cudaMemcpy(reluData.data(), reluDev, reluSize, cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  assertAllEqual(aData, reluData);
+
+  cudaFree(aDev);
+  cudaFree(reluDev);
+}
+
+void testCudaPrioritizeDependents() {
+  KernelScope kernel_scope;
+  Placeholder a("a", kFloat, {10});
+  Placeholder b("b", kFloat, {12});
+  Placeholder c("c", kFloat, {12});
+
+  LoopOptions block_idx_opt;
+  block_idx_opt.set_gpu_block_index(0);
+
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+
+  /*
+   * for (int i = 0; i < 12; ++i) {
+   *   c[i] = (i < 10 ? a[i] + b[i] : b[i]);
+   * }
+   */
+  ExprHandle load_a = Load::make(BufHandle(a.data()), {i}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b.data()), {i}, 1);
+  ExprHandle cmp = CompareSelect::make(i, 10, CompareSelectOperation::kLT);
+  ExprHandle ite = IfThenElse::make(cmp, Add::make(load_a, load_b), load_b);
+
+  For* loop =
+      For::make(i, 0, 12, Block::make({c.store({i}, ite)}), block_idx_opt);
+
+  CudaCodeGen cuda_cg(loop, a, b, c);
+
+  PaddedBuffer<float> a_v(10, "a_v");
+  PaddedBuffer<float> b_v(12, "b_v");
+  PaddedBuffer<float> c_v(12, "c_v");
+  PaddedBuffer<float> c_ref(12, "c_ref");
+
+  for (int i = 0; i < 10; ++i) {
+    a_v(i) = i * 100;
+    b_v(i) = i;
+    c_v(i) = 0;
+  }
+
+  for (int i = 10; i < 12; ++i) {
+    b_v(i) = i;
+    c_v(i) = 0;
+  }
+
+  float* a_dev = nullptr;
+  float* b_dev = nullptr;
+  float* c_dev = nullptr;
+  cudaMalloc(&a_dev, 10 * sizeof(float));
+  cudaMalloc(&b_dev, 12 * sizeof(float));
+  cudaMalloc(&c_dev, 12 * sizeof(float));
+
+  cudaMemcpy(a_dev, a_v.data(), 10 * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(b_dev, b_v.data(), 12 * sizeof(float), cudaMemcpyHostToDevice);
+
+  cudaDeviceSynchronize();
+
+  cuda_cg(a_dev, b_dev, c_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(c_v.data(), c_dev, 12 * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  for (int i = 0; i < 12; ++i) {
+    if (i < 10) {
+      c_ref(i) = i + i * 100;
+    } else {
+      c_ref(i) = i;
+    }
+  }
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
+}
+
+/// Tests the case where there are two loops which have different extents bound
+/// to the same block dimension. We must mask the smaller extent loop body.
+void testCudaMaskBlockDim() {
+  KernelScope kernel_scope;
+  int A_SIZE = 100;
+  int B_SIZE = 50;
+  Placeholder a_buf("a", kFloat, {A_SIZE});
+  Placeholder b_buf("b", kFloat, {B_SIZE});
+  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+    return a_buf.load(i) + 10;
+  });
+  Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+    return a_buf.load(i) + b_buf.load(i);
+  });
+
+  LoopNest l({c, d});
+  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  l.setGPUBlockIndex(loops[0], 0);
+  loops = l.getLoopStmtsFor(d);
+  l.setGPUBlockIndex(loops[0], 0);
+
+  l.prepareForCodegen();
+  Stmt* stmt = l.root_stmt();
+  CudaCodeGen cuda_cg(stmt, c, d, a_buf, b_buf);
+
+  std::ostringstream oss;
+  oss << *cuda_cg.stmt();
+
+  // Check the c write is not masked, but the d write is.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK-NOT: if (blockIdx
+# CHECK: c[blockIdx.x] =
+# CHECK: if (blockIdx.x<50
+# CHECK:   d[blockIdx.x] =)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  auto blockExtents = cuda_cg.gpu_block_extents();
+  auto threadExtents = cuda_cg.gpu_thread_extents();
+  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(A_SIZE)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(1)));
+
+  // Sanity check that the kernel works.
+  PaddedBuffer<float> a_v(A_SIZE);
+  PaddedBuffer<float> b_v(B_SIZE);
+  PaddedBuffer<float> c_v(A_SIZE);
+  PaddedBuffer<float> d_v(B_SIZE);
+
+  PaddedBuffer<float> c_ref(A_SIZE);
+  PaddedBuffer<float> d_ref(B_SIZE);
+
+  for (int i = 0; i < A_SIZE; i++) {
+    a_v(i) = (float)i;
+    c_ref(i) = (float)(i + 10);
+  }
+
+  for (int i = 0; i < B_SIZE; i++) {
+    b_v(i) = (float)(B_SIZE - i);
+    d_ref(i) = a_v(i) + b_v(i);
+  }
+
+  float* a_dev = nullptr;
+  cudaMalloc(&a_dev, A_SIZE * sizeof(float));
+  float* b_dev = nullptr;
+  cudaMalloc(&b_dev, B_SIZE * sizeof(float));
+  float* c_dev = nullptr;
+  cudaMalloc(&c_dev, A_SIZE * sizeof(float));
+  float* d_dev = nullptr;
+  cudaMalloc(&d_dev, B_SIZE * sizeof(float));
+  cudaMemcpy(a_dev, a_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(b_dev, b_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(c_dev, c_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_dev, d_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cuda_cg(c_dev, d_dev, a_dev, b_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(c_v.data(), c_dev, A_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaMemcpy(d_v.data(), d_dev, B_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
+  ExpectAllNear(d_v, d_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(b_dev);
+  cudaFree(c_dev);
+  cudaFree(d_dev);
+}
+
+/// Tests the case with two loops, which have different extents that are bound
+/// to the same thread dimension. This is the same as the above - the smaller
+/// rank write should be masked. But this time we also need to syncthreads.
+void testCudaMaskThreadDim() {
+  KernelScope kernel_scope;
+  int A_SIZE = 50;
+  int B_SIZE = 100;
+  Placeholder a_buf("a", kFloat, {A_SIZE});
+  Placeholder b_buf("b", kFloat, {B_SIZE});
+  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+    return a_buf.load(i) + 10;
+  });
+  Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+    return a_buf.load(i / 2) + b_buf.load(i);
+  });
+
+  LoopNest l({c, d});
+  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  l.setGPUThreadIndex(loops[0], 0);
+  loops = l.getLoopStmtsFor(d);
+  l.setGPUThreadIndex(loops[0], 0);
+
+  l.prepareForCodegen();
+  Stmt* stmt = l.root_stmt();
+  CudaCodeGen cuda_cg(stmt, c, d, a_buf, b_buf);
+
+  std::ostringstream oss;
+  oss << *cuda_cg.stmt();
+
+  // Check the c write is masked, but the d write is not.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: if (threadIdx.x<50
+# CHECK:   c[threadIdx.x] =
+# CHECK: __syncthreads();
+# CHECK-NOT: if (threadIdx.x
+# CHECK: d[threadIdx.x] =)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  auto blockExtents = cuda_cg.gpu_block_extents();
+  auto threadExtents = cuda_cg.gpu_thread_extents();
+  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(1)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(B_SIZE)));
+
+  PaddedBuffer<float> a_v(A_SIZE);
+  PaddedBuffer<float> b_v(B_SIZE);
+  PaddedBuffer<float> c_v(A_SIZE);
+  PaddedBuffer<float> d_v(B_SIZE);
+
+  PaddedBuffer<float> c_ref(A_SIZE);
+  PaddedBuffer<float> d_ref(B_SIZE);
+
+  for (int i = 0; i < A_SIZE; i++) {
+    a_v(i) = (float)i;
+    c_ref(i) = (float)(i + 10);
+  }
+
+  for (int i = 0; i < B_SIZE; i++) {
+    b_v(i) = (float)(B_SIZE - i);
+    d_ref(i) = a_v(i / 2) + b_v(i);
+  }
+
+  float* a_dev = nullptr;
+  cudaMalloc(&a_dev, A_SIZE * sizeof(float));
+  float* b_dev = nullptr;
+  cudaMalloc(&b_dev, B_SIZE * sizeof(float));
+  float* c_dev = nullptr;
+  cudaMalloc(&c_dev, A_SIZE * sizeof(float));
+  float* d_dev = nullptr;
+  cudaMalloc(&d_dev, B_SIZE * sizeof(float));
+  cudaMemcpy(a_dev, a_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(b_dev, b_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(c_dev, c_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_dev, d_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cuda_cg(c_dev, d_dev, a_dev, b_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(c_v.data(), c_dev, A_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaMemcpy(d_v.data(), d_dev, B_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
+  ExpectAllNear(d_v, d_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(b_dev);
+  cudaFree(c_dev);
+  cudaFree(d_dev);
+}
+
+/// Tests the case where there are two loops, and each is bound to a different
+/// block dimension. In this case all writes should be masked since they occur
+/// in distinct dimensions.
+// Note: this is an extremely dumb pattern which we should never see, but is a
+// useful edge case to make sure we've got things covered.
+void testCudaMaskMultiBlockDim() {
+  KernelScope kernel_scope;
+  int A_SIZE = 100;
+  int B_SIZE = 50;
+  Placeholder a_buf("a", kFloat, {A_SIZE});
+  Placeholder b_buf("b", kFloat, {B_SIZE});
+  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+    return a_buf.load(i) + 10;
+  });
+  Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+    return a_buf.load(i) + b_buf.load(i);
+  });
+
+  LoopNest l({c, d});
+  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  l.setGPUBlockIndex(loops[0], 0);
+  loops = l.getLoopStmtsFor(d);
+  l.setGPUBlockIndex(loops[0], 1);
+
+  l.prepareForCodegen();
+  Stmt* stmt = l.root_stmt();
+  CudaCodeGen cuda_cg(stmt, c, d, a_buf, b_buf);
+
+  std::ostringstream oss;
+  oss << *cuda_cg.stmt();
+
+  // Write to c should be masked against y, write to d against x.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: if (blockIdx.y<1
+# CHECK:   c[blockIdx.x] =
+# CHECK: if (blockIdx.x<1
+# CHECK:   d[blockIdx.y] =)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  auto blockExtents = cuda_cg.gpu_block_extents();
+  auto threadExtents = cuda_cg.gpu_thread_extents();
+  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(A_SIZE)));
+  ASSERT_TRUE(exprEquals(blockExtents[1], new IntImm(B_SIZE)));
+
+  PaddedBuffer<float> a_v(A_SIZE);
+  PaddedBuffer<float> b_v(B_SIZE);
+  PaddedBuffer<float> c_v(A_SIZE);
+  PaddedBuffer<float> d_v(B_SIZE);
+
+  PaddedBuffer<float> c_ref(A_SIZE);
+  PaddedBuffer<float> d_ref(B_SIZE);
+
+  for (int i = 0; i < A_SIZE; i++) {
+    a_v(i) = (float)i;
+    c_ref(i) = (float)(i + 10);
+  }
+
+  for (int i = 0; i < B_SIZE; i++) {
+    b_v(i) = (float)(B_SIZE - i);
+    d_ref(i) = a_v(i) + b_v(i);
+  }
+
+  float* a_dev = nullptr;
+  cudaMalloc(&a_dev, A_SIZE * sizeof(float));
+  float* b_dev = nullptr;
+  cudaMalloc(&b_dev, B_SIZE * sizeof(float));
+  float* c_dev = nullptr;
+  cudaMalloc(&c_dev, A_SIZE * sizeof(float));
+  float* d_dev = nullptr;
+  cudaMalloc(&d_dev, B_SIZE * sizeof(float));
+  cudaMemcpy(a_dev, a_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(b_dev, b_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(c_dev, c_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_dev, d_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cuda_cg(c_dev, d_dev, a_dev, b_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(c_v.data(), c_dev, A_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaMemcpy(d_v.data(), d_dev, B_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
+  ExpectAllNear(d_v, d_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(b_dev);
+  cudaFree(c_dev);
+  cudaFree(d_dev);
+}
+
+/// Tests the case where both the blockDim and threadDim are bound to different
+/// loops. In this instance both stores should be masked since they are
+/// distinct.
+// Note: this is an extremely dumb pattern which we should never see, but is a
+// useful edge case to make sure we've got things covered.
+void testCudaMaskBlockAndThreadDim() {
+  KernelScope kernel_scope;
+  int A_SIZE = 100;
+  int B_SIZE = 50;
+  Placeholder a_buf("a", kFloat, {A_SIZE});
+  Placeholder b_buf("b", kFloat, {B_SIZE});
+  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+    return a_buf.load(i) + 10;
+  });
+  Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
+    return a_buf.load(i) + b_buf.load(i);
+  });
+
+  LoopNest l({c, d});
+  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  l.setGPUBlockIndex(loops[0], 0);
+  loops = l.getLoopStmtsFor(d);
+  l.setGPUThreadIndex(loops[0], 0);
+
+  l.prepareForCodegen();
+  Stmt* stmt = l.root_stmt();
+  CudaCodeGen cuda_cg(stmt, c, d, a_buf, b_buf);
+
+  std::ostringstream oss;
+  oss << *cuda_cg.stmt();
+
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: if (threadIdx.x<1
+# CHECK:   c[blockIdx.x] =
+# CHECK: }
+# CHECK: if (blockIdx.x<1
+# CHECK:   d[threadIdx.x] =)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  auto blockExtents = cuda_cg.gpu_block_extents();
+  auto threadExtents = cuda_cg.gpu_thread_extents();
+  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(A_SIZE)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(B_SIZE)));
+
+  PaddedBuffer<float> a_v(A_SIZE);
+  PaddedBuffer<float> b_v(B_SIZE);
+  PaddedBuffer<float> c_v(A_SIZE);
+  PaddedBuffer<float> d_v(B_SIZE);
+
+  PaddedBuffer<float> c_ref(A_SIZE);
+  PaddedBuffer<float> d_ref(B_SIZE);
+
+  for (int i = 0; i < A_SIZE; i++) {
+    a_v(i) = (float)i;
+    c_ref(i) = (float)(i + 10);
+  }
+
+  for (int i = 0; i < B_SIZE; i++) {
+    b_v(i) = (float)(B_SIZE - i);
+    d_ref(i) = a_v(i) + b_v(i);
+  }
+
+  float* a_dev = nullptr;
+  cudaMalloc(&a_dev, A_SIZE * sizeof(float));
+  float* b_dev = nullptr;
+  cudaMalloc(&b_dev, B_SIZE * sizeof(float));
+  float* c_dev = nullptr;
+  cudaMalloc(&c_dev, A_SIZE * sizeof(float));
+  float* d_dev = nullptr;
+  cudaMalloc(&d_dev, B_SIZE * sizeof(float));
+  cudaMemcpy(a_dev, a_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(b_dev, b_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(c_dev, c_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(d_dev, d_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cuda_cg(c_dev, d_dev, a_dev, b_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(c_v.data(), c_dev, A_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaMemcpy(d_v.data(), d_dev, B_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
+  ExpectAllNear(d_v, d_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(b_dev);
+  cudaFree(c_dev);
+  cudaFree(d_dev);
+}
+
+/// Tests the case where the loopnest has two loops of depth two: each with the
+/// outer loop bound to blockDim.x and the inner loop bound to threadDim.x. In
+/// this case all writes with a rank smaller than the max should be masked.
+void testCudaMaskMultiDim() {
+  KernelScope kernel_scope;
+  int OUTER_SIZE = 10;
+  int A_SIZE = 100;
+  int B_SIZE = 50;
+  Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
+  Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
+  Tensor* c = Compute(
+      "C",
+      {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        return ExprHandle(2) * a_buf.load(i, j);
+      });
+  Tensor* d = Compute(
+      "D",
+      {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        return c->call(i, j * 2) + b_buf.load(i, j);
+      });
+
+  LoopNest l({c, d});
+  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  l.setGPUBlockIndex(loops[0], 0);
+  l.setGPUThreadIndex(loops[1], 0);
+  loops = l.getLoopStmtsFor(d);
+  l.setGPUBlockIndex(loops[0], 0);
+  l.setGPUThreadIndex(loops[1], 0);
+
+  l.prepareForCodegen();
+  Stmt* stmt = l.root_stmt();
+  CudaCodeGen cuda_cg(stmt, c, d, a_buf, b_buf);
+
+  std::ostringstream oss;
+  oss << *cuda_cg.stmt();
+
+  // The write to D should be masked, but not the write to C.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK-NOT: if (
+# CHECK: C[100 * blockIdx.x + threadIdx.x] =
+# CHECK: __syncthreads();
+# CHECK: if (threadIdx.x<50
+# CHECK:   D[50 * blockIdx.x + threadIdx.x] =)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  auto blockExtents = cuda_cg.gpu_block_extents();
+  auto threadExtents = cuda_cg.gpu_thread_extents();
+  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(OUTER_SIZE)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(A_SIZE)));
+
+  PaddedBuffer<float> a_v(OUTER_SIZE, A_SIZE);
+  PaddedBuffer<float> b_v(OUTER_SIZE, B_SIZE);
+  PaddedBuffer<float> c_v(OUTER_SIZE, A_SIZE);
+  PaddedBuffer<float> d_v(OUTER_SIZE, B_SIZE);
+
+  PaddedBuffer<float> c_ref(OUTER_SIZE, A_SIZE);
+  PaddedBuffer<float> d_ref(OUTER_SIZE, B_SIZE);
+
+  for (int o = 0; o < OUTER_SIZE; ++o) {
+    for (int i = 0; i < A_SIZE; i++) {
+      a_v(o, i) = (float)i;
+      c_ref(o, i) = (float)(i * 2);
+    }
+  }
+
+  for (int o = 0; o < OUTER_SIZE; ++o) {
+    for (int i = 0; i < B_SIZE; i++) {
+      b_v(o, i) = (float)(B_SIZE - i);
+      d_ref(o, i) = c_ref(o, i * 2) + b_v(o, i);
+    }
+  }
+
+  float* a_dev = nullptr;
+  cudaMalloc(&a_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  float* b_dev = nullptr;
+  cudaMalloc(&b_dev, OUTER_SIZE * B_SIZE * sizeof(float));
+  float* c_dev = nullptr;
+  cudaMalloc(&c_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  float* d_dev = nullptr;
+  cudaMalloc(&d_dev, OUTER_SIZE * B_SIZE * sizeof(float));
+  cudaMemcpy(
+      a_dev,
+      a_v.data(),
+      OUTER_SIZE * A_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      b_dev,
+      b_v.data(),
+      OUTER_SIZE * B_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      c_dev,
+      c_v.data(),
+      OUTER_SIZE * A_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      d_dev,
+      d_v.data(),
+      OUTER_SIZE * B_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cuda_cg(c_dev, d_dev, a_dev, b_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(
+      c_v.data(),
+      c_dev,
+      OUTER_SIZE * A_SIZE * sizeof(float),
+      cudaMemcpyDeviceToHost);
+  cudaMemcpy(
+      d_v.data(),
+      d_dev,
+      OUTER_SIZE * B_SIZE * sizeof(float),
+      cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
+  ExpectAllNear(d_v, d_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(b_dev);
+  cudaFree(c_dev);
+  cudaFree(d_dev);
+}
+
+// Tests the case where loop extents are symbolic and not known at compile time.
+// In this case both stores must be masked against the extent of the other loop,
+// incase it is larger.
+void testCudaMaskMultiDimSymbolic() {
+  KernelScope kernel_scope;
+  VarHandle OUTER_SIZE("OUTER_SIZE", kInt);
+  VarHandle A_SIZE("A_SIZE", kInt);
+  VarHandle B_SIZE("B_SIZE", kInt);
+  Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
+  Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
+  Tensor* c = Compute(
+      "C",
+      {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        return ExprHandle(2) * a_buf.load(i, j);
+      });
+  Tensor* d = Compute(
+      "D",
+      {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        return c->call(i, j * 2) + b_buf.load(i, j);
+      });
+
+  LoopNest l({c, d});
+  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  l.setGPUBlockIndex(loops[0], 0);
+  l.setGPUThreadIndex(loops[1], 0);
+  loops = l.getLoopStmtsFor(d);
+  l.setGPUBlockIndex(loops[0], 0);
+  l.setGPUThreadIndex(loops[1], 0);
+
+  l.prepareForCodegen();
+  Stmt* stmt = l.root_stmt();
+  CudaCodeGen cuda_cg(stmt, c, d, OUTER_SIZE, A_SIZE, B_SIZE, a_buf, b_buf);
+
+  std::ostringstream oss;
+  oss << *cuda_cg.stmt();
+
+  // Since we don't know which is bigger (A_SIZE or B_SIZE) we must mask both.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: if (threadIdx.x<A_SIZE
+# CHECK:   C[threadIdx.x + A_SIZE * blockIdx.x] =
+# CHECK: __syncthreads();
+# CHECK: if (threadIdx.x<B_SIZE
+# CHECK:   D[threadIdx.x + B_SIZE * blockIdx.x] =)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  auto blockExtents = cuda_cg.gpu_block_extents();
+  auto threadExtents = cuda_cg.gpu_thread_extents();
+  ASSERT_TRUE(exprEquals(blockExtents[0], OUTER_SIZE.node()));
+  ASSERT_TRUE(exprEquals(
+      threadExtents[0], new Max(A_SIZE.node(), B_SIZE.node(), true)));
+
+  int OUTER_EXTENT = 10;
+  int A_EXTENT = 100;
+  int B_EXTENT = 50;
+
+  PaddedBuffer<float> a_v(OUTER_EXTENT, A_EXTENT);
+  PaddedBuffer<float> b_v(OUTER_EXTENT, B_EXTENT);
+  PaddedBuffer<float> c_v(OUTER_EXTENT, A_EXTENT);
+  PaddedBuffer<float> d_v(OUTER_EXTENT, B_EXTENT);
+
+  PaddedBuffer<float> c_ref(OUTER_EXTENT, A_EXTENT);
+  PaddedBuffer<float> d_ref(OUTER_EXTENT, B_EXTENT);
+
+  for (int o = 0; o < OUTER_EXTENT; ++o) {
+    for (int i = 0; i < A_EXTENT; i++) {
+      a_v(o, i) = (float)i;
+      c_ref(o, i) = (float)(i * 2);
+    }
+  }
+
+  for (int o = 0; o < OUTER_EXTENT; ++o) {
+    for (int i = 0; i < B_EXTENT; i++) {
+      b_v(o, i) = (float)(B_EXTENT - i);
+      d_ref(o, i) = c_ref(o, i * 2) + b_v(o, i);
+    }
+  }
+
+  float* a_dev = nullptr;
+  cudaMalloc(&a_dev, OUTER_EXTENT * A_EXTENT * sizeof(float));
+  float* b_dev = nullptr;
+  cudaMalloc(&b_dev, OUTER_EXTENT * B_EXTENT * sizeof(float));
+  float* c_dev = nullptr;
+  cudaMalloc(&c_dev, OUTER_EXTENT * A_EXTENT * sizeof(float));
+  float* d_dev = nullptr;
+  cudaMalloc(&d_dev, OUTER_EXTENT * B_EXTENT * sizeof(float));
+  cudaMemcpy(
+      a_dev,
+      a_v.data(),
+      OUTER_EXTENT * A_EXTENT * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      b_dev,
+      b_v.data(),
+      OUTER_EXTENT * B_EXTENT * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      c_dev,
+      c_v.data(),
+      OUTER_EXTENT * A_EXTENT * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      d_dev,
+      d_v.data(),
+      OUTER_EXTENT * B_EXTENT * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cuda_cg(c_dev, d_dev, OUTER_EXTENT, A_EXTENT, B_EXTENT, a_dev, b_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(
+      c_v.data(),
+      c_dev,
+      OUTER_EXTENT * A_EXTENT * sizeof(float),
+      cudaMemcpyDeviceToHost);
+  cudaMemcpy(
+      d_v.data(),
+      d_dev,
+      OUTER_EXTENT * B_EXTENT * sizeof(float),
+      cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
+  ExpectAllNear(d_v, d_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(b_dev);
+  cudaFree(c_dev);
+  cudaFree(d_dev);
+}
+
+// Tests the case where two loops are fused at a common parent loop, which is
+// bound to the block dimension. Internally the inner loops have different
+// extents but are bound to the same thread dimension. The smaller loop should
+// be masked.
+void testCudaMaskCompoundInnerLoop() {
+  KernelScope kernel_scope;
+  int OUTER_SIZE = 10;
+  int A_SIZE = 100;
+  int B_SIZE = 50;
+  Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
+  Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
+  Placeholder c_buf("c", kFloat, {OUTER_SIZE, A_SIZE});
+  Placeholder d_buf("d", kFloat, {OUTER_SIZE, B_SIZE});
+
+  // Can't build this using Compute and transforms yet.
+  LoopOptions blockBound;
+  blockBound.set_gpu_block_index(0);
+  LoopOptions threadBound;
+  threadBound.set_gpu_thread_index(0);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+
+  Stmt* stmt = For::make(
+      i,
+      0,
+      OUTER_SIZE,
+      Block::make(
+          {For::make(
+               j,
+               0,
+               A_SIZE,
+               c_buf.store({i, j}, ExprHandle(2) * a_buf.load(i, j)),
+               threadBound),
+           For::make(
+               k,
+               0,
+               B_SIZE,
+               d_buf.store({i, k}, c_buf.load(i, k * 2) + b_buf.load(i, k)),
+               threadBound)}),
+      blockBound);
+
+  stmt = FlattenIndexes(stmt);
+  stmt = IRSimplifier::simplify(stmt);
+
+  CudaCodeGen cuda_cg(stmt, a_buf, b_buf, c_buf, d_buf);
+
+  std::ostringstream oss;
+  oss << *cuda_cg.stmt();
+
+  // The write to D should be masked, but not the write to C.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK-NOT: if (
+# CHECK: c[100 * blockIdx.x + threadIdx.x] =
+# CHECK: __syncthreads();
+# CHECK: if (threadIdx.x<50
+# CHECK:   d[50 * blockIdx.x + threadIdx.x] =)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  auto blockExtents = cuda_cg.gpu_block_extents();
+  auto threadExtents = cuda_cg.gpu_thread_extents();
+  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(OUTER_SIZE)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(A_SIZE)));
+
+  PaddedBuffer<float> a_v(OUTER_SIZE, A_SIZE);
+  PaddedBuffer<float> b_v(OUTER_SIZE, B_SIZE);
+  PaddedBuffer<float> c_v(OUTER_SIZE, A_SIZE);
+  PaddedBuffer<float> d_v(OUTER_SIZE, B_SIZE);
+
+  PaddedBuffer<float> c_ref(OUTER_SIZE, A_SIZE);
+  PaddedBuffer<float> d_ref(OUTER_SIZE, B_SIZE);
+
+  for (int o = 0; o < OUTER_SIZE; ++o) {
+    for (int i = 0; i < A_SIZE; i++) {
+      a_v(o, i) = (float)i;
+      c_ref(o, i) = (float)(i * 2);
+    }
+    for (int i = 0; i < B_SIZE; i++) {
+      b_v(o, i) = (float)(B_SIZE - i);
+      d_ref(o, i) = c_ref(o, i * 2) + b_v(o, i);
+    }
+  }
+
+  float* a_dev = nullptr;
+  cudaMalloc(&a_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  float* b_dev = nullptr;
+  cudaMalloc(&b_dev, OUTER_SIZE * B_SIZE * sizeof(float));
+  float* c_dev = nullptr;
+  cudaMalloc(&c_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  float* d_dev = nullptr;
+  cudaMalloc(&d_dev, OUTER_SIZE * B_SIZE * sizeof(float));
+  cudaMemcpy(
+      a_dev,
+      a_v.data(),
+      OUTER_SIZE * A_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      b_dev,
+      b_v.data(),
+      OUTER_SIZE * B_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      c_dev,
+      c_v.data(),
+      OUTER_SIZE * A_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      d_dev,
+      d_v.data(),
+      OUTER_SIZE * B_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cuda_cg(a_dev, b_dev, c_dev, d_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(
+      c_v.data(),
+      c_dev,
+      OUTER_SIZE * A_SIZE * sizeof(float),
+      cudaMemcpyDeviceToHost);
+  cudaMemcpy(
+      d_v.data(),
+      d_dev,
+      OUTER_SIZE * B_SIZE * sizeof(float),
+      cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
+  ExpectAllNear(d_v, d_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(b_dev);
+  cudaFree(c_dev);
+  cudaFree(d_dev);
+}
+
+// Tests the case with two loops fused into a common parent, which is not bound
+// to any block or thread dimension - however it's two inner loops are bound to
+// the first thread dimenions. This should work just like the MaskThreadDim test
+// where the bigger loop is unmasked but the smaller is masked.
+void testCudaMaskInnerLoopOneBlock() {
+  KernelScope kernel_scope;
+  int OUTER_SIZE = 10;
+  int A_SIZE = 100;
+  int B_SIZE = 50;
+  Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
+  Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
+  Placeholder c_buf("c", kFloat, {OUTER_SIZE, A_SIZE});
+  Placeholder d_buf("d", kFloat, {OUTER_SIZE, B_SIZE});
+
+  // Can't build this using Compute and transforms yet.
+  LoopOptions blockBound;
+  blockBound.set_gpu_block_index(0);
+  LoopOptions threadBound;
+  threadBound.set_gpu_thread_index(0);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+
+  Stmt* stmt = For::make(
+      i,
+      0,
+      OUTER_SIZE,
+      Block::make(
+          {For::make(
+               j,
+               0,
+               A_SIZE,
+               c_buf.store({i, j}, ExprHandle(2) * a_buf.load(i, j)),
+               threadBound),
+           For::make(
+               k,
+               0,
+               B_SIZE,
+               d_buf.store({i, k}, c_buf.load(i, k * 2) + b_buf.load(i, k)),
+               threadBound)}));
+
+  stmt = FlattenIndexes(stmt);
+  stmt = IRSimplifier::simplify(stmt);
+
+  CudaCodeGen cuda_cg(stmt, a_buf, b_buf, c_buf, d_buf);
+
+  std::ostringstream oss;
+  oss << *cuda_cg.stmt();
+
+  // The other loop remains the D write is masked.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i = 0; i < 10
+# CHECK-NOT: if (
+# CHECK: c[100 * i + threadIdx.x] =
+# CHECK: __syncthreads();
+# CHECK: if (threadIdx.x<50
+# CHECK:   d[50 * i + threadIdx.x] =)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  auto blockExtents = cuda_cg.gpu_block_extents();
+  auto threadExtents = cuda_cg.gpu_thread_extents();
+  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(1)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(A_SIZE)));
+
+  PaddedBuffer<float> a_v(OUTER_SIZE, A_SIZE);
+  PaddedBuffer<float> b_v(OUTER_SIZE, B_SIZE);
+  PaddedBuffer<float> c_v(OUTER_SIZE, A_SIZE);
+  PaddedBuffer<float> d_v(OUTER_SIZE, B_SIZE);
+
+  PaddedBuffer<float> c_ref(OUTER_SIZE, A_SIZE);
+  PaddedBuffer<float> d_ref(OUTER_SIZE, B_SIZE);
+
+  for (int o = 0; o < OUTER_SIZE; ++o) {
+    for (int i = 0; i < A_SIZE; i++) {
+      a_v(o, i) = (float)i;
+      c_ref(o, i) = (float)(i * 2);
+    }
+    for (int i = 0; i < B_SIZE; i++) {
+      b_v(o, i) = (float)(B_SIZE - i);
+      d_ref(o, i) = c_ref(o, i * 2) + b_v(o, i);
+    }
+  }
+
+  float* a_dev = nullptr;
+  cudaMalloc(&a_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  float* b_dev = nullptr;
+  cudaMalloc(&b_dev, OUTER_SIZE * B_SIZE * sizeof(float));
+  float* c_dev = nullptr;
+  cudaMalloc(&c_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  float* d_dev = nullptr;
+  cudaMalloc(&d_dev, OUTER_SIZE * B_SIZE * sizeof(float));
+  cudaMemcpy(
+      a_dev,
+      a_v.data(),
+      OUTER_SIZE * A_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      b_dev,
+      b_v.data(),
+      OUTER_SIZE * B_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      c_dev,
+      c_v.data(),
+      OUTER_SIZE * A_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      d_dev,
+      d_v.data(),
+      OUTER_SIZE * B_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cuda_cg(a_dev, b_dev, c_dev, d_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(
+      c_v.data(),
+      c_dev,
+      OUTER_SIZE * A_SIZE * sizeof(float),
+      cudaMemcpyDeviceToHost);
+  cudaMemcpy(
+      d_v.data(),
+      d_dev,
+      OUTER_SIZE * B_SIZE * sizeof(float),
+      cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
+  ExpectAllNear(d_v, d_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(b_dev);
+  cudaFree(c_dev);
+  cudaFree(d_dev);
+}
+
+// Tests the case with two loop nests, each of which bound to the same block
+// size, but with internal loops bound to different thread rank (ie x and y). In
+// this case both bodies must be masked against the other dimension being > 0.
+// Note: this is a bit degenerate no one would actually write this for perf.
+void testCudaMaskMultiDimMultiAxis() {
+  KernelScope kernel_scope;
+  int OUTER_SIZE = 10;
+  int A_SIZE = 30;
+  int B_SIZE = 15;
+  Placeholder a_buf("a", kFloat, {OUTER_SIZE, A_SIZE});
+  Placeholder b_buf("b", kFloat, {OUTER_SIZE, B_SIZE});
+  Tensor* c = Compute(
+      "C",
+      {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        return ExprHandle(2) * a_buf.load(i, j);
+      });
+  Tensor* d = Compute(
+      "D",
+      {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        return c->call(i, j * 2) + b_buf.load(i, j);
+      });
+
+  LoopNest l({c, d});
+  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  l.setGPUBlockIndex(loops[0], 0);
+  l.setGPUThreadIndex(loops[1], 0);
+  loops = l.getLoopStmtsFor(d);
+  l.setGPUBlockIndex(loops[0], 0);
+  l.setGPUThreadIndex(loops[1], 1);
+
+  l.prepareForCodegen();
+  Stmt* stmt = l.root_stmt();
+  CudaCodeGen cuda_cg(stmt, c, d, a_buf, b_buf);
+
+  std::ostringstream oss;
+  oss << *cuda_cg.stmt();
+
+  // Both stores masked agaist the other thread dim < 1.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: if (threadIdx.y<1
+# CHECK:   C[30 * blockIdx.x + threadIdx.x] =
+# CHECK: __syncthreads();
+# CHECK: if (threadIdx.x<1
+# CHECK:   D[threadIdx.y + 15 * blockIdx.x] =)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  auto blockExtents = cuda_cg.gpu_block_extents();
+  auto threadExtents = cuda_cg.gpu_thread_extents();
+  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(OUTER_SIZE)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(A_SIZE)));
+
+  PaddedBuffer<float> a_v(OUTER_SIZE, A_SIZE);
+  PaddedBuffer<float> b_v(OUTER_SIZE, B_SIZE);
+  PaddedBuffer<float> c_v(OUTER_SIZE, A_SIZE);
+  PaddedBuffer<float> d_v(OUTER_SIZE, B_SIZE);
+
+  PaddedBuffer<float> c_ref(OUTER_SIZE, A_SIZE);
+  PaddedBuffer<float> d_ref(OUTER_SIZE, B_SIZE);
+
+  for (int o = 0; o < OUTER_SIZE; ++o) {
+    for (int i = 0; i < A_SIZE; i++) {
+      a_v(o, i) = (float)i;
+      c_ref(o, i) = (float)(i * 2);
+    }
+  }
+
+  for (int o = 0; o < OUTER_SIZE; ++o) {
+    for (int i = 0; i < B_SIZE; i++) {
+      b_v(o, i) = (float)(B_SIZE - i);
+      d_ref(o, i) = c_ref(o, i * 2) + b_v(o, i);
+    }
+  }
+
+  float* a_dev = nullptr;
+  cudaMalloc(&a_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  float* b_dev = nullptr;
+  cudaMalloc(&b_dev, OUTER_SIZE * B_SIZE * sizeof(float));
+  float* c_dev = nullptr;
+  cudaMalloc(&c_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  float* d_dev = nullptr;
+  cudaMalloc(&d_dev, OUTER_SIZE * B_SIZE * sizeof(float));
+  cudaMemcpy(
+      a_dev,
+      a_v.data(),
+      OUTER_SIZE * A_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      b_dev,
+      b_v.data(),
+      OUTER_SIZE * B_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      c_dev,
+      c_v.data(),
+      OUTER_SIZE * A_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      d_dev,
+      d_v.data(),
+      OUTER_SIZE * B_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cuda_cg(c_dev, d_dev, a_dev, b_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(
+      c_v.data(),
+      c_dev,
+      OUTER_SIZE * A_SIZE * sizeof(float),
+      cudaMemcpyDeviceToHost);
+  cudaMemcpy(
+      d_v.data(),
+      d_dev,
+      OUTER_SIZE * B_SIZE * sizeof(float),
+      cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
+  ExpectAllNear(d_v, d_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(b_dev);
+  cudaFree(c_dev);
+  cudaFree(d_dev);
+}
+
+// Tests the case with two loop nests, each bound to both Block and Thread but
+// the second loop is smaller in both cases - the second store must be masked
+// for both the block and thread dimension.
+void testCudaMaskMultiDimMultiLevel() {
+  KernelScope kernel_scope;
+  int OUTER_A_SIZE = 10;
+  int OUTER_B_SIZE = 5;
+  int A_SIZE = 30;
+  int B_SIZE = 15;
+  Placeholder a_buf("a", kFloat, {OUTER_A_SIZE, A_SIZE});
+  Placeholder b_buf("b", kFloat, {OUTER_B_SIZE, B_SIZE});
+  Tensor* c = Compute(
+      "C",
+      {{OUTER_A_SIZE, "i"}, {A_SIZE, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        return ExprHandle(2) * a_buf.load(i, j);
+      });
+  Tensor* d = Compute(
+      "D",
+      {{OUTER_B_SIZE, "i"}, {B_SIZE, "j"}},
+      [&](const VarHandle& i, const VarHandle& j) {
+        return c->call(i, j * 2) + b_buf.load(i, j);
+      });
+
+  LoopNest l({c, d});
+  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  l.setGPUBlockIndex(loops[0], 0);
+  l.setGPUThreadIndex(loops[1], 0);
+  loops = l.getLoopStmtsFor(d);
+  l.setGPUBlockIndex(loops[0], 0);
+  l.setGPUThreadIndex(loops[1], 0);
+
+  l.prepareForCodegen();
+  Stmt* stmt = l.root_stmt();
+  CudaCodeGen cuda_cg(stmt, c, d, a_buf, b_buf);
+
+  std::ostringstream oss;
+  oss << *cuda_cg.stmt();
+
+  // The write to D should be masked twice, but not the write to C.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK-NOT: if (
+# CHECK: C[30 * blockIdx.x + threadIdx.x] =
+# CHECK: __syncthreads();
+# CHECK: if (blockIdx.x<5
+# CHECK:   if (threadIdx.x<15
+# CHECK:     D[threadIdx.x + 15 * blockIdx.x] =)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  auto blockExtents = cuda_cg.gpu_block_extents();
+  auto threadExtents = cuda_cg.gpu_thread_extents();
+  ASSERT_TRUE(exprEquals(blockExtents[0], new IntImm(OUTER_A_SIZE)));
+  ASSERT_TRUE(exprEquals(threadExtents[0], new IntImm(A_SIZE)));
+
+  PaddedBuffer<float> a_v(OUTER_A_SIZE, A_SIZE);
+  PaddedBuffer<float> b_v(OUTER_B_SIZE, B_SIZE);
+  PaddedBuffer<float> c_v(OUTER_A_SIZE, A_SIZE);
+  PaddedBuffer<float> d_v(OUTER_B_SIZE, B_SIZE);
+
+  PaddedBuffer<float> c_ref(OUTER_A_SIZE, A_SIZE);
+  PaddedBuffer<float> d_ref(OUTER_B_SIZE, B_SIZE);
+
+  for (int o = 0; o < OUTER_A_SIZE; ++o) {
+    for (int i = 0; i < A_SIZE; i++) {
+      a_v(o, i) = (float)i;
+      c_ref(o, i) = (float)(i * 2);
+    }
+  }
+
+  for (int o = 0; o < OUTER_B_SIZE; ++o) {
+    for (int i = 0; i < B_SIZE; i++) {
+      b_v(o, i) = (float)(B_SIZE - i);
+      d_ref(o, i) = c_ref(o, i * 2) + b_v(o, i);
+    }
+  }
+
+  float* a_dev = nullptr;
+  cudaMalloc(&a_dev, OUTER_A_SIZE * A_SIZE * sizeof(float));
+  float* b_dev = nullptr;
+  cudaMalloc(&b_dev, OUTER_B_SIZE * B_SIZE * sizeof(float));
+  float* c_dev = nullptr;
+  cudaMalloc(&c_dev, OUTER_A_SIZE * A_SIZE * sizeof(float));
+  float* d_dev = nullptr;
+  cudaMalloc(&d_dev, OUTER_B_SIZE * B_SIZE * sizeof(float));
+  cudaMemcpy(
+      a_dev,
+      a_v.data(),
+      OUTER_A_SIZE * A_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      b_dev,
+      b_v.data(),
+      OUTER_B_SIZE * B_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      c_dev,
+      c_v.data(),
+      OUTER_A_SIZE * A_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaMemcpy(
+      d_dev,
+      d_v.data(),
+      OUTER_B_SIZE * B_SIZE * sizeof(float),
+      cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cuda_cg(c_dev, d_dev, a_dev, b_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(
+      c_v.data(),
+      c_dev,
+      OUTER_A_SIZE * A_SIZE * sizeof(float),
+      cudaMemcpyDeviceToHost);
+  cudaMemcpy(
+      d_v.data(),
+      d_dev,
+      OUTER_B_SIZE * B_SIZE * sizeof(float),
+      cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
+  ExpectAllNear(d_v, d_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(b_dev);
+  cudaFree(c_dev);
+  cudaFree(d_dev);
 }
 
 } // namespace jit

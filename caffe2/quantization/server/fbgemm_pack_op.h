@@ -15,7 +15,7 @@ void QuantizeConvBias(
     int M,
     const dnnlowp::TensorQuantizationParams& in_qparams,
     const vector<dnnlowp::TensorQuantizationParams>& filter_qparams,
-    std::vector<int32_t>& b_quantized, bool round_nearest_even=true);
+    std::vector<int32_t>& b_quantized, bool use_fp16=false, bool round_nearest_even=true);
 
 class FullyConnectedDNNLowPPackWeightOp final
     : public DNNLowPOp<std::uint8_t, FCFp32Op> {

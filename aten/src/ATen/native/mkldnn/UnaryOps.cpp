@@ -8,11 +8,11 @@ namespace at {
 namespace native {
 
 Tensor mkldnn_sigmoid(const Tensor& self) {
-  AT_ERROR("mkldnn_sigmoid: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_sigmoid: ATen not compiled with MKLDNN support");
 }
 
 Tensor& mkldnn_sigmoid_(Tensor& self) {
-  AT_ERROR("mkldnn_sigmoid_: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_sigmoid_: ATen not compiled with MKLDNN support");
 }
 
 } // namespace native

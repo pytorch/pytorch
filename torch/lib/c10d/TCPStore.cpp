@@ -10,7 +10,7 @@ namespace c10d {
 
 namespace {
 
-enum class QueryType : uint8_t { SET, GET, ADD, CHECK, WAIT };
+enum class QueryType : uint8_t { SET, GET, ADD, CHECK, WAIT, GETNUMKEYS, DELETE };
 
 enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
@@ -180,6 +180,12 @@ void TCPStoreDaemon::query(int socket) {
   } else if (qt == QueryType::WAIT) {
     waitHandler(socket);
 
+  } else if (qt == QueryType::GETNUMKEYS) {
+    getNumKeysHandler(socket);
+
+  } else if (qt == QueryType::DELETE) {
+    deleteHandler(socket);
+
   } else {
     throw std::runtime_error("Unexpected query type");
   }
@@ -226,6 +232,16 @@ void TCPStoreDaemon::getHandler(int socket) const {
   std::string key = tcputil::recvString(socket);
   auto data = tcpStore_.at(key);
   tcputil::sendVector<uint8_t>(socket, data);
+}
+
+void TCPStoreDaemon::getNumKeysHandler(int socket) const {
+  tcputil::sendValue<int64_t>(socket, tcpStore_.size());
+}
+
+void TCPStoreDaemon::deleteHandler(int socket) {
+  std::string key = tcputil::recvString(socket);
+  auto numDeleted = tcpStore_.erase(key);
+  tcputil::sendValue<int64_t>(socket, numDeleted);
 }
 
 void TCPStoreDaemon::checkHandler(int socket) const {
@@ -357,10 +373,23 @@ int64_t TCPStore::add(const std::string& key, int64_t value) {
   return addHelper_(regKey, value);
 }
 
+bool TCPStore::deleteKey(const std::string& key) {
+  std::string regKey = regularPrefix_ + key;
+  tcputil::sendValue<QueryType>(storeSocket_, QueryType::DELETE);
+  tcputil::sendString(storeSocket_, regKey, true);
+  auto numDeleted = tcputil::recvValue<int64_t>(storeSocket_);
+  return (numDeleted == 1);
+}
+
 int64_t TCPStore::addHelper_(const std::string& key, int64_t value) {
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::ADD);
   tcputil::sendString(storeSocket_, key, true);
   tcputil::sendValue<int64_t>(storeSocket_, value);
+  return tcputil::recvValue<int64_t>(storeSocket_);
+}
+
+int64_t TCPStore::getNumKeys() {
+  tcputil::sendValue<QueryType>(storeSocket_, QueryType::GETNUMKEYS);
   return tcputil::recvValue<int64_t>(storeSocket_);
 }
 

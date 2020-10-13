@@ -630,8 +630,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
     return enqueue(std::move(entry));
   } else {
     // Need alltoallv
-    ProcessGroup::checkSplitSizes(inputSplitSizes, inputTensor, size_);
-    ProcessGroup::checkSplitSizes(outputSplitSizes, outputTensor, size_);
+    c10d::checkSplitSizes(inputSplitSizes, inputTensor, size_);
+    c10d::checkSplitSizes(outputSplitSizes, outputTensor, size_);
     std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
         [opts, this, inputSplitSizes, outputSplitSizes](
             std::unique_ptr<WorkEntry>& entry) {
@@ -641,9 +641,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall_base(
           std::vector<int> recv_lengths(size_);
           std::vector<int> send_offsets(size_);
           std::vector<int> recv_offsets(size_);
-          ProcessGroup::computeLengthsAndOffsets(
+          c10d::computeLengthsAndOffsets(
               inputSplitSizes, srcdata, &send_lengths, &send_offsets);
-          ProcessGroup::computeLengthsAndOffsets(
+          c10d::computeLengthsAndOffsets(
               outputSplitSizes, dstdata, &recv_lengths, &recv_offsets);
           c10::DeviceGuard guard(srcdata.device());
           std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
@@ -684,9 +684,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::alltoall(
         auto srcdata = entry->src;
         auto dstdata = entry->dst;
         int64_t src_len =
-            ProcessGroup::computeLengthsAndOffsets(srcdata, &send_lengths, &send_offsets);
+            c10d::computeLengthsAndOffsets(srcdata, &send_lengths, &send_offsets);
         int64_t dst_len =
-            ProcessGroup::computeLengthsAndOffsets(dstdata, &recv_lengths, &recv_offsets);
+            c10d::computeLengthsAndOffsets(dstdata, &recv_lengths, &recv_offsets);
         std::vector<int64_t> send_lengthsL(
             send_lengths.begin(), send_lengths.end());
         std::vector<int64_t> recv_lengthsL(

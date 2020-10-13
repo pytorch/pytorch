@@ -18,7 +18,7 @@ class IDEEPTransposeOp final : public IDEEPOperator {
     const auto& X = Input(INPUT);
     auto* Y = Output(OUTPUT);
 
-    Y->transpose_from(X, axes_);
+    Y->transpose_from(X.to_public(nullptr, X.get_data_type()), axes_);
 
     return true;
   }

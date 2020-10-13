@@ -85,6 +85,18 @@ RUN rm AndroidManifest.xml
 RUN rm build.gradle
 ENV INSTALLED_ANDROID ${ANDROID}
 
+# (optional) Install Vulkan SDK
+ARG VULKAN_SDK_VERSION
+ADD ./common/install_vulkan_sdk.sh install_vulkan_sdk.sh
+RUN if [ -n "${VULKAN_SDK_VERSION}" ]; then bash ./install_vulkan_sdk.sh; fi
+RUN rm install_vulkan_sdk.sh
+
+# (optional) Install swiftshader
+ARG SWIFTSHADER
+ADD ./common/install_swiftshader.sh install_swiftshader.sh
+RUN if [ -n "${SWIFTSHADER}" ]; then bash ./install_swiftshader.sh; fi
+RUN rm install_swiftshader.sh
+
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION
 ADD ./common/install_cmake.sh install_cmake.sh
@@ -111,9 +123,8 @@ RUN bash ./install_jni.sh && rm install_jni.sh
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
-# Install LLVM dev version
-ADD ./common/install_llvm.sh install_llvm.sh
-RUN bash ./install_llvm.sh
+# Install LLVM dev version (Defined in the pytorch/builder github repository)
+COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
 USER jenkins
 CMD ["bash"]

@@ -24,6 +24,7 @@ def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tens
 class RNNBase(Module):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
                      'batch_first', 'dropout', 'bidirectional']
+    __jit_unused_properties__ = ['all_weights']
 
     mode: str
     input_size: int
@@ -948,7 +949,7 @@ class LSTMCell(RNNCellBase):
     Examples::
 
         >>> rnn = nn.LSTMCell(10, 20)
-        >>> input = torch.randn(6, 3, 10)
+        >>> input = torch.randn(3, 10)
         >>> hx = torch.randn(3, 20)
         >>> cx = torch.randn(3, 20)
         >>> output = []

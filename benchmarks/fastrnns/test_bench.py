@@ -1,20 +1,12 @@
-from __future__ import print_function
 import pytest
 import torch
+from .fuser import set_fuser
 from .runner import get_nn_runners
 
-default_rnns = ['cudnn', 'aten', 'jit', 'jit_premul', 'jit_premul_bias', 'jit_simple',
-                         'jit_multilayer', 'py']
-default_cnns = ['resnet18', 'resnet18_jit', 'resnet50', 'resnet50_jit']
-all_nets = default_rnns + default_cnns
-
-def pytest_generate_tests(metafunc):
-    # This creates lists of tests to generate, can be customized
-    if metafunc.cls.__name__ == "TestBenchNetwork":
-        metafunc.parametrize('net_name', all_nets, scope="class")
-
 @pytest.fixture(scope='class')
-def modeldef(request, net_name):
+def modeldef(request, net_name, executor, fuser):
+    set_fuser(fuser, executor)
+
     # Given a 'net_name' provided by generate_tests, build the thing
     name, rnn_creator, context = get_nn_runners(net_name)[0]
     creator_args = creator_args = {

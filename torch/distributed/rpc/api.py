@@ -3,18 +3,16 @@ import contextlib
 import functools
 import inspect
 import logging
-import numbers
 import threading
 from typing import Generic, TypeVar
 
 import torch
-import torch.distributed as dist
 
 from . import (
     PyRRef,
     RemoteProfilerManager,
-    RpcBackendOptions,
     WorkerInfo,
+    get_rpc_timeout,
     _cleanup_python_rpc_handler,
     _delete_all_user_and_unforked_owner_rrefs,
     _destroy_rref_context,
@@ -28,7 +26,6 @@ from . import (
     _is_current_rpc_agent_set,
     _reset_current_rpc_agent,
     _set_and_start_rpc_agent,
-    backend_registry,
 )
 
 from .internal import (
@@ -38,7 +35,7 @@ from .internal import (
     _build_rpc_profiling_key,
 )
 
-from .constants import UNSET_RPC_TIMEOUT
+from .constants import DEFAULT_SHUTDOWN_TIMEOUT, UNSET_RPC_TIMEOUT
 
 
 logger = logging.getLogger(__name__)
@@ -108,6 +105,16 @@ _all_gather_sequence_id = 0
 _all_gather_sequence_id_to_states = collections.defaultdict(AllGatherStates)
 
 
+def _init_rpc_states(agent):
+    worker_infos = agent.get_worker_infos()
+    global _ALL_WORKER_NAMES
+    _ALL_WORKER_NAMES = {worker_info.name for worker_info in worker_infos}
+
+    # NB: backend implementation might have already set the rpc_agent.
+    if not _is_current_rpc_agent_set():
+        _set_and_start_rpc_agent(agent)
+
+
 def _gather_to_leader(sequence_id, worker_name, obj):
     with _all_gather_dict_lock:
         assert (
@@ -136,7 +143,7 @@ def _broadcast_to_followers(sequence_id, objects_map):
 
 
 @_require_initialized
-def _all_gather(obj):
+def _all_gather(obj, timeout=UNSET_RPC_TIMEOUT):
     r"""
     This is similar to torch.distributed.all_gather(), but is using RPC. It
     picks the worker with the smallest name (alphabetic order) as the leader.
@@ -157,8 +164,8 @@ def _all_gather(obj):
         _all_gather_sequence_id += 1
 
     is_leader = leader_name == self_name
-    # Set a long enough timeout for all shutdown messages to be processed.
-    timeout = 5  # second
+    if timeout == UNSET_RPC_TIMEOUT:
+        timeout = get_rpc_timeout()
 
     # Phase 1: Followers send it's object to the leader
     if is_leader:
@@ -172,9 +179,7 @@ def _all_gather(obj):
         )
 
     with _all_gather_dict_lock:
-        states = _all_gather_sequence_id_to_states[
-            sequence_id
-        ]
+        states = _all_gather_sequence_id_to_states[sequence_id]
     states.proceed_signal.wait()
 
     # Phase 2: Leader broadcast gathered results to all followers
@@ -190,15 +195,20 @@ def _all_gather(obj):
                 timeout=timeout
             )
             worker_name_to_response_future_dict[follower_name] = fut
+
+        errors = []
         for follower_name, fut in worker_name_to_response_future_dict.items():
             try:
                 fut.wait()
             except RuntimeError as ex:
-                logger.error(
-                    "{worker_name} failed to respond to 'Shutdown Proceed.' request in {timeout}".format(
-                        worker_name=follower_name, timeout=timeout
-                    )
-                )
+                errors.append((follower_name, ex))
+
+        if errors:
+            raise RuntimeError(
+                f"Followers {[e[0] for e in errors]} timed out in _all_gather "
+                f"after {timeout:.2f} seconds. The first exception is {errors[0][1]}"
+            )
+
     return states.gathered_objects
 
 
@@ -211,7 +221,12 @@ def _wait_all_workers():
     terminate the RPC framework, and there is no guarantee that the RPC
     framework will work after this method returns.
     """
-    _all_gather(None)
+    try:
+        _all_gather(None, timeout=DEFAULT_SHUTDOWN_TIMEOUT)
+    except RuntimeError as ex:
+        logger.error(
+            f"Failed to respond to 'Shutdown Proceed' in time, got error {ex}"
+        )
 
 
 @_require_initialized
@@ -287,38 +302,6 @@ def shutdown(graceful=True):
         _reset_current_rpc_agent()
 
 
-# TODO: add a context manager to wrap _init_rpc_backend and shutdown
-def _init_rpc_backend(
-    backend=backend_registry.BackendType.PROCESS_GROUP,
-    store=None,
-    name=None,
-    rank=-1,
-    world_size=-1,
-    rpc_backend_options=None,
-):
-
-    _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options)
-
-    if _is_current_rpc_agent_set():
-        raise RuntimeError("RPC is already initialized")
-
-    # Initialize RPC.
-    rpc_agent = backend_registry.init_backend(
-        backend,
-        store=store,
-        name=name,
-        rank=rank,
-        world_size=world_size,
-        rpc_backend_options=rpc_backend_options,
-    )
-
-    worker_infos = rpc_agent.get_worker_infos()
-    global _ALL_WORKER_NAMES
-    _ALL_WORKER_NAMES = {worker_info.name for worker_info in worker_infos}
-
-    _set_and_start_rpc_agent(rpc_agent)
-
-
 @_require_initialized
 def get_worker_info(worker_name=None):
     r"""
@@ -350,22 +333,16 @@ def _to_worker_info(name_or_info):
         raise ValueError("Cannot get WorkerInfo from name {}".format(name_or_info))
 
 
-def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
-    type_mapping = {
-        backend: backend_registry.BackendType,
-        store: dist.Store,
-        name: str,
-        rank: numbers.Integral,
-        world_size: numbers.Integral,
-        rpc_backend_options: RpcBackendOptions,
-    }
-    for arg, arg_type in type_mapping.items():
-        if not isinstance(arg, arg_type):
-            raise RuntimeError(
-                "Argument {} must be of type {} but got type {}".format(
-                    arg, arg_type, type(arg)
-                )
-            )
+def _rref_typeof_on_owner(rref):
+    return type(rref.local_value())
+
+
+def _rref_typeof_on_user(rref):
+    return rpc_sync(
+        rref.owner(),
+        _rref_typeof_on_owner,
+        args=(rref,)
+    )
 
 
 T = TypeVar("T")

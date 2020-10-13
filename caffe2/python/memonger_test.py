@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 
@@ -389,7 +389,7 @@ class MemongerTest(hu.HypothesisTestCase):
     @given(input_dim=st.integers(min_value=4, max_value=4),
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_forward_optim_tree_harder(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         m.net.Proto().type = "dag"

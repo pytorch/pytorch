@@ -1,6 +1,8 @@
 .. role:: hidden
     :class: hidden-section
 
+.. _torch-fft-module:
+
 torch.fft
 =========
 
@@ -14,7 +16,24 @@ conflicts with the :func:`torch.fft` function.
 
 .. currentmodule:: torch.fft
 
-Functions
----------
+Fast Fourier Transforms
+-----------------------
 
 .. autofunction:: fft
+.. autofunction:: ifft
+.. autofunction:: fftn
+.. autofunction:: ifftn
+.. autofunction:: rfft
+.. autofunction:: irfft
+.. autofunction:: rfftn
+.. autofunction:: irfftn
+.. autofunction:: hfft
+.. autofunction:: ihfft
+
+Helper Functions
+----------------
+
+.. autofunction:: fftfreq
+.. autofunction:: rfftfreq
+.. autofunction:: fftshift
+.. autofunction:: ifftshift

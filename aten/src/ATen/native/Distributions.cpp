@@ -454,6 +454,7 @@ Tensor& multinomial_out(Tensor& result, const Tensor& self, int64_t n_sample, bo
   if (self.dim() > 1) {
     int64_t n_dist = self.size(-2);
     result.resize_({n_dist, n_sample});
+    if (n_dist == 0) { return result; };
   } else {
     result.resize_({n_sample});
   }

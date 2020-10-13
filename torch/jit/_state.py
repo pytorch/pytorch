@@ -9,7 +9,6 @@ import torch
 import os
 import weakref
 
-
 class EnabledProxy:
     """Stores whether the JIT is enabled or not.
 
@@ -82,8 +81,8 @@ def _get_script_class(name):
 # In the future we could consider caching more types of objects so that
 # aliasing is preserved across separate compilations of the same object.
 
-_jit_caching_layer = weakref.WeakKeyDictionary()
-_jit_function_overload_caching = weakref.WeakKeyDictionary()
+_jit_caching_layer: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_jit_function_overload_caching: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 def _try_get_jit_cached_overloads(key):
     qual_names = _jit_function_overload_caching.get(key, None)
