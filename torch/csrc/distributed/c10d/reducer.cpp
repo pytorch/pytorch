@@ -946,31 +946,6 @@ void Reducer::prepare_for_backward(
   std::unordered_set<torch::autograd::Node*> seen;
   std::vector<torch::autograd::Node*> queue;
 
-  // Check that any prior reduction has finished.
-  // The variable `require_finalize_` is true until all gradients
-  // have been computed and reduction of all buckets has been kicked off.
-  if (require_finalize_) {
-    TORCH_CHECK(
-        false,
-        "Expected to have finished reduction in the prior iteration before ",
-        "starting a new one. ",
-        "",
-        "This error indicates that your module has parameters that were ",
-        "not used in producing loss. ",
-        "",
-        "You can enable unused parameter detection by (1) passing the keyword "
-        "argument `find_unused_parameters=True` to ",
-        "`torch.nn.parallel.DistributedDataParallel`; (2) making sure all ",
-        "`forward` function outputs participate in calculating loss. "
-        "",
-        "If you already have done the above two steps, then the distributed ",
-        "data parallel module wasn't able to locate the output tensors in the ",
-        "return value of your module's `forward` function. ",
-        "Please include the loss function and the structure of the return ",
-        "value of `forward` of your module when reporting this issue (e.g. ",
-        "list, dict, iterable).");
-  }
-
   // Reset accounting.
   expect_autograd_hooks_ = true;
   next_bucket_ = 0;
@@ -1325,6 +1300,11 @@ void Reducer::sync_bucket_indices(
 }
 
 bool Reducer::rebuild_buckets() {
+  // Ensure reduction for previous backwards pass is finished. If user's model
+  // has unused parameters for example, this will raise an error recommending to
+  // run with find_unused_parameters=True, instead of the size mismatch
+  // exception below.
+  ensure_prior_reduction_finished();
   std::lock_guard<std::mutex> lock(mutex_);
   if (!should_rebuild_buckets() || rebuilt_params_.empty()) {
     return false;
@@ -1379,6 +1359,34 @@ void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
       "Communication hook does not support single-process multiple-device mode.");
 
   comm_hook_ = std::move(iface);
+}
+
+void Reducer::ensure_prior_reduction_finished() {
+  // Check that any prior reduction has finished.
+  // The variable `require_finalize_` is true until all gradients
+  // have been computed and reduction of all buckets has been kicked off.
+  if (require_finalize_) {
+    TORCH_CHECK(
+        false,
+        "Expected to have finished reduction in the prior iteration before ",
+        "starting a new one. ",
+        "",
+        "This error indicates that your module has parameters that were ",
+        "not used in producing loss. ",
+        "",
+        "You can enable unused parameter detection by (1) passing the keyword "
+        "argument `find_unused_parameters=True` to ",
+        "`torch.nn.parallel.DistributedDataParallel`; (2) making sure all ",
+        "`forward` function outputs participate in calculating loss. "
+        "",
+        "If you already have done the above two steps, then the distributed ",
+        "data parallel module wasn't able to locate the output tensors in the ",
+        "return value of your module's `forward` function. ",
+        "Please include the loss function and the structure of the return ",
+        "value of `forward` of your module when reporting this issue (e.g. ",
+        "list, dict, iterable).");
+  }
+
 }
 
 namespace {
