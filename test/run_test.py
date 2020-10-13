@@ -206,8 +206,7 @@ JIT_EXECUTOR_TESTS = [
     'test_jit_profiling',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
-    'test_jit_fuser_te',
-    'test_tensorexpr']
+]
 
 def print_to_stderr(message):
     print(message, file=sys.stderr)
