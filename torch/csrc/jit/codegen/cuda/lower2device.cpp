@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/lower_alias_memory.h>
 #include <torch/csrc/jit/codegen/cuda/lower_index.h>
 #include <torch/csrc/jit/codegen/cuda/lower_insert_syncs.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
@@ -114,8 +115,14 @@ void GpuLower::lower() {
   const auto unrolled_loops =
       UnrollPass::runPass(fusion_, lowered_exprs, preds);
 
+  // Reuse memory locations if:
+  // TensorView is dynamic shared memory
+  // TensorViews have the same size
+  // Output TensorView is modified using Input TensorView
+  const auto reuse_mem_exprs = reuseMemoryAllocations(fusion_, unrolled_loops);
+
   // Insert SyncThreads at end of for-loop to avoid WAR race condition
-  const auto sync_exprs = insertThreadSynchronization(fusion_, unrolled_loops);
+  const auto sync_exprs = insertThreadSynchronization(fusion_, reuse_mem_exprs);
 
   const auto indexed_loops =
       IndexLowering::getIndexedExprs(fusion_, sync_exprs);

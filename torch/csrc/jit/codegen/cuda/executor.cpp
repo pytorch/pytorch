@@ -194,21 +194,25 @@ uint64_t FusionExecutor::computeSharedMemory(
     uint64_t total) {
   FUSER_PERF_SCOPE("computeSharedMemory");
   for (auto smem_alloc : buffers) {
-    auto inferred_val = see.inferValue(smem_alloc->size());
-    if (inferred_val.has_value()) {
-      const uint64_t data_size = dataTypeSize(smem_alloc->buffer_type());
-      // Add padding to align dynamic shared memory
-      if (align_padding) {
-        total = ceilDiv(total, data_size) * data_size;
+    // If this buffer aliases another buffer,
+    // then do not allocate memory for this buffer.
+    if (smem_alloc->alias() == nullptr) {
+      auto inferred_val = see.inferValue(smem_alloc->size());
+      if (inferred_val.has_value()) {
+        const uint64_t data_size = dataTypeSize(smem_alloc->buffer_type());
+        // Add padding to align dynamic shared memory
+        if (align_padding) {
+          total = ceilDiv(total, data_size) * data_size;
+        }
+        total += inferred_val.value() * data_size;
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false,
+            "Failed to evaluate the size ",
+            smem_alloc->size(),
+            " of shared memory buffer - T",
+            smem_alloc->buffer()->name());
       }
-      total += inferred_val.value() * data_size;
-    } else {
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "Failed to evaluate the size ",
-          smem_alloc->size(),
-          " of shared memory buffer - T",
-          smem_alloc->buffer()->name());
     }
   }
   return total;
@@ -500,7 +504,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
         launch_params.bdimx(),
         launch_params.bdimy(),
         launch_params.bdimz(),
-        launch_params.smem() * 4,
+        launch_params.smem(),
         stream,
         kernel_arguments.getBuffer(),
         nullptr));

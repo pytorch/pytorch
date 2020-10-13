@@ -540,11 +540,24 @@ class TORCH_CUDA_API Allocate : public Expr {
     return buffer_->getDataType().value();
   }
 
+  Allocate* alias() const {
+    return alias_;
+  }
+
+  void setAlias(Allocate* alias) {
+    TORCH_INTERNAL_ASSERT(alias->getMemoryType() == memory_type_);
+    alias_ = alias;
+  }
+
  private:
   Val* buffer_ = nullptr;
   MemoryType memory_type_ = MemoryType::Local;
   Val* size_ = nullptr;
   bool zero_init_ = false;
+
+  // This alias tracks the next Allocate node in a linked chain of aliases
+  // If the alias is nullptr, then the Allocate node uses memory in the kernel
+  Allocate* alias_ = nullptr;
 };
 
 // Sync represents __syncthreads barrier for block level coordination.

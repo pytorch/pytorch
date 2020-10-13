@@ -59,8 +59,13 @@ TensorView* makeConcreteTensor(
   // We can uncomment the below statement to test all tests with contiguous
   // tensors. return makeContigTensor(nDims, dtype);
   std::vector<IterDomain*> dom;
-  for (size_t i = 0; i < sizes.size(); i++)
-    dom.push_back(new IterDomain(new Int(0), new Int(sizes[i])));
+  for (size_t i = 0; i < sizes.size(); i++) {
+    if (sizes[i] >= 0) {
+      dom.push_back(new IterDomain(new Int(0), new Int(sizes[i])));
+    } else {
+      dom.push_back(new IterDomain(new Int(0), new Int()));
+    }
+  }
   return new TensorView(new TensorDomain(dom), dtype);
 }
 
@@ -5911,6 +5916,472 @@ TEST(NVFuserTest, FusionSmemBlockGemmCache_CUDA) {
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 0);
+}
+
+TEST(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* x = makeDummyTensor(2);
+  fusion.addInput(x);
+  TensorView* max_val =
+      reductionOp(BinaryOpType::Max, {-1}, new Float(FLT_MIN), x); // (M)
+  TensorView* bcast_max = broadcast(max_val, {false, true}); // (M, B)
+  TensorView* x_max_sub = sub(x, bcast_max); // (M, N)
+  TensorView* exp = unaryOp(UnaryOpType::Exp, x_max_sub); // (M, N)
+  TensorView* sum_exp = sum(exp, {-1}); // (M, R)
+  TensorView* bcast_sum = broadcast(sum_exp, {false, true}); // (M, B)
+  TensorView* softmax = div(exp, bcast_sum); // (M, N)
+  fusion.addOutput(softmax);
+
+  // Read Input into Shared Memory
+  // Load Input + Pwise into shared memory
+  auto cache_x = x->cache_after();
+  cache_x->setMemoryType(MemoryType::Shared);
+  exp->setMemoryType(MemoryType::Shared);
+
+  std::vector<TensorView*> all_tensors({x,
+                                        cache_x,
+                                        max_val,
+                                        bcast_max,
+                                        x_max_sub,
+                                        exp,
+                                        sum_exp,
+                                        bcast_sum,
+                                        softmax});
+
+  auto tidx = new Int();
+  fusion.addInput(tidx);
+
+  for (auto tensor : all_tensors) {
+    tensor->split(-1, tidx);
+  }
+
+  auto sum_exp_rf = sum_exp->rFactor({1});
+  all_tensors.push_back(sum_exp_rf);
+
+  // computeAt
+  x->computeAt(x_max_sub, 1);
+  exp->computeAt(softmax, 1);
+  x_max_sub->computeAt(exp, 2);
+
+  softmax->axis(0)->parallelize(ParallelType::BIDx);
+  for (auto tensor : all_tensors) {
+    tensor->axis(-1)->parallelize(ParallelType::TIDx);
+  }
+
+  const size_t dimx = 1024;
+  const size_t dimy = 4096;
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({dimx, dimy}, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, 128});
+
+  auto t1 = at::_softmax(t0, -1, false);
+  TORCH_CHECK(
+      t1.allclose(outputs[0], 1e-5, 1e-5),
+      "Error of: ",
+      t1.sub(outputs[0]).abs().max());
+}
+
+TEST(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int pixels_per_thread = 64;
+  const int TIDX = 128;
+  const int static_size = pixels_per_thread * TIDX;
+
+  TensorView* sx = makeConcreteTensor({-1, static_size});
+  TensorView* dx = makeDummyTensor(2);
+  fusion.addInput(sx);
+  fusion.addInput(dx);
+
+  TensorView* max_sx =
+      reductionOp(BinaryOpType::Max, {-1}, new Float(FLT_MIN), sx); // (M)
+  TensorView* max_dx =
+      reductionOp(BinaryOpType::Max, {-1}, new Float(FLT_MIN), dx); // (M)
+
+  // Reduction => merge local and shared memory TensorViews
+  TensorView* max_val = binaryOp(BinaryOpType::Max, max_sx, max_dx);
+  TensorView* bcast_max = broadcast(max_val, {false, true}); // (M, B)
+
+  TensorView* sx_max_sub = sub(sx, bcast_max); // (M, N)
+  TensorView* dx_max_sub = sub(dx, bcast_max); // (M, N)
+
+  TensorView* sx_exp = unaryOp(UnaryOpType::Exp, sx_max_sub); // (M, N)
+  TensorView* dx_exp = unaryOp(UnaryOpType::Exp, dx_max_sub); // (M, N)
+
+  TensorView* sx_sum_exp = sum(sx_exp, {-1}); // (M, R)
+  TensorView* dx_sum_exp = sum(dx_exp, {-1}); // (M, R)
+
+  // Reduction => merge local and shared memory TensorViews
+  TensorView* sum_exp = binaryOp(BinaryOpType::Add, sx_sum_exp, dx_sum_exp);
+  TensorView* bcast_sum = broadcast(sum_exp, {false, true}); // (M, B)
+
+  TensorView* sx_softmax = div(sx_exp, bcast_sum); // (M, N)
+  TensorView* dx_softmax = div(dx_exp, bcast_sum); // (M, N)
+  fusion.addOutput(sx_softmax);
+  fusion.addOutput(dx_softmax);
+
+  auto sx_cache = sx->cache_after();
+  auto dx_cache = dx->cache_after();
+  dx_cache->setMemoryType(MemoryType::Shared);
+  dx_exp->setMemoryType(MemoryType::Shared);
+
+  // Reduction and Broadcast Tensors common to both memory TVs
+  std::vector<TensorView*> common_tensors(
+      {max_val, sum_exp, bcast_max, bcast_sum});
+
+  // Static Local Memory TVs
+  std::vector<TensorView*> static_tensors(
+      {sx, sx_cache, max_sx, sx_max_sub, sx_exp, sx_sum_exp, sx_softmax});
+
+  // Dynamic Local Memory TVs
+  std::vector<TensorView*> dynamic_tensors(
+      {dx, dx_cache, max_dx, dx_max_sub, dx_exp, dx_sum_exp, dx_softmax});
+
+  std::vector<TensorView*> all_tensors;
+  all_tensors.insert(
+      all_tensors.end(), common_tensors.begin(), common_tensors.end());
+  all_tensors.insert(
+      all_tensors.end(), static_tensors.begin(), static_tensors.end());
+  all_tensors.insert(
+      all_tensors.end(), dynamic_tensors.begin(), dynamic_tensors.end());
+
+  // M => M
+  // M, N => M, N/128, 128
+  for (auto tensor : all_tensors) {
+    if (tensor->nDims() > 1) {
+      tensor->split(-1, TIDX);
+    }
+  }
+
+  auto sx_sum_exp_rf = sx_sum_exp->rFactor({1});
+  auto dx_sum_exp_rf = dx_sum_exp->rFactor({1});
+  all_tensors.push_back(sx_sum_exp_rf);
+  all_tensors.push_back(dx_sum_exp_rf);
+
+  // computeAt
+  sx->computeAt(sx_max_sub, 1);
+  dx->computeAt(dx_max_sub, 1);
+
+  sx_exp->computeAt(sx_softmax, 1);
+  dx_exp->computeAt(dx_softmax, 1);
+
+  sx_max_sub->computeAt(sx_exp, 2);
+  dx_max_sub->computeAt(dx_exp, 2);
+
+  sx_softmax->axis(0)->parallelize(ParallelType::BIDx);
+  dx_softmax->axis(0)->parallelize(ParallelType::BIDx);
+  for (auto tensor : all_tensors) {
+    if (tensor->nDims() > 1) {
+      tensor->axis(-1)->parallelize(ParallelType::TIDx);
+    }
+  }
+
+  const size_t dimx = 1024;
+  const size_t dimy = 16384;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor in = at::randn({dimx, dimy}, options);
+  at::Tensor static_in = in.narrow(1, 0, static_size);
+  at::Tensor dynamic_in = in.narrow(1, static_size, dimy - static_size);
+
+  at::Tensor out = at::zeros({dimx, dimy}, options);
+  at::Tensor static_out = out.narrow(1, 0, static_size);
+  at::Tensor dynamic_out = out.narrow(1, static_size, dimy - static_size);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs =
+      fe.runFusion({static_in, dynamic_in}, {static_out, dynamic_out});
+
+  auto t1 = at::_softmax(in, -1, false);
+  TORCH_CHECK(
+      t1.allclose(out, 1e-5, 1e-5), "Error of: ", t1.sub(out).abs().max());
+}
+
+TEST(NVFuserTest, FusionPersistentBatchNormLocalShared_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int pixels_per_thread = 64;
+  const int TIDX = 128;
+  const int static_size = pixels_per_thread * TIDX;
+
+  TensorView* sx = makeConcreteTensor({-1, static_size});
+  TensorView* dx = makeDummyTensor(2);
+  fusion.addInput(sx);
+  fusion.addInput(dx);
+
+  Float* gamma = new Float();
+  Float* beta = new Float();
+  Float* eps = new Float();
+  Int* N = new Int();
+  fusion.addInput(gamma);
+  fusion.addInput(beta);
+  fusion.addInput(eps);
+  fusion.addInput(N);
+
+  // Reduction
+  auto sx_sum = sum(sx, {-1}); // (M, R)
+  auto dx_sum = sum(dx, {-1}); // (M, R)
+  // Reduction => merge local and shared memory TensorViews
+  auto x_sum = binaryOp(BinaryOpType::Add, sx_sum, dx_sum);
+
+  // Broadcast
+  auto x_sum_bcast = broadcast(x_sum, {false, true}); // (M, B)
+  // Pwise
+  auto x_mean = div(x_sum_bcast, N); // (M, B)
+
+  auto sx_mean_sub = sub(sx, x_mean); // (M, N)
+  auto dx_mean_sub = sub(dx, x_mean); // (M, N)
+
+  auto sx_mean_sub_pow = mul(sx_mean_sub, sx_mean_sub); // (M, N)
+  auto dx_mean_sub_pow = mul(dx_mean_sub, dx_mean_sub); // (M, N)
+
+  // Reduction
+  auto sx_var_sum = sum(sx_mean_sub_pow, {-1}); // (M, R)
+  auto dx_var_sum = sum(dx_mean_sub_pow, {-1}); // (M, R)
+  // Reduction => merge local and shared memory TensorViews
+  auto var_sum = binaryOp(BinaryOpType::Add, sx_var_sum, dx_var_sum);
+
+  // Broadcast
+  auto var_sum_bcast = broadcast(var_sum, {false, true}); // (M, B)
+  // Pwise
+  auto var = div(var_sum_bcast, N); // (M, B)
+  auto var_eps = add(var, eps); // (M, B)
+  auto rvar = unaryOp(UnaryOpType::Rsqrt, var_eps); // (M, B)
+
+  auto sx_norm = mul(sx_mean_sub, rvar);
+  auto dx_norm = mul(dx_mean_sub, rvar);
+
+  auto sx_norm_gamma = mul(sx_norm, gamma);
+  auto dx_norm_gamma = mul(dx_norm, gamma);
+
+  auto sx_norm_gamma_beta = add(sx_norm_gamma, beta);
+  auto dx_norm_gamma_beta = add(dx_norm_gamma, beta);
+  fusion.addOutput(sx_norm_gamma_beta);
+  fusion.addOutput(dx_norm_gamma_beta);
+
+  // Read Input into Shared Memory
+  // Read Input minus Input_Mean into Shared Memory
+  auto sx_cache = sx->cache_after();
+  auto dx_cache = dx->cache_after();
+  dx_cache->setMemoryType(MemoryType::Shared);
+  dx_mean_sub->setMemoryType(MemoryType::Shared);
+
+  std::vector<TensorView*> common_tensors(
+      {x_sum, x_sum_bcast, x_mean, var_sum, var_sum_bcast, var, var_eps, rvar});
+
+  std::vector<TensorView*> static_tensors({sx,
+                                           sx_cache,
+                                           sx_sum,
+                                           sx_mean_sub,
+                                           sx_mean_sub_pow,
+                                           sx_var_sum,
+                                           sx_norm,
+                                           sx_norm_gamma,
+                                           sx_norm_gamma_beta});
+
+  std::vector<TensorView*> dynamic_tensors({dx,
+                                            dx_cache,
+                                            dx_sum,
+                                            dx_mean_sub,
+                                            dx_mean_sub_pow,
+                                            dx_var_sum,
+                                            dx_norm,
+                                            dx_norm_gamma,
+                                            dx_norm_gamma_beta});
+
+  std::vector<TensorView*> all_tensors;
+  all_tensors.insert(
+      all_tensors.end(), common_tensors.begin(), common_tensors.end());
+  all_tensors.insert(
+      all_tensors.end(), static_tensors.begin(), static_tensors.end());
+  all_tensors.insert(
+      all_tensors.end(), dynamic_tensors.begin(), dynamic_tensors.end());
+
+  // M => M
+  // M, N => M, N/128, 128
+  for (auto tensor : all_tensors) {
+    if (tensor->nDims() > 1) {
+      tensor->split(-1, TIDX);
+    }
+  }
+
+  // Local Sum => Block Broadcast
+  TensorView* sx_sum_rf = sx_sum->rFactor({1});
+  TensorView* sx_var_sum_rf = sx_var_sum->rFactor({1});
+  TensorView* dx_sum_rf = dx_sum->rFactor({1});
+  TensorView* dx_var_sum_rf = dx_var_sum->rFactor({1});
+  all_tensors.push_back(sx_sum_rf);
+  all_tensors.push_back(sx_var_sum_rf);
+  all_tensors.push_back(dx_sum_rf);
+  all_tensors.push_back(dx_var_sum_rf);
+
+  // ComputeAt
+  sx->computeAt(sx_mean_sub_pow, 1);
+  dx->computeAt(dx_mean_sub_pow, 1);
+
+  var_sum->computeAt(rvar, 1);
+
+  sx_mean_sub_pow->computeAt(sx_var_sum_rf, 2);
+  dx_mean_sub_pow->computeAt(dx_var_sum_rf, 2);
+
+  sx_norm->computeAt(sx_norm_gamma_beta, 2);
+  dx_norm->computeAt(dx_norm_gamma_beta, 2);
+
+  sx_norm_gamma_beta->axis(0)->parallelize(ParallelType::BIDx);
+  dx_norm_gamma_beta->axis(0)->parallelize(ParallelType::BIDx);
+  for (auto tensor : all_tensors) {
+    if (tensor->nDims() > 1) {
+      tensor->axis(-1)->parallelize(ParallelType::TIDx);
+    }
+  }
+
+  const int dimx = 1024;
+  const int dimy = 16384;
+  const float kGamma = 1.0f;
+  const float kBeta = 0.0f;
+  const float kEps = 1e-5;
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor in = at::randn({dimx, dimy}, options);
+  at::Tensor static_in = in.narrow(1, 0, static_size);
+  at::Tensor dynamic_in = in.narrow(1, static_size, dimy - static_size);
+
+  at::Tensor out = at::zeros({dimx, dimy}, options);
+  at::Tensor static_out = out.narrow(1, 0, static_size);
+  at::Tensor dynamic_out = out.narrow(1, static_size, dimy - static_size);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(
+      {static_in, dynamic_in, kGamma, kBeta, kEps, dimy},
+      {static_out, dynamic_out});
+
+  auto at_mu = at::mean(in, -1).unsqueeze(1);
+  auto at_var = at::var(in, -1).unsqueeze(1);
+  auto at_rvar = at::rsqrt(at::add(at_var, kEps));
+  auto at_norm = at::mul(at::sub(in, at_mu), at_rvar);
+  auto at_norm_gamma_beta = at::add(at::mul(at_norm, kGamma), kBeta);
+  TORCH_CHECK(
+      at_norm_gamma_beta.allclose(out, 1e-3, 1e-3),
+      "Error of: ",
+      at_norm_gamma_beta.sub(out).abs().max());
+}
+
+TEST(NVFuserTest, FusionSmemDynamicPersistentBatchNorm_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  auto x = makeDummyTensor(2);
+  Float* gamma = new Float();
+  Float* beta = new Float();
+  Float* eps = new Float();
+  Int* N = new Int();
+  fusion.addInput(x);
+  fusion.addInput(gamma);
+  fusion.addInput(beta);
+  fusion.addInput(eps);
+  fusion.addInput(N);
+
+  // Reduction
+  auto x_sum = sum(x, {-1}); // (M, R)
+  // Broadcast
+  auto x_sum_bcast = broadcast(x_sum, {false, true}); // (M, B)
+  // Pwise
+  auto x_mean = div(x_sum_bcast, N); // (M, B)
+  auto x_mean_sub = sub(x, x_mean); // (M, N)
+  auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub); // (M, N)
+  // Reduction
+  auto var_sum = sum(x_mean_sub_pow, {-1}); // (M, R)
+  // Broadcast
+  auto var_sum_bcast = broadcast(var_sum, {false, true}); // (M, B)
+  // Pwise
+  auto var = div(var_sum_bcast, N); // (M, B)
+  auto var_eps = add(var, eps); // (M, B)
+  auto rvar = unaryOp(UnaryOpType::Rsqrt, var_eps); // (M, B)
+  auto norm = mul(x_mean_sub, rvar);
+  auto norm_gamma = mul(norm, gamma);
+  auto norm_gamma_beta = add(norm_gamma, beta);
+  fusion.addOutput(norm_gamma_beta);
+
+  // Read Input into Shared Memory
+  // Read Input minus Input_Mean into Shared Memory
+  auto cache_x = x->cache_after();
+  cache_x->setMemoryType(MemoryType::Shared);
+  x_mean_sub->setMemoryType(MemoryType::Shared);
+
+  std::vector<TensorView*> all_tensors({x_sum,
+                                        x_mean,
+                                        cache_x,
+                                        x_sum_bcast,
+                                        x_mean_sub,
+                                        x_mean_sub_pow,
+                                        var_sum,
+                                        var_sum_bcast,
+                                        var,
+                                        var_eps,
+                                        rvar,
+                                        norm,
+                                        norm_gamma,
+                                        norm_gamma_beta});
+
+  auto tidx = new Int();
+  fusion.addInput(tidx);
+
+  for (auto tensor : all_tensors) {
+    tensor->split(-1, tidx);
+  }
+  norm_gamma->split(1, 1);
+  norm_gamma_beta->split(1, 1);
+
+  // Local Sum => Block Broadcast
+  TensorView* x_sum_rf = x_sum->rFactor({1});
+  TensorView* var_sum_rf = var_sum->rFactor({1});
+  all_tensors.push_back(x_sum_rf);
+  all_tensors.push_back(var_sum_rf);
+
+  // ComputeAt
+  x->computeAt(x_mean_sub_pow, 1);
+  var_sum->computeAt(rvar, 1);
+  x_mean_sub_pow->computeAt(var_sum_rf, 2);
+  norm->computeAt(norm_gamma_beta, 2);
+
+  for (auto tv : all_tensors) {
+    tv->axis(0)->parallelize(ParallelType::BIDx);
+    tv->axis(-1)->parallelize(ParallelType::TIDx);
+  }
+
+  const int dimx = 128;
+  const int dimy = 2048;
+  const float kGamma = 1.0f;
+  const float kBeta = 0.0f;
+  const float kEps = 1e-5;
+  const int TIDX = 128;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({dimx, dimy}, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, kGamma, kBeta, kEps, dimy, TIDX});
+
+  auto at_mu = at::mean(t0, -1).unsqueeze(1);
+  auto at_var = at::var(t0, -1).unsqueeze(1);
+  auto at_rvar = at::rsqrt(at::add(at_var, kEps));
+  auto at_norm = at::mul(at::sub(t0, at_mu), at_rvar);
+  auto at_norm_gamma_beta = at::add(at::mul(at_norm, kGamma), kBeta);
+  TORCH_CHECK(
+      at_norm_gamma_beta.allclose(outputs[0], 1e-3, 1e-3),
+      "Error of: ",
+      at_norm_gamma_beta.sub(outputs[0]).abs().max());
 }
 
 TEST(NVFuserTest, FusionSmemDynamicReductionSymbolic_CUDA) {

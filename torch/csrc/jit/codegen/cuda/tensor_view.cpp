@@ -506,17 +506,8 @@ TensorView* TensorView::cache_after() {
   // After:  This TV -> [Set Op] -> New CA TV -> [Use Op] -> Next TV
 
   // Expr* consumer_uses =
-  size_t count = 0;
   for (auto expr : fusion()->unordered_uses(this)) {
     createExprProducer(expr, this, consumer);
-    ++count;
-  }
-
-  if (count > 1) {
-    std::cout
-        << "WARNING: Cache_After with multiple consumers can create incorrect "
-           "kernels depending on computeAt configuration."
-        << std::endl;
   }
 
   // Expr* consumer_origin =
