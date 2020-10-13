@@ -1195,3 +1195,32 @@ class TestFreezing(JitTestCase):
             # It used to segfault while running frozen module.
             m_frozen_res = m_frozen(data)
             self.assertEqual(m_res, m_frozen_res)
+
+    def test_module_getattr_indirection(self):
+        class Add(nn.Module):
+            def __init__(self, val):
+                super(Add, self).__init__()
+                self.val = val
+
+            def forward(self):
+                return self.val
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.mod1 = Add(1)
+                self.mod2 = Add(2)
+
+            def forward(self, cond: bool):
+                if cond:
+                    return self.mod1()
+                else:
+                    return self.mod2()
+
+        mod = Mod()
+        mod.eval()
+
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod))
+        mod_eager = Mod()
+        self.assertEqual(mod_eager(True), frozen_mod(True))
+        self.assertEqual(mod_eager(False), frozen_mod(False))
