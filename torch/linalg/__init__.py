@@ -142,7 +142,7 @@ Using the :attr:`dim` argument to compute matrix norms::
 """)
 
 tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
-linalg.tensorsolve(a, b, axes=None) -> Tensor
+linalg.tensorsolve(input, other, dims=None) -> Tensor
 
 Computes the solution to the tensor equation ``a x = b`` for ``x``.
 
@@ -154,7 +154,7 @@ Args:
         ``Q`` is the shape of that sub-tensor of `:attr:`a` consisting of the appropriate
         number of its rightmost indices, and must be such that ``prod(Q) == prod(b.shape)``.
     b (Tensor): right-hand-side tensor of any size.
-    axes (Tuple[int]): axes (dimensions) of `:attr:`a` to reorder to the right, before solve.
+    dims (Tuple[int]): dimensions of `:attr:`a` to reorder to the right, before solve.
         If None (default), no reordering is done.
 
     Returns:

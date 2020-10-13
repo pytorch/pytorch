@@ -1601,39 +1601,39 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, opt
   return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
 }
 
-Tensor linalg_tensorsolve(const Tensor& self, const Tensor& input2, optional<IntArrayRef> axes) {
+Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
   /*
   The idea is to reduce the problem to 2D matrix solve.
-  Step 1. (optional) `self` is permuted with `axes` such that dimensions from `axes` are moved to the right.
-  For example, if we have 4D input with the shape (1, 2, 3, 4) and axes=(0, 2),
+  Step 1. (optional) `self` is permuted with `dims` such that dimensions from `dims` are moved to the right.
+  For example, if we have 4D input with the shape (1, 2, 3, 4) and dims=(0, 2),
   then the result of permutation would have the shape (2, 4, 1, 3).
   Step 2. reshape `self` to 2D matrix.
-  Step 3. solve the matrix equation self.to_2D() @ result = input2.to_1D()
+  Step 3. solve the matrix equation self.to_2D() @ result = other.to_1D()
   Step 4. reshape the result.
   */
   int64_t ndim = self.dim();
   Tensor self_ = self;
 
-  // prepare the permutation vector with given axes and permute self_
-  if (axes.has_value()) {
-    std::vector<int64_t> permutation_axes(ndim);
-    std::iota(permutation_axes.begin(), permutation_axes.end(), 0);
-    for (int64_t k : axes.value().vec()) {
-      auto it = std::find(permutation_axes.begin(), permutation_axes.end(), k);
-      std::rotate(it, it + 1, permutation_axes.end());
+  // prepare the permutation vector with given dims and permute self_
+  if (dims.has_value()) {
+    std::vector<int64_t> permutation_dims(ndim);
+    std::iota(permutation_dims.begin(), permutation_dims.end(), 0);
+    for (int64_t k : dims.value().vec()) {
+      auto it = std::find(permutation_dims.begin(), permutation_dims.end(), k);
+      std::rotate(it, it + 1, permutation_dims.end());
     }
-    self_ = self_.permute(permutation_axes);
+    self_ = self_.permute(permutation_dims);
   }
 
-  // result_shape is self_.sizes[-(an-input2.dim):]
-  std::vector<int64_t> result_shape = self_.sizes().slice(input2.dim(), ndim - input2.dim()).vec();
+  // result_shape is self_.sizes[-(an-other.dim):]
+  std::vector<int64_t> result_shape = self_.sizes().slice(other.dim(), ndim - other.dim()).vec();
 
   int64_t product = std::accumulate(result_shape.begin(), result_shape.end(), int64_t{1}, std::multiplies<int64_t>());
   self_ = self_.reshape({-1, product});
 
   // 0th output of at::solve is the solution
-  // normally input2 would be flattened by at::solve expects 2D input
-  Tensor result = std::get<0>(at::solve(input2.reshape({input2.numel(), 1}), self_));
+  // normally `other` would be flattened by at::solve expects 2D input
+  Tensor result = std::get<0>(at::solve(other.reshape({other.numel(), 1}), self_));
   return result.reshape(result_shape);
 }
 

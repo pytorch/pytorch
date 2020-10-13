@@ -28,8 +28,8 @@ inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, opt
   return torch::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor tensorsolve(const Tensor& self, const Tensor& input2, optional<IntArrayRef> axes) {
-  return torch::linalg_tensorsolve(self, input2, axes);
+inline Tensor tensorsolve(const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
+  return torch::linalg_tensorsolve(self, other, dims);
 }
 
 } // namespace detail
@@ -57,7 +57,7 @@ inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string o
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-/// Solving of the tensor equation `a x = b`
+/// Solves of the tensor equation `a x = b`
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.tensorsolve
 ///
@@ -67,8 +67,8 @@ inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string o
 /// auto b = torch::randn(2*3, 4);
 /// auto x = torch::linalg::tensorsolve(a, b);
 /// ```
-inline Tensor tensorsolve(const Tensor& a, const Tensor& b, optional<IntArrayRef> axes) {
-  return detail::tensorsolve(a, b, axes);
+inline Tensor tensorsolve(const Tensor& input, const Tensor& other, optional<IntArrayRef> dims) {
+  return detail::tensorsolve(input, other, dims);
 }
 
 }} // torch::linalg

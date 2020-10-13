@@ -928,17 +928,17 @@ class TestLinalg(TestCase):
     @dtypesIfCUDA(torch.float, torch.double)
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     def test_tensorsolve(self, device, dtype):
-        def run_test(a_shape, axes):
+        def run_test(a_shape, dims):
             a = torch.rand(a_shape, dtype=dtype, device=device)
             b = torch.rand(a_shape[:2], dtype=dtype, device=device)
-            result = torch.linalg.tensorsolve(a, b, axes=axes)
-            expected = np.linalg.tensorsolve(a.cpu().numpy(), b.cpu().numpy(), axes=axes)
+            result = torch.linalg.tensorsolve(a, b, dims=dims)
+            expected = np.linalg.tensorsolve(a.cpu().numpy(), b.cpu().numpy(), axes=dims)
             self.assertEqual(result, expected)
 
         a_shapes = [(2, 3, 6), (3, 4, 4, 3)]
-        axes = [None, (0, 2)]
-        for a_shape, ax in itertools.product(a_shapes, axes):
-            run_test(a_shape, ax)
+        dims = [None, (0, 2)]
+        for a_shape, d in itertools.product(a_shapes, dims):
+            run_test(a_shape, d)
 
     # TODO: once "solve_cuda" supports complex dtypes, they shall be added to above test
     @unittest.expectedFailure
