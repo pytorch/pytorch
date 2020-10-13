@@ -9,7 +9,7 @@ from typing import Optional, Sequence, Union, Callable, List
 # Prominent characteristics of the C++ API:
 #
 #   - dtype, layout, device and pin_memory are collected into
-#     a single C++ type TensorOptions  (the legacy dispatcher API
+#     a single C++ type TensorOptions  (the native functions API
 #     also has this, but tensor options is really most relevant
 #     for the C++ API; it makes calling kwarg factory functions
 #     pleasant)

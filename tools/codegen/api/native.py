@@ -1,17 +1,21 @@
 from tools.codegen.model import *
 
-from tools.codegen.api.types import TensorOptionsArguments, LegacyDispatcherArgument, ThisArgument
+from tools.codegen.api.types import TensorOptionsArguments, NativeArgument, ThisArgument
 import tools.codegen.api.cpp as cpp
 
 from typing import Union, Sequence
 
-# This file describes the translation of JIT schema to the legacy
-# dispatcher API.  This looks a lot like the C++ API (which
-# makes historical sense, because historically the dispatcher API
-# and the C++ API exactly matched), but over time we have
-# evolved the C++ API without actually changing our native::
-# kernels.  To be deleted eventually.  Dispatcher calls use
-# this when you are not use_c10_dispatcher: full.
+# This file describes the translation of JIT schema to the native functions API.
+# This looks a lot like the C++ API (which makes historical sense, because the
+# idea was you wrote native functions to implement functions in the C++ API),
+# but over time we have evolved the C++ API without actually changing our
+# native:: kernels.  The intention is to make native API and dispatcher API
+# line up as closely as possible, since this results in the least overhead
+# (no translation is needed from dispatcher API to native API).
+#
+# When a function is not use_c10_dispatcher: full, the dispatcher API actually
+# coincides with the native:: API (e.g., we do as dumb as pass through as
+# possible).
 
 def name(func: FunctionSchema) -> str:
     name = str(func.name.name)
@@ -38,9 +42,9 @@ def returns_type(rs: Sequence[Return]) -> str:
 def argument_type(a: Argument) -> str:
     return argumenttype_type(a.type, mutable=a.is_write)
 
-def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> LegacyDispatcherArgument:
+def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> NativeArgument:
     if isinstance(a, Argument):
-        return LegacyDispatcherArgument(
+        return NativeArgument(
             type=argument_type(a),
             name=a.name,
             default=cpp.default_expr(a.default, a.type) if a.default is not None else None,
@@ -48,7 +52,7 @@ def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Legacy
         )
     elif isinstance(a, ThisArgument):
         # Erase ThisArgument from the distinction
-        return LegacyDispatcherArgument(
+        return NativeArgument(
             type=argument_type(a.argument),
             name=a.argument.name,
             default=None,
@@ -61,7 +65,7 @@ def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Legacy
             default = '{}'
         elif a.dtype.default == "long":
             default = 'at::kLong'  # TODO: this is wrong
-        return LegacyDispatcherArgument(
+        return NativeArgument(
             type='const TensorOptions &',
             name='options',
             default=default,
@@ -70,5 +74,5 @@ def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Legacy
     else:
         assert_never(a)
 
-def arguments(func: FunctionSchema) -> Sequence[LegacyDispatcherArgument]:
+def arguments(func: FunctionSchema) -> Sequence[NativeArgument]:
     return list(map(argument, cpp.group_arguments(func, method=False)))

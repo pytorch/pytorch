@@ -2,7 +2,7 @@ from tools.codegen.model import *
 
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
-import tools.codegen.api.legacy_dispatcher as legacy_dispatcher
+import tools.codegen.api.native as native
 import tools.codegen.local as local
 
 import itertools
@@ -36,9 +36,9 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
         return cpp.argumenttype_type(t, mutable=mutable)
     else:
         # This is real sharing.  If you're modifying this path, ask
-        # yourself why you are changing the legacy dispatcher protocol
-        # here and not in legacy_dispatcher.
-        return legacy_dispatcher.argumenttype_type(t, mutable=mutable)
+        # yourself why you are changing the native functions protocol
+        # here and not in native.
+        return native.argumenttype_type(t, mutable=mutable)
 
 def argument_type(a: Argument) -> str:
     return argumenttype_type(a.type, mutable=a.is_write)
@@ -55,7 +55,7 @@ def argument(a: Argument) -> DispatcherArgument:
             argument=a,
         )
     else:
-        la = legacy_dispatcher.argument(a)
+        la = native.argument(a)
         return DispatcherArgument(
             type=la.type,
             name=la.name,
@@ -71,7 +71,7 @@ def arguments(func: FunctionSchema) -> Sequence[DispatcherArgument]:
     else:
         return [
             DispatcherArgument(type=la.type, name=la.name, argument=la.argument)
-            for la in legacy_dispatcher.arguments(func)
+            for la in native.arguments(func)
         ]
 
 # Given a set of CppArguments in scope, return a sequence of dispatcher
@@ -146,7 +146,7 @@ def cpparguments_exprs(args: Sequence[CppArgumentPack]) -> Sequence[DispatcherEx
 
 # I don't think this is entirely sound, but it should be reasonably
 # close
-def legacydispatcherarguments_exprs(args: Sequence[LegacyDispatcherArgument]) -> Sequence[DispatcherExpr]:
+def nativearguments_exprs(args: Sequence[NativeArgument]) -> Sequence[DispatcherExpr]:
     return cpparguments_exprs([
         CppSingleArgumentPack(CppArgument(type=a.type, name=a.name, default=None, argument=a.argument))
         for a in args
