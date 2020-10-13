@@ -1,3 +1,16 @@
+// [cuDNN convolution v7 and v8 API]
+// cuDNN v8 introduces a new set of APIs and a frontend to use this API
+// The frontend is released open-sourced at https://github.com/NVIDIA/cudnn_frontend
+// PyTorch should use v8 API whenever possible for better performance,
+// and still keep its legacy v7 API for compatibility purposes. The v7 API will be
+// removed in the future when cuDNN 7 is no longer supported.
+//
+// Currently, we are still at a very early stage of the migration from v7 to v8 API
+// During this migration, there will be three files:
+//   - Conv.cpp stores the code shared by v7 and v8 API
+//   - Conv_v8.cpp stores the code only used by v8 API
+//   - Conv_v7.cpp stores the code only used by v7 API
+
 #include <limits>
 #include <vector>
 #include <sstream>
@@ -990,6 +1003,9 @@ Tensor cudnn_convolution(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic, bool allow_tf32)
 {
+  if (!benchmark && !deterministic) {
+    return at::_cudnn_convolution_v8(input_t, weight_t, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+  }
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 };
   CheckedFrom c = "cudnn_convolution";
