@@ -1197,9 +1197,9 @@ class TestFreezing(JitTestCase):
             self.assertEqual(m_res, m_frozen_res)
 
     def test_module_getattr_indirection(self):
-        class Add(nn.Module):
+        class ValMod(nn.Module):
             def __init__(self, val):
-                super(Add, self).__init__()
+                super(ValMod, self).__init__()
                 self.val = val
 
             def forward(self):
@@ -1208,18 +1208,18 @@ class TestFreezing(JitTestCase):
         class Mod(nn.Module):
             def __init__(self):
                 super(Mod, self).__init__()
-                self.mod1 = Add(1)
-                self.mod2 = Add(2)
+                self.mod1 = ValMod(1)
+                self.mod2 = ValMod(2)
 
             def forward(self, cond: bool):
                 if cond:
-                    return self.mod1()
+                    val = self.mod1.val
                 else:
-                    return self.mod2()
+                    val = self.mod2.val
+                return val
 
         mod = Mod()
         mod.eval()
-
         frozen_mod = torch.jit.freeze(torch.jit.script(mod))
         mod_eager = Mod()
         self.assertEqual(mod_eager(True), frozen_mod(True))
