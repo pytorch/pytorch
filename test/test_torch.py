@@ -13885,6 +13885,14 @@ class TestTorchDeviceType(TestCase):
         for base in floats:
             self._test_pow(base, tensor)
 
+    @onlyCUDA
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_cuda_tensor_pow_scalar_tensor(self, device):
+        cuda_tensor = torch.randn((3, 3), device=device)
+        scalar_tensors = [torch.tensor(5), torch.tensor(-3), torch.tensor(1)]
+        for exp in scalar_tensors:
+            self._test_pow(cuda_tensor, exp)
+
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     @dtypes(*(torch.testing.get_all_dtypes(include_bool=False, include_bfloat16=False)))
