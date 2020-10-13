@@ -3,8 +3,8 @@ call %SCRIPT_HELPERS_DIR%\setup_pytorch_env.bat
 
 pushd test
 
-pytorch_installation="$(dirname $(dirname $(cd /c && python -c 'import os; import torch; print(os.path.realpath(torch.__file__))')))"
-python_installation="$(dirname $(dirname $(cd /c && python -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
+set pytorch_installation="$(dirname $(dirname $(cd /c && python -c 'import os; import torch; print(os.path.realpath(torch.__file__))')))"
+set python_installation="$(dirname $(dirname $(cd /c && python -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
 python -m pip show torch
 echo %python_installation%
 
