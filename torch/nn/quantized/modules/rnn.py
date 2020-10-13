@@ -138,7 +138,7 @@ class LSTMLayer(nn.Module):
 
     def forward(self, x, hidden=None):
         if hidden is None:
-            hidden = tuple([None, None])
+            hidden = (None, None)
         hx_fw, cx_fw = hidden
         if self.bidirectional:
             if hx_fw is None:

@@ -2665,6 +2665,10 @@ class TestDynamicQuantizedRNNOp(TestCase):
                 self.assertEqual(result_ref[0], result_dynamic[0], msg="torch.quantized_rnncell results are off")
 
 
+"""Tests recurrent layers."""
+class TestQuantizedRNN(TestCase):
+    pass
+
 class TestQuantizedLinear(unittest.TestCase):
     """Tests the correctness of the quantized linear and linear_relu op."""
     @given(batch_size=st.integers(1, 4),
