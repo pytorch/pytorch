@@ -40,7 +40,7 @@ from tools.codegen.api.python import *
 from tools.codegen.gen import cpp_string, with_native_function
 from tools.codegen.model import *
 
-from typing import Dict, Optional, Union, Sequence, Set, List, Tuple, Any
+from typing import Dict, Optional, Sequence, List, Tuple, Any
 
 #
 # declarations blocklist
@@ -960,8 +960,8 @@ def gen_lambda_args_str(f: NativeFunction, method: bool, ps: PythonSignature) ->
 
     @with_native_function
     def go(f: NativeFunction) -> str:
-        return ', '.join(map(lambda a: f"{a.type_str} {a.name}", \
-           dispatch_lambda_args(f, method, python_signature=ps if ps.deprecated else None)))
+        return ', '.join(map(lambda a: f"{a.type_str} {a.name}",
+                             dispatch_lambda_args(f, method, python_signature=ps)))
 
     return go(f)
 
