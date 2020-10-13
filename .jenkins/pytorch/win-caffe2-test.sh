@@ -30,7 +30,7 @@ fi
 
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
-call %SCRIPT_HELPERS_DIR%\setup_pytorch_env.bat
+$SCRIPT_HELPERS_DIR/setup_pytorch_env.bat
 
 if [ -n "$CIRCLE_PULL_REQUEST" ]; then
   DETERMINE_FROM="${TMP_DIR}/determine_from"
