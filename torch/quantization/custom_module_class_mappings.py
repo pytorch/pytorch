@@ -61,7 +61,6 @@ def get_quantized_custom_module_class(float_custom_module_class):
         float_custom_module_class = type(float_custom_module_class)
     quantized_custom_module_class = \
         QUANTIZED_CUSTOM_MODULE_CLASS_MAPPINGS.get(float_custom_module_class, None)
-    print(float_custom_module_class, quantized_custom_module_class)
     assert quantized_custom_module_class is not None, \
         'Float Custom module class {}'.format(float_custom_module_class) + \
         ' does not have a corresponding quantized module class'
