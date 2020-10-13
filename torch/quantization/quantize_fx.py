@@ -154,9 +154,9 @@ def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=No
         # user will manually define the corresponding observed
         # module class which has a from_float class method that converts
         # float custom module to observed custom module
-        "custom_module_class": [
-           (CustomModule, ObservedCustomModule),
-        ]
+        "float_to_observed_custom_module_class": {
+           CustomModule: ObservedCustomModule
+        }
       }
 
 
@@ -245,9 +245,9 @@ def convert_fx(graph_module, inplace=False, debug=False, convert_custom_config_d
           # user will manually define the corresponding quantized
           # module class which has a from_observed class method that converts
           # observed custom module to quantized custom module
-          "custom_module_class": [
-             (ObservedCustomModule, QuantizedCustomModule),
-          ]
+          "observed_to_quantized_custom_module_class": {
+             ObservedCustomModule: QuantizedCustomModule
+          }
         }
 
     Return:

@@ -13,10 +13,6 @@ from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig, \
     get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic
-from torch.quantization import (
-    is_custom_module_class,
-    is_observed_custom_module,
-)
 from torch.quantization.quantization_mappings import (
     get_dynamic_quant_module_mappings,
     get_qconfig_propagation_list,
@@ -361,7 +357,7 @@ class QuantizationTestCase(TestCase):
 
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
            ((is_leaf_module(module) and not isinstance(module, torch.nn.Sequential)
-            and type(module) in propagate_qconfig_list) or \
+            and type(module) in propagate_qconfig_list) or
            type(module) in float_to_observed_module_class_mapping.keys()):
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
