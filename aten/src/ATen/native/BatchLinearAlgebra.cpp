@@ -331,6 +331,7 @@ static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
   auto batch_size = batchCount(A);
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
+  auto lda = std::max(int64_t{1}, n);
 
   auto ipiv = at::empty({n}, b.options().dtype(kInt));
   auto ipiv_data = ipiv.data_ptr<int>();
@@ -339,7 +340,7 @@ static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-    lapackSolve<scalar_t>(n, nrhs, A_working_ptr, n, ipiv_data, b_working_ptr, n, &info);
+    lapackSolve<scalar_t>(n, nrhs, A_working_ptr, lda, ipiv_data, b_working_ptr, lda, &info);
     infos[i] = info;
     if (info != 0) {
       return;
