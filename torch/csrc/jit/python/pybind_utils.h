@@ -10,6 +10,7 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/QScheme.h>
+#include <torch/csrc/Stream.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -312,6 +313,8 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (THPDevice_Check(input.ptr())) {
     return InferredType(DeviceObjType::get());
+  } else if (THPStream_Check(input.ptr())) {
+    return InferredType(StreamObjType::get());
   } else if (THPDtype_Check(input.ptr())) {
     return InferredType(IntType::get());
   } else if (THPQScheme_Check(input.ptr())) {
@@ -606,6 +609,10 @@ inline IValue toIValue(
     case TypeKind::DeviceObjType: {
       auto device = reinterpret_cast<THPDevice*>(obj.ptr());
       return device->device;
+    }
+    case TypeKind::StreamObjType: {
+      auto stream = reinterpret_cast<THPStream*>(obj.ptr());
+      return static_cast<int64_t>(stream->cdata);
     }
     case TypeKind::ListType: {
       const auto& elem_type = type->expect<ListType>()->getElementType();
