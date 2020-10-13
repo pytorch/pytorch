@@ -16,6 +16,7 @@ from .quantization_mappings import (get_dynamic_quant_module_mappings,
 
 from .custom_module_class_mappings import (
     is_custom_module_class,
+    is_custom_observed_module_class,
     get_observed_custom_module_class,
     get_quantized_custom_module_class,
     mark_observed_custom_module,
@@ -216,6 +217,14 @@ def prepare(model, inplace=False, allow_list=None,
         prehook: observer we want to add to forward_pre_hook
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare")
+    if is_custom_observed_module_class(model):
+        if inplace:
+            warnings.warn("'inplace' does not apply to the custom modules")
+        model = get_observed_custom_module_class(model).from_float(model)
+        return prepare(
+            model, inplace=True, allow_list=allow_list,
+            observer_non_leaf_module_list=observer_non_leaf_module_list,
+            prehook=prehook)
     if not inplace:
         model = copy.deepcopy(model)
 

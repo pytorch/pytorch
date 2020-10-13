@@ -1,3 +1,5 @@
+import inspect
+
 OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS = dict()
 
 def register_observed_custom_module_mapping(float_custom_module_class, observed_custom_module_class):
@@ -9,15 +11,21 @@ def register_observed_custom_module_mapping(float_custom_module_class, observed_
     This will be used in prepare step of post training static quantization or
     quantization aware training
     """
+    global OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS
     assert hasattr(observed_custom_module_class, 'from_float'), 'from_float must be' + \
         ' defined in observed custom module class'
     OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS[float_custom_module_class] = \
         observed_custom_module_class
 
-def get_observed_custom_module_class(float_custom_module_class):
+def get_observed_custom_module_class(float_custom_module_class=None):
     """ Get the corresponding observed module class for a given
     float custom module.
     """
+    global OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS
+    if float_custom_module_class is None:
+        return OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS
+    if not inspect.isclass(float_custom_module_class):
+        float_custom_module_class = type(float_custom_module_class)
     observed_custom_module_class = \
         OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS.get(float_custom_module_class, None)
     assert observed_custom_module_class is not None, \
@@ -38,6 +46,7 @@ def register_quantized_custom_module_mapping(float_custom_module_class, quantize
     This will be used in prepare step of post training static quantization or
     quantization aware training
     """
+    global QUANTIZED_CUSTOM_MODULE_CLASS_MAPPINGS
     assert hasattr(quantized_custom_module_class, 'from_observed'), 'from_observed' + \
         ' must be defined in quantized custom module class'
     QUANTIZED_CUSTOM_MODULE_CLASS_MAPPINGS[float_custom_module_class] = \
@@ -47,18 +56,38 @@ def get_quantized_custom_module_class(float_custom_module_class):
     """ Get the corresponding quantized module class for a given
     float custom module.
     """
+    global QUANTIZED_CUSTOM_MODULE_CLASS_MAPPINGS
+    if not inspect.isclass(float_custom_module_class):
+        float_custom_module_class = type(float_custom_module_class)
     quantized_custom_module_class = \
         QUANTIZED_CUSTOM_MODULE_CLASS_MAPPINGS.get(float_custom_module_class, None)
+    print(float_custom_module_class, quantized_custom_module_class)
     assert quantized_custom_module_class is not None, \
         'Float Custom module class {}'.format(float_custom_module_class) + \
         ' does not have a corresponding quantized module class'
     return quantized_custom_module_class
 
+def is_custom_observed_module_class(module_class):
+    """ Check if a given module class is a custom observed module class
+    """
+    global OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS
+    if not inspect.isclass(module_class):
+        module_class = type(module_class)
+    return module_class in OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS
+
+def is_custom_quantized_module_class(module_class):
+    """ Check if a given module class is a custom quantized module class
+    """
+    global QUANTIZED_CUSTOM_MODULE_CLASS_MAPPINGS
+    if not inspect.isclass(module_class):
+        module_class = type(module_class)
+    return type(module_class) in QUANTIZED_CUSTOM_MODULE_CLASS_MAPPINGS
+
 def is_custom_module_class(module_class):
     """ Check if a given module class is a custom module class
     """
-    return module_class in OBSERVED_CUSTOM_MODULE_CLASS_MAPPINGS and \
-        module_class in QUANTIZED_CUSTOM_MODULE_CLASS_MAPPINGS
+    return is_custom_observed_module_class(module_class) and \
+           is_custom_quantized_module_class(module_class)
 
 def mark_observed_custom_module(module, custom_module_class):
     """ Mark a module as observed custom module, so that
