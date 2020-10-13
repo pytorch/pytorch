@@ -145,7 +145,11 @@ DONT_REQUIRE_DERIVATIVE = {
     'quantize_per_tensor', 'quantize_per_channel',
     # Functions that return integers should not have output that require gradients
     'argmax', 'argmin', 'argsort', 'searchsorted',
-    'bucketize'
+    'bucketize',
+    # Functions that return booleans are not differentiable
+    'isnan', 'isposinf', 'isneginf', 'isinf'
+    # Functions return none are not differentiable
+    'record_stream',
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
@@ -160,8 +164,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'cosh', '__rmul__', 'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
-    'dot', 'vdot', 'cholesky', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
-    'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh'
+    'dot', 'vdot', 'cholesky'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -423,7 +426,7 @@ FACTORY_FUNCTION_NAMES = None
 def maybe_unwrap_optional_tensors(option, formals, args):
     assert len(formals) == len(args), \
         "Assert we didn't screw up with method_args removing self but forgetting to remove it from formals"
-    if option['use_c10_dispatcher'] == 'full':
+    if option['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
         def maybe_unwrap_optional_tensor(formal, arg):
             if formal['dynamic_type'] == 'Tensor' and formal['is_nullable']:
                 return "{}.has_value() ? *{} : at::Tensor()".format(arg, arg)
@@ -531,9 +534,10 @@ def format_trace_inputs(declaration):
             else:
                 return ADD_TRACE_INPUT.substitute(name=name, input=value)
 
-    if declaration['use_c10_dispatcher'] == 'full':
+    if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
         trace_inputs = declaration['schema_order_arguments']
     else:
+        assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
         trace_inputs = declaration['arguments']
 
     if is_out_overload(declaration):
@@ -542,9 +546,10 @@ def format_trace_inputs(declaration):
         out_input = trace_inputs[0]
         trace_inputs = trace_inputs[1:]
 
-    if declaration['use_c10_dispatcher'] == 'full':
+    if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
         trace_input_spec = [(i['name'], i['name'], i['type'], i.get('is_nullable')) for i in trace_inputs]
     else:
+        assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
         trace_input_spec = [(i['name'], i['name'], i['simple_type'], i.get('is_nullable')) for i in trace_inputs]
 
     trace_inputs = \
@@ -689,7 +694,7 @@ def gen_variable_type(out, aten_declarations, template_path):
     registration_declarations = []
 
     for declaration in aten_declarations:
-        if declaration['use_c10_dispatcher'] == 'full':
+        if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
             declaration_formals = declaration['schema_order_formals']
         else:
             assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
@@ -724,7 +729,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
 
     for declaration in aten_declarations:
         formal_types = [arg['type'] for arg in declaration['arguments']]
-        if declaration['use_c10_dispatcher'] == 'full':
+        if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
             formals = declaration['schema_order_formals']
         else:
             assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
@@ -735,7 +740,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
             body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body, formals=formals))
-            if declaration['use_c10_dispatcher'] == 'full':
+            if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
                 wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
                     declaration, class_type='VariableType'))
             else:
@@ -752,10 +757,11 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
             trace_method_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=trace_body, formals=formals))
 
-            if declaration['use_c10_dispatcher'] == 'full':
+            if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
                 trace_wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
                     declaration, class_type='TraceType'))
             else:
+                assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
                 trace_wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                     declaration, class_type='TraceType'))
 
@@ -797,7 +803,7 @@ def emit_trace_body(declaration):
     trace_dispatch_args = ['op', 'c10::DispatchKey::Tracer'] + declaration['args']
     schema_order_trace_dispatch_args = ['op', 'c10::DispatchKey::Tracer'] + declaration['schema_order_args']
     assign_return_values = '{} = '.format(tie_return_values) if not modifies_arguments and not returns_void else ''
-    if declaration['use_c10_dispatcher'] == 'full':
+    if declaration['use_c10_dispatcher'] in ['hacky_wrapper_for_legacy_signatures', 'full']:
         call = TRACE_DISPATCH.substitute(
             declaration,
             schema_order_arg_types=schema_order_arg_types,
@@ -1261,7 +1267,7 @@ def unpack_args(env, declaration):
     body = []
     unpacked_args = []
     unpacked_args_simple_type = {}
-    if declaration['use_c10_dispatcher'] == 'full':
+    if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
         arguments = declaration['schema_order_arguments']
     else:
         assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
