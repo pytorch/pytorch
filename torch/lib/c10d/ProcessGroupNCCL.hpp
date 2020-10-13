@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include <list>
 #include <mutex>
 #include <thread>
@@ -22,13 +23,6 @@ constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
 // Environment variable which controls whether or not we perform Async Error
 // Handling with NCCL.
 constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
-
-// NCCL Commmunication type
-enum class NCCLCommType : std::uint8_t {
-  SEND = 0,
-  RECV,
-  COLL,
-};
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -71,7 +65,7 @@ class ProcessGroupNCCL : public ProcessGroup {
                    public std::enable_shared_from_this<WorkNCCL> {
    public:
     // Constructor takes a list of CUDA devices
-    WorkNCCL(const std::vector<at::Device>& devices);
+    WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
     // destructs outputs_ tensors who are view tensors in autograd graph.
@@ -147,6 +141,10 @@ class ProcessGroupNCCL : public ProcessGroup {
     virtual std::exception_ptr checkForNCCLErrors(
         const std::vector<std::shared_ptr<NCCLComm>>& ncclComms) const;
 
+    friend std::ostream& operator<<(
+        std::ostream& output,
+        const WorkNCCL& workNCCL);
+
    private:
     // Helper function for synchronize
     void synchronizeInternal(std::chrono::milliseconds timeout);
@@ -166,6 +164,7 @@ class ProcessGroupNCCL : public ProcessGroup {
 
     // Store a reference to NCCL collective's outputs to be used by getFuture.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
+
     // Store streams that run FutureNCCL then callbacks.
     std::vector<std::shared_ptr<at::cuda::CUDAStream>>
         futureNCCLCallbackStreams_;
@@ -462,7 +461,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
       ncclUniqueId* ncclID,
-      NCCLCommType commType,
+      OpType opType,
       const std::string& devicesKey,
       int p2pRank);
 
@@ -471,7 +470,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::vector<std::shared_ptr<NCCLComm>>& getNCCLComm(
       const std::string& devicesKey,
       const std::vector<at::Device>& devices,
-      NCCLCommType commType = NCCLCommType::COLL,
+      OpType opType,
       int p2pRank = 0,
       bool isSendRecvSelf = false);
 
@@ -480,7 +479,9 @@ class ProcessGroupNCCL : public ProcessGroup {
       const std::vector<std::shared_ptr<NCCLComm>>& ncclComms);
 
   virtual std::shared_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
-      std::vector<at::Device> devices);
+      std::vector<at::Device> devices,
+      int rank,
+      OpType opType);
 
  private:
   // Helper that encapsulates work shared across all collective communication
@@ -493,14 +494,16 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> collective(
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
-      Fn fn);
+      Fn fn,
+      OpType opType);
   template <typename Fn, typename PreProcess, typename PostProcess>
   std::shared_ptr<ProcessGroup::Work> collective(
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
       Fn fn,
       PreProcess pre,
-      PostProcess post);
+      PostProcess post,
+      OpType opType);
 
   // Helper that encapsulates work shared across point-to-point communication
   // primitives. It is the same structure as the helper used for collective
@@ -510,13 +513,13 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& tensor,
       Fn fn,
       int peer,
-      NCCLCommType commType);
+      OpType opType);
   template <typename Fn, typename PreProcess, typename PostProcess>
   std::shared_ptr<ProcessGroup::Work> pointToPoint(
       std::vector<at::Tensor>& tensor,
       Fn fn,
       int peer,
-      NCCLCommType commType,
+      OpType opType,
       PreProcess pre,
       PostProcess post);
 
@@ -542,8 +545,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   // accordingly.
   void parseNcclBlockingWait();
 
-  // Reads the NCCL_ASYNC_ERROR_HANDLING environment variable and sets asyncErrorHandling_
-  // accordingly.
+  // Reads the NCCL_ASYNC_ERROR_HANDLING environment variable and sets
+  // asyncErrorHandling_ accordingly.
   void parseNcclAsyncErrorHandling();
 
   void workCleanupLoop();
