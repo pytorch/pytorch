@@ -2,6 +2,10 @@ import torch
 from torch.fx import GraphModule  # type: ignore
 from torch.fx import symbolic_trace  # type: ignore
 from torch.fx.symbolic_trace import Tracer  # type: ignore
+from .custom_module_class_mappings import (
+    register_observed_custom_module_mapping,
+    register_quantized_custom_module_mapping,
+)
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
 from .fx.utils import graph_pretty_str  # noqa: F401
@@ -12,6 +16,11 @@ def _check_is_graph_module(model):
             'input model must be a GraphModule, ' +
             'Got type:' + str(type(model)) + ' Please make ' +
             'sure to follow the tutorials.')
+
+def _register_custom_module_class(custom_module_config):
+    for custom, observed, quantized in custom_module_config:
+        register_observed_custom_module_mapping(custom, observed)
+        register_quantized_custom_module_mapping(custom, quantized)
 
 def _fuse_fx(graph_module, inplace=False):
     r""" Internal helper function to fuse modules in preparation for quantization
@@ -24,14 +33,16 @@ def _fuse_fx(graph_module, inplace=False):
     return fuser.fuse(graph_module, inplace)
 
 class CustomTracer(Tracer):
-    def __init__(self, standalone_modules):
+    def __init__(self, standalone_modules, custom_module_classes):
         super().__init__()
         self.standalone_modules = standalone_modules
+        self.custom_module_classes = custom_module_classes
 
     def is_leaf_module(self, m, module_qualified_name):
         return (m.__module__.startswith('torch.nn') and
                 not isinstance(m, torch.nn.Sequential)) or \
-            module_qualified_name in self.standalone_modules
+            module_qualified_name in self.standalone_modules or \
+            type(m) in self.custom_module_classes
 
 
 def _prepare_fx(model, qconfig_dict, inplace, prepare_custom_config_dict=None, is_standalone_module=False):
@@ -53,9 +64,15 @@ forward graph of the parent module,
         # standlone module is traced before quantizing standalone modules
         graph_module = symbolic_trace(model)
     else:
-        standalone_modules = prepare_custom_config_dict.get("standalone_module_name", [])
+        standalone_modules = prepare_custom_config_dict.get('standalone_module_name', [])
+        custom_module_config = qconfig_dict.get('custom_module_class', [])
+        custom_module_classes = [config[0] for config in custom_module_config]
+        # TODO: currently we are registering classes globally,
+        # we want to make custom module class mapping local
+        _register_custom_module_class(custom_module_config)
         # skipping tracing standalone modules when tracing top level module
-        graph_module = GraphModule(model, CustomTracer(standalone_modules).trace(model))
+        tracer = CustomTracer(standalone_modules, custom_module_classes)
+        graph_module = GraphModule(model, tracer.trace(model))
     graph_module = _fuse_fx(graph_module, inplace)
     quantizer = Quantizer()
     return quantizer.prepare(
@@ -135,6 +152,12 @@ def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=No
       # priority (in increasing order): global, object_type, module_name_regex, module_name
       # qconfig == None means fusion and quantization should be skipped for anything
       # matching the rule
+
+      # optional: specify the custom module class and provide the corresponding
+      # observed and quantized custom module classes
+      "custom_module_class": [
+         (CustomModuleClass, ObservedCustomModuleClass, QuantizedCustomModuleClass)
+      ]
       }
       `inplace`: flag for carry out model transformations in-place,
       the original module is mutated

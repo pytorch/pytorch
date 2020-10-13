@@ -2869,6 +2869,10 @@
     CPU: range_cpu_out
     CUDA: range_cuda_out
 
+- func: ravel(Tensor(a) self) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+
 - func: reciprocal(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -8156,6 +8160,12 @@
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
+
+- func: record_stream(Tensor(a!) self, Stream s) -> ()
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    CUDA: record_stream_cuda
 
 - func: isposinf(Tensor self) -> Tensor
   use_c10_dispatcher: full
