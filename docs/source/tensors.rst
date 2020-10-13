@@ -495,6 +495,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: q_per_channel_axis
    .. automethod:: rad2deg
    .. automethod:: random_
+   .. automethod:: ravel
    .. automethod:: reciprocal
    .. automethod:: reciprocal_
    .. automethod:: record_stream

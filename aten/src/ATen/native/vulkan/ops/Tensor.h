@@ -11,7 +11,7 @@ namespace ops {
 //
 // This class represents a Vulkan tensor and provides an abstraction layer
 // that allows both the CPU, and the GPU, to view a Vulkan (buffer, image)
-// pair as one coherent, synchronized unit of storage on both UMA and NUMA
+// pair as one coherent, synchronized unit of storage on both UMA and discrete
 // systems.  Expanding on the previous sentence, this class tries to address
 // two orthogonal implementation complexities that arise as a result of the
 // aforementioned goal of memory coherence:
@@ -19,16 +19,17 @@ namespace ops {
 // 1) First, synchronization across processors; CPUs and GPUs are separate
 //    processors, and even though they share the same address space in a system
 //    with a unified memory architecture, their address spaces only partially
-//    overlap on NUMA.  Consequently on NUMA, while it is still technically
-//    possible to take advantage of this shared address space to maintain one
-//    single copy of the data, different access latencies from CPU and GPU to
-//    this shared location usually necessitates maintaining two copies each in
-//    processor-local memory, otherwise memory access latency will hurt from
-//    the processor to which this data is not close.  This shared memory is more
-//    often than not located in system memory, making for slow GPU read and
-//    write access over the PCI-e bus.  Maintaining two separate copies on the
-//    other hand, requires synchronization to guarantee coherence.  This is
-//    not an issue on UMA and this implementation accounts for that optimization.
+//    overlap on systems with a discrete GPU.  Consequently on discrete systems,
+//    while it is still technically possible to take advantage of this shared
+//    address space to maintain one single copy of the data, different access
+//    latencies from CPU and GPU to this shared location usually necessitates
+//    maintaining two copies each in processor-local memory, otherwise memory
+//    access latency will hurt from the processor to which this data is not
+//    close.  This shared memory is more often than not located in system memory,
+//    making for slow GPU read and write access over the PCI-e bus on discrete.
+//    Maintaining two separate copies on the other hand, requires synchronization
+//    to guarantee coherence.  This is not an issue on UMA and this implementation
+//    accounts for that optimization.
 //
 // 2) Second, synchronization across resources (i.e. buffers and images); GPU
 //    drivers pack images in proprietory formats for better locality of access
@@ -48,6 +49,10 @@ namespace ops {
 //    data is write accessed as a buffer (image) and read accessed as an
 //    image (buffer).
 //
+// 3) When an if a synchronization is unavoidable, place as much distance
+//    between the synchronization is triggered and the data is accessed since
+//    all synchronizations this class provides are async.
+//
 // For optimal performance, access the data as images, and keep the data on GPU,
 // and above all understand the expensive data flow that this class abstracts
 // away.
@@ -61,7 +66,7 @@ namespace ops {
 // support.
 //
 
-class vTensor final {
+class C10_EXPORT vTensor final {
  public:
   vTensor() = default;
   vTensor(
@@ -211,23 +216,73 @@ class vTensor final {
         IntArrayRef sizes,
         const TensorOptions& options);
 
-    struct Component final {
-      typedef uint8_t Flags;
-
-      enum Type : Flags {
-        Buffer = 1u << 0u,
-        Image = 1u << 1u,
-        Staging = 1u << 2u,
-        All = Buffer | Image | Staging,
-      };
-    };
-
+    // Accessor
     Buffer& buffer(Access::Flags access) const;
     Image& image(Access::Flags access) const;
     Buffer& staging(Access::Flags access) const;
     vTensor::Memory& wait();
 
    private:
+    class CMD;
+
+    class State final {
+     public:
+      State();
+      State(api::Context*, IntArrayRef);
+
+      struct Bundle final {
+        struct Buffer final {
+          VkPipelineStageFlags stage;
+          VkAccessFlags access;
+
+          operator bool() const;
+        } staging, buffer;
+
+        struct Image final {
+          VkPipelineStageFlags stage;
+          VkAccessFlags access;
+          VkImageLayout layout;
+
+          operator bool() const;
+        } image;
+      };
+
+      struct Component final {
+        typedef uint8_t Flags;
+
+        enum Type : Flags {
+          Buffer = 1u << 0u,
+          Image = 1u << 1u,
+          Staging = 1u << 2u,
+          All = Buffer | Image | Staging,
+        };
+      };
+
+      // Availability
+      bool is_available(Component::Flags) const;
+      bool is_discrete() const;
+      bool is_uma() const;
+
+      // Clean / Dirty
+      bool is_clean(Component::Flags) const;
+      bool is_dirty(Component::Flags) const;
+      void set_clean(Component::Flags);
+      void set_dirty(Component::Flags);
+
+      // Transition
+      typedef std::pair<Bundle, Bundle> Transition;
+      Transition transition(Bundle to);
+
+     private:
+      Component::Flags available_;
+      Component::Flags dirty_;
+      Bundle bundle_;
+    };
+
+    typedef State::Component Component;
+
+   private:
+    // Lazy allocation
     Buffer& buffer() const;
     Image& image() const;
     Buffer& staging() const;
@@ -244,50 +299,24 @@ class vTensor final {
     api::Context* context_;
 
     // State
-    mutable class State final {
-     public:
-      State();
-      State(api::Context*, IntArrayRef);
-
-      struct Buffer final {
-        VkPipelineStageFlags stage;
-        VkAccessFlags access;
-      };
-
-      struct Image final {
-        VkPipelineStageFlags stage;
-        VkAccessFlags access;
-        VkImageLayout layout;
-      };
-
-      // Availability
-      bool is_available(Component::Flags) const;
-      bool is_discrete() const;
-      bool is_uma() const;
-
-      // Clean / Dirty
-      bool is_clean(Component::Flags) const;
-      bool is_dirty(Component::Flags) const;
-      void set_clean(Component::Flags);
-      void set_dirty(Component::Flags);
-
-      // Barrier
-      Buffer& buffer();
-      Image& image();
-      Buffer& staging();
-
-     private:
-      Component::Flags available_;
-      Component::Flags dirty_;
-      Buffer buffer_;
-      Image image_;
-      Buffer staging_;
-    } state_;
+    mutable State state_;
 
     // Metadata
     c10::SmallVector<int64_t, 6u> sizes_;
     TensorOptions options_;
+
+   private:
+    // Debug
+    friend std::ostream& operator<<(
+      std::ostream&,
+      const View::State::Bundle&);
   } view_;
+
+ private:
+  // Debug
+  friend std::ostream& operator<<(
+      std::ostream&,
+      const View::State::Bundle&);
 };
 
 using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
@@ -367,6 +396,17 @@ inline vTensor::Future<Type, vTensor::Access::Read> vTensor::host() const & {
 template<typename Type, vTensor::Access::Flags kAccess>
 inline vTensor::Future<Type, kAccess> vTensor::host() & {
   return Future<Type, kAccess>(host(kAccess));
+}
+
+inline vTensor::View::State::Bundle::Buffer::operator bool() const {
+  return (0u != stage) &&
+         (0u != access);
+}
+
+inline vTensor::View::State::Bundle::Image::operator bool() const {
+  return (0u != stage) &&
+         (0u != access) &&
+         (VK_IMAGE_LAYOUT_UNDEFINED != layout);
 }
 
 inline bool vTensor::View::State::is_available(
