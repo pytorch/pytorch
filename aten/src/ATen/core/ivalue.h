@@ -98,6 +98,7 @@ struct OptionalArray {
   _(GenericDict)             \
   _(Future)                  \
   _(Device)                  \
+  _(Stream)                  \
   _(Object)                  \
   _(PyObject)                \
   _(Uninitialized)           \
@@ -550,6 +551,15 @@ struct CAFFE2_API IValue final {
     AT_ASSERT(isDevice());
     return c10::Device(payload.as_device.type, payload.as_device.index);
   }
+
+  //Stream
+  IValue(c10::Stream stream)
+    : tag(Tag::Stream), is_intrusive_ptr(false) {
+    payload.as_int = stream.pack();
+  }
+  c10::Stream toStream() &&;
+  c10::Stream toStream() const &;
+  bool isStream() const { return Tag::Stream == tag; }
 
   // ScalarType
   IValue(ScalarType t)

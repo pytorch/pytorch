@@ -46,13 +46,13 @@ VmaAllocator create_allocator(
 }
 
 VmaAllocationCreateInfo create_allocation_create_info(
-    const VmaMemoryUsage usage) {
+    const Resource::Memory::Descriptor& descriptor) {
   return VmaAllocationCreateInfo{
     0u, /* VMA_ALLOCATION_CREATE_MAPPED_BIT - MoltenVK Issue #175 */
         /* VMA_ALLOCATION_CREATE_STRATEGY_MIN_FRAGMENTATION_BIT */
-    usage,
-    0u,
-    0u,
+    descriptor.usage,
+    descriptor.required,
+    descriptor.preferred,
     0u,
     VK_NULL_HANDLE,
     nullptr,

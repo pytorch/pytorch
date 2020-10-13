@@ -21,6 +21,32 @@ VkFormat convert(const caffe2::TypeMeta dtype) {
   return VK_FORMAT_UNDEFINED;
 }
 
+vTensor::Access::Flags convert(const VkAccessFlags vk_access) {
+  vTensor::Access::Flags access = 0u;
+
+  constexpr VkAccessFlags kRead =
+      VK_ACCESS_HOST_READ_BIT |
+      VK_ACCESS_MEMORY_READ_BIT |
+      VK_ACCESS_SHADER_READ_BIT |
+      VK_ACCESS_TRANSFER_READ_BIT;
+
+  constexpr VkAccessFlags kWrite =
+      VK_ACCESS_HOST_WRITE_BIT |
+      VK_ACCESS_MEMORY_WRITE_BIT |
+      VK_ACCESS_SHADER_WRITE_BIT |
+      VK_ACCESS_TRANSFER_WRITE_BIT;
+
+  if (vk_access & kRead) {
+    access |= vTensor::Access::Read;
+  }
+
+  if (vk_access & kWrite) {
+    access |= vTensor::Access::Write;
+  }
+
+  return access;
+}
+
 vTensor::Buffer allocate_buffer(
     api::Context* const context,
     const IntArrayRef sizes,
@@ -31,12 +57,34 @@ vTensor::Buffer allocate_buffer(
   // Forward function declaration
   bool requires_staging(api::Context*);
 
-  VkFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+  const VkFlags usage = [context]() {
+    VkFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
-  if (requires_staging(context)) {
-    usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-             VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-  }
+    if (requires_staging(context)) {
+      usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+               VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    }
+
+    return usage;
+  }();
+
+  const auto memory = [context]() -> api::Resource::Memory::Descriptor {
+    if (requires_staging(context)) {
+      return {
+        VMA_MEMORY_USAGE_GPU_ONLY,
+        0u,
+        0u,
+      };
+    }
+
+    return {
+      VMA_MEMORY_USAGE_UNKNOWN,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+          VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+    };
+  }();
 
   return context->resource().pool.buffer(
       vTensor::Buffer::Descriptor{
@@ -48,7 +96,7 @@ vTensor::Buffer allocate_buffer(
         // Usage
         {
           usage,
-          VMA_MEMORY_USAGE_GPU_ONLY,
+          memory,
         },
       });
 }
@@ -108,7 +156,11 @@ vTensor::Image allocate_image(
         {
           VK_IMAGE_USAGE_SAMPLED_BIT |
               VK_IMAGE_USAGE_STORAGE_BIT,
-          VMA_MEMORY_USAGE_GPU_ONLY,
+          {
+            VMA_MEMORY_USAGE_GPU_ONLY,
+            0u,
+            0u,
+          },
         },
         // View
         {
@@ -140,7 +192,12 @@ vTensor::Buffer allocate_staging(
         {
           VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
               VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-          VMA_MEMORY_USAGE_CPU_ONLY,
+          {
+            VMA_MEMORY_USAGE_CPU_ONLY,
+            0u,
+            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+                VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+          },
         },
       });
 }
@@ -148,74 +205,6 @@ vTensor::Buffer allocate_staging(
 vTensor::Fence allocate_fence(
     api::Context* const context) {
   return context->resource().pool.fence();
-}
-
-// We typically do not know whether we need a command buffer to service a request
-// until we have actually perfomed a bunch of checks in not so trivial nested logic
-// which makes a policy of always allocating a command buffer up front, only to end
-// up using it at times, a wasteful approach.  This class abstracts that away.
-
-class CMD final {
- public:
-  explicit CMD(api::Context* context);
-  CMD(const CMD&) = delete;
-  CMD& operator=(const CMD&) = delete;
-  CMD(CMD&&) = delete;
-  CMD& operator=(CMD&&) = delete;
-  ~CMD() = default;
-
-  api::Command::Buffer* operator->();
-  void submit(api::Resource::Fence fence = {});
-
- private:
-  api::Context* context_;
-  api::Command::Buffer command_buffer_;
-};
-
-CMD::CMD(api::Context* const context)
-  : context_(context) {
-}
-
-api::Command::Buffer* CMD::operator->() {
-  if (!command_buffer_) {
-    command_buffer_ = context_->command().pool.allocate();
-    command_buffer_.begin();
-  }
-
-  return &command_buffer_;
-}
-
-void CMD::submit(const api::Resource::Fence fence) {
-  if (command_buffer_) {
-    command_buffer_.end();
-    command_buffer_.submit(context_->gpu().queue, fence);
-  }
-}
-
-vTensor::Access::Flags get_access(const VkAccessFlags vk_access) {
-  vTensor::Access::Flags access = 0u;
-
-  constexpr VkAccessFlags kRead =
-      VK_ACCESS_HOST_READ_BIT |
-      VK_ACCESS_MEMORY_READ_BIT |
-      VK_ACCESS_SHADER_READ_BIT |
-      VK_ACCESS_TRANSFER_READ_BIT;
-
-  constexpr VkAccessFlags kWrite =
-      VK_ACCESS_HOST_WRITE_BIT |
-      VK_ACCESS_MEMORY_WRITE_BIT |
-      VK_ACCESS_SHADER_WRITE_BIT |
-      VK_ACCESS_TRANSFER_WRITE_BIT;
-
-  if (vk_access & kRead) {
-    access |= vTensor::Access::Read;
-  }
-
-  if (vk_access & kWrite) {
-    access |= vTensor::Access::Write;
-  }
-
-  return access;
 }
 
 } // namespace
@@ -286,25 +275,382 @@ vTensor::View::View(
   ops::verify(options);
 }
 
-vTensor::Buffer& vTensor::View::buffer(const Access::Flags access) const {
-  CMD command_buffer(context_);
+// We typically do not know whether we need a command buffer to service a request
+// until we have perfomed a bunch of checks in nested logic, and even then we
+// may end up with the always issued state transition optimized away under
+// certain conditions, which makes a policy of always allocating a command buffer
+// up front, only to end up using it at times, a wasteful approach.  This class
+// answers that need.
 
-  if ((access & Access::Read) && state_.is_dirty(Component::Buffer)) {
-    if (state_.is_clean(Component::Staging)) {
-      if (state_.is_discrete()) {
-        ;
-      }
-      else {
-        ;
-      }
+class vTensor::View::CMD final {
+ public:
+  explicit CMD(const View& view);
+  CMD(const CMD&) = delete;
+  CMD& operator=(const CMD&) = delete;
+  CMD(CMD&&) = delete;
+  CMD& operator=(CMD&&) = delete;
+  ~CMD() = default;
+
+  typedef api::Resource::Buffer Buffer;
+  typedef api::Resource::Image Image;
+  typedef api::Resource::Fence Fence;
+
+  void barrier(const State::Transition& transition);
+
+  void copy_buffer_to_staging(
+      State& state,
+      const Buffer::Object& buffer,
+      const Buffer::Object& staging);
+
+  void copy_staging_to_buffer(
+      State& state,
+      const Buffer::Object& staging,
+      const Buffer::Object& buffer);
+
+  void copy_buffer_to_image(
+      State& state,
+      const Buffer::Object& buffer,
+      const Image::Object& image);
+
+  void copy_image_to_buffer(
+      State& state,
+      const Image::Object& image,
+      const Buffer::Object& buffer);
+
+  void submit(Fence fence = {});
+
+ private:
+  api::Command::Buffer& command_buffer();
+
+ private:
+  const View& view_;
+  api::Command::Buffer command_buffer_;
+};
+
+vTensor::View::CMD::CMD(const View& view)
+  : view_(view) {
+}
+
+api::Command::Buffer& vTensor::View::CMD::command_buffer() {
+  if (!command_buffer_) {
+    command_buffer_ = view_.context_->command().pool.allocate();
+    command_buffer_.begin();
+  }
+
+  return command_buffer_;
+}
+
+void vTensor::View::CMD::barrier(
+    const State::Transition& transition) {
+  api::Pipeline::Barrier barrier{};
+
+  enum class Barrier {
+    No,
+    Exectution,
+    Memory,
+  };
+
+  const auto categorize = [](
+      const VkAccessFlags vk_src,
+      const VkAccessFlags vk_dst) {
+    using Access = vTensor::Access;
+
+    if (0u == vk_src) {
+      return Barrier::No;
     }
-    else if (state_.is_clean(Component::Image)) {
-      ;
+
+    const Access::Flags src = convert(vk_src);
+    const Access::Flags dst = convert(vk_dst);
+
+    if (Access::Read == (src & Access::Read)) {
+      if (Access::Read == (dst & Access::Read)) {
+        return Barrier::No;
+      }
+
+      return Barrier::Exectution;
     }
-    else {
-      ;
+
+    return Barrier::Memory;
+  };
+
+  printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+
+  if (transition.second.staging) {
+    printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+    const Barrier category = categorize(
+        transition.first.staging.access,
+        transition.second.staging.access);
+
+    if (Barrier::No != category) {
+      printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+      barrier.stage.src |= transition.first.staging.stage;
+      barrier.stage.dst |= transition.second.staging.stage;
+
+      if (Barrier::Memory == category) {
+        printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+        barrier.buffers.push_back({
+          view_.staging().object,
+          {
+            transition.first.staging.access,
+            transition.second.staging.access,
+          },
+        });
+      }
     }
   }
+
+  printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+
+  if (transition.second.buffer) {
+    printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+    const Barrier category = categorize(
+        transition.first.buffer.access,
+        transition.second.buffer.access);
+
+    if (Barrier::No != category) {
+      printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+      barrier.stage.src |= transition.first.buffer.stage;
+      barrier.stage.dst |= transition.second.buffer.stage;
+
+      if (Barrier::Memory == category) {
+        printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+        barrier.buffers.push_back({
+          view_.buffer().object,
+          {
+            transition.first.buffer.access,
+            transition.second.buffer.access,
+          },
+        });
+      }
+    }
+  }
+
+  printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+
+  if (transition.second.image) {
+    printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+    const Barrier category = categorize(
+        transition.first.image.access,
+        transition.second.image.access);
+
+    const bool requires_image_layout_transition =
+        (transition.first.image.layout != transition.second.image.layout);
+
+    if (requires_image_layout_transition || (Barrier::No != category)) {
+      printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+      barrier.stage.src |= transition.first.image.stage;
+      barrier.stage.dst |= transition.second.image.stage;
+
+      if (Barrier::Memory == category) {
+        printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+        barrier.images.push_back({
+          view_.image().object,
+          {
+            transition.first.image.access,
+            transition.second.image.access,
+          },
+          {
+            transition.first.image.layout,
+            transition.second.image.layout,
+          },
+        });
+      }
+    }
+  }
+
+  // // Filter out host dependencies out of source, per Vulkan spec host write ordering guarantees:
+  // // https://www.khronos.org/registry/vulkan/specs/1.2/html/vkspec.html#synchronization-submission-host-writes
+
+  // barrier.stage.src &= ~VK_PIPELINE_STAGE_HOST_BIT;
+
+  // for (api::Resource::Buffer::Barrier& buffer_barrier : barrier.buffers) {
+  //   buffer_barrier.memory.src &=
+  //       ~(VK_ACCESS_HOST_READ_BIT | VK_ACCESS_HOST_WRITE_BIT);
+  // }
+
+  // Insert a barrier if we are left with anything meaningful.
+
+  if (barrier) {
+    command_buffer().barrier(barrier);
+  }
+}
+
+void vTensor::View::CMD::copy_buffer_to_staging(
+    State& state,
+    const Buffer::Object& buffer,
+    const Buffer::Object& staging) {
+  if (state.is_clean(Component::Staging) || state.is_uma()) {
+    return;
+  }
+
+  barrier(
+      state.transition({
+          // Staging
+          {
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
+          },
+          // Buffer
+          {
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_ACCESS_TRANSFER_READ_BIT,
+          },
+          // Image
+          {},
+        }));
+
+  command_buffer().copy(buffer, staging);
+}
+
+void vTensor::View::CMD::copy_staging_to_buffer(
+    State& state,
+    const Buffer::Object& staging,
+    const Buffer::Object& buffer) {
+  if (state.is_clean(Component::Buffer) || state.is_uma()) {
+    return;
+  }
+
+  barrier(
+      state.transition({
+            // Staging
+            {
+              VK_PIPELINE_STAGE_TRANSFER_BIT,
+              VK_ACCESS_TRANSFER_READ_BIT,
+            },
+            // Buffer
+            {
+              VK_PIPELINE_STAGE_TRANSFER_BIT,
+              VK_ACCESS_TRANSFER_WRITE_BIT,
+            },
+            // Image
+            {},
+          }));
+
+  command_buffer().copy(staging, buffer);
+}
+
+void vTensor::View::CMD::copy_buffer_to_image(
+    State& state,
+    const Buffer::Object& buffer,
+    const Image::Object& image) {
+  if (state.is_clean(Component::Image)) {
+    return;
+  }
+
+  barrier(
+      state.transition({
+          // Staging
+          {},
+          // Buffer
+          {
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+          },
+          // Image
+          {
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_ACCESS_SHADER_WRITE_BIT,
+            VK_IMAGE_LAYOUT_GENERAL,
+          },
+        }));
+
+  // launch
+}
+
+void vTensor::View::CMD::copy_image_to_buffer(
+    State& state,
+    const Image::Object& image,
+    const Buffer::Object& buffer) {
+  if (state.is_clean(Component::Buffer)) {
+    return;
+  }
+
+  barrier(
+      state.transition({
+          // Staging
+          {},
+          // Buffer
+          {
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_ACCESS_SHADER_WRITE_BIT,
+          },
+          // Image
+          {
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+          },
+        }));
+
+  // launch
+}
+
+void vTensor::View::CMD::submit(const api::Resource::Fence fence) {
+  if (command_buffer_) {
+    command_buffer_.end();
+    command_buffer_.submit(view_.context_->gpu().queue, fence);
+  }
+}
+
+vTensor::Buffer& vTensor::View::buffer(const Access::Flags access) const {
+  printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+
+  CMD command_buffer(*this);
+
+  if ((access & Access::Read) && state_.is_dirty(Component::Buffer)) {
+    printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+
+    if (state_.is_clean(Component::Staging)) {
+      printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+
+      command_buffer.copy_staging_to_buffer(
+          state_,
+          staging(Access::Read).object,
+          buffer().object);
+    }
+    else if (state_.is_clean(Component::Image)) {
+      printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+
+      command_buffer.copy_image_to_buffer(
+          state_,
+          image(Access::Read).object,
+          buffer().object);
+    }
+    else {
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Invalid state!");
+    }
+  }
+
+  printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+
+  command_buffer.barrier(
+      state_.transition({
+          // Staging
+          {},
+          // Buffer
+          {
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            [access]() {
+              VkAccessFlags vk_access = 0u;
+
+              if (access & Access::Read) {
+                vk_access |= VK_ACCESS_SHADER_READ_BIT;
+              }
+
+              if (access & Access::Write) {
+                vk_access |= VK_ACCESS_SHADER_WRITE_BIT;
+              }
+
+              return vk_access;
+            }(),
+          },
+          // Image
+          {},
+        }));
+
+  command_buffer.submit();
 
   if (access & Access::Write) {
     state_.set_dirty(Component::All);
@@ -316,19 +662,54 @@ vTensor::Buffer& vTensor::View::buffer(const Access::Flags access) const {
 }
 
 vTensor::Image& vTensor::View::image(const Access::Flags access) const {
-  CMD command_buffer(context_);
+  printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+
+  CMD command_buffer(*this);
 
   if ((access & Access::Read) && state_.is_dirty(Component::Image)) {
-    if (state_.is_dirty(Component::Buffer) && state_.is_clean(Component::Staging)) {
-      ;
+    printf("==== %s: %u\n", __FUNCTION__, __LINE__);
 
-      state_.is_clean(Component::Buffer);
-    }
-
-    if (state_.is_clean(Component::Buffer)) {
-      ;
-    }
+    command_buffer.copy_buffer_to_image(
+        state_,
+        buffer(Access::Read).object,
+        image().object);
   }
+
+  printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+
+  command_buffer.barrier(
+      state_.transition({
+          // Staging
+          {},
+          // Buffer
+          {},
+          // Image
+          {
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            [access]() {
+              VkAccessFlags vk_access = 0u;
+
+              if (access & Access::Read) {
+                vk_access |= VK_ACCESS_SHADER_READ_BIT;
+              }
+
+              if (access & Access::Write) {
+                vk_access |= VK_ACCESS_SHADER_WRITE_BIT;
+              }
+
+              return vk_access;
+            }(),
+            [access]() {
+              if (Access::Read == (access & Access::Read)) {
+                return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+              }
+
+              return VK_IMAGE_LAYOUT_GENERAL;
+            }(),
+          },
+        }));
+
+  command_buffer.submit();
 
   if (access & Access::Write) {
     state_.set_dirty(Component::All);
@@ -340,10 +721,46 @@ vTensor::Image& vTensor::View::image(const Access::Flags access) const {
 }
 
 vTensor::Buffer& vTensor::View::staging(const Access::Flags access) const {
-  CMD command_buffer(context_);
+  printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+
+  CMD command_buffer(*this);
 
   if ((access & Access::Read) && state_.is_dirty(Component::Staging)) {
+    printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+    command_buffer.copy_buffer_to_staging(
+        state_,
+        buffer(Access::Read).object,
+        staging().object);
   }
+
+  printf("==== %s: %u\n", __FUNCTION__, __LINE__);
+
+  command_buffer.barrier(
+      state_.transition({
+          // Staging
+          {
+            VK_PIPELINE_STAGE_HOST_BIT,
+            [access]() {
+              VkAccessFlags vk_access = 0u;
+
+              if (access & Access::Read) {
+                vk_access |= VK_ACCESS_HOST_READ_BIT;
+              }
+
+              if (access & Access::Write) {
+                vk_access |= VK_ACCESS_HOST_WRITE_BIT;
+              }
+
+              return vk_access;
+            }(),
+          },
+          // Buffer
+          {},
+          // Image
+          {},
+        }));
+
+  command_buffer.submit();
 
   if (access & Access::Write) {
     state_.set_dirty(Component::All);
@@ -400,19 +817,13 @@ vTensor::Buffer& vTensor::View::staging() const {
 }
 
 vTensor::Fence& vTensor::View::fence() const {
-  if (!fence_) {
-    fence_ = allocate_fence(context_);
-  }
-
-  return fence_;
+  return (fence_ = allocate_fence(context_));
 }
 
 vTensor::View::State::State()
   : available_{},
     dirty_{},
-    buffer_{},
-    image_{},
-    staging_{} {
+    bundle_{} {
 }
 
 vTensor::View::State::State(
@@ -420,10 +831,7 @@ vTensor::View::State::State(
     const IntArrayRef sizes)
   : available_{},
     dirty_{},
-    buffer_{},
-    image_{},
-    staging_{} {
-
+    bundle_{} {
   available_ |= Component::Buffer;
 
   if (requires_image(sizes)) {
@@ -435,8 +843,127 @@ vTensor::View::State::State(
   }
 }
 
-// void vTensor::View::transition(const State& state) const {
-// }
+vTensor::View::State::Transition
+vTensor::View::State::transition(const Bundle bundle) {
+  const Bundle from = bundle_;
+  Bundle& to = bundle_;
+
+  if (bundle.staging) {
+    to.staging = bundle.staging;
+  }
+
+  if (bundle.buffer) {
+    to.buffer = bundle.buffer;
+  }
+
+  if (bundle.image) {
+    to.image = to.image;
+  }
+
+  std::cout << "From: " << from << std::endl;
+  std::cout << "To: " << to << std::endl;
+
+  return Transition{
+    from,
+    to,
+  };
+}
+
+namespace {
+
+struct Stage final {
+  VkPipelineStageFlags value;
+};
+
+std::ostream& operator<<(
+    std::ostream& stream,
+    const Stage& stage) {
+  stream << "Stage: ";
+
+  if (0u == stage.value) {
+    return stream << "  0";
+  }
+
+  if (stage.value & VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT) {
+    stream << "  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT";
+  }
+
+  if (stage.value & VK_PIPELINE_STAGE_HOST_BIT) {
+    stream << "  VK_PIPELINE_STAGE_HOST_BIT";
+  }
+
+  if (stage.value & VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT) {
+    stream << "  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT";
+  }
+
+  if (stage.value & VK_PIPELINE_STAGE_TRANSFER_BIT) {
+    stream << "  VK_PIPELINE_STAGE_TRANSFER_BIT";
+  }
+
+  return stream;
+}
+
+struct Access final {
+  VkAccessFlags value;
+};
+
+std::ostream& operator<<(
+    std::ostream& stream,
+    const Access& access) {
+  stream << "Access: ";
+
+  if (0u == access.value) {
+    return stream << "  0";
+  }
+
+  if (access.value & VK_ACCESS_HOST_READ_BIT) {
+    stream << "  VK_ACCESS_HOST_READ_BIT";
+  }
+
+  if (access.value & VK_ACCESS_HOST_WRITE_BIT) {
+    stream << "  VK_ACCESS_HOST_WRITE_BIT";
+  }
+
+  if (access.value & VK_ACCESS_MEMORY_READ_BIT) {
+    stream << "  VK_ACCESS_MEMORY_READ_BIT";
+  }
+
+  if (access.value & VK_ACCESS_MEMORY_WRITE_BIT) {
+    stream << "  VK_ACCESS_MEMORY_WRITE_BIT";
+  }
+
+  if (access.value & VK_ACCESS_SHADER_READ_BIT) {
+    stream << "  VK_ACCESS_SHADER_READ_BIT";
+  }
+
+  if (access.value & VK_ACCESS_SHADER_WRITE_BIT) {
+    stream << "  VK_ACCESS_SHADER_WRITE_BIT";
+  }
+
+  if (access.value & VK_ACCESS_TRANSFER_READ_BIT) {
+    stream << "  VK_ACCESS_TRANSFER_READ_BIT";
+  }
+
+  if (access.value & VK_ACCESS_TRANSFER_WRITE_BIT) {
+    stream << "  VK_ACCESS_TRANSFER_WRITE_BIT";
+  }
+
+  return stream;
+}
+
+} // namespace
+
+std::ostream& operator<<(
+    std::ostream& stream,
+    const vTensor::View::State::Bundle& bundle) {
+  stream << "Staging\n " << Stage{bundle.staging.stage} << "\n " << Access{bundle.staging.access}<< std::endl;
+  stream << "Buffer\n " << Stage{bundle.buffer.stage} << "\n " << Access{bundle.buffer.access}<< std::endl;
+  stream << "Image\n " << Stage{bundle.image.stage} << "\n " << Access{bundle.image.access}<< std::endl;
+
+  return stream;
+}
+
+
 
 // Any state in column T can transition to any state in column T + 1 for a
 // total of 7 x 6 = 42 possible transitions.  In each scenario, synchronization
@@ -1364,6 +1891,10 @@ void verify(const TensorOptions& options) {
       !options.has_memory_format(),
       "'memory_format' tensor option is not yet supported under Vulkan!");
 }
+
+// namespace {
+
+
 
 // std::ostream& operator<<(
 //     std::ostream& stream,
