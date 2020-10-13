@@ -86,7 +86,7 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
             if mutable:
                 return 'Tensor &'  # TODO: fix this discrepancy
             else:
-                if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+                if local.use_c10_dispatcher().dispatcher_uses_new_style():
                     return 'const c10::optional<Tensor>&'
                 else:
                     return 'const Tensor &'
@@ -101,7 +101,7 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
         elif str(t.elem) == 'Dimname':
             return "DimnameList"
         # TODO: do something reasonable about lists of optional tensors
-        elif not local.use_c10_dispatcher() is UseC10Dispatcher.full and str(t.elem) == 'Tensor?':
+        elif (not local.use_c10_dispatcher().dispatcher_uses_new_style()) and str(t.elem) == 'Tensor?':
             return "TensorList"
         elem = argumenttype_type(t.elem, mutable=mutable)
         # TODO: explicitly qualify namespace here
@@ -152,7 +152,6 @@ JIT_TO_CPP_DEFAULT = {
     'None': 'c10::nullopt',  # UGH this one is type directed
     'Mean': 'at::Reduction::Mean',
     '[]': '{}',
-    '[0,1]': '{0,1}',  # TODO: stop special casing
     'contiguous_format': 'MemoryFormat::Contiguous',
     'long': 'at::kLong',
 }
@@ -181,6 +180,20 @@ def default_expr(d: str, t: Type) -> str:
                     i += 2
 
             return f'"{s}"'
+
+    if isinstance(t, OptionalType):
+        if d == 'None':
+            return 'c10::nullopt'
+
+        return default_expr(d, t.elem)
+
+    if isinstance(t, ListType):
+        if (d.startswith('[') and d.endswith(']')):
+            return '{' + d[1:-1] + '}'
+        elif t.size is None:
+            # NOTE: Sized lists can have scalar defaults
+            raise ValueError(f"Expected a list default '[...]' but found: '{d}'")
+
     return JIT_TO_CPP_DEFAULT.get(d, d)
 
 # Convert an argument into its C++ API form

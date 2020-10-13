@@ -21,10 +21,11 @@ Argument = Optional[Union[
 
 class Node:
     def __init__(self, graph: 'Graph', name: str, op: str, target: Target,
-                 args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> None:
+                 args: Tuple[Argument, ...], kwargs: Dict[str, Argument],
+                 type : Optional[Any] = None) -> None:
         self.graph = graph
         self.name = name  # unique name of value being created
-        assert op in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output']
+        assert op in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output', 'root']
         self.op = op  # the kind of operation = placeholder|call_method|call_module|call_function|get_attr
         if op in ['call_method', 'call_module']:
             assert isinstance(target, str)
@@ -39,6 +40,57 @@ class Node:
         #
         # Is a dict to act as an "ordered set". Keys are significant, value dont-care
         self.users : Dict['Node', None] = {}
+        # Type expression representing the output value of this node.
+        # This should contain the same class of Type objects that would appear
+        # as type annotations for function inputs/outputs.
+        #
+        # For placeholder nodes, this value will be used to type-annotate the
+        # generated function parameters.
+        # For the return ndoe, this value will be used to type-annotate the
+        # generated function return type. (Note this is a special case. `return`
+        # does not produce a value, it's more of a notation. Thus, this value
+        # describes the type of args[0] in the `return` node.
+        self.type : Optional[Any] = type
+        self._prev = self
+        self._next = self
+        self._erased = False
+
+    @property
+    def next(self) -> 'Node':
+        return self._next
+
+    @property
+    def prev(self) -> 'Node':
+        return self._prev
+
+    def prepend(self, x: 'Node'):
+        """Insert x before this node in the list of nodes in the graph.
+           Before: p -> self
+                   bx -> x -> ax
+           After:  p -> x -> self
+                   bx -> ax
+
+        Args:
+            x (Node): The node to put before this node. Must be a member of the same graph.
+        """
+        assert self.graph == x.graph, "Attempting to move a Node into a different Graph"
+        x._remove_from_list()
+        p = self._prev
+        p._next, x._prev = x, p
+        x._next, self._prev = self, x
+
+    def append(self, x: 'Node'):
+        """Insert x after this node in the list of nodes in the graph.
+        Equvalent to `self.next.prepend(x)`
+
+        Args:
+            x (Node): The node to put after this node. Must be a member of the same graph.
+        """
+        self._next.prepend(x)
+
+    def _remove_from_list(self):
+        p, n = self._prev, self._next
+        p._next, n._prev = n, p
 
     @property
     def args(self) -> Tuple[Argument, ...]:
