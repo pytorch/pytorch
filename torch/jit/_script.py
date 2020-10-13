@@ -12,7 +12,6 @@ import inspect
 import copy
 import pickle
 import warnings
-from sys import version_info
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 
@@ -1163,14 +1162,13 @@ def _isinstance(obj, target_type) -> bool:
     if origin_type:
         return generics_checker(obj, target_type)
 
-    # handle python 3.6 quality of returning None for origin of 
-    # containers without contained type (vs returning container type)
-    if version_info[1] == 6:
-        check_args_exist(target_type)
+    # Check to handle weird python type behaviors
+    # 1. python 3.6 returns None for origin of containers without 
+    #    contained type (intead of returning outer container type)
+    # 2. non-typed optional origin returns as none instead 
+    #    of as optional in 3.6-3.8
+    check_args_exist(target_type)
 
-    # handle odd case of non typed optional origin returning as none
-    if origin_type is None and target_type is Optional:
-        check_args_exist(target_type)
     # handle non-generics
     return isinstance(obj, target_type)
 
