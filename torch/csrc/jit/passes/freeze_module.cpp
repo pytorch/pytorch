@@ -567,12 +567,17 @@ class AttributePropagator {
         }
         if (n->kind() == prim::GetAttr) {
           auto& name = n->s(attr::name);
-          auto mptr =
-              getModulePtrForGetAttrNode(n->input(0)->node(), graph, module_);
-          auto module = Module(mptr);
-          if (module.type() == n->inputs()[0]->type() && module.hasattr(name)) {
-            auto attr = module.attr(name);
-            insertMutableAttr(name, attr, mptr);
+          for (auto& mptr : modules) {
+            auto module = Module(mptr);
+            if (module.type() == n->inputs()[0]->type() &&
+                module.hasattr(name)) {
+              auto attr = module.attr(name);
+              insertMutableAttr(name, attr, mptr);
+              if (attr.isModule()) {
+                modules.insert(attr.toModule()._ivalue());
+              }
+              break;
+            }
           }
         } else if (n->kind() == prim::fork) {
           applyToForkSubgraph(
