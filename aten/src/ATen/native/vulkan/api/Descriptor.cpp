@@ -131,24 +131,24 @@ Descriptor::Set::Set(
       "Invalid Vulkan descriptor set!");
 }
 
-void Descriptor::Set::update(const Stream& source) {
+void Descriptor::Set::update(const Item& item) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
       "This descriptor set is in an invalid state! "
       "Potential reason: This descriptor set is moved from.");
 
-  const auto stream_itr = std::find_if(
-      bindings_.streams.begin(),
-      bindings_.streams.end(),
-      [binding = source.binding](const Stream& destination) {
-        return destination.binding == binding;
+  const auto items_itr = std::find_if(
+      bindings_.items.begin(),
+      bindings_.items.end(),
+      [binding = item.binding](const Item& other) {
+        return other.binding == binding;
       });
 
-  if (bindings_.streams.end() == stream_itr) {
-     bindings_.streams.emplace_back(source);
+  if (bindings_.items.end() == items_itr) {
+     bindings_.items.emplace_back(item);
   }
   else {
-    *stream_itr = source;
+    *items_itr = item;
   }
 
   bindings_.dirty = true;
@@ -163,7 +163,7 @@ Descriptor::Set& Descriptor::Set::bind(
       "This descriptor set is in an invalid state! "
       "Potential reason: This descriptor set is moved from.");
 
-  update(Stream{
+  update({
       binding,
       type,
       {
@@ -187,7 +187,7 @@ Descriptor::Set& Descriptor::Set::bind(
       "This descriptor set is in an invalid state! "
       "Potential reason: This descriptor set is moved from.");
 
-  update(Stream{
+  update({
       binding,
       type,
       {
@@ -240,25 +240,25 @@ VkDescriptorSet Descriptor::Set::handle() const {
 
     c10::SmallVector<VkWriteDescriptorSet, 8u> write_descriptor_sets;
 
-    for (const Stream& stream : bindings_.streams) {
+    for (const Item& item : bindings_.items) {
       VkWriteDescriptorSet write{
         VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         nullptr,
         descriptor_set_,
-        stream.binding,
+        item.binding,
         0u,
         1u,
-        stream.type,
+        item.type,
         nullptr,
         nullptr,
         nullptr,
       };
 
-      if (is_buffer(stream.type)) {
-        write.pBufferInfo = &stream.info.buffer;
+      if (is_buffer(item.type)) {
+        write.pBufferInfo = &item.info.buffer;
       }
-      else if (is_image(stream.type)) {
-        write.pImageInfo = &stream.info.image;
+      else if (is_image(item.type)) {
+        write.pImageInfo = &item.info.image;
       }
 
       write_descriptor_sets.emplace_back(write);
