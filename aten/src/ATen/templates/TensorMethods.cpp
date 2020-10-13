@@ -31,6 +31,10 @@ Tensor Tensor::vulkan() const {
   return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
 }
 
+Tensor Tensor::metal() const {
+  return to(options().device(DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
+}
+
 Tensor Tensor::toType(ScalarType t) const {
   return to(options().dtype(t), /*non_blocking*/ false, /*copy*/ false);
 }
@@ -127,8 +131,18 @@ bool Tensor::is_vulkan() const {
   return impl_->is_vulkan();
 }
 
+bool Tensor::is_metal() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_metal();
+}
+
+
 bool is_vulkan(Tensor self) {
   return self.is_vulkan();
+}
+
+bool is_metal(Tensor self) {
+  return self.is_metal();
 }
 
 bool Tensor::is_quantized() const {
