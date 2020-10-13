@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <bits/stdint-intn.h>
 #include <c10/util/Optional.h>
 #include <torch/lib/c10d/ProcessGroup.hpp>
 #include <torch/lib/c10d/Store.hpp>
@@ -12,6 +13,22 @@
 #include <unordered_map>
 
 namespace c10d {
+
+#ifdef USE_C10D_GLOO
+constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
+#endif
+
+inline std::vector<std::string> split(
+    char separator,
+    const std::string& string) {
+  std::vector<std::string> pieces;
+  std::stringstream ss(string);
+  std::string item;
+  while (std::getline(ss, item, separator)) {
+    pieces.push_back(std::move(item));
+  }
+  return pieces;
+}
 
 class Backend {
  public:
@@ -29,18 +46,22 @@ class Backend {
 
 class DistributedC10d {
  public:
-  void initProcessGroup(
-      const std::string& backend,
-      const std::string& init_method,
-      const std::chrono::milliseconds& timeout,
-      int64_t world_size,
-      int64_t rank,
-      std::shared_ptr<Store> store,
-      const std::string& group_name);
-
   void destroyProcessGroup(std::shared_ptr<ProcessGroup> group);
   int64_t getRank(std::shared_ptr<ProcessGroup> group);
   int64_t getWorldSize(std::shared_ptr<ProcessGroup> group);
+
+  // getters/setters for the global states
+  const std::string& backend() const;
+  void backend(std::string const& backend_name);
+
+  const std::unordered_map<std::shared_ptr<ProcessGroup>, std::vector<int64_t>>&
+  pg_group_ranks();
+  void pg_group_ranks(std::unordered_map<
+                      std::shared_ptr<ProcessGroup>,
+                      std::vector<int64_t>> const& new_ranks);
+
+  const std::string& default_pg_init_method() const;
+  void default_pg_init_method(std::string const& init_method);
 
   ProcessGroup::Work isend(
       at::Tensor tensor,
@@ -88,13 +109,13 @@ class DistributedC10d {
   c10::optional<ProcessGroup::Work> allReduce(
       at::Tensor tensor,
       ReduceOp op,
-      std::shred_ptr<ProcessGroup> group,
+      std::shared_ptr<ProcessGroup> group,
       bool async_op);
 
   c10::optional<ProcessGroup::Work> allReduceCoalesced(
       at::Tensor tensor,
       ReduceOp op,
-      std::shred_ptr<ProcessGroup> group,
+      std::shared_ptr<ProcessGroup> group,
       bool async_op);
 
   c10::optional<ProcessGroup::Work> reduceMultiGPU(
@@ -199,20 +220,21 @@ class DistributedC10d {
   int64_t getGroupSize(std::shared_ptr<ProcessGroup> group) const;
   int64_t getBackend(std::shared_ptr<ProcessGroup> group);
 
-  void newProcessGroupHelper(const int64_t work_size,
-                             const int64_t rank,
-                             const std::unordered_map<std::shared_ptr<ProcessGroup>, std::vector<int64_t>>& pg_group_ranks_,
-                             const std::string& backend,
-                             std::shared_ptr<Store> store,
-                             c10::optional<std::string> group_name,
-                             std::chrono::milliseconds timeout);
+  std::shared_ptr<ProcessGroup> newProcessGroupHelper(
+      const int64_t world_size,
+      const int64_t rank,
+      const std::vector<int64_t>& group_ranks,
+      const std::string& backend_str,
+      const std::shared_ptr<Store>& store,
+      c10::optional<std::string> group_name,
+      std::chrono::milliseconds timeout);
 
   std::string backend_;
   // TODO: Ask Alex what kind of equality we need. It determine whether we
   // need to use ProcessGroup or ProcesGroup* as key.
   std::unordered_map<
       std::shared_ptr<ProcessGroup>,
-      std::pair<std::shared_ptr<Backend>, std::shared_ptr<Store>>>
+      std::pair<std::string, std::shared_ptr<Store>>>
       pg_map_;
 
   // Note, this is different mapping relationship than original Python

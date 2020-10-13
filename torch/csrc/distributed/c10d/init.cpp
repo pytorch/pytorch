@@ -6,7 +6,6 @@
 #include <c10d/TCPStore.hpp>
 #include <c10d/ProcessGroupRoundRobin.hpp>
 #endif
-#include <c10d/ProcessGroup.hpp>
 
 #ifdef USE_C10D_GLOO
 #include <c10d/ProcessGroupGloo.hpp>
@@ -24,6 +23,7 @@
 #include <pybind11/chrono.h>
 
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/distributed/c10d/c10d_frontend.h>
 #include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -35,20 +35,6 @@ namespace distributed {
 namespace c10d {
 
 namespace {
-
-#ifdef USE_C10D_GLOO
-constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
-#endif
-
-std::vector<std::string> split(char separator, const std::string& string) {
-  std::vector<std::string> pieces;
-  std::stringstream ss(string);
-  std::string item;
-  while (std::getline(ss, item, separator)) {
-    pieces.push_back(std::move(item));
-  }
-  return pieces;
-}
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
@@ -892,9 +878,9 @@ Arguments:
             ::c10d::ProcessGroupGloo::Options options;
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV);
+            char* ifnameEnv = getenv(::c10d::GLOO_SOCKET_IFNAME_ENV);
             if (ifnameEnv) {
-              for (const auto& iface : split(',', ifnameEnv)) {
+              for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
                 options.devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
               }
