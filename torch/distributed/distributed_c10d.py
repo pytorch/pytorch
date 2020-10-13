@@ -44,6 +44,17 @@ try:
 except ImportError:
     _GLOO_AVAILABLE = False
 
+# Some reduce ops are not supported by complex numbers.
+# We currently provide complex support to the distributed API by viewing
+# complex tensors as real (torch.view_as_real), meaning that calling
+# these unsupported ops will return garbage values rather than error out.
+# (e.g. max(2+3i, 3+2i) = 3+3i)
+# We'd like calls to unsupported ops to error out accordingly,
+# rather than returning garbage values.
+def supports_complex(reduceOp: ReduceOp) -> bool:
+    denyList = [ReduceOp.MAX, ReduceOp.MIN, ReduceOp.PRODUCT]
+    return reduceOp not in denyList
+
 
 class Backend(object):
     """
@@ -970,6 +981,8 @@ def all_reduce_multigpu(tensor_list,
     After the call, all ``tensor`` in ``tensor_list`` is going to be bitwise
     identical in all processes.
 
+    Complex tensors are supported.
+
     Only nccl and gloo backend is currently supported
     tensors should only be GPU tensors
 
@@ -992,6 +1005,8 @@ def all_reduce_multigpu(tensor_list,
     """
     if _rank_not_in_group(group):
         return
+
+    tensor_list = [t if not t.is_complex() else torch.view_as_real(t) for t in tensor_list]
 
     opts = AllreduceOptions()
     opts.reduceOp = op
@@ -1017,6 +1032,8 @@ def all_reduce(tensor,
 
     After the call ``tensor`` is going to be bitwise identical in all processes.
 
+    Complex tensors are supported.
+
     Arguments:
         tensor (Tensor): Input and output of the collective. The function
             operates in-place.
@@ -1030,10 +1047,38 @@ def all_reduce(tensor,
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
+    Examples:
+        >>> # All tensors below are of torch.int64 type.
+        >>> # We have 2 process groups, 2 ranks.
+        >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
+        >>> tensor
+        tensor([1, 2]) # Rank 0
+        tensor([3, 4]) # Rank 1
+        >>> dist.all_reduce(tensor, op=ReduceOp.SUM)
+        >>> tensor
+        tensor([4, 6]) # Rank 0
+        tensor([4, 6]) # Rank 1
+
+        >>> # All tensors below are of torch.cfloat type.
+        >>> # We have 2 process groups, 2 ranks.
+        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat) + 2 * rank * (1+1j)
+        >>> tensor
+        tensor([1.+1.j, 2.+2.j]) # Rank 0
+        tensor([3.+3.j, 4.+4.j]) # Rank 1
+        >>> dist.all_reduce(tensor, op=ReduceOp.SUM)
+        >>> tensor
+        tensor([4.+4.j, 6.+6.j]) # Rank 0
+        tensor([4.+4.j, 6.+6.j]) # Rank 1
+
     """
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
+
+    if tensor.is_complex():
+        if not supports_complex(op):
+            raise RuntimeError(f"all_reduce does not support {op} on complex tensors")
+        tensor = torch.view_as_real(tensor)
 
     opts = AllreduceOptions()
     opts.reduceOp = op
@@ -1068,6 +1113,8 @@ def all_reduce_coalesced(tensors,
     After the call each tensor in tensors is going to bitwise identical
     in all processes.
 
+    Complex tensors are supported.
+
     Arguments:
         tensors (List[Tensor]): Input and output of the collective. The function
             operates in-place.
@@ -1085,6 +1132,11 @@ def all_reduce_coalesced(tensors,
     _check_tensor_list(tensors, "tensor")
     if _rank_not_in_group(group):
         return
+
+    if any([t.is_complex() for t in tensors]) and not supports_complex(op):
+        raise RuntimeError(f"all_reduce does not support {op} on complex tensors")
+
+    tensors = [t if not t.is_complex() else torch.view_as_real(t) for t in tensors]
 
     opts = AllreduceCoalescedOptions()
     opts.reduceOp = op
@@ -1215,6 +1267,8 @@ def all_gather_multigpu(output_tensor_lists,
     Only nccl backend is currently supported
     tensors should only be GPU tensors
 
+    Complex tensors are supported.
+
     Arguments:
         output_tensor_lists (List[List[Tensor]]): Output lists. It should
             contain correctly-sized tensors on each GPU to be used for output
@@ -1249,6 +1303,9 @@ def all_gather_multigpu(output_tensor_lists,
     """
     if _rank_not_in_group(group):
         return
+
+    output_tensor_lists = [[t if not t.is_complex() else torch.view_as_real(t) for t in l] for l in output_tensor_lists]
+    input_tensor_list = [t if not t.is_complex() else torch.view_as_real(t) for t in input_tensor_list]
 
     if group == GroupMember.WORLD:
         _check_default_pg()
@@ -1498,6 +1555,8 @@ def all_gather(tensor_list,
     """
     Gathers tensors from the whole group in a list.
 
+    Complex tensors are supported.
+
     Arguments:
         tensor_list (list[Tensor]): Output list. It should contain
             correctly-sized tensors to be used for output of the collective.
@@ -1509,11 +1568,43 @@ def all_gather(tensor_list,
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
+    Examples:
+        >>> # All tensors below are of torch.int64 dtype.
+        >>> # We have 2 process groups, 2 ranks.
+        >>> tensor_list = [torch.zero(2, dtype=torch.int64) for _ in range(2)]
+        >>> tensor_list
+        [tensor([0, 0]), tensor([0, 0])] # Rank 0 and 1
+        >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
+        >>> tensor
+        tensor([1, 2]) # Rank 0
+        tensor([3, 4]) # Rank 1
+        >>> dist.all_gather(tensor_list, tensor)
+        >>> tensor_list
+        [tensor([1, 2]), tensor([3, 4])] # Rank 0
+        [tensor([1, 2]), tensor([3, 4])] # Rank 1
+
+        >>> # All tensors below are of torch.cfloat dtype.
+        >>> # We have 2 process groups, 2 ranks.
+        >>> tensor_list = [torch.zero(2, dtype=torch.cfloat) for _ in range(2)]
+        >>> tensor_list
+        [tensor([0.+0.j, 0.+0.j]), tensor([0.+0.j, 0.+0.j])] # Rank 0 and 1
+        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat) + 2 * rank * (1+1j)
+        >>> tensor
+        tensor([1.+1.j, 2.+2.j]) # Rank 0
+        tensor([3.+3.j, 4.+4.j]) # Rank 1
+        >>> dist.all_gather(tensor_list, tensor)
+        >>> tensor_list
+        [tensor([1.+1.j, 2.+2.j]), tensor([3.+3.j, 4.+4.j])] # Rank 0
+        [tensor([1.+1.j, 2.+2.j]), tensor([3.+3.j, 4.+4.j])] # Rank 1
+
     """
     _check_tensor_list(tensor_list, "tensor_list")
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
+
+    tensor_list = [t if not t.is_complex() else torch.view_as_real(t) for t in tensor_list]
+    tensor = tensor if not tensor.is_complex() else torch.view_as_real(tensor)
 
     if group == GroupMember.WORLD:
         _check_default_pg()
@@ -1532,6 +1623,8 @@ def all_gather_coalesced(output_tensor_lists,
                          async_op=False):
     """
     Gathers input tensors from the whole group in a list in a coalesced manner.
+
+    Complex tensors are supported.
 
     Arguments:
         output_tensor_lists (list[list[Tensor]]): Output list. It should contain
@@ -1580,6 +1673,9 @@ def all_gather_coalesced(output_tensor_lists,
                            "output_tensor_lists should be a list")
     for output_tensor_list in output_tensor_lists:
         _check_tensor_list(output_tensor_list, "output_tensor_lists")
+
+    output_tensor_lists = [[t if not t.is_complex() else torch.view_as_real(t) for t in l] for l in output_tensor_lists]
+    input_tensor_list = [t if not t.is_complex() else torch.view_as_real(t) for t in input_tensor_list]
 
     if group == GroupMember.WORLD:
         _check_default_pg()
