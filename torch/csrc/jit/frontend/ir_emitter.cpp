@@ -3139,7 +3139,7 @@ struct to_ir {
       case '%': {
         auto lhs = emitSugaredExpr(Expr(tree->tree(0)), 0)
                        ->asValue(tree->tree(0)->range(), method);
-        auto lhs_type = first_arg->type();
+        auto lhs_type = lhs->type();
         if (lhs_type == StringType::get()) {
           auto values = getValues(tree->trees(), /*maybe_unpack=*/false);
           auto node = graph->create(aten::percentFormat, values, 1)
@@ -3147,9 +3147,8 @@ struct to_ir {
           Value* output = graph->insertNode(node)->output();
           output->setType(StringType::get());
           return output;
-        } else {
-          continue;
         }
+        // else, fall through to the next case
       }
       case TK_IN:
       case TK_POW:
