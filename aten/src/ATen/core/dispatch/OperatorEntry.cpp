@@ -99,6 +99,7 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
 
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
+  // Redirect registrations to catchAll to Math.
   auto& k = dispatch_key.has_value() ? kernels_[*dispatch_key] : kernels_[DispatchKey::Math];
 
   if (k.size() > 0) {
@@ -166,7 +167,6 @@ c10::optional<const AnnotatedKernel*> OperatorEntry::getKernelForDispatchKey(Dis
 }
 
 std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTableEntryWithDebug(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const {
-  auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
   // [Note] DispatchTable computation
   // dispatchTable contains entries for runtime dispatch keys.
   // For any dispatch key, it'll pick a kernel using the following order:
@@ -213,6 +213,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // non backend keys (e.g AutogradXXX, Batched etc) due to (2.1).
   bool has_backend_kernel =
     hasKernelForAnyDispatchKey(getBackendKeySetFromAutograd(dispatch_key).add(DispatchKey::DefaultBackend));
+
   // 2.2. Use Math kernel if available. For autograd keys, we only use kernel from Math
   //      when there's no direct registration to its corresponding backend key or DefaultBackend.
   //      For AutogradOther, we return ambiguousAutogradOtherKernel_ if there's registration
@@ -236,21 +237,31 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   }
 
   // 3. Backend fallback
+  auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
   if (dispatcher.backendFallbackKernels_[dispatch_ix].kernel.isValid()) {
     return {dispatcher.backendFallbackKernels_[dispatch_ix], "backend fallback"};
+  }
 
   // 4. Default to error
-  } else {
-    return {missingKernel_, "missing"};
-  }
+  return {missingKernel_, "missing"};
 }
 
+// synchronizes the dispatch table entry for a given dispatch key
+// with the current state of kernel registrations in the dispatcher.
+// note that this is not a complete update, due to relationships between
+// dispatch keys (e.g. runtime keys and their associated autograd keys).
+// This function should be considered a private helper for updateDispatchTable_()
 void OperatorEntry::updateDispatchTableEntry_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
   auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
   dispatchTable_[dispatch_ix] = computeDispatchTableEntry(dispatcher, dispatch_key);
   dispatchKeyExtractor_.setOperatorHasFallthroughForKey(dispatch_key, dispatchTable_[dispatch_ix].isFallthrough());
 }
 
+// synchronizes the dispatch table entries for a given dispatch key *and its
+// associated keys* with the current state of kernel registrations in the
+// dispatcher.
+// After a kernel has been registered to a dispatch key, a call to this
+// function will synchronize the dispatcher state. See e.g. registerKernel()
 void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
   // Handle Undefined separately since it isn't a runtime key but we have an entry in dispatchTable_.
   // See Note [Undefined in dispatchTable_]
@@ -272,6 +283,16 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
   updateDispatchTableEntry_(dispatcher, autograd_key);
 }
 
+// does a complete update of the dispatch table, synchronizing all
+// runtime dispatch keys with the current state of kernel registrations
+// in the dispatcher.
+// Note that we use updateDispatchTable_() to perform our per-key updating,
+// even though that function is equipped to handle out-of-order updates and
+// alias key updates, neither of which we send it. This is deliberate - the
+// current design is more tractable with all updates funneled through a single
+// per-key update mechanism, than with multiple variations that assume different
+// invariants.
+//
 void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) {
   // Note [Undefined in dispatchTable_]
   // (1) it gives people place to specify functionality that should run when there are no dispatch keys,
