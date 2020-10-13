@@ -17503,16 +17503,41 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             (torch.rand((10, 1), device=device).to(dtype), torch.rand((10, 1), device=device).to(dtype).transpose(0, 1)),
             (torch.randint(100, (10, ), device=device, dtype=torch.long), torch.rand(10, device=device).to(dtype))
         ]
-        for input in inputs:
-            actual = torch.igamma(input[0], input[1])
-            input0, input1 = input[0], input[1]
+        for input0, input1 in inputs:
+            actual = torch.igamma(input0, input1)
             if dtype == torch.bfloat16:
                 input0 = input0.to(torch.float)
                 input1 = input1.to(torch.float)
             expected = scipy.special.gammainc(input0.cpu().numpy(), input1.cpu().numpy())
             expected = torch.from_numpy(expected).to(dtype)
-            assert torch.allclose(actual, expected)
             self.assertEqual(actual, expected)
+
+    @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64)
+    def test_igamma_edge_cases(self, device, dtype):
+        tkwargs = {"dtype": dtype, "device": device}
+        infs = torch.zeros((3,), **tkwargs) + float("inf")
+        zeros = torch.zeros((3,), **tkwargs)
+        ones = torch.ones((3,), **tkwargs)
+        zero_to_large = torch.tensor([0., 1., 1e3], **tkwargs)
+        small_to_inf = torch.tensor([1e-3, 1., float("inf")], **tkwargs)
+        nans = torch.zeros((3,), **tkwargs) + float("nan")
+        inpouts = [
+            # (a    ,    x),       out
+            ((zeros, small_to_inf), ones),
+            ((small_to_inf, zeros), zeros),
+            ((infs, zero_to_large), zeros),
+            ((zero_to_large, infs), ones),
+            ((zeros, zeros), nans),
+            ((infs, infs), nans),
+            ((-small_to_inf, small_to_inf), nans),
+        ]
+        for inputs, output in inpouts:
+            calc = torch.igamma(inputs[0], inputs[1])
+            if torch.all(torch.isnan(output)):
+                self.assertTrue(torch.all(torch.isnan(calc)))
+            else:
+                self.assertEqual(calc, output)
 
     @dtypes(torch.int64, torch.float64)
     def test_remainder_edge_cases(self, device, dtype):
@@ -17537,8 +17562,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 r = a.remainder(b)
                 r_expected = torch.tensor([0, 0, 0, 0, -3, 3, -2, 2] * 10000, dtype=dtype, device=device)
                 self.assertEqual(r, r_expected)
-
                 # Test nan cases
+
                 a = torch.tensor([-34, 0, 34] * 20000, dtype=dtype, device=device)
                 b = torch.zeros(3 * 20000, dtype=dtype, device=device)
                 self.assertTrue(torch.isnan(a.remainder(b)).all())

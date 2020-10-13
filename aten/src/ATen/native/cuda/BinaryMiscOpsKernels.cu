@@ -124,6 +124,7 @@ REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel_cuda);
 REGISTER_DISPATCH(gcd_stub, &gcd_kernel_cuda);
 REGISTER_DISPATCH(lcm_stub, &lcm_kernel_cuda);
 REGISTER_DISPATCH(hypot_stub, &hypot_kernel_cuda);
+REGISTER_DISPATCH(igamma_stub, &igamma_kernel_cuda);
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel_cuda);
 REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel_cuda);
 
