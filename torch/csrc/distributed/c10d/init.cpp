@@ -972,41 +972,31 @@ Arguments:
     py::call_guard<py::gil_scoped_release>());
 #endif
 
+#define PROCESS_GROUP_DEPRECATION_WARNING(api_method)              \
+do { TORCH_WARN_ONCE(                                              \
+    #api_method "API is being deprecated, please ping "            \
+    "https://github.com/pytorch/pytorch/issues/46291 "             \
+    "if you see this warning");                                    \
+} while(0)
+
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
-      .def(
-          "is_completed",
-          [](::c10d::ProcessGroup::Work& work) -> bool {
-            TORCH_WARN_ONCE("ProcessGroup::Work::is_completed API is being "
-                "deprecated, please ping "
-                "https://github.com/pytorch/pytorch/issues/46291 "
-                "if you see this warning");
-            return work.isSuccess();
-          })
+      .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
       .def(
           "is_success",
           [](::c10d::ProcessGroup::Work& work) -> bool {
-            TORCH_WARN_ONCE("ProcessGroup::Work::is_success API is being "
-                "deprecated, please ping "
-                "https://github.com/pytorch/pytorch/issues/46291 "
-                "if you see this warning");
+            PROCESS_GROUP_DEPRECATION_WARNING(ProcessGroup::Work::is_success);
             return work.isSuccess();
           })
       .def(
           "exception",
           [](::c10d::ProcessGroup::Work& work) -> std::exception_ptr {
-            TORCH_WARN_ONCE("ProcessGroup::Work::exception API is being "
-                "deprecated, please ping "
-                "https://github.com/pytorch/pytorch/issues/46291 "
-                "if you see this warning");
+            PROCESS_GROUP_DEPRECATION_WARNING(ProcessGroup::Work::exception);
             return work.exception();
           })
       .def(
           "source_rank",
           [](::c10d::ProcessGroup::Work& work) -> int {
-            TORCH_WARN_ONCE("ProcessGroup::Work::source_rank API is being "
-                "deprecated, please ping "
-                "https://github.com/pytorch/pytorch/issues/46291 "
-                "if you see this warning");
+            PROCESS_GROUP_DEPRECATION_WARNING(ProcessGroup::Work::source_rank);
             return work.sourceRank();
           })
       .def("_source_rank", &::c10d::ProcessGroup::Work::sourceRank)
@@ -1018,10 +1008,7 @@ Arguments:
       .def(
           "synchronize",
           [](::c10d::ProcessGroup::Work& work) -> void {
-            TORCH_WARN_ONCE("ProcessGroup::Work::synchronize API is being "
-                "deprecated, please ping "
-                "https://github.com/pytorch/pytorch/issues/46291 "
-                 "if you see this warning");
+            PROCESS_GROUP_DEPRECATION_WARNING(ProcessGroup::Work::synchronize);
             work.synchronize();
           })
       .def(
@@ -1158,6 +1145,8 @@ Arguments:
 
   Py_RETURN_TRUE;
 }
+
+#undef PROCESS_GROUP_DEPRECATION_WARNING
 
 } // namespace
 
