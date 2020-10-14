@@ -54,6 +54,8 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
       const MessageType& messageType,
       const int64_t messageId,
       const std::shared_ptr<FutureMessage>& responseFuture) const override;
+
+  bool cudaAvailable() const override;
 };
 
 } // namespace rpc
