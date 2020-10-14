@@ -17531,7 +17531,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # test igamma for reasonable range of values
         loglo = -4  # approx 0.018
         loghi = 4  # approx 54.6
-        _helper_test_igamma(loglo, loghi, device, dtype)
+        self._helper_test_igamma(loglo, loghi, device, dtype)
 
     @dtypes(torch.float64)
     def test_igamma_extreme(self, device, dtype):
@@ -17546,7 +17546,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         kwargs = {"device": device, "dtype": dtype}
         loglo = torch.log(torch.tensor(torch.finfo(dtype).tiny, **kwargs))
         loghi = torch.log(torch.tensor(torch.finfo(dtype).max, **kwargs))
-        _helper_test_igamma(loglo, loghi, device, dtype)
+        self._helper_test_igamma(loglo, loghi, device, dtype)
 
     @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
     @dtypesIfCUDA(torch.bfloat16, torch.float32, torch.float64)
