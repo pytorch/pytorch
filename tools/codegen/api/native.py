@@ -1,18 +1,22 @@
 from tools.codegen.model import *
 
-from tools.codegen.api.types import TensorOptionsArguments, LegacyDispatcherArgument, ThisArgument
+from tools.codegen.api.types import TensorOptionsArguments, NativeArgument, ThisArgument
 import tools.codegen.api.cpp as cpp
-import tools.codegen.local as local
+from tools.codegen import local
 
-from typing import Union, Sequence
+from typing import Union, Sequence, Tuple
 
-# This file describes the translation of JIT schema to the legacy
-# dispatcher API.  This looks a lot like the C++ API (which
-# makes historical sense, because historically the dispatcher API
-# and the C++ API exactly matched), but over time we have
-# evolved the C++ API without actually changing our native::
-# kernels.  To be deleted eventually.  Dispatcher calls use
-# this when you are not use_c10_dispatcher: full.
+# This file describes the translation of JIT schema to the native functions API.
+# This looks a lot like the C++ API (which makes historical sense, because the
+# idea was you wrote native functions to implement functions in the C++ API),
+# but over time we have evolved the C++ API without actually changing our
+# native:: kernels.  The intention is to make native API and dispatcher API
+# line up as closely as possible, since this results in the least overhead
+# (no translation is needed from dispatcher API to native API).
+#
+# When a function is not use_c10_dispatcher: full, the dispatcher API actually
+# coincides with the native:: API (e.g., we do as dumb as pass through as
+# possible).
 
 def name(func: FunctionSchema) -> str:
     name = str(func.name.name)
@@ -39,9 +43,9 @@ def returns_type(rs: Sequence[Return]) -> str:
 def argument_type(a: Argument) -> str:
     return argumenttype_type(a.type, mutable=a.is_write)
 
-def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Sequence[LegacyDispatcherArgument]:
+def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Sequence[NativeArgument]:
     if isinstance(a, Argument):
-        return [LegacyDispatcherArgument(
+        return [NativeArgument(
             type=argument_type(a),
             name=a.name,
             default=cpp.default_expr(a.default, a.type) if a.default is not None else None,
@@ -49,7 +53,7 @@ def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Sequen
         )]
     elif isinstance(a, ThisArgument):
         # Erase ThisArgument from the distinction
-        return [LegacyDispatcherArgument(
+        return [NativeArgument(
             type=argument_type(a.argument),
             name=a.argument.name,
             default=None,
@@ -64,7 +68,7 @@ def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Sequen
                 default = '{}'
             elif a.dtype.default == "long":
                 default = 'at::kLong'  # TODO: this is wrong
-            return [LegacyDispatcherArgument(
+            return [NativeArgument(
                 type='const TensorOptions &',
                 name='options',
                 default=default,
@@ -73,25 +77,25 @@ def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Sequen
         else:
             assert local.use_c10_dispatcher() == UseC10Dispatcher.full
             return [
-                LegacyDispatcherArgument(
+                NativeArgument(
                     type='c10::optional<ScalarType>',
                     name='dtype',
                     default='{}',
                     argument=a,
                 ),
-                LegacyDispatcherArgument(
+                NativeArgument(
                     type='c10::optional<Layout>',
                     name='layout',
                     default='{}',
                     argument=a,
                 ),
-                LegacyDispatcherArgument(
+                NativeArgument(
                     type='c10::optional<Device>',
                     name='device',
                     default='{}',
                     argument=a,
                 ),
-                LegacyDispatcherArgument(
+                NativeArgument(
                     type='c10::optional<bool>',
                     name='pin_memory',
                     default='{}',
@@ -100,7 +104,5 @@ def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Sequen
     else:
         assert_never(a)
 
-def arguments(func: FunctionSchema) -> Sequence[LegacyDispatcherArgument]:
-    signature_group = cpp.signature_group(func)
-    args = signature_group.signature_prefer_gathered().arguments
-    return [i for arg in args for i in argument(arg)]
+def arguments(func: FunctionSchema) -> Tuple[NativeArgument, ...]:
+    return tuple(i for arg in cpp.group_arguments(func, method=False) for i in argument(arg))
