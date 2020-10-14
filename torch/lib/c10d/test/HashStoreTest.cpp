@@ -19,6 +19,8 @@ void testGetSet(std::string prefix = "") {
     c10d::test::check(store, "key0", "value0");
     c10d::test::check(store, "key1", "value1");
     c10d::test::check(store, "key2", "value2");
+    auto numKeys = store.getNumKeys();
+    EXPECT_EQ(numKeys, 3);
   }
 
   // get() waits up to timeout_.
