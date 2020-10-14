@@ -518,6 +518,13 @@ void initJITBindings(PyObject* module) {
             return old_num;
           })
       .def(
+          "_jit_get_num_profiled_runs",
+          [] {
+            // pybind can't automatically bind to atomic size_t
+            size_t num_runs = getNumProfiledRuns();
+            return num_runs;
+          })
+      .def(
           "_jit_set_bailout_depth",
           [](size_t depth) {
             size_t old_depth = getBailoutDepth();
@@ -1098,6 +1105,10 @@ void initJITBindings(PyObject* module) {
       .def(
           "then",
           &PythonFutureWrapper::then,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "add_done_callback",
+          &PythonFutureWrapper::add_done_callback,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "set_result",

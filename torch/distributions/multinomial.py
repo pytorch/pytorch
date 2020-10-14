@@ -2,7 +2,6 @@ import torch
 from torch._six import inf
 from torch.distributions.distribution import Distribution
 from torch.distributions import Categorical
-from numbers import Number
 from torch.distributions import constraints
 from torch.distributions.utils import broadcast_all
 
@@ -40,6 +39,7 @@ class Multinomial(Distribution):
     """
     arg_constraints = {'probs': constraints.simplex,
                        'logits': constraints.real}
+    total_count: int
 
     @property
     def mean(self):
@@ -50,7 +50,7 @@ class Multinomial(Distribution):
         return self.total_count * self.probs * (1 - self.probs)
 
     def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
-        if not isinstance(total_count, Number):
+        if not isinstance(total_count, int):
             raise NotImplementedError('inhomogeneous total_count is not supported')
         self.total_count = total_count
         self._categorical = Categorical(probs=probs, logits=logits)
