@@ -544,7 +544,7 @@ class _ValgrindWrapper(object):
         stat_log = os.path.join(working_dir, "callgrind_stat.txt")
         stdout_stderr_log = os.path.join(working_dir, "stdout_stderr.log")
 
-        def run(args: List[str], **kwargs: Any) -> Tuple[subprocess.CompletedProcess, str]:
+        def run(args: List[str], **kwargs: Any) -> Tuple[subprocess.CompletedProcess[str], str]:
             # https://thraxil.org/users/anders/posts/2008/03/13/Subprocess-Hanging-PIPE-is-your-enemy/
             f_stdout_stderr = open(stdout_stderr_log, "wb")
             try:

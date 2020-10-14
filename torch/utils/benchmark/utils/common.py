@@ -46,7 +46,7 @@ class TaskSpec:
             f"{textwrap.indent(self.stmt, '  ')}"
         )
 
-    def setup_str(self):
+    def setup_str(self) -> str:
         return (
             "" if self.setup == "pass"
             else f"setup:\n{textwrap.indent(self.setup, '  ')}" if "\n" in self.setup
