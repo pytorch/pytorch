@@ -3797,10 +3797,11 @@ class DistributedTest:
             expected_len = 2
 
             class TensorWrapper:
-                __slots__ = ['t']
+                __slots__ = ['t', 'moved_to_gpu']
 
                 def __init__(self, t):
                     self.t = t
+                    self.moved_to_gpu = False
 
             # Handlers for specific types of validation we want to do based on
             # the input type.
@@ -3818,9 +3819,17 @@ class DistributedTest:
                 return x.a + x.b
 
             def custom_type_validator(x):
-                self.assertEqual(str(x.t.device), "cpu")
+                self.assertTrue(x.moved_to_gpu or (str(x.t.device) == "cpu"))
                 x.t = x.t.to(self.rank)
+                x.moved_to_gpu = True
                 return x.t
+
+            def dict_validator(x):
+                self.assertTrue(EXPECTED_FIELDS[0] in x.keys())
+                self.assertTrue(EXPECTED_FIELDS[1] in x.keys())
+                self.assertEqual(1, len(set(t.device for t in x.values())))
+                self.assertEqual(x[EXPECTED_FIELDS[0]].device.index, self.rank)
+                return x[EXPECTED_FIELDS[0]] + x[EXPECTED_FIELDS[1]]
 
             validators = {
                 TensorWrapper: custom_type_validator,
@@ -3828,6 +3837,7 @@ class DistributedTest:
                 list: tuple_and_list_validator,
                 TestNamedTupleInput_0: namedtuple_validator,
                 TestNamedTupleInput_1: namedtuple_validator,
+                dict: dict_validator,
             }
 
             class ToyModel(torch.nn.Module):
@@ -3845,29 +3855,43 @@ class DistributedTest:
             model = torch.nn.parallel.DistributedDataParallel(
                 ToyModel().to(self.rank), device_ids=[self.rank]
             )
+
+            def train_iter(inp, input_type):
+                for _ in range(4):
+                    out = model(inp, input_type)
+                    out.sum().backward()
+
             # CPU tuple input, should be moved to the proper device before call
             # to forward.
             inp = tuple(torch.randn(10, 10) for _ in range(expected_len))
-            model(inp, tuple)
+            train_iter(inp, tuple)
+
             # List CPU input, should be moved to proper device before call to
             # forward.
             inp = [torch.randn(10, 10) for _ in range(expected_len)]
-            model(inp, list)
+            train_iter(inp, list)
             # Custom type containing tensor. The type is maintained, but the
             # device is not propagated (which is what happens with scatter too)
             inp = TensorWrapper(torch.randn(10, 10))
-            model(inp, TensorWrapper)
-
+            train_iter(inp, TensorWrapper)
+            # NamedTuple input. The type should be maintained and tensor inputs
+            # should be moved to the correct device as in scatter.
             batch = 5
             dim = 10
             a = torch.rand(batch, dim)
             b = torch.rand(batch, dim)
 
             inp = TestNamedTupleInput_0(a, b)
-            model(inp, type(inp))
+            train_iter(inp, type(inp))
 
             inp = TestNamedTupleInput_1(a, b)
-            model(inp, type(inp))
+            train_iter(inp, type(inp))
+
+            inp = {
+                EXPECTED_FIELDS[0]: a,
+                EXPECTED_FIELDS[1]: b,
+            }
+            train_iter(inp, type(inp))
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
