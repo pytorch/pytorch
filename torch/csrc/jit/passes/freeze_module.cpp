@@ -560,6 +560,10 @@ class AttributePropagator {
               TORCH_INTERNAL_ASSERT(module.hasattr(name));
               auto module = Module(mptr);
               auto attr = module.attr(name);
+              // TODO: this could be insertReferencedAttr to be more clear,
+              // these are attributes we could not inline, which include 
+              // other reasons besides mutation (unsupported constant, 
+              // getAttr resolving to non-getAttr node, etc)
               insertMutableAttr(name, attr, mptr);
               if (attr.isModule()) {
                 modules.insert(attr.toModule()._ivalue());
