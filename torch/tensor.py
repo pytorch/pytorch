@@ -412,6 +412,12 @@ class Tensor(torch._C._TensorBase):
         if not self.requires_grad:
             return torch.Tensor._lu(self, pivot=pivot, get_infos=get_infos)
         else:
+            if not (self.size(-2) == self.size(-1) and self.dtype.is_floating_point):
+                raise ValueError(
+                    'lu.backward works only with batches of squared full-rank matrices'
+                    ' of floating types.'
+                )
+
             class _LU(torch.autograd.Function):
                 @staticmethod
                 def forward(ctx, self, pivot=True, get_infos=False):
