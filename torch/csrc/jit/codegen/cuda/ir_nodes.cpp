@@ -1222,7 +1222,12 @@ class ConcretizeDomain : private BackwardVisitor {
 };
 
 void ConcretizeDomain::concretizePwOp(Expr* e) {
-  TensorView* tv = *ir_utils::filterByType<TensorView>(e->outputs()).begin();
+  if (e->output(0)->getValType() != ValType::TensorView) {
+    return;
+  }
+
+  TORCH_INTERNAL_ASSERT(e->outputs().size() == 1);
+  TensorView* tv = e->output(0)->as<TensorView>();
 
   std::vector<IterDomain*> io = tv->getRootDomain();
 
@@ -1316,8 +1321,13 @@ class ProveValEqual : private IterVisitor {
 
   // Inspect a pointwise op and record the identified equality
   void provePwOp(Expr* e) {
-    TensorView* tv = *ir_utils::filterByType<TensorView>(e->outputs()).begin();
-    std::vector<IterDomain*> io = tv->getRootDomain();
+    if (e->output(0)->getValType() != ValType::TensorView) {
+      return;
+    }
+
+    TORCH_INTERNAL_ASSERT(e->outputs().size() == 1);
+    TensorView* tv = e->output(0)->as<TensorView>();
+    const std::vector<IterDomain*>& io = tv->getRootDomain();
 
     // Record equalities from output to all the inputs
     // ignores un-concretizable broadcasts
