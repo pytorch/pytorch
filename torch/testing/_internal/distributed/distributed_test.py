@@ -1303,10 +1303,13 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-        def test_all_reduce_max_complex_unsupported(self):
+        def test_all_reduce_complex_unsupported_ops(self):
+            unsupported_ops = [dist.ReduceOp.MAX, dist.ReduceOp.MIN, dist.ReduceOp.PRODUCT,
+                               dist.ReduceOp.BAND, dist.ReduceOp.BOR, dist.ReduceOp.BXOR]
             group, group_id, rank = self._init_global_test()
-            with self.assertRaisesRegex(RuntimeError, "all_reduce does not support"):
-                dist.all_reduce(_build_tensor(1, dtype=torch.cfloat), dist.ReduceOp.MAX, group_id)
+            for unsupported_op in unsupported_ops:
+                with self.assertRaisesRegex(RuntimeError, "all_reduce does not support"):
+                    dist.all_reduce(_build_tensor(1, dtype=torch.cfloat), unsupported_op, group_id)
 
         @unittest.skipIf(
             BACKEND != "gloo",
