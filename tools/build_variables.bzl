@@ -127,6 +127,7 @@ core_sources_full = [
     "torch/csrc/jit/codegen/fuser/fallback.cpp",
     "torch/csrc/jit/codegen/fuser/interface.cpp",
     "torch/csrc/jit/codegen/cuda/interface.cpp",
+    "torch/csrc/jit/codegen/cuda/instrumentation.cpp",
     "torch/csrc/jit/codegen/fuser/kernel_cache.cpp",
     "torch/csrc/jit/frontend/builtin_functions.cpp",
     "torch/csrc/jit/frontend/versioned_symbols.cpp",
@@ -294,7 +295,6 @@ libtorch_distributed_sources = [
 ]
 
 jit_sources_full = [
-    "torch/csrc/jit/codegen/cuda/instrumentation.cpp",
     "torch/csrc/jit/passes/lower_graph.cpp",
     "torch/csrc/jit/runtime/register_c10_ops.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
@@ -351,7 +351,6 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/fusion.cpp",
     "torch/csrc/jit/codegen/cuda/graph_fuser.cpp",
     "torch/csrc/jit/codegen/cuda/index_compute.cpp",
-    "torch/csrc/jit/codegen/cuda/instrumentation.cpp",
     "torch/csrc/jit/codegen/cuda/ir_base_nodes.cpp",
     "torch/csrc/jit/codegen/cuda/ir_cloner.cpp",
     "torch/csrc/jit/codegen/cuda/ir_graphviz.cpp",
