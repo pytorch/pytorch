@@ -834,6 +834,29 @@ Q: Is tensor in-place indexed assignment like `data[index] = new_data` supported
 
     assert torch.all(torch.eq(out, torch.tensor(out_ort)))
 
+  Below is the list of supported patterns for indexing. ::
+
+    # Scalar indices
+    data[0, 1] = new_data
+
+    # Slice indices
+    data[:3] = new_data
+
+    # Tensor indices (only consecutive 1-d tensor indices are supported)
+    data[torch.tensor([2, 3]), torch.tensor([1, 2])] = new_data
+
+    # Ellipsis (not supported to export in script modules)
+    data[...] = new_data
+
+    # The combination of above
+    data[2, ..., torch.tensor([2, 1, 3]), 2:4] += update
+
+    # Boolean mask
+    data[data != 1] = new_data
+
+  If you are experiencing issues exporting indexing similar to the above patterns, please double check that
+  you are exporting with the latest opset (opset_version=12).
+
 Q: Is tensor list exportable to ONNX?
 
   Yes, this is supported now for ONNX opset version >= 11. ONNX introduced the concept of Sequence in opset 11.
