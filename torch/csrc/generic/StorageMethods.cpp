@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
@@ -229,9 +230,9 @@ PyObject * THPStorage_(writeFile)(PyObject *_self, PyObject *args)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
-  PyObject *file = PyTuple_GET_ITEM(args, 0);
-  bool is_real_file = PyTuple_GET_ITEM(args, 1) == Py_True;
-  bool save_size = PyTuple_GET_ITEM(args, 2) == Py_True;
+  PyObject *file = PyTuple_GetItem(args, 0);
+  bool is_real_file = PyTuple_GetItem(args, 1) == Py_True;
+  bool save_size = PyTuple_GetItem(args, 2) == Py_True;
 
   if (!is_real_file) {
     THPStorage_(writeFileRaw<PyObject*>)(self->cdata, file, save_size);
@@ -336,7 +337,8 @@ PyObject * THPStorage_(_setCdata)(PyObject *_self, PyObject *new_cdata)
 }
 
 static PyMethodDef THPStorage_(methods)[] = {
-  {"copy_", (PyCFunction)(void(*)(void))THPStorage_(copy_), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"copy_", convertPyCFunctionWithKeywords(THPStorage_(copy_)),
+    METH_VARARGS | METH_KEYWORDS, nullptr},
   {"element_size", THPStorage_(elementSize), METH_NOARGS, nullptr},
   {"fill_", THPStorage_(fill_), METH_O, nullptr},
   {"new", THPStorage_(new), METH_NOARGS, nullptr},
@@ -348,9 +350,11 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"_new_with_file", THPStorage_(newWithFile), METH_O | METH_STATIC, nullptr},
   {"_set_from_file", THPStorage_(setFromFile), METH_VARARGS, nullptr},
 #if !defined(THC_GENERIC_FILE)
-  {"from_buffer", (PyCFunction)(void(*)(void))THPStorage_(fromBuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"from_buffer", convertPyCFunctionWithKeywords(THPStorage_(fromBuffer)),
+    METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
 #endif
-  {"from_file", (PyCFunction)(void(*)(void))THPStorage_(fromFile), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"from_file", convertPyCFunctionWithKeywords(THPStorage_(fromFile)),
+    METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
 #ifdef THC_GENERIC_FILE
   {"get_device", THPStorage_(getDevice), METH_NOARGS, nullptr},
 #endif

@@ -733,7 +733,7 @@ static void _trim_grad_input(const std::shared_ptr<PyNode>& cdata, THPFunction *
   }
 }
 
-PyObject * THPFunction_do_backward(PyObject *self, PyObject *args)
+PyObject * THPFunction_do_backward(PyObject *_self, PyObject *args)
 {
   try {
     Py_ssize_t num_args = args ? PyTuple_GET_SIZE(args) : 0;
@@ -745,8 +745,8 @@ PyObject * THPFunction_do_backward(PyObject *self, PyObject *args)
       return nullptr;
     }
 
-    auto self_thp = (THPFunction*)self;
-    auto cdata = self_thp->cdata.lock();
+    auto self = (THPFunction*)_self;
+    auto cdata = self->cdata.lock();
     // In obscure situations, cdata might be nullptr because it's expired.  THAT
     // is an internal error and I'd like to know about it, but since this is
     // all dead soon I didn't bother implementing a sanity check here.  See
@@ -767,8 +767,8 @@ PyObject * THPFunction_do_backward(PyObject *self, PyObject *args)
     // zero-filled buffers instead
     Py_INCREF(raw_grad_output);
     THPObjectPtr grad_output(raw_grad_output);
-    if (self_thp->materialize_grads) {
-      _prepare_grads(self_thp, grad_output, true);
+    if (self->materialize_grads) {
+      _prepare_grads(self, grad_output, true);
     }
 
     // self.backward(*grad_output)
@@ -781,7 +781,7 @@ PyObject * THPFunction_do_backward(PyObject *self, PyObject *args)
 
     // We allow functions to return more gradients, than there were outputs,
     // if and only if the additional ones are all None
-    _trim_grad_input(cdata, self_thp, grad_input);
+    _trim_grad_input(cdata, self, grad_input);
     int num_grads = PyTuple_GET_SIZE(grad_input.get());
     int num_outputs = cdata->num_outputs();
     THPUtils_assert(num_grads == num_outputs, "%s returned an invalid number of "
@@ -802,15 +802,15 @@ PyObject * THPFunction_do_backward(PyObject *self, PyObject *args)
 // Other methods / attributes
 ////////////////////////////////////////////////////////////////////////////////
 
-PyObject* THPFunction__register_hook_dict(PyObject *self, PyObject *_var)
+PyObject* THPFunction__register_hook_dict(PyObject *_self, PyObject *_var)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPVariable_Check(_var), "_register_hook_dict expected a variable");
   THPVariable *var = (THPVariable*)_var;
   std::unique_ptr<FunctionPreHook> hook(new PyFunctionPreHook(
       var->backward_hooks, var->cdata.output_nr()));
-  auto self_thp = (THPFunction*)self;
-  auto cdata = self_thp->cdata.lock();
+  auto self = (THPFunction*)_self;
+  auto cdata = self->cdata.lock();
   TORCH_CHECK(cdata,
     "Legacy autograd function had register_hook called before the function was "
     "invoked.  This usage pattern is no longer supported: please call register_hook "
@@ -821,11 +821,11 @@ PyObject* THPFunction__register_hook_dict(PyObject *self, PyObject *_var)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPFunction_register_hook(PyObject *self, PyObject *hook)
+PyObject* THPFunction_register_hook(PyObject *_self, PyObject *hook)
 {
   HANDLE_TH_ERRORS
-  auto self_thp = (THPFunction*)self;
-  auto cdata = self_thp->cdata.lock();
+  auto self= (THPFunction*)_self;
+  auto cdata = self->cdata.lock();
   TORCH_CHECK(cdata,
     "Legacy autograd function had _register_hook called before the function was "
     "invoked.  This usage pattern is no longer supported: please call _register_hook "

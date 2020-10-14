@@ -4,6 +4,7 @@
 #include <torch/csrc/cuda/Stream.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
 #include <c10/cuda/CUDAGuard.h>
@@ -45,8 +46,9 @@ static PyObject * THCPEvent_pynew(
 }
 
 static PyObject * THCPEvent_from_ipc_handle(
-    PyTypeObject *type, PyObject *args, PyObject *kwargs) {
+    PyObject *_type, PyObject *args, PyObject *kwargs) {
   HANDLE_TH_ERRORS
+  auto type = (PyTypeObject*)_type;
 
   static torch::PythonArgParser parser({
     "from_ipc_handle(Device device, std::string ipc_handle)",
@@ -161,7 +163,8 @@ static struct PyGetSetDef THCPEvent_properties[] = {
 };
 
 static PyMethodDef THCPEvent_methods[] = {
-  {(char*)"from_ipc_handle", (PyCFunction)(void(*)(void))THCPEvent_from_ipc_handle,
+  {(char*)"from_ipc_handle",
+    convertPyCFunctionWithKeywords(THCPEvent_from_ipc_handle),
     METH_CLASS | METH_VARARGS | METH_KEYWORDS, nullptr},
   {(char*)"record", THCPEvent_record, METH_O, nullptr},
   {(char*)"wait", THCPEvent_wait, METH_O, nullptr},

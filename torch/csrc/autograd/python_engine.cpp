@@ -8,6 +8,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <ATen/BatchedTensorImpl.h>
 #include <ATen/VmapMode.h>
 #include <pybind11/pybind11.h>
@@ -277,7 +278,9 @@ PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 }
 
 static struct PyMethodDef THPEngine_methods[] = {
-  {(char*)"run_backward", (PyCFunction)(void(*)(void))THPEngine_run_backward, METH_VARARGS | METH_KEYWORDS, nullptr},
+  {(char*)"run_backward",
+    convertPyCFunctionWithKeywords(THPEngine_run_backward),
+    METH_VARARGS | METH_KEYWORDS, nullptr},
   {(char*)"queue_callback", THPEngine_queue_callback, METH_O, nullptr},
   {(char*)"is_checkpoint_valid", THPEngine_is_checkpoint_valid, METH_NOARGS, nullptr},
   {nullptr}
