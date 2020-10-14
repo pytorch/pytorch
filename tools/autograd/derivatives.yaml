@@ -251,7 +251,7 @@
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
 
 - name: asin(Tensor self) -> Tensor
-  self: grad * (-self * self + 1).rsqrt()
+  self: grad * (-self * self + 1).rsqrt().conj()
 
 - name: atan(Tensor self) -> Tensor
   self: grad / (self * self + 1).conj()
