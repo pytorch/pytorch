@@ -455,6 +455,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               ProcessGroupAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "get_worker_info",
+          (const WorkerInfo& (ProcessGroupAgent::*)(worker_id_t id) const) &
+              ProcessGroupAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "get_worker_infos",
           (std::vector<WorkerInfo>(ProcessGroupAgent::*)() const) &
               ProcessGroupAgent::getWorkerInfos,
@@ -548,6 +553,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       .def(
           "get_worker_info",
           (const WorkerInfo& (TensorPipeAgent::*)(const std::string&)const) &
+              TensorPipeAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_info",
+          (const WorkerInfo& (TensorPipeAgent::*)(worker_id_t id) const) &
               TensorPipeAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
