@@ -62,9 +62,7 @@
 #endif
 #endif
 
-#if (defined(_WIN32) || defined(_WIN64) || defined(FBCODE_CAFFE2) || defined(C10_MOBILE))
-#define NVALGRIND
-#else
+#if defined(USE_VALGRIND)
 #include <callgrind.h>
 #endif
 
@@ -833,20 +831,20 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
     "valgrind_supported_platform", [](){
-      #if defined(NVALGRIND)
-      return false;
-      #else
+      #if defined(USE_VALGRIND)
       return true;
+      #else
+      return false;
       #endif
     }
   );
 
   py_module.def(
     "valgrind_toggle", [](){
-      #if defined(NVALGRIND)
-      TORCH_CHECK(false, "Valgrind is not supported.");
-      #else
+      #if defined(USE_VALGRIND)
       CALLGRIND_TOGGLE_COLLECT;
+      #else
+      TORCH_CHECK(false, "Valgrind is not supported.");
       #endif
     }
   );
