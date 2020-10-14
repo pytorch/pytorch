@@ -717,9 +717,9 @@ static PyMappingMethods THPVariable_as_mapping = {
 };
 
 static PyMethodDef extra_methods[] = {
-  {"as_subclass", convertPyCFunctionWithKeywords(THPVariable_as_subclass),
+  {"as_subclass", castPyCFunctionWithKeywords(THPVariable_as_subclass),
     METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"_make_subclass", convertPyCFunctionWithKeywords(THPVariable_make_subclass),
+  {"_make_subclass", castPyCFunctionWithKeywords(THPVariable_make_subclass),
     METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
   {nullptr}
 };

@@ -72,7 +72,7 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
 ${py_forwards}
 
 static PyMethodDef nn_functions[] = {
-  {"_parse_to", convertPyCFunctionWithKeywords(THPVariable__parse_to),
+  {"_parse_to", castPyCFunctionWithKeywords(THPVariable__parse_to),
     METH_VARARGS | METH_KEYWORDS, nullptr},
   ${py_method_defs}
   {NULL}

@@ -164,7 +164,7 @@ static struct PyGetSetDef THCPEvent_properties[] = {
 
 static PyMethodDef THCPEvent_methods[] = {
   {(char*)"from_ipc_handle",
-    convertPyCFunctionWithKeywords(THCPEvent_from_ipc_handle),
+    castPyCFunctionWithKeywords(THCPEvent_from_ipc_handle),
     METH_CLASS | METH_VARARGS | METH_KEYWORDS, nullptr},
   {(char*)"record", THCPEvent_record, METH_O, nullptr},
   {(char*)"wait", THCPEvent_wait, METH_O, nullptr},

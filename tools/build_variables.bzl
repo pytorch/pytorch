@@ -525,7 +525,6 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/cuda_lazy_init.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/object_ptr.cpp",
-    "torch/csrc/utils/pycfunction_helpers.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
     "torch/csrc/utils/python_dispatch.cpp",
     "torch/csrc/utils/structseq.cpp",

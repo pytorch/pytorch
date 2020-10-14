@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Python.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
-PyCFunction convertPyCFunctionWithKeywords(PyCFunctionWithKeywords func);
+inline PyCFunction castPyCFunctionWithKeywords(PyCFunctionWithKeywords func) {
+  return (PyCFunction)(void(*)(void))func;
+}

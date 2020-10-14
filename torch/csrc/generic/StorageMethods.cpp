@@ -337,7 +337,7 @@ PyObject * THPStorage_(_setCdata)(PyObject *_self, PyObject *new_cdata)
 }
 
 static PyMethodDef THPStorage_(methods)[] = {
-  {"copy_", convertPyCFunctionWithKeywords(THPStorage_(copy_)),
+  {"copy_", castPyCFunctionWithKeywords(THPStorage_(copy_)),
     METH_VARARGS | METH_KEYWORDS, nullptr},
   {"element_size", THPStorage_(elementSize), METH_NOARGS, nullptr},
   {"fill_", THPStorage_(fill_), METH_O, nullptr},
@@ -350,10 +350,10 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"_new_with_file", THPStorage_(newWithFile), METH_O | METH_STATIC, nullptr},
   {"_set_from_file", THPStorage_(setFromFile), METH_VARARGS, nullptr},
 #if !defined(THC_GENERIC_FILE)
-  {"from_buffer", convertPyCFunctionWithKeywords(THPStorage_(fromBuffer)),
+  {"from_buffer", castPyCFunctionWithKeywords(THPStorage_(fromBuffer)),
     METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
 #endif
-  {"from_file", convertPyCFunctionWithKeywords(THPStorage_(fromFile)),
+  {"from_file", castPyCFunctionWithKeywords(THPStorage_(fromFile)),
     METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
 #ifdef THC_GENERIC_FILE
   {"get_device", THPStorage_(getDevice), METH_NOARGS, nullptr},

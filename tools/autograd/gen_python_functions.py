@@ -1076,7 +1076,7 @@ def method_def(name, declarations, is_python_method, module):
         pyfunc_cast = ''
         flags = 'METH_NOARGS' if is_python_method else 'METH_VARARGS | METH_KEYWORDS'
     else:
-        pyfunc_cast = 'convertPyCFunctionWithKeywords'
+        pyfunc_cast = 'castPyCFunctionWithKeywords'
         flags = 'METH_VARARGS | METH_KEYWORDS'
 
     if module == "torch":

@@ -279,7 +279,7 @@ PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 
 static struct PyMethodDef THPEngine_methods[] = {
   {(char*)"run_backward",
-    convertPyCFunctionWithKeywords(THPEngine_run_backward),
+    castPyCFunctionWithKeywords(THPEngine_run_backward),
     METH_VARARGS | METH_KEYWORDS, nullptr},
   {(char*)"queue_callback", THPEngine_queue_callback, METH_O, nullptr},
   {(char*)"is_checkpoint_valid", THPEngine_is_checkpoint_valid, METH_NOARGS, nullptr},
