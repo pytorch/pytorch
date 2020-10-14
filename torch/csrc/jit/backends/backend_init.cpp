@@ -8,13 +8,17 @@
 namespace torch {
 namespace jit {
 
-// Selectively lower \p cloned_mod to a backend. \p to_backend
+// Selectively lower \p mod to a backend. \p to_backend
 // is called to lower modules. \p modules_to_lower contains
-// qualified names of submodules of \p cloned_mod that should be lowered.
+// qualified names of submodules of \p mod that should be lowered.
 void to_backend_selective_impl(
-    Module& cloned_mod,
+    Module& mod,
     py::function to_backend,
     const std::vector<std::string>& modules_to_lower) {
+  // This map will be used later to remap types in ancestor module graphs for
+  // all lowered submodules.
+  std::unordered_map<TypePtr, TypePtr> type_remap;
+
   // For each module that should be lowered:
   for (const auto& module_to_lower : modules_to_lower) {
     // Use QualifiedName to parse the qualified module names.
@@ -30,7 +34,7 @@ void to_backend_selective_impl(
     // Search through the module hierarchy using the atoms of
     // qual_module_name until current points to the module to
     // be lowered while storing references all of the ancestors.
-    Module current = cloned_mod;
+    Module current = mod;
     for (size_t i = 0, e = atoms.size(); i < e; ++i) {
       IValue submodule = current.attr(atoms[i]);
       if (submodule.isModule()) {
@@ -56,28 +60,32 @@ void to_backend_selective_impl(
     Module parent = ancestors.back();
     auto parent_type = parent.type();
     parent_type->unsafeChangeAttributeType(
-        qual_module_name.name(), lowered_submodule.type());
-    parent.setattr(qual_module_name.name(), lowered_submodule._ivalue());
+        atoms.back(), lowered_submodule.type());
+    parent.setattr(atoms.back(), lowered_submodule._ivalue());
 
-    // Fix references to the submodule in the graphs of ancestors' methods.
-    std::unordered_map<TypePtr, TypePtr> type_remap;
+    // Record the type mapping from old type -> lowered type.
     type_remap[current.type()] = lowered_submodule.type();
+  }
 
-    auto type_remap_fn = [&type_remap](TypePtr in) {
-      auto it = type_remap.find(in);
-      if (it == type_remap.end())
-        return in;
-      return it->second;
-    };
+  // Having lowered all of the modules that needed to be lowered, remap types in
+  // all graphs in the hierarchy so that the graphs all use the new lowered
+  // type.
+  auto type_remap_fn = [&type_remap](TypePtr in) {
+    auto it = type_remap.find(in);
+    if (it == type_remap.end())
+      return in;
+    return it->second;
+  };
 
-    for (auto& ancestor : ancestors) {
-      for (auto& fn : ancestor.type()->methods()) {
-        auto method = ancestor.get_method(fn->name());
-        auto graph = method.graph();
-        graph->remapTypes(type_remap_fn);
-        auto new_schema = fn->getSchema().cloneWithRemappedTypes(type_remap_fn);
-        fn->setSchema(new_schema);
-      }
+  // modules() iterates over all modules in the hierarchy including the root.
+  for (auto module : mod.modules()) {
+    auto module_type = module.type();
+    for (auto& fn : module_type->methods()) {
+      auto method = module.get_method(fn->name());
+      auto graph = method.graph();
+      graph->remapTypes(type_remap_fn);
+      auto new_schema = fn->getSchema().cloneWithRemappedTypes(type_remap_fn);
+      fn->setSchema(new_schema);
     }
   }
 }
@@ -322,12 +330,11 @@ void initJitBackendBindings(PyObject* module) {
           // interfere with the changes that to_backend_selective_impl will
           // make.
           Module& mod = original_module.value();
-          auto cloned_mod = mod.clone();
-          to_backend_selective_impl(cloned_mod, to_backend, modules_to_lower);
+          to_backend_selective_impl(mod, to_backend, modules_to_lower);
           // Wrap the result in a RecursiveScriptModule because that's what the
           // caller passed in.
           return py::module::import("torch.jit._recursive")
-              .attr("wrap_cpp_module")(cloned_mod);
+              .attr("wrap_cpp_module")(mod);
         }
 
         throw py::cast_error(c10::str(
