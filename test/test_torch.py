@@ -17496,17 +17496,19 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def _helper_test_igamma(self, loglo, loghi, device, dtype):
         torch.manual_seed(123)
         kwargs = {"device": device, "dtype": dtype}
+
         # generating random distribution from lo to hi with a loguniform
         # distribution
         def randrange(shape, **kwargs):
             return torch.exp(torch.rand(shape, **kwargs) * (loghi - loglo) + loglo)
+
         vec1 = randrange((100, 1), **kwargs)
         inputs = [
             (randrange((10,), **kwargs), randrange((10,), **kwargs)),
             (randrange((3, 3, 3), **kwargs), randrange((3, 3, 3), **kwargs)),
             (randrange((100, 1), **kwargs), randrange((100, 1), **kwargs).transpose(0, 1)),
-            (vec1, vec1), # for large number, it should approach 0.5
-            (vec1, 0.5 * vec1), # test for considerable ratio
+            (vec1, vec1),  # for large number, it should approach 0.5
+            (vec1, 0.5 * vec1),  # test for considerable ratio
             (vec1, 2.0 * vec1),
         ]
         for input0, input1 in inputs:
