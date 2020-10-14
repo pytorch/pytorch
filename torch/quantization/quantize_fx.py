@@ -160,12 +160,12 @@ def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=No
            CustomModule: ObservedCustomModule
         },
 
-        # the qualified name for the submodule that will skip symbolic trace
+        # the qualified names for the submodule that are not symbolically traceable
         "non_traceable_module_name": [
            "non_traceable_module"
         ],
 
-        # the module class that will skip symbolic trace
+        # the module classes that are not symbolically traceable
         "non_traceable_module_class": [
            NonTraceableModule
         ]
