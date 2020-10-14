@@ -9,7 +9,7 @@ Tensor = torch.Tensor
 # also connects the torch.linalg Python namespace to the torch._C._linalg builtins.
 
 cholesky = _add_docstr(_linalg.linalg_cholesky, r"""
-linalg.cholesky(input) -> Tensor
+linalg.cholesky(input, *, out=None) -> Tensor
 
 Returns the Cholesky decomposition.
 
@@ -36,6 +36,9 @@ of each of the individual matrices.
 Args:
     input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
                 batch dimensions consisting of symmetric positive-definite matrices.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
 
 Example::
 

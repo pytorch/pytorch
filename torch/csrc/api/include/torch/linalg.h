@@ -12,6 +12,10 @@ inline Tensor cholesky(const Tensor& self) {
   return torch::linalg_cholesky(self);
 }
 
+inline Tensor cholesky_out(Tensor& result, const Tensor& self) {
+  return torch::linalg_cholesky_out(result, self);
+}
+
 inline Tensor det(const Tensor& self) {
   return torch::linalg_det(self);
 }
@@ -48,6 +52,10 @@ inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, opt
 /// ```
 inline Tensor cholesky(const Tensor& self) {
   return detail::cholesky(self);
+}
+
+inline Tensor cholesky_out(Tensor& result, const Tensor& self) {
+  return detail::cholesky_out(result, self);
 }
 
 /// See the documentation of torch.linalg.det

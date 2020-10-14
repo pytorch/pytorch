@@ -943,6 +943,17 @@ class TestLinalg(TestCase):
         for shape, batch in list(itertools.product(shapes, batches)) + larger_input_case:
             run_test(shape, batch)
 
+        # check the out= variant
+        A = random_hermitian_pd_matrix(3, 3, dtype=dtype, device=device)
+        out = torch.empty_like(A)
+        ans = torch.linalg.cholesky(A, out=out)
+        self.assertEqual(ans, out)
+
+        # cholesky requires out to have same shape as input
+        out = torch.empty(2, 3, dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, r'to have same size as tensor for argument'):
+            torch.linalg.cholesky(A, out=out)
+
         # cholesky requires the input to be a square matrix
         A = torch.randn(2, 3, device=device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):

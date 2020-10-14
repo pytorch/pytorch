@@ -8289,6 +8289,10 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: linalg_cholesky.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+
 # torch.linalg.det, alias for torch.det
 - func: linalg_det(Tensor self) -> Tensor
   python_module: linalg
