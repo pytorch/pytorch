@@ -974,7 +974,7 @@ Arguments:
 
 #define PROCESS_GROUP_DEPRECATION_WARNING(api_method)                \
   TORCH_WARN_ONCE(#api_method                                        \
-                  "API is being deprecated, please ping "            \
+                  " API is being deprecated, please ping "           \
                   "https://github.com/pytorch/pytorch/issues/46291 " \
                   "if you see this warning")
 
