@@ -23,16 +23,15 @@
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 
-#if defined(__CUDACC__) && (CUSPARSE_VERSION >= 11000 || (!defined(_MSC_VER) && CUSPARSE_VERSION >= 10301))
-#define IS_SPMM_AVAILABLE() 1
+#if defined(__CUDACC__) && (CUSPARSE_VERSION >= 11000)
+#define IS_CUSPARSE11_AVAILABLE() 1
 #else
-#define IS_SPMM_AVAILABLE() 0
+#define IS_CUSPARSE11_AVAILABLE() 0
 #endif
 
-#if IS_SPMM_AVAILABLE()
+#if IS_CUSPARSE11_AVAILABLE()
 #include <library_types.h>
 #endif
-
 
 namespace at {
 namespace native {
@@ -125,7 +124,7 @@ struct csrMatrixRef {
 using DcsrMatrixRef = csrMatrixRef<double>;
 using ScsrMatrixRef = csrMatrixRef<float>; 
 
-#if IS_SPMM_AVAILABLE()
+#if IS_CUSPARSE11_AVAILABLE()
 
 cudaDataType getTensorCudaDataType(Tensor self) {
   cudaDataType cuda_data_type;
