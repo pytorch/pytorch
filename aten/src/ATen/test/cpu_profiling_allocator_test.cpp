@@ -164,7 +164,8 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
 }
 
 int main(int argc, char* argv[]) {
-  c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator());
+  // Setting the priority high to make sure no other allocator gets used instead of this.
+  c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator(), /*priority*/ 100);
   // Need to disable mkldnn for this test since it allocatred memory
   // via raw_allocate inteface which requires context pointer and raw
   // pointer to be the same. Tis is not true for mobile allocator.
