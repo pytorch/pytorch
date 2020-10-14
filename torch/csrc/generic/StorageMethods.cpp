@@ -9,7 +9,7 @@
 #else
 #define LSEEK lseek
 #endif
-
+ 
 static PyObject * THPStorage_(size)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
