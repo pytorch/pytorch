@@ -714,9 +714,8 @@ class DistributedDataParallel(Module):
         return res
 
     def to_kwargs(self, inputs, kwargs, device_id):
-        target_gpus = device_id
-        inputs = self._recursive_to(inputs, target_gpus) if inputs else []
-        kwargs = self._recursive_to(kwargs, target_gpus) if kwargs else []
+        inputs = self._recursive_to(inputs, device_id) if inputs else []
+        kwargs = self._recursive_to(kwargs, device_id) if kwargs else []
         if len(inputs) < len(kwargs):
             inputs.extend([() for _ in range(len(kwargs) - len(inputs))])
         elif len(kwargs) < len(inputs):
