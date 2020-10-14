@@ -203,6 +203,12 @@ def compute_type_method(
     if def_only:
         assert target is Target.REGISTRATION and dispatch is None
 
+    def qualify_type_name(name: str) -> str:
+        if dispatch is None or dispatch == 'Math' or dispatch == 'DefaultBackend':
+            return f'TypeDefault::{name}'
+        else:
+            return f'{dispatch}Type::{name}'
+
     @with_native_function
     def func(f: NativeFunction) -> Optional[str]:
         if dispatch is not None:
@@ -286,10 +292,7 @@ def compute_type_method(
         elif target is Target.REGISTRATION:
             dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
-            if dispatch is None or dispatch == 'Math' or dispatch == 'DefaultBackend':
-                type_name = f'TypeDefault::{name}'
-            else:
-                type_name = f'{dispatch}Type::{name}'
+            type_name = qualify_type_name(name)
 
             # def registration only happens in TypeDefault
             def_registration = ""
@@ -332,9 +335,15 @@ def compute_type_method(
 
         # Illegal to not have dispatch for structured kernels
         with native_function_manager(g.out):
-            assert g.out.dispatch is not None
-            if g.out.dispatch is None or dispatch not in g.out.dispatch:
+            assert g.out.dispatch is not None, "dispatch on structured kernels currently mandatory"
+
+            # Skip if we're generating for an unsupported dispatch key
+            if dispatch is not None and dispatch not in g.out.dispatch:
                 return []
+            # Only TypeDefault generation we do is registration
+            if dispatch is None and target is not Target.REGISTRATION:
+                return []
+
             functional_func = g.out.func.signature()
             functional_sig = DispatcherSignature.from_schema(functional_func)
             meta_name = meta.name(functional_func)
@@ -343,37 +352,58 @@ def compute_type_method(
             # transformation ALWAYS refers to valid arguments in the original
             # signature
             functional_exprs = ', '.join(e.expr for e in functional_sig.exprs())
-            out_impl_name = f"at::native::{g.out.dispatch[dispatch]}"
 
+        @with_native_function
         def subfunc(f: NativeFunction) -> str:
             k = f.func.kind()
-            with native_function_manager(f):
-                if target is Target.DECLARATION:
-                    return ""
-                elif target is Target.DEFINITION:
-                    sig = DispatcherSignature.from_schema(f.func)
+            sig = NativeSignature.from_schema(f.func)
+
+            if target is Target.DECLARATION:
+                # Not necessary!  Only TypeDefault is actually used, see
+                # https://github.com/pytorch/pytorch/issues/46319
+                return ""
+            elif target is Target.DEFINITION:
+                assert dispatch is not None
+                assert g.out is not None  # sigh
+                assert g.out.dispatch is not None
+
+                out_impl_name = f"at::native::{g.out.dispatch[dispatch]}"
+
+                # TODO: work a little harder to generate fresh names here
+                # TODO: less praying that I picked the right argument names
+
+                if k is SchemaKind.functional:
+                    out_expr = "result"
+                    prologue = "auto result = tensor_from_meta(meta_result);"
+                elif k is SchemaKind.inplace:
+                    out_expr = "self"
+                    prologue = "// TODO: consistency check assert"
+                elif k is SchemaKind.out:
+                    # TODO: generalize this for multi-out
+                    assert len(f.func.out_arguments) == 1, "multi-out structured not supported yet"
+                    # TODO: naughtily leaning on some codegen invariants....
+                    out_expr = f.func.out_arguments[0].name
+                    prologue = f"""
+// TODO: add a consistency check for meta_result
+{out_expr}.resize_(meta_result.sizes);
+"""
+
+                device_guard = ""
+
+                if dispatch is None or 'CUDA' in dispatch or 'Vulkan' == dispatch:
+                    # TODO: stop copypaste
+                    self_args = (a for a in f.func.arguments if a.name == "self")
+                    candidate_args = itertools.chain(self_args, f.func.out_arguments, f.func.arguments)
+                    device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
 
                     device_guard = ''
-
-                    # TODO: work a little harder to generate fresh names here
-                    # TODO: less praying that I picked the right argument names
-
-                    if k is SchemaKind.functional:
-                        prologue = "auto result = tensor_from_meta(meta_result);"
-                        out_expr = "result"
-                    elif k is SchemaKind.inplace:
-                        prologue = "// TODO: consistency check assert"
-                        out_expr = "self"
-                    elif k is SchemaKind.out:
-                        prologue = """
-// TODO: add a consistency check for meta_result
-out.resize_(meta_result.sizes);
+                    if f.device_guard and device_of is not None:
+                        # TODO: OptionalCUDAGuard
+                        device_guard = f"""\
+    const OptionalDeviceGuard device_guard(device_of({device_of}));
 """
-                        # TODO: generalize this for multi-out, and out
-                        # arguments not named out
-                        out_expr = "out"
 
-                    return f"""\
+                return f"""\
 {sig.defn()} {{
     {device_guard}
     auto meta_result = meta::{meta_name}({functional_exprs});
@@ -383,10 +413,18 @@ out.resize_(meta_result.sizes);
 }}
 """
 
-                elif target is Target.REGISTRATION:
-                    return ""
+            elif target is Target.REGISTRATION:
+                if dispatch is None:
+                    return f'm.def({cpp_string(str(f.func))});'
                 else:
-                    assert_never(target)
+                    type_name = qualify_type_name(sig.name())
+                    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+                        return f'm.impl("{f.func.name}", TORCH_FN({type_name}));'
+                    else:
+                        # SIGHHHHH
+                        return f'm.impl("{f.func.name}", torch::CppFunction::makeUnboxedOnly({type_name}));'
+            else:
+                assert_never(target)
 
         rs = []
         rs.append(subfunc(g.out))

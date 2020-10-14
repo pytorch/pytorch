@@ -131,6 +131,7 @@ genrule(
         "aten/src/ATen/Functions.h",
         "aten/src/ATen/Functions.cpp",
         "aten/src/ATen/NativeFunctions.h",
+        "aten/src/ATen/MetaFunctions.h",
         "aten/src/ATen/MkldnnCPUType.h",
         "aten/src/ATen/MkldnnCPUType.cpp",
         "aten/src/ATen/QuantizedCPUType.h",

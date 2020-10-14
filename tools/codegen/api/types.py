@@ -298,10 +298,13 @@ class DispatcherSignature:
     def arguments(self) -> Tuple[DispatcherArgument, ...]:
         return self._arguments
 
+    def name(self) -> str:
+        return dispatcher.name(self.func)
+
     def defn(self, name: Optional[str] = None) -> str:
         args_str = ', '.join(map(str, self.arguments()))
         if name is None:
-            name = native.name(self.func)
+            name = self.name()
         return f"{self._returns_type} {name}({args_str})"
 
     def exprs(self) -> Sequence[DispatcherExpr]:
@@ -371,10 +374,13 @@ class NativeSignature:
     _arguments: Tuple[NativeArgument, ...]
     _returns_type: str
 
+    def name(self) -> str:
+        return native.name(self.func)
+
     def defn(self, name: Optional[str] = None) -> str:
         args_str = ', '.join(map(str, self.arguments()))
         if name is None:
-            name = dispatcher.name(self.func)
+            name = self.name()
         return f"{self._returns_type} {name}({args_str})"
 
     def arguments(self) -> Tuple[NativeArgument, ...]:
