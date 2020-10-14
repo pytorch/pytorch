@@ -9,7 +9,7 @@ from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingLi
 
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, FutureType, EnumType
+    DeviceObjType, StreamObjType, FutureType, EnumType
 
 
 from textwrap import dedent
@@ -313,6 +313,8 @@ def try_ann_to_type(ann, loc):
         return InterfaceType(_qualified_name(ann))
     if ann is torch.device:
         return DeviceObjType.get()
+    if ann is torch.Stream:
+        return StreamObjType.get()
     if ann is torch.dtype:
         return IntType.get()  # dtype not yet bound in as its own type
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
