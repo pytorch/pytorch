@@ -14,11 +14,8 @@ if ERRORLEVEL 1 exit /b 1
 echo Run caffe2 ops tests
 pip list
 pip install pytest
-python -m pytest --maxfail=100 -x -v --disable-warnings --junit-xml="resulst.xml" %PYTHONPATH%\caffe2\python\operator_test -G
+python -m pytest --maxfail=10000 -v --disable-warnings --junit-xml="resulst.xml" %TMP_DIR_WIN%\build\caffe2\python\operator_test -G
 
 if ERRORLEVEL 1 exit /b 1
 
 popd
-
-
-

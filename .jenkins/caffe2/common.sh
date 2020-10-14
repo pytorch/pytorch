@@ -32,4 +32,3 @@ INSTALL_PREFIX="/usr/local/caffe2"
 mkdir -p "$gtest_reports_dir" || true
 mkdir -p "$pytest_reports_dir" || true
 mkdir -p "$INSTALL_PREFIX" || true
-
