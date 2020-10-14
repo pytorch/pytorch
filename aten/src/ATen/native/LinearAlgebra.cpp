@@ -299,7 +299,7 @@ static void addmm_impl_cpu_(
   const int64_t ldc = c.strides()[transpose_c ? 0 : 1];
 
   // Apply BLAS routine
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBFloat16, ScalarType::Bool,
       result.scalar_type(), "addmm_impl_cpu_",
       [&]{
         at::native::cpublas::gemm(
