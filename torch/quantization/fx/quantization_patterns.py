@@ -573,7 +573,7 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
     """ Converts an observed standalone module to quantized standalone module
     by calling convert_fx on the observed standalone module.
     """
-    def convert(self, quantizer, node, load_arg, debug=False):
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         assert node.op == 'call_module'
         qconfig = quantizer.qconfig_map[node.name]
         convert = torch.quantization.quantize_fx._convert_standalone_module_fx
