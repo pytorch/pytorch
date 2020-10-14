@@ -10,7 +10,7 @@ from ._state import _get_script_class
 
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, FutureType, EnumType
+    DeviceObjType, StreamObjType, FutureType, EnumType
 
 
 from textwrap import dedent
@@ -314,10 +314,13 @@ def try_ann_to_type(ann, loc):
         return InterfaceType(_qualified_name(ann))
     if ann is torch.device:
         return DeviceObjType.get()
+    if ann is torch.Stream:
+        return StreamObjType.get()
     if ann is torch.dtype:
         return IntType.get()  # dtype not yet bound in as its own type
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
-        if not hasattr(ann, "__torch_script_class__"):
+        qualified_name = _qualified_name(ann)
+        if _get_script_class(qualified_name) is None:
             torch.jit._script._recursive_compile_class(ann, loc)
         return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc), list(ann))
     if inspect.isclass(ann):

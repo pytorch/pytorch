@@ -695,6 +695,9 @@
 - name: median(Tensor self) -> Tensor
   self: evenly_distribute_backward(grad, self, result)
 
+- name: nanmedian(Tensor self) -> Tensor
+  self: evenly_distribute_backward(grad, self, result)
+
 # This is in theory incorrect in the following case:
 #   sorted list: [..., a, b, b, ..., b, b, c, ...] with median = b and the value
 #                            |                     at middle position of the
@@ -710,6 +713,9 @@
 # The backward implementation is correct in the sense that it returns the
 # subgradient on one side.
 - name: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
+
+- name: nanmedian.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
