@@ -165,7 +165,8 @@
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
-
+# This future is needed to print Python2 EOL message
+from __future__ import print_function
 import sys
 if sys.version_info < (3,):
     print("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -341,7 +342,6 @@ def build_deps():
 
 # the list of runtime dependencies required by this built package
 install_requires = [
-    'future',
     'typing_extensions',
     'dataclasses; python_version < "3.7"'
 ]
