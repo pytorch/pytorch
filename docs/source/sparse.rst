@@ -30,11 +30,11 @@ __ https://en.wikipedia.org/wiki/Sparse_matrix
    When talking about storing only non-zero elements of a sparse
    array, the usage of adjective "non-zero" is not strict: one is
    allowed to store also zeros in the sparse array data
-   structure. Hence, in the following, we use "specified elements"
-   instead of "non-zero elements" when talking about storing elements
-   of sparse arrays in some sparse storage format. In addition, the
-   unspecified elements are often assumed to have a certain value (or
-   no value at all), we use "fill value" to denote such elements.
+   structure. Hence, in the following, we use "specified elements" for
+   those array elements that are actually stored. In addition, the
+   unspecified elements are typically assumed to have zero value, but
+   not only, hence we use the term "fill value" to denote such
+   elements.
 
 .. note::
 
@@ -145,9 +145,9 @@ PyTorch hybrid COO tensor extends the sparse COO tensor by allowing
 the ``values`` tensor to be a multi-dimensional tensor so that we
 have:
 
-  - the indices of specified (tensor) elements are collected in
-    ``indices`` tensor of size ``(sparse_dims, nse)`` and with element
-    type ``torch.int64``,
+  - the indices of specified elements are collected in ``indices``
+    tensor of size ``(sparse_dims, nse)`` and with element type
+    ``torch.int64``,
 
   - the corresponding (tensor) values are collected in ``values``
     tensor of size ``(nse, dense_dims)`` and with an arbitrary integer
@@ -156,7 +156,8 @@ have:
 .. note::
 
    We use (M + K)-dimensional tensor to denote a N-dimensional hybrid
-   sparse tensor such that M + K == N holds.
+   sparse tensor, where M and K are the numbers of sparse and dense
+   dimensions, respectively, such that M + K == N holds.
 
 Suppose we want to create a (2 + 1)-dimensional tensor with the entry
 [3, 4] at location (0, 2), entry [5, 6] at location (1, 0), and entry
