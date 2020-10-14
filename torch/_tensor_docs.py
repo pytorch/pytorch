@@ -2202,6 +2202,13 @@ median(dim=None, keepdim=False) -> (Tensor, LongTensor)
 See :func:`torch.median`
 """)
 
+add_docstr_all('nanmedian',
+               r"""
+nanmedian(dim=None, keepdim=False) -> (Tensor, LongTensor)
+
+See :func:`torch.nanmedian`
+""")
+
 add_docstr_all('min',
                r"""
 min(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
@@ -2661,6 +2668,13 @@ add_docstr_all('deg2rad_',
 deg2rad_() -> Tensor
 
 In-place version of :meth:`~Tensor.deg2rad`
+""")
+
+add_docstr_all('ravel',
+               r"""
+ravel(input) -> Tensor
+
+see :func:`torch.ravel`
 """)
 
 add_docstr_all('reciprocal',
