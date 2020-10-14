@@ -21,20 +21,20 @@ void to_backend_selective_impl(
     c10::QualifiedName qual_module_name(module_to_lower);
     auto& atoms = qual_module_name.atoms();
 
+    // Record all of the ancestor modules (the last being the parent)
+    // so that the type of the lowered module can be remapped in their
+    // graphs if needed.
+    std::vector<Module> ancestors;
+    ancestors.reserve(atoms.size() - 1);
+
     // Search through the module hierarchy using the atoms of
     // qual_module_name until current points to the module to
-    // be lowered. Make parent point to its parent for type
-    // modification purposes.
-    Module parent;
+    // be lowered while storing references all of the ancestors.
     Module current = cloned_mod;
     for (size_t i = 0, e = atoms.size(); i < e; ++i) {
       IValue submodule = current.attr(atoms[i]);
       if (submodule.isModule()) {
-        // If this is the last atom, store a reference to the
-        // parent of the module that is about to be lowered.
-        if (i == e - 1) {
-          parent = current;
-        }
+        ancestors.emplace_back(current);
         current = submodule.toModule();
       } else {
         std::stringstream err;
@@ -53,12 +53,13 @@ void to_backend_selective_impl(
 
     // Adjust the parent's type so that the type of the submodule matches
     // the type of lowered_submodule.
+    Module parent = ancestors.back();
     auto parent_type = parent.type();
     parent_type->unsafeChangeAttributeType(
         qual_module_name.name(), lowered_submodule.type());
     parent.setattr(qual_module_name.name(), lowered_submodule._ivalue());
 
-    // Fix references to the submodule in the graphs of parent's methods.
+    // Fix references to the submodule in the graphs of ancestors' methods.
     std::unordered_map<TypePtr, TypePtr> type_remap;
     type_remap[current.type()] = lowered_submodule.type();
 
@@ -69,12 +70,14 @@ void to_backend_selective_impl(
       return it->second;
     };
 
-    for (auto& fn : parent_type->methods()) {
-      auto method = parent.get_method(fn->name());
-      auto graph = method.graph();
-      graph->remapTypes(type_remap_fn);
-      auto new_schema = fn->getSchema().cloneWithRemappedTypes(type_remap_fn);
-      fn->setSchema(new_schema);
+    for (auto& ancestor : ancestors) {
+      for (auto& fn : ancestor.type()->methods()) {
+        auto method = ancestor.get_method(fn->name());
+        auto graph = method.graph();
+        graph->remapTypes(type_remap_fn);
+        auto new_schema = fn->getSchema().cloneWithRemappedTypes(type_remap_fn);
+        fn->setSchema(new_schema);
+      }
     }
   }
 }

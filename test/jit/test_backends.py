@@ -212,16 +212,29 @@ class SelectiveLoweringTest(JitBackendTestCase):
             self.submodule = submodule
 
         def forward(self, x, y):
+            # Call the module that will be lowered directly to test
+            # type remapping in modules that are not its parent.
+            a, b = self.submodule.submodule.forward(x, y)
+            c, d = self.submodule.forward(x, y)
+            return a + c, b + d
+
+    class MiddleModule(torch.nn.Module):
+        def __init__(self, submodule):
+            super().__init__()
+            self.submodule = submodule
+
+        def forward(self, x, y):
             return self.submodule.forward(x, y)
 
     def setUp(self):
         super().setUp()
         OuterModule = SelectiveLoweringTest.OuterModule
+        MiddleModule = SelectiveLoweringTest.MiddleModule
 
         # Create Python, JIT and backend versions of OuterModule(OuterModule(InnerModule())).
-        self.module = OuterModule(OuterModule(BasicModule()))
-        self.scripted_module = torch.jit.script(OuterModule(OuterModule(BasicModule())))
-        self.lowered_module = torch.jit.script(OuterModule(OuterModule(BasicModule())))
+        self.module = OuterModule(MiddleModule(BasicModule()))
+        self.scripted_module = torch.jit.script(OuterModule(MiddleModule(BasicModule())))
+        self.lowered_module = torch.jit.script(OuterModule(MiddleModule(BasicModule())))
         self.lowered_module = to_test_backend_selective(self.lowered_module, {"forward": ""}, ["submodule.submodule"])
 
     def test_execution(self):
@@ -241,22 +254,27 @@ class SelectiveLoweringTest(JitBackendTestCase):
         """
         Check that type remapping and replacement occurred during selective lowering.
         """
-        # Check that self.lowered_module was not lowered; there should be no uses of the lowered module type in its graph.
+        # Check that self.lowered_module was not lowered, but that it does contain test_backendLoweredModule due to it
+        # calling the lowered module directly.
         FileCheck() \
             .check("OuterModule") \
-            .check_not("test_backendLoweredModule") \
+            .check("BasicModule") \
+            .run(self.scripted_module.graph)
+        FileCheck() \
+            .check("OuterModule") \
+            .check("test_backendLoweredModule") \
             .run(self.lowered_module.graph)
 
         # Check that self.lowered_module.submodule was not lowered but that BasicModule has been replaced in its graph.
-        # self.scripted_module.submodule should be an OuterModule that contains a BasicModule.
-        # self.lowered_module.submodule should be an OuterModule that contains a test_backendLoweredModule.
+        # self.scripted_module.submodule should be an MiddleModule that contains a BasicModule.
+        # self.lowered_module.submodule should be an MiddleModule that contains a test_backendLoweredModule.
         FileCheck() \
-            .check("OuterModule") \
+            .check("MiddleModule") \
             .check("BasicModule") \
             .check_not("test_backendLoweredModule") \
             .run(self.scripted_module.submodule.graph)
         FileCheck() \
-            .check("OuterModule") \
+            .check("MiddleModule") \
             .check("test_backendLoweredModule") \
             .check_not("BasicModule") \
             .run(self.lowered_module.submodule.graph)
