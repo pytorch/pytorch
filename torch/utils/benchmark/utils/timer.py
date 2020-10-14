@@ -62,7 +62,7 @@ class Timer(object):
         timer:
             Callable which returns the current time. If PyTorch was built
             without CUDA or there is no GPU present, this defaults to
-            `timer.default_timer`; otherwise it will synchronize CUDA before
+            `timeit.default_timer`; otherwise it will synchronize CUDA before
             measuring the time.
 
         globals:
@@ -349,9 +349,9 @@ class Timer(object):
         subject. Take particular care with nn.Modules: they rely on pickle and
         you may need to add an import to `setup` for them to transfer properly.
 
-        By default, a profile will also be collected for an empty statement
-        (and cached) to indicate how many instructions are from the Python
-        loop which drives `stmt`.
+        By default, a profile for an empty statement will be collected and
+        cached to indicate how many instructions are from the Python loop which
+        drives `stmt`.
 
         Returns:
             A `CallgrindStats` object which provides instruction counts and

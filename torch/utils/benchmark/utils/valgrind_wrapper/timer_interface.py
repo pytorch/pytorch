@@ -428,7 +428,8 @@ class GlobalsBridge:
                     torch.jit.save(wrapped_value.value, f)
 
             else:
-                raise NotImplementedError(f"Unknown serialization method: {method}")
+                raise NotImplementedError(
+                    f"Unknown serialization method: {wrapped_value.serialization}")
 
         return "\n".join(load_lines)
 
