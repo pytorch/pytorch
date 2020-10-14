@@ -3094,6 +3094,18 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(Zero_(), x)
 
+    def test_tolist(self):
+        class List(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                cur_shape = torch._shape_as_tensor(input)
+                final_shape: List[int] = cur_shape.tolist()
+                pad_tensor = torch.zeros(final_shape)
+                return torch.cat([input, pad_tensor], dim=0)
+
+        x = torch.randn(2, 3)
+        self.run_test(List(), (x,))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_list_pass(self):
         class Slice(torch.nn.Module):

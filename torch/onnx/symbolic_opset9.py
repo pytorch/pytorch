@@ -2200,6 +2200,10 @@ def prim_dtype(g, self):
     return g.op("Constant", value_t=torch.IntTensor([dtype]))
 
 
+def prim_tolist(g, input, dim_val, elem_ty_val):
+    return input
+
+
 @parse_args('v', 'i')
 def one_hot(g, self, num_classes):
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
