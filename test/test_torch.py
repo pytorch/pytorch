@@ -19209,6 +19209,9 @@ else:
                 with self.assertRaisesRegex(RuntimeError, e_msg):
                     op(x, dim=dim)
 
+    # Note: This test failed on XLA since the test cases that used in this test
+    #       are created by empty_strided which doesn't support overlap in XLA impl
+    @onlyOnCPUAndCUDA
     def test_like_fn_stride_proparation_vs_tensoriterator_unary_op(self, device):
         # Test like functions against tensoriterator based unary operator (exp) to
         # make sure the returned tensor from like function follows the same stride propergation
