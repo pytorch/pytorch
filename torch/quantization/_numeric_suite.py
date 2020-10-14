@@ -6,7 +6,7 @@ import torch.nn.quantized.dynamic as nnqd
 from torch.quantization import prepare
 
 from .quantization_mappings import (
-    get_compare_output_module_list,
+    get_default_compare_output_module_list,
 )
 
 NON_LEAF_MODULE_TO_ADD_OBSERVER_ALLOW_LIST = {
@@ -405,7 +405,7 @@ def prepare_model_outputs(
         allow_list: list of module types to attach logger
     """
     if allow_list is None:
-        allow_list = get_compare_output_module_list()
+        allow_list = get_default_compare_output_module_list()
 
     qconfig_debug = torch.quantization.QConfig(activation=Logger, weight=None)
     float_module.qconfig = qconfig_debug
@@ -451,7 +451,7 @@ def compare_model_outputs(
         containing the matching float and quantized activations
     """
     if allow_list is None:
-        allow_list = get_compare_output_module_list()
+        allow_list = get_default_compare_output_module_list()
     prepare_model_outputs(float_model, q_model, Logger, allow_list)
     float_model(*data)
     q_model(*data)
