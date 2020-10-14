@@ -17500,7 +17500,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # distribution
         def randrange(shape):
             a = torch.rand(shape).to(device) * (loghi - loglo) + loglo
-            return torch.exp(a).to(dtype)
+            return torch.exp(a.to(torch.float64)).to(dtype)
 
         vec1 = randrange((100, 1))
         inputs = [
@@ -17522,7 +17522,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             if half_prec:
                 actual = actual.to(torch.float)
                 expected = expected.to(torch.float)
-            # self.assertEqual(actual[~torch.isnan(actual)], expected[~torch.isnan(expected)])
             self.assertEqual(actual, expected)
 
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
@@ -17532,21 +17531,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # test igamma for reasonable range of values
         loglo = -4  # approx 0.018
         loghi = 4  # approx 54.6
-        self._helper_test_igamma(loglo, loghi, device, dtype)
-
-    @dtypes(torch.float64)
-    def test_igamma_extreme(self, device, dtype):
-        # test igamma for extreme values
-        # This test only runs for float64 because it compares with scipy which
-        # operates at float64 (even when the inputs are float32).
-        # For large float32, e.g., igamma(1e38, 1e28), the torch version returns
-        # nan (wrong) while scipy returns 0.0 (correct), just because they
-        # operate in float64.
-        # Wrong results are also returned by scipy for large float64 numbers,
-        # e.g. sp.gammainc(1e308, 1e208)
-        kwargs = {"device": device, "dtype": dtype}
-        loglo = torch.log(torch.tensor(torch.finfo(dtype).tiny, **kwargs))
-        loghi = torch.log(torch.tensor(torch.finfo(dtype).max, **kwargs))
         self._helper_test_igamma(loglo, loghi, device, dtype)
 
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
