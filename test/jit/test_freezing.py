@@ -1197,19 +1197,16 @@ class TestFreezing(JitTestCase):
             self.assertEqual(m_res, m_frozen_res)
 
     def test_module_getattr_indirection(self):
-        class ValMod(nn.Module):
-            def __init__(self, val):
-                super(ValMod, self).__init__()
-                self.val = val
-
-            def forward(self):
-                return self.val
+        @torch.jit.script
+        class ValHolder(object):
+            def __init__(self, val: int):
+                self.val: int = val
 
         class Mod(nn.Module):
             def __init__(self):
                 super(Mod, self).__init__()
-                self.mod1 = ValMod(1)
-                self.mod2 = ValMod(2)
+                self.mod1 = ValHolder(1)
+                self.mod2 = ValHolder(2)
 
             def forward(self, cond: bool):
                 if cond:
