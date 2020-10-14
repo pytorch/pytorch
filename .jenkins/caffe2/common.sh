@@ -8,11 +8,11 @@ pytest_reports_dir="${TEST_DIR}/python"
 
 # Figure out which Python to use
 PYTHON="$(which python)"
+if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+  PYTHON=$(which "python${BASH_REMATCH[1]}")
+fi
 
-# Figure out which Python to use for ROCm
-if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
-    PYTHON=$(which "python${BASH_REMATCH[1]}")
-    alias python="$PYTHON"
+if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
     if which sccache > /dev/null; then
         # Save sccache logs to file
         sccache --stop-server || true
@@ -24,14 +24,12 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|
     fi
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
-    # /usr/local/caffe2 is where the cpp bits are installed to in in cmake-only
-    # builds. In +python builds the cpp tests are copied to /usr/local/caffe2 so
-    # that the test code in .jenkins/test.sh is the same
-    INSTALL_PREFIX="/usr/local/caffe2"
-    mkdir -p "$INSTALL_PREFIX" || true
-fi
+# /usr/local/caffe2 is where the cpp bits are installed to in in cmake-only
+# builds. In +python builds the cpp tests are copied to /usr/local/caffe2 so
+# that the test code in .jenkins/test.sh is the same
+INSTALL_PREFIX="/usr/local/caffe2"
 
 mkdir -p "$gtest_reports_dir" || true
 mkdir -p "$pytest_reports_dir" || true
+mkdir -p "$INSTALL_PREFIX" || true
 
