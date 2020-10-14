@@ -1198,8 +1198,8 @@ class ConcretizeDomain : private BackwardVisitor {
     bcast_domain_map_[id] = concretized(To);
   }
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Woverloaded-virtual"
+  using BackwardVisitor::handle;
+
   void handle(ReductionOp* rop) override {
     concretizePwOp(rop);
   }
@@ -1215,7 +1215,6 @@ class ConcretizeDomain : private BackwardVisitor {
   void handle(TernaryOp* top) override {
     concretizePwOp(top);
   };
-#pragma clang diagnostic pop
 
  private:
   using MapType = std::unordered_map<IterDomain*, IterDomain*>;
@@ -1332,8 +1331,8 @@ class ProveValEqual : private IterVisitor {
     }
   }
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Woverloaded-virtual"
+  using IterVisitor::handle;
+
   void handle(ReductionOp* rop) override {
     provePwOp(rop);
   }
@@ -1349,7 +1348,6 @@ class ProveValEqual : private IterVisitor {
   void handle(TernaryOp* top) override {
     provePwOp(top);
   }
-#pragma clang diagnostic pop
 
  private:
   ConcretizeDomain cd_;
