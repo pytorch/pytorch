@@ -6956,6 +6956,7 @@ class TestAutogradDeviceType(TestCase):
             gradcheck(lambda x: x.lu(get_infos=False), x)
             gradgradcheck(lambda x: x.lu(get_infos=False), x)
 
+            # there is no pivot-less LU factorization on CPU
             if x.device.type == 'cuda':
                 gradcheck(lambda x: x.lu(pivot=False, get_infos=True), x)
                 gradgradcheck(lambda x: x.lu(pivot=False, get_infos=True), x)
