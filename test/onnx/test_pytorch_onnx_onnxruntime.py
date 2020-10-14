@@ -3094,6 +3094,17 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(Zero_(), x)
 
+    def test_floating_point(self):
+        class FloatingPoint(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                if x.is_floating_point():
+                    return x.new_zeros(x.shape[1:])
+                return x.new_zeros(x.shape)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(FloatingPoint(), x)
+
     def test_tolist(self):
         class List(torch.jit.ScriptModule):
             @torch.jit.script_method
