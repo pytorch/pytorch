@@ -325,7 +325,8 @@ class Quantizer:
             prepare_custom_config_dict = {}
         if not inplace:
             model = copy.deepcopy(model)
-        self.patterns = get_default_quant_patterns()
+        additional_quant_patterns = prepare_custom_config_dict.get("additional_quant_pattern", {})
+        self.patterns = dict(get_default_quant_patterns, **additional_quant_patterns)
 
         flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
         # TODO: support regex as well

@@ -24,7 +24,8 @@ class Fuser:
         input_graph = model.graph
         self.modules = dict(input_root.named_modules())
 
-        fusion_patterns = get_default_fusion_patterns()
+        additional_fusion_patterns = fuse_custom_config_dict.get("additional_quant_pattern", {})
+        fusion_patterns = dict(get_default_fusion_patterns(), **additional_fusion_patterns)
         # find fusion
         fusion_pairs = self._find_matches(input_root, input_graph, fusion_patterns)
         self.fused_graph = Graph()
