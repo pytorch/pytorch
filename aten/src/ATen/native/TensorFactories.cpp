@@ -164,48 +164,6 @@ Tensor polar(const Tensor& abs, const Tensor& angle) {
   return at::polar_out(result, abs, angle);
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<c10::MemoryFormat> optional_memory_format) {
-
-  TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
-  TensorOptions options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
-
-  AT_ASSERT(options.device().type() == DeviceType::CPU);
-  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
-  check_size_nonnegative(size);
-
-  c10::Allocator* allocator;
-  if (options.pinned_memory()) {
-    allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
-  } else {
-    allocator = at::getCPUAllocator();
-  }
-
-  int64_t nelements = prod_intlist(size);
-  auto dtype = options.dtype();
-  int64_t size_bytes = nelements * dtype.itemsize();
-  auto storage_impl = c10::make_intrusive<StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
-      size_bytes,
-      allocator->allocate(size_bytes),
-      allocator,
-      /*resizeable=*/true);
-
-  auto tensor = detail::make_tensor<TensorImpl>(
-      std::move(storage_impl), at::DispatchKey::CPU, dtype);
-  // Default TensorImpl has size [0]
-  if (size.size() != 1 || size[0] != 0) {
-    tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
-  }
-
-  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
-  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
-
-  return tensor;
-}
 
 Tensor empty(
     IntArrayRef size,
@@ -517,25 +475,6 @@ Tensor ones_like(
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto result = at::empty_like(self, options, optional_memory_format);
   return result.fill_(1.);
-}
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
-  if (options.device() == at::kCPU) {
-    // This is a fast track to skip device dispatch for making scalar tensor on CPU.
-    // See https://github.com/pytorch/pytorch/pull/29915 for more detailed perf
-    // difference.
-    // In the future when we remove the overhead of device dispatch, we'll happily
-    // revert this to following:
-    //   auto result = at::empty({}, options);
-    at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
-    auto result = empty_cpu({}, options);
-    at::native::fill_(result, s);
-    return result;
-  }
-  return at::empty({}, options).fill_(s);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ rand ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
