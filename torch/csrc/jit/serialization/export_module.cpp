@@ -120,7 +120,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
     } else if (ins.op == RET) {
       auto node = code.instructions_source()[i];
       for (const auto input : node->inputs()) {
-        auto input_type = input->type();
+        const auto input_type = input->type();
         if (input_type->kind() == TypeKind::TupleType) {
           if (auto name_typed_input = input_type->cast<at::NamedType>()) {
             TORCH_CHECK(
