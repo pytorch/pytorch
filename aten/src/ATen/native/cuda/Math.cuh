@@ -551,14 +551,14 @@ static inline __host__ __device__ scalar_t calc_igammac(scalar_t a, scalar_t x) 
 
   if ((x < 0) || (a < 0)) {
     // out of defined-region of the function
-    return std::numeric_limits<scalar_t>::quiet_NaN();
+    return std::numeric_limits<accscalar_t>::quiet_NaN();
   }
   else if (a == 0) {
     if (x > 0) {
       return 0.0;
     }
     else {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
+      return std::numeric_limits<accscalar_t>::quiet_NaN();
     }
   }
   else if (x == 0) {
@@ -566,7 +566,7 @@ static inline __host__ __device__ scalar_t calc_igammac(scalar_t a, scalar_t x) 
   }
   else if (::isinf(static_cast<accscalar_t>(a))) {
     if (::isinf(static_cast<accscalar_t>(x))) {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
+      return std::numeric_limits<accscalar_t>::quiet_NaN();
     }
     return 1.0;
   }
@@ -631,14 +631,14 @@ static inline __host__ __device__ scalar_t calc_igamma(scalar_t a, scalar_t x) {
   // boundary values following SciPy
   if ((x < 0) || (a < 0)) {
     // out of defined-region of the function
-    return std::numeric_limits<scalar_t>::quiet_NaN();
+    return std::numeric_limits<accscalar_t>::quiet_NaN();
   }
   else if (a == 0) {
     if (x > 0) {
       return 1.0;
     }
     else {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
+      return std::numeric_limits<accscalar_t>::quiet_NaN();
     }
   }
   else if (x == 0) {
@@ -646,7 +646,7 @@ static inline __host__ __device__ scalar_t calc_igamma(scalar_t a, scalar_t x) {
   }
   else if (::isinf(static_cast<accscalar_t>(a))) {
     if (::isinf(static_cast<accscalar_t>(x))) {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
+      return std::numeric_limits<accscalar_t>::quiet_NaN();
     }
     return 0.0;
   }

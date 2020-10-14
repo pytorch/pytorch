@@ -93,7 +93,7 @@ void hypot_kernel_cuda(TensorIterator& iter) {
 }
 
 void igamma_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "igamma_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igamma_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return calc_igamma(a, b);
     });
