@@ -8,9 +8,6 @@ Tensor empty_mkldnn(IntArrayRef sizes, c10::optional<ScalarType> dtype, c10::opt
   TORCH_CHECK(
      !optional_memory_format.has_value(),
      "'memory_format' argument is incompatible with mkldnn tensor");
-  TORCH_CHECK(
-    !layout.has_value(),
-    "'layout' argument is incompatible with mkldnn tensor");
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
   ideep::tensor::dims dst_dims (sizes.begin(), sizes.end());

@@ -165,10 +165,11 @@ Tensor polar(const Tensor& abs, const Tensor& angle) {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
+Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
+                 c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
   Device device = device_or_default(device_opt);
 
-  AT_ASSERT(device.type() == DeviceType::CPU);
+  TORCH_CHECK(device.type() == DeviceType::CPU);
   TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   check_size_nonnegative(size);
 
@@ -220,7 +221,8 @@ Tensor empty(
   return result;
 }
 
-Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt,
+                         c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
   check_size_nonnegative(size);
   auto t = at::native::empty_cpu({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   at::native::resize_impl_cpu_(t.unsafeGetTensorImpl(), size, stride);

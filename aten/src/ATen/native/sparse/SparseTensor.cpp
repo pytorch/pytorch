@@ -85,7 +85,8 @@ SparseTensor new_sparse(c10::optional<ScalarType> dtype, c10::optional<Layout> l
 
 /** Actual dispatched creation methods ***/
 
-SparseTensor new_with_dims_sparse(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
+SparseTensor new_with_dims_sparse(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size, c10::optional<ScalarType> dtype,
+                                  c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
   SparseTensor self = new_sparse(dtype, layout, device, pin_memory);
   get_sparse_impl(self)->resize_and_clear_(sparse_dim, dense_dim, size);
   return self;
