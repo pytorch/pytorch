@@ -148,6 +148,8 @@ DONT_REQUIRE_DERIVATIVE = {
     'bucketize',
     # Functions that return booleans are not differentiable
     'isnan', 'isposinf', 'isneginf', 'isinf'
+    # Functions return none are not differentiable
+    'record_stream',
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
