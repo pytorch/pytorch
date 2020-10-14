@@ -3887,6 +3887,7 @@ class DistributedTest:
             inp = TestNamedTupleInput_1(a, b)
             train_iter(inp, type(inp))
 
+            # dictionary input.
             inp = {
                 EXPECTED_FIELDS[0]: a,
                 EXPECTED_FIELDS[1]: b,
