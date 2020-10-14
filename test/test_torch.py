@@ -19241,15 +19241,15 @@ else:
         # non-dense overlapping 0 strided tensor
         # non-dense overlapping equal strides
         tset = (
-            torch.randn(4, 3, 2, device = device),
-            torch.randn(4, 3, 2, device = device)[:, :, ::2],
-            torch.empty_strided((4, 3, 2), (10, 3, 1)).fill_(1.0),
-            torch.empty_strided((4, 3, 2), (10, 0, 3)).fill_(1.0),
-            torch.empty_strided((4, 3, 2), (10, 1, 2)).fill_(1.0),
-            torch.empty_strided((4, 3, 2), (4, 2, 1))[:, :, ::2].fill_(1.0),
-            torch.empty_strided((4, 3, 2), (10, 1, 1)).fill_(1.0),
-            torch.empty_strided((4, 1, 1, 2), (10, 0, 0, 2)).fill_(1.0),
-            torch.empty_strided((4, 2, 3), (10, 3, 3)).fill_(1.0))
+            torch.randn(4, 3, 2, device=device),
+            torch.randn(4, 3, 2, device=device)[:, :, ::2],
+            torch.empty_strided((4, 3, 2), (10, 3, 1), device=device).fill_(1.0),
+            torch.empty_strided((4, 3, 2), (10, 0, 3), device=device).fill_(1.0),
+            torch.empty_strided((4, 3, 2), (10, 1, 2), device=device).fill_(1.0),
+            torch.empty_strided((4, 3, 2), (4, 2, 1), device=device)[:, :, ::2].fill_(1.0),
+            torch.empty_strided((4, 3, 2), (10, 1, 1), device=device).fill_(1.0),
+            torch.empty_strided((4, 1, 1, 2), (10, 0, 0, 2), device=device).fill_(1.0),
+            torch.empty_strided((4, 2, 3), (10, 3, 3), device=device).fill_(1.0))
 
         for like_fn in like_fns:
             for t in tset:
