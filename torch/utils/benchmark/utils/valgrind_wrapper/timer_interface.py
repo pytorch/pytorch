@@ -257,7 +257,7 @@ class Serialization(enum.Enum):
     TORCH_JIT = 2
 
 
-_GLOBALS_TYPES_WHITELIST: Dict[Serialization, Tuple[Any, ...]] = {
+_GLOBALS_ALLOWED_TYPES: Dict[Serialization, Tuple[Any, ...]] = {
     Serialization.PICKLE: (str, bytes, bool, int, float, complex),
     Serialization.TORCH_JIT: (torch.jit.ScriptFunction, torch.jit.ScriptModule),
     Serialization.TORCH: (torch.nn.Module,),
@@ -270,7 +270,7 @@ class CopyIfCallgrind:
     See `GlobalsBridge` for why this matters.
     """
     def __init__(self, value: Any, *, setup: Optional[str] = None):
-        for method, supported_types in _GLOBALS_TYPES_WHITELIST.items():
+        for method, supported_types in _GLOBALS_ALLOWED_TYPES.items():
             if any(isinstance(value, t) for t in supported_types):
                 self._value: Any = value
                 self._setup: Optional[str] = setup
@@ -279,7 +279,7 @@ class CopyIfCallgrind:
         else:
             supported_str = "\n".join([
                 getattr(t, "__name__", repr(t))
-                for t in it.chain(_GLOBALS_TYPES_WHITELIST.values())])
+                for t in it.chain(_GLOBALS_ALLOWED_TYPES.values())])
 
             raise ValueError(
                 f"Unsupported type: {type(value)}\n"
