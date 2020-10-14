@@ -422,7 +422,6 @@ class Tensor(torch._C._TensorBase):
                 @staticmethod
                 def forward(ctx, self, pivot=True, get_infos=False):
                     LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
-                    P, L, U = torch.lu_unpack(LU, pivots)
                     ctx.save_for_backward(LU, pivots, infos)
                     ctx.mark_non_differentiable(pivots, infos)
                     return LU, pivots, infos
