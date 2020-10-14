@@ -83,8 +83,9 @@ class WindowsJob:
             props_dict["test_name"] = test_name
 
             if is_running_on_cuda:
-                #index 3 is for caffe2 ops test, use xlarge to avoid hypothesis.errors.DeadlineExceeded
-                props_dict["executor"] = "windows-xlarge-cpu-with-nvidia-cuda" if self.test_index == 3 else "windows-with-nvidia-gpu"
+                # index 3 is for caffe2 ops test, use xlarge to avoid hypothesis.errors.DeadlineExceeded
+                props_dict["executor"] = "windows-xlarge-cpu-with-nvidia-cuda" if self.test_index == 3 \
+                                                                               else "windows-with-nvidia-gpu"
 
 
         props_dict["cuda_version"] = (
