@@ -79,9 +79,8 @@ struct DeepAndWideFast : torch::nn::Module {
 
       return pred;
     } else {
-      at::native::add_out(prealloc_tensors[0], wide, mu_); // BxNF + 1xNF
-      at::native::mul_out(
-          prealloc_tensors[1], prealloc_tensors[0], sigma_); // BxNF * 1xNF
+      at::native::add_out(prealloc_tensors[0], wide, mu_);
+      at::native::mul_out(prealloc_tensors[1], prealloc_tensors[0], sigma_);
       // Placeholder for ReplaceNaN
       at::native::clamp_out(
           prealloc_tensors[2], prealloc_tensors[1], -10.0, 10.0);
