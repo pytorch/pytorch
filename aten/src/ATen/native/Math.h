@@ -454,19 +454,19 @@ static scalar_t lanczos_sum_expg_scaled(scalar_t x) {
     56906521.91347156388090791033559122686859
   };
   static const scalar_t lanczos_sum_expg_scaled_denom[13] = {
-    1,
-    66,
-    1925,
-    32670,
-    357423,
-    2637558,
-    13339535,
-    45995730,
-    105258076,
-    150917976,
-    120543840,
-    39916800,
-    0
+    1.,
+    66.,
+    1925.,
+    32670.,
+    357423.,
+    2637558.,
+    13339535.,
+    45995730.,
+    105258076.,
+    150917976.,
+    120543840.,
+    39916800.,
+    0.
   };
   return ratevl(x, lanczos_sum_expg_scaled_num,
       sizeof(lanczos_sum_expg_scaled_num) / sizeof(lanczos_sum_expg_scaled_num[0]) - 1,
@@ -506,8 +506,6 @@ static scalar_t _igam_helper_fac(scalar_t a, scalar_t x) {
 
 template <typename scalar_t>
 static scalar_t _igam_helper_series(scalar_t a, scalar_t x) {
-  static scalar_t MAXLOG = std::is_same<scalar_t, double>::value ?
-    7.09782712893383996843E2 : 88.72283905206835;
   static scalar_t MACHEP = std::is_same<scalar_t, double>::value ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
   static int MAXITER = 2000;
@@ -543,8 +541,6 @@ static scalar_t _igamc_helper_series(scalar_t a, scalar_t x) {
   scalar_t sum = 0;
   scalar_t term, logx;
   static scalar_t MAXITER = 2000;
-  static scalar_t MAXLOG = std::is_same<scalar_t, double>::value ?
-    7.09782712893383996843E2 : 88.72283905206835;
   static scalar_t MACHEP = std::is_same<scalar_t, double>::value ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
 
@@ -713,17 +709,7 @@ static scalar_t _igamc_helper_continued_fraction(scalar_t a, scalar_t x) {
 
 template <typename scalar_t>
 static inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
-  scalar_t ans, ax, c, yc, r, t, y, z;
   scalar_t absxma_a;
-  scalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
-  static scalar_t MAXLOG = std::is_same<scalar_t,double>::value ?
-    7.09782712893383996843E2 : 88.72283905206835;
-  static scalar_t MACHEP = std::is_same<scalar_t,double>::value ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
-  static scalar_t BIG = std::is_same<scalar_t,double>::value ?
-    4.503599627370496e15 : 16777216.;
-  static scalar_t BIGINV = std::is_same<scalar_t,double>::value ?
-    2.22044604925031308085e-16 : 5.9604644775390625E-8;
 
   static scalar_t SMALL = 20.0;
   static scalar_t LARGE = 200.0;
@@ -791,11 +777,7 @@ static inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
 
 template <typename scalar_t>
 static inline scalar_t calc_igamma(scalar_t a, scalar_t x) {
-  scalar_t ans, ax, c, r, absxma_a;
-  static scalar_t MAXLOG = std::is_same<scalar_t, double>::value ?
-    7.09782712893383996843E2 : 88.72283905206835;
-  static scalar_t MACHEP = std::is_same<scalar_t, double>::value ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
+  scalar_t absxma_a;
   static scalar_t SMALL = 20.0;
   static scalar_t LARGE = 200.0;
   static scalar_t SMALLRATIO = 0.3;

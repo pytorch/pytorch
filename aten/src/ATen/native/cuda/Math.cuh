@@ -54,12 +54,12 @@ static inline __host__ __device__ scalar_t zeta(scalar_t _x, scalar_t _q) {
   a = q;
   i = 0;
   b = 0.0;
-  while((i < 9) || (a <= 9.0)){
+  while ((i < 9) || (a <= 9.0)) {
     i += 1;
     a += 1.0;
     b = ::pow( a, -x );
     s += b;
-    if((-MACHEP < (b / s)) && ((b / s) < MACHEP)) {
+    if ((-MACHEP < (b / s)) && ((b / s) < MACHEP)) {
       return static_cast<scalar_t>(s);
     }
   };
@@ -68,16 +68,16 @@ static inline __host__ __device__ scalar_t zeta(scalar_t _x, scalar_t _q) {
   s -= 0.5 * b;
   a = 1.0;
   k = 0.0;
-  for(int i=0; i < 12; i++) {
+  for (int i=0; i < 12; i++) {
     a *= x + k;
     b /= w;
     t = a * b / A[i];
     s = s + t;
     t = t / s;
-    if(t < 0){
+    if (t < 0){
       t = -t;
     }
-    if((-MACHEP <t) && (t < MACHEP)){
+    if ((-MACHEP <t) && (t < MACHEP)){
       return static_cast<scalar_t>(s);
     }
     k += 1.0;
@@ -220,7 +220,7 @@ static __host__ __device__ scalar_t ratevl(scalar_t x, const scalar_t num[], int
   }
   if (absx > 1) {
     i = N - M;
-    return ::pow(x, i) * num_ans / denom_ans;
+    return ::pow(x, static_cast<accscalar_t>(i)) * num_ans / denom_ans;
   }
   else {
     return num_ans / denom_ans;
@@ -301,8 +301,6 @@ static __host__ __device__ scalar_t _igam_helper_fac(scalar_t a, scalar_t x) {
 template <typename scalar_t>
 static __host__ __device__ scalar_t _igam_helper_series(scalar_t a, scalar_t x) {
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
-  static accscalar_t MAXLOG = std::is_same<accscalar_t, double>::value ?
-    7.09782712893383996843E2 : 88.72283905206835;
   static accscalar_t MACHEP = std::is_same<accscalar_t, double>::value ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
   static int MAXITER = 2000;
@@ -339,8 +337,6 @@ static __host__ __device__ scalar_t _igamc_helper_series(scalar_t a, scalar_t x)
   accscalar_t sum = 0;
   accscalar_t term, logx;
   static accscalar_t MAXITER = 2000;
-  static accscalar_t MAXLOG = std::is_same<accscalar_t, double>::value ?
-    7.09782712893383996843E2 : 88.72283905206835;
   static accscalar_t MACHEP = std::is_same<accscalar_t, double>::value ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
 
@@ -512,17 +508,7 @@ static __host__ __device__ scalar_t _igamc_helper_continued_fraction(scalar_t a,
 template <typename scalar_t>
 static inline __host__ __device__ scalar_t calc_igammac(scalar_t a, scalar_t x) {
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
-  accscalar_t ans, ax, c, yc, r, t, y, z;
   accscalar_t absxma_a;
-  accscalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
-  static accscalar_t MAXLOG = std::is_same<accscalar_t,double>::value ?
-    7.09782712893383996843E2 : 88.72283905206835;
-  static accscalar_t MACHEP = std::is_same<accscalar_t,double>::value ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
-  static accscalar_t BIG = std::is_same<accscalar_t,double>::value ?
-    4.503599627370496e15 : 16777216.;
-  static accscalar_t BIGINV = std::is_same<accscalar_t,double>::value ?
-    2.22044604925031308085e-16 : 5.9604644775390625E-8;
 
   static accscalar_t SMALL = 20.0;
   static accscalar_t LARGE = 200.0;
@@ -591,11 +577,7 @@ static inline __host__ __device__ scalar_t calc_igammac(scalar_t a, scalar_t x) 
 template <typename scalar_t>
 static inline __host__ __device__ scalar_t calc_igamma(scalar_t a, scalar_t x) {
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
-  accscalar_t ans, ax, c, r, absxma_a;
-  static accscalar_t MAXLOG = std::is_same<accscalar_t, double>::value ?
-    7.09782712893383996843E2 : 88.72283905206835;
-  static accscalar_t MACHEP = std::is_same<accscalar_t, double>::value ?
-    1.11022302462515654042E-16 : 5.9604644775390625E-8;
+  accscalar_t absxma_a;
   static accscalar_t SMALL = 20.0;
   static accscalar_t LARGE = 200.0;
   static accscalar_t SMALLRATIO = 0.3;
