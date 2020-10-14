@@ -220,10 +220,20 @@ thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
 std::ostream& operator<<(
     std::ostream& output,
     const ProcessGroupNCCL::WorkNCCL& workNCCL) {
-  return output << "WorkNCCL("
-                << "OpType=" << opTypeToString(workNCCL.opType_)
-                << ", TensorShape=" << (*workNCCL.outputs_)[0].sizes()
-                << ", Timeout(ms)=" << workNCCL.opTimeout_.count() << ")";
+  std::string workInfo;
+  if (workNCCL.outputs_) {
+    workInfo = c10::str("WorkNCCL(",
+                        "OpType=", opTypeToString(workNCCL.opType_),
+                        ", TensorShape=", (*workNCCL.outputs_)[0].sizes(),
+                        ", Timeout(ms)=", workNCCL.opTimeout_.count(),
+                        ")");
+  } else {
+    workInfo = c10::str("WorkNCCL(",
+                        "OpType=", opTypeToString(workNCCL.opType_),
+                        ", Timeout(ms)=", workNCCL.opTimeout_.count(),
+                        ")");
+  }
+  return output << workInfo;
 }
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(
