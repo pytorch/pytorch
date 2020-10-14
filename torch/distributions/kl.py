@@ -1,6 +1,7 @@
 import math
 import warnings
 from functools import total_ordering
+from typing import Type, Dict, Callable, Tuple
 
 import torch
 from torch._six import inf
@@ -33,7 +34,7 @@ from .uniform import Uniform
 from .utils import _sum_rightmost
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
-_KL_MEMOIZE = {}  # Memoized version mapping many specific (type, type) pairs to functions.
+_KL_MEMOIZE: Dict[Tuple[Type, Type], Callable] = {}  # Memoized version mapping many specific (type, type) pairs to functions.
 
 
 def register_kl(type_p, type_q):
