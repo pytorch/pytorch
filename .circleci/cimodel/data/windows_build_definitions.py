@@ -83,7 +83,9 @@ class WindowsJob:
             props_dict["test_name"] = test_name
 
             if is_running_on_cuda:
-                props_dict["executor"] = "windows-with-nvidia-gpu"
+                #index 3 is for caffe2 ops test, use xlarge to avoid hypothesis.errors.DeadlineExceeded
+                props_dict["executor"] = "windows-xlarge-cpu-with-nvidia-cuda" if self.test_index == 3 else "windows-with-nvidia-gpu"
+
 
         props_dict["cuda_version"] = (
             miniutils.quote(str(self.cuda_version.major))
@@ -131,7 +133,7 @@ WORKFLOW_DATA = [
     WindowsJob(None, _VC2019, CudaVersion(10, 1)),
     WindowsJob(1, _VC2019, CudaVersion(10, 1)),
     WindowsJob(2, _VC2019, CudaVersion(10, 1)),
-    # temp support caffe2 ops test
+    # support caffe2 ops test
     WindowsJob(3, _VC2019, CudaVersion(10, 1)),
     # VS2019 CUDA-11.0
     WindowsJob(None, _VC2019, CudaVersion(11, 0)),
