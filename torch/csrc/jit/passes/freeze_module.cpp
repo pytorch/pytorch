@@ -550,9 +550,9 @@ class AttributePropagator {
           auto& name = n->s(attr::name);
           // For now, use all module ivalues which are the same type
           // and could be the module that this GetAttr resolves to
-          // TODO: we could attempt to follow the GetAttr chain and 
+          // TODO: we could attempt to follow the GetAttr chain and
           // find the exact ivalue, we would have to be careful
-          // that the chain does not contain any attributes which 
+          // that the chain does not contain any attributes which
           // get written to (setAttr calls)
           for (auto& mptr : modules) {
             auto module = Module(mptr);
@@ -561,8 +561,8 @@ class AttributePropagator {
               auto module = Module(mptr);
               auto attr = module.attr(name);
               // TODO: this could be insertReferencedAttr to be more clear,
-              // these are attributes we could not inline, which include 
-              // other reasons besides mutation (unsupported constant, 
+              // these are attributes we could not inline, which include
+              // other reasons besides mutation (unsupported constant,
               // getAttr resolving to non-getAttr node, etc)
               insertMutableAttr(name, attr, mptr);
               if (attr.isModule()) {
