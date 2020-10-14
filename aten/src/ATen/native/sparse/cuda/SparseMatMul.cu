@@ -743,6 +743,69 @@ void sparse_sparse_matmul_cuda_kernel(
     });
 }
 
+template <typename scalar_t>
+Tensor fill_with(const Tensor& input, scalar_t fill_value) {
+  auto input_indices = input._indices();
+  auto input_values = input._values();
+
+  if (input.size(0) * input.size(1) == input_values.numel()) {
+    return input;
+  }
+  Tensor output = at::empty_like(input);
+
+  auto output_indices = output._indices();
+  auto output_values = output._values();
+  auto n_rows = input.size(0);
+  auto n_cols = input.size(1);
+  auto matrix_size = n_rows * n_cols;
+  auto new_nnz = input.size(0) * input.size(1) + input_values.numel();
+
+  output_indices.resize_({2, new_nnz});
+  output_values.resize_(new_nnz);
+
+  auto input_indices_accessor = input_indices.packed_accessor<int64_t, 2>();
+  auto input_values_accessor = input_values.packed_accessor<scalar_t, 1>();
+
+  auto output_indices_accessor = output_indices.packed_accessor<int64_t, 2>();
+  auto output_values_accessor = output_values.packed_accessor<scalar_t, 1>();
+  int64_t index = 0;
+
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  auto policy = thrust::cuda::par(allocator).on(stream);
+
+  thrust::for_each(
+      policy,
+      thrust::make_counting_iterator(int64_t(0)),
+      thrust::make_counting_iterator(int64_t(matrix_size)),
+      [output_indices_accessor,
+       output_values_accessor,
+       fill_value,
+       n_rows,
+       n_cols] __device__(int64_t index) mutable {
+        output_indices_accessor[0][index] = index / n_cols;
+        output_indices_accessor[1][index] = index % n_cols;
+        output_values_accessor[index] = fill_value;
+      });
+
+  thrust::for_each(
+      policy,
+      thrust::make_counting_iterator(int64_t(matrix_size)),
+      thrust::make_counting_iterator(int64_t(new_nnz)),
+      [input_indices_accessor,
+       output_indices_accessor,
+       output_values_accessor,
+       input_values_accessor,
+       fill_value,
+       matrix_size] __device__(int64_t index) mutable {
+        int64_t j = index - matrix_size;
+        output_indices_accessor[0][index] = input_indices_accessor[0][j];
+        output_indices_accessor[1][index] = input_indices_accessor[1][j];
+        output_values_accessor[index] = input_values_accessor[j] - fill_value;
+      });
+  return output;
+}
+
 template <typename scalar_t, short grad_order>
 void sparse_matmul_kernel_grad(Tensor& output, const Tensor& grad, const Tensor& x) {
   /* 
@@ -758,11 +821,12 @@ void sparse_matmul_kernel_grad(Tensor& output, const Tensor& grad, const Tensor&
     else:
       output = C_grad @ x^T 
   */
+  Tensor grad_updated = fill_with(grad, /*fill_value = */ scalar_t(1.0));
   Tensor grad_filled = at::ones(grad.sizes(), grad.options().layout(kStrided));
   if (grad_order == 1) {
-    sparse_sparse_matmul_cuda_kernel<scalar_t>(output, x.transpose(0, 1).coalesce(), grad_filled.to_sparse());
-  } else if (grad_order == 0){
-    sparse_sparse_matmul_cuda_kernel<scalar_t>(output, grad_filled.to_sparse(), x.transpose(0, 1).coalesce());
+    sparse_sparse_matmul_cuda_kernel<scalar_t>(output, x.transpose(0, 1).coalesce(), grad_updated.coalesce());
+  } else if (grad_order == 0) {
+    sparse_sparse_matmul_cuda_kernel<scalar_t>(output, grad_updated.coalesce(), x.transpose(0, 1).coalesce());
   }
 }
 
