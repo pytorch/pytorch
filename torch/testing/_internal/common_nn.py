@@ -1580,7 +1580,29 @@ new_module_tests = [
         input_size=(4, 6, 5),
         cudnn=True,
         check_eval=True,
+        check_bfloat16=True,
         desc='1d_affine',
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(3, 12, 1e-3),
+        cpp_constructor_args='torch::nn::GroupNormOptions(3, 12).eps(1e-3)',
+        input_size=(4, 12),
+        cudnn=True,
+        check_eval=True,
+        check_bfloat16=True,
+        desc='1d_affine_GN',
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(1, 6, 1e-3),
+        cpp_constructor_args='torch::nn::GroupNormOptions(1, 6).eps(1e-3)',
+        input_size=(150, 6),
+        cudnn=True,
+        check_eval=True,
+        desc='1d_affine_large_batch',  # For large batch_size
+        check_bfloat16=True,
+        test_cpu=False,
     ),
     dict(
         module_name='GroupNorm',
@@ -1589,15 +1611,17 @@ new_module_tests = [
         input_size=(4, 5, 5),
         cudnn=True,
         check_eval=True,
+        check_bfloat16=True,
         desc='1d_no_affine_IN',  # this setting is equivalent with InstanceNormi
     ),
     dict(
         module_name='GroupNorm',
-        constructor_args=(1, 5, 1e-3, False),
-        cpp_constructor_args='torch::nn::GroupNormOptions(1, 5).eps(1e-3).affine(false)',
-        input_size=(4, 5, 5),
+        constructor_args=(1, 10, 1e-3, False),
+        cpp_constructor_args='torch::nn::GroupNormOptions(1, 10).eps(1e-3).affine(false)',
+        input_size=(4, 10),
         cudnn=True,
         check_eval=True,
+        check_bfloat16=True,
         desc='1d_no_affine_LN',  # this setting is equivalent with LayerNorm
     ),
     dict(
@@ -1607,7 +1631,19 @@ new_module_tests = [
         input_size=(4, 6, 2, 3),
         cudnn=True,
         check_eval=True,
+        check_bfloat16=True,
         desc='2d_affine',
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(3, 6, 1e-3),
+        cpp_constructor_args='torch::nn::GroupNormOptions(3, 6).eps(1e-3)',
+        input_size=(4, 6, 28, 28),
+        cudnn=True,
+        check_eval=True,
+        check_bfloat16=True,
+        desc='2d_affine_large_feature',
+        test_cpu=False,
     ),
     dict(
         module_name='GroupNorm',
@@ -1616,6 +1652,7 @@ new_module_tests = [
         input_size=(4, 3, 2, 3),
         cudnn=True,
         check_eval=True,
+        check_bfloat16=True,
         desc='2d_no_affine_IN',  # this setting is equivalent with InstanceNorm
     ),
     dict(
@@ -1625,6 +1662,7 @@ new_module_tests = [
         input_size=(4, 3, 2, 3),
         cudnn=True,
         check_eval=True,
+        check_bfloat16=True,
         desc='2d_no_affine_LN',  # this setting is equivalent with LayerNorm
     ),
     dict(
