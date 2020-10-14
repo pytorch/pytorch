@@ -284,7 +284,8 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 // synchronizes the dispatch table entry for a given dispatch key
 // with the current state of kernel registrations in the dispatcher.
 // note that this is not a complete update, due to relationships between
-// dispatch keys (e.g. runtime keys and their associated autograd keys).
+// dispatch keys (e.g. runtime keys and their associated autograd keys,
+// or alias keys and their associated keysets).
 // This function should be considered a private helper for updateDispatchTable_()
 void OperatorEntry::updateDispatchTableEntry_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
   auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
@@ -314,8 +315,10 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
   }
   // Note [Refresh Runtime Autograd entries in dispatchTable_]
   // Registering to backend key might affect computed entry at its Autograd backend key due to (2.1) & (2.3).
-  DispatchKey autograd_key = getAutogradKeyFromBackend(dispatch_key);
-  updateDispatchTableEntry_(dispatcher, autograd_key);
+  if (c10::isBackendDispatchKey(dispatch_key)) {
+    DispatchKey autograd_key = getAutogradKeyFromBackend(dispatch_key);
+    updateDispatchTableEntry_(dispatcher, autograd_key);
+  }
 }
 
 // does a complete update of the dispatch table, synchronizing all
@@ -332,7 +335,7 @@ void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) 
   // Note [Undefined in dispatchTable_]
   // DispatchKey Undefined is used in runtime:
   // (1) it gives people place to specify functionality that should run when there are no dispatch keys,
-  //     e.g., an op without Tensor input or an empty TensorList argument
+  //     e.g., an op without Tensor inputs or empty TensorList arguments
   // (2) it would let us remove the explicit error checking code in the dispatch hotpath, and so when
   //     no dispatch keys are available we just slide into the undefined handler which would then raise
   //     the error message.

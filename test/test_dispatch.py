@@ -25,6 +25,7 @@ import re
 Result = namedtuple('Result', 'state table provenance')
 
 dispatch_keys_to_check = (
+    'Undefined',
     'CPU',
     'CUDA',
     'XLA',
@@ -341,6 +342,7 @@ Math[alias]: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed 
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: default_def_name_t_t [math kernel]
 CPU: fn_cpu [kernel]
 CUDA: default_def_name_t_t [math kernel]
 XLA: fn_xla [kernel]
@@ -372,6 +374,7 @@ Math[alias]: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed 
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: default_def_name_t_t [math kernel]
 CPU: impl_t_t [kernel]
 CUDA: default_def_name_t_t [math kernel]
 XLA: default_def_name_t_t [math kernel]
@@ -402,6 +405,7 @@ Math[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: impl_t_t [math kernel]
 CPU: impl_t_t [math kernel]
 CUDA: impl_t_t [math kernel]
 XLA: impl_t_t [math kernel]
@@ -435,6 +439,7 @@ Math[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: fn_math [math kernel]
 CPU: fn_cpu [kernel]
 CUDA: fn_math [math kernel]
 XLA: fn_math [math kernel]
@@ -474,35 +479,38 @@ AutogradXLA: impl_t_t [autograd kernel]
     # Now that catchAll maps to Math, registering to both catchAll and Math breaks commutativity.
     def test_computed_table_with_cpu_autograd_math(self):
         result = self.commute("foo", [
-            # m.def("foo", [](const Tensor & x) { return x })
-            lambda m: m.def_name_t_t("foo"),
+            # m.def("foo(Tensor x) -> Tensor")
+            lambda m: m.def_("foo(Tensor x) -> Tensor"),
             # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
             # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo", "Autograd", debug="fn_autograd"),
+            # m.impl("foo", torch::kMath, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "Math", debug="fn_math"),
         ])
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
 name: test::foo
-schema: test::foo(Tensor _0) -> (Tensor _0)
+schema: test::foo(Tensor x) -> (Tensor)
 debug: registered at /dev/null:0
-alias analysis kind: CONSERVATIVE
+alias analysis kind: FROM_SCHEMA
 CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 Autograd[alias]: fn_autograd :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-Math[alias]: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Math[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: fn_math [math kernel]
 CPU: fn_cpu [kernel]
-CUDA: default_def_name_t_t [math kernel]
-XLA: default_def_name_t_t [math kernel]
-AutogradOther: default_def_name_t_t [math kernel]
+CUDA: fn_math [math kernel]
+XLA: fn_math [math kernel]
+AutogradOther: fn_math [math kernel]
 AutogradCPU: fn_autograd [autograd kernel]
-AutogradCUDA: default_def_name_t_t [math kernel]
-AutogradXLA: default_def_name_t_t [math kernel]
+AutogradCUDA: fn_math [math kernel]
+AutogradXLA: fn_math [math kernel]
 ''')
 
     def test_computed_table_with_ambiguous_autogradother(self):
@@ -528,6 +536,7 @@ Math[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check + ('QuantizedCPU',))
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: fn_math [math kernel]
 CPU: fn_math [math kernel]
 CUDA: fn_math [math kernel]
 XLA: fn_math [math kernel]
@@ -561,6 +570,7 @@ DefaultBackend[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0) [ boxed u
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: fn_defaultbackend [default backend kernel]
 CPU: fn_cpu [kernel]
 CUDA: fn_defaultbackend [default backend kernel]
 XLA: fn_defaultbackend [default backend kernel]
@@ -596,6 +606,7 @@ DefaultBackend[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0) [ boxed u
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check + ('QuantizedCPU',))
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: fn_defaultbackend [default backend kernel]
 CPU: fn_cpu [kernel]
 CUDA: fn_defaultbackend [default backend kernel]
 XLA: fn_defaultbackend [default backend kernel]
@@ -635,6 +646,7 @@ DefaultBackend[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0) [ boxed u
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: fn_defaultbackend [default backend kernel]
 CPU: fn_cpu [kernel]
 CUDA: fn_defaultbackend [default backend kernel]
 XLA: fn_defaultbackend [default backend kernel]
