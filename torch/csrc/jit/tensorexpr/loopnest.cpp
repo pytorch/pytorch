@@ -1428,6 +1428,283 @@ static std::vector<const Var*> getOuterLoopIndexes(Stmt* s) {
   return res;
 }
 
+class CacheReplacer : public IRMutator {
+ public:
+  CacheReplacer(
+      const Buf* buffer,
+      const Buf* cache,
+      std::vector<const Expr*>& offsets)
+      : buf_(buffer), cache_(cache), offsets_(offsets) {}
+
+ private:
+  const Expr* mutate(const FunctionCall* v) override {
+    const Buf* buf = v->tensor()->buf();
+    if (buf != buf_) {
+      return IRMutator::mutate(v);
+    }
+
+    // for reductions the size of tensor->args() is not equal to the size of the
+    // output buffer, but they should be ordered so that the output args are at
+    // the beginning even if the loops are reordered later.
+    // Map indices to call-parameters.
+    std::vector<const Expr*> newIndices;
+    for (size_t i = 0; i < offsets_.size(); ++i) {
+      const Expr* index = v->param(i)->accept_mutator(this);
+      const Expr* offset = offsets_[i];
+      const Expr* sub = IRSimplifier::simplify(new Sub(index, offset));
+      newIndices.push_back(sub);
+    }
+
+    return new Load(cache_, newIndices, new IntImm(1));
+  }
+
+  const Expr* mutate(const Load* v) override {
+    const Buf* buf = v->buf();
+    if (buf != buf_) {
+      return IRMutator::mutate(v);
+    }
+
+    // Map indices to call-parameters.
+    std::vector<const Expr*> newIndices;
+    TORCH_INTERNAL_ASSERT(offsets_.size() == v->indices().size());
+    for (size_t i = 0; i < v->indices().size(); ++i) {
+      const Expr* index = v->indices()[i]->accept_mutator(this);
+      const Expr* offset = offsets_[i];
+      const Expr* sub = IRSimplifier::simplify(new Sub(index, offset));
+      newIndices.push_back(sub);
+    }
+
+    return new Load(cache_, newIndices, v->mask());
+  }
+
+  Stmt* mutate(const Store* v) override {
+    const Buf* buf = v->buf();
+    if (buf != buf_) {
+      return IRMutator::mutate(v);
+    }
+
+    const Expr* newValue = v->value()->accept_mutator(this);
+
+    // Map indices to call-parameters.
+    std::vector<const Expr*> newIndices;
+    TORCH_INTERNAL_ASSERT(offsets_.size() == v->indices().size());
+    for (size_t i = 0; i < v->indices().size(); ++i) {
+      const Expr* index = v->indices()[i]->accept_mutator(this);
+      const Expr* offset = offsets_[i];
+      const Expr* sub = IRSimplifier::simplify(new Sub(index, offset));
+      newIndices.push_back(sub);
+    }
+
+    return new Store(cache_, newIndices, newValue, v->mask());
+  }
+
+  const Expr* mutate(const ReduceOp* v) override {
+    const Buf* buf = v->accumulator();
+    if (buf != buf_) {
+      return IRMutator::mutate(v);
+    }
+
+    const Expr* newBody = v->body().node()->accept_mutator(this);
+
+    // Map indices to call-parameters.
+    std::vector<const Expr*> newIndices;
+    TORCH_INTERNAL_ASSERT(offsets_.size() == v->output_args().size());
+    for (size_t i = 0; i < v->output_args().size(); ++i) {
+      const Expr* index = v->output_args()[i]->accept_mutator(this);
+      const Expr* offset = offsets_[i];
+      const Expr* sub = IRSimplifier::simplify(new Sub(index, offset));
+      newIndices.push_back(sub);
+    }
+
+    return new ReduceOp(
+        cache_,
+        ExprHandle(newBody),
+        v->interaction(),
+        newIndices,
+        v->reduce_args());
+  }
+
+  const Buf* buf_;
+  const Buf* cache_;
+  std::vector<const Expr*>& offsets_;
+};
+
+LoopNest::AccessResult LoopNest::cacheAccesses(
+    const Buf* producer,
+    const std::string& name,
+    Stmt* consumer) {
+  ReduceOp* reduceOp{nullptr};
+  auto reductions = NodeFinder<ReduceOp>::find(consumer);
+  for (auto* ro : reductions) {
+    if (ro->accumulator() != producer) {
+      continue;
+    }
+
+    if (reduceOp) {
+      throw std::runtime_error(
+          "can only cache accesses used by at most a single reduceOp");
+      return {nullptr, nullptr};
+    }
+
+    reduceOp = ro;
+  }
+
+  auto consumer_bounds_info = inferBounds(consumer);
+  auto bounds_it = consumer_bounds_info.find(producer);
+  if (bounds_it == consumer_bounds_info.end()) {
+    throw std::runtime_error("consumer does not use the Tensor produced");
+    return {nullptr, nullptr};
+  }
+
+  std::vector<const Expr*> starts;
+  std::vector<const Expr*> stops;
+
+  bool hasReads = false;
+  bool hasWrites = false;
+  // Find the safe size of the temprorary buffer by determining the outer
+  // extents of a union of all bounds.
+  for (const TensorAccessBoundsInfo& p : bounds_it->second) {
+    hasReads |= p.kind == kLoad;
+    hasWrites |= p.kind == kStore;
+
+    for (size_t i = 0; i < p.start.size(); i++) {
+      if (starts.size() <= i) {
+        starts.push_back(p.start[i]);
+      } else {
+        starts[i] =
+            IRSimplifier::simplify(new Min(starts[i], p.start[i], true));
+      }
+
+      if (stops.size() <= i) {
+        stops.push_back(p.stop[i]);
+      } else {
+        stops[i] = IRSimplifier::simplify(new Max(stops[i], p.stop[i], true));
+      }
+    }
+  }
+
+  std::vector<std::string> var_names = {"i", "j", "k", "l", "m", "n", "o", "p"};
+  std::vector<const Expr*> tmp_dims;
+  std::vector<Var*> new_loop_vars;
+  std::vector<const Expr*> new_loop_vars_expr;
+
+  // Determine the size of the cache, and create a loop var for each dimension.
+  for (size_t i = 0; i < starts.size(); ++i) {
+    const Expr* dim = IRSimplifier::simplify(
+        new Add(new Sub(stops[i], starts[i]), new IntImm(1)));
+
+    tmp_dims.push_back(dim);
+
+    new_loop_vars.push_back(new Var(var_names[i % var_names.size()], kInt));
+    new_loop_vars_expr.push_back(new_loop_vars[i]);
+  }
+
+  // Create the var.
+  Buf* tmp_buf = new Buf(new Var(name, kHandle), tmp_dims, producer->dtype());
+
+  // determine the offsets for calls into the cache based off the loop start of
+  // each axis.
+  std::vector<const Expr*> tmp_params;
+  for (size_t i = 0; i < new_loop_vars.size(); ++i) {
+    tmp_params.push_back(new Add(new_loop_vars[i], starts[i]));
+  }
+
+  // Replace acceses to the producer in the consumer with the cache.
+  CacheReplacer replacer(producer, tmp_buf, starts);
+  Stmt* new_consumer =
+      IRSimplifier::simplify(consumer->accept_mutator(&replacer));
+
+  intermediate_bufs_.insert(tmp_buf);
+
+  // replace the old consumer with the replaced consumer.
+  Block* consumer_block = nullptr;
+  // if the consumer is a block, we should mutate it in place.
+  if ((consumer_block = dynamic_cast<Block*>(consumer))) {
+    consumer_block->clear();
+    consumer_block->append_stmt(new_consumer);
+  } else {
+    consumer_block = dynamic_cast<Block*>(consumer->get_parent());
+    assert(consumer_block);
+    consumer_block->replace_stmt(consumer, new_consumer);
+  }
+
+  // If there's a reduction we can't just write the result straight back to the
+  // original buffer, since after parallelism the writes will race. Instead we
+  // need to create a new ReduceOp.
+  if (reduceOp) {
+    // reduceOp means we had both loads and stores.
+
+    // Init cache to 0.
+    Stmt* tmp_init = new Store(
+        tmp_buf,
+        new_loop_vars_expr,
+        getImmediateByType(tmp_buf->dtype(), 0),
+        new IntImm(1));
+
+    for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
+      tmp_init =
+          new For(new_loop_vars[i], new IntImm(0), tmp_dims[i], tmp_init);
+    }
+
+    consumer_block->insert_stmt_before(tmp_init, new_consumer);
+
+    // Reduce back to the original buffer:
+    Stmt* tmp_store = new Store(
+        producer,
+        tmp_params,
+        new ReduceOp(
+            producer,
+            ExprHandle(new Load(tmp_buf, new_loop_vars_expr, new IntImm(1))),
+            reduceOp->interaction(),
+            tmp_params,
+            {}),
+        new IntImm(1));
+
+    for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
+      tmp_store =
+          new For(new_loop_vars[i], new IntImm(0), tmp_dims[i], tmp_store);
+    }
+
+    consumer_block->insert_stmt_after(tmp_store, new_consumer);
+
+    return std::make_pair(tmp_buf, new_consumer);
+  }
+
+  if (hasReads) {
+    // Fill the cache with values from the consumer.
+    Stmt* tmp_store = new Store(
+        tmp_buf,
+        new_loop_vars_expr,
+        new Load(producer, tmp_params, new IntImm(1)),
+        new IntImm(1));
+
+    for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
+      tmp_store =
+          new For(new_loop_vars[i], new IntImm(0), tmp_dims[i], tmp_store);
+    }
+
+    consumer_block->insert_stmt_before(tmp_store, new_consumer);
+  }
+
+  if (hasWrites) {
+    // sync the cache back to the producer buf.
+    Stmt* tmp_store = new Store(
+        producer,
+        tmp_params,
+        new Load(tmp_buf, new_loop_vars_expr, new IntImm(1)),
+        new IntImm(1));
+
+    for (int64_t i = new_loop_vars.size() - 1; i >= 0; --i) {
+      tmp_store =
+          new For(new_loop_vars[i], new IntImm(0), tmp_dims[i], tmp_store);
+    }
+
+    consumer_block->insert_stmt_after(tmp_store, new_consumer);
+  }
+
+  return std::make_pair(tmp_buf, new_consumer);
+}
+
 /*
  * WHAT COMPUTE_AT DOES
  * ====================
