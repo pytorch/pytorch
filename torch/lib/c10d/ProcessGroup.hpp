@@ -73,6 +73,8 @@ class ProcessGroup {
 
   // Please do not use ProcessGroup::Work API, it is going away, to be
   // replaced by ivalue::Future.
+  // Python binding for this class might change, please do not assume
+  // this will be bound using pybind.
   class Work {
    public:
     Work();
