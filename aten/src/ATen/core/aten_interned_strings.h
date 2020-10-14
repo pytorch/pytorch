@@ -599,6 +599,7 @@ _(aten, rnn_tanh) \
 _(aten, rnn_tanh_cell) \
 _(aten, rot90) \
 _(aten, round) \
+_(aten, row_stack) \
 _(aten, rrelu) \
 _(aten, rrelu_with_noise) \
 _(aten, rrelu_with_noise_backward) \
@@ -781,6 +782,7 @@ _(attr, ceil_mode) \
 _(attr, checked_signal_sizes) \
 _(attr, chunks) \
 _(attr, columns) \
+_(attr, column_stack) \
 _(attr, complex_input) \
 _(attr, complex_output) \
 _(attr, condition) \

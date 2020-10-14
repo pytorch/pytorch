@@ -1262,6 +1262,50 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
   return self;
 }
 
+Tensor& row_stack_out(Tensor& result, TensorList tensors) {
+  return at::vstack_out(result, tensors);
+}
+
+Tensor row_stack(TensorList tensors) {
+  return at::vstack(tensors);
+}
+
+static std::vector<Tensor> reshape_1d_tensors(TensorList tensors) {
+  std::vector<Tensor> result(tensors.size());
+  auto transform_lambda = [](const Tensor& input) -> Tensor {
+    return input.reshape({input.size(0), 1});
+  };
+  std::transform(tensors.cbegin(),
+                 tensors.cend(),
+                 result.begin(),
+                 transform_lambda);
+  return result;
+}
+
+Tensor& column_stack_out(Tensor& result, TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+              "column_stack expects a non-empty TensorList");
+
+  auto rep = at::atleast_1d(tensors);
+  if (rep[0].dim() == 1) {
+    auto reshaped_tensors = reshape_1d_tensors(rep);
+    return at::hstack_out(result, reshaped_tensors);
+  }
+  return at::hstack_out(result, rep);
+}
+
+Tensor column_stack(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+              "column_stack expects a non-empty TensorList");
+
+  auto rep = at::atleast_1d(tensors);
+  if (rep[0].dim() == 1) {
+    auto reshaped_tensors = reshape_1d_tensors(rep);
+    return at::hstack(reshaped_tensors);
+}
+  return at::hstack(rep);
+}
+
 static Tensor& propagate_transposed_names(
     Tensor& result,
     const Tensor& other,
