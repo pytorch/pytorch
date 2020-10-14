@@ -3290,21 +3290,25 @@ add_docstr(torch.igamma,
            r"""
 igamma(input, other, *, out=None) -> Tensor
 
-Regularized lower incomplete gamma function
+Computes the regularized lower incomplete gamma function:
 
 .. math::
-    \text{out}_{i} = \frac{1}{\Gamma(\text{input})} \int_0^\text{other} t^{\text{input}-1} e^{-t} dt
+    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_0^\text{other}_i t^{\text{input}_i-1} e^{-t} dt
 
-The shapes of ``input`` and ``other`` must be
-:ref:`broadcastable <broadcasting-semantics>`.
+where (1) :attr:`input` and :attr:`other` must be non-negative and (2)
+:attr:`input` and :attr:`other` must not be zero at the same index.
+Violating the constraints will return `nan`.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+and float inputs.
 
 .. note::
-    The backward pass for :math:`\text{input}` has not been implemented.
+    The backward pass for :attr:`input` has not been implemented.
 
 """ + r"""
 Args:
-    input (Tensor): the first input tensor
-    other (Tensor): the second input tensor
+    input (Tensor): the first non-negative input tensor
+    other (Tensor): the second non-negative input tensor
 
 Keyword args:
     {out}

@@ -17493,15 +17493,21 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
             self.assertEqual(actual, expected)
 
-    @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
-    @dtypes(torch.float32, torch.float64)
-    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    def test_igamma(self, device, dtype):
+    def _helper_test_igamma(self, loglo, loghi, device, dtype):
+        torch.manual_seed(123)
+        kwargs = {"device": device, "dtype": dtype}
+        # generating random distribution from lo to hi with a loguniform
+        # distribution
+        def randrange(shape, **kwargs):
+            return torch.exp(torch.rand(shape, **kwargs) * (loghi - loglo) + loglo)
+        vec1 = randrange((100, 1), **kwargs)
         inputs = [
-            (torch.rand(10, device=device).to(dtype), torch.rand(10, device=device).to(dtype)),
-            (torch.rand((3, 3, 3), device=device).to(dtype), torch.rand((3, 3, 3), device=device).to(dtype)),
-            (torch.rand((100, 1), device=device).to(dtype), torch.rand((100, 1), device=device).to(dtype).transpose(0, 1)),
-            (torch.randint(100, (10, ), device=device, dtype=torch.long), torch.rand(10, device=device).to(dtype))
+            (randrange((10,), **kwargs), randrange((10,), **kwargs)),
+            (randrange((3, 3, 3), **kwargs), randrange((3, 3, 3), **kwargs)),
+            (randrange((100, 1), **kwargs), randrange((100, 1), **kwargs).transpose(0, 1)),
+            (vec1, vec1), # for large number, it should approach 0.5
+            (vec1, 0.5 * vec1), # test for considerable ratio
+            (vec1, 2.0 * vec1),
         ]
         for input0, input1 in inputs:
             actual = torch.igamma(input0, input1)
@@ -17510,9 +17516,38 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 input1 = input1.to(torch.float)
             expected = scipy.special.gammainc(input0.cpu().numpy(), input1.cpu().numpy())
             expected = torch.from_numpy(expected).to(dtype)
-            self.assertEqual(actual, expected)
+            if dtype == torch.bfloat16:
+                actual = actual.to(torch.float)
+                expected = expected.to(torch.float)
+            self.assertEqual(actual[~torch.isnan(actual)], expected[~torch.isnan(expected)])
 
     @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
+    @dtypesIfCUDA(torch.bfloat16, torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    def test_igamma_common(self, device, dtype):
+        # test igamma for reasonable range of values
+        loglo = -4  # approx 0.018
+        loghi = 4  # approx 54.6
+        _helper_test_igamma(loglo, loghi, device, dtype)
+
+    @dtypes(torch.float64)
+    def test_igamma_extreme(self, device, dtype):
+        # test igamma for extreme values
+        # This test only runs for float64 because it compares with scipy which
+        # operates at float64 (even when the inputs are float32).
+        # For large float32, e.g., igamma(1e38, 1e28), the torch version returns
+        # nan (wrong) while scipy returns 0.0 (correct), just because they
+        # operate in float64.
+        # Wrong results are also returned by scipy for large float64 numbers,
+        # e.g. sp.gammainc(1e308, 1e208)
+        kwargs = {"device": device, "dtype": dtype}
+        loglo = torch.log(torch.tensor(torch.finfo(dtype).tiny, **kwargs))
+        loghi = torch.log(torch.tensor(torch.finfo(dtype).max, **kwargs))
+        _helper_test_igamma(loglo, loghi, device, dtype)
+
+    @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
+    @dtypesIfCUDA(torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     def test_igamma_edge_cases(self, device, dtype):
         tkwargs = {"dtype": dtype, "device": device}

@@ -174,10 +174,16 @@ static inline __host__ __device__ scalar_t calc_polygamma(int n, scalar_t x) {
   return ((n % 2) ? 1.0 : -1.0) * ::exp(::lgamma(static_cast<scalar_t>(n) + 1.0)) * zeta(static_cast<scalar_t>(n + 1), x);
 }
 
+/*
+ * For licensing information, please refer to the the cpu implementation located in "ATen/native/Math.h".
+ */
 // regularized lower & upper incomplete gamma
 template <typename scalar_t>
 static __host__ __device__ scalar_t ratevl(scalar_t x, const scalar_t num[], int64_t M,
     const scalar_t denom[], int64_t N) {
+  // evaluating rational function, i.e., the ratio of two polynomials
+  // the coefficients for numerator are given by `num` while coeffs for
+  // denumerator are given by `denom`
 
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   int64_t i, dir;
@@ -227,8 +233,12 @@ static __host__ __device__ scalar_t ratevl(scalar_t x, const scalar_t num[], int
   }
 }
 
+/*
+ * For licensing information, please refer to the the cpu implementation located in "ATen/native/Math.h".
+ */
 template <typename scalar_t>
 static __host__ __device__ scalar_t lanczos_sum_expg_scaled(scalar_t x) {
+  // lanczos approximation
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
 
   static const accscalar_t lanczos_sum_expg_scaled_num[13] = {
@@ -269,6 +279,10 @@ static __host__ __device__ scalar_t lanczos_sum_expg_scaled(scalar_t x) {
 
 template <typename scalar_t>
 static __host__ __device__ scalar_t _igam_helper_fac(scalar_t a, scalar_t x) {
+  // compute x^a * exp(-a) / gamma(a)
+  // corrected from (15) and (16) in [igam2] by replacing exp(x - a) with
+  // exp(a - x).
+
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   accscalar_t ax, fac, res, num, numfac;
   static accscalar_t MAXLOG = std::is_same<accscalar_t,double>::value ?
@@ -300,6 +314,8 @@ static __host__ __device__ scalar_t _igam_helper_fac(scalar_t a, scalar_t x) {
 
 template <typename scalar_t>
 static __host__ __device__ scalar_t _igam_helper_series(scalar_t a, scalar_t x) {
+  // Compute igam using DLMF 8.11.4. [igam1]
+
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   static accscalar_t MACHEP = std::is_same<accscalar_t, double>::value ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
@@ -331,6 +347,9 @@ static __host__ __device__ scalar_t _igam_helper_series(scalar_t a, scalar_t x) 
 
 template <typename scalar_t>
 static __host__ __device__ scalar_t _igamc_helper_series(scalar_t a, scalar_t x) {
+  // Compute igamc using DLMF 8.7.3 [igam1]. This is related to the series in
+  // _igam_helper_series but extra care is taken to avoid cancellation.
+
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   int n;
   accscalar_t fac = 1;
@@ -356,6 +375,8 @@ static __host__ __device__ scalar_t _igamc_helper_series(scalar_t a, scalar_t x)
 
 template <typename scalar_t>
 static __host__ __device__ scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t x, bool igam) {
+  // Compute igam/igamc using DLMF 8.12.3/8.12.4 [igam1]
+
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   static const accscalar_t d[25][25] =
     {{-3.3333333333333333e-1, 8.3333333333333333e-2, -1.4814814814814815e-2, 1.1574074074074074e-3, 3.527336860670194e-4, -1.7875514403292181e-4, 3.9192631785224378e-5, -2.1854485106799922e-6, -1.85406221071516e-6, 8.296711340953086e-7, -1.7665952736826079e-7, 6.7078535434014986e-9, 1.0261809784240308e-8, -4.3820360184533532e-9, 9.1476995822367902e-10, -2.551419399494625e-11, -5.8307721325504251e-11, 2.4361948020667416e-11, -5.0276692801141756e-12, 1.1004392031956135e-13, 3.3717632624009854e-13, -1.3923887224181621e-13, 2.8534893807047443e-14, -5.1391118342425726e-16, -1.9752288294349443e-15},
@@ -446,6 +467,8 @@ static __host__ __device__ scalar_t _igam_helper_asymptotic_series(scalar_t a, s
 
 template <typename scalar_t>
 static __host__ __device__ scalar_t _igamc_helper_continued_fraction(scalar_t a, scalar_t x) {
+  // Compute igamc using DLMF 8.9.2. [igam1]
+
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   int i;
   accscalar_t ans, ax, c, yc, r, t, y, z;
@@ -507,6 +530,17 @@ static __host__ __device__ scalar_t _igamc_helper_continued_fraction(scalar_t a,
 
 template <typename scalar_t>
 static inline __host__ __device__ scalar_t calc_igammac(scalar_t a, scalar_t x) {
+  /* the calculation of the regularized upper incomplete gamma function
+   * is done differently based on the values of a and x:
+   * - if x and/or a is at the boundary of defined region, then assign the
+   *   result at the boundary
+   * - if a is large and a ~ x, then using Uniform Asymptotic Expansions for
+   *   Large Parameter (see DLMF 8.12.4 [igam1])
+   * - if x > 1.1 and x < a, using the substraction from the regularized lower
+   *   incomplete gamma
+   * - otherwise, calculate the series from [igam2] eq (5)
+   */
+
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   accscalar_t absxma_a;
 
@@ -576,6 +610,17 @@ static inline __host__ __device__ scalar_t calc_igammac(scalar_t a, scalar_t x) 
 
 template <typename scalar_t>
 static inline __host__ __device__ scalar_t calc_igamma(scalar_t a, scalar_t x) {
+  /* the calculation of the regularized lower incomplete gamma function
+   * is done differently based on the values of a and x:
+   * - if x and/or a is at the boundary of defined region, then assign the
+   *   result at the boundary
+   * - if a is large and a ~ x, then using Uniform Asymptotic Expansions for
+   *   Large Parameter (see DLMF 8.12.3 [igam1])
+   * - if x > 1 and x > a, using the substraction from the regularized upper
+   *   incomplete gamma
+   * - otherwise, calculate the series from [igam2] eq (4)
+   */
+
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   accscalar_t absxma_a;
   static accscalar_t SMALL = 20.0;

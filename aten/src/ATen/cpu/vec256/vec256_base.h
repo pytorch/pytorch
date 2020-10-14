@@ -395,8 +395,6 @@ public:
     return map(calc_i0);
   }
   Vec256<T> igamma(const Vec256<T> &x) const {
-    // TODO: is there a way to implement SIMD better than evaluating it
-    // one-by-one? (the current implementation is not taking advantage of SIMD)
     Vec256<T> ret;
     for (int64_t i = 0; i < size(); i++) {
       ret[i] = calc_igamma(values[i], x[i]);
