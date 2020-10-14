@@ -1126,14 +1126,26 @@ std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t
 }
 
 std::vector<Tensor> hsplit(const Tensor& self, int64_t split_size) {
+  TORCH_CHECK(self.dim() >= 1, "hsplit requires a tensor with at least 1 dimension")
   if (self.dim() > 1) {
-    return at::split(self, split_size, 1);
+    TORCH_CHECK(self.sizes()[1] % split_size == 0, "tensor split does not result in an equal division")
+    return at::tensor_split(self, split_size, 1);
   }
-  return at::split(self, split_size, 0);
+  TORCH_CHECK(self.sizes()[0] % split_size == 0, "tensor split does not result in an equal division")
+  return at::tensor_split(self, split_size, 0);
 }
 
-std::vector<Tensor> vsplit(const Tensor& self, int64_t split_size) { return at::split(self, split_size, 0); }
-std::vector<Tensor> dsplit(const Tensor& self, int64_t split_size) { return at::split(self, split_size, 2); }
+std::vector<Tensor> vsplit(const Tensor& self, int64_t split_size) {
+  TORCH_CHECK(self.dim() >= 2, "vsplit requires a tensor with at least 2 dimensions")
+  TORCH_CHECK(self.sizes()[0] % split_size == 0, "tensor split does not result in an equal division")
+  return at::tensor_split(self, split_size, 0);
+}
+
+std::vector<Tensor> dsplit(const Tensor& self, int64_t split_size) {
+  TORCH_CHECK(self.dim() >= 3, "dsplit requires a tensor with at least 3 dimensions")
+  TORCH_CHECK(self.sizes()[2] % split_size == 0, "tensor split does not result in an equal division")
+  return at::tensor_split(self, split_size, 2);
+}
 
 std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
@@ -1166,14 +1178,21 @@ std::vector<Tensor> unsafe_split_with_sizes(const Tensor& self, IntArrayRef spli
 }
 
 std::vector<Tensor> hsplit(const Tensor& self, IntArrayRef split_sizes) {
+  TORCH_CHECK(self.dim() >= 1, "hsplit requires a tensor with at least 1 dimension")
   if (self.dim() > 1) {
-    return at::split_with_sizes(self, split_sizes, 1);
+    return at::tensor_split(self, split_sizes, 1);
   }
-  return at::split_with_sizes(self, split_sizes, 0);
+  return at::tensor_split(self, split_sizes, 0);
 }
 
-std::vector<Tensor> vsplit(const Tensor& self, IntArrayRef split_sizes) { return at::split_with_sizes(self, split_sizes, 0); }
-std::vector<Tensor> dsplit(const Tensor& self, IntArrayRef split_sizes) { return at::split_with_sizes(self, split_sizes, 2); }
+std::vector<Tensor> vsplit(const Tensor& self, IntArrayRef split_sizes) {
+  TORCH_CHECK(self.dim() >= 2, "vsplit requires a tensor with at least 1 dimension")
+  return at::tensor_split(self, split_sizes, 0);
+}
+std::vector<Tensor> dsplit(const Tensor& self, IntArrayRef split_sizes) {
+  TORCH_CHECK(self.dim() >= 3, "dsplit requires a tensor with at least 1 dimension")
+  return at::tensor_split(self, split_sizes, 2);
+}
 
 
 // Precondition: tensors is non-empty
