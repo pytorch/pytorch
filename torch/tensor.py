@@ -417,30 +417,30 @@ class Tensor(torch._C._TensorBase):
                 def forward(ctx, self, pivot=True, get_infos=False):
                     LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
                     P, L, U = torch.lu_unpack(LU, pivots)
-                    ctx.save_for_backward(P, L, U)
+                    ctx.save_for_backward(LU, pivots, infos)
                     ctx.mark_non_differentiable(pivots, infos)
-                    return L, U, pivots, infos
+                    return LU, pivots, infos
 
                 @staticmethod
-                def backward(ctx, L_grad, U_grad, pivots_grad, infos_grad):
-                    P, L, U = ctx.saved_tensors
+                def backward(ctx, LU_grad, pivots_grad, infors_grad):
+                    LU, pivots, infos = ctx.saved_tensors
+                    P, L, U = torch.lu_unpack(LU, pivots)
 
                     Lt_inv = L.inverse().transpose(-1, -2)
                     Ut_inv = U.inverse().transpose(-1, -2)
 
-                    phi_L = (L.transpose(-1, -2) @ L_grad).tril_()
+                    phi_L = (L.transpose(-1, -2) @ LU_grad).tril_()
                     phi_L.diagonal(dim1=-2, dim2=-1).mul_(0.0)
-                    phi_U = (U_grad @ U.transpose(-1, -2)).triu_()
+                    phi_U = (LU_grad @ U.transpose(-1, -2)).triu_()
 
                     self_grad_perturbed = Lt_inv @ (phi_L + phi_U) @ Ut_inv
-                    return P @ self_grad_perturbed, None, None, None
+                    return P @ self_grad_perturbed, None, None
 
-            I = torch.diag_embed(torch.ones(self.shape[:-1], dtype=self.dtype, device=self.device))
-            L, U, pivots, infos = _LU.apply(self, pivot, get_infos)
+            LU, pivots, infos = _LU.apply(self, pivot, get_infos)
             if get_infos:
-                return L + U - I, pivots, infos
+                return LU, pivots, infos
             else:
-                return L + U - I, pivots
+                return LU, pivots
 
     def stft(self, n_fft: int, hop_length: Optional[int] = None,
              win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,

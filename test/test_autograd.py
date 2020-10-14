@@ -6967,8 +6967,8 @@ class TestAutogradDeviceType(TestCase):
         run_test(3, 3, 3)
         run_test(3, 3, 3, 3)
         run_test(5, 5)
-        run_test(5, 5, 5)
-        run_test(5, 5, 5, 5)
+        run_test(3, 5, 5)
+        run_test(3, 3, 5, 5)
 
     def test_strided_leaf_grad_layout(self, device):
         # (1) If leaf is non-overlapping and dense, grad's layout should match its leaf.
