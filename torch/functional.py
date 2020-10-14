@@ -1470,8 +1470,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         ...   print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
-    # If get_infos is True, then we don't need to check for errors and vice versa
-    return torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
+    return A.lu(pivot=pivot, get_infos=get_infos)
 
 
 if TYPE_CHECKING:
