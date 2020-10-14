@@ -11,7 +11,7 @@
 namespace at {
 
 /*
-philox_kernelarg_t, philox_cuda_state_t, and unpack() in
+philox_cuda_state_t and unpack() in
 cuda/StatefulCUDAOpsUtils.cuh allow non-divergent use of
 CUDAGeneratorImplHostState::philox_cuda_state() and
 CUDAGeneratorImplDeviceState::philox_cuda_state()
@@ -21,11 +21,9 @@ Intended usage (see e.g. native/cuda/Dropout.cu):
 
 #include <ATen/cuda/philox_kernelarg_helper.h>
 
-__global__ void kernel(..., philox_kernelarg_t philox_args) {
+__global__ void kernel(..., philox_cuda_state_t philox_args) {
   // Provides std::pair<uint64_t, uint64_t>
   auto seeds = at::cuda::philox::unpack(philox_args);
-  auto seed = state.first;
-  auto offset = state.second;
 }
 
 host_caller(...) {
@@ -41,92 +39,57 @@ host_caller(...) {
   // rng_engine_inputs may contain device tensors, and extends the
   // lifetime of those tensors, so rng_engine_input
   // MUST REMAIN ALIVE on the host across the kernel launch.
-  kernel<<<...>>>(..., rng_engine_inputs.to_kernel_arg());
+  kernel<<<...>>>(..., rng_engine_inputs);
 }
 */
 
-struct philox_kernelarg_t {
+struct philox_cuda_state_t {
+  philox_cuda_state_t() {}
   // Called by philox_cuda_state_t::to_kernel_arg if state lives on the CPU.
-  philox_kernelarg_t(uint64_t seed, uint64_t offset)
-    : has_device_ptrs_{false} {
-    state_ = std::make_pair(seed, offset);
-  }
+  philox_cuda_state_t(uint64_t seed,
+                      uint64_t offset,
+                      subseq_pool_start)
+    : has_device_ptrs_{false},
+      seed_{seed},
+      offset_{offset},
+      subseq_pool_start_{subseq_pool_start} {}
   // Called by philox_cuda_state_t::to_kernel_arg if state lives on the GPU.
   // Pointers are int64_t*, not uint64_t* (there's no such thing as uint64_t Tensors)
-  philox_kernelarg_t(int64_t* seed_this_launch,
-                     int64_t* offset_this_launch,
-                     int64_t* offset_next_launch,
-                     uint64_t increment)
+  philox_cuda_state_t(int64_t* seed,
+                      int64_t* offset,
+                      int64_t* next_offset,
+                      uint64_t increment,
+                      int subseq_pool_start)
     : has_device_ptrs_{true},
-      seed_ptr_this_launch_(seed_this_launch),
-      offset_ptr_this_launch(offset_this_launch),
-      offset_ptr_next_launch(offset_next_launch
-      increment_(increment) {}
+      seed_{seed},
+      offset_{offset},
+      next_offset_{next_offset},
+      increment_{increment},
+      subseq_pool_start_{subseq_start_this_stream} {}
 
   // Public members, directly accessible by at::cuda::philox::unpack.
   // If we made them private with getters/setters, the getters/setters
   // would have to be __device__, and we can't declare __device__ in ATen.
+  // Deliberately not packed in pairs/tuples to make point-of-use less opaque.
 
-  // Helps select a subsequence from the active stream's pool
-  int64_t stream_id;
+  // Helps select a subsequence from the active stream's pool.
+  // See Note [Per stream and device RNG states] in CUDAGeneratorImpl.cpp.
+  int64_t subseq_pool_start_;
 
   // false if the state came from the CPU, true if it lives on the GPU.
   const bool has_device_ptrs_;
 
   // Contains the state if has_device_ptrs_ is false.
-  std::pair<uint64_t, uint64_t> state_;
+  uint64_t seed_;
+  uintt64_t offset_;
 
-  // The following are only populated and used by unpack() if has_device_ptrs is true.
+  // The following are only populated and used by unpack() if has_device_ptrs_ is true.
+  int64_t* seed_ptr_;
+  int64_t* offset_ptr;
+  int64_t* next_offset_ptr;
 
-  // State to be used in the current kernel
-  int64_t* seed_ptr_this_launch_;
-  int64_t* offset_ptr_this_launch;
-  // State for the next kernel in the same stream, safely writeable by thread 0
-  // without disturbing other threads in the current kernel
-  int64_t* offset_ptr_next_launch_;
   // Added to this launch's offset to compute next launch's offset
   uint64_t increment_;
-};
-
-// Lives on the host, returned by philox_cuda_state(), keeps 
-struct philox_cuda_state_t {
-  philox_cuda_state_t() {}
-  philox_cuda_state_t(uint64_t seed, uint64_t offset)
-    : has_device_tensors_{false} {
-    state_ = std::make_pair(seed, offset);
-  }
-  philox_cuda_state_t(Tensor seed_this_launch,
-                      Tensor offset_this_launch,
-                      Tensor offset_next_launch,
-                      uint64_t increment)
-    : has_device_tensors_{true},
-      seed_this_launch_{seed_this_launch},
-      offset_this_launch_{offset_this_launch},
-      offset_next_launch_{offset_next_launch},
-      increment_{increment} {}
-
-  // We could rig an a conversion "operator philox_kernelarg_t()"
-  // instead of to_kernel_arg(). But i like the explicitness.
-  philox_kernelarg_t to_kernel_arg() const {
-    if (has_device_tensors_) {
-      return philox_kernelarg_t{state_tensors_.first.data_ptr<int64_t>(),
-                                state_tensors_.second.data_ptr<int64_t>()};
-    } else {
-      return philox_kernelarg_t{state_.first, state_.second};
-    }
-  }
-
-  private:
-  bool has_device_tensors_;
-  // Used if has_device_tensors_ is false.
-  std::pair<uint64_t, uint64_t> state_;
-  // Used if has_device_tensors_ is true.
-  // Must be Tensor, not Tensor&.
-  // Part of philox_cuda_state_t's job is to keep allocations alive.
-  Tensor seed_this_launch_;
-  Tensor offset_this_launch_;
-  Tensor offset_next_launch_;
-  uint64_t increment;
 };
 
 // Some callers cast to CUDAGeneratorImpl, so we need it as an interface.
@@ -206,10 +169,18 @@ struct TORCH_CUDA_API CUDAGeneratorImplDeviceState : public CUDAGeneratorImpl {
   std::shared_ptr<CUDAGeneratorImplDeviceState> clone() const;
 
   private:
+  void clear_states();
   CUDAGeneratorImplDeviceState* clone_impl() const override;
-  Tensor seed_;
-  Tensor philox_offset_per_thread_;
-  c10::optional<c10::Stream> state_update_stream_;
+  using per_stream_states_t = std::unordered_map<StreamId, philox_cuda_state_t>>;
+  using live_refs_t = std::vector<std::tuple<Tensor, Tensor, Tensor, c10::Stream>>;
+  void accept_clone_impl(const uint64_t&,
+                         const uint64_t&,
+                         const per_stream_states_t&,
+                         const live_refs_t&);
+  uint64_t init_seed_;
+  uint64_t init_offset_;
+  per_stream_states_t per_stream_states_;
+  live_refs_t live_refs_;
 };
 
 

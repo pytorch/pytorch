@@ -99,6 +99,10 @@ static std::array<LeakyStreamInternals, kStreamsPerPool>
 // could work around this with something like
 // https://stackoverflow.com/questions/13150449/efficient-unsigned-to-signed-cast-avoiding-implementation-defined-behavior
 // but it seems a bit overkill for this.
+//
+// Please keep at least the 8 most significant bits zeroed.  Stream ids must be <= 2^24
+// to interact properly with CUDA RNG generators.
+// See Note [Per stream and device RNG states] in CUDAGeneratorImpl.cpp.
 
 enum class StreamIdType : uint8_t {
   DEFAULT = 0x0,

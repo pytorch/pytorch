@@ -16,14 +16,22 @@ namespace native {
 namespace cuda { namespace detail {
 
 namespace {
-// CUDA generators assign a pool of subsequences (of the overall Philox
-// sequence) to each stream.
-// For a given RNG consumer kernel in a given stream, each thread
-// is assigned a subsequence from the active stream's pool.
-// max_threads_per_kernel is an estimated upper limit of the maximum
-// number of threads any kernel may possibly need.
-// In other words, it estimates how many subsequences we should assign
-// to each stream's pool.
+/**
+ * Note [Per stream and device RNG states]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * CUDA generators assign a pool of subsequences (of the overall Philox
+ * sequence) to each stream.
+ * For a given RNG consumer kernel in a given stream, each thread
+ * is assigned a subsequence from the active stream's pool.
+ * max_threads_per_kernel is an estimated upper limit of the maximum
+ * number of threads any kernel may possibly need.
+ * In other words, it estimates how many subsequences we should assign
+ * to each stream's pool.
+ *
+ * Curand philox offers 2^64 subsequences.  Since we assign 2^40 subsequences
+ * to each stream, stream id values must be <= 2^24.
+ * See Note [StreamId assignment] in c10/cuda/CUDAStream.cpp.
+ */
 constexpr uint64_t max_threads_per_kernel =  (uint64_t(1) << 40);
 
 // Ensures we only call cudaGetDeviceCount only once.
@@ -235,80 +243,79 @@ CUDAGeneratorImplHostState* CUDAGeneratorImplHostState::clone_impl() const {
  * CUDAGeneratorImplDeviceState methods
  * See descriptions of corresponding HostState methods.
  *
- * Some casts back and forth between uint64_t and int64_t occur because there's
- * no such thing as uint64_t tensors in pytorch, but I want DeviceState to match
+ * Some casts back and forth between uint64_t and int64_t occur because
+ * there's no such thing as uint64_t Tensors, but DeviceState must match
  * HostState's uint64_t interface.
  */
 
 CUDAGeneratorImplDeviceState::CUDAGeneratorImplDeviceState(DeviceIndex device_index)
-  : CUDAGeneratorImpl(device_index) {
-  state_update_stream_ = at::cuda::stateUpdateStream(device_index);
-  c10::OptionalStreamGuard stream_guard{state_update_stream_};
-  auto options = TensorOptions().device(at::kCUDA).dtype(at::kLong);
-  seed_ = at::native::full({1}, static_cast<int64_t>(default_rng_seed_val), options);
-  philox_offset_per_thread_ = at::native::full({1}, 0, options);
+  : CUDAGeneratorImpl(device_index) {}
+
+void CUDAGeneratorImplDeviceState::clear_states() {
+  per_stream_states_.clear();
+  live_refs_.clear();
 }
 
 void CUDAGeneratorImplDeviceState::set_current_seed(uint64_t seed) {
-  c10::OptionalStreamGuard stream_guard{state_update_stream_};
-  seed_.fill_(static_cast<int64_t>(seed));
-  philox_offset_per_thread_.fill_(0);
+  // Sets up this instance to lazily recreate per-stream states from the new seed.
+  init_seed_ = seed;
+  init_offset_ = 0;
+  clear_states();
 }
 
 uint64_t CUDAGeneratorImplDeviceState::current_seed() const {
-  // See Note: Device-side RNG state update ordering
-  c10::OptionalStreamGuard stream_guard{state_update_stream_};
   // .item() syncs on the current stream.
   return static_cast<uint64_t>(seed_.item().to<int64_t>());
 }
 
 void CUDAGeneratorImplDeviceState::set_philox_offset_per_thread(uint64_t offset) {
-  // See Note: Device-side RNG state update ordering
-  c10::OptionalStreamGuard stream_guard{state_update_stream_};
-  philox_offset_per_thread_.fill_(static_cast<int64_t>(offset));
+  // Sets up this instance to lazily recreate per-stream states from the new offset.
+  init_offset = 0;
+  clear_states();
 }
 
 uint64_t CUDAGeneratorImplDeviceState::philox_offset_per_thread() const {
-  // See Note: Device-side RNG state update ordering
-  c10::OptionalStreamGuard stream_guard{state_update_stream_};
   // .item() syncs on the current stream.
   return static_cast<uint64_t>(philox_offset_per_thread_.item().to<int64_t>());
 }
 
 philox_cuda_state_t CUDAGeneratorImplDeviceState::philox_cuda_state(uint64_t increment) {
-  // Constraint:  The state update stream is supposed to handle a few small ops,
-  // and run ahead of the workhorse ambient_stream.
-  // Whatever we do to hand back a state safely MUST NOT sync state_update_stream
-  // on ambient_stream.
-  // (Syncing ambient_stream on state_update_stream is fine.)
-  auto ambient_stream = at::cuda::getCurrentCUDAStream();
-  // See Note: Device-side RNG state update ordering
-  c10::OptionalStreamGuard stream_guard{state_update_stream_};
-  // Snapshots the current state of state_update_stream_.
-  // Returns deep copies so the current caller gets its own frozen state,
-  // and can sync on state_update_stream_ to use the frozen state.
-  // If a subsequent caller enqueues some new call that changes the state
-  // (set_current_seed, set_philox_offset_per_thread, or philox_cuda_state)
-  // it won't affect the values the current caller's kernels are using.
-  // This is equivalent to returning CPU-side states by value.
-  auto frozen_seed = this->seed_.clone();
-  auto frozen_offset = this->philox_offset_per_thread_.clone();
-  this->philox_offset_per_thread_.add_(static_cast<int64_t>(increment));
+  auto stream = at::cuda::getCurrentCUDAStream();
 
-  // Allows safely handing frozen states back to ambient_stream.
-  // If cuda graphs doesn't like the resulting event queries,
-  // we may need a 2 stage copy to frozen dests allocated on ambient stream.
-  c10::cuda::CUDACachingAllocator::recordStream(frozen_seed.storage().data_ptr(),
-                                                ambient_stream);
-  c10::cuda::CUDACachingAllocator::recordStream(frozen_offset.storage().data_ptr(),
-                                                ambient_stream);
+  // State snapshot for the coming kernel.
+  philox_cuda_state_t for_kernel;
 
-  // Makes ambient thread wait for its state copies.
-  at::cuda::CUDAEvent event;
-  event.record(c10::cuda::CUDAStream(*state_update_stream_));
-  event.block(ambient_stream);
+  // Retrieves state for current stream, creates it if necessary
+  auto state = per_stream_states.find(stream.id());
+  if (state == per_stream_states.end()) {
+    // State tensors for this stream don't exist yet, create them
+    auto options = TensorOptions().device(at::kCUDA).dtype(at::kLong);
+    auto seed = at::native::full({1}, static_cast<int64_t>(init_seed_), options);
+    auto offset = at::native::full({1}, static_cast<int64_t>(init_offset_), options);
+    auto next_offset = at::native::full({1}, static_cast<int64_t>(init_offset_), options);
+    // The only reason we stash stream in live_refs is so accept_clone_impl
+    // can clone tensors from a source DeviceState instance on the right streams.
+    live_refs_.push_back{{seed,
+                          offset,
+                          next_offset,
+                          stream}};
+    philox_cuda_state_t new_state{seed.data_ptr<int64_t>(),
+                                  offset.data_ptr<int64_t>(),
+                                  next_offset.data_ptr<int64_t>(),
+                                  increment,
+                                  stream.id() * max_threads_per_kernel /*subseq_pool_start*/}
+    for_kernel = new_state;
+    // *next_offset_ptr will be updated by at::cuda::philox::unpack in the coming kernel.
+    // After freezing for_kernel, swap next and current so "next" becomes "current" for
+    // the kernel after the coming kernel.
+    std::swap(state.offset_ptr, state.next_offset_ptr);
+    per_stream_states[stream.id()] = new_state;
+  } else {
+    for_kernel = *state;
+    std::swap(*state.offset_ptr, *state.next_offset_ptr);
+  }
 
-  return philox_cuda_state_t{std::move(frozen_seed), std::move(frozen_offset)};
+  return for_kernel;
 }
 
 /**
@@ -327,11 +334,23 @@ std::shared_ptr<CUDAGeneratorImplDeviceState> CUDAGeneratorImplDeviceState::clon
   return std::shared_ptr<CUDAGeneratorImplDeviceState>(this->clone_impl());
 }
 
+// Tries to implement the following guarantee:
+// If cloned instance is used identically to source instance in the future,
+// it will behave identically to source instance.
 CUDAGeneratorImplDeviceState* CUDAGeneratorImplDeviceState::clone_impl() const {
   auto gen = new CUDAGeneratorImplDeviceState(this->device().index());
-  gen->set_current_seed(this->current_seed());
-  gen->set_philox_offset_per_thread(this->philox_offset_per_thread());
+  gen->accept_clone_impl(this->init_seed_,
+                         this->init_offset,
+                         this->per_stream_states,
+                         this->live_refs);
   return gen;
+}
+
+void CUDAGeneratorImplDeviceState::accept_clone_impl(const uint64_t& init_seed,
+                                                     const uint64_t& init_offset,
+                                                     const per_stream_states_t per_stream_states,
+                                                     const live_refs_t& live_refs) {
+  for const auto&
 }
 
 } // namespace at
