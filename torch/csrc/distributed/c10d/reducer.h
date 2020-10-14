@@ -122,7 +122,8 @@ class Reducer {
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
       grad_accumulators_;
-  std::unordered_map<torch::autograd::Node*, VariableIndex> func_;
+  std::unordered_map<torch::autograd::Node*, VariableIndex>
+      gradAccToVariableMap_;
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
       hooks_;
 
