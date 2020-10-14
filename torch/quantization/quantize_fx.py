@@ -1,6 +1,5 @@
 import torch
 from torch.fx import GraphModule  # type: ignore
-from torch.fx import symbolic_trace  # type: ignore
 from torch.fx.symbolic_trace import Tracer  # type: ignore
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
