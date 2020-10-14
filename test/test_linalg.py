@@ -949,7 +949,14 @@ class TestLinalg(TestCase):
         ans = torch.linalg.cholesky(A, out=out)
         self.assertEqual(ans, out)
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_cholesky_errors(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
         # cholesky requires out to have same shape as input
+        A = random_hermitian_pd_matrix(3, dtype=dtype, device=device)
         out = torch.empty(2, 3, dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, r'to have same size as tensor for argument'):
             torch.linalg.cholesky(A, out=out)
