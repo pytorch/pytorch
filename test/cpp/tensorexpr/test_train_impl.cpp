@@ -169,7 +169,7 @@ VTensor* grad(VTensor* y, VTensor* x, VTensor* j) {
           TORCH_CHECK(g, ss.str());
         }
         auto g_outs = g(op->inputs, grad_inputs);
-        for (auto i = 0; i < g_outs.size(); ++i) {
+        for (auto i = 0U; i < g_outs.size(); ++i) {
           auto input = op->inputs[i];
           if (need_grad.find(input) != need_grad.end()) {
             if (grad_map.find(input) != grad_map.end()) {
@@ -198,7 +198,7 @@ VOp::VOp(
     VGraph* graph_)
     : inputs(inputs_), graph(graph_) {
   method = &VMethod::get(name);
-  for (auto i = 0; i < num_outputs; ++i) {
+  for (auto i = 0U; i < num_outputs; ++i) {
     outputs.emplace_back(graph->create_tensor({}));
     outputs.back()->op = this;
   }
@@ -497,7 +497,7 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
     }
     auto outs = vop->method->lower(inps, vop->inputs, vbindings);
     TORCH_CHECK(outs.size() == vop->outputs.size());
-    for (auto i = 0; i < outs.size(); ++i) {
+    for (auto i = 0U; i < outs.size(); ++i) {
       bindings[vop->outputs[i]] = outs[i];
     }
   }
