@@ -5,6 +5,7 @@ import itertools
 import numpy as np
 import sys
 import unittest
+import operator
 
 import torch
 from torch import _VF
@@ -19,7 +20,7 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN
+from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines
@@ -574,22 +575,37 @@ class TestQuantizedOps(TestCase):
         X, (scale, zero_point, torch_type) = X
 
         assume(min_val <= max_val)
-        Y = X.copy()
-        Y[Y < min_val] = min_val
-        Y[Y > max_val] = max_val
-        qY = torch.quantize_per_tensor(torch.from_numpy(Y), scale=scale,
-                                       zero_point=zero_point, dtype=torch_type)
+        Y_clamp = torch.clamp(torch.from_numpy(X), min=min_val, max=max_val)
+        qY_clamp = torch.quantize_per_tensor(Y_clamp, scale=scale,
+                                             zero_point=zero_point, dtype=torch_type)
+
         X = torch.from_numpy(X)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                        dtype=torch_type)
-
         ops_under_test = {
             'ops.quantized': torch.ops.quantized.clamp,
         }
 
         for name, op in ops_under_test.items():
-            qY_hat = op(qX, min_val, max_val)
-            self.assertEqual(qY, qY_hat, msg="{} qclamp failed".format(name))
+            qY_clamp_hat = op(qX, min=min_val, max=max_val)
+            self.assertEqual(qY_clamp, qY_clamp_hat, msg="{} qclamp failed".format(name))
+
+        if torch.backends.quantized.engine == 'fbgemm':
+            with override_quantized_engine('fbgemm'):
+                Y_min_clamp = torch.clamp(X, min=min_val)
+                Y_max_clamp = torch.clamp(X, max=max_val)
+
+                qY_min_clamp = torch.quantize_per_tensor(Y_min_clamp, scale=scale,
+                                                         zero_point=zero_point, dtype=torch_type)
+                qY_max_clamp = torch.quantize_per_tensor(Y_max_clamp, scale=scale,
+                                                         zero_point=zero_point, dtype=torch_type)
+
+
+                for name, op in ops_under_test.items():
+                    qY_min_clamp_hat = op(qX, min=min_val)
+                    self.assertEqual(qY_min_clamp, qY_min_clamp_hat, msg="{} qclamp failed".format(name))
+                    qY_max_clamp_hat = op(qX, max=max_val)
+                    self.assertEqual(qY_max_clamp, qY_max_clamp_hat, msg="{} qclamp failed".format(name))
 
     """Tests the correctness of the quantized::hardtanh op."""
     @skipIfNoFBGEMM
@@ -668,37 +684,51 @@ class TestQuantizedOps(TestCase):
                     qY, qY_hat,
                     msg="Hardswish failed: {} vs {}, {}".format(qY, qY_hat, torch.backends.quantized.engine))
 
-    """Tests the correctness of the scalar addition."""
-    @unittest.skip("Failing on MacOS")
-    @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
-                       elements=hu.floats(-1e6, 1e6, allow_nan=False),
-                       qparams=hu.qparams()),
-           b=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
-    def test_qadd_scalar_relu(self, A, b):
+    """Tests the correctness of the binary op + scalar."""
+    def _test_binary_op_scalar_relu(self, A, b, binary_op_name, binary_op, quantized_op, quantized_op_relu):
         import copy
-        add_scalar = torch.ops.quantized.add
-        add_scalar_relu = torch.ops.quantized.add_relu
+        op_scalar = quantized_op
+        op_scalar_relu = quantized_op_relu
 
         A, (scale, zero_point, dtype) = A
         A = A.astype(np.float32)
         qA = torch.quantize_per_tensor(torch.from_numpy(A), scale, zero_point, dtype)
 
-        C = qA.dequantize() + round(b / scale) * scale
+        if binary_op_name == 'add':
+            C = binary_op(qA.dequantize(), round(b / scale) * scale)
+        else:
+            C = binary_op(qA.dequantize(), b)
         C_relu = copy.deepcopy(C)
         C_relu[C_relu < 0] = 0
 
-        C_hat = add_scalar(qA, b)
+        C_hat = op_scalar(qA, b)
         C_ref = torch.quantize_per_tensor(C, C_hat.q_scale(), C_hat.q_zero_point(), dtype)
-        C_relu_hat = add_scalar_relu(qA, b)
+        C_relu_hat = op_scalar_relu(qA, b)
         C_relu_ref = torch.quantize_per_tensor(
             C_relu, C_relu_hat.q_scale(), C_relu_hat.q_zero_point(), dtype)
 
         self.assertEqual(C_ref.dequantize(), C_hat.dequantize(),
-                         msg="Scalar add results don't match:\
-                         {} vs {}".format(C_ref.dequantize(), C_hat.dequantize()))
+                         msg="{}_scalar results don't match: "
+                         "{} vs {}".format(binary_op_name, C_ref.dequantize(), C_hat.dequantize()))
         self.assertEqual(C_relu_ref.dequantize(), C_relu_hat.dequantize(),
-                         msg="Scalar add relu results don't match:\
-                         {} vs {}".format(C_relu_ref.dequantize(), C_relu_hat.dequantize()))
+                         msg="{}_scalar_relu results don't match: "
+                         "{} vs {}".format(binary_op_name, C_relu_ref.dequantize(), C_relu_hat.dequantize()))
+
+    @unittest.skipIf(IS_MACOS, "skipping macos test")
+    @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False),
+                       qparams=hu.qparams()),
+           b=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
+    def test_add_scalar_relu(self, A, b):
+        self._test_binary_op_scalar_relu(A, b, "add", operator.add, torch.ops.quantized.add, torch.ops.quantized.add_relu)
+
+    @unittest.skipIf(IS_MACOS, "skipping macos test")
+    @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False),
+                       qparams=hu.qparams()),
+           b=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
+    def test_mul_scalar_relu(self, A, b):
+        self._test_binary_op_scalar_relu(A, b, "mul", operator.mul, torch.ops.quantized.mul, torch.ops.quantized.mul_relu)
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
@@ -2936,7 +2966,9 @@ class TestQuantizedEmbeddingOps(TestCase):
 
     def embedding_bag_rowwise_offsets_run(
             self, bit_rate, num_embeddings,
-            embedding_dim, num_offsets, enable_per_sample_weights,
+            embedding_dim, num_offsets,
+            use_32bit_indices, use_32bit_offsets,
+            enable_per_sample_weights,
             include_last_offset, atol, rtol):
         pt_op = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
         pt_prepack_op = torch.ops.quantized.embedding_bag_byte_prepack
@@ -2997,8 +3029,8 @@ class TestQuantizedEmbeddingOps(TestCase):
             per_sample_weights, indices, offsets)
         result = pt_op(
             q_weights,
-            indices,
-            offsets,
+            indices.int() if use_32bit_indices else indices,
+            offsets.int() if use_32bit_offsets else offsets,
             mode=0,
             per_sample_weights=per_sample_weights,
             include_last_offset=include_last_offset,
@@ -3035,14 +3067,19 @@ class TestQuantizedEmbeddingOps(TestCase):
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_offsets=st.integers(1, 20),
+           use_32bit_indices=st.booleans(),
+           use_32bit_offsets=st.booleans(),
            enable_per_sample_weights=st.booleans(),
            include_last_offset=st.booleans())
     def test_embedding_bag_byte(self, num_embeddings,
                                 embedding_dim, num_offsets,
+                                use_32bit_indices,
+                                use_32bit_offsets,
                                 enable_per_sample_weights,
                                 include_last_offset):
         self.embedding_bag_rowwise_offsets_run(
             8, num_embeddings, embedding_dim, num_offsets,
+            use_32bit_indices, use_32bit_offsets,
             enable_per_sample_weights, include_last_offset,
             atol=0.005, rtol=1e-3)
 
@@ -3050,14 +3087,19 @@ class TestQuantizedEmbeddingOps(TestCase):
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_offsets=st.integers(1, 20),
+           use_32bit_indices=st.booleans(),
+           use_32bit_offsets=st.booleans(),
            enable_per_sample_weights=st.booleans(),
            include_last_offset=st.booleans())
     def test_embedding_bag_4bit(self, num_embeddings,
                                 embedding_dim, num_offsets,
+                                use_32bit_indices,
+                                use_32bit_offsets,
                                 enable_per_sample_weights,
                                 include_last_offset):
         self.embedding_bag_rowwise_offsets_run(4, num_embeddings,
                                                embedding_dim, num_offsets,
+                                               use_32bit_indices, use_32bit_offsets,
                                                enable_per_sample_weights,
                                                include_last_offset, atol=0.1,
                                                rtol=1e-2)
