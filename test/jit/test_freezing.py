@@ -1068,7 +1068,8 @@ class TestFreezing(JitTestCase):
         inp = torch.ones(1, 8, 32, 32)
         out1 = fmod.forward(inp)
         # FIXME: frozen module mutated from outside (original module).
-        smod.weight[0, 0, 0, 0] += 100.0
+        with torch.no_grad():
+            smod.weight[0, 0, 0, 0] += 100.0
         out2 = fmod.forward(inp)
         out3 = smod(inp)
         self.assertNotEqual(out1, out2)
