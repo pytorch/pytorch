@@ -322,8 +322,8 @@ std::vector<at::Tensor> scatter(
   }
   dim = at::maybe_wrap_dim(dim, tensor);
   std::vector<at::Tensor> chunks = chunk_sizes
-      ? tensor.split_with_sizes(/*split_sizes=*/*chunk_sizes, /*dim=*/dim)
-      : tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
+      ? tensor.unsafe_split_with_sizes(/*split_sizes=*/*chunk_sizes, /*dim=*/dim)
+      : tensor.unsafe_chunk(/*chunks=*/devices.size(), /*dim=*/dim);
   at::cuda::OptionalCUDAStreamGuard cuda_guard;
   for (size_t i = 0; i < chunks.size(); ++i) {
     const auto device_index = static_cast<int16_t>(devices[i]);
