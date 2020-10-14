@@ -541,7 +541,7 @@
   self: not_implemented("i0")
 
 - name: igamma(Tensor self, Tensor other) -> Tensor
-  self: 'not_implemented("igamma: self")'
+  self: 'not_implemented("igamma: input")'
   other: grad * exp((self - 1) * log(other) - other - lgamma(self))
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
