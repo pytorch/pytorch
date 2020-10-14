@@ -996,8 +996,6 @@ class TestLinalg(TestCase):
         actual_L = torch.linalg.cholesky(A)
         self.assertEqual(actual_L, expected_L)
 
-    # TODO: enable CUDA tests once
-    # RuntimeError: "triangular_solve_cuda" not implemented for 'ComplexDouble' is fixed
     @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.float64, torch.complex128)
@@ -1024,6 +1022,22 @@ class TestLinalg(TestCase):
         shapes = ((3, 3), (4, 3, 2, 2))
         for shape in shapes:
             run_test(shape)
+
+    # TODO: enable CUDA tests once (merge with above test)
+    # RuntimeError: "triangular_solve_cuda" not implemented for 'ComplexDouble' is fixed
+    @unittest.expectedFailure
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.complex64, torch.complex128)
+    def test_cholesky_autograd_xfailed(self, device, dtype):
+        def func(root):
+            x = 0.5 * (root + root.transpose(-1, -2).conj())
+            return torch.linalg.cholesky(x)
+
+        shape = (3, 3)
+        root = torch.rand(*shape, dtype=dtype, device=device, requires_grad=True)
+        root = root + torch.eye(shape[-1], dtype=dtype, device=device)
+        gradcheck(func, root)
 
 instantiate_device_type_tests(TestLinalg, globals())
 
