@@ -137,6 +137,8 @@ public:
   // Invoke an operator via the boxed calling convention using an IValue stack
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
+  const KernelFunction& kernelBoxed(DispatchKey) const;
+
   // ------------------------------------------------------------------------
   //
   // Performing registrations (NON user public; use op_registration)
@@ -424,6 +426,11 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
   kernel.callBoxed(op, stack);
+}
+
+inline const KernelFunction& Dispatcher::kernelBoxed(const OperatorHandle& op, DispatchKey dispatchKey) const {
+  const auto& entry = op.operatorIterator_->op;
+  return entry.lookup(dispatchKey);
 }
 
 } // namespace c10
