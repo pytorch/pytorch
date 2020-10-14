@@ -49,7 +49,7 @@ void addFormattedArg(
   // TODO: Implement precison-based formatting
   switch (key) {
     case 'd':
-    case 'i': {
+    case 'i':
       TORCH_CHECK(
           ival.isScalar(),
           "Got ",
@@ -61,9 +61,8 @@ void addFormattedArg(
         ss << static_cast<int>(ival.toDouble());
       }
       break;
-    }
     case 'e':
-    case 'E': {
+    case 'E':
       TORCH_CHECK(
           ival.isScalar(),
           "Got ",
@@ -78,10 +77,10 @@ void addFormattedArg(
       } else {
         ss << static_cast<float>(ival.toDouble());
       }
+      ss << std::nouppercase;
       break;
-    }
     case 'f':
-    case 'F': {
+    case 'F':
       TORCH_CHECK(
           ival.isScalar(),
           "Got ",
@@ -94,8 +93,7 @@ void addFormattedArg(
         ss << static_cast<float>(ival.toDouble());
       }
       break;
-    }
-    case 'c': {
+    case 'c':
       TORCH_CHECK(
           ival.isInt() || (ival.isString() && ival.toStringRef().length() == 1),
           "Got ",
@@ -107,24 +105,24 @@ void addFormattedArg(
         ss << ival.toStringRef();
       }
       break;
-    }
-    case 's': {
+    case 's':
       if (ival.isString()) {
         ss << ival.toStringRef();
       } else {
         ss << ival;
       }
       break;
-    }
-    default: {
+    default:
       TORCH_CHECK(
-          false, "The specifier ", key, " is not supported in TorchScript");
-    }
+          false,
+          "The specifier %",
+          key,
+          " is not supported in TorchScript format strings");
   }
 }
 
 void percentFormat(Stack& stack, size_t num_inputs) {
-  auto format = peek(stack, 0, num_inputs).toStringRef();
+  auto format_str = peek(stack, 0, num_inputs).toStringRef();
   auto args = last(stack, num_inputs - 1)[0];
   auto args_size = 1; // assumed size
   if (args.isTuple()) {
@@ -134,20 +132,22 @@ void percentFormat(Stack& stack, size_t num_inputs) {
   size_t used_args = 0;
   size_t begin = 0;
   while (true) {
-    size_t loc = format.find('%', begin);
-    if (loc == std::string::npos) {
-      ss << format.substr(begin);
+    size_t percent_idx = format_str.find('%', begin);
+    size_t format_idx = percent_idx + 1;
+    if (percent_idx == std::string::npos) {
+      ss << format_str.substr(begin);
       break;
     }
-    TORCH_CHECK(loc < format.length() - 1, "Incomplete format specifier");
-    ss << format.substr(begin, loc - begin);
-    if (format.at(loc + 1) == '%') {
+    TORCH_CHECK(
+        percent_idx < format_str.length() - 1, "Incomplete format specifier");
+    ss << format_str.substr(begin, percent_idx - begin);
+    if (format_str.at(format_idx) == '%') {
       ss << '%';
-      begin = loc + 2;
+      begin = percent_idx + 2; // skip the `%` and the format specifier
       continue;
     }
     TORCH_CHECK(used_args < args_size, "Too few arguments for format string");
-    char key = format.at(loc + 1);
+    char key = format_str.at(format_idx);
     IValue arg;
     if (args.isTuple()) {
       arg = args.toTuple()->elements()[used_args];
@@ -155,7 +155,7 @@ void percentFormat(Stack& stack, size_t num_inputs) {
       arg = args;
     }
     addFormattedArg(key, arg, ss);
-    begin = loc + 2;
+    begin = percent_idx + 2;
     ++used_args;
   }
   TORCH_CHECK(used_args == args_size, "Too many arguments for format string");

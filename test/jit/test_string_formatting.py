@@ -44,7 +44,7 @@ class TestStringFormatting(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Incomplete format specifier"):
             @torch.jit.script
             def fn(arg1: str) -> str:
-                return "%s in template %" % arg1
+                return "%s in template %" % arg1    # noqa: F501
             fn("foo")
 
     def test_string_interpolation_with_string_placeholder_and_digit_variable(self):
@@ -145,5 +145,12 @@ class TestStringFormatting(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Too many arguments for format string"):
             @torch.jit.script
             def fn(arg1: str, arg2: str) -> str:
-                return "%s in template" % (arg1, arg2)
+                return "%s in template" % (arg1, arg2)    # noqa: F501
             fn("foo", "bar")
+
+    def test_string_interpolation_with_unknown_format_specifier(self):
+        with self.assertRaisesRegex(RuntimeError, "The specifier %a is not supported in TorchScript format strings"):
+            @torch.jit.script
+            def fn(arg1: str) -> str:
+                return "%a in template" % arg1    # noqa: F501
+            fn("foo")

@@ -3124,6 +3124,23 @@ struct to_ir {
     return std::make_shared<SimpleValue>(rpc_node_output);
   }
 
+  // This is an auxiliary function that is only called from `emitSimpleExpr`.
+  Value* emitSimpleExprFromBuiltInFunction(const TreeRef& tree) {
+    const auto& inputs = tree->trees();
+    auto kind = getNodeKind(tree->kind(), inputs.size());
+    auto overload = getOperatorOverload(tree->kind(), inputs.size());
+    auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+    if (tree->kind() == TK_IN) {
+      // For `in` the arguments are in reverse order (the object being
+      // checked is second)
+      std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
+    }
+    return asSimple(
+        makeMagic(
+            overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
+            ->call(tree->range(), method, named_values, {}, 0));
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree,
       const TypePtr& type_hint = nullptr) {
@@ -3139,7 +3156,7 @@ struct to_ir {
       case '%': {
         auto lhs = emitSugaredExpr(Expr(tree->tree(0)), 0)
                        ->asValue(tree->tree(0)->range(), method);
-        auto lhs_type = lhs->type();
+        auto const& lhs_type = lhs->type();
         if (lhs_type == StringType::get()) {
           auto values = getValues(tree->trees(), /*maybe_unpack=*/false);
           auto node = graph->create(aten::percentFormat, values, 1)
@@ -3147,8 +3164,9 @@ struct to_ir {
           Value* output = graph->insertNode(node)->output();
           output->setType(StringType::get());
           return output;
+        } else {
+          return emitSimpleExprFromBuiltInFunction(tree);
         }
-        // else, fall through to the next case
       }
       case TK_IN:
       case TK_POW:
@@ -3166,23 +3184,8 @@ struct to_ir {
       case '|':
       case '^':
       case TK_LSHIFT:
-      case TK_RSHIFT: {
-        const auto& inputs = tree->trees();
-        auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto overload = getOperatorOverload(tree->kind(), inputs.size());
-        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-
-        if (tree->kind() == TK_IN) {
-          // For `in` the arguments are in reverse order (the object being
-          // checked is second)
-          std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
-        }
-
-        return asSimple(
-            makeMagic(
-                overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
-                ->call(tree->range(), method, named_values, {}, 0));
-      }
+      case TK_RSHIFT:
+        return emitSimpleExprFromBuiltInFunction(tree);
       case TK_IS:
       case TK_ISNOT:
       case TK_AND:

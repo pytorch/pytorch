@@ -330,6 +330,7 @@ set of reviewers.
 
 ```
 use_c10_dispatcher: 'with_codegenerated_unboxing_wrapper'
+use_c10_dispatcher: 'hacky_wrapper_for_legacy_signatures'
 use_c10_dispatcher: 'full'
 ```
 
@@ -340,6 +341,10 @@ Some ops use features that aren't supported by those templates yet,
 and enabling `use_c10_dispatcher: full` for those will result in a compiler error.
 For those, use `use_c10_dispatcher: 'with_codegenerated_unboxing_wrapper'` instead,
 or just omit the argument because 'with_codegenerated_unboxing_wrapper' is the default.
+`use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` is similar to `full`
+but adds a wrapper around the kernel before registering it with the dispatcher
+to support some legacy function signatures for kernels that we didn't migrate to
+the new signatures yet.
 
 ### `manual_kernel_registration`
 
