@@ -61,6 +61,9 @@
 #   BUILD_CAFFE2_OPS=0
 #     disable Caffe2 operators build
 #
+#   BUILD_CAFFE2=0
+#     disable Caffe2 build
+#
 #   USE_IBVERBS
 #     toggle features related to distributed support
 #
@@ -162,7 +165,7 @@
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
-from __future__ import print_function
+
 import sys
 if sys.version_info < (3,):
     print("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -173,13 +176,10 @@ if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
 
 import platform
 python_min_version = (3, 6, 1)
-python_min_version_str = '.'.join((str(num) for num in python_min_version))
-python_max_version = (3, 9, 0)
-python_max_version_str = '.'.join((str(num) for num in python_max_version))
-if sys.version_info < python_min_version or sys.version_info >= python_max_version:
-    print("You are using Python {}. Python >={},<{} is required.".format(platform.python_version(),
-                                                                         python_min_version_str,
-                                                                         python_max_version_str))
+python_min_version_str = '.'.join(map(str, python_min_version))
+if sys.version_info < python_min_version:
+    print("You are using Python {}. Python >={} is required.".format(platform.python_version(),
+                                                                     python_min_version_str))
     sys.exit(-1)
 
 from setuptools import setup, Extension, distutils, find_packages
@@ -340,7 +340,11 @@ def build_deps():
 ################################################################################
 
 # the list of runtime dependencies required by this built package
-install_requires = ['future', 'typing_extensions', 'dataclasses']
+install_requires = [
+    'future',
+    'typing_extensions',
+    'dataclasses; python_version < "3.7"'
+]
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -776,6 +780,10 @@ if __name__ == '__main__':
                 'include/ATen/detail/*.h',
                 'include/ATen/native/*.h',
                 'include/ATen/native/cpu/*.h',
+                'include/ATen/native/cuda/*.h',
+                'include/ATen/native/cuda/*.cuh',
+                'include/ATen/native/hip/*.h',
+                'include/ATen/native/hip/*.cuh',
                 'include/ATen/native/quantized/*.h',
                 'include/ATen/native/quantized/cpu/*.h',
                 'include/ATen/quantized/*.h',
@@ -866,7 +874,7 @@ if __name__ == '__main__':
         download_url='https://github.com/pytorch/pytorch/tags',
         author='PyTorch Team',
         author_email='packages@pytorch.org',
-        python_requires='>={},<{}'.format(python_min_version_str, python_max_version_str),
+        python_requires='>={}'.format(python_min_version_str),
         # PyPI package information.
         classifiers=[
             'Development Status :: 5 - Production/Stable',
@@ -882,7 +890,7 @@ if __name__ == '__main__':
             'Topic :: Software Development :: Libraries :: Python Modules',
             'Programming Language :: C++',
             'Programming Language :: Python :: 3',
-        ] + ['Programming Language :: Python :: 3.{}' for i in range(python_min_version[1], python_max_version[1])],
+        ] + ['Programming Language :: Python :: 3.{}' for i in range(python_min_version[1], 9)],
         license='BSD-3',
         keywords='pytorch machine learning',
     )

@@ -24,7 +24,7 @@ def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tens
 class RNNBase(Module):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
                      'batch_first', 'dropout', 'bidirectional']
-    __ignored_properties__ = ['all_weights']
+    __jit_unused_properties__ = ['all_weights']
 
     mode: str
     input_size: int
