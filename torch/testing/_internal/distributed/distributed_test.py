@@ -3785,6 +3785,56 @@ class DistributedTest:
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
+        def test_ddp_device(self):
+            m = nn.Linear(10, 10).to(self.rank)
+            expected_len = 2
+
+            class TensorWrapper:
+                __slots__ = ['t']
+
+                def __init__(self, t):
+                    self.t = t
+
+            class ToyModel(torch.nn.Module):
+                def __init__(_self):  # noqa: B902
+                    super().__init__()
+                    _self.lin = nn.Linear(10, 10, bias=False)
+
+                def forward(_self, x, expected_type):  # noqa: B902
+                    # Similar to scatter, the recursive to in the single-device
+                    # case does not move tensors if they are in a custom type.
+                    self.assertTrue(isinstance(x, expected_type))
+                    if expected_type == TensorWrapper:
+                        self.assertEqual(str(x.t.device), "cpu")
+                        x.t = x.t.to(self.rank)
+                        return _self.lin(x.t)
+                    else:
+                        self.assertTrue(len(x), expected_len)
+                        self.assertTrue(x[0].device == x[1].device)
+                        self.assertEqual(x[0].device.index, self.rank)
+                        t = x[0] + x[1]
+                        return _self.lin(t)
+
+            model = torch.nn.parallel.DistributedDataParallel(
+                ToyModel().to(self.rank), device_ids=[self.rank]
+            )
+            # CPU input, should be moved to the proper device before call to
+            # forward.
+            inp = tuple(torch.randn(10, 10) for _ in range(expected_len))
+            model(inp, tuple)
+            # List CPU input, should be moved to proper device before call to
+            # forward.
+            inp = [torch.randn(10, 10) for _ in range(expected_len)]
+            model(inp, list)
+            # Custom type containing tensor. The type is maintained, but the
+            # device is not propagated (which is what happens with scatter too)
+            inp = TensorWrapper(torch.randn(10, 10))
+            model(inp, TensorWrapper)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
         def test_ddp_namedtuple(self):
             expected_fields = ("a", "b")
             TestNamedTupleInput_0 = namedtuple("NamedTuple", expected_fields)
