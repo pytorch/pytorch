@@ -18,10 +18,13 @@ if ERRORLEVEL 1 exit /b 1
 if ERRORLEVEL 1 exit /b 1
 
 echo Run caffe2 ops tests
-#pytorch_installation="$(dirname $(dirname $(cd $TMP_DIR && python -c 'import os; import torch; print(os.path.realpath(torch.__file__))')))"
-#python_installation="$(dirname $(dirname $(cd $TMP_DIR && python -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
-#caffe2_pypath="$python_installation/caffe2"
-#python run_test.py --include test_nn --verbose --determine-from="%1"
+for /F "usebackq" %f IN (`python -c "import os; import caffe2; print(os.path.dirname(os.path.realpath(caffe2.__file__)))"`) DO set caffe2_dir=%f
+python -m pytest -x -v --disable-warnings --junit-xml="resulst.xml" %caffe2_dir%\python\operator_test -G
+
+rem pytorch_installation="$(dirname $(dirname $(cd $TMP_DIR && python -c 'import os; import torch; print(os.path.realpath(torch.__file__))')))"
+rem python_installation="$(dirname $(dirname $(cd $TMP_DIR && python -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
+rem caffe2_pypath="$python_installation/caffe2"
+rem python run_test.py --include test_nn --verbose --determine-from="%1"
 if ERRORLEVEL 1 exit /b 1
 
 popd
