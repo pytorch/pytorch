@@ -23,6 +23,7 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Device.h>
+#include <torch/csrc/Stream.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DataLoader.h>
 #include <torch/csrc/Generator.h>
@@ -723,6 +724,7 @@ PyObject* initModule() {
   THPMemoryFormat_init(module);
   THPQScheme_init(module);
   THPDevice_init(module);
+  THPStream_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));

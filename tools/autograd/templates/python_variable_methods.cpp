@@ -12,7 +12,6 @@
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/jit/frontend/tracer.h"
 #ifdef USE_CUDA
-#include "torch/csrc/cuda/Stream.h"
 #include "torch/csrc/cuda/Event.h"
 #endif
 #include "torch/csrc/utils/cuda_lazy_init.h"
@@ -31,6 +30,7 @@
 
 #include <ATen/ATen.h>
 #include "c10/util/Optional.h"
+#include "c10/core/Stream.h"
 
 #include <stdexcept>
 
@@ -41,6 +41,7 @@ using at::Backend;
 using at::Scalar;
 using at::ScalarType;
 using at::Tensor;
+using c10::Stream;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
@@ -705,27 +706,6 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
-// TODO: move this to ATen. We would need to expose Stream objects in ATen.
-static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
-{
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
-    auto args = py::make_tuple(py::handle(arg));
-    return handle_torch_function(self, "record_stream", args.ptr());
-  }
-#ifdef USE_CUDA
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  if (!THCPStream_Check(arg)) {
-    return PyErr_Format(PyExc_TypeError, "expected Stream object");
-  }
-  c10::cuda::CUDACachingAllocator::recordStream(self_.storage().data_ptr(), at::cuda::CUDAStream::unpack(((THCPStream*)arg)->cdata));
-  Py_RETURN_NONE;
-#else
-  throw std::runtime_error("PyTorch compiled without CUDA support");
-#endif
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -1182,7 +1162,6 @@ PyMethodDef variable_methods[] = {
   {"nonzero", convertPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS, NULL},
   {"numel", THPVariable_numel, METH_NOARGS, NULL},
   {"numpy", THPVariable_numpy, METH_NOARGS, NULL},
-  {"record_stream", THPVariable_record_stream, METH_O, NULL},
   {"requires_grad_", convertPyCFunctionWithKeywords(THPVariable_requires_grad_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"set_", convertPyCFunctionWithKeywords(THPVariable_set_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"short", convertPyCFunctionWithKeywords(THPVariable_short), METH_VARARGS | METH_KEYWORDS, NULL},
