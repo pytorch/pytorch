@@ -79,9 +79,9 @@ def _create_batched_inputs(
 
     batch_size = _validate_and_get_batch_size(flat_in_dims, flat_args)
     # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
-    batched_inputs = tuple(arg if in_dim is None else
-                           torch._add_batch_dim(arg, in_dim, vmap_level)  # type: ignore
-                           for in_dim, arg in zip(flat_in_dims, flat_args))
+    batched_inputs = [arg if in_dim is None else
+                      torch._add_batch_dim(arg, in_dim, vmap_level)  # type: ignore
+                      for in_dim, arg in zip(flat_in_dims, flat_args)]
     return tree_unflatten(batched_inputs, args_spec), batch_size
 
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
