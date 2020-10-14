@@ -50,9 +50,8 @@ struct DeepAndWideFast : torch::nn::Module {
       torch::Tensor wide) {
     torch::NoGradGuard no_grad;
     if (!allocated) {
-      auto wide_offset = at::native::add(wide, mu_); // BxNF + 1xNF
-      auto wide_normalized =
-          at::native::mul(wide_offset, sigma_); // BxNF * 1xNF
+      auto wide_offset = at::native::add(wide, mu_);
+      auto wide_normalized = at::native::mul(wide_offset, sigma_);
       // Placeholder for ReplaceNaN
       auto wide_preproc = at::native::clamp(wide_normalized, -10.0, 10.0);
 
