@@ -14,7 +14,19 @@ if ERRORLEVEL 1 exit /b 1
 echo Run caffe2 ops tests
 pip list
 pip install pytest
-python -m pytest --maxfail=10000 -v --disable-warnings --junit-xml="resulst.xml" %TMP_DIR_WIN%\build\caffe2\python\operator_test -G
+cd %TMP_DIR_WIN%\build\caffe2\python\operator_test
+python -m pytest -x -v --disable-warnings ^
+--ignore copy_rows_to_tensor_op_test.py ^
+--ignore dataset_ops_test.py ^
+--ignore expand_op_test.py ^
+--ignore fc_operator_test.py ^
+--ignore index_hash_ops_test.py ^
+--ignore index_ops_test.py ^
+--ignore learning_rate_op_test ^
+--ignore pack_ops_test.py ^
+--ignore sequence_ops_test.py ^
+--ignore torch_integration_test.py ^
+%TMP_DIR_WIN%\build\caffe2\python\operator_test -G
 
 if ERRORLEVEL 1 exit /b 1
 
