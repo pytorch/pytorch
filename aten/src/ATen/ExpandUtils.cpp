@@ -113,7 +113,7 @@ std::vector<int64_t> infer_dense_strides(IntArrayRef tensor_sizes, IntArrayRef t
     return {1};
   }
 
-  DimVector perm(ndim);
+  std::vector<int64_t> perm(ndim);
   // initialize perm with n-1, n-2, ..., 1, 0
   std::iota(perm.rbegin(), perm.rend(), 0);
 

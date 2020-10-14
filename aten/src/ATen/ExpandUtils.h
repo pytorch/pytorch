@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/Tensor.h>
-#include <ATen/DimVector.h>
 #include <c10/util/Exception.h>
 
 #include <functional>
