@@ -190,13 +190,13 @@ def prepare(model, inplace=False, allow_list=None,
         allow_list: list of quantizable modules
         observer_non_leaf_module_list: list of non-leaf modules we want to add observer
         `prepare_custom_config_dict`: customization configuration dictionary for prepare function:
-        # user will manually define the corresponding observed
-        # module class which has a from_float class method that converts
-        # float custom module to observed custom module
         prepare_custom_config_dict = {
+          # user will manually define the corresponding observed
+          # module class which has a from_float class method that converts
+          # float custom module to observed custom module
           "float_to_observed_custom_module_class": {
              CustomModule: ObservedCustomModule
-           }
+           },
         }
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare")
@@ -207,6 +207,7 @@ def prepare(model, inplace=False, allow_list=None,
     if not inplace:
         model = copy.deepcopy(model)
 
+    # TODO: remove allow_list
     qconfig_propagation_list = allow_list
     if qconfig_propagation_list is None:
         qconfig_propagation_list = get_default_qconfig_propagation_list()
@@ -360,6 +361,7 @@ def prepare_qat(model, mapping=None, inplace=False):
     torch._C._log_api_usage_once("quantization_api.quantize.prepare_qat")
     if mapping is None:
         mapping = get_default_qat_module_mappings()
+
     if not inplace:
         model = copy.deepcopy(model)
 
