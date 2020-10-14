@@ -6490,6 +6490,25 @@ Example::
     tensor([ 1.0000,  1.5000,  2.0000])
 """.format(**factory_common_args))
 
+add_docstr(torch.ravel,
+           r"""
+ravel(input) -> Tensor
+
+Return a contiguous flattened tensor. A copy is made only if needed.
+
+Args:
+    {input}
+
+Example::
+
+    >>> t = torch.tensor([[[1, 2],
+    ...                    [3, 4]],
+    ...                   [[5, 6],
+    ...                    [7, 8]]])
+    >>> torch.ravel(t)
+    tensor([1, 2, 3, 4, 5, 6, 7, 8])
+""".format(**common_args))
+
 add_docstr(torch.remainder,
            r"""
 remainder(input, other, *, out=None) -> Tensor

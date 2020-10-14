@@ -1004,5 +1004,13 @@ class TestFX(JitTestCase):
         z.node.args = (y.node, y.node)
         self.assertEqual(x.node.users.keys(), [zed.node])
 
+    def test_trace_function(self):
+        def foo(x, y):
+            return torch.relu(x) + y
+
+        x, y = torch.randn(3, 4), torch.randn(3, 4)
+        self.checkGraphModule(foo, (x, y))
+
+
 if __name__ == '__main__':
     run_tests()
