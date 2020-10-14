@@ -15,7 +15,7 @@ from torch.fx.proxy import TraceError
 
 from fx.quantization import Quantizer
 
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -32,6 +32,10 @@ class SimpleTest(torch.nn.Module):
 
 def a_non_torch_leaf(a, b):
     return a + b
+
+class Pair(NamedTuple):
+    x : torch.Tensor
+    y : torch.Tensor
 
 class TestFX(JitTestCase):
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
@@ -131,7 +135,8 @@ class TestFX(JitTestCase):
         # Custom delegate to disallow in-place tensor operations
         class NoMutableCallTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
-                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
+                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None,
+                            type_expr : Optional[Any] = None) -> Node:
                 name = target if isinstance(target, str) else torch.typename(target)
                 if name[-1] == '_':
                     raise RuntimeError('In-place operations are not supported')
@@ -448,7 +453,8 @@ class TestFX(JitTestCase):
     def test_node_tagging(self):
         class TaggingTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
-                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
+                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None,
+                            type_expr : Optional[Any] = None) -> Node:
                 n = super().create_node(kind, target, args, kwargs, name)
                 n.tag = 'foo'
                 return n
@@ -733,8 +739,8 @@ class TestFX(JitTestCase):
         c : torch.fx.Node = graph.create_node('get_attr', 'zip.zap.zam')
         d : torch.fx.Node = graph.create_node('call_function', operator.add, args=(b, c))
         graph.output(d)
-        nodes = graph._nodes
-        nodes[2], nodes[3] = nodes[3], nodes[2]
+        nodes = list(graph.nodes)
+        nodes[3].append(nodes[2])
         with self.assertRaisesRegex(RuntimeError, 'was used before it has been defined'):
             graph.lint()
 
@@ -765,6 +771,26 @@ class TestFX(JitTestCase):
         # Test shape propogation and make sure results match actual
         self.assertEqual(output_shape, ref_out.shape)
 
+    def test_fn_type_annotations(self):
+        class Foo(torch.nn.Module):
+            def forward(self, p : Pair, z : torch.Tensor, i : int) -> Dict[str, torch.Tensor]:
+                return {'a': p.x + p.y + z + i}
+
+        foo_scripted = torch.jit.script(Foo())
+        foo_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
+
+        fxed = symbolic_trace(Foo())
+        fxed_scripted = torch.jit.script(fxed)
+        fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
+
+    def test_typename_print(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,),
+                                              type_expr=List[float])
+        output : torch.fx.Node = graph.output(b)
+        self.assertTrue('typing.List[float]' in str(graph))
+
     def test_find_single_partition(self):
         class testModule(torch.nn.Module):
             def forward(self, a, b):
@@ -776,7 +802,7 @@ class TestFX(JitTestCase):
         dag = partitioner.partition_graph(traced, devices)
         for node in traced.graph.nodes:
             assert node.op == 'output' or node.partition_ids == [1]
-        nodes = traced.graph.nodes
+        nodes = list(traced.graph.nodes)
         res_dag = DAG()
         res_dag.create_node(0, [], [1], [], [])
         res_dag.create_node(1, [0], [], [nodes[0], nodes[1]], [nodes[2]])
@@ -842,7 +868,7 @@ class TestFX(JitTestCase):
                 kwargs = node.kwargs
                 # Neg doesn't have in-place
                 kwargs.pop('inplace')
-                with torch.fx.graph.insert_before(node):
+                with rn18_traced.graph.inserting_before(node):
                     new_node = rn18_traced.graph.call_function(
                         the_function=torch.neg, args=node.args, kwargs=node.kwargs)
                 node.replace_all_uses_with(replace_with=new_node)
@@ -857,7 +883,7 @@ class TestFX(JitTestCase):
         b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
         output : torch.fx.Node = graph.output(b)
 
-        with torch.fx.graph.insert_before(b):
+        with graph.inserting_before(b):
             neg : torch.fx.Node = graph.call_function(the_function=torch.neg, args=(x,))
             _, *relu_args = b.args
             b.args = (neg, *relu_args)
@@ -877,7 +903,7 @@ class TestFX(JitTestCase):
         neg : torch.fx.Node = graph.call_function(the_function=torch.neg, args=(x,))
         _, *relu_args = b.args
         b.args = (neg, *relu_args)
-        graph.move_node_before(to_move=neg, before=b)
+        b.prepend(neg)
 
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
 
@@ -910,13 +936,39 @@ class TestFX(JitTestCase):
         for use in users_of_x:
             assert any(use.name.startswith(prefix) for prefix in expected_ops)
 
+    def test_inline_graph(self):
+        class InlineInto(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x)
+
+        class ToInline(torch.nn.Module):
+            def forward(self, x):
+                return torch.neg(x)
+
+        inline_into = symbolic_trace(InlineInto())
+        to_inline = symbolic_trace(ToInline())
+
+        combined_graph = torch.fx.Graph()
+        output_node = combined_graph.graph_copy(inline_into.graph, {})
+
+        input_node = list(to_inline.graph.nodes)[0]
+        assert input_node and input_node.op == 'placeholder'
+
+        val_map = {input_node : output_node}
+        output = combined_graph.graph_copy(to_inline.graph, val_map)
+        combined_graph.output(output)
+
+        combined_module = torch.fx.GraphModule(torch.nn.Module(), combined_graph)
+
+        input = torch.rand(3, 4)
+        self.assertEqual(combined_module(input), input.relu().neg())
 
     def test_multi_insert_point(self):
         graph = torch.fx.Graph()
         x = torch.fx.Proxy(graph.placeholder('x'))
         relu = torch.relu(x)
 
-        with torch.fx.graph.insert_before(relu.node):
+        with graph.inserting_before(relu.node):
             y = torch.neg(x)
             z = torch.tanh(y)
 
