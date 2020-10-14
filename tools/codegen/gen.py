@@ -242,16 +242,25 @@ def compute_type_method(
 
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
 
+                if local.use_c10_dispatcher() == UseC10Dispatcher.full:
+                    cuda_guard_from_tensor_options = """\
+    const DeviceGuard device_guard(device_or_default(device));
+"""
+                else:
+                    assert local.use_c10_dispatcher() in [UseC10Dispatcher.with_codegenerated_unboxing_wrapper,
+                                                          UseC10Dispatcher.hacky_wrapper_for_legacy_signatures]
+                    cuda_guard_from_tensor_options = """\
+    const DeviceGuard device_guard(options.device());
+"""
+
                 # TODO: There is probably a simpler version of this that
                 # works just as well.
                 if f.device_guard and (dispatch is None or 'Vulkan' == dispatch) and has_tensor_options:
-                    cuda_guard = """\
-    const DeviceGuard device_guard(options.device());
-"""
+                    cuda_guard = cuda_guard_from_tensor_options
                 elif f.device_guard and dispatch is not None and 'CUDA' in dispatch and has_tensor_options:
-                    cuda_guard = """\
+                    cuda_guard = f"""\
     globalContext().lazyInitCUDA();
-    const DeviceGuard device_guard(options.device());
+    {cuda_guard_from_tensor_options}
 """
                 elif f.device_guard and device_of is not None:
                     cuda_guard = f"""\
@@ -285,11 +294,13 @@ def compute_type_method(
             if not def_only and not f.manual_kernel_registration and (dispatch is not None or f.dispatch is None):
                 # Figure out which signature the function is
                 if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-
+                    payload = f"TORCH_FN({type_name})"
+                elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
                     payload = "c10::impl::hacky_wrapper_for_legacy_signatures<" \
                         f"{dispatcher_sig.type()}>(TORCH_FN({type_name}))"
 
                 else:
+                    assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
                     payload = f"torch::CppFunction::makeUnboxedOnly(&{type_name})"
 
                 # Annotate it with dispatch information if necessary
@@ -353,7 +364,7 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
 
         result = generate_defn(sig_group.signature)
         if sig_group.faithful_signature is not None:
-            if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+            if local.use_c10_dispatcher().dispatcher_uses_new_style():
                 result += generate_defn(sig_group.faithful_signature)
 
         return result
@@ -466,7 +477,7 @@ def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], Opti
         dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
         sig: Union[NativeSignature, DispatcherSignature]
-        if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+        if local.use_c10_dispatcher().dispatcher_uses_new_style():
             sig = dispatcher_sig
             dispatcher_exprs = dispatcher_sig.exprs()
             dispatch_key = "c10::computeDispatchKey(dtype, layout, device)"
@@ -495,19 +506,22 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_sig.type()}>();
   {compute_dk}
-  DispatchKey _autograd_dk = c10::getAutogradKeyFromBackend(_dk);
   // This trick allows calling Autograd backend kernel first and then backend kernel,
   // without adding another AutogradBackendSelect dispatch key.
-  DispatchKey _current_dk = at::impl::variable_excluded_from_dispatch() ? _dk : _autograd_dk;
+  DispatchKey _current_dk = at::impl::variable_excluded_from_dispatch()
+                            ? _dk : c10::getAutogradKeyFromBackend(_dk);
   return op.callWithDispatchKey(_current_dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
 """
         elif target is Target.REGISTRATION:
             if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+                return f"""m.impl("aten::{f.func.name}", TORCH_FN({name}));"""
+            elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
                 return f"""m.impl("aten::{f.func.name}",
           c10::impl::hacky_wrapper_for_legacy_signatures<{dispatcher_sig.type()}>(
             TORCH_FN({name})));"""
             else:
+                assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
                 return f"""m.impl_UNBOXED("aten::{f.func.name}", {name});"""
         elif target is Target.DECLARATION:
             raise AssertionError()

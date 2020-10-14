@@ -47,10 +47,13 @@ class Location:
 # Valid values of the 'variants' field in native_functions.yaml
 Variant = Enum('Variant', ('function', 'method'))
 
-UseC10Dispatcher = Enum('UseC10Dispatcher', (
-    'full',
-    'with_codegenerated_unboxing_wrapper'
-))
+class UseC10Dispatcher(Enum):
+    full = 0
+    with_codegenerated_unboxing_wrapper = 1
+    hacky_wrapper_for_legacy_signatures = 2
+
+    def dispatcher_uses_new_style(self) -> bool:
+        return self in [UseC10Dispatcher.full, UseC10Dispatcher.hacky_wrapper_for_legacy_signatures]
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -128,6 +131,8 @@ class NativeFunction:
             use_c10_dispatcher = UseC10Dispatcher.with_codegenerated_unboxing_wrapper
         elif use_c10_dispatcher_s == 'full':
             use_c10_dispatcher = UseC10Dispatcher.full
+        elif use_c10_dispatcher_s == 'hacky_wrapper_for_legacy_signatures':
+            use_c10_dispatcher = UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
         else:
             raise AssertionError(
                 f'use_c10_dispatcher must be unset or set to full, got {use_c10_dispatcher}')
@@ -577,6 +582,7 @@ BaseTy = Enum('BaseTy', (
     'MemoryFormat',
     'QScheme',
     'Storage',
+    'Stream',
     'ConstQuantizerPtr',  # TODO: rename
 ))
 
