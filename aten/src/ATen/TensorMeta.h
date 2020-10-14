@@ -16,4 +16,12 @@ inline Tensor tensor_from_meta(const TensorMeta& meta) {
   return at::empty(meta.sizes, dtype(meta.dtype));
 }
 
+// Analogous to x.new_empty(sizes)
+inline TensorMeta new_meta(const Tensor& self, IntArrayRef sizes) {
+  TensorMeta m;
+  m.sizes = sizes;
+  m.dtype = self.scalar_type();
+  return m;
+}
+
 } // namespace at

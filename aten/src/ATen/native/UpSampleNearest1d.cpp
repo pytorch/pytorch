@@ -1,8 +1,46 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/UpSample.h>
+#include <ATen/MetaFunctions.h>
 
 namespace at {
+
+// TODO: maybe move these to their own directory
+namespace meta {
+
+TensorMeta upsample_nearest1d(const Tensor& input, IntArrayRef output_size, c10::optional<double> scales) {
+  TORCH_CHECK(
+      output_size.size() == 1,
+      "It is expected output_size equals to 1, but got size ",
+      output_size.size());
+
+  int64_t output_width = output_size[0];
+
+  TORCH_CHECK(input.dim() == 3, "Expected 3D input, but got ", input.dim(), "D")
+
+  int64_t nbatch = input.size(0);
+  int64_t channels = input.size(1);
+  int64_t input_width = input.size(2);
+
+  TORCH_CHECK(
+      input_width > 0 && output_width > 0,
+      "Input and output sizes should be greater than 0, but got input (W: ",
+      input_width,
+      ") and output (W: ",
+      output_width,
+      ")");
+
+  // Allow for empty batch size but not other dimensions
+  TORCH_CHECK(
+      (input.size(1) != 0 && input.size(2) != 0) && input.dim() == 3,
+      "Non-empty 3D data tensor expected but got a tensor with sizes ",
+      input.sizes());
+
+  return new_meta(input, {nbatch, channels, output_width});
+}
+
+} // namespace meta
+
 namespace native {
 namespace {
 
