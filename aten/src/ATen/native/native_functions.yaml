@@ -2869,6 +2869,10 @@
     CPU: range_cpu_out
     CUDA: range_cuda_out
 
+- func: ravel(Tensor(a) self) -> Tensor(a)
+  use_c10_dispatcher: full
+  variants: function, method
+
 - func: reciprocal(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -6619,6 +6623,22 @@
     CPU: foreach_tensor_addcmul_slow
     CUDA: foreach_tensor_addcmul_cuda
 
+- func: _foreach_maximum.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_maximum_slow
+    CUDA: foreach_tensor_maximum_cuda
+
+- func: _foreach_minimum.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_minimum_slow
+    CUDA: foreach_tensor_minimum_cuda
+
 - func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
   use_c10_dispatcher: full
   dispatch:
@@ -8156,6 +8176,12 @@
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
+
+- func: record_stream(Tensor(a!) self, Stream s) -> ()
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    CUDA: record_stream_cuda
 
 - func: isposinf(Tensor self) -> Tensor
   use_c10_dispatcher: full
