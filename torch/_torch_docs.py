@@ -3303,7 +3303,8 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
 
 .. note::
-    The backward pass for :attr:`input` has not been implemented.
+    The backward pass with respect to :attr:`input` is not supported.
+    Please open a feature request on github if you need it.
 
 """ + r"""
 Args:
