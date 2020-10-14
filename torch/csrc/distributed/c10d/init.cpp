@@ -973,7 +973,15 @@ Arguments:
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
-      .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
+      .def(
+          "is_completed",
+          [](::c10d::ProcessGroup::Work& work) -> bool {
+            TORCH_WARN_ONCE("ProcessGroup::Work::is_completed API is being "
+                "deprecated, please ping "
+                "https://github.com/pytorch/pytorch/issues/46291 "
+                "if you see this warning");
+            return work.isSuccess();
+          })
       .def(
           "is_success",
           [](::c10d::ProcessGroup::Work& work) -> bool {
