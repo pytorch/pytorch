@@ -19144,21 +19144,21 @@ else:
                 with self.assertRaises(RuntimeError):
                     torch_fn(a_base, random.randint(1, 10))
                 with self.assertRaises(ValueError):
-                    np_fn(a_base.numpy(), random.randint(1, 10))
+                    np_fn(a_base.cpu().numpy(), random.randint(1, 10))
 
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False))
     def test_hsplit(self, device, dtype):
         self._test_special_splits(torch.hsplit, np.hsplit, (1, 1), 0, device, dtype)
         self._test_special_splits(torch.hsplit, np.hsplit, (2, 4), 1, device, dtype)
 
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False))
     def test_vsplit(self, device, dtype):
         self._test_special_splits(torch.vsplit, np.vsplit, (2, 4), 0, device, dtype)
 
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False))
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False))
     def test_dsplit(self, device, dtype):
         self._test_special_splits(torch.dsplit, np.dsplit, (3, 4), 2, device, dtype)
 
