@@ -10,8 +10,6 @@ from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
 from torch.fx.experimental.Partitioner import DAG, Partitioner
 from torch.fx.experimental.subgraph_creation_example import split_module
-from torch.fx.immutable_collections import immutable_dict, immutable_list
-from copy import deepcopy
 
 from torch.fx.proxy import TraceError
 
@@ -867,7 +865,7 @@ class TestFX(JitTestCase):
         to_erase = []
         for node in rn18_traced.graph.nodes:
             if node.op == 'call_function' and node.target in [torch.relu, torch.nn.functional.relu]:
-                kwargs = node.kwargs.copy()
+                kwargs = node.kwargs
                 # Neg doesn't have in-place
                 kwargs.pop('inplace')
                 with rn18_traced.graph.inserting_before(node):
@@ -921,13 +919,6 @@ class TestFX(JitTestCase):
             if node.target in [operator.add, torch.relu]:
                 with self.assertRaisesRegex(RuntimeError, 'but it still had .* users in the graph'):
                     traced.graph.erase_node(node)
-
-    def test_copy_it(self):
-        d = immutable_dict([(3, 4), (5, 6)])
-        l = immutable_list([(3, 4), (5, 6)])
-
-        self.assertEqual(d, deepcopy(d))
-        self.assertEqual(l, deepcopy(l))
 
     def test_find_uses(self):
         graph = torch.fx.Graph()
