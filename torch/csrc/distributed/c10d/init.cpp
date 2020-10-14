@@ -972,12 +972,11 @@ Arguments:
     py::call_guard<py::gil_scoped_release>());
 #endif
 
-#define PROCESS_GROUP_DEPRECATION_WARNING(api_method)              \
-do { TORCH_WARN_ONCE(                                              \
-    #api_method "API is being deprecated, please ping "            \
-    "https://github.com/pytorch/pytorch/issues/46291 "             \
-    "if you see this warning");                                    \
-} while(0)
+#define PROCESS_GROUP_DEPRECATION_WARNING(api_method)                \
+  TORCH_WARN_ONCE(#api_method                                        \
+                  "API is being deprecated, please ping "            \
+                  "https://github.com/pytorch/pytorch/issues/46291 " \
+                  "if you see this warning")
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
