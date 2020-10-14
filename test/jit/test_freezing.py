@@ -1213,10 +1213,10 @@ class TestFreezing(JitTestCase):
 
             def forward(self, cond: bool):
                 if cond:
-                    val = self.mod1.val
+                    mod = self.mod1
                 else:
-                    val = self.mod2.val
-                return val
+                    mod = self.mod2
+                return mod.val
 
         mod = Mod()
         mod.eval()
