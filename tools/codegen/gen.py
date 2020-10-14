@@ -242,16 +242,25 @@ def compute_type_method(
 
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
 
+                if local.use_c10_dispatcher() == UseC10Dispatcher.full:
+                    cuda_guard_from_tensor_options = """\
+    const DeviceGuard device_guard(device_or_default(device));
+"""
+                else:
+                    assert local.use_c10_dispatcher() in [UseC10Dispatcher.with_codegenerated_unboxing_wrapper,
+                                                          UseC10Dispatcher.hacky_wrapper_for_legacy_signatures]
+                    cuda_guard_from_tensor_options = """\
+    const DeviceGuard device_guard(options.device());
+"""
+
                 # TODO: There is probably a simpler version of this that
                 # works just as well.
                 if f.device_guard and (dispatch is None or 'Vulkan' == dispatch) and has_tensor_options:
-                    cuda_guard = """\
-    const DeviceGuard device_guard(options.device());
-"""
+                    cuda_guard = cuda_guard_from_tensor_options
                 elif f.device_guard and dispatch is not None and 'CUDA' in dispatch and has_tensor_options:
-                    cuda_guard = """\
+                    cuda_guard = f"""\
     globalContext().lazyInitCUDA();
-    const DeviceGuard device_guard(options.device());
+    {cuda_guard_from_tensor_options}
 """
                 elif f.device_guard and device_of is not None:
                     cuda_guard = f"""\
@@ -497,10 +506,10 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_sig.type()}>();
   {compute_dk}
-  DispatchKey _autograd_dk = c10::getAutogradKeyFromBackend(_dk);
   // This trick allows calling Autograd backend kernel first and then backend kernel,
   // without adding another AutogradBackendSelect dispatch key.
-  DispatchKey _current_dk = at::impl::variable_excluded_from_dispatch() ? _dk : _autograd_dk;
+  DispatchKey _current_dk = at::impl::variable_excluded_from_dispatch()
+                            ? _dk : c10::getAutogradKeyFromBackend(_dk);
   return op.callWithDispatchKey(_current_dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
 """

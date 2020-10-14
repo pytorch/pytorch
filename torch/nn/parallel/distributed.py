@@ -695,7 +695,7 @@ class DistributedDataParallel(Module):
         """
         def to_map(obj):
             if isinstance(obj, torch.Tensor):
-                return obj.to(target_gpu)
+                return (obj.to(target_gpu), )
             if is_namedtuple(obj):
                 return list(type(obj)(*args) for args in zip(*map(to_map, obj)))
             if isinstance(obj, tuple) and len(obj) > 0:

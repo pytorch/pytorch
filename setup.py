@@ -176,13 +176,10 @@ if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
 
 import platform
 python_min_version = (3, 6, 1)
-python_min_version_str = '.'.join((str(num) for num in python_min_version))
-python_max_version = (3, 9, 0)
-python_max_version_str = '.'.join((str(num) for num in python_max_version))
-if sys.version_info < python_min_version or sys.version_info >= python_max_version:
-    print("You are using Python {}. Python >={},<{} is required.".format(platform.python_version(),
-                                                                         python_min_version_str,
-                                                                         python_max_version_str))
+python_min_version_str = '.'.join(map(str, python_min_version))
+if sys.version_info < python_min_version:
+    print("You are using Python {}. Python >={} is required.".format(platform.python_version(),
+                                                                     python_min_version_str))
     sys.exit(-1)
 
 from setuptools import setup, Extension, distutils, find_packages
@@ -877,7 +874,7 @@ if __name__ == '__main__':
         download_url='https://github.com/pytorch/pytorch/tags',
         author='PyTorch Team',
         author_email='packages@pytorch.org',
-        python_requires='>={},<{}'.format(python_min_version_str, python_max_version_str),
+        python_requires='>={}'.format(python_min_version_str),
         # PyPI package information.
         classifiers=[
             'Development Status :: 5 - Production/Stable',
@@ -893,7 +890,7 @@ if __name__ == '__main__':
             'Topic :: Software Development :: Libraries :: Python Modules',
             'Programming Language :: C++',
             'Programming Language :: Python :: 3',
-        ] + ['Programming Language :: Python :: 3.{}' for i in range(python_min_version[1], python_max_version[1])],
+        ] + ['Programming Language :: Python :: 3.{}' for i in range(python_min_version[1], 9)],
         license='BSD-3',
         keywords='pytorch machine learning',
     )
