@@ -87,6 +87,7 @@ MULTI_OUTPUT_SAFE_FUNCTIONS = {
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
     'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
+    'tensor_split'
 })
 
 def format_return_type(returns):
@@ -127,6 +128,8 @@ def load_aten_declarations(path):
             continue
 
         for arg in declaration['arguments']:
+            arg['simple_type'] = get_simple_type(arg)
+        for arg in declaration['schema_order_arguments']:
             arg['simple_type'] = get_simple_type(arg)
         for ret in declaration['returns']:
             ret['simple_type'] = get_simple_type(ret)

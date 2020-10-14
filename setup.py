@@ -61,6 +61,9 @@
 #   BUILD_CAFFE2_OPS=0
 #     disable Caffe2 operators build
 #
+#   BUILD_CAFFE2=0
+#     disable Caffe2 build
+#
 #   USE_IBVERBS
 #     toggle features related to distributed support
 #
@@ -340,7 +343,11 @@ def build_deps():
 ################################################################################
 
 # the list of runtime dependencies required by this built package
-install_requires = ['future', 'typing_extensions', 'dataclasses']
+install_requires = [
+    'future',
+    'typing_extensions',
+    'dataclasses; python_version < "3.7"'
+]
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
