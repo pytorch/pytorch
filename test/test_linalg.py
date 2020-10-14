@@ -1028,7 +1028,7 @@ class TestLinalg(TestCase):
     @unittest.expectedFailure
     @onlyCUDA
     @skipCUDAIfNoMagma
-    @dtypes(torch.complex64, torch.complex128)
+    @dtypes(torch.complex128)
     def test_cholesky_autograd_xfailed(self, device, dtype):
         def func(root):
             x = 0.5 * (root + root.transpose(-1, -2).conj())
