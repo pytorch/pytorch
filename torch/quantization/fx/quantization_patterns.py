@@ -88,8 +88,7 @@ class Add(QuantizeHandler):
                 op = torch.ops.quantized.add_relu
             else:
                 op = torch.ops.quantized.add
-            kwargs = self.add_node.kwargs
-            kwargs.update({'scale': scale, 'zero_point': zero_point})
+            kwargs = {**self.add_node.kwargs, 'scale': scale, 'zero_point': zero_point}
             return quantizer.quantized_graph.create_node(
                 'call_function', op, load_arg(quantized=True)(self.add_node.args), kwargs)
 
@@ -126,8 +125,7 @@ class Mul(QuantizeHandler):
                 op = torch.ops.quantized.mul_relu
             else:
                 op = torch.ops.quantized.mul
-            kwargs = self.mul_node.kwargs
-            kwargs.update({'scale': scale, 'zero_point': zero_point})
+            kwargs = {**self.mul_node.kwargs, 'scale': scale, 'zero_point': zero_point}
             return quantizer.quantized_graph.create_node('call_function', op, load_arg(quantized=True)(self.mul_node.args), kwargs)
 
 @register_quant_pattern(torch.cat)
@@ -139,8 +137,7 @@ class Cat(QuantizeHandler):
         scale, zero_point = activation_post_process.calculate_qparams()
         scale = float(scale)
         zero_point = int(zero_point)
-        kwargs = load_arg(quantized=False)(node.kwargs)
-        kwargs.update({'scale': scale, 'zero_point': zero_point})
+        kwargs = {**load_arg(quantized=False)(node.kwargs), 'scale': scale, 'zero_point': zero_point}
         return quantizer.quantized_graph.create_node(
             'call_function', torch.ops.quantized.cat, load_arg(quantized=[0])(node.args), kwargs)
 
@@ -322,7 +319,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 linear_weight = load_arg(quantized=weight_quantized)(self.linear_node.args[1])
 
                 # get other arguments
-                kwargs = load_arg(quantized=False)(self.linear_node.kwargs)
+                kwargs = {**load_arg(quantized=False)(self.linear_node.kwargs)}
                 # pack weight
                 bias = None
                 # all args after bias, including bias
@@ -429,8 +426,7 @@ class DefaultNode(QuantizeHandler):
 
             quantized_op = get_quantized_operator(node.target)
             args = load_arg(quantized=[0])(node.args)
-            kwargs = load_arg(quantized=False)(node.kwargs)
-            kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
+            kwargs = {**load_arg(quantized=False)(node.kwargs), 'output_scale': scale, 'output_zero_point': zero_point}
             if quantized_op in ARGS_TO_SKIP:
                 args_to_skip = ARGS_TO_SKIP[quantized_op]
                 for arg in args_to_skip:
@@ -449,8 +445,7 @@ class ELU(QuantizeHandler):
         zero_point = int(zero_point)
         quantized_op = get_quantized_operator(node.target)
         args = load_arg(quantized=[0])(node.args)
-        kwargs = load_arg(quantized=False)(node.kwargs)
-        kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
+        kwargs = {**load_arg(quantized=False)(node.kwargs), 'output_scale': scale, 'output_zero_point': zero_point}
         kwargs.pop('inplace')
         return quantizer.quantized_graph.create_node(
             'call_function', quantized_op, args, kwargs)
