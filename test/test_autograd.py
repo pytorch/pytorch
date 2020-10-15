@@ -4227,6 +4227,49 @@ for shape in [(1,), ()]:
         run_test(grad_mode=False, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
 
+    def test_inplace_not_requires_grad(self):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.view_as(inp)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        # Original Tensor does not require grad
+        a = torch.rand(1, 2)
+
+        # Tensor being written does require grad
+        b = torch.rand(1, requires_grad=True)
+
+        # Take an invalid view on a that should raise an error
+        view_a = MyFn.apply(a)
+
+        with self.assertRaisesRegex(RuntimeError, 'Output 0 of a function created in no_grad mode is a view'):
+            view_a += b
+
+        # Extra test for copy_ that is a manual implementation and could be easily
+        # forgotten when the codegen is updated
+        a = torch.rand(1, 2)
+        b = torch.rand(1, requires_grad=True)
+        view_a = MyFn.apply(a)
+
+        with self.assertRaisesRegex(RuntimeError, 'Output 0 of a function created in no_grad mode is a view'):
+            view_a.copy_(b)
+
+        # Functions that should throw must properly throw
+        a = torch.rand(1, 2)
+        b = torch.rand(1, requires_grad=True)
+        view_a = a.unbind()[0]
+        with self.assertRaisesRegex(RuntimeError, 'Output 0 of a function created in no_grad mode is a view'):
+            view_a.copy_(b)
+
+        # Sanity check that views that should work still work
+        a = torch.rand(1, 2)
+        b = torch.rand(1, requires_grad=True)
+        a.select(1, 0).copy_(b)
+
     def _do_test_autograd_simple_views_python(self, dtype):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
