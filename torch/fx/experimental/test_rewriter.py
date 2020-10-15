@@ -1,6 +1,5 @@
 import torch
-import unittest
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
+from torch.fx import symbolic_trace
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_utils import run_tests
 

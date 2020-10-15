@@ -2,7 +2,6 @@ import ast
 import astor
 import inspect
 import textwrap
-import torch
 import copy
 from types import FunctionType
 
@@ -24,7 +23,7 @@ class AST_Rewriter(ast.NodeTransformer):
         source_str = inspect.getsource(fn)
         whitespace_prefix = source_str.split("def")[0]
         split_source = source_str.split('\n')
-        aligned_source = [whitespace_prefix+s for s in split_source[1:]]
+        aligned_source = [whitespace_prefix + s for s in split_source[1:]]
         aligned_source.insert(0, split_source[0])
         aligned_str = '\n'.join(aligned_source)
         normalized_str = textwrap.dedent(aligned_str)
@@ -53,7 +52,7 @@ class AST_Rewriter(ast.NodeTransformer):
             call_node_args.append(ast.Constant(value="", kind=None))
         call_node = ast.Call(
             func=ast.Attribute(value=ast.Name(id="torch", ctx=ast.Load()),
-            attr="Assert", ctx=ast.Load()),
+                               attr="Assert", ctx=ast.Load()),
             args=call_node_args,
             keywords=[])
 
