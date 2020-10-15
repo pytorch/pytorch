@@ -29,7 +29,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import MultiProcessTestCase, \
     requires_gloo, requires_nccl, requires_nccl_version, \
     skip_if_not_multigpu, skip_if_lt_x_gpu, get_timeout, skip_if_rocm, \
-    skip_if_rocm_single_process, simple_sparse_reduce_tests, skip_if_win32, \
+    simple_sparse_reduce_tests, skip_if_win32, \
     create_device
 
 from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, \
