@@ -92,8 +92,9 @@ namespace impl {
           TORCH_CHECK(false, "Output ", diff_view_meta->output_nr_, " of ", grad_fn_name, " is a view and "
                       "is being modified inplace but this inplace operation is not allowed. You should "
                       "either replace it by an out of place operation or do a .clone() of the Tensor "
-                      "before modifying it inplace. Note that this can happen in particular when using "
-                      "DP or DDP that can give as input to the forward a view of the provided input.");
+                      "before modifying it inplace. Note that this can happen when using DataParallel or "
+                      "DistributedDataParallel, which can send views of the original input to the forward "
+                      "method of the model.");
         }
         TORCH_INTERNAL_ASSERT(gradient_edge.input_nr == 0);
         TORCH_INTERNAL_ASSERT(gradient_edge.function);

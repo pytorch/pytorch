@@ -4249,7 +4249,7 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, 'Output 0 of a function created in no_grad mode is a view'):
             view_a += b
 
-        # Extra test of copy that is a manual implementation and could be easily
+        # Extra test for copy_ that is a manual implementation and could be easily
         # forgotten when the codegen is updated
         a = torch.rand(1, 2)
         b = torch.rand(1, requires_grad=True)
