@@ -393,12 +393,6 @@ ${statements}
 #endif
 """)
 
-# Generate a file that lists all functions and their schema string. Used for XLA
-REGISTRATION_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${declaration_formals}); \
-// {"schema": "${schema_string}", "compound": "${compound}", "has_math_kernel": "${has_math_kernel}"}
-""")
-
 # TraceType templates
 # TODO: change `redispatch` to `NoTracerDispatchMode` + regular `call`.
 # See NOTE[UnboxedOnly]
@@ -689,31 +683,6 @@ def gen_variable_type(out, aten_declarations, template_path):
     for i, shard in enumerate(shards):
         gen_variable_type_shard(out, shard, template_path, '_%d' % i, False)
     gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False)
-
-    REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(template_path + "/RegistrationDeclarations.h")
-    registration_declarations = []
-
-    for declaration in aten_declarations:
-        if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
-            declaration_formals = declaration['schema_order_formals']
-        else:
-            assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-            declaration_formals = declaration['formals']
-        if dispatch_strategy(declaration) == 'use_derived':
-            registration_declarations.append(
-                REGISTRATION_DECLARATION.substitute(declaration,
-                                                    declaration_formals=declaration_formals,
-                                                    compound='False'))
-        else:
-            registration_declarations.append(
-                REGISTRATION_DECLARATION.substitute(declaration,
-                                                    declaration_formals=declaration_formals,
-                                                    compound='True'))
-
-    env = {
-        'registration_declarations': registration_declarations,
-    }
-    write(out, 'RegistrationDeclarations.h', REGISTRATION_DECLARATIONS_H, env)
 
 
 def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
