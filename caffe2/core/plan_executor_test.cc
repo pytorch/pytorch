@@ -18,6 +18,35 @@ static std::atomic<int> cancelCount{0};
 static std::atomic<bool> stuckRun{false};
 } // namespace
 
+class StuckBlockingOp final : public Operator<CPUContext> {
+ public:
+  StuckBlockingOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    // StuckBlockingOp runs and notifies ErrorOp.
+    stuckRun = true;
+
+    while (!cancelled_) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    return true;
+  }
+
+  void Cancel() override {
+    LOG(INFO) << "cancelled StuckBlockingOp.";
+    cancelCount += 1;
+    cancelled_ = true;
+  }
+
+ private:
+  std::atomic<bool> cancelled_{false};
+};
+
+REGISTER_CPU_OPERATOR(StuckBlocking, StuckBlockingOp);
+OPERATOR_SCHEMA(StuckBlocking).NumInputs(0).NumOutputs(0);
+
 class StuckAsyncOp final : public Operator<CPUContext> {
  public:
   StuckAsyncOp(const OperatorDef& operator_def, Workspace* ws)
@@ -55,7 +84,7 @@ class ErrorOp final : public Operator<CPUContext> {
       : Operator<CPUContext>(operator_def, ws) {}
 
   bool RunOnDevice() override {
-    // Wait for StuckAsyncOp to run first.
+    // Wait for StuckAsyncOp or StuckBlockingOp to run first.
     while (!stuckRun) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
@@ -123,6 +152,39 @@ PlanDef parallelErrorPlan() {
   return plan_def;
 }
 
+PlanDef parallelErrorPlanWithCancellableStuckNet() {
+  // Set a plan with two nets: one stuck net with blocking operator that never
+  // returns; one error net with error op that throws.
+  PlanDef plan_def;
+
+  auto* stuck_blocking_net = plan_def.add_network();
+  stuck_blocking_net->set_name("stuck_blocking_net");
+  {
+    auto* op = stuck_blocking_net->add_op();
+    op->set_type("StuckBlocking");
+  }
+
+  auto* error_net = plan_def.add_network();
+  error_net->set_name("error_net");
+  {
+    auto* op = error_net->add_op();
+    op->set_type("Error");
+  }
+
+  auto* execution_step = plan_def.add_execution_step();
+  execution_step->set_concurrent_substeps(true);
+  {
+    auto* substep = execution_step->add_substep();
+    substep->add_network(stuck_blocking_net->name());
+  }
+  {
+    auto* substep = execution_step->add_substep();
+    substep->add_network(error_net->name());
+  }
+
+  return plan_def;
+}
+
 struct HandleExecutorThreadExceptionsGuard {
   HandleExecutorThreadExceptionsGuard(int timeout = 60) {
     globalInit({
@@ -158,6 +220,7 @@ struct HandleExecutorThreadExceptionsGuard {
 TEST(PlanExecutorTest, ErrorAsyncPlan) {
   HandleExecutorThreadExceptionsGuard guard;
 
+  cancelCount = 0;
   PlanDef plan_def = parallelErrorPlan();
   Workspace ws;
   ASSERT_THROW(ws.RunPlan(plan_def), TestError);
@@ -167,7 +230,6 @@ TEST(PlanExecutorTest, ErrorAsyncPlan) {
 // death tests not supported on mobile
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 TEST(PlanExecutorTest, BlockingErrorPlan) {
-
   // TSAN doesn't play nicely with death tests
 #if defined(__has_feature)
 #if __has_feature(thread_sanitizer)
@@ -206,6 +268,17 @@ TEST(PlanExecutorTest, BlockingErrorPlan) {
       "failed to stop concurrent workers after exception: test error");
 }
 #endif
+
+TEST(PlanExecutorTest, ErrorPlanWithCancellableStuckNet) {
+  HandleExecutorThreadExceptionsGuard guard;
+
+  cancelCount = 0;
+  PlanDef plan_def = parallelErrorPlanWithCancellableStuckNet();
+  Workspace ws;
+
+  ASSERT_THROW(ws.RunPlan(plan_def), TestError);
+  ASSERT_EQ(cancelCount, 1);
+}
 
 } // namespace caffe2
 

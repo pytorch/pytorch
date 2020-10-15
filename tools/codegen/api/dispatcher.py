@@ -29,7 +29,7 @@ from typing import Sequence, Optional
 #
 
 def argumenttype_type(t: Type, *, mutable: bool) -> str:
-    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+    if local.use_c10_dispatcher().dispatcher_uses_new_style():
         # This is a faux amis.  If it makes sense in the future to add
         # more special cases here, or invert things so cpp.argument_type
         # calls this, or just completely inline the function, please do
@@ -49,7 +49,7 @@ def returns_type(rs: Sequence[Return]) -> str:
     return cpp.returns_type(rs)
 
 def argument(a: Argument) -> DispatcherArgument:
-    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+    if local.use_c10_dispatcher().dispatcher_uses_new_style():
         return DispatcherArgument(
             type=argument_type(a),
             name=a.name,
@@ -67,7 +67,7 @@ def name(func: FunctionSchema) -> str:
     return cpp.name(func)
 
 def arguments(func: FunctionSchema) -> Sequence[DispatcherArgument]:
-    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+    if local.use_c10_dispatcher().dispatcher_uses_new_style():
         return list(map(argument, itertools.chain(func.out_arguments, func.arguments, func.kwarg_only_arguments)))
     else:
         return [
@@ -106,7 +106,8 @@ def cppargument_exprs(a: CppArgument,
     elif isinstance(a.argument, ThisArgument):
         return [DispatcherExpr(type=argument_type(a.argument.argument), expr=a.name)]
     elif isinstance(a.argument, Argument):
-        if a.name == 'memory_format' and tensor_options is not None and local.use_c10_dispatcher() is UseC10Dispatcher.full:
+        if a.name == 'memory_format' and tensor_options is not None and \
+                local.use_c10_dispatcher().dispatcher_uses_new_style():
             return [DispatcherExpr(
                 type=argument_type(a.argument),
                 expr=f'c10::impl::check_tensor_options_and_extract_memory_format({tensor_options.name}, {a.name})')
@@ -125,7 +126,7 @@ def cpparguments_exprs(args: Sequence[CppArgument], process_tensoroptions: Proce
 # I don't think this is entirely sound, but it should be reasonably
 # close
 def legacydispatcherarguments_exprs(args: Sequence[LegacyDispatcherArgument]) -> Sequence[DispatcherExpr]:
-    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+    if local.use_c10_dispatcher().dispatcher_uses_new_style():
         process_tensoroptions = ProcessTensoroptions.SCATTER
     else:
         process_tensoroptions = ProcessTensoroptions.PASS_THROUGH
@@ -136,7 +137,7 @@ def legacydispatcherarguments_exprs(args: Sequence[LegacyDispatcherArgument]) ->
                               process_tensoroptions=process_tensoroptions)
 
 def exprs(args: Sequence[DispatcherArgument]) -> Sequence[DispatcherExpr]:
-    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
+    if local.use_c10_dispatcher().dispatcher_uses_new_style():
         process_tensoroptions = ProcessTensoroptions.SCATTER
     else:
         process_tensoroptions = ProcessTensoroptions.PASS_THROUGH

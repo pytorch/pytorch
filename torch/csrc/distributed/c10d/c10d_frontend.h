@@ -52,16 +52,16 @@ class DistributedC10d {
 
   // getters/setters for the global states
   const std::string& backend() const;
-  void backend(std::string const& backend_name);
+  void set_backend(std::string const& backend_name);
 
   const std::unordered_map<std::shared_ptr<ProcessGroup>, std::vector<int64_t>>&
   pg_group_ranks();
-  void pg_group_ranks(std::unordered_map<
-                      std::shared_ptr<ProcessGroup>,
-                      std::vector<int64_t>> const& new_ranks);
+  void set_pg_group_ranks(std::unordered_map<
+                          std::shared_ptr<ProcessGroup>,
+                          std::vector<int64_t>> const& new_ranks);
 
   const std::string& default_pg_init_method() const;
-  void default_pg_init_method(std::string const& init_method);
+  void set_default_pg_init_method(std::string const& init_method);
 
   ProcessGroup::Work isend(
       at::Tensor tensor,

@@ -39,11 +39,7 @@ def libtorch_generated_sources(gencode_pattern):
         "autograd/generated/TraceType_2.cpp",
         "autograd/generated/TraceType_3.cpp",
         "autograd/generated/TraceType_4.cpp",
-    ]] + [
-        "torch/csrc/autograd/TraceTypeManual.cpp",
-        "torch/csrc/autograd/VariableTypeManual.cpp",
-        "torch/csrc/autograd/FunctionsManual.cpp",
-    ]
+    ]]
 
 # copied from https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/core/CMakeLists.txt
 jit_core_headers = [
@@ -546,6 +542,7 @@ libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/comm.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/reducer.cpp",
+    "torch/csrc/distributed/c10d/c10d_frontend.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
