@@ -771,6 +771,7 @@ jobs:
           no_output_timeout: 3m
           command: |
             start /wait msiexec /i azure-cli-2.13.0.msi /quiet /qn /norestart /log t1.log
+            az login
           shell: cmd.exe
 
   pytorch_windows_test:
