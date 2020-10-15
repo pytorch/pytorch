@@ -6,7 +6,7 @@ from itertools import product
 import itertools
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA)
+    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, _assertGradAndGradgradChecks)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA, precisionOverride,
      skipCPUIfNoMkl, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA)
@@ -341,14 +341,16 @@ class TestFFT(TestCase):
                 # Use real input instead and put view_as_complex into the graph
                 if dtype.is_complex:
                     def test_fn(x):
-                        return torch_fn(torch.view_as_complex(x), *args)
-                    input = torch.view_as_real(input).detach().requires_grad_()
+                        out = torch_fn(torch.view_as_complex(x), *args)
+                        return torch.view_as_real(out) if out.is_complex() else out
+                    inputs = (torch.view_as_real(input).detach().requires_grad_(),)
                 else:
                     def test_fn(x):
-                        return torch_fn(x, *args)
-                    input = input.detach().requires_grad_()
+                        out = torch_fn(x, *args)
+                        return torch.view_as_real(out) if out.is_complex() else out
+                    inputs = (input.detach().requires_grad_(),)
 
-                self.assertTrue(torch.autograd.gradcheck(test_fn, (input,)))
+                _assertGradAndGradgradChecks(self, test_fn, inputs)
 
     # nd-fft tests
 
@@ -473,14 +475,16 @@ class TestFFT(TestCase):
                 # Use real input instead and put view_as_complex into the graph
                 if dtype.is_complex:
                     def test_fn(x):
-                        return torch_fn(torch.view_as_complex(x), s, dim, norm)
+                        out = torch_fn(torch.view_as_complex(x), s, dim, norm)
+                        return torch.view_as_real(out) if out.is_complex() else out
                     inputs = (torch.view_as_real(input).detach().requires_grad_(),)
                 else:
                     def test_fn(x):
-                        return torch_fn(x, s, dim, norm)
+                        out = torch_fn(x, s, dim, norm)
+                        return torch.view_as_real(out) if out.is_complex() else out
                     inputs = (input.detach().requires_grad_(),)
 
-                self.assertTrue(torch.autograd.gradcheck(test_fn, inputs))
+                _assertGradAndGradgradChecks(self, test_fn, inputs)
 
     @skipCUDAIfRocm
     @skipCPUIfNoMkl
@@ -509,6 +513,81 @@ class TestFFT(TestCase):
         c = torch.complex(a, a)
         with self.assertRaisesRegex(RuntimeError, "Expected a real input"):
             torch.fft.rfftn(c)
+
+    # Helper functions
+
+    @skipCPUIfNoMkl
+    @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(torch.float, torch.double)
+    def test_fftfreq_numpy(self, device, dtype):
+        test_args = [
+            *product(
+                # n
+                range(1, 20),
+                # d
+                (None, 10.0),
+            )
+        ]
+
+        functions = ['fftfreq', 'rfftfreq']
+
+        for fname in functions:
+            torch_fn = getattr(torch.fft, fname)
+            numpy_fn = getattr(np.fft, fname)
+
+            for n, d in test_args:
+                args = (n,) if d is None else (n, d)
+                expected = numpy_fn(*args)
+                actual = torch_fn(*args, device=device, dtype=dtype)
+                self.assertEqual(actual, expected, exact_dtype=False)
+
+    @skipCPUIfNoMkl
+    @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    def test_fftshift_numpy(self, device, dtype):
+        test_args = [
+            # shape, dim
+            *product(((11,), (12,)), (None, 0, -1)),
+            *product(((4, 5), (6, 6)), (None, 0, (-1,))),
+            *product(((1, 1, 4, 6, 7, 2),), (None, (3, 4))),
+        ]
+
+        functions = ['fftshift', 'ifftshift']
+
+        for shape, dim in test_args:
+            input = torch.rand(*shape, device=device, dtype=dtype)
+            input_np = input.cpu().numpy()
+
+            for fname in functions:
+                torch_fn = getattr(torch.fft, fname)
+                numpy_fn = getattr(np.fft, fname)
+
+                expected = numpy_fn(input_np, axes=dim)
+                actual = torch_fn(input, dim=dim)
+                self.assertEqual(actual, expected)
+
+    @skipCPUIfNoMkl
+    @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
+    @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
+    @dtypes(torch.float, torch.double)
+    def test_fftshift_frequencies(self, device, dtype):
+        for n in range(10, 15):
+            sorted_fft_freqs = torch.arange(-(n // 2), n - (n // 2),
+                                            device=device, dtype=dtype)
+            x = torch.fft.fftfreq(n, d=1 / n, device=device, dtype=dtype)
+
+            # Test fftshift sorts the fftfreq output
+            shifted = torch.fft.fftshift(x)
+            self.assertTrue(torch.allclose(shifted, shifted.sort().values))
+            self.assertEqual(sorted_fft_freqs, shifted)
+
+            # And ifftshift is the inverse
+            self.assertEqual(x, torch.fft.ifftshift(shifted))
 
     # Legacy fft tests
     def _test_fft_ifft_rfft_irfft(self, device, dtype):

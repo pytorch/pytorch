@@ -13,40 +13,41 @@ from .stubs import QuantStub, DeQuantStub
 
 # Map for swapping float module to quantized ones
 STATIC_QUANT_MODULE_MAPPINGS = {
-    nn.Linear: nnq.Linear,
-    nn.ReLU: nnq.ReLU,
-    nn.ReLU6: nnq.ReLU6,
-    nn.Hardswish: nnq.Hardswish,
-    nn.ELU: nnq.ELU,
+    QuantStub: nnq.Quantize,
+    DeQuantStub: nnq.DeQuantize,
+    nn.BatchNorm2d: nnq.BatchNorm2d,
+    nn.BatchNorm3d: nnq.BatchNorm3d,
     nn.Conv1d: nnq.Conv1d,
     nn.Conv2d: nnq.Conv2d,
     nn.Conv3d: nnq.Conv3d,
     nn.ConvTranspose1d: nnq.ConvTranspose1d,
     nn.ConvTranspose2d: nnq.ConvTranspose2d,
-    nn.BatchNorm2d: nnq.BatchNorm2d,
-    nn.BatchNorm3d: nnq.BatchNorm3d,
-    nn.LayerNorm: nnq.LayerNorm,
+    nn.ELU: nnq.ELU,
+    nn.Embedding: nnq.Embedding,
+    nn.EmbeddingBag: nnq.EmbeddingBag,
     nn.GroupNorm: nnq.GroupNorm,
+    nn.Hardswish: nnq.Hardswish,
     nn.InstanceNorm1d: nnq.InstanceNorm1d,
     nn.InstanceNorm2d: nnq.InstanceNorm2d,
     nn.InstanceNorm3d: nnq.InstanceNorm3d,
-    nn.Embedding: nnq.Embedding,
-    nn.EmbeddingBag: nnq.EmbeddingBag,
-    QuantStub: nnq.Quantize,
-    DeQuantStub: nnq.DeQuantize,
+    nn.LayerNorm: nnq.LayerNorm,
+    nn.LeakyReLU: nnq.LeakyReLU,
+    nn.Linear: nnq.Linear,
+    nn.ReLU6: nnq.ReLU6,
+    nn.ReLU: nnq.ReLU,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
+    nni.BNReLU2d: nniq.BNReLU2d,
+    nni.BNReLU3d: nniq.BNReLU3d,
     nni.ConvReLU1d: nniq.ConvReLU1d,
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.ConvReLU3d: nniq.ConvReLU3d,
     nni.LinearReLU: nniq.LinearReLU,
-    nni.BNReLU2d: nniq.BNReLU2d,
-    nni.BNReLU3d: nniq.BNReLU3d,
-    nniqat.ConvReLU2d: nniq.ConvReLU2d,
-    nniqat.LinearReLU: nniq.LinearReLU,
     nniqat.ConvBn2d: nnq.Conv2d,
     nniqat.ConvBnReLU2d: nniq.ConvReLU2d,
+    nniqat.ConvReLU2d: nniq.ConvReLU2d,
+    nniqat.LinearReLU: nniq.LinearReLU,
     # QAT modules:
     nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,
@@ -54,8 +55,8 @@ STATIC_QUANT_MODULE_MAPPINGS = {
 
 # Map for swapping float module to qat modules
 QAT_MODULE_MAPPINGS = {
-    nn.Linear: nnqat.Linear,
     nn.Conv2d: nnqat.Conv2d,
+    nn.Linear: nnqat.Linear,
     # Intrinsic modules:
     nni.ConvBn2d: nniqat.ConvBn2d,
     nni.ConvBnReLU2d: nniqat.ConvBnReLU2d,
@@ -65,11 +66,11 @@ QAT_MODULE_MAPPINGS = {
 
 # Map for swapping dynamic modules
 DYNAMIC_QUANT_MODULE_MAPPINGS = {
+    nn.GRUCell: nnqd.GRUCell,
     nn.Linear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
     nn.LSTMCell: nnqd.LSTMCell,
     nn.RNNCell: nnqd.RNNCell,
-    nn.GRUCell: nnqd.GRUCell,
 }
 
 # Whitelist for propagating the qconfig
@@ -86,6 +87,7 @@ FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS = {
     F.hardswish: torch._ops.ops.quantized.hardswish,
     F.instance_norm: torch._ops.ops.quantized.instance_norm,
     F.layer_norm: torch._ops.ops.quantized.layer_norm,
+    F.leaky_relu: torch._ops.ops.quantized.leaky_relu,
 }
 
 def register_static_quant_module_mapping(
