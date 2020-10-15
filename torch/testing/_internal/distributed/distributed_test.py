@@ -11,7 +11,6 @@ import unittest
 from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
-from io import StringIO
 from typing import Union, NamedTuple
 
 import torch
@@ -35,6 +34,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_no_gpu,
     require_n_gpus_for_nccl_backend,
     requires_nccl_version,
+    captured_output,
 )
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -132,18 +132,6 @@ class BatchNormNet(nn.Module):
 DDP_NET = Net()
 BN_NET = BatchNormNet()
 ONLY_SBN_NET = nn.SyncBatchNorm(2, momentum=0.99)
-
-
-@contextmanager
-def _captured_output():
-    new_out, new_err = StringIO(), StringIO()
-    old_out, old_err = sys.stdout, sys.stderr
-    try:
-        sys.stdout, sys.stderr = new_out, new_err
-        yield sys.stdout, sys.stderr
-    finally:
-        sys.stdout, sys.stderr = old_out, old_err
-
 
 def get_timeout(test_id):
     test_name = test_id.split(".")[-1]
@@ -377,7 +365,7 @@ class DistributedTest:
             return rank_to_GPU
 
         def test_dump_DDP_relevant_env_vars(self):
-            with _captured_output() as (out, err):
+            with captured_output() as (out, _):
                 _dump_DDP_relevant_env_vars()
                 lines = out.getvalue().splitlines()
 
