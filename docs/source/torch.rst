@@ -85,6 +85,7 @@ Indexing, Slicing, Joining, Mutating Ops
 
     cat
     chunk
+    column_stack
     dstack
     gather
     hstack
@@ -94,6 +95,7 @@ Indexing, Slicing, Joining, Mutating Ops
     narrow
     nonzero
     reshape
+    row_stack
     split
     squeeze
     stack

@@ -1788,6 +1788,35 @@ clip(input, min, max, *, out=None) -> Tensor
 Alias for :func:`torch.clamp`.
 """.format(**common_args))
 
+add_docstr(torch.column_stack,
+           r"""
+column_stack(tensors, *, out=None) -> Tensor
+
+Stack 1D tensors as columns into a 2D tensor, 2D tensors are stacked just like :func:`torch.hstack`.
+
+Args:
+    tensors (sequence of Tensors)
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([1, 2, 3])
+    >>> b = torch.tensor([4, 5, 6])
+    >>> torch.column_stack((a,b))
+    tensor([[1, 4],
+        [2, 5],
+        [3, 6]])
+    >>> a = torch.tensor([[1],[2],[3]])
+    >>> b = torch.tensor([[4],[5],[6]])
+    >>> torch.column_stack((a,b))
+    tensor([[1, 4],
+            [2, 5],
+            [3, 6]])
+
+""".format(**common_args))
+
 add_docstr(torch.complex,
            r"""
 complex(real, imag, *, out=None) -> Tensor
@@ -6629,6 +6658,12 @@ Example::
     torch.uint8
 """)
 
+add_docstr(torch.row_stack,
+           r"""
+row_stack(tensors, *, out=None) -> Tensor
+
+Alias of :func:`torch.vstack`.
+""".format(**common_args))
 
 add_docstr(torch.round,
            r"""
