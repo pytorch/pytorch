@@ -409,43 +409,51 @@ class Tensor(torch._C._TensorBase):
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.lu, relevant_args, self, pivot=pivot, get_infos=get_infos)
 
-        if not self.requires_grad:
-            return torch.Tensor._lu(self, pivot=pivot, get_infos=get_infos)
+        if not torch._jit_internal.is_scripting():
+            if self.requires_grad:
+                if not (self.size(-2) == self.size(-1) and self.dtype.is_floating_point):
+                    raise ValueError(
+                        'lu.backward works only with batches of squared full-rank matrices'
+                        ' of floating types.'
+                    )
+
+                class _LU(torch.autograd.Function):
+                    @staticmethod
+                    def forward(ctx, self, pivot=True, get_infos=False):
+                        LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
+                        ctx.save_for_backward(LU, pivots)
+                        ctx.mark_non_differentiable(pivots, infos)
+                        return LU, pivots, infos
+
+                    @staticmethod
+                    def backward(ctx, LU_grad, pivots_grad, infors_grad):
+                        LU, pivots = ctx.saved_tensors
+                        P, L, U = torch.lu_unpack(LU, pivots)
+
+                        Lt_inv = L.inverse().transpose(-1, -2)
+                        Ut_inv = U.inverse().transpose(-1, -2)
+
+                        phi_L = (L.transpose(-1, -2) @ LU_grad).tril_()
+                        phi_L.diagonal(dim1=-2, dim2=-1).mul_(0.0)
+                        phi_U = (LU_grad @ U.transpose(-1, -2)).triu_()
+
+                        self_grad_perturbed = Lt_inv @ (phi_L + phi_U) @ Ut_inv
+                        return P @ self_grad_perturbed, None, None
+
+                LU, pivots, infos = _LU.apply(self, pivot, get_infos)
+                if get_infos:
+                    return LU, pivots, infos
+                else:
+                    return LU, pivots
         else:
-            if not (self.size(-2) == self.size(-1) and self.dtype.is_floating_point):
-                raise ValueError(
-                    'lu.backward works only with batches of squared full-rank matrices'
-                    ' of floating types.'
+            if self.requires_grad:
+                raise RuntimeError(
+                    'Script and require gradients is not supported at the moment.'
+                    'If you just want to do the forward, use .detach()'
+                    'on the input before calling the function.'
                 )
 
-            class _LU(torch.autograd.Function):
-                @staticmethod
-                def forward(ctx, self, pivot=True, get_infos=False):
-                    LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
-                    ctx.save_for_backward(LU, pivots)
-                    ctx.mark_non_differentiable(pivots, infos)
-                    return LU, pivots, infos
-
-                @staticmethod
-                def backward(ctx, LU_grad, pivots_grad, infors_grad):
-                    LU, pivots = ctx.saved_tensors
-                    P, L, U = torch.lu_unpack(LU, pivots)
-
-                    Lt_inv = L.inverse().transpose(-1, -2)
-                    Ut_inv = U.inverse().transpose(-1, -2)
-
-                    phi_L = (L.transpose(-1, -2) @ LU_grad).tril_()
-                    phi_L.diagonal(dim1=-2, dim2=-1).mul_(0.0)
-                    phi_U = (LU_grad @ U.transpose(-1, -2)).triu_()
-
-                    self_grad_perturbed = Lt_inv @ (phi_L + phi_U) @ Ut_inv
-                    return P @ self_grad_perturbed, None, None
-
-            LU, pivots, infos = _LU.apply(self, pivot, get_infos)
-            if get_infos:
-                return LU, pivots, infos
-            else:
-                return LU, pivots
+        return torch.Tensor._lu(self, pivot=pivot, get_infos=get_infos)
 
     def stft(self, n_fft: int, hop_length: Optional[int] = None,
              win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
