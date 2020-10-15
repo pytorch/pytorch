@@ -136,241 +136,178 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   return result;
 }
 
-Tensor einsum(std::string eqn, TensorList tensors) {
-  constexpr size_t number_of_letters = 26;
-  std::string in_eqn;
-  size_t pos;
-  // The equation is given in terms of single lowercase letters ('a'..'z') and potentially an ellipsis.
-  // Internally, we represent it using indices from 0 to num_total_dimensions, with each letter
-  // mapped to an index and the ellipsis ('...') being mapped to a number of consequtive indices.
-  // The mapping of letters to internal indices is given in letter_mapping. A value of -1 means that
-  // the letter has not been assigned an index yet (because it has not been seen).
-  // The ellipsis is defined by first_ell_idx (the first index) and num_ell_idxes (the number of indices).
-  // A value of -1 for num_ell_idxes specifies that we have not seen an ellipsis yet.
-  // Note: The internal indices are NOT the dimensions used internally. There is a mapping to them below.
+Tensor einsum(std::string equation, TensorList operands) {
+  TORCH_CHECK(!operands.empty(), "einsum() must provide at least one operand");
 
-  std::array<std::int64_t, number_of_letters> letter_mapping; // map letter to internal (numerical) label
-  letter_mapping.fill(-1);
-  int64_t num_ell_idxes = -1;
-  int64_t first_ell_idx = 0;
+  // Find arrow (->) to split equation into lhs and rhs
+  std::size_t arrow_pos = equation.find("->");
+  
+  // Extract labels for each operand
+  std::istringstream lhs(equation.substr(0, arrow_pos));
+  std::vector<std::string> operand_labels;
+  while (lhs.good()) {
+    std::string token;
+    std::getline(lhs, token, ',');
+    operand_labels.emplace_back(token);
+  }
+  
+  TORCH_CHECK(
+      operand_labels.size() == operands.size(),
+      "einsum() the number of operands specified in the equation (",
+      operand_labels.size(),
+      ") does not match the number of operands provided (",
+      operands.size(),
+      ")");
+  
+  constexpr int total_labels = 'z' - 'a' + 1;
+  std::vector<int> label_count(total_labels, 0);
+  std::vector<std::size_t> label_last_operand(total_labels, -1);
+  
+  // Parse labels for each operand
+  for (std::size_t i = 0; i < operands.size(); ++i) {
+    Tensor operand = operands[i];
+    std::string labels = operand_labels[i];
+    int count = 0;
+    for (char c : labels) {
+      if (c != ' ') {
+        TORCH_CHECK(
+            c >= 'a' && c <= 'z',
+            "einsum() subscripts must be in range [a, z] but found ",
+            c);
+        if (operand.size(count) > 1) {
+          label_last_operand[c - 'a'] = i;
+        }
+        ++label_count[c - 'a'];
+        ++count;
+      }
+    }
+    TORCH_CHECK(
+        count == operand.dim(),
+        "einsum() the number of subscripts in the equation (",
+        count,
+        ") does not match the number of dimensions (",
+        operand.dim(),
+        ") for operand ",
+        i);
+  }
 
-  // The internal representation of the left hand side fo the equation (with ellipsis expanded) is stored in input_op_idxes.
-  // For each operand, we have a vector mapping each dimension to an internal index.
-  // We also keep track of the number of occurrences for each letter (to infer a right hand side if not given) and
-  // of the last occurrence of each index.
-  std::vector<std::vector<int64_t>> input_op_idxes;                   // the parsed operand indices
-  std::array<std::int64_t, number_of_letters> num_letter_occurrences; // number of occurrence in the equation of this letter
-  num_letter_occurrences.fill(0);
-  std::vector<std::int64_t> last_idx_occurrence;                      // the last operator (left to right) using this index
-
-  if ((pos = eqn.find("->")) != std::string::npos) { // check whether we have a right hand side. in_eq is the left hand side
-    in_eqn = eqn.substr(0, pos);
+  // Parse output labels
+  std::vector<int> label_out_index(total_labels, -1);
+  std::vector<int> permuted_labels;
+  int out_index = 0;
+  if (arrow_pos == std::string::npos) {
+    for (int label = 0; label < total_labels; ++label) {
+      if (label_count[label] == 1) {
+        label_out_index[label] = out_index++;
+        permuted_labels.emplace_back(label);
+      }
+    }
   } else {
-    in_eqn = eqn;
+    std::string rhs = equation.substr(arrow_pos + 2);
+    for (char c : rhs) {
+      if (c != ' ') {
+        TORCH_CHECK(
+            c >= 'a' && c <= 'z',
+            "einsum() subscripts must be in range [a, z] but found ",
+            c);
+        TORCH_CHECK(
+            label_count[c - 'a'] > 0,
+            "einsum() output subscript ",
+            c,
+            label_count[c - 'a'] == -1 
+            ? " appears more than once in the output string"
+            : " does not appear in the equation for any input operand");
+        label_out_index[c - 'a'] = out_index++;
+        label_count[c - 'a'] = -1;
+        permuted_labels.emplace_back(c - 'a');
+      }
+    }
   }
-  // remove spaces for einsum compatibility (#9929)
-  in_eqn.erase(std::remove_if(in_eqn.begin(), in_eqn.end(), isspace), in_eqn.end());
+  
+  int out_size = out_index;
 
-  // next we parse in_eq (the left hand side) by iterating. It is a string of comma separated terms per index
-  int64_t operand = 0;
-  std::stringstream eqn_stream(in_eqn);
-  std::string term;
-  int64_t num_total_idxes = 0;
-  while (! eqn_stream.eof()) {
-    std::getline(eqn_stream, term, ',');  // term = string with indices of current term
-    TORCH_CHECK((int64_t) tensors.size()>operand, "more operands in equation than tensors"); // we cannot have a longer equation than operands. We need to check here before we use the dimension
+  // Parse contraction labels
+  for (int label = 0; label < total_labels; ++label) {
+    if (label_count[label] > 0 && label_out_index[label] == -1) {
+      label_out_index[label] = out_index++;
+      permuted_labels.emplace_back(label);
+    }
+  }
 
-    int64_t ell_char_count = 0;            // handling of ellipsis '...' is a bit tedious, we count the '.'
-    // if there is an ellipsis, the number of dimensions it represents must be total dim - letter dimensions
-    int64_t candidate_num_ell_idxes = tensors[operand].dim() - term.size() + 3;
-    int64_t dims_in_term = 0;              // dimensions we have seen
-    std::vector<int64_t> current_op_idxes; // mapping of operand dimensions to indices for current term
-    for (auto &c : term) {                 // c = character with a single letter or '.'
-      if (c == '.') {
-        ell_char_count++;
-        TORCH_CHECK(ell_char_count <= 3, "can only have '.' in one ellispis '...' in term ", operand, " of the equation");
-        if (ell_char_count == 3) {        // this completes the ellipsis
-          if (num_ell_idxes == -1) {      // if we have not seen an ellipsis before, keep track of indices and size
-            first_ell_idx = num_total_idxes;
-            num_ell_idxes = candidate_num_ell_idxes;
-            num_total_idxes += num_ell_idxes;
-          }
-          else {                          // we have seen an ellipsis before, so we check compatibility
-            TORCH_CHECK(candidate_num_ell_idxes == num_ell_idxes,
-                     "ellipsis must represent ", num_ell_idxes, " dimensions in all terms");
-          }
-          for (int64_t i = 0; i < num_ell_idxes; ++i) { // map ellipsis dimensions in operand to indices
-            current_op_idxes.push_back(first_ell_idx + i);
-            last_idx_occurrence.push_back(operand);
-          }
-          dims_in_term += num_ell_idxes;                // keep track of dimensions
+  // Permute operands to align dimensions (out_shape + contraction_shape) and
+  // take diagonals for subscripts repeated in the same operand
+  std::vector<Tensor> permuted_operands;
+  for (std::size_t i = 0; i < operands.size(); ++i) {
+    std::vector<int64_t> perm_shape(out_index, -1);
+    std::vector<int64_t> label_dim(total_labels, -1);
+    std::string labels = operand_labels[i];
+    Tensor operand = operands[i];
+    std::size_t j = 0;
+    for (char c : labels) {
+      if (c != ' ') {
+        if (label_dim[c - 'a'] != -1) {
+          // Repeated label, take diagonal
+          int64_t dim = label_dim[c - 'a'];
+          TORCH_CHECK(
+              operand.size(j) == operand.size(dim),
+              "einsum() subscript ",
+              c,
+              " is repeated for operand ",
+              i,
+              " but the sizes don't match, ",
+              operand.size(j),
+              " != ",
+              operand.size(dim));
+          operand = operand.diagonal(0, j, dim);
+          operand.unsqueeze_(dim).transpose_(dim, -1).squeeze_(-1);
+        } else {
+          label_dim[c - 'a'] = j;
+          perm_shape[label_out_index[c - 'a']] = j++;
         }
-      } else {                                          // a letter (hopefully)
-        TORCH_CHECK((ell_char_count == 0) || (ell_char_count == 3), "'.' must only occur in ellipsis, operand ", operand);
-        TORCH_CHECK(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
-        int64_t letter_num = c-'a';                     // letter_num  = position in letter_mapping
-        if (letter_mapping[letter_num] == -1) {         // new letter, add internal index and mapping
-          letter_mapping[letter_num] = num_total_idxes;
-          num_total_idxes++;
-          last_idx_occurrence.push_back(operand);
-        } else {                                        // letter we have already seen
-          last_idx_occurrence[letter_mapping[letter_num]] = operand;
-        }
-        num_letter_occurrences[letter_num]++;
-        current_op_idxes.push_back(letter_mapping[letter_num]);
-        dims_in_term++;
       }
     }
-    TORCH_CHECK(dims_in_term == tensors[operand].dim(), "dimension mismatch for operand ", operand, ": equation ", dims_in_term, " tensor ", tensors[operand].dim());
-    input_op_idxes.push_back(std::move(current_op_idxes));
-    operand++;
-  }
-  // in the check below, we need ==, but > is captured above, so the error message can be specific that it is <.
-  TORCH_CHECK((int64_t) tensors.size()==operand, "more tensors than operands in equation");
-
-  // the following parses or infers output (right hand side)
-  // it also assigns the idxes_to_preprocessed_dims (index -> dimension in preprocessed / output tensors)
-  // for the output indices. -1 means that the index has not been assigned a dimension yet
-  std::vector<int64_t> idxes_to_preprocessed_dims(num_total_idxes, -1);     // the position of the index in the tensor dimensions
-  int64_t num_output_dims = 0;
-  if (pos != std::string::npos) {            // parse the user provided right hand side
-    int64_t ell_char_count = 0;
-    for (auto &c : eqn.substr(pos+2)) {
-      if (c == '.') {                        // '.' as part of ellipsis
-        ell_char_count++;
-        TORCH_CHECK(ell_char_count <= 3, "can only have '.' in one ellispis '...' in right hand side of the equation");
-        if (ell_char_count == 3) {           // ellipsis complete
-          TORCH_CHECK(num_ell_idxes >= 0, "ellipsis '...' may only appear in right hand side if it does in left hand side");
-          for (int64_t i = 0; i < num_ell_idxes; ++i) {
-            idxes_to_preprocessed_dims[first_ell_idx + i] = num_output_dims;
-            num_output_dims++;
-          }
-        }
-      } else if (! isspace(c)) {                              // letter (hopefully)
-        TORCH_CHECK((ell_char_count == 0) || (ell_char_count == 3), "'.' must only occur in ellipsis in the right hand side");
-        TORCH_CHECK(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
-        int64_t letter_num = c-'a';
-        TORCH_CHECK(idxes_to_preprocessed_dims[letter_mapping[letter_num]] == -1, "index ", c, " occurs twice in output");
-        idxes_to_preprocessed_dims[letter_mapping[letter_num]] = num_output_dims;
-        num_output_dims++;
+    for (int64_t& index : perm_shape) {
+      if (index == -1) {
+        operand = operand.unsqueeze(-1);
+        index = j++;
       }
     }
-  } else { // create an inferred right hand side
-    // the ellipsis (if in the lhs) comes first
-    if (num_ell_idxes >= 0) {
-      for (int64_t i = 0; i < num_ell_idxes; ++i) {
-        idxes_to_preprocessed_dims[first_ell_idx + i] = num_output_dims;
-        num_output_dims++;
-      }
-    }
-    // then the indices that occur exactly once in alphabetic order
-    for (size_t idx = 0; idx < number_of_letters; idx++) {
-      if (num_letter_occurrences[idx] == 1) {
-        idxes_to_preprocessed_dims[letter_mapping[idx]] = num_output_dims;
-        num_output_dims++;
-      }
-    }
-  }
-  // now we assign the idxes_to_preprocessed_dims (index -> dimension in preprocessed / output tensors)
-  // for the non-output indices - those that are eventually summed over
-  int64_t position = num_output_dims;
-  for (int64_t i = 0; i < num_total_idxes; i++) {
-    if (idxes_to_preprocessed_dims[i]==-1) {
-      idxes_to_preprocessed_dims[i] = position;
-      position++;
-    }
+    permuted_operands.push_back(operand.permute(perm_shape));
   }
 
-  // we now "homogenize the dimensions", i.e.
-  // - take diagonals for duplicated indices
-  // - permute the dimensions to match the order given by idxes_to_preprocessed_dims
-  // - unsqueeze to create all dimensions for each index in each tensor where they are missing
-  // we also check that sizes match
-  // after this, all operands will have compatible shapes (i.e. all dimensions are aligned are broadcastable)
-  std::vector<Tensor> preprocessed_operands;
-  std::vector<std::int64_t> size_of_dims(num_total_idxes, -1); // keep track of sizes for each index, -1 means we have not seen a size yet
-  for (int64_t op = 0; op < (int64_t) tensors.size(); op++) {
-    auto preprocessed_op = tensors[op];
-    std::vector<int64_t> idx_to_dim(num_total_idxes, -1); // the dimension which the index refers to in the original tensor, -1 means it does not appear
-    std::vector<int64_t>& current_op_input_idxes = input_op_idxes[op];
-    int64_t dim = 0; // there are two dimension indices: dim is after taking diagonals, i is in input
-    for (size_t i = 0; i < current_op_input_idxes.size(); i++) {
-      auto idx = current_op_input_idxes[i];
-      auto dim_out = idxes_to_preprocessed_dims[idx];
-      if (idx_to_dim[dim_out] == -1) { // first appearance
-        idx_to_dim[dim_out] = dim;
-        if (size_of_dims[idx] == -1) { // keep track of sizes
-          size_of_dims[idx] = preprocessed_op.size(dim);
-        }
-        else {
-          TORCH_CHECK(size_of_dims[idx] == preprocessed_op.size(dim), "size of dimension does not match previous size, operand ", op, ", dim ", i);
-        }
-        dim++;
-      } else { // duplicate dimension in tensor --> take diagonal of idx_to_dim[dim_out] and dim and put the diagonal dimension to idx_to_dim[dim_out]
-        TORCH_CHECK(size_of_dims[idx] == preprocessed_op.size(dim), "size of dimension does not match previous size, operand ", op, ", dim ", i);
-        preprocessed_op = preprocessed_op.diagonal(0, idx_to_dim[dim_out], dim);
-        // diagonal moves the diagonal dimension to the back
-        // now we permute the last dim back to idx_to_dim[dim_out]
-        std::vector<int64_t> perm(preprocessed_op.dim(), 0);
-        for (int64_t d = 0; d < preprocessed_op.dim(); d++) {
-          if (d == idx_to_dim[dim_out]) {
-            perm[d] = preprocessed_op.dim() - 1;
-          } else {
-            perm[d] = d - (d > idx_to_dim[dim_out]);
-          }
-        }
-        preprocessed_op = preprocessed_op.permute(perm);
-      }
-    }
-    // now we permute the dimensions in the right order
-    std::vector<int64_t> permutation; // permutation for this tensor
-    for (auto &d : idx_to_dim) {
-      if (d > -1) {
-        permutation.push_back(d);
-      }
-    }
-    preprocessed_op = preprocessed_op.permute(permutation);
-    // finally, we insert dimensions for idxes not in the operand
-    for (size_t dim = 0; dim < idx_to_dim.size(); dim++) {
-      if (idx_to_dim[dim] == -1) {
-        preprocessed_op = preprocessed_op.unsqueeze(dim);
-      }
-    }
+  // Compute result
+  Tensor result = permuted_operands[0];
 
-    preprocessed_operands.push_back(std::move(preprocessed_op));
+  for (std::size_t i = 1; i < permuted_operands.size(); ++i) {
+    result = result.mul(permuted_operands[i]);
+  }
+  
+  if (out_size < out_index) {
+    std::vector<int64_t> sum_dims(out_index - out_size);
+    std::iota(sum_dims.begin(), sum_dims.end(), out_size);
+    result = result.sum(sum_dims);
   }
 
-  // now we reduce the indices from left to right
-  // numpy allows to optimize the path using various
-  // algorithms (see eigen_path in numpy docs)
-  // we start with the leftmost operator and reduce indices that
-  // appear only there
-  Tensor result = std::move(preprocessed_operands[0]);
-  for (int64_t idx = 0; idx < num_total_idxes; idx++) {
-    if ((last_idx_occurrence[idx] == 0)
-        && (idxes_to_preprocessed_dims[idx]>=num_output_dims)) {
-      result = result.sum(idxes_to_preprocessed_dims[idx], true);
-    }
-  }
+  // if (permuted_operands.size() == 1 && out_size < out_index) {
+  //   std::vector<int64_t> sum_dims(out_index - out_size);
+  //   std::iota(sum_dims.begin(), sum_dims.end(), out_size);
+  //   result = result.sum(sum_dims);
+  // }
 
-  // now we process each tensor using sumproduct_pair
-  for (int64_t i = 1; i < (int64_t) preprocessed_operands.size(); i++) {
-    std::vector<int64_t> sum_dims;
-    for (int64_t idx = 0; idx < num_total_idxes; idx++) {
-      if ((last_idx_occurrence[idx] == i)
-          && (idxes_to_preprocessed_dims[idx]>=num_output_dims)) {
-        sum_dims.push_back(idxes_to_preprocessed_dims[idx]);
-      }
-    }
-    result = at::native::sumproduct_pair(result, std::move(preprocessed_operands[i]), sum_dims, true);
-  }
-  // finally, we squeeze out all non-result dimensions
-  auto sizes = result.sizes().vec();
-  for (int64_t dim = num_total_idxes-1; dim >= num_output_dims; dim--) {
-    sizes.erase(sizes.begin() + dim);
-  }
+  // for (std::size_t i = 1; i < permuted_operands.size(); ++i) {
+  //   std::vector<int64_t> sum_dims;
+  //   for (int dim = out_size; dim < out_index; ++dim) {
+  //     if (label_last_operand[permuted_labels[dim]] <= i) {
+  //       sum_dims.emplace_back(dim);
+  //     }
+  //   }
+  //   result = sumproduct_pair(
+  //       result,
+  //       permuted_operands[i],
+  //       sum_dims,
+  //       i < permuted_operands.size() - 1);
+  // }
 
-  result = result.view(sizes);
   return result;
 }
 

@@ -921,6 +921,51 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
+    def test_einsum(self, device):
+        def check(equation, *operands):
+            ref = np.einsum(equation, *[operand.numpy() for operand in operands])
+            res = torch.einsum(equation, *[operand.to(device=device) for operand in operands])
+            self.assertEqual(torch.from_numpy(np.array(ref)), res.cpu())
+
+        # Test common operations
+        check('bik, kj -> bij', torch.rand(2, 3, 4), torch.rand(1, 5))
+        check('i, i ->', torch.rand(3), torch.rand(3))
+        check('i, j -> ij', torch.rand(2), torch.rand(3))
+        check('ij -> ji', torch.rand(2, 3))
+
+        # Test diagonals
+        check('ii->i', torch.rand(2, 2))
+        check('ii', torch.rand(3, 3))
+        check('iji', torch.rand(2, 3, 2))
+
+    def test_einsum_corner_cases(self, device):
+        def check(equation, *operands, expected_output):
+            tensors = [torch.tensor(operand, device=device) if not isinstance(operand, tuple)
+                       else torch.rand(operand, device=device) for operand in operands]
+            output = torch.einsum(equation, tensors)
+            self.assertEqual(output, torch.tensor(expected_output, device=device))
+
+        # Test equation variantions
+        check(' ', 1, expected_output=1)
+        check(' -> ', 1, expected_output=1)
+        check(' , ', 2, 2, expected_output=4)
+        check(' , , ', 2, 2, 2, expected_output=8)
+        check(' , -> ', 2, 2, expected_output=4)
+        check(' i ', [1], expected_output=[1])
+        check(' i -> ', [1], expected_output=1)
+        check(' i -> i ', [1], expected_output=[1])
+        check(' i , i ', [2], [2], expected_output=4)
+        check(' i , i -> i ', [2], [2], expected_output=[4])
+
+        # Test tensors with 0 size dimensions
+        check('i', [], expected_output=[])
+        check(' i j -> j', [[], []], expected_output=[])
+        check('ij->i', [[], []], expected_output=[0., 0.])
+        check(' i j k  ,  k  -> i j ', (3, 0, 6), (6,), expected_output=[[], [], []])
+
+        # Test broadcasting
+        check('i,j', [2], [1, 2], expected_output=[[2, 4]])
+        check('i,ij->ij', [1, 2], [[1, 2, 3], [2, 3, 4]], expected_output=[[1, 2, 3], [4, 6, 8]])
 
 instantiate_device_type_tests(TestLinalg, globals())
 
