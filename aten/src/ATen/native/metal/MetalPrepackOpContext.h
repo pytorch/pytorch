@@ -64,7 +64,7 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
   int64_t groups;
   c10::optional<Scalar> output_min;
   c10::optional<Scalar> output_max;
-  void* conv2dOp = nullptr; // reserved for MPSCNNConv2dOp
+  void* conv2dOp = nullptr; // reserved to hold MPSCNNConv2dOp objects
   std::function<void(void*)> releaseCallback = nullptr;
 };
 
