@@ -14,9 +14,17 @@ struct Resource final {
   */
 
   struct Memory final {
+    /*
+      Barrier
+    */
+
+    struct Barrier final {
+      VkAccessFlags src;
+      VkAccessFlags dst;
+    };
+
     VmaAllocator allocator;
     VmaAllocation allocation;
-    VmaAllocationInfo allocation_info;
 
     class Scope;
     template<typename Type>
@@ -52,6 +60,15 @@ struct Resource final {
 
   struct Buffer final {
     /*
+      Barrier
+    */
+
+    struct Barrier final {
+      VkBuffer hande;
+      Memory::Barrier memory;
+    };
+
+    /*
       Descriptor
     */
 
@@ -75,6 +92,20 @@ struct Resource final {
   */
 
   struct Image final {
+    /*
+      Barrier
+    */
+
+    struct Barrier final {
+      VkImage handle;
+      Memory::Barrier memory;
+
+      struct {
+        VkImageLayout src;
+        VkImageLayout dst;
+      } layout;
+    };
+
     /*
       Descriptor
     */
@@ -109,9 +140,14 @@ struct Resource final {
   class Pool final {
    public:
     explicit Pool(const GPU& gpu);
+    Pool(const Pool&) = delete;
+    Pool& operator=(const Pool&) = delete;
+    Pool(Pool&&);
+    Pool& operator=(Pool&&);
+    ~Pool() = default;
 
-    Buffer allocate(const Buffer::Descriptor& descriptor);
-    Image allocate(const Image::Descriptor& descriptor);
+    Buffer buffer(const Buffer::Descriptor& descriptor);
+    Image image(const Image::Descriptor& descriptor);
     void purge();
 
    private:
