@@ -49,7 +49,7 @@ void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
   std::copy(t.begin(), t.end(), out.begin() + range.first);
 }
 
-Tensor copysign_tensor_backward(Tensor grad, Tensor self, Tensor other) {
+Tensor copysign_tensor_backward(Tensor grad, const Tensor & self, const Tensor & other) {
   auto result = grad * self.sign() * (other.ge(0) * 2 - 1);
   return result;
 }
