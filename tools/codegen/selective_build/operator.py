@@ -75,21 +75,21 @@ class SelectiveBuildOperator():
             debug_info = tuple(map(lambda x: str(x), di_list))
 
         return SelectiveBuildOperator(
-            op_name,
-            is_root_operator,
-            is_used_for_training,
-            include_all_overloads,
-            debug_info,
+            name=op_name,
+            is_root_operator=is_root_operator,
+            is_used_for_training=is_used_for_training,
+            include_all_overloads=include_all_overloads,
+            _debug_info=debug_info,
         )
 
     @staticmethod
     def from_legacy_operator_name_without_overload(name: str) -> 'SelectiveBuildOperator':
         return SelectiveBuildOperator(
-            name,
-            True,
-            True,
-            True,
-            None,
+            name=name,
+            is_root_operator=True,
+            is_used_for_training=True,
+            include_all_overloads=True,
+            _debug_info=None,
         )
 
     def to_dict(self) -> Dict[str, object]:
@@ -127,17 +127,17 @@ def combine_operators(
         )
 
     return SelectiveBuildOperator(
-        lhs.name,
+        name=lhs.name,
         # Consider this operator to be a root operator if it is a
         # root operator in any of the models used in this instance of
         # the pytorch library.
-        lhs.is_root_operator or rhs.is_root_operator,
+        is_root_operator=lhs.is_root_operator or rhs.is_root_operator,
         # Consider this operator to be a training operator if it is
         # an operator used for training in any of the models used
         # in this instance of the pytorch library.
-        lhs.is_used_for_training or rhs.is_used_for_training,
-        lhs.include_all_overloads or rhs.include_all_overloads,
-        merge_debug_info(lhs._debug_info, rhs._debug_info),
+        is_used_for_training=lhs.is_used_for_training or rhs.is_used_for_training,
+        include_all_overloads=lhs.include_all_overloads or rhs.include_all_overloads,
+        _debug_info=merge_debug_info(lhs._debug_info, rhs._debug_info),
     )
 
 def merge_operator_dicts(
