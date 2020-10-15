@@ -546,6 +546,7 @@ class PrioritizeLoad : public IRMutator {
     const Var* load_new_var = new Var("v", v->dtype());
     const Expr* new_value = IRMutator::mutate(v);
     load_list.push_back(std::make_pair(load_new_var, new_value));
+
     return load_new_var;
   }
 
@@ -983,6 +984,10 @@ void CudaCodeGen::Initialize() {
   stmt_v = stmt_v->accept_mutator(&atomic_add_fuser);
 
   stmt_v = registerize(stmt_v);
+
+  // The registerizer might insert half-type scalars, we don't want this.
+  CudaHalfScalarRewriter hsFix;
+  stmt_v = stmt_v->accept_mutator(&hsFix);
 
   PrioritizeLoad prioritize_load;
   stmt_v = stmt_v->accept_mutator(&prioritize_load);

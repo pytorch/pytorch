@@ -221,8 +221,8 @@ The short version:
 - When you use PyTorch to differentiate any function :math:`f(z)` with complex domain and/or codomain,
   the gradients are computed under the assumption that the function is a part of a larger real-valued
   loss function :math:`g(input)=L`. The gradient computed is :math:`\frac{\partial L}{\partial z^*}`
-  (note the conjugation of z), which is precisely the direction of the step
-  you should take in gradient descent. Thus, all the existing optimizers work out of
+  (note the conjugation of z), the negative of which is precisely the direction of steepest descent
+  used in Gradient Descent algorithm.. Thus, all the existing optimizers work out of
   the box with complex parameters.
 - This convention matches TensorFlow's convention for complex
   differentiation, but is different from JAX (which computes

@@ -629,7 +629,7 @@ class TestVmapAPI(TestCase):
         self.assertEqual(x, outplace_op(x_orig, y.view(B0, 1, 7)))
 
         # op(left, right): Some of the levels in right are not found in left
-        msg = r'vmap: aten::atan2_\(tensor, \.\.\.\) is not possible'
+        msg = r'vmap: aten::atan2_\(self, \*extra_args\) is not possible'
         x = torch.rand(7)
         y = torch.rand(B0, 7)
         with self.assertRaisesRegex(RuntimeError, msg):

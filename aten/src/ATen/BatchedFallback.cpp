@@ -1,6 +1,7 @@
 #include <ATen/BatchedFallback.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/VmapTransforms.h>
+#include <c10/util/llvmMathExtras.h>
 
 namespace at {
 
@@ -35,17 +36,13 @@ static bool areAnyArgumentsTensorList(const FunctionSchema& schema) {
 }
 
 // Returns if an operator is in-place. An operator is inplace if:
-// 1. its name ends in '_'
-// 2. The first argument is a Tensor and it is being written to
-// 3. The first argument is being returned
-// 4. No other arguments are aliased
+// 1. The first argument is a Tensor and it is being written to
+// 2. The first argument is being returned
+// 3. No other arguments are aliased
 // Here is an example of an in-place operator:
 // add_(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
 static bool isInplaceOp(const c10::FunctionSchema& schema) {
-  if (!schema.is_mutable() || schema.name().back() != '_') {
-    return false;
-  }
-  if (schema.returns().size() != 1) {
+  if (!schema.is_mutable() || schema.returns().size() != 1) {
     return false;
   }
   // Check that the first argument is being written to
@@ -63,11 +60,6 @@ static bool isInplaceOp(const c10::FunctionSchema& schema) {
   // Check that the first tensor is being returned (i.e., output has a (a!))
   const auto& return_alias_info = schema.returns()[0].alias_info();
   return return_alias_info && return_alias_info.value().isWrite();
-}
-
-static int64_t firstSetBitPosition(std::bitset<kVmapMaxTensorDims> bdims) {
-  auto bdims_as_int64 = bdims.to_ulong();
-  return std::log2(bdims_as_int64 & -bdims_as_int64) + 1;
 }
 
 static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
@@ -135,17 +127,19 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
     if (self_vmap_levels != (self_vmap_levels | other_vmap_levels)) {
       // Find one vmap level to complain about
       auto additional_bdims = (self_vmap_levels | other_vmap_levels) ^ self_vmap_levels;
-      auto offending_level = firstSetBitPosition(additional_bdims);
+      auto offending_level = llvm::findLastSet(additional_bdims.to_ulong());
       // The following prints out "vmap: aten::add_(tensor, ...) is not possible",
       // but it would be better to print out "tensor.add_(...) is not possible".
       // Afaict there's no official way to get the add_ and there is no way to
       // tell if an operator has method or function variants.
       TORCH_CHECK(false,
-        "vmap: ", schema.name(), "(tensor, ...) is not possible because `tensor` ",
-        "is not being vmapped over for vmap level ", offending_level, " but another "
-        "argument is. Please try to use out-of-place operators instead of ",
-        schema.name(), ". If said operator is being called inside the PyTorch ",
-        "framework, please file a bug report instead.");
+        "vmap: ", schema.name(), "(self, *extra_args) is not possible because ",
+        "there exists a Tensor `other` in extra_args that has more elements ",
+        "than `self`. This happened due to `other` being vmapped over but ",
+        "`self` not being vmapped over at level ", offending_level, ". ",
+        "Please try to use out-of-place operators instead of ", schema.name(), ". ",
+        "If said operator is being called inside the PyTorch framework, ",
+        "please file a bug report instead.");
     }
     batched_tensor_inputs.push_back(tensor);
     batched_tensor_inputs_position.push_back(idx);
@@ -159,8 +153,9 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
 
   // Compute the total number of batches
   auto num_batch_dims = input_physical_views.front().numBatchDims();
-  auto some_sizes = input_physical_views.front().tensor().sizes();
-  auto batch_sizes = ArrayRef<int64_t>(some_sizes.begin(), some_sizes.begin() + num_batch_dims);
+  auto first_physical_view_sizes = input_physical_views.front().tensor().sizes();
+  auto batch_sizes = ArrayRef<int64_t>(
+      first_physical_view_sizes.begin(), first_physical_view_sizes.begin() + num_batch_dims);
   auto num_batches = std::accumulate(
       batch_sizes.begin(),
       batch_sizes.end(),
