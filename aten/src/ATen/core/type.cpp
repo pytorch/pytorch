@@ -158,6 +158,10 @@ DeviceObjTypePtr DeviceObjType::get() {
   static auto value = DeviceObjType::create();
   return value;
 }
+StreamObjTypePtr StreamObjType::get() {
+  static auto value = StreamObjType::create();
+  return value;
+}
 ScalarTypeTypePtr ScalarTypeType::get() {
 static auto value = ScalarTypeType::create();
 return value;
