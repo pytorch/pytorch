@@ -923,7 +923,6 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
 
-    @precisionOverride({torch.float: 1e-2, torch.cfloat: 1e-4})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -935,7 +934,19 @@ class TestLinalg(TestCase):
             A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
             expected_L = np.linalg.cholesky(A.cpu().numpy())
             actual_L = torch.linalg.cholesky(A)
-            self.assertEqual(actual_L, expected_L)
+            matrices_are_equal = np.allclose(actual_L.cpu().numpy(), expected_L)
+
+            # For fp32 individual entries in matrices can differ between PyTorch and NumPy
+            # Let's compare the norms of matrices instead
+            if A.numel() > 0 and not matrices_are_equal:
+                # axis is specified to calculate matrix norm for batched input
+                expected_norm = np.linalg.norm(expected_L, ord=1, axis=(-2, -1))
+                actual_norm = torch.linalg.norm(actual_L, ord=1, axis=(-2, -1))
+                norms_are_equal = np.allclose(actual_norm.cpu().numpy(), expected_norm)
+                matrices_are_equal = np.allclose(actual_L.cpu().numpy(), expected_L, atol=1e-2, rtol=1e-5)
+                self.assertTrue(matrices_are_equal and norms_are_equal)
+            else:
+                self.assertTrue(matrices_are_equal)
 
         shapes = (0, 3, 5)
         batches = ((), (3, ), (2, 2))
