@@ -185,19 +185,23 @@ def prepare(model, inplace=False, allow_list=None,
     will be propagated.
 
     Args:
-        model: input model to be modified in-place
-        inplace: carry out model transformations in-place, the original module is mutated
-        allow_list: list of quantizable modules
-        observer_non_leaf_module_list: list of non-leaf modules we want to add observer
-        `prepare_custom_config_dict`: customization configuration dictionary for prepare function:
-        # user will manually define the corresponding observed
-        # module class which has a from_float class method that converts
-        # float custom module to observed custom module
-        prepare_custom_config_dict = {
-          "float_to_observed_custom_module_class": {
-             CustomModule: ObservedCustomModule
-          }
-        }
+        `model`: input model to be modified in-place
+        `inplace`: carry out model transformations in-place, the original module is mutated
+        `allow_list`: list of quantizable modules
+        `observer_non_leaf_module_list`: list of non-leaf modules we want to add observer
+        `prepare_custom_config_dict`: customization configuration dictionary for prepare function
+
+    Example:
+    ```python
+       prepare_custom_config_dict = {
+         # user will manually define the corresponding observed
+         # module class which has a from_float class method that converts
+         # float custom module to observed custom module
+         "float_to_observed_custom_module_class": {
+            CustomModule: ObservedCustomModule
+         }
+       }
+    ```
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare")
@@ -399,21 +403,25 @@ def convert(
     end if remove_qconfig is set to True.
 
     Args:
-        module: input module
-        mapping: a dictionary that maps from source module type to target
-                 module type, can be overwritten to allow swapping user defined
-                 Modules
-        inplace: carry out model transformations in-place, the original module
-                 is mutated
-        `convert_custom_config_dict`: custom configuration dictionary for convert function:
-        convert_custom_config_dict = {
-          # user will manually define the corresponding quantized
-          # module class which has a from_observed class method that converts
-          # observed custom module to quantized custom module
-          "observed_to_quantized_custom_module_class": {
-             ObservedCustomModule: QuantizedCustomModule
-          }
-        }
+        `module`: input module
+        `mapping`: a dictionary that maps from source module type to target
+                   module type, can be overwritten to allow swapping user defined
+                   Modules
+        `inplace`: carry out model transformations in-place, the original module
+                   is mutated
+        `convert_custom_config_dict`: custom configuration dictionary for convert function
+
+    Example:
+    ```python
+       convert_custom_config_dict = {
+         # user will manually define the corresponding quantized
+         # module class which has a from_observed class method that converts
+         # observed custom module to quantized custom module
+         "observed_to_quantized_custom_module_class": {
+            ObservedCustomModule: QuantizedCustomModule
+         }
+       }
+    ```
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.convert")
