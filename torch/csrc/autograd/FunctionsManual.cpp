@@ -50,7 +50,7 @@ void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
 }
 
 Tensor copysign_tensor_backward(Tensor grad, Tensor self, Tensor other) {
-  auto result = grad * self.sign() * other.sign();
+  auto result = grad * self.sign() * (other.ge(0) * 2 - 1);
   return result;
 }
 

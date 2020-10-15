@@ -123,14 +123,14 @@ Tensor& add_relu_(Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor& copysign_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIterator::binary_float_op(result, self, other);
   copysign_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor copysign(const Tensor& self, const Tensor& other) {
   Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIterator::binary_float_op(result, self, other);
   copysign_stub(iter.device_type(), iter);
   return iter.output();
 }

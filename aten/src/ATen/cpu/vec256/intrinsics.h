@@ -32,6 +32,11 @@
         (defined(__VEC__) || defined(__ALTIVEC__))
 /* XLC or GCC-compatible compiler, targeting PowerPC with VMX/VSX */
 #include <altivec.h>
+/* We need to undef those tokens defined by <altivec.h> to avoid conflicts
+   with the C++ types. => Can still use __bool/__vector */
+#undef bool
+#undef vector
+#undef pixel
 #elif defined(__GNUC__) && defined(__SPE__)
 /* GCC-compatible compiler, targeting PowerPC with SPE */
 #include <spe.h>

@@ -342,7 +342,7 @@
 
 - name: copysign.Tensor(Tensor self, Tensor other) -> Tensor
   self: copysign_tensor_backward(grad, self, other)
-  other: non_differentiable
+  other: zeros_like(other)
 
 - name: copysign.Scalar(Tensor self, Scalar other) -> Tensor
   self: copysign_tensor_backward(grad, self, at::scalar_to_tensor(other))
