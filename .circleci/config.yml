@@ -722,6 +722,16 @@ jobs:
       - store_artifacts:
           path: C:/w/build-results
 
+  pytorch_windows_test_2gpu:
+    executor: "windows-medium-cpu-with-nvidia-cuda"
+    steps:
+      - checkout
+      - run:
+          name: Install Azure cli
+          no_output_timeout: 30m
+          command: |
+            az login
+
   pytorch_windows_test:
     <<: *pytorch_windows_params
     parameters:
@@ -1939,7 +1949,7 @@ jobs:
 workflows:
   binary_builds:
     jobs:
-      - pytorch_windows_build:
+      - pytorch_windows_test_2gpu:
           build_environment: pytorch-win-vs2019-cpu-py3
           cuda_version: cpu
           name: pytorch_windows_vs2019_py36_cpu_build
