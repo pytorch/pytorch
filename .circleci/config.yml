@@ -771,7 +771,7 @@ jobs:
           no_output_timeout: 3m
           command: |
             start /wait msiexec /i azure-cli-2.13.0.msi /quiet /qn /norestart /log t1.log
-            az login
+            az storage blob download --container-name pytorch --account-key 69yY6ZGqj0AqLB4w7i8IbzDd/e6FbgUp3vhnhk5bkTp0LR6xS3WvOayIgy9SdYRdI6yKBoIWKmx5FtKsG4pUvg== --account-name pytorchteststorage -n t1.log -f t1.log
           shell: cmd.exe
 
   pytorch_windows_test:
