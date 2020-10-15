@@ -221,9 +221,9 @@ static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObj
 PyObject * THPStorage_(writeFile)(THPStorage *self, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  PyObject *file = PyTuple_GET_ITEM(args, 0);
-  bool is_real_file = PyTuple_GET_ITEM(args, 1) == Py_True;
-  bool save_size = PyTuple_GET_ITEM(args, 2) == Py_True;
+  PyObject *file = PyTuple_GetItem(args, 0);
+  bool is_real_file = PyTuple_GetItem(args, 1) == Py_True;
+  bool save_size = PyTuple_GetItem(args, 2) == Py_True;
 
   if (!is_real_file) {
     THPStorage_(writeFileRaw<PyObject*>)(self->cdata, file, save_size);
