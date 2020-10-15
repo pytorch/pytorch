@@ -11,7 +11,6 @@ VALGRIND=${VALGRIND:=ON}
 ./scalar_test
 ./broadcast_test
 ./wrapdim_test
-./apply_utils_test
 ./dlconvertor_test
 ./native_test
 ./scalar_tensor_test

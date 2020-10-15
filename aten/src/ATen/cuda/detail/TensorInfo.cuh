@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
 
 namespace at {
 namespace cuda {

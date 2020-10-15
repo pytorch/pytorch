@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/Dispatch.h>
-#include <ATen/CPUApplyUtils.h>
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>

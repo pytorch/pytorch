@@ -5,7 +5,7 @@
 #include <numeric>
 
 #include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
+#include <ATen/Parallel.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cpu/vec256/vec256.h>
 

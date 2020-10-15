@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/CPUApplyUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/Config.h>
 

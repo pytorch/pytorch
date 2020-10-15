@@ -1,7 +1,6 @@
 #include <ATen/native/Activation.h>
 
 #include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>

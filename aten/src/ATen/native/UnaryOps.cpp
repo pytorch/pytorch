@@ -14,7 +14,6 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
 
-#include <ATen/CPUApplyUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
