@@ -357,12 +357,12 @@ class GlobalsBridge:
     to define them using a `setup` string. Another group are torch.nn.Modules,
     whose construction can be complex and prohibitively cumbersome to coerce
     into a `setup` string. Finally, most builtin types are sufficiently well
-    behaved and sufficiently common to warrant whitelisting as well. (e.g.
+    behaved and sufficiently common to warrant allowing as well. (e.g.
     `globals={"n": 1}` is very convenient.)
 
     Fortunately, all have well defined serialization semantics. This class
     is responsible for enabling the Valgrind subprocess to use elements in
-    `globals` so long as they are a whitelisted type.
+    `globals` so long as they are an allowed type.
 
     Caveats:
         The user is required to acknowledge this serialization by wrapping
