@@ -146,6 +146,7 @@ jobs:
           # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
           # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
           # in a follow up PR.
+          # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
           python tools/clang_tidy.py                               \
             --verbose                                              \
             --paths torch/csrc/                                    \
@@ -160,6 +161,7 @@ jobs:
             -g"-torch/csrc/cuda/nccl.*"                            \
             -g"-torch/csrc/cuda/python_nccl.cpp"                   \
             -g"-torch/csrc/autograd/FunctionsManual.cpp"           \
+            -g"-torch/csrc/generic/*.cpp"                          \
             "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
 
           cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
