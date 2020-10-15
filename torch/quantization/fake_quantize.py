@@ -41,6 +41,12 @@ class FakeQuantize(Module):
                            provides a method to calculate scale and zero-point.
 
     """
+
+    fake_quant_enabled: torch.Tensor
+    observer_enabled: torch.Tensor
+    scale: torch.Tensor
+    zero_point: torch.Tensor
+
     def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255, **observer_kwargs):
         super(FakeQuantize, self).__init__()
         assert quant_min <= quant_max, \
