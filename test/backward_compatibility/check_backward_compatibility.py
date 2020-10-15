@@ -91,7 +91,7 @@ allow_list = [
     ("aten::logspace", datetime.date(2020, 9, 30)),
     ("aten::logspace.out", datetime.date(2020, 9, 30)),
     ("__getstate__", datetime.date(2020, 9, 11), "Conv[23]dPackedParams"),
-    ("_caffe2::LearningRate", datetime.date(2020, 10, 1)),
+    ("_caffe2::LearningRate", datetime.date(2020, 10, 30)),
     ("aten::_var", datetime.date(2020, 10, 1)),
     ("aten::_std", datetime.date(2020, 10, 1)),
     ("aten::_foreach_add_", datetime.date(2020, 10, 1)),
@@ -121,6 +121,7 @@ allow_list = [
     ("aten::_foreach_addcdiv", datetime.date(2020, 10, 15)),
     ("aten::_foreach_addcmul", datetime.date(2020, 10, 15)),
 ]
+
 
 def allow_listed(schema, allow_list):
     for item in allow_list:
