@@ -122,7 +122,8 @@ class Reducer {
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
       grad_accumulators_;
-  std::unordered_map<torch::autograd::Node*, VariableIndex> func_;
+  std::unordered_map<torch::autograd::Node*, VariableIndex>
+      gradAccToVariableMap_;
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
       hooks_;
 
@@ -169,6 +170,10 @@ class Reducer {
   void finalize_bucket_dense(Bucket& replica);
 
   void finalize_backward();
+
+  // Asserts that the reduction for the previous iteration has finished before
+  // rebuilding buckets or kicking off the next one.
+  void ensure_prior_reduction_finished();
 
   // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
   // the buckets
