@@ -192,16 +192,14 @@ def prepare(model, inplace=False, allow_list=None,
         `prepare_custom_config_dict`: customization configuration dictionary for prepare function
 
     Example:
-    ```python
     prepare_custom_config_dict = {
-        # user will manually define the corresponding observed
-        # module class which has a from_float class method that converts
-        # float custom module to observed custom module
-        "float_to_observed_custom_module_class": {
-           CustomModule: ObservedCustomModule
-        }
+    # user will manually define the corresponding observed
+    # module class which has a from_float class method that converts
+    # float custom module to observed custom module
+      "float_to_observed_custom_module_class": {
+         CustomModule: ObservedCustomModule
+      }
     }
-    ```
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare")
@@ -412,16 +410,14 @@ def convert(
         `convert_custom_config_dict`: custom configuration dictionary for convert function
 
     Example:
-    ```python
     convert_custom_config_dict = {
-        # user will manually define the corresponding quantized
-        # module class which has a from_observed class method that converts
-        # observed custom module to quantized custom module
-        "observed_to_quantized_custom_module_class": {
-           ObservedCustomModule: QuantizedCustomModule
-        }
+    # user will manually define the corresponding quantized
+    # module class which has a from_observed class method that converts
+    # observed custom module to quantized custom module
+      "observed_to_quantized_custom_module_class": {
+         ObservedCustomModule: QuantizedCustomModule
+      }
     }
-    ```
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.convert")
