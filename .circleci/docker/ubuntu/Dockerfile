@@ -44,6 +44,10 @@ ARG GCC_VERSION
 ADD ./common/install_gcc.sh install_gcc.sh
 RUN bash ./install_gcc.sh && rm install_gcc.sh
 
+# Install lcov for C++ code coverage
+ADD ./common/install_lcov.sh install_lcov.sh
+RUN  bash ./install_lcov.sh && rm install_lcov.sh
+
 # Install non-standard Python versions (via Travis binaries)
 ARG TRAVIS_PYTHON_VERSION
 ARG TRAVIS_DL_URL_PREFIX
@@ -122,10 +126,6 @@ RUN bash ./install_jni.sh && rm install_jni.sh
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
-
-# Install lcov if coverage is specified
-ADD ./common/install_lcov.sh install_lcov.sh
-RUN if [[ ${BUILD_ENVIRONMENT} == *"coverage"* ]]; then bash ./install_lcov.sh; fi
 
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
