@@ -17,6 +17,7 @@ from .rprop import Rprop
 from .rmsprop import RMSprop
 from .optimizer import Optimizer
 from .lbfgs import LBFGS
+from .sharded_optimizer import ShardedOptimizer
 from . import lr_scheduler
 from . import swa_utils
 
@@ -32,3 +33,4 @@ del rprop
 del rmsprop
 del optimizer
 del lbfgs
+del sharded_optimizer

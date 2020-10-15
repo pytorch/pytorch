@@ -23,6 +23,68 @@ else:
     _params_t = Any
 
 
+def _broadcast_object(
+    obj: Any, src_rank: int, group: object = dist.group.WORLD, dist_device: torch.device = torch.device("cpu")
+) -> Any:
+    """
+    Either broadcast from master to the fleet (default),
+    or use the src setting as the original rank.
+    """
+
+    if dist.get_rank() == src_rank:
+        # Emit data
+        buffer = io.BytesIO()
+        torch.save(obj, buffer)
+        data = bytearray(buffer.getbuffer())
+        length_tensor = torch.LongTensor([len(data)]).to(dist_device)
+        data_send_tensor = torch.ByteTensor(data).to(dist_device)
+        dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
+        dist.broadcast(data_send_tensor, src=src_rank, group=group, async_op=False)
+    else:
+        # Fetch from the source
+        length_tensor = torch.LongTensor([0]).to(dist_device)
+        dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
+        data_recv_tensor = torch.empty([int(length_tensor.item())], dtype=torch.uint8, device=dist_device)
+        dist.broadcast(data_recv_tensor, src=src_rank, group=group, async_op=False)
+        buffer = io.BytesIO(data_recv_tensor.cpu().numpy())
+        obj = torch.load(buffer, map_location=dist_device)
+    return obj
+
+
+# Credits:  classy_vision/generic/distributed_util.py
+def _recursive_copy_to_device(value: Any, non_blocking: bool, device: torch.device) -> Any:
+    """
+    Recursively searches lists, tuples, dicts and copies tensors to device if
+    possible. Non-tensor values are passed as-is in the result.
+
+    NOTE:  These are all copies, so if there are two objects that reference
+    the same object, then after this call, there will be two different objects
+    referenced on the device.
+    """
+
+    if isinstance(value, torch.Tensor):
+        return value.to(device, non_blocking=non_blocking)
+
+    if isinstance(value, (list, tuple)):
+        values = [_recursive_copy_to_device(val, non_blocking=non_blocking, device=device) for val in value]
+        return values if isinstance(value, list) else tuple(values)
+
+    if isinstance(value, container_abcs.Mapping):
+        return {
+            key: _recursive_copy_to_device(val, non_blocking=non_blocking, device=device) for key, val in value.items()
+        }
+
+    return value
+
+
+def _get_global_rank(group: Any, rank: int) -> int:
+    if group is dist.group.WORLD:
+        return rank
+    else:
+        global_rank = dist.distributed_c10d._get_global_rank(group, rank)  # type: ignore
+    return global_rank
+
+
 class ShardedOptimizer(Optimizer):
     """Wraps an arbitrary :class:`optim.Optimizer <torch.optim.Optimizer>`
     optimizer and shards its state as described by ZeRO_.
@@ -81,7 +143,7 @@ class ShardedOptimizer(Optimizer):
         self.group = group if group is not None else dist.group.WORLD
         self.world_size = dist.get_world_size(self.group)
         self.rank = dist.get_rank(self.group)
-        self.global_rank = __get_global_rank(self.group, self.rank)
+        self.global_rank = _get_global_rank(self.group, self.rank)
 
         self.optim = optim(self.partition_parameters()[self.rank], **default)
 
@@ -283,7 +345,7 @@ class ShardedOptimizer(Optimizer):
         for k, v in state_dict["state"].items():
             if k in id_map:
                 param = id_map[k]
-                self.optim.state[param] = __recursive_copy_to_device(v, non_blocking=True, device=param.device)
+                self.optim.state[param] = _recursive_copy_to_device(v, non_blocking=True, device=param.device)
 
         # Restore the global param_groups (the params themselves are already correct)
         for global_group, local_group in zip(self.param_groups, groups):
@@ -357,20 +419,20 @@ class ShardedOptimizer(Optimizer):
             if rank == self.rank:
                 logging.debug("Saving self state")
                 all_states.append(
-                    __recursive_copy_to_device(self.local_state_dict(), non_blocking=True, device=torch.device("cpu"))
+                    _recursive_copy_to_device(self.local_state_dict(), non_blocking=True, device=torch.device("cpu"))
                 )
 
                 # Sync with other replicas
-                __broadcast_object(empty_buffer, src_rank=self.global_rank, group=self.group, dist_device=self._device)
+                _broadcast_object(empty_buffer, src_rank=self.global_rank, group=self.group, dist_device=self._device)
             else:
                 # Fetch the optim state from the other replicas
-                global_rank = __get_global_rank(self.group, rank)
-                replica_state = __broadcast_object(
+                global_rank = _get_global_rank(self.group, rank)
+                replica_state = _broadcast_object(
                     empty_buffer, src_rank=global_rank, group=self.group, dist_device=self._device
                 )
 
                 all_states.append(
-                    __recursive_copy_to_device(replica_state, non_blocking=True, device=torch.device("cpu"))
+                    _recursive_copy_to_device(replica_state, non_blocking=True, device=torch.device("cpu"))
                 )
 
                 logging.debug("State from rank %s received", rank)
@@ -385,19 +447,19 @@ class ShardedOptimizer(Optimizer):
             if rank == self.rank:
                 # Send the state to the reference replica
                 logging.debug(
-                    "Sending the sharded optimizer state to the reference replica from rank %s", rank,
+                    "Sending the sharded optimizer state to the reference replica from rank %s",
+                    rank,
                 )
-                __broadcast_object(
+                _broadcast_object(
                     self.local_state_dict(), src_rank=self.global_rank, group=self.group, dist_device=self._device
                 )
             else:
-                global_rank = __get_global_rank(self.group, rank)
+                global_rank = _get_global_rank(self.group, rank)
                 # Discard this tensor/rank, broadcast necessary for syncing
-                __broadcast_object(empty_buffer, src_rank=global_rank, group=self.group, dist_device=self._device)
+                _broadcast_object(empty_buffer, src_rank=global_rank, group=self.group, dist_device=self._device)
 
     def _free_other_grads(self) -> None:
-        """Free all the gradients only useful for the other ranks
-        """
+        """Free all the gradients only useful for the other ranks"""
         for rank, partition in enumerate(self.partition_parameters()):
             if rank == self.rank:
                 continue
@@ -407,8 +469,7 @@ class ShardedOptimizer(Optimizer):
                     t.grad = None
 
     def _broadcast_params(self, buffers: List[torch.Tensor], per_rank_params: List[List[Parameter]]) -> None:
-        """Helper function to broadcast all the parameters from a given device
-        """
+        """Helper function to broadcast all the parameters from a given device"""
         buffer_size = buffers[0].numel()
         restore_require_grad = []
         bucket_requests = []
@@ -420,7 +481,7 @@ class ShardedOptimizer(Optimizer):
             if len(params) == 0:
                 continue
 
-            global_rank = __get_global_rank(self.group, rank)
+            global_rank = _get_global_rank(self.group, rank)
 
             # Copy small parameters into per-GPU buffers
             i_bucketed = 0  # the number of tensors packed in the buffer
@@ -472,65 +533,3 @@ class ShardedOptimizer(Optimizer):
 
         for p in restore_require_grad:
             p.requires_grad = True
-
-
-def __broadcast_object(
-    obj: Any, src_rank: int, group: object = dist.group.WORLD, dist_device: torch.device = torch.device("cpu")
-) -> Any:
-    """
-    Either broadcast from master to the fleet (default),
-    or use the src setting as the original rank.
-    """
-
-    if dist.get_rank() == src_rank:
-        # Emit data
-        buffer = io.BytesIO()
-        torch.save(obj, buffer)
-        data = bytearray(buffer.getbuffer())
-        length_tensor = torch.LongTensor([len(data)]).to(dist_device)
-        data_send_tensor = torch.ByteTensor(data).to(dist_device)
-        dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
-        dist.broadcast(data_send_tensor, src=src_rank, group=group, async_op=False)
-    else:
-        # Fetch from the source
-        length_tensor = torch.LongTensor([0]).to(dist_device)
-        dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
-        data_recv_tensor = torch.empty([int(length_tensor.item())], dtype=torch.uint8, device=dist_device)
-        dist.broadcast(data_recv_tensor, src=src_rank, group=group, async_op=False)
-        buffer = io.BytesIO(data_recv_tensor.cpu().numpy())
-        obj = torch.load(buffer, map_location=dist_device)
-    return obj
-
-
-# Credits:  classy_vision/generic/distributed_util.py
-def __recursive_copy_to_device(value: Any, non_blocking: bool, device: torch.device) -> Any:
-    """
-    Recursively searches lists, tuples, dicts and copies tensors to device if
-    possible. Non-tensor values are passed as-is in the result.
-
-    NOTE:  These are all copies, so if there are two objects that reference
-    the same object, then after this call, there will be two different objects
-    referenced on the device.
-    """
-
-    if isinstance(value, torch.Tensor):
-        return value.to(device, non_blocking=non_blocking)
-
-    if isinstance(value, (list, tuple)):
-        values = [__recursive_copy_to_device(val, non_blocking=non_blocking, device=device) for val in value]
-        return values if isinstance(value, list) else tuple(values)
-
-    if isinstance(value, container_abcs.Mapping):
-        return {
-            key: __recursive_copy_to_device(val, non_blocking=non_blocking, device=device) for key, val in value.items()
-        }
-
-    return value
-
-
-def __get_global_rank(group: Any, rank: int) -> int:
-    if group is dist.group.WORLD:
-        return rank
-    else:
-        global_rank = dist.distributed_c10d._get_global_rank(group, rank)  # type: ignore
-    return global_rank
