@@ -417,6 +417,7 @@ else
     pushd test
     echo "Generating XML coverage report"
     time python -mcoverage xml
+    time lcov --capture --directory build/ --output-file coverage.info
     popd
   fi
 fi
