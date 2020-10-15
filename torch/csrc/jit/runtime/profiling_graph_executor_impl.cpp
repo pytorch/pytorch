@@ -45,11 +45,11 @@ static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{false};
 #else
 static std::atomic<bool> executor_mode{true};
-static std::atomic<bool> profiling_mode{false};
+static std::atomic<bool> profiling_mode{true};
 #endif
 
 static std::atomic<size_t> num_profiled_runs{1};
-static std::atomic<size_t> bailout_depth{1};
+static std::atomic<size_t> bailout_depth{20}; // NOLINT
 
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
@@ -253,7 +253,7 @@ void runDiffGraphPasses(std::shared_ptr<Graph>& graph) {
       BatchMM(graph);
       GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
 
-      FuseTensorExprs(graph);
+      FuseTensorExprs(graph, getFusionGroupInlining() ? 2 : 1);
       GRAPH_DEBUG(
           "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
 
@@ -312,7 +312,7 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
       BatchMM(graph);
       GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
 
-      FuseTensorExprs(graph);
+      FuseTensorExprs(graph, getFusionGroupInlining() ? 2 : 1);
       GRAPH_DEBUG(
           "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
 
@@ -370,7 +370,9 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     InlineAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
-    GRAPH_DEBUG("After InlineAutodiffSubgraphs\n", *copy);
+    RemoveProfilingNodes(copy);
+    GRAPH_DEBUG(
+        "After InlineAutodiffSubgraphs and Removing Profiling Nodes\n", *copy);
   } else {
     runNoGradOptimizations(copy);
   }
@@ -460,7 +462,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   }
 
   if (optimized_plan_) {
-    GRAPH_DUMP("plan already optimized:", graph);
+    GRAPH_DEBUG("plan already optimized:", (*optimized_plan_).graph);
     return *optimized_plan_;
   }
 
@@ -494,8 +496,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   // replaces a fallback graph inserted by
   // specialize_autogradzero if one exists
   replaceFallbackGraphWithFallbackFunction(copy->block());
-  GRAPH_DUMP("Optimized Graph: ", copy);
-  // cache
   GRAPH_DUMP("Optimized Graph: ", copy);
   optimized_plan_ =
       ExecutionPlan(copy, function_name_, *remaining_bailout_depth_);

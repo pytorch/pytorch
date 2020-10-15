@@ -21,6 +21,7 @@ torch/csrc/jit/generated/
 import argparse
 import re
 from itertools import groupby
+from functools import reduce
 from ..autograd.gen_autograd import load_aten_declarations
 from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
 from ..autograd.utils import CodeTemplate, write, is_out_variant, op_name_without_overload
@@ -45,6 +46,7 @@ TYPE_MAP = {
     'std::array<bool,3>': 'bool[3]',
     'std::array<bool,4>': 'bool[4]',
     'std::string': 'str',
+    'std::string?': 'str?',
     'Scalar': 'Scalar',
     'MemoryFormat': 'MemoryFormat',
     'MemoryFormat?': 'MemoryFormat?',
@@ -135,6 +137,7 @@ FROM_IVALUE = {
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
     'std::string': '{}.toStringRef()',
+    'std::string?': '{}.toOptional<std::string>()',
     'Generator?': '{}.toOptional<at::Generator>()',
     'std::array<bool,2>': 'as_bool_array<2>({}.toBoolList())',
     'std::array<bool,3>': 'as_bool_array<3>({}.toBoolList())',
@@ -332,7 +335,7 @@ def gen_unboxing_wrappers(
                                                   return_type=return_type,
                                                   formals_types_with_leading_comma=argument_types_with_leading_comma)
         else:
-            assert decl['use_c10_dispatcher'] == 'full'
+            assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
             if is_namespace_function:
                 return CALL_NAMESPACE.substitute(name=decl['name'],
                                                  args=pack_arguments(args),
@@ -379,7 +382,7 @@ def gen_unboxing_wrappers(
                                                  op_capture=op_capture,
                                                  lvalues=lvalues)
         else:
-            assert decl['use_c10_dispatcher'] == 'full'
+            assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
 
         return constructor
 
@@ -486,13 +489,22 @@ def gen_unboxing_wrappers(
                 shards[x].append(OPERATOR.substitute(signature=decl['schema_string'],
                                                      op=emit_decl_variant(decl)))
             else:
-                assert decl['use_c10_dispatcher'] == 'full'
+                assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
 
     for i, shard in enumerate(shards):
         env = {
             'constructors': shard,
         }
         write(out, 'generated_unboxing_wrappers_%d.cpp' % i, GENERATED_UNBOXING_WRAPPERS_CPP, env)
+
+    all_shards = reduce(
+        lambda lhs, rhs: lhs + rhs,
+        shards,
+    )
+    env = {
+        'constructors': all_shards,
+    }
+    write(out, 'generated_unboxing_wrappers_everything.cpp', GENERATED_UNBOXING_WRAPPERS_CPP, env)
 
 
 default_map = {'{}': 'None', 'nullptr': 'None', 'c10::nullopt': 'None'}

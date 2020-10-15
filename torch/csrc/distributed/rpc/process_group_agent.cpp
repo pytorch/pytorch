@@ -8,12 +8,6 @@
 namespace torch {
 namespace distributed {
 namespace rpc {
-const std::string kRPCTimeoutErrorStr =
-    "RPC ran for more than {} milliseconds and timed out.";
-
-namespace {
-constexpr auto kSecToMsConversion = 1000;
-}
 
 //////////////////////////  MessageCounter  /////////////////////////////////
 
@@ -159,6 +153,8 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
 }
 
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
+  TORCH_CHECK(
+      id >= 0 && id < allWorkerInfo_.size(), "Invalid destination: ", id);
   return allWorkerInfo_[id];
 }
 
@@ -802,7 +798,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
 
     for (const auto& timedOutFuture : timedOutFutures) {
       auto errStr =
-          fmt::format(kRPCTimeoutErrorStr, timedOutFuture.timeout_.count());
+          fmt::format(kRpcTimeoutErrorStr, timedOutFuture.timeout_.count());
       auto err = makeRPCError(errStr, RPCErrorType::TIMEOUT);
 
       if (!timedOutFuture.future_->hasError()) {

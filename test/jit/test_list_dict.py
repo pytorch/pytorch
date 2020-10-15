@@ -1,7 +1,7 @@
 import os
 import sys
 import inspect
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from textwrap import dedent
 from collections import OrderedDict
 
@@ -407,6 +407,43 @@ class TestList(JitTestCase):
             a = [0, 1, 2, 3, 4]
             return a[3:10] == [3, 4]
         self.checkScript(test_backward_slice, ())
+
+    def test_slice_index(self):
+        a = torch.tensor(
+            [
+                [[1, 11], [2, 22]],
+                [[3, 33], [4, 44]],
+                [[5, 55], [6, 66]],
+            ]
+        )
+
+        def test_index_slice1(x):
+            x = x[:, :, [0, 1]]
+            return x
+        self.checkScript(test_index_slice1, (a,))
+
+        def test_index_slice2(x):
+            x = x[[2, 1, 0], :, :]
+            return x
+        self.checkScript(test_index_slice2, (a,))
+
+        def test_index_slice3(x):
+            x = x[[0, 1], :, [1]]
+            return x
+        self.checkScript(test_index_slice3, (a,))
+
+        def test_index_slice_empty_list(x):
+            empty_list: List[int] = []
+            x = x[empty_list, :, :]
+            return x
+        self.checkScript(test_index_slice_empty_list, (a,))
+
+        def test_index_slice_out_of_bounds_index(x):
+            x = x[[4], :, :]
+            return x
+        with self.assertRaisesRegex(RuntimeError, "index 4 is out of bounds for dimension 0 with size 3"):
+            self.checkScript(test_index_slice_out_of_bounds_index, (a,))
+
 
     def test_mutable_list_append(self):
         def test_append():
@@ -1132,17 +1169,33 @@ class TestList(JitTestCase):
             5, dtype=torch.double).cuda(),))
 
     def test_no_element_type_annotation(self):
-        def fn(x):
+        def fn_with_comment(x):
             # type: (torch.Tensor) -> List
             a: List = x.tolist()
             return a
 
-        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
-            cu = torch.jit.CompilationUnit()
-            cu.define(dedent(inspect.getsource(fn)))
+        def annotated_fn(x: torch.Tensor) -> List:
+            a: List = x.tolist()
+            return a
 
-        with self.assertRaisesRegex(RuntimeError, r"Unknown type name"):
-            torch.jit.script(fn)
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use List without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn_with_comment)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use List without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(annotated_fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use List without a contained type"):
+            torch.jit.script(fn_with_comment)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use List without a contained type"):
+            torch.jit.script(annotated_fn)
+
+    def test_list_none(self):
+        with self.assertRaisesRegex(RuntimeError, "Can not create ListType with None type"):
+            x = torch._C.ListType(None)
+
 
 
 class TestDict(JitTestCase):
@@ -1271,6 +1324,15 @@ class TestDict(JitTestCase):
 
         self.checkScript(update, (self.dict(), self.dict()))
         self.checkScript(update, (self.dict(), self.dict2()))
+
+    def test_update_existing_key(self):
+        def foo() -> Dict[str, int]:
+            a: Dict[str, int] = {}
+            for i in range(3):
+                a.update({'a': i})
+            return a
+
+        self.checkScript(foo, ())
 
     def test_aug_assign(self):
         def aug_assign_dict_tensor(a):
@@ -1514,3 +1576,31 @@ class TestDict(JitTestCase):
 
         with self.assertRaisesRegex(Exception, "Arguments for call are not"):
             torch.jit.script(test_dict_error)
+
+    def test_type_annotation_missing_contained_type(self):
+        """
+        Test that the use of a Dict type annotation without contained
+        key and value types produces an error.
+        """
+        # This function uses a type comment.
+        def fn_with_comment(input):
+            # type: (Dict) -> Any
+            return input
+
+        # This function uses Python3 style type annotations.
+        def annotated_fn(input: Dict) -> Any:
+            return input
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn_with_comment)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(annotated_fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
+            m = torch.jit.script(fn_with_comment)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Dict without contained types"):
+            m = torch.jit.script(annotated_fn)

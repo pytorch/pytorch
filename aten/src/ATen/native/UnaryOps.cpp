@@ -162,7 +162,10 @@ Tensor& abs_out(Tensor& result, const Tensor& self) {
 Tensor abs(const Tensor& self) {
   return unary_op_impl_with_complex_to_float(self, at::abs_out);
 }
-Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
+Tensor& abs_(Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "In-place abs is not supported for complex tensors.");
+  return unary_op_impl_(self, at::abs_out);
+}
 
 // Absolute, alias for abs
 Tensor& absolute_out(Tensor& result, const Tensor& self) {
@@ -231,6 +234,10 @@ Tensor& exp_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(r
 Tensor exp(const Tensor& self) { return unary_op_impl(self, at::exp_out); }
 Tensor& exp_(Tensor& self) { return unary_op_impl_(self, at::exp_out); }
 
+Tensor& exp2_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, exp2_stub); }
+Tensor exp2(const Tensor& self) { return unary_op_impl(self, at::exp2_out); }
+Tensor& exp2_(Tensor& self) { return unary_op_impl_(self, at::exp2_out); }
+
 Tensor& expm1_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, expm1_stub); }
 Tensor expm1(const Tensor& self) { return unary_op_impl(self, at::expm1_out); }
 Tensor& expm1_(Tensor& self) { return unary_op_impl_(self, at::expm1_out); }
@@ -256,6 +263,10 @@ Tensor& floor_out(Tensor& result, const Tensor& self) {
 }
 Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
 Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
+
+Tensor& i0_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, i0_stub); }
+Tensor i0(const Tensor& self) { return unary_op_impl(self, at::i0_out); }
+Tensor& i0_(Tensor& self) { return unary_op_impl_(self, at::i0_out); }
 
 Tensor& log_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log_stub); }
 Tensor log(const Tensor& self) { return unary_op_impl(self, at::log_out); }
@@ -292,6 +303,17 @@ Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
 Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sign_stub); }
 Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
 Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
+
+Tensor& sgn_out(Tensor& result, const Tensor& self) {
+  if (self.is_complex()) {
+    return unary_op_impl_out(result, self, sgn_stub);
+  } else {
+    return unary_op_impl_out(result, self, sign_stub);
+  }
+}
+
+Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
+Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
 Tensor& sin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sin_stub); }
 Tensor sin(const Tensor& self) { return unary_op_impl(self, at::sin_out); }
@@ -365,6 +387,41 @@ Tensor& logit_(Tensor& self, c10::optional<double> eps) {
   return at::logit_out(self, self, eps);
 }
 
+Tensor& nan_to_num_out(
+    Tensor& result,
+    const Tensor& self,
+    c10::optional<double> nan,
+    c10::optional<double> pos_inf,
+    c10::optional<double> neg_inf) {
+
+  if (c10::isIntegralType(self.scalar_type())) {
+    result.resize_as_(self);
+    result.copy_(self);
+    return result;
+  }
+
+  auto iter = TensorIterator::unary_op(result, self);
+  nan_to_num_stub(iter.device_type(), iter, nan, pos_inf, neg_inf);
+  return result;
+}
+
+Tensor nan_to_num(
+    const Tensor& self,
+    c10::optional<double> nan,
+    c10::optional<double> pos_inf,
+    c10::optional<double> neg_inf) {
+  auto result = at::empty_like(self);
+  return at::nan_to_num_out(result, self, nan, pos_inf, neg_inf);
+}
+
+Tensor& nan_to_num_(
+    Tensor& self,
+    c10::optional<double> nan,
+    c10::optional<double> pos_inf,
+    c10::optional<double> neg_inf) {
+  return at::nan_to_num_out(self, self, nan, pos_inf, neg_inf);
+}
+
 Tensor& tanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, tanh_stub); }
 Tensor tanh(const Tensor& self) { return unary_op_impl(self, at::tanh_out); }
 Tensor& tanh_(Tensor& self) { return unary_op_impl_(self, at::tanh_out); }
@@ -397,9 +454,9 @@ Tensor& neg_out(Tensor& result, const Tensor& self) {
 Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
 Tensor& neg_(Tensor& self) { return unary_op_impl_(self, at::neg_out); }
 
-Tensor& negative_out(Tensor& result, const Tensor& self) { return at::native::neg_out(result, self); }
-Tensor negative(const Tensor& self) { return at::native::neg(self); }
-Tensor& negative_(Tensor& self) { return at::native::neg_(self); }
+Tensor& negative_out(Tensor& result, const Tensor& self) { return at::neg_out(result, self); }
+Tensor negative(const Tensor& self) { return self.neg(); }
+Tensor& negative_(Tensor& self) { return self.neg_(); }
 
 Tensor logical_not(const Tensor& self) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
@@ -444,7 +501,7 @@ Tensor signbit(const Tensor& self) {
 }
 
 Tensor& clamp_out(Tensor& result, const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
+  TORCH_CHECK(!self.is_complex(), "clamp does not support complex inputs.");
   if (min && max) {
     TORCH_CHECK(self.layout() == Layout::Strided,
                 "clamp only supports strided layout, got: ", self.layout());
@@ -455,7 +512,7 @@ Tensor& clamp_out(Tensor& result, const Tensor& self, optional<Scalar> min, opti
   } else if (min) {
     at::clamp_min_out(result, self, *min);
   } else {
-    AT_ERROR("At least one of 'min' or 'max' must not be None");
+    TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
   }
   return result;
 }
@@ -470,7 +527,7 @@ Tensor& clamp_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
 }
 
 Tensor& clamp_max_out(Tensor& result, const Tensor& self, Scalar max) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
+  TORCH_CHECK(!self.is_complex(), "clamp does not support complex inputs.");
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_max only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self);
@@ -488,7 +545,7 @@ Tensor& clamp_max_(Tensor& self, Scalar max) {
 }
 
 Tensor& clamp_min_out(Tensor& result, const Tensor& self, Scalar min) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
+  TORCH_CHECK(!self.is_complex(), "clamp does not support complex inputs.");
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_min only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self);
@@ -612,15 +669,18 @@ DEFINE_DISPATCH(erf_stub);
 DEFINE_DISPATCH(erfc_stub);
 DEFINE_DISPATCH(erfinv_stub);
 DEFINE_DISPATCH(exp_stub);
+DEFINE_DISPATCH(exp2_stub);
 DEFINE_DISPATCH(expm1_stub);
 DEFINE_DISPATCH(floor_stub);
 DEFINE_DISPATCH(frac_stub);
+DEFINE_DISPATCH(i0_stub);
 DEFINE_DISPATCH(log_stub);
 DEFINE_DISPATCH(log10_stub);
 DEFINE_DISPATCH(log1p_stub);
 DEFINE_DISPATCH(log2_stub);
 DEFINE_DISPATCH(logical_not_stub);
 DEFINE_DISPATCH(neg_stub);
+DEFINE_DISPATCH(nan_to_num_stub);
 DEFINE_DISPATCH(polygamma_stub);
 DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);
@@ -629,6 +689,7 @@ DEFINE_DISPATCH(sigmoid_stub);
 DEFINE_DISPATCH(logit_stub);
 DEFINE_DISPATCH(sign_stub);
 DEFINE_DISPATCH(signbit_stub);
+DEFINE_DISPATCH(sgn_stub);
 DEFINE_DISPATCH(sin_stub);
 DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);

@@ -19,6 +19,10 @@ gradients by minimizing gradient underflow, as explained :ref:`here<gradient-sca
 :class:`torch.cuda.amp.autocast` and :class:`torch.cuda.amp.GradScaler` are modular.
 In the samples below, each is used as its individual documentation suggests.
 
+(Samples here are illustrative.  See the
+`Automatic Mixed Precision recipe <https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html>`_
+for a runnable walkthrough.)
+
 .. contents:: :local:
 
 Typical Mixed Precision Training
@@ -169,7 +173,9 @@ Here's an ordinary example of an L2 penalty without gradient scaling or autocast
             loss = loss_fn(output, target)
 
             # Creates gradients
-            grad_params = torch.autograd.grad(loss, model.parameters(), create_graph=True)
+            grad_params = torch.autograd.grad(outputs=loss,
+                                              inputs=model.parameters(),
+                                              create_graph=True)
 
             # Computes the penalty term and adds it to the loss
             grad_norm = 0
@@ -184,8 +190,8 @@ Here's an ordinary example of an L2 penalty without gradient scaling or autocast
 
             optimizer.step()
 
-To implement a gradient penalty *with* gradient scaling, the loss passed to
-:func:`torch.autograd.grad` should be scaled.  The resulting gradients
+To implement a gradient penalty *with* gradient scaling, the ``outputs`` Tensor(s)
+passed to :func:`torch.autograd.grad` should be scaled.  The resulting gradients
 will therefore be scaled, and should be unscaled before being combined to create the
 penalty value.
 
@@ -203,8 +209,10 @@ Here's how that looks for the same L2 penalty::
                 output = model(input)
                 loss = loss_fn(output, target)
 
-            # Scales the loss for autograd.grad's backward pass, resulting in scaled grad_params
-            scaled_grad_params = torch.autograd.grad(scaler.scale(loss), model.parameters(), create_graph=True)
+            # Scales the loss for autograd.grad's backward pass, producing scaled_grad_params
+            scaled_grad_params = torch.autograd.grad(outputs=scaler.scale(loss),
+                                                     inputs=model.parameters(),
+                                                     create_graph=True)
 
             # Creates unscaled grad_params before computing the penalty. scaled_grad_params are
             # not owned by any optimizer, so ordinary division is used instead of scaler.unscale_:

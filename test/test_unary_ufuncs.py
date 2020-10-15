@@ -1,6 +1,7 @@
 import math
 from itertools import product, chain
 from numbers import Number
+import random
 
 import unittest
 
@@ -18,6 +19,21 @@ from torch.testing import \
 
 if TEST_NUMPY:
     import numpy as np
+
+# Tests for unary "universal functions (ufuncs)" that accept a single
+# tensor and have common properties like:
+#   - they are elementwise functions
+#   - the input shape is the output shape
+#   - they typically have method and inplace variants
+#   - they typically support the out kwarg
+#   - they typically have NumPy or SciPy references
+
+# See NumPy's universal function documentation
+# (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
+# about the concept of ufuncs.
+
+# Functions tested here:
+#
 
 # Interesting values and extremal values for different dtypes
 _unsigned_int_vals = (0, 1, 55, 127)
@@ -117,49 +133,12 @@ def generate_numeric_tensors(device, dtype, *,
 
     return chain(empty_tensors, scalar_tensors, small_tensors, (medium_tensor,), (large_tensor,))
 
-# Tests for unary "universal functions (ufuncs)" that accept a single
-# tensor and have common properties like:
-#   - they are elementwise functions
-#   - the input shape is the output shape
-#   - they typically have method and inplace variants
-#   - they typically support the out kwarg
-#   - they typically have NumPy or SciPy references
-
-# See NumPy's universal function documentation
-# (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
-# about the concept of ufuncs.
-
 # TODO: port test_unary_out_op_mem_overlap
 # TODO: add out= tests (different devices, dtypes, mismatched sizes,
 #                       correct sizes, 0 size, broadcasted out)
 # TODO: add test for inplace variants erroring on broadcasted inputs
 class TestUnaryUfuncs(TestCase):
     exact_dtype = True
-
-    # Helper for comparing torch tensors and numpy arrays
-    # TODO: should this or assertEqual also validate that strides are equal?
-    def assertEqualHelper(self, actual, expected, *, dtype, exact_dtype=True, **kwargs):
-        assert isinstance(actual, torch.Tensor)
-
-        # Some NumPy functions return scalars, not arrays
-        if isinstance(expected, Number):
-            self.assertEqual(actual.item(), expected)
-        elif isinstance(expected, np.ndarray):
-            # Handles exact dtype comparisons between arrays and tensors
-            if exact_dtype:
-                # Allows array dtype to be float32 when comparing with bfloat16 tensors
-                #   since NumPy doesn't support the bfloat16 dtype
-                if expected.dtype == np.float32:
-                    assert actual.dtype in (torch.bfloat16, torch.float32)
-                else:
-                    assert expected.dtype == torch_to_numpy_dtype_dict[actual.dtype]
-
-            self.assertEqual(actual,
-                             torch.from_numpy(expected).to(actual.dtype),
-                             exact_device=False,
-                             **kwargs)
-        else:
-            self.assertEqual(actual, expected, exact_device=False, **kwargs)
 
     # Tests bool tensor negation raises the correct error
     def test_neg_error_message(self, device):
@@ -234,6 +213,32 @@ class TestUnaryUfuncs(TestCase):
             actual = alt(t.clone())
             self.assertEqual(actual, expected, rtol=0, atol=0)
 
+    # Helper for comparing torch tensors and numpy arrays
+    # TODO: should this or assertEqual also validate that strides are equal?
+    def assertEqualHelper(self, actual, expected, msg, *, dtype, exact_dtype=True, **kwargs):
+        assert isinstance(actual, torch.Tensor)
+
+        # Some NumPy functions return scalars, not arrays
+        if isinstance(expected, Number):
+            self.assertEqual(actual.item(), expected)
+        elif isinstance(expected, np.ndarray):
+            # Handles exact dtype comparisons between arrays and tensors
+            if exact_dtype:
+                # Allows array dtype to be float32 when comparing with bfloat16 tensors
+                #   since NumPy doesn't support the bfloat16 dtype
+                if expected.dtype == np.float32:
+                    assert actual.dtype in (torch.bfloat16, torch.float32)
+                else:
+                    assert expected.dtype == torch_to_numpy_dtype_dict[actual.dtype]
+
+            self.assertEqual(actual,
+                             torch.from_numpy(expected).to(actual.dtype),
+                             msg,
+                             exact_device=False,
+                             **kwargs)
+        else:
+            self.assertEqual(actual, expected, msg, exact_device=False, **kwargs)
+
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on a range of tensors, including empty tensors, scalar tensors,
     #   1D tensors and a large 2D tensor with interesting and extremal values
@@ -266,7 +271,7 @@ class TestUnaryUfuncs(TestCase):
             else:
                 msg = None
 
-            self.assertEqualHelper(actual, expected, dtype=dtype, msg=msg)
+            self.assertEqualHelper(actual, expected, msg, dtype=dtype)
 
     # Tests for testing (dis)contiguity consistency
 
@@ -373,6 +378,41 @@ class TestUnaryUfuncs(TestCase):
 
         self.assertEqual(actual, expected)
 
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_nan_to_num(self, device, dtype):
+        for contiguous in [False, True]:
+            x = make_tensor((64, 64), low=0., high=100., dtype=dtype, device=device)
+
+            if dtype.is_floating_point:
+                # Add extremal values.
+                extremals = [float('nan'), float('inf'), -float('inf')]
+                for idx, extremal in zip(torch.randint(0, 63, (3,)), extremals):
+                    x[idx, :] = extremal
+
+            if not contiguous:
+                x = x.T
+
+            # With args
+            nan = random.random()
+            posinf = random.random() * 5
+            neginf = random.random() * 10
+
+            self.compare_with_numpy(lambda x: x.nan_to_num(nan=nan, posinf=posinf),
+                                    lambda x: np.nan_to_num(x, nan=nan, posinf=posinf),
+                                    x)
+            self.compare_with_numpy(lambda x: x.nan_to_num(posinf=posinf, neginf=neginf),
+                                    lambda x: np.nan_to_num(x, posinf=posinf, neginf=neginf),
+                                    x)
+
+            # Out Variant
+            out = torch.empty_like(x)
+            result = torch.nan_to_num(x)
+            torch.nan_to_num(x, out=out)
+            self.assertEqual(result, out)
+
+            result = torch.nan_to_num(x, nan=nan, posinf=posinf, neginf=neginf)
+            torch.nan_to_num(x, out=out, nan=nan, posinf=posinf, neginf=neginf)
+            self.assertEqual(result, out)
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
 

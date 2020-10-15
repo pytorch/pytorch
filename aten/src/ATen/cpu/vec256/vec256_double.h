@@ -152,6 +152,9 @@ public:
   Vec256<double> hypot(const Vec256<double> &b) const {
     return Vec256<double>(Sleef_hypotd4_u05(values, b));
   }
+  Vec256<double> i0() const {
+    return map(calc_i0);
+  }
   Vec256<double> log() const {
     return Vec256<double>(Sleef_logd4_u10(values));
   }

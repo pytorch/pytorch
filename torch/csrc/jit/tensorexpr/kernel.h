@@ -121,6 +121,8 @@ class TORCH_API TensorExprKernel {
 
   Tensor* computeSum(const torch::jit::Value* v);
 
+  Tensor* computeSoftmax(const torch::jit::Value* v);
+
   Tensor* computeValue(const torch::jit::Value* v);
 
   void flattenTensors(BackendType backendType);
@@ -133,7 +135,6 @@ class TORCH_API TensorExprKernel {
       const at::ArrayRef<IValue>& inputs,
       std::vector<at::Tensor>& outputs);
   BackendType inferBackendTypeFromDevice(at::Device device);
-  at::Device pickDeviceType(const at::ArrayRef<torch::jit::Value*>& inputs);
 
   void bindInput(const torch::jit::Value* input);
 
@@ -212,6 +213,9 @@ TORCH_API int& getTECudaPointwiseBlockSize();
 TORCH_API bool& getTEGenerateBlockCode();
 TORCH_API bool fallbackAllowed();
 TORCH_API bool setFallbackAllowed(bool value);
+
+TORCH_API c10::optional<at::Device> pickDeviceType(
+    const at::ArrayRef<torch::jit::Value*>& inputs);
 
 } // namespace tensorexpr
 } // namespace jit

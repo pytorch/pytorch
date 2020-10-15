@@ -85,6 +85,17 @@ bool getAutodiffSubgraphInlining() {
   return autodiff_subgraph_inlining;
 }
 
+// for debugging it is helpful to be able to force fusion groups
+// to be created
+static std::atomic<bool> fusion_group_inlining(true);
+void debugSetFusionGroupInlining(bool state) {
+  fusion_group_inlining = state;
+}
+
+bool getFusionGroupInlining() {
+  return fusion_group_inlining;
+}
+
 thread_local std::weak_ptr<Graph> last_executed_optimized_graph;
 std::shared_ptr<Graph> lastExecutedOptimizedGraph() {
   return last_executed_optimized_graph.lock();
@@ -156,6 +167,12 @@ struct CaptureList {
           stack.push_back(*ivalue_capture_it++);
         } break;
       }
+    }
+  }
+
+  void release_variables() {
+    for (auto& var_capture_ : var_captures_) {
+      var_capture_.reset_data();
     }
   }
 
@@ -309,6 +326,10 @@ struct DifferentiableGraphBackward : public autograd::Node {
       input_instructions_.pushTensor();
       addInputVariable(v.toTensor());
     }
+  }
+
+  void release_variables() override {
+    captures_.release_variables();
   }
 
  private:
@@ -593,7 +614,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
     auto opt_graph = graph->copy();
-    SOURCE_DUMP("Optimizing the following function:", opt_graph);
+    GRAPH_DUMP("Optimizing the following function:", opt_graph);
     arg_spec_creator_.specializeTypes(*opt_graph, spec);
 
     // Phase 0. Inline functions, then clean up any artifacts that the inliner
