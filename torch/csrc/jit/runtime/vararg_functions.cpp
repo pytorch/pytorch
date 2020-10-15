@@ -102,7 +102,7 @@ void addFormattedArg(
       break;
     case 'c':
       TORCH_CHECK(
-          ival.isInt() || (ival.isString() && ival.toStringRef().length() == 1,
+          ival.isInt() || (ival.isString() && ival.toStringRef().length() == 1),
           "%",
           key,
           " requires an int or char for formatting, but got ",
