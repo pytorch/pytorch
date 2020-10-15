@@ -3095,7 +3095,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Zero_(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfONNXShapeInference(True)  # segfault for ConstantOfShape, should be fixed by #45369
     def test_list_pass(self):
         class Slice(torch.nn.Module):
             def forward(self, x, y):
