@@ -1693,7 +1693,6 @@ new_module_tests = [
         input_size=(0, 4, 10),
         cudnn=True,
         desc='zero_batch',
-        test_cuda=(not TEST_WITH_ROCM),
         with_tf32=True,
         tf32_precision=0.005,
     ),
@@ -1828,7 +1827,6 @@ new_module_tests = [
         cudnn=True,
         desc='zero_batch',
         check_with_long_tensor=True,
-        test_cuda=(not TEST_WITH_ROCM),
         with_tf32=True,
     ),
     dict(
@@ -2214,7 +2212,6 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         desc='zero_batch',
-        test_cuda=(not TEST_WITH_ROCM),
         with_tf32=True,
     ),
     dict(
