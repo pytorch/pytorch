@@ -164,7 +164,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'cosh', '__rmul__', 'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
-    'dot', 'vdot', 'cholesky'
+    'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
+    'bmm', 'diagonal'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -719,6 +720,12 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
 
         # See Note [Manual catchAll kernels]
         assert (declaration['name'] in MANUAL_CATCHALL) == declaration['manual_kernel_registration']
+        # If you want to register a kernel to Autograd, you must make the op abstract.
+        # In other words, this op must have dispatch section in native_functions.yaml.
+        if declaration['name'] in MANUAL_AUTOGRAD_AND_TRACER or declaration['derivative']:
+            msg = (f'Did you add a formula for {declaration["name"]}(or its functional variant) in derivatives.yaml?'
+                   f'If so please add a dispatch section for it with DefaultBackend in native_functions.yaml.')
+            assert declaration['abstract'], msg
 
         # Emit TraceType code
         if declaration['name'] not in MANUAL_TRACER:
