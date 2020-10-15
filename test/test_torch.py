@@ -17554,7 +17554,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             ((-small_to_inf, small_to_inf), nans),
         ]
         for inputs, output in inpouts:
-            calc = torch.igamma(inputs[0], inputs[1])
+            input0, input1 = inputs
+            calc = torch.igamma(input0, input1)
             if torch.all(torch.isnan(output)):
                 self.assertTrue(torch.all(torch.isnan(calc)))
             else:

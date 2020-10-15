@@ -3293,7 +3293,7 @@ igamma(input, other, *, out=None) -> Tensor
 Computes the regularized lower incomplete gamma function:
 
 .. math::
-    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_0^\text{other}_i t^{\text{input}_i-1} e^{-t} dt
+    \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_0^{\text{other}_i} t^{\text{input}_i-1} e^{-t} dt
 
 where (1) :attr:`input` and :attr:`other` must be non-negative and (2)
 :attr:`input` and :attr:`other` must not be zero at the same index.
