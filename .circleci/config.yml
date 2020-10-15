@@ -765,7 +765,7 @@ jobs:
           name: Download Azure cli
           no_output_timeout: 3m
           command: |
-            curl -L https://azurecliprod.blob.core.windows.net/msi/azure-cli-2.13.0.msi
+            curl -L https://azurecliprod.blob.core.windows.net/msi/azure-cli-2.13.0.msi --output azure-cli-2.13.0.msi
       - run:
           name: Install Azure cli
           no_output_timeout: 3m
