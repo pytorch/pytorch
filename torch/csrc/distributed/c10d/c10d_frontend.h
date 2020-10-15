@@ -42,6 +42,19 @@ class DistributedC10d {
   int64_t getRank(std::shared_ptr<ProcessGroup> group);
   int64_t getWorldSize(std::shared_ptr<ProcessGroup> group);
 
+  // getters/setters for the global states
+  const std::string& backend() const;
+  void set_backend(std::string const& backend_name);
+
+  const std::unordered_map<std::shared_ptr<ProcessGroup>, std::vector<int64_t>>&
+  pg_group_ranks();
+  void set_pg_group_ranks(std::unordered_map<
+                          std::shared_ptr<ProcessGroup>,
+                          std::vector<int64_t>> const& new_ranks);
+
+  const std::string& default_pg_init_method() const;
+  void set_default_pg_init_method(std::string const& init_method);
+
   ProcessGroup::Work isend(
       at::Tensor tensor,
       int64_t dst,
@@ -88,13 +101,13 @@ class DistributedC10d {
   c10::optional<ProcessGroup::Work> allReduce(
       at::Tensor tensor,
       ReduceOp op,
-      std::shred_ptr<ProcessGroup> group,
+      std::shared_ptr<ProcessGroup> group,
       bool async_op);
 
   c10::optional<ProcessGroup::Work> allReduceCoalesced(
       at::Tensor tensor,
       ReduceOp op,
-      std::shred_ptr<ProcessGroup> group,
+      std::shared_ptr<ProcessGroup> group,
       bool async_op);
 
   c10::optional<ProcessGroup::Work> reduceMultiGPU(
