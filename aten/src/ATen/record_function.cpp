@@ -1,5 +1,5 @@
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/record_function.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <algorithm>
 #include <cstdlib>
 #include <random>
@@ -394,7 +394,9 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   manager().runStartCallbacks(*this);
 }
 
-void RecordFunction::before(c10::OperatorHandle const& op, int64_t sequence_nr) {
+void RecordFunction::before(
+    c10::OperatorHandle const& op,
+    int64_t sequence_nr) {
   if (!active) {
     return;
   }
