@@ -25,6 +25,7 @@ import re
 Result = namedtuple('Result', 'state table provenance')
 
 dispatch_keys_to_check = (
+    'Undefined',
     'CPU',
     'CUDA',
     'XLA',
@@ -341,6 +342,7 @@ catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: default_def_name_t_t [catch all]
 CPU: fn_cpu [kernel]
 CUDA: default_def_name_t_t [catch all]
 XLA: fn_xla [kernel]
@@ -372,6 +374,7 @@ catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: default_def_name_t_t [catch all]
 CPU: impl_t_t [kernel]
 CUDA: default_def_name_t_t [catch all]
 XLA: default_def_name_t_t [catch all]
@@ -402,6 +405,7 @@ Math[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: impl_t_t [math kernel]
 CPU: impl_t_t [math kernel]
 CUDA: impl_t_t [math kernel]
 XLA: impl_t_t [math kernel]
@@ -435,6 +439,7 @@ Math[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: fn_math [math kernel]
 CPU: fn_cpu [kernel]
 CUDA: fn_math [math kernel]
 XLA: fn_math [math kernel]
@@ -498,6 +503,7 @@ catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: fn_math [math kernel]
 CPU: fn_cpu [kernel]
 CUDA: fn_math [math kernel]
 XLA: fn_math [math kernel]
@@ -531,6 +537,7 @@ catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: default_def_name_t_t [catch all]
 CPU: fn_cpu [kernel]
 CUDA: default_def_name_t_t [catch all]
 XLA: default_def_name_t_t [catch all]
@@ -564,6 +571,7 @@ catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check + ('QuantizedCPU',))
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: fn_math [math kernel]
 CPU: fn_math [math kernel]
 CUDA: fn_math [math kernel]
 XLA: fn_math [math kernel]
@@ -597,6 +605,7 @@ DefaultBackend[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0) [ boxed u
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: fn_defaultbackend [default backend kernel]
 CPU: fn_cpu [kernel]
 CUDA: fn_defaultbackend [default backend kernel]
 XLA: fn_defaultbackend [default backend kernel]
@@ -632,6 +641,7 @@ DefaultBackend[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0) [ boxed u
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check + ('QuantizedCPU',))
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: fn_defaultbackend [default backend kernel]
 CPU: fn_cpu [kernel]
 CUDA: fn_defaultbackend [default backend kernel]
 XLA: fn_defaultbackend [default backend kernel]
@@ -671,6 +681,7 @@ DefaultBackend[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0) [ boxed u
         extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check)
 
         self.assertExpectedInline(extracted_table, '''\
+Undefined: fn_defaultbackend [default backend kernel]
 CPU: fn_cpu [kernel]
 CUDA: fn_defaultbackend [default backend kernel]
 XLA: fn_defaultbackend [default backend kernel]

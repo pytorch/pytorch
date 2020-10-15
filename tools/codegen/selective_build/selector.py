@@ -102,7 +102,13 @@ class SelectiveBuilder:
         if self.include_all_operators:
             return True
 
-        not_training_op = SelectiveBuildOperator('', False, False, False, None)
+        not_training_op = SelectiveBuildOperator(
+            name='',
+            is_root_operator=False,
+            is_used_for_training=False,
+            include_all_overloads=False,
+            _debug_info=None,
+        )
         op = not_training_op
         if name in self.operators:
             op = self.operators[name]
