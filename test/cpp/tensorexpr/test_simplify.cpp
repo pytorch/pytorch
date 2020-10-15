@@ -1060,6 +1060,47 @@ void testSimplifySubs() {
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_IMM_WITH_VAL(Int, simplified.node(), 2);
   }
+
+  {
+    // Sub where result is negative.
+    ExprHandle body = x - (x + 1);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), -1);
+  }
+
+  {
+    // Sub where result is positive due to negative scalar on RHS.
+    ExprHandle body = x - (x - 1);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 1);
+  }
+
+  {
+    // Term - Polynomial sub where RHS must be negated.
+    ExprHandle body = (x * 2) - (x * 2 + 1);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), -1);
+  }
+
+  {
+    // Term - Polynomial sub where the result is a Term.
+    ExprHandle body = (y * x * 2) - (x * y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // Term - Polynomial sub where the result is a Polynomial.
+    ExprHandle body = (x * 2) - (x + 1);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Sub, simplified.node(), sub);
+
+    IS_VAR_WITH_NAME(sub->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, sub->rhs(), 1);
+  }
 }
 
 void testSimplifyDiv() {

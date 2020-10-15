@@ -700,22 +700,6 @@ else()
   caffe2_update_option(USE_FAKELOWP OFF)
 endif()
 
-# ---[ Kineto
-if(USE_KINETO)
-  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-  set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto" CACHE STRING "Kineto source directory")
-  if(USE_KINETO AND NOT TARGET kineto)
-    set(KINETO_BUILD_TESTS OFF CACHE BOOL "")
-    set(KINETO_LIBRARY_TYPE "default" CACHE STRING "")
-
-    add_subdirectory("${KINETO_SOURCE_DIR}")
-    # set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
-    message(STATUS "Configured libkineto.")
-  endif()
-
-  list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
-endif()
-
 # ---[ LMDB
 if(USE_LMDB)
   find_package(LMDB)
@@ -1494,7 +1478,7 @@ if(NOT INTERN_BUILD_MOBILE)
     add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
     # skip unwanted includes from windows.h
     add_definitions(-DWIN32_LEAN_AND_MEAN)
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "/wd4819" "-Xcompiler" "/wd4503" "-Xcompiler" "/wd4190" "-Xcompiler" "/wd4244" "-Xcompiler" "/wd4251" "-Xcompiler" "/wd4275" "-Xcompiler" "/wd4522")
+    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
   endif()
 
   if(NOT MSVC)
@@ -1759,3 +1743,26 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 
 list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
+
+# ---[ Kineto
+if(USE_KINETO)
+  if(USE_KINETO AND NOT TARGET kineto)
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party" CACHE STRING "")
+    set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto/libkineto" CACHE STRING "")
+    set(KINETO_BUILD_TESTS OFF CACHE BOOL "")
+    set(KINETO_LIBRARY_TYPE "static" CACHE STRING "")
+    set(CUPTI_INCLUDE_DIR "/usr/local/cuda/extras/CUPTI/include" CACHE STRING "")
+
+    message(STATUS "Kineto dependency: KINETO_SOURCE_DIR = ${KINETO_SOURCE_DIR}")
+    message(STATUS "Kineto dependency: KINETO_BUILD_TESTS = ${KINETO_BUILD_TESTS}")
+    message(STATUS "Kineto dependency: KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
+    message(STATUS "Kineto dependency: CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
+    message(STATUS "Kineto dependency: CUDA_INCLUDE_DIRS = ${CUDA_INCLUDE_DIRS}")
+    message(STATUS "Kineto dependency: CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
+
+    add_subdirectory("${KINETO_SOURCE_DIR}")
+    message(STATUS "Configured libkineto as a dependency.")
+  endif()
+
+  list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
+endif()

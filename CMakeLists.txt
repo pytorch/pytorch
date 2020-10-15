@@ -166,7 +166,7 @@ option(USE_GLOG "Use GLOG" OFF)
 option(USE_LEVELDB "Use LEVELDB" OFF)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_LMDB "Use LMDB" OFF)
-option(USE_METAL "Use Metal for iOS build" ON)
+option(USE_METAL "Use Metal for iOS build" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(
     USE_NCCL "Use NCCL" ON
@@ -199,6 +199,9 @@ option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
     "Use system Eigen instead of the one under third_party" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
+cmake_dependent_option(
+    USE_VALGRIND "Use Valgrind. Only available on Linux." ON
+    "LINUX" OFF)
 option(USE_VULKAN "Use Vulkan GPU backend" OFF)
 option(USE_VULKAN_WRAPPER "Use Vulkan wrapper" ON)
 option(USE_VULKAN_SHADERC_RUNTIME "Use Vulkan Shader compilation runtime(Needs shaderc lib)" OFF)
@@ -512,17 +515,17 @@ if(USE_FBGEMM AND ((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VO
 endif()
 
 if(USE_KINETO AND INTERN_BUILD_MOBILE)
-  message(STATUS "Disabling usage of libkineto in a mobile build.")
+  message(STATUS "Not using libkineto in a mobile build.")
   set(USE_KINETO OFF)
 endif()
 
 if(USE_KINETO AND (NOT USE_CUDA))
-  message(STATUS "Disabling usage of libkineto in a non-CUDA build.)
+  message(STATUS "Not using libkineto in a non-CUDA build.")
   set(USE_KINETO OFF)
 endif()
 
 if (USE_KINETO AND MSVC)
-  message(STATUS "Disabling usage of libkineto in a Windows build.)
+  message(STATUS "Not using libkineto in a Windows build.")
   set(USE_KINETO OFF)
 endif()
 

@@ -66,8 +66,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${CMAKE_BINARY_DIR}/third_party
     ${CMAKE_BINARY_DIR}/third_party/onnx
 
-    ${TORCH_ROOT}/third_party/valgrind/callgrind
-    ${TORCH_ROOT}/third_party/valgrind/include
+    ${TORCH_ROOT}/third_party/valgrind-headers
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
@@ -188,6 +187,10 @@ if(USE_NCCL AND NOT WIN32)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
+endif()
+
+if(USE_VALGRIND AND NOT WIN32)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_VALGRIND)
 endif()
 
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists
