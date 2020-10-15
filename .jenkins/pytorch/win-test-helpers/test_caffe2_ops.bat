@@ -3,6 +3,14 @@ call %SCRIPT_HELPERS_DIR%\setup_pytorch_env.bat
 @echo on
 pushd test
 
+echo Some smoke tests
+"C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\gflags.exe" /i python.exe +sls
+python %SCRIPT_HELPERS_DIR%\run_python_nn_smoketests.py
+if ERRORLEVEL 1 exit /b 1
+
+"C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\gflags.exe" /i python.exe -sls
+if ERRORLEVEL 1 exit /b 1
+
 echo Run caffe2 ops tests
 cd %TMP_DIR_WIN%\build\caffe2\python\operator_test
 python -m pytest -x -v --disable-warnings ^
@@ -23,7 +31,7 @@ python -m pytest -x -v --disable-warnings ^
 --ignore roi_align_rotated_op_test.py ^
 --ignore sequence_ops_test.py ^
 --ignore torch_integration_test.py ^
-. -G
+%TMP_DIR_WIN%\build\caffe2\python\operator_test -G
 
 if ERRORLEVEL 1 exit /b 1
 
