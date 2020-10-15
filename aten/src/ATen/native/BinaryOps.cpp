@@ -128,7 +128,7 @@ Tensor& copysign_out(Tensor& result, const Tensor& self, const Tensor& other) {
   return result;
 }
 
-Tensor copysign(Tensor& self, const Tensor& other) {
+Tensor copysign(const Tensor& self, const Tensor& other) {
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   copysign_stub(iter.device_type(), iter);
