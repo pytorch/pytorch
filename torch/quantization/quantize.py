@@ -16,6 +16,7 @@ from .quantization_mappings import (get_dynamic_quant_module_mappings,
 
 from .custom_module_class_mappings import (
     is_custom_module_class,
+    is_custom_observed_module_class,
     get_observed_custom_module_class,
     get_quantized_custom_module_class,
     mark_observed_custom_module,
@@ -212,16 +213,17 @@ def prepare(model, inplace=False, allow_list=None,
     for name, child in model.named_children():
         if is_custom_observed_module_class(child):
             custom_modules.append((name, child))
+    for name, child in custom_modules:
+        qconfig = getattr(child, 'qconfig', model.qconfig)
+        new_child = get_observed_custom_module_class(child)
+        new_child = new_child.from_float(child, qconfig=qconfig)
+        model._modules[name] = new_child
 
     qconfig_propagation_list = allow_list
     if qconfig_propagation_list is None:
         qconfig_propagation_list = get_qconfig_propagation_list()
 
     propagate_qconfig_(model, qconfig_dict=None)
-
-    for name, child in custom_modules:
-        new_child = get_observed_custom_module_class(child).from_float(child)
-        model._modules[name] = new_child
 
     # sanity check common API misusage
     if not any(hasattr(m, 'qconfig') and m.qconfig for m in model.modules()):
