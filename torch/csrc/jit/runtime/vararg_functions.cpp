@@ -4,6 +4,8 @@
 namespace torch {
 namespace jit {
 
+#define PRECISION 6
+
 void tupleUnpack(Stack& stack) {
   auto tuple = pop(stack).toTuple();
   stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
@@ -45,16 +47,17 @@ void addFormattedArg(
     char key,
     const IValue& ival,
     std::stringstream& ss,
-    int precision = 6) {
+    int precision = PRECISION) {
   // TODO: Implement precison-based formatting
   switch (key) {
     case 'd':
     case 'i':
       TORCH_CHECK(
           ival.isScalar(),
-          "Got ",
-          ival.tagKind(),
-          ", but a number is required for formatting");
+          "%",
+          key,
+          " requires a number for formatting, but got ",
+          ival.tagKind());
       if (ival.isInt()) {
         ss << ival.toInt();
       } else {
@@ -65,9 +68,10 @@ void addFormattedArg(
     case 'E':
       TORCH_CHECK(
           ival.isScalar(),
-          "Got ",
-          ival.tagKind(),
-          ", but a number is required for formatting");
+          "%",
+          key,
+          " requires a number for formatting, but got ",
+          ival.tagKind());
       ss << std::setprecision(precision) << std::scientific;
       if (key == 'E') {
         ss << std::uppercase;
@@ -77,15 +81,18 @@ void addFormattedArg(
       } else {
         ss << static_cast<float>(ival.toDouble());
       }
-      ss << std::nouppercase;
+      if (key == 'E') {
+        ss << std::nouppercase;
+      }
       break;
     case 'f':
     case 'F':
       TORCH_CHECK(
           ival.isScalar(),
-          "Got ",
-          ival.tagKind(),
-          ", but a number is required for formatting");
+          "%",
+          key,
+          " requires a number for formatting, but got ",
+          ival.tagKind());
       ss << std::setprecision(precision) << std::fixed;
       if (ival.isInt()) {
         ss << static_cast<float>(ival.toInt());
@@ -95,10 +102,11 @@ void addFormattedArg(
       break;
     case 'c':
       TORCH_CHECK(
-          ival.isInt() || (ival.isString() && ival.toStringRef().length() == 1),
-          "Got ",
-          ival.tagKind(),
-          ", but an int or char is required for formatting");
+          ival.isInt() || (ival.isString() && ival.toStringRef().length() == 1,
+          "%",
+          key,
+          " requires an int or char for formatting, but got ",
+          ival.tagKind());
       if (ival.isInt()) {
         ss << static_cast<char>(ival.toInt());
       } else {
