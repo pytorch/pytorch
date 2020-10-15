@@ -3902,13 +3902,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 input1_32 = torch.ones(1, dtype=torch.float32)
                 input2_32 = torch.ones(1, dtype=torch.float32)
 
-                out_64 = torch.zero(1, dtype=torch.float64)
+                out_64 = torch.zeros(1, dtype=torch.float64)
                 with self.assertRaisesRegex(RuntimeError, 'The scalar types of the arguments do not match.'):
                     op(input1_32, input2_32, out=out_64)
 
                 # Allowing types to mismatch if the out dtype is torch.bool, so the functional version
                 # of comparison ops will work with non-bool dtypes.
-                out_bool = torch.zero(1, dtype=torch.bool)
+                out_bool = torch.zeros(1, dtype=torch.bool)
                 op(input1_32, input2_32, out=out_bool)
 
         def test_inplace_comparison_ops_require_inputs_have_same_dtype(self):
