@@ -1029,9 +1029,7 @@ class TestLinalg(TestCase):
             root = root + torch.eye(shape[-1], dtype=dtype, device=device)
 
             gradcheck(func, root)
-            # TODO: gradgradcheck does not work correctly yet for complex
-            if not dtype.is_complex:
-                gradgradcheck(func, root)
+            gradgradcheck(func, root)
 
             root = torch.rand(*shape, dtype=dtype, device=device)
             root = torch.matmul(root, root.transpose(-1, -2).conj())
@@ -1165,9 +1163,7 @@ class TestLinalg(TestCase):
             root = root + torch.eye(dims[-1])
 
             gradcheck(func, [root, upper])
-            # TODO: gradgradcheck does not work correctly yet for complex
-            if not dtype.is_complex:
-                gradgradcheck(func, [root, upper])
+            gradgradcheck(func, [root, upper])
 
             root = torch.rand(*dims, dtype=dtype, device=device)
             root = torch.matmul(root, root.transpose(-1, -2).conj())
