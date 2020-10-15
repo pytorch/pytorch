@@ -144,7 +144,7 @@ def _broadcast_to_followers(sequence_id, objects_map):
 _thread_local_var = threading.local()
 
 @contextlib.contextmanager
-def wait_all():
+def _wait_all():
     r"""
     A context manager that collects all futures returned by ``rpc_async`` and
     waits them on the context manager's exit; relieving the user of needing
@@ -156,7 +156,7 @@ def wait_all():
         >>> import torch
         >>> import torch.distributed.rpc as rpc
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> with rpc.wait_all():
+        >>> with rpc._wait_all():
         >>>    fut_1 = rpc.rpc_async(dst, torch.add, (torch.ones(2, 2), 1))
         >>>    fut_2 = rpc.rpc_async(dst, torch.add, (torch.ones(2, 2), 1))
         >>> #fut_1 and fut_2 are waited on

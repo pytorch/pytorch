@@ -15,7 +15,7 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.distributed.autograd as dist_autograd
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
-from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler, _thread_local_var
+from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler, _thread_local_var, _wait_all
 from torch.distributed.rpc.internal import (
     PythonUDF,
     RPCExecMode,
@@ -2819,7 +2819,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_wait_all(self):
-        with rpc.wait_all():
+        with _wait_all():
             self.assertTrue(_thread_local_var.future_list == [])
             dst = worker_name((self.rank + 1) % self.world_size)
             fut = rpc.rpc_async(dst, torch.add, (torch.ones(2, 2), 1))
@@ -2831,7 +2831,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_wait_all_multiple_call(self):
-        with rpc.wait_all():
+        with _wait_all():
             self.assertTrue(_thread_local_var.future_list == [])
             dst = worker_name((self.rank + 1) % self.world_size)
             for i in range(20):
@@ -2846,7 +2846,7 @@ class RpcTest(RpcAgentTestFixture):
     def test_wait_all_timeout(self):
         expected_error = self.get_timeout_error_regex()
         with self.assertRaisesRegex(RuntimeError, expected_error):
-            with rpc.wait_all():
+            with _wait_all():
                 self.assertTrue(_thread_local_var.future_list == [])
                 dst = worker_name((self.rank + 1) % self.world_size)
                 timeout = 0.1  # 100 ms
@@ -2856,7 +2856,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_wait_all_raise_in_user_func(self):
         with self.assertRaises(ValueError):
-            with rpc.wait_all():
+            with _wait_all():
                 self.assertTrue(_thread_local_var.future_list == [])
                 dst = worker_name((self.rank + 1) % self.world_size)
                 fut = rpc.rpc_async(dst, raise_func)
@@ -2865,7 +2865,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_wait_all_raise_in_body(self):
         with self.assertRaises(ValueError):
-            with rpc.wait_all():
+            with _wait_all():
                 raise_func()
         self.assertFalse(hasattr(_thread_local_var, "future_list"))
 
