@@ -6884,9 +6884,11 @@ class TestTorchDeviceType(TestCase):
         test_inverse_many_batches_helper(3, 512)
         test_inverse_many_batches_helper(64, 64)
 
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float32, torch.float64)
     def test_pinverse(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
 
@@ -6894,12 +6896,10 @@ class TestTorchDeviceType(TestCase):
             # Testing against definition for pseudo-inverses
             MPI = torch.pinverse(M)
             if M.numel() > 0:
-                self.assertEqual(M, M.matmul(MPI).matmul(M), atol=1e-8, rtol=0, msg='pseudo-inverse condition 1')
-                self.assertEqual(MPI, MPI.matmul(M).matmul(MPI), atol=1e-8, rtol=0, msg='pseudo-inverse condition 2')
-                self.assertEqual(M.matmul(MPI), (M.matmul(MPI)).transpose(-2, -1),
-                                 atol=1e-8, rtol=0, msg='pseudo-inverse condition 3')
-                self.assertEqual(MPI.matmul(M), (MPI.matmul(M)).transpose(-2, -1),
-                                 atol=1e-8, rtol=0, msg='pseudo-inverse condition 4')
+                self.assertEqual(M, M.matmul(MPI).matmul(M))
+                self.assertEqual(MPI, MPI.matmul(M).matmul(MPI))
+                self.assertEqual(M.matmul(MPI), (M.matmul(MPI)).transpose(-2, -1).conj())
+                self.assertEqual(MPI.matmul(M), (MPI.matmul(M)).transpose(-2, -1).conj())
             else:
                 self.assertEqual(M.shape, MPI.shape[:-2] + (MPI.shape[-1], MPI.shape[-2]))
         for sizes in [(5, 5), (3, 5, 5), (3, 7, 5, 5),  # square matrices
@@ -6916,6 +6916,18 @@ class TestTorchDeviceType(TestCase):
             M = fullrank(matsize, *batchdims, dtype=dtype, device=device)
             self.assertEqual(torch.eye(matsize, dtype=dtype, device=device).expand(sizes), M.pinverse().matmul(M),
                              atol=1e-7, rtol=0, msg='pseudo-inverse for invertible matrix')
+
+    # TODO: once there is more support for complex dtypes on GPU, they shall be added to above test
+    # particularly when RuntimeError: _th_bmm_out not supported on CUDAType for ComplexFloat is fixed
+    @unittest.expectedFailure
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.complex64, torch.complex128)
+    def test_pinverse_complex_xfailed(self, device, dtype):
+        size = (3, 5, 5)
+        M = torch.randn(*sizes, dtype=dtype, device=device)
+        MPI = torch.pinverse(M)
+        self.assertEqual(M, M.matmul(MPI).matmul(M))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
