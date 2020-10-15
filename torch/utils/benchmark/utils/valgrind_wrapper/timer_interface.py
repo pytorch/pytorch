@@ -12,13 +12,21 @@ import sys
 import tempfile
 import textwrap
 from types import ModuleType
-from typing import cast, Any, Callable, DefaultDict, Dict, Generator, List, NamedTuple, Optional, Tuple, Union
+from typing import (
+    cast, Any, Callable, DefaultDict, Dict, Generator, List, NamedTuple,
+    Optional, Tuple, Union, TYPE_CHECKING)
 
 import torch
 from torch.utils.benchmark.utils import common
 
 
 __all__ = ["FunctionCount", "FunctionCounts", "CallgrindStats", "CopyIfCallgrind"]
+
+
+if TYPE_CHECKING:
+    CompletedProcessType = subprocess.CompletedProcess[str]
+else:
+    CompletedProcessType = subprocess.CompletedProcess
 
 
 FunctionCount = NamedTuple("FunctionCount", [("count", int), ("function", str)])
@@ -544,7 +552,7 @@ class _ValgrindWrapper(object):
         stat_log = os.path.join(working_dir, "callgrind_stat.txt")
         stdout_stderr_log = os.path.join(working_dir, "stdout_stderr.log")
 
-        def run(args: List[str], **kwargs: Any) -> Tuple[subprocess.CompletedProcess[str], str]:
+        def run(args: List[str], **kwargs: Any) -> Tuple[CompletedProcessType, str]:
             # https://thraxil.org/users/anders/posts/2008/03/13/Subprocess-Hanging-PIPE-is-your-enemy/
             f_stdout_stderr = open(stdout_stderr_log, "wb")
             try:
