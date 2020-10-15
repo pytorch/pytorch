@@ -420,7 +420,7 @@ def convert(
             "observed_to_quantized_custom_module_class": {
                 ObservedCustomModule: QuantizedCustomModule
             }
-         }
+        }
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.convert")
