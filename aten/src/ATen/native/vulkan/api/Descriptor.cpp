@@ -157,7 +157,7 @@ void Descriptor::Set::update(const Item& item) {
 Descriptor::Set& Descriptor::Set::bind(
     const uint32_t binding,
     const VkDescriptorType type,
-    const Resource::Buffer& buffer) {
+    const Resource::Buffer::Object& buffer) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
       "This descriptor set is in an invalid state! "
@@ -169,8 +169,8 @@ Descriptor::Set& Descriptor::Set::bind(
       {
         .buffer = {
           buffer.handle,
-          0u, // buffer.offset,
-          0u, // buffer.range,
+          buffer.offset,
+          buffer.range,
         },
       },
     });
@@ -181,7 +181,7 @@ Descriptor::Set& Descriptor::Set::bind(
 Descriptor::Set& Descriptor::Set::bind(
     const uint32_t binding,
     const VkDescriptorType type,
-    const Resource::Image& image) {
+    const Resource::Image::Object& image) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
       "This descriptor set is in an invalid state! "
@@ -192,9 +192,9 @@ Descriptor::Set& Descriptor::Set::bind(
       type,
       {
         .image = {
-          // image.sampler,
-          // image.view,
-          // image.layout
+          image.sampler,
+          image.view,
+          image.layout
         },
       },
     });

@@ -68,12 +68,12 @@ struct Descriptor final {
     Set& bind(
         uint32_t binding,
         VkDescriptorType type,
-        const Resource::Buffer& buffer);
+        const Resource::Buffer::Object& buffer);
 
     Set& bind(
         uint32_t binding,
         VkDescriptorType type,
-        const Resource::Image& image);
+        const Resource::Image::Object& image);
 
     VkDescriptorSet handle() const;
 
