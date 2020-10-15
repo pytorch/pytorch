@@ -8,6 +8,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/Fill.h>
 
 // Fast pass functions can be directly referenced from outside of ATen/native
 // without dispatching. They are majorly for performance improvement. Keep them
@@ -71,6 +72,8 @@ inline void fill_fast(Tensor& self, Scalar value_scalar) {
 } // namspace
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+DEFINE_DISPATCH(fill_stub);
+
 Tensor& fill_out(Tensor& self, Scalar value) {
   if (self.is_quantized()) {
     at::Tensor out = at::ones(self.sizes()).to(kFloat) * value;
@@ -98,8 +101,6 @@ Tensor& fill_out(Tensor& self, Scalar value) {
   fill_stub(iter.device_type(), iter, value);
   return self;
 }
-
-DEFINE_DISPATCH(fill_stub);
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
   TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
