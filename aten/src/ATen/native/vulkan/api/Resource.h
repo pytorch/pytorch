@@ -11,6 +11,8 @@ namespace vulkan {
 namespace api {
 
 struct Resource final {
+  class Pool;
+
   //
   // Memory
   //
@@ -212,6 +214,19 @@ struct Resource final {
   };
 
   //
+  // Fence
+  //
+
+  struct Fence final {
+    Pool* pool;
+    size_t id;
+
+    operator bool() const;
+    VkFence handle(bool add_to_waitlist = true) const;
+    void wait(uint64_t timeout_nanoseconds = UINT64_MAX);
+  };
+
+  //
   // Pool
   //
 
@@ -222,11 +237,15 @@ struct Resource final {
     Pool& operator=(const Pool&) = delete;
     Pool(Pool&&);
     Pool& operator=(Pool&&);
-    ~Pool() = default;
+    ~Pool();
 
     Buffer buffer(const Buffer::Descriptor& descriptor);
     Image image(const Image::Descriptor& descriptor);
+    Fence fence();
     void purge();
+
+   private:
+    friend struct Fence;
 
    private:
     struct Configuration final {
@@ -235,9 +254,21 @@ struct Resource final {
 
     VkDevice device_;
     Handle<VmaAllocator, void(*)(VmaAllocator)> allocator_;
-    std::vector<Handle<Buffer, void(*)(const Buffer&)>> buffers_;
-    std::vector<Handle<Image, void(*)(const Image&)>> images_;
-    Image::Sampler sampler_;
+
+    struct {
+      std::vector<Handle<Buffer, void(*)(const Buffer&)>> pool;
+    } buffer_;
+
+    struct {
+      std::vector<Handle<Image, void(*)(const Image&)>> pool;
+      Image::Sampler sampler;
+    } image_;
+
+    struct {
+      std::vector<Handle<VkFence, VK_DELETER(Fence)>> pool;
+      mutable std::vector<VkFence> waitlist;
+      size_t in_use;
+    } fence_;
   } pool;
 
   explicit Resource(const GPU& gpu)
@@ -317,6 +348,27 @@ inline Resource::Image::Object::operator bool() const {
 
 inline Resource::Image::operator bool() const {
   return object;
+}
+
+inline Resource::Fence::operator bool() const {
+  return pool;
+}
+
+inline VkFence Resource::Fence::handle(const bool add_to_waitlist) const {
+  if (!pool) {
+    return VK_NULL_HANDLE;
+  }
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      id < pool->fence_.pool.size(),
+      "Invalid Vulkan fence!");
+
+  const VkFence fence = pool->fence_.pool[id].get();
+  if (add_to_waitlist) {
+    pool->fence_.waitlist.push_back(fence);
+  }
+
+  return fence;
 }
 
 } // namespace api
