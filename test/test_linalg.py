@@ -5,10 +5,11 @@ from math import inf, nan, isnan
 from random import randrange
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN, make_tensor)
+    (TestCase, run_tests, slowTest, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN, make_tensor)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCPU, dtypesIfCUDA,
-     onlyCUDA, onlyCPU, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
+     onlyCUDA, onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
+from torch.testing._internal.common_cuda import tf32_on_and_off
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck, gradgradcheck
 
@@ -1057,6 +1058,125 @@ class TestLinalg(TestCase):
         root = torch.rand(*shape, dtype=dtype, device=device, requires_grad=True)
         root = root + torch.eye(shape[-1], dtype=dtype, device=device)
         gradcheck(func, root)
+
+    # NOTE: old_cholesky* tests were moved here from test_torch.py and test_autograd.py
+    @slowTest
+    @skipCUDAIf(True, "See issue #26789.")
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_old_cholesky_batched_many_batches(self, device, dtype):
+        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
+
+        def cholesky_test_helper(n, batchsize, device, upper):
+            A = random_symmetric_pd_matrix(n, batchsize, dtype=dtype, device=device)
+            chol_fact = torch.cholesky(A, upper=upper)
+            if upper:
+                # Correctness check
+                self.assertEqual(A, chol_fact.transpose(-2, -1).matmul(chol_fact))
+                # Upper triangular check
+                self.assertEqual(chol_fact, chol_fact.triu())
+            else:
+                # Correctness check
+                self.assertEqual(A, chol_fact.matmul(chol_fact.transpose(-2, -1)))
+                # Lower triangular check
+                self.assertEqual(chol_fact, chol_fact.tril())
+
+        for upper, batchsize in itertools.product([True, False], [262144, 524288]):
+            cholesky_test_helper(2, batchsize, device, upper)
+
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_old_cholesky_batched(self, device, dtype):
+        from torch.testing._internal.common_utils import \
+            (random_symmetric_pd_matrix,
+             random_fullrank_matrix_distinct_singular_value)
+
+        def cholesky_test_helper(n, batch_dims, upper):
+            # This is a workaround while there is no support for batched complex random_symmetric_pd_matrix
+            if dtype.is_complex:
+                real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+                A_real = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, dtype=real_dtype, device=device)
+                A_imag = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, dtype=real_dtype, device=device)
+                A = A_real + 1j * A_imag
+                # There is no support for complex batched matmul yet
+                matmul_list = []
+                for mat in A.contiguous().view(-1, n, n):
+                    matmul_list.append(mat @ mat.t().conj())
+                A = torch.stack(matmul_list).view(*batch_dims, n, n)
+            else:
+                A = random_symmetric_pd_matrix(n, *batch_dims, dtype=dtype, device=device)
+            cholesky_exp = torch.stack([m.cholesky(upper=upper) for m in A.reshape(-1, n, n)])
+            cholesky_exp = cholesky_exp.reshape_as(A)
+            self.assertEqual(cholesky_exp, torch.cholesky(A, upper=upper))
+
+        for upper, batchsize in itertools.product([True, False], [(3,), (3, 4), (2, 3, 4)]):
+            cholesky_test_helper(3, batchsize, upper)
+
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @tf32_on_and_off(0.01)
+    def test_old_cholesky(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        A = random_hermitian_pd_matrix(10, dtype=dtype, device=device)
+
+        # default Case
+        C = torch.cholesky(A)
+        B = torch.mm(C, C.t().conj())
+        self.assertEqual(A, B, atol=1e-14, rtol=0)
+
+        # test Upper Triangular
+        U = torch.cholesky(A, True)
+        B = torch.mm(U.t().conj(), U)
+        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (upper) did not allow rebuilding the original matrix')
+
+        # test Lower Triangular
+        L = torch.cholesky(A, False)
+        B = torch.mm(L, L.t().conj())
+        self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_old_cholesky_empty(self, device, dtype):
+        def run_test(upper):
+            A = torch.empty(0, 0, dtype=dtype, device=device)
+            chol = torch.cholesky(A, upper)
+            chol_A = torch.matmul(chol, chol.t().conj())
+            self.assertEqual(A, chol_A)
+        for upper in [True, False]:
+            run_test(upper)
+
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_old_cholesky_autograd(self, device, dtype):
+        def func(root, upper):
+            x = 0.5 * (root + root.transpose(-1, -2).conj())
+            return torch.cholesky(x, upper)
+
+        def run_test(upper, dims):
+            root = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
+            root = root + torch.eye(dims[-1])
+
+            gradcheck(func, [root, upper])
+            # TODO: gradgradcheck does not work correctly yet for complex
+            if not dtype.is_complex:
+                gradgradcheck(func, [root, upper])
+
+            root = torch.rand(*dims, dtype=dtype, device=device)
+            root = torch.matmul(root, root.transpose(-1, -2).conj())
+            root.requires_grad_()
+            chol = root.cholesky().sum().backward()
+            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())  # Check the gradient is hermitian
+
+        for upper, dims in itertools.product([True, False], [(3, 3), (4, 3, 2, 2)]):
+            run_test(upper, dims)
 
 instantiate_device_type_tests(TestLinalg, globals())
 
