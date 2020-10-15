@@ -6,6 +6,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, skipCPUIfNoLapack, skipCUDAIfNoMagma, onlyCPU)
+import collections
 
 # Information for generating an alias test
 # NOTE: ending the alias_name with an underscore will interpret the test
@@ -150,12 +151,22 @@ alias_infos = (
     AliasInfo('true_divide_', torch.Tensor.true_divide_, 'div_', torch.Tensor.div_,
               lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.rand(20, device=d) + .1,),
               decorators=(onlyCPU,)),
+    AliasInfo('row_stack', torch.row_stack, 'vstack', torch.vstack,
+              lambda d: ((torch.randn(20, device=d), torch.randn(20, device=d)))),
 )
 
 # Placeholder test class for validating that aliases are correctly
 #   translated when scripted and traced
 class TestOpNormalization(JitTestCase):
     pass
+
+
+# Clone input tensor and sequence of Tensors
+def clone_inp(inp):
+    if isinstance(inp, collections.Sequence):
+        return list(map(torch.clone, inp))
+    else:
+        return inp.clone()
 
 # Generates alias tests and adds them to the specified class (cls)
 def create_alias_tests(cls):
@@ -180,10 +191,18 @@ def create_alias_tests(cls):
                 arg_string = ', '.join((str(arg) for arg in info.get_args(device)))
                 script = fn_template.format(alias_name=info.alias_name, args=arg_string)
             else:
-                fn_template = '''
-                    def _fn(t):
+                is_input_tensor_list = isinstance(info.get_input(device), collections.Sequence)
+                # For sequence of Tensors, annotate the type to be List[Tensor]
+                if is_input_tensor_list:
+                    fn_template = '''
+                    def _fn(t: List[Tensor]):
                         return op(t{args})
-                '''
+                    '''
+                else:
+                    fn_template = '''
+                        def _fn(t):
+                            return op(t{args})
+                    '''
                 arg_string = ", " + ', '.join((str(arg) for arg in info.get_args(device)))
                 script = fn_template.format(args=arg_string)
 
@@ -192,8 +211,8 @@ def create_alias_tests(cls):
 
             # Acquires and checks the graph remaps the alias
             inp = info.get_input(device)
-            scripted(inp.clone())
-            graph = scripted.graph_for(inp.clone())
+            scripted(clone_inp(inp))
+            graph = scripted.graph_for(clone_inp(inp))
             FileCheck().check(info.original_name).check_not(info.alias_name).run(graph)
 
             # Checks that tracing converts aliases
@@ -203,9 +222,9 @@ def create_alias_tests(cls):
             def _fn(t, info=info, args=args):
                 return info.alias_op(t, *args)
 
-            traced = torch.jit.trace(_fn, (inp.clone(),))
-            traced(inp.clone())
-            graph = traced.graph_for(inp.clone())
+            traced = torch.jit.trace(_fn, (clone_inp(inp),))
+            traced(clone_inp(inp))
+            graph = traced.graph_for(clone_inp(inp))
             FileCheck().check(info.original_name).check_not(info.alias_name).run(graph)
 
         # Applies decorators
@@ -223,10 +242,10 @@ def create_alias_tests(cls):
             inp = info.get_input(device)
             args = info.get_args(device)
 
-            alias_input = inp.clone()
+            alias_input = clone_inp(inp)
             alias_result = alias_op(alias_input, *args)
 
-            original_input = inp.clone()
+            original_input = clone_inp(inp)
             original_result = alias_op(original_input, *args)
 
             self.assertEqual(alias_input, original_input, atol=0, rtol=0)
