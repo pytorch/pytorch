@@ -29,6 +29,7 @@ Supports real and complex inputs. Backpropagation for complex inputs is only sup
 
 .. note:: If :attr:`input` is not a Hermitian positive-definite matrix, or if it's a batch of matrices
           and one or more of them is not a Hermitian positive-definite matrix, then a RuntimeError will be thrown.
+          The error message tells the index of the first problematic matrix in the batch.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
