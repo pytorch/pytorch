@@ -71,7 +71,6 @@ class TestIsinstance(JitTestCase):
         def optional_test(x: Any):
             assert torch.jit.isinstance(x, Optional[torch.Tensor])
             assert not torch.jit.isinstance(x, Optional[str])
-            # TODO: successful torch.jit.isinstance makes sets type?
 
         x = torch.ones(3, 3)
         self.checkScript(optional_test, (x,))
@@ -79,8 +78,10 @@ class TestIsinstance(JitTestCase):
     def test_optional_none(self):
         def optional_test_none(x: Any):
             assert torch.jit.isinstance(x, Optional[torch.Tensor])
-            # assert not torch.jit.isinstance(x, Optional[str])
-            # TODO: above line fails in TS interpreter need to investigate
+            # assert torch.jit.isinstance(x, Optional[str])
+            # TODO: above line in eager will evaluate to True while in
+            #       the TS interpreter will evaluate to False as the 
+            #       first torch.jit.isinstance refines the 'None' type 
 
         x = None
         self.checkScript(optional_test_none, (x,))
