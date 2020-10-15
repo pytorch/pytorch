@@ -398,21 +398,6 @@ class TestUnaryUfuncs(TestCase):
 
         self.assertEqual(actual, expected)
 
-    def _compare_out_variant_based_on_device(self, op, input, out):
-        out_dtype = out.dtype
-        if self.device_type == 'cuda':
-            # As input are dynamically casted
-            # in kernel, cast input to out_dtype
-            expected = op(input.to(out_dtype))
-            op(input, out=out)
-            self.assertEqual(out, expected)
-        else:
-            expected = op(input)
-            op(input, out=out)
-            # As output are casted to passed
-            # result dtype on CPU.
-            self.assertEqual(out, expected.to(out_dtype))
-
     def _test_out_arg(self, op, input, output):
         dtype = input.dtype
         out_dtype = output.dtype
@@ -425,16 +410,22 @@ class TestUnaryUfuncs(TestCase):
                 op(input, out=output)
 
     def _test_out_promote_int_to_float_op(self, op, input, output):
+        def compare_out(op, input, out):
+            out_dtype = out.dtype
+            expected = op(input)
+            op(input, out=out)
+            self.assertEqual(out, expected.to(out_dtype))
+
         dtype = input.dtype
         out_dtype = output.dtype
         if out_dtype.is_floating_point and not dtype.is_complex:
-            self._compare_out_variant_based_on_device(op, input, output)
+            compare_out(op, input, output)
         elif out_dtype.is_floating_point and dtype.is_complex:
             # Can't cast complex to float
             with self.assertRaises(RuntimeError):
                 op(input, out=output)
         elif out_dtype.is_complex:
-            self._compare_out_variant_based_on_device(op, input, output)
+            compare_out(op, input, output)
         else:
             # Can't cast to Integral types
             with self.assertRaises(RuntimeError):
