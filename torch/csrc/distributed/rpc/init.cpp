@@ -31,7 +31,7 @@ constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-PyObject* rpc_init(PyObject* /* unused */) {
+PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   auto rpc_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
   if (!rpc_module) {
@@ -455,6 +455,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
               ProcessGroupAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "get_worker_info",
+          (const WorkerInfo& (ProcessGroupAgent::*)(worker_id_t id) const) &
+              ProcessGroupAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "get_worker_infos",
           (std::vector<WorkerInfo>(ProcessGroupAgent::*)() const) &
               ProcessGroupAgent::getWorkerInfos,
@@ -483,12 +488,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
               optional<std::vector<std::string>>,
               optional<std::vector<std::string>>,
               float,
-              std::string>(),
+              std::string,
+              std::unordered_map<std::string, tensorpipe::DeviceMap>>(),
           py::arg("num_worker_threads") = kDefaultNumWorkerThreads,
           py::arg("_transports") = optional<std::vector<std::string>>(),
           py::arg("_channels") = optional<std::vector<std::string>>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
-          py::arg("init_method") = kDefaultInitMethod)
+          py::arg("init_method") = kDefaultInitMethod,
+          py::arg("device_maps") =
+              std::unordered_map<std::string, tensorpipe::DeviceMap>())
       .def_readwrite(
           "num_worker_threads",
           &TensorPipeRpcBackendOptions::numWorkerThreads,
@@ -496,7 +504,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
               The number of threads in the thread-pool used by
               :class:`~torch.distributed.rpc.TensorPipeAgent` to execute
               requests.
-          )");
+          )")
+      .def_readwrite(
+          "device_maps",
+          &TensorPipeRpcBackendOptions::deviceMaps,
+          R"(The device map locations.)")
+      .def("set_device_map", &TensorPipeRpcBackendOptions::setDeviceMap);
 
   module.attr("_DEFAULT_NUM_WORKER_THREADS") =
       py::cast(kDefaultNumWorkerThreads);
@@ -540,6 +553,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def(
           "get_worker_info",
           (const WorkerInfo& (TensorPipeAgent::*)(const std::string&)const) &
+              TensorPipeAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_info",
+          (const WorkerInfo& (TensorPipeAgent::*)(worker_id_t id) const) &
               TensorPipeAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -769,7 +787,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 } // namespace
 
 static PyMethodDef methods[] = { // NOLINT
-    {"_rpc_init", (PyCFunction)rpc_init, METH_NOARGS, nullptr},
+    {"_rpc_init", rpc_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {
