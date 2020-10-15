@@ -37,6 +37,12 @@ executors:
       resource_class: windows.medium
       image: windows-server-2019-vs2019:stable
       shell: bash.exe
+
+  windows-medium-cpu-with-nvidia-cuda-cmd:
+    machine:
+      resource_class: windows.medium
+      image: windows-server-2019-vs2019:stable
+      shell: cmd.exe
 commands:
 
   calculate_docker_image_tag:
@@ -756,11 +762,16 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Install Azure cli
-          no_output_timeout: 30m
+          name: Download Azure cli
+          no_output_timeout: 3m
           command: |
-            pip install azure-cli
-            az login
+            curl -L https://azurecliprod.blob.core.windows.net/msi/azure-cli-2.13.0.msi
+      - run:
+          name: Install Azure cli
+          no_output_timeout: 3m
+          command: |
+            start /wait msiexec /i azure-cli-2.13.0.msi /quiet /qn /norestart /log t1.log
+          shell: cmd.exe
 
   pytorch_windows_test:
     <<: *pytorch_windows_params
