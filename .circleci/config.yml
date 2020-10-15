@@ -759,7 +759,7 @@ jobs:
           name: Install Azure cli
           no_output_timeout: 30m
           command: |
-            curl -L https://aka.ms/InstallAzureCli | bash
+            pip install azure-cli
             az login
 
   pytorch_windows_test:
