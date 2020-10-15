@@ -1223,7 +1223,7 @@ tensor_split(input, indices_or_sections, dim=0) -> List of Tensors
 
 Splits a tensor into multiple sub-tensors, all of which are views of :attr:`input`,
 along dimension :attr:`dim` according to the indices or number of sections specified
-by :attr:`indices_or_sections. This function is based on NumPy's
+by :attr:`indices_or_sections`. This function is based on NumPy's
 :func:`numpy.array_split`.
 
 Args:
@@ -1239,11 +1239,8 @@ Args:
 
         If :attr:`indices_or_sections` is a list of ints, :attr:`input` is split along
         dimension :attr:`dim` at each of the indices in the list. For instance,
-        :code:`[2, 3]` and :code:`dim=0` would result in the following tensors:
-
-            - :code:`input[:2]`
-            - :code:`input[2:3]`
-            - :code:`input[3:]`
+        :code:`indices_or_sections=[2, 3]` and :code:`dim=0` would result in the tensors
+        :code:`input[:2]`, :code:`input[2:3]`, and :code:`input[3:]`.
 
     dim (int, optional): dimension along which to split the tensor. Default: ``0``
 

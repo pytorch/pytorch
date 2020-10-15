@@ -1,10 +1,5 @@
 
-#include "c10d_frontend.h"
-#include <c10/util/Exception.h>
-#include <c10d/PrefixStore.hpp>
-#include <c10d/Utils.hpp>
-#include <stdexcept>
-#include <utility>
+#include <torch/csrc/distributed/c10d/c10d_frontend.h>
 
 namespace c10d {
 
