@@ -352,9 +352,13 @@ void DumpGraph(NNGraph* g, const std::string& fname) {
   };
 
   std::ofstream out(fname.c_str());
-  out << nom::converters::convertToDotString(g, nnprinter);
-  out.close();
+  if (out) {
+    out << nom::converters::convertToDotString(g, nnprinter);
+  } else {
+    LOG(ERROR) << "Cannot create nomnigraph dump file: " << fname;
+  }
 }
+
 caffe2::NetDef OptimizeForBackend(
     caffe2::NetDef& net,
     std::function<bool(const caffe2::OperatorDef&)> supports,
