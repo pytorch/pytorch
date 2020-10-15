@@ -108,9 +108,6 @@ class LazyModuleMixin:
     >>> # attaches an optimizer, since parameters can now be used as usual
     >>> optim = torch.optim.SGD(mlp.parameters(), lr=0.01)
 
-    Note that lazy modules cannot validate if the shape is correct during
-    deserialization when loading an initialized parameter into an uninitialized one.
-
     A final caveat when using lazy modules is that the order of initialization of a network's
     parameters may change, since the lazy modules are always initialized after other modules.
     This can cause the parameters of a network using lazy modules to be initialized differently
@@ -118,6 +115,50 @@ class LazyModuleMixin:
     For example, if the LazyMLP class defined above had a :class:`torch.nn.LazyLinear` module
     first and then a regular :class:`torch.nn.Linear` second, the second module would be
     initialized on construction and the first module would be initialized during the first dry run."
+
+    Lazy modules can be serialized with a state dict like other modules. For example:
+
+    >>> lazy_mlp = LazyMLP()
+    >>> # The state dict shows the uninitialized parameters
+    >>> lazy_mlp.state_dict()
+    OrderedDict([('fc1.weight', Uninitialized parameter),
+                 ('fc1.bias',
+                  tensor([-1.8832e+25,  4.5636e-41, -1.8832e+25,  4.5636e-41, -6.1598e-30,
+                           4.5637e-41, -1.8788e+22,  4.5636e-41, -2.0042e-31,  4.5637e-41])),
+                 ('fc2.weight', Uninitialized parameter),
+                 ('fc2.bias', tensor([0.0019]))])
+
+    Lazy modules can also load regular :class:`torch.nn.Parameter`s,
+    which replace their :class:`torch.nn.UninitializedParameter`s:
+
+    >>> full_mlp = LazyMLP()
+    >>> # Dry run to initialize another module
+    >>> full_mlp.forward(torch.ones(10, 1))
+    >>> # Load an initialized state into a lazy module
+    >>> lazy_mlp.load_state_dict(full_mlp.state_dict())
+    >>> # The state dict now holds valid values
+    >>> lazy_mlp.state_dict()
+    OrderedDict([('fc1.weight',
+                  tensor([[-0.3837],
+                          [ 0.0907],
+                          [ 0.6708],
+                          [-0.5223],
+                          [-0.9028],
+                          [ 0.2851],
+                          [-0.4537],
+                          [ 0.6813],
+                          [ 0.5766],
+                          [-0.8678]])),
+                 ('fc1.bias',
+                  tensor([-1.8832e+25,  4.5636e-41, -1.8832e+25,  4.5636e-41, -6.1598e-30,
+                           4.5637e-41, -1.8788e+22,  4.5636e-41, -2.0042e-31,  4.5637e-41])),
+                 ('fc2.weight',
+                  tensor([[ 0.1320,  0.2938,  0.0679,  0.2793,  0.1088, -0.1795, -0.2301,  0.2807,
+                            0.2479,  0.1091]])),
+                 ('fc2.bias', tensor([0.0019]))])
+
+    Note, however, that lazy modules cannot validate that the shape of parameters they load is correct.
+
 
     .. note:: A `LazyModule`, or a module containing a `LazyModule` requires an explicit
     dummy forward call in the following scenarios.
