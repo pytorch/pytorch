@@ -31,45 +31,16 @@ class Context final {
   Context& operator=(Context&&) = default;
   ~Context() = default;
 
-  inline GPU gpu() {
-    // A GPU is simply a (physical device, logical device, device queue) trio.
-    return {
-      &adapter_,
-      device(),
-      queue(),
-    };
-  }
-
-  inline Command& command() {
-    return command_;
-  }
-
-  inline Shader& shader() {
-    return shader_;
-  }
-
-  inline Pipeline& pipeline() {
-    return pipeline_;
-  }
-
-  inline Descriptor& descriptor() {
-    return descriptor_;
-  }
-
-  inline Resource& resource() {
-    return resource_;
-  }
+  GPU gpu();
+  Command& command();
+  Shader& shader();
+  Pipeline& pipeline();
+  Descriptor& descriptor();
+  Resource& resource();
 
  private:
-  inline VkDevice device() {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_);
-    return device_.get();
-  }
-
-  inline VkQueue queue() {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(queue_);
-    return queue_;
-  }
+  VkDevice device();
+  VkQueue queue();
 
  private:
   class Deleter final {
@@ -90,6 +61,49 @@ class Context final {
 };
 
 Context* context();
+
+//
+// Impl
+//
+
+inline GPU Context::gpu() {
+  // A GPU is simply a (physical device, logical device, device queue) trio.
+  return {
+    &adapter_,
+    device(),
+    queue(),
+  };
+}
+
+inline Command& Context::command() {
+  return command_;
+}
+
+inline Shader& Context::shader() {
+  return shader_;
+}
+
+inline Pipeline& Context::pipeline() {
+  return pipeline_;
+}
+
+inline Descriptor& Context::descriptor() {
+  return descriptor_;
+}
+
+inline Resource& Context::resource() {
+  return resource_;
+}
+
+inline VkDevice Context::device() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_);
+  return device_.get();
+}
+
+inline VkQueue Context::queue() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(queue_);
+  return queue_;
+}
 
 } // namespace api
 } // namespace vulkan
