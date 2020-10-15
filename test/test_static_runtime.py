@@ -1,7 +1,6 @@
+import numpy as np
 import torch
 from torch import nn
-import numpy as np
-
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 
@@ -13,8 +12,19 @@ class StaticRuntime:
         else:
             self.static_runtime = torch._C._jit_to_static_runtime(scripted.graph)
 
-    def __call__(self, *inps):
-        return self.static_runtime.run(inps)
+    def __call__(self, *args, **kwargs):
+        if not kwargs:
+            return self.static_runtime.run(args)
+        else:
+            return self.static_runtime.run(args, kwargs)
+
+    def benchmark(self, args, kwargs, warmup_runs, main_runs):
+        self.static_runtime.benchmark(args, kwargs, warmup_runs, main_runs)
+
+    def benchmark_individual_ops(self, args, kwargs, warmup_runs, main_runs):
+        return self.static_runtime.benchmark_individual_ops(
+            args, kwargs, warmup_runs, main_runs
+        )
 
 
 def linear_shim(input, weight, bias=None):
@@ -117,8 +127,33 @@ class TestStaticRuntime(TestCase):
 
         attention_a = StaticRuntime(attention)
         o_test = attention_a(src, src, src, src_mask)
+        o_test_kw = attention_a(src, src, value=src, mask=src_mask)
         for a, b in zip(o_ref, o_test):
             torch.testing.assert_allclose(a, b)
+        for a, b in zip(o_ref, o_test_kw):
+            torch.testing.assert_allclose(a, b)
+
+    def test_multihead_attention_layer_benchmark(self):
+        HID_DIM = 256
+        QUERY_LEN = 8
+        BATCH_SIZE = 128
+        LAYERS = 3
+        HEADS = 8
+        DROPOUT = 0.1
+        device = torch.device("cpu")
+        attention = MultiHeadAttentionLayer(HID_DIM, HEADS, DROPOUT, device).to(device)
+        with torch.no_grad():
+            src = torch.randn(BATCH_SIZE, QUERY_LEN, HID_DIM).to(device)
+        src_mask = (src > 0)[:, :, 0].unsqueeze(1).unsqueeze(2).to(device)
+
+        attention.eval()
+        attention = torch.jit.script(attention)
+        attention_a = StaticRuntime(attention)
+
+        attention_a.benchmark([src, src, src, src_mask], {}, 10, 10)
+        metrics = attention_a.benchmark_individual_ops(
+            [src, src, src, src_mask], {}, 10, 10
+        )
 
     def test_mlp(self):
         # Arguments taken from benchmark script, ./bench/dlrm_s_benchmark.sh

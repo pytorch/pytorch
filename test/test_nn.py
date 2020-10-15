@@ -2954,6 +2954,23 @@ class TestNN(NNTestCase):
         expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])
         self.assertEqual(F.threshold(x, 0, 99), expected)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_embedding_max_norm_unsorted_repeating_indices(self):
+        def create_embedding(device):
+            # Seed RNG so we get the same Embedding each time
+            torch.manual_seed(0)
+            return torch.nn.Embedding(
+                num_embeddings=20,
+                embedding_dim=64,
+                max_norm=1.0).to(device)
+
+        ix = torch.arange(2, device='cpu', dtype=torch.long).repeat(2000)
+        out_cpu = create_embedding('cpu')(ix)
+
+        ix = ix.to('cuda')
+        out = create_embedding('cuda')(ix)
+        self.assertEqual(out.cpu(), out_cpu)
+
     def test_embedding_sparse_basic(self):
         embedding = nn.Embedding(10, 20, sparse=True)
         input = torch.tensor([[0, 2, 4, 5], [4, 3, 0, 9]], dtype=torch.long)
@@ -10129,6 +10146,34 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp)
+
+    @onlyOnCPUAndCUDA
+    def test_ReplicationPad_empty(self, device):
+        for mod, inp in [
+                (torch.nn.ReplicationPad1d(3), torch.randn(0, 3, 10, device=device)),
+                (torch.nn.ReplicationPad2d(3), torch.randn(0, 3, 10, 10, device=device)),
+                (torch.nn.ReplicationPad3d(3), torch.randn(0, 3, 10, 10, 10, device=device))]:
+            self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(NotImplementedError, 'Only 3D'):
+            mod = torch.nn.ReplicationPad1d(2)
+            inp = torch.randn(3, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected 2D or 3D'):
+            mod = torch.nn.ReplicationPad1d(2)
+            inp = torch.randn(3, 0, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected 3D or 4D'):
+            mod = torch.nn.ReplicationPad2d((2, 2, 2, 2))
+            inp = torch.randn(43, 0, 10, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected 4D or 5D'):
+            mod = torch.nn.ReplicationPad3d((2, 2, 2, 2, 2, 2))
+            inp = torch.randn(3, 0, 10, 10, 10, device=device)
+            mod(inp)
 
     @onlyOnCPUAndCUDA
     def test_ReflectionPad_empty(self, device):
