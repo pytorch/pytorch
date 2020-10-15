@@ -13853,10 +13853,18 @@ class TestTorchDeviceType(TestCase):
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_cuda_tensor_pow_scalar_tensor(self, device):
         cuda_tensors = [torch.randn((3, 3), device=device), torch.tensor(3.0, device=device)]
-        scalar_tensors = [torch.tensor(5.0), torch.tensor(-3), torch.tensor(1)]
-        for base in cuda_tensors:
-            for exp in scalar_tensors:
-                self._test_pow(base, exp)
+        scalar_tensors = [torch.tensor(5.0, device='cpu'), torch.tensor(-3), torch.tensor(1)]
+        for base, exp in product(cuda_tensors, scalar_tensors):
+            self._test_pow(base, exp)
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_cpu_tensor_pow_cuda_scalar_tensor(self, device):
+        cpu_tensors = [torch.randn((3, 3), device='cpu'), torch.tensor(3.0, device='cpu')]
+        cuda_tensors = [torch.tensor(5.0, device='cuda'), torch.tensor(-3, device='cuda')]
+        for base, exp in product(cpu_tensors, cuda_tensors):
+            regex = 'Expected all tensors to be on the same device, but found at least two devices, cuda.* and cpu!'
+            self.assertRaisesRegex(RuntimeError, regex, torch.pow, base, exp)
 
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
