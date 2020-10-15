@@ -110,6 +110,10 @@ c10::optional<Value*> tryInsertConstant(
     ss << val.toDevice();
     n->s_(attr::value, ss.str());
     n->output()->setType(DeviceObjType::get());
+  } else if (val.isStream()) {
+    auto stream = val.toStream();
+    n->i_(attr::value, stream.pack());
+    n->output()->setType(StreamObjType::get());
   } else if (val.isNone()) {
     n->output()->setType(NoneType::get());
   } else if (val.isTuple()) {
@@ -179,6 +183,9 @@ c10::optional<IValue> toIValue(const Value* v) {
   } else if (type == DeviceObjType::get()) {
     auto d = c10::Device(node->s(attr::value));
     return d;
+  } else if (type == StreamObjType::get()) {
+    auto s = c10::Stream::unpack(node->i(attr::value));
+    return s;
   } else if (node->mustBeNone()) {
     return IValue();
   } else if (type->cast<EnumType>()) {
