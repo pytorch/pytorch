@@ -7,6 +7,7 @@ from .node import Argument
 from .graph import Graph
 from .graph_module import GraphModule
 from .proxy import Proxy, _create_proxy, TracerBase
+from .experimental.rewriter import AST_Rewriter
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -119,7 +120,7 @@ class Tracer(TracerBase):
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
-    def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
+    def trace(self, root: Union[torch.nn.Module, Callable], rewrite: bool = True) -> Graph:
         if isinstance(root, torch.nn.Module):
             self.root = root
             fn = type(root).forward
@@ -130,6 +131,9 @@ class Tracer(TracerBase):
         self.graph = Graph()
 
         assert isinstance(fn, FunctionType)
+        # experimental
+        if rewrite:
+            fn = AST_Rewriter().rewrite(fn)
         co = fn.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
         names_iter = iter(co.co_varnames)
@@ -162,7 +166,6 @@ class Tracer(TracerBase):
             else:
                 return _create_proxy(self, 'call_module', module_qualified_name, args, kwargs)
         try:
-            torch.nn.Module.__call__ = module_call_wrapper
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
         finally:
