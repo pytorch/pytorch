@@ -19666,6 +19666,17 @@ class TestViewOps(TestCase):
         self.assertEqual(res.shape, torch.Size([2]))
 
     @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_view_tensor_split(self, device, dtype):
+        a = make_tensor((40, 30), device, dtype, low=-9, high=9)
+        a_split_dim0 = a.tensor_split(7, 0)
+        for a_split_dim0_tensor in a_split_dim0:
+            self.assertTrue(self.is_view_of(a, a_split_dim0_tensor))
+        a_split_dim1 = a.tensor_split(7, 1)
+        for a_split_dim1_tensor in a_split_dim1:
+            self.assertTrue(self.is_view_of(a, a_split_dim1_tensor))
+
+    @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_real_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
