@@ -13,6 +13,10 @@ from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig, \
     get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic
+from torch.quantization import (
+    is_custom_module_class,
+    is_observed_custom_module,
+)
 from torch.quantization.quantization_mappings import (
     get_dynamic_quant_module_mappings,
     get_qconfig_propagation_list,
@@ -337,15 +341,12 @@ class QuantizationTestCase(TestCase):
         self.assertTrue(hasattr(module, 'quant'))
         self.assertTrue(hasattr(module, 'dequant'))
 
-    def checkObservers(self, module, propagate_qconfig_list=None, prepare_custom_config_dict=None):
+    def checkObservers(self, module, propagate_qconfig_list=None):
         r"""Checks the module or module's leaf descendants
             have observers in preperation for quantization
         """
         if propagate_qconfig_list is None:
             propagate_qconfig_list = get_qconfig_propagation_list()
-        if prepare_custom_config_dict is None:
-            prepare_custom_config_dict = {}
-        float_to_observed_module_class_mapping = prepare_custom_config_dict.get("float_to_observed_custom_module_class", {})
 
         # check if a module is a leaf module, ignoring activation_post_process attribute
         def is_leaf_module(module):
@@ -355,18 +356,18 @@ class QuantizationTestCase(TestCase):
                     submodule_name_count += 1
             return submodule_name_count == 0
 
-        if hasattr(module, 'qconfig') and module.qconfig is not None and \
-           ((is_leaf_module(module) and not isinstance(module, torch.nn.Sequential)
-            and type(module) in propagate_qconfig_list) or
-           type(module) in float_to_observed_module_class_mapping.keys()):
+        if (hasattr(module, 'qconfig') and module.qconfig is not None and
+           is_leaf_module(module) and not isinstance(module, torch.nn.Sequential)
+           and type(module) in propagate_qconfig_list) or \
+           is_custom_module_class(type(module)):
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
         # we don't need to check observers for child modules of the
         # qat modules
         if type(module) not in get_qat_module_mappings().values() and \
-           type(module) not in float_to_observed_module_class_mapping.values():
+           not is_observed_custom_module(module):
             for child in module.children():
-                self.checkObservers(child, propagate_qconfig_list, prepare_custom_config_dict)
+                self.checkObservers(child)
 
     def checkQuantDequant(self, mod):
         r"""Checks that mod has nn.Quantize and
