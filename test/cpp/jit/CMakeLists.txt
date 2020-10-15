@@ -97,8 +97,6 @@ elseif(USE_ROCM)
     ${PYTORCH_HIP_HCC_LIBRARIES}
     ${TORCH_CUDA_LIBRARIES})
 
-  target_link_libraries(test_jit PRIVATE caffe2_gpu)
-
   target_compile_definitions(test_jit PRIVATE USE_ROCM)
 endif()
 
