@@ -5397,8 +5397,8 @@ class TestTorchDeviceType(TestCase):
             return value
 
         try:
-            expected = torch.from_numpy(
-                np.power(to_np(base), to_np(np_exponent)))
+            np_res = np.power(to_np(base), to_np(np_exponent))
+            expected = torch.from_numpy(np_res) if isinstance(np_res, np.ndarray) else torch.tensor(np_res, dtype=base.dtype)
         except ValueError as e:
             err_msg = "Integers to negative integer powers are not allowed."
             self.assertEqual(str(e), err_msg)
@@ -13861,10 +13861,19 @@ class TestTorchDeviceType(TestCase):
     @onlyCUDA
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_cuda_tensor_pow_scalar_tensor(self, device):
-        cuda_tensor = torch.randn((3, 3), device=device)
-        scalar_tensors = [torch.tensor(5), torch.tensor(-3), torch.tensor(1)]
-        for exp in scalar_tensors:
-            self._test_pow(cuda_tensor, exp)
+        cuda_tensors = [torch.randn((3, 3), device=device), torch.tensor(3.0, device=device)]
+        scalar_tensors = [torch.tensor(5.0, device='cpu'), torch.tensor(-3), torch.tensor(1)]
+        for base, exp in product(cuda_tensors, scalar_tensors):
+            self._test_pow(base, exp)
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_cpu_tensor_pow_cuda_scalar_tensor(self, device):
+        cpu_tensors = [torch.randn((3, 3), device='cpu'), torch.tensor(3.0, device='cpu')]
+        cuda_tensors = [torch.tensor(5.0, device='cuda'), torch.tensor(-3, device='cuda')]
+        for base, exp in product(cpu_tensors, cuda_tensors):
+            regex = 'Expected all tensors to be on the same device, but found at least two devices, cuda.* and cpu!'
+            self.assertRaisesRegex(RuntimeError, regex, torch.pow, base, exp)
 
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
