@@ -994,6 +994,14 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(np.linalg.LinAlgError, r'Matrix is not positive definite'):
             np.linalg.cholesky(A.cpu().numpy())
 
+        # if at least one matrix in the batch is singular, an error should be raised
+        A = torch.eye(3, 3, dtype=dtype, device=device)
+        A = A.reshape((1, 3, 3))
+        A = A.repeat(5, 1, 1)
+        A[4, -1, -1] = 0  # Now A[4] is singular
+        with self.assertRaisesRegex(RuntimeError, r'For batch 4: U\(3,3\) is zero, singular U\.'):
+            torch.linalg.cholesky(A)
+
     # TODO: once there is more support for complex dtypes on GPU, they shall be added to above test
     # particularly when RuntimeError: _th_bmm_out not supported on CUDAType for ComplexFloat is fixed
     @unittest.expectedFailure
