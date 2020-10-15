@@ -9786,6 +9786,15 @@ class TestTorchDeviceType(TestCase):
         guess_rank, actual_rank, size, batches = 2, 2, (17, 4), ()
         run_subtest(guess_rank, actual_rank, size, batches, device, jitted)
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.cfloat)
+    def test_svd_complex(self, device, dtype):
+        t = torch.randn((10, 10), dtype=dtype, device=device)
+        U, S, V = torch.svd(t, some=False)
+        t2 = U @ torch.diag(S).type(dtype) @ V.T.conj()
+        self.assertEqual(t, t2)
+
     def test_lerp(self, device):
         start_end_shapes = [(), (5,), (5, 5), (5, 5, 5)]
         for shapes in product(start_end_shapes, start_end_shapes):

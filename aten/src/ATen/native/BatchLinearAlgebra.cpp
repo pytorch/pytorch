@@ -1004,7 +1004,8 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
 #endif
 }
 
-std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some, bool compute_uv) {
+std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some,
+                                                   bool compute_uv, bool apply_conj) {
   std::vector<int64_t> infos(batchCount(self), 0);
   int64_t m = self.size(-2), n = self.size(-1);
   int64_t k = std::min(m, n);
@@ -1041,21 +1042,25 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
   }
   // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
   VT_working_copy.transpose_(-2, -1);
+  if (VT_working_copy.is_complex() && apply_conj)
+    VT_working_copy = VT_working_copy.conj();
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
 std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compute_uv) {
   TORCH_CHECK(self.dim() >= 2,
               "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  return at::_svd_helper(self, some, compute_uv);
+  bool apply_conj = true;
+  return at::_svd_helper(self, some, compute_uv, apply_conj);
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& V,
                                               const Tensor& self, bool some, bool compute_uv) {
   TORCH_CHECK(self.dim() >= 2,
               "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  bool apply_conj = true;
   Tensor U_tmp, S_tmp, V_tmp;
-  std::tie(U_tmp, S_tmp, V_tmp) = at::_svd_helper(self, some, compute_uv);
+  std::tie(U_tmp, S_tmp, V_tmp) = at::_svd_helper(self, some, compute_uv, apply_conj);
   U.resize_as_(U_tmp).copy_(U_tmp);
   S.resize_as_(S_tmp).copy_(S_tmp);
   V.resize_as_(V_tmp).copy_(V_tmp);
@@ -1075,9 +1080,13 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& V,
 */
 
 std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matrices, bool compute_uv) {
+  TORCH_CHECK(self.dim() >= 2,
+              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+
     bool some = !full_matrices;
+    bool apply_conj = false;
     Tensor U, S, V;
-    std::tie(U, S, V) = at::svd(self, some, compute_uv);
+    std::tie(U, S, V) = at::_svd_helper(self, some, compute_uv, apply_conj);
     if (compute_uv) {
         Tensor VT = V.transpose(-2, -1);
         return std::make_tuple(U, S, VT);
@@ -1092,8 +1101,13 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matr
 // support out versions of torch.linalg.*?
 std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tensor& V,
                                                      const Tensor& self, bool full_matrices, bool compute_uv) {
+  TORCH_CHECK(self.dim() >= 2,
+              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+
+  bool some = !full_matrices;
+  bool apply_conj = false;
   Tensor U_tmp, S_tmp, V_tmp;
-  std::tie(U_tmp, S_tmp, V_tmp) = at::svd(self, full_matrices, compute_uv);
+  std::tie(U_tmp, S_tmp, V_tmp) = at::_svd_helper(self, full_matrices, compute_uv, apply_conj);
   U.resize_as_(U_tmp).copy_(U_tmp);
   S.resize_as_(S_tmp).copy_(S_tmp);
   V.resize_as_(V_tmp).copy_(V_tmp);

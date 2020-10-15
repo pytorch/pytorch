@@ -5547,7 +5547,7 @@
   use_c10_dispatcher: full
   variants: method, function
 
-- func: _svd_helper(Tensor self, bool some, bool compute_uv) -> (Tensor, Tensor, Tensor)
+- func: _svd_helper(Tensor self, bool some, bool compute_uv, bool apply_conj) -> (Tensor U, Tensor S, Tensor V)
   use_c10_dispatcher: full
   variants: function
   dispatch:
