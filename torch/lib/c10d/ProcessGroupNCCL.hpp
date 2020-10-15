@@ -546,14 +546,6 @@ class ProcessGroupNCCL : public ProcessGroup {
   // communicators associated with timed out collectives.
   void abortTimedOutCollectives(std::unordered_set<std::string>& abortedCommIds);
 
-  // Reads the NCCL_BLOCKING_WAIT environment variable and sets blockingWait_
-  // accordingly.
-  void parseNcclBlockingWait();
-
-  // Reads the NCCL_ASYNC_ERROR_HANDLING environment variable and sets
-  // asyncErrorHandling_ accordingly.
-  void parseNcclAsyncErrorHandling();
-
   void workCleanupLoop();
 
  protected:
