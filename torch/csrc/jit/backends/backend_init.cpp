@@ -8,10 +8,30 @@
 namespace torch {
 namespace jit {
 
+// Check whether all modules in the hierarchy rooted at \p mod have unique
+// types.
+bool allModuleTypesUnique(Module& mod) {
+  // Maintain a set of TypePtrs and return false at the first sight of a
+  // repeated type.
+  std::unordered_set<TypePtr> types;
+
+  // Iterate over all modules in the hierarchy, including the root.
+  for (auto module : mod.modules()) {
+    auto module_type = module.type();
+    if (types.count(module_type) > 0) {
+      return false;
+    }
+
+    types.insert(module_type);
+  }
+
+  return true;
+}
+
 // Selectively lower \p mod to a backend. \p to_backend
 // is called to lower modules. \p modules_to_lower contains
 // qualified names of submodules of \p mod that should be lowered.
-void to_backend_selective_impl(
+void toBackendSelectiveImpl(
     Module& mod,
     py::function to_backend,
     const std::vector<std::string>& modules_to_lower) {
@@ -326,15 +346,19 @@ void initJitBackendBindings(PyObject* module) {
           const std::vector<std::string>& modules_to_lower) {
         if (auto original_module =
                 as_module(py::cast<py::object>(orig_module))) {
-          // Clone the original module so that type modifications don't
-          // interfere with the changes that to_backend_selective_impl will
-          // make.
+          // Check that the original module hierarchy has unique types for every
+          // Module.
           Module& mod = original_module.value();
-          to_backend_selective_impl(mod, to_backend, modules_to_lower);
-          // Wrap the result in a RecursiveScriptModule because that's what the
-          // caller passed in.
-          return py::module::import("torch.jit._recursive")
-              .attr("wrap_cpp_module")(mod);
+          if (allModuleTypesUnique(mod)) {
+            toBackendSelectiveImpl(mod, to_backend, modules_to_lower);
+            // Wrap the result in a RecursiveScriptModule because that's what
+            // the caller passed in.
+            return py::module::import("torch.jit._recursive")
+                .attr("wrap_cpp_module")(mod);
+          } else {
+            throw py::cast_error(c10::str(
+                "Selective lowering is only supported for module hierarchies with unique types for each Module"));
+          }
         }
 
         throw py::cast_error(c10::str(

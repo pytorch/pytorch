@@ -104,11 +104,30 @@ class JitBackendTestCase(JitTestCase):
         """
         self.lowered_module = self.getExportImportCopy(self.lowered_module)
 
+    def test_execution(self):
+        """
+        Stub for correctness tests.
+        """
+        pass
+
+    def test_save_load(self):
+        """
+        Stub for serialization tests.
+        """
+        pass
+
+    def test_errors(self):
+        """
+        Stub for testing error checking.
+        """
+        pass
+
 
 class BasicModuleTest(JitBackendTestCase):
     """
     Tests for BasicModule.
     """
+
     def setUp(self):
         super().setUp()
         # Create Python, JIT and backend versions of BasicModule.
@@ -207,16 +226,17 @@ class SelectiveLoweringTest(JitBackendTestCase):
     Tests for the selective lowering API.
     """
     class OuterModule(torch.nn.Module):
-        def __init__(self, submodule, other):
+        def __init__(self, sub1, sub2, other):
             super().__init__()
-            self.submodule = submodule
+            self.sub1 = sub1
+            self.sub2 = sub2
             self.other = other
 
         def forward(self, x, y):
             # Call the module that will be lowered directly to test
             # type remapping in modules that are not its parent.
-            a, b = self.submodule.submodule.forward(x, y)
-            c, d = self.submodule.forward(x, y)
+            a, b = self.sub1.submodule.forward(x, y)
+            c, d = self.sub2.forward(x, y)
             e, f = self.other.forward(x, y)
             return a + c + e, b + d + f
 
@@ -236,17 +256,20 @@ class SelectiveLoweringTest(JitBackendTestCase):
         def script_without_type_sharing(mod):
             return torch.jit._recursive.create_script_module(mod, torch.jit._recursive.infer_methods_to_compile, share_types=False)
         # Create Python, JIT and backend versions of a hierarchy that looks like this:
-        #                            OuterModule
+        #                 --------- OuterModule --------
+        #                 |              |              |
+        #           MiddleModule    MiddleModule   MiddleModule
+        #                |               |              |
+        #           BasicModule     BasicModule    BasicModule
         #
-        #           MiddleModule                    MiddleModule
-        #
-        #           BasicModule                     BasicModule
-        #
-        # One BasicModule will be lowered and the other will not.
-        self.module = OuterModule(MiddleModule(BasicModule()), MiddleModule(BasicModule()))
-        self.scripted_module = script_without_type_sharing(OuterModule(MiddleModule(BasicModule()), MiddleModule(BasicModule())))
-        self.lowered_module = script_without_type_sharing(OuterModule(MiddleModule(BasicModule()), MiddleModule(BasicModule())))
-        self.lowered_module = to_test_backend_selective(self.lowered_module, {"forward": ""}, ["submodule.submodule"])
+        # Two BasicModules will be lowered and the third will not.
+        self.module = OuterModule(MiddleModule(BasicModule()), MiddleModule(BasicModule()), MiddleModule(BasicModule()))
+        self.scripted_module = script_without_type_sharing(OuterModule(MiddleModule(
+            BasicModule()), MiddleModule(BasicModule()), MiddleModule(BasicModule())))
+        self.lowered_module = script_without_type_sharing(OuterModule(MiddleModule(
+            BasicModule()), MiddleModule(BasicModule()), MiddleModule(BasicModule())))
+        self.lowered_module = to_test_backend_selective(self.lowered_module, {"forward": ""}, [
+                                                        "sub1.submodule", "sub2.submodule"])
 
     def test_execution(self):
         input = torch.randn(5)
@@ -277,29 +300,45 @@ class SelectiveLoweringTest(JitBackendTestCase):
             .check("test_backendLoweredModule") \
             .run(self.lowered_module.graph)
 
-        # Check that self.lowered_module.submodule was not lowered but that BasicModule has been replaced in its graph.
-        # self.scripted_module.submodule should be an MiddleModule that contains a BasicModule.
-        # self.lowered_module.submodule should be an MiddleModule that contains a test_backendLoweredModule.
+        # Check that self.lowered_module.sub1/sub2 were not lowered but that BasicModule has been replaced in their graphs.
         FileCheck() \
             .check("MiddleModule") \
             .check("BasicModule") \
             .check_not("test_backendLoweredModule") \
-            .run(self.scripted_module.submodule.graph)
+            .run(self.scripted_module.sub1.graph)
         FileCheck() \
             .check("MiddleModule") \
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
             .check("test_backendLoweredModule") \
             .check_not("BasicModule") \
-            .run(self.lowered_module.submodule.graph)
+            .run(self.lowered_module.sub1.graph)
 
-        # Check that self.lowered_module.submodule.submodule was lowered. Its graph should mention
+        FileCheck() \
+            .check("MiddleModule") \
+            .check("BasicModule") \
+            .check_not("test_backendLoweredModule") \
+            .run(self.scripted_module.sub2.graph)
+        FileCheck() \
+            .check("MiddleModule") \
+            .check_not("__torch__.torch.classes.__backends__.test_backend") \
+            .check("test_backendLoweredModule") \
+            .check_not("BasicModule") \
+            .run(self.lowered_module.sub2.graph)
+
+        # Check that self.lowered_module.sub1/sub2.submodule were lowered. Its graph should mention
         # __torch__.torch.classes.__backends__.test_backend, the TorchBind class for executing functions
         # on the test JIT backend.
         FileCheck() \
             .check("test_backendLoweredModule") \
             .check_not("BasicModule") \
             .check("__torch__.torch.classes.__backends__.test_backend") \
-            .run(self.lowered_module.submodule.submodule.graph)
+            .run(self.lowered_module.sub1.submodule.graph)
+
+        FileCheck() \
+            .check("test_backendLoweredModule") \
+            .check_not("BasicModule") \
+            .check("__torch__.torch.classes.__backends__.test_backend") \
+            .run(self.lowered_module.sub2.submodule.graph)
 
         # Check that self.other and self.other.submodule have been left untouched by the selective lowering process.
         FileCheck() \
@@ -313,6 +352,29 @@ class SelectiveLoweringTest(JitBackendTestCase):
             .check_not("__torch__.torch.classes.__backends__.test_backend") \
             .check_not("test_backendLoweredModule") \
             .run(self.scripted_module.other.submodule.graph)
+
+    def test_errors(self):
+        """
+        Check errors associated with selective lowering.
+        """
+        # Check error messages thrown when attempting to lower something that is not a ScriptModule.
+        with self.assertRaisesRegex(RuntimeError, r"Object .* is not a ScriptModule"):
+            to_test_backend_selective(torch.nn.ReLU(), {"forward": ""}, ["submodule"])
+
+        MiddleModule = SelectiveLoweringTest.MiddleModule
+        mod = MiddleModule(BasicModule())
+        mod.new_attr = 3
+
+        with self.assertRaisesRegex(RuntimeError, r"Attribute named new_attr is not a Module"):
+            to_test_backend_selective(torch.jit.script(mod), {"forward": ""}, ["new_attr"])
+
+        # Check error message thrown when module hierarchy doesn't have unique types.
+        OuterModule = SelectiveLoweringTest.OuterModule
+        mod = OuterModule(MiddleModule(BasicModule()), MiddleModule(BasicModule()), MiddleModule(BasicModule()))
+
+        with self.assertRaisesRegex(RuntimeError, r"Selective lowering is only supported for module hierarchies with unique types"):
+            to_test_backend_selective(torch.jit.script(mod), {"forward": ""}, ["new_attr"])
+
 
 class TestBackends(JitTestCase):
     """
@@ -344,3 +406,7 @@ class TestBackends(JitTestCase):
         self.basic_module_test.test_save_load()
         self.nested_module_test.test_save_load()
         self.selective_lowering_test.test_save_load()
+
+    @skipIfRocm
+    def test_errors(self):
+        self.selective_lowering_test.test_errors()
