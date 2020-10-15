@@ -16,6 +16,7 @@ pip list
 pip install pytest
 cd %TMP_DIR_WIN%\build\caffe2\python\operator_test
 python -m pytest -x -v --disable-warnings ^
+--ignore adam_test.py ^
 --ignore batch_sparse_to_dense_op_test.py ^
 --ignore copy_rows_to_tensor_op_test.py ^
 --ignore counter_ops_test.py ^
