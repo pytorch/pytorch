@@ -284,6 +284,16 @@ Vision Layers
     nn.UpsamplingNearest2d
     nn.UpsamplingBilinear2d
 
+Shuffle Layers
+----------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.ChannelShuffle
+
 DataParallel Layers (multi-GPU, distributed)
 --------------------------------------------
 

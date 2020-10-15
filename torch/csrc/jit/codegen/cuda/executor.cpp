@@ -25,9 +25,13 @@ int FusionExecutor::fusion_id_counter_ = 0;
 
 std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   // generating cuda code;
-  std::string code = std::string("namespace ") +
-      FusionExecutor::kernelNamespace() + " {\n" +
-      executor_utils::kernelPreamble() + kernel + "}\n";
+  std::string code = "";
+#ifdef __HIP_PLATFORM_HCC__
+  code += std::string("#include <hip/hip_runtime.h>\n") +
+      std::string("#include <hip/hip_fp16.h>\n");
+#endif
+  code += std::string("namespace ") + FusionExecutor::kernelNamespace() +
+      " {\n" + executor_utils::kernelPreamble() + kernel + "}\n";
 
   const char* debug_env = getenv("PYTORCH_CUDA_FUSER_DEBUG");
   if (debug_env && atoi(debug_env)) {
