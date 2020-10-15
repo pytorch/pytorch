@@ -662,6 +662,11 @@ Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& othe
       check_convert(self.item(), other.scalar_type());
     }
   }
+  if (result.scalar_type() != kBool) {
+    TORCH_CHECK(result.dtype() == self.dtype() && result.dtype() == other.dtype(),
+                "The scalar types of the arguments do not match. self.dtype() = ", self.dtype(),
+                ", other.dtype() = ", other.dtype(), ", result.dtype() = ", result.dtype());
+  }
   auto iter = TensorIterator::comparison_op(result, self, other);
   stub(iter.device_type(), iter);
   return result;

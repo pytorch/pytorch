@@ -3896,6 +3896,21 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                        torch.logical_and, torch.logical_or, torch.logical_xor]:
                 self.assertEqual(op(torch.tensor([True]), torch.tensor([False])).dtype, torch.bool)
 
+        def test_out_comparison_ops_error_if_different_dtypes(self):
+            for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne,
+                       torch.logical_and, torch.logical_or, torch.logical_xor]:
+                input1_32 = torch.ones(1, dtype=torch.float32)
+                input2_32 = torch.ones(1, dtype=torch.float32)
+
+                out_64 = torch.zero(1, dtype=torch.float64)
+                with self.assertRaisesRegex(RuntimeError, 'The scalar types of the arguments do not match.'):
+                    op(input1_32, input2_32, out=out_64)
+
+                # Allowing types to mismatch if the out dtype is torch.bool, so the functional version
+                # of comparison ops will work with non-bool dtypes.
+                out_bool = torch.zero(1, dtype=torch.bool)
+                op(input1_32, input2_32, out=out_bool)
+
         def test_inplace_comparison_ops_require_inputs_have_same_dtype(self):
             with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
                 for op in ['lt_', 'le_', 'gt_', 'ge_', 'eq_', 'ne_', 'logical_xor_', 'logical_and_', 'logical_or_']:
