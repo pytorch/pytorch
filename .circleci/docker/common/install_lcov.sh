@@ -1,3 +1,5 @@
+#!/bin/bash
+
 set -ex
 
 sudo apt-get -qq update
