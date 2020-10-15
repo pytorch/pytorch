@@ -530,9 +530,9 @@ Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, const Tensor &
   at::IntArrayRef sizes = mat1.sizes();
   at::IntArrayRef strides = mat1.strides();
   if (strides[0] == 1 && strides[1] == sizes[0]) {
-    return maybe_multiply(mat2.mm(grad.t()).t(), alpha);
+    return maybe_multiply(mat2.conj().mm(grad.t()).t(), alpha);
   } else {
-    return maybe_multiply(grad.mm(mat2.t()), alpha);
+    return maybe_multiply(grad.mm(mat2.t().conj()), alpha);
   }
 }
 
@@ -550,9 +550,9 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntArrayRef si
       at::addmm_out(r, t, mat1.t(), grad, alpha, 1);
       return r;
     }
-    return maybe_multiply(grad.t().mm(mat1).t(), alpha);
+    return maybe_multiply(grad.t().mm(mat1.conj()).t(), alpha);
   } else {
-    return maybe_multiply(mat1.t().mm(grad), alpha);
+    return maybe_multiply(mat1.t().conj().mm(grad), alpha);
   }
 }
 
@@ -2123,9 +2123,9 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
   Tensor grad_b, grad_a;
   if (grad_x.defined() || grad_m.defined()) {
     if (grad_x.defined()) {
-      grad_b = std::get<0>(grad_x.triangular_solve(a, upper, !transpose, unitriangular));
+      grad_b = std::get<0>(grad_x.triangular_solve(a.conj(), upper, !transpose, unitriangular));
       if (output_mask[1]) {
-        grad_a = transpose ? -x.matmul(grad_b.transpose(-1, -2)) : -grad_b.matmul(x.transpose(-1, -2));
+        grad_a = transpose ? -x.conj().matmul(grad_b.transpose(-1, -2)) : -grad_b.matmul(x.transpose(-1, -2).conj());
         if (upper) {
           grad_a = grad_a.triu((int) unitriangular);
         } else {
