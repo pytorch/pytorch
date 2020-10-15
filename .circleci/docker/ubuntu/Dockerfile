@@ -123,6 +123,10 @@ RUN bash ./install_jni.sh && rm install_jni.sh
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
+# Install lcov if coverage is specified
+ADD ./common/install_lcov.sh install_lcov.sh
+RUN if [[ ${BUILD_ENVIRONMENT} == *"coverage"* ]]; then bash ./install_lcov.sh; fi
+
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
