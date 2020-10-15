@@ -177,6 +177,31 @@ Resource::Image::Sampler::Factory::operator()(
   };
 }
 
+void Resource::Fence::wait(const uint64_t timeout_nanoseconds) {
+  const VkFence fence = handle(/* add_to_waitlist = */ false);
+
+  const auto waitlist_itr = std::find(
+      pool->fence_.waitlist.cbegin(),
+      pool->fence_.waitlist.cend(),
+      fence);
+
+  if (pool->fence_.waitlist.cend() != waitlist_itr) {
+    VK_CHECK(vkWaitForFences(
+        pool->device_,
+        1u,
+        &fence,
+        VK_TRUE,
+        timeout_nanoseconds));
+
+    VK_CHECK(vkResetFences(
+        pool->device_,
+        1u,
+        &fence));
+
+    pool->fence_.waitlist.erase(waitlist_itr);
+  }
+}
+
 Resource::Pool::Pool(const GPU& gpu)
   : device_(gpu.device),
     allocator_(
@@ -185,17 +210,30 @@ Resource::Pool::Pool(const GPU& gpu)
           gpu.adapter->handle,
           device_),
         vmaDestroyAllocator),
-    sampler_(gpu) {
-  buffers_.reserve(Configuration::kReserve);
-  images_.reserve(Configuration::kReserve);
+    buffer_{},
+    image_{
+      .sampler = Image::Sampler{gpu},
+    },
+    fence_{} {
+  buffer_.pool.reserve(Configuration::kReserve);
+  image_.pool.reserve(Configuration::kReserve);
+  fence_.pool.reserve(Configuration::kReserve);
+}
+
+Resource::Pool::~Pool() {
+  try {
+    purge();
+  }
+  catch (...) {
+  }
 }
 
 Resource::Pool::Pool(Pool&& pool)
   : device_(std::move(pool.device_)),
     allocator_(std::move(pool.allocator_)),
-    buffers_(std::move(pool.buffers_)),
-    images_(std::move(pool.images_)),
-    sampler_(std::move(pool.sampler_)) {
+    buffer_(std::move(pool.buffer_)),
+    image_(std::move(pool.image_)),
+    fence_(std::move(pool.fence_)) {
   pool.device_ = VK_NULL_HANDLE;
 }
 
@@ -203,9 +241,9 @@ Resource::Pool& Resource::Pool::operator=(Pool&& pool) {
   if (&pool != this) {
     device_ = std::move(pool.device_);
     allocator_ = std::move(pool.allocator_);
-    buffers_ = std::move(pool.buffers_);
-    images_ = std::move(pool.images_);
-    sampler_ = std::move(pool.sampler_);
+    buffer_ = std::move(pool.buffer_);
+    image_ = std::move(pool.image_);
+    fence_ = std::move(pool.fence_);
 
     pool.device_ = VK_NULL_HANDLE;
   };
@@ -249,7 +287,7 @@ Resource::Buffer Resource::Pool::buffer(
   TORCH_CHECK(buffer, "Invalid Vulkan buffer!");
   TORCH_CHECK(allocation, "Invalid VMA allocation!");
 
-  buffers_.emplace_back(
+  buffer_.pool.emplace_back(
       Buffer{
         Buffer::Object{
           buffer,
@@ -263,7 +301,7 @@ Resource::Buffer Resource::Pool::buffer(
       },
       &release_buffer);
 
-  return buffers_.back().get();
+  return buffer_.pool.back().get();
 }
 
 Resource::Image Resource::Pool::image(
@@ -342,13 +380,13 @@ Resource::Image Resource::Pool::image(
       view,
       "Invalid Vulkan image view!");
 
-  images_.emplace_back(
+  image_.pool.emplace_back(
       Image{
         Image::Object{
           image,
           VK_IMAGE_LAYOUT_UNDEFINED,
           view,
-          sampler_.cache.retrieve(descriptor.sampler),
+          image_.sampler.cache.retrieve(descriptor.sampler),
         },
         Memory{
           allocator_.get(),
@@ -357,7 +395,40 @@ Resource::Image Resource::Pool::image(
       },
       &release_image);
 
-  return images_.back().get();
+  return image_.pool.back().get();
+}
+
+Resource::Fence Resource::Pool::fence() {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && allocator_,
+      "This resource pool is in an invalid state! ",
+      "Potential reason: This resource pool is moved from.");
+
+  if (fence_.pool.size() == fence_.in_use) {
+    const VkFenceCreateInfo fence_create_info{
+      VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+      nullptr,
+      0u,
+    };
+
+    VkFence fence{};
+    VK_CHECK(vkCreateFence(
+        device_,
+        &fence_create_info,
+        nullptr,
+        &fence));
+
+    TORCH_CHECK(
+        fence,
+        "Invalid Vulkan fence!");
+
+    fence_.pool.emplace_back(fence, VK_DELETER(Fence)(device_));
+  }
+
+  return Fence{
+    this,
+    fence_.in_use++,
+  };
 }
 
 void Resource::Pool::purge() {
@@ -366,8 +437,25 @@ void Resource::Pool::purge() {
       "This resource pool is in an invalid state! ",
       "Potential reason: This resource pool is moved from.");
 
-  images_.clear();
-  buffers_.clear();
+  if (!fence_.waitlist.empty()) {
+    VK_CHECK(vkWaitForFences(
+        device_,
+        fence_.waitlist.size(),
+        fence_.waitlist.data(),
+        VK_TRUE,
+        UINT64_MAX));
+
+    VK_CHECK(vkResetFences(
+        device_,
+        fence_.waitlist.size(),
+        fence_.waitlist.data()));
+
+    fence_.waitlist.clear();
+  }
+
+  fence_.in_use = 0u;
+  image_.pool.clear();
+  buffer_.pool.clear();
 }
 
 } // namespace api

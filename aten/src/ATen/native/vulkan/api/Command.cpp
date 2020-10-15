@@ -257,7 +257,7 @@ void Command::Buffer::dispatch(
 
 void Command::Buffer::submit(
     const VkQueue queue,
-    const VkFence fence) {
+    const Resource::Fence fence) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
       "This command buffer is in an invalid state! "
@@ -279,7 +279,7 @@ void Command::Buffer::submit(
     nullptr,
   };
 
-  VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence));
+  VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence.handle()));
 }
 
 Command::Pool::Pool(const GPU& gpu)
