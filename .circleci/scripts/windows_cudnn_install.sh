@@ -12,7 +12,7 @@ else
     exit 1
 fi
 
-cudnn_installer_link="http://fremont.ipv6.ai/${cudnn_installer_name}.zip?dl=0"
+cudnn_installer_link="http://fremont.ipv6.ai/${cudnn_installer_name}.zip"
 
 curl --retry 3 -O $cudnn_installer_link
 7z x ${cudnn_installer_name}.zip -ocudnn
