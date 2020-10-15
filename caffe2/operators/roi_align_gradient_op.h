@@ -13,7 +13,7 @@ C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(RoIAlignGradient)
 namespace caffe2 {
 
 template <typename T, class Context>
-class RoIAlignGradientOp final : public Operator<Context> {
+class C10_EXPORT RoIAlignGradientOp final : public Operator<Context> {
  public:
   template <class... Args>
   explicit RoIAlignGradientOp(Args&&... args)

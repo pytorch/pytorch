@@ -11,7 +11,7 @@ C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(RoIAlign)
 namespace caffe2 {
 
 template <typename T, class Context>
-class RoIAlignOp final : public Operator<Context> {
+class C10_EXPORT RoIAlignOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
