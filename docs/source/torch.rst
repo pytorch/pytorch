@@ -463,6 +463,7 @@ Other Operations
     meshgrid
     lcm
     logcumsumexp
+    ravel
     renorm
     repeat_interleave
     roll

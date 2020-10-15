@@ -220,10 +220,10 @@ def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
         return torch.empty(size, size, size, dtype=dtype).fill_(value).cuda(device_id)
 
 
-def _build_multidim_tensor(dim, dim_size, value=None):
+def _build_multidim_tensor(dim, dim_size, value=None, dtype=torch.float):
     if value is None:
         value = size
-    return torch.FloatTensor(size=[dim_size for _ in range(dim)]).fill_(value)
+    return torch.empty(size=[dim_size for _ in range(dim)], dtype=dtype).fill_(value)
 
 
 class Barrier(object):
@@ -1241,20 +1241,17 @@ class DistributedTest:
             expected_value,
             cuda=False,
             rank_to_GPU=None,
+            dtype=torch.float,
         ):
             for src in group:
-                if rank == src:
-                    tensor = _build_tensor(src + 1).fill_(master_value)
-                    if cuda:
-                        tensor = tensor.cuda(rank_to_GPU[rank][0])
-                    dist.all_reduce(tensor, op, group_id)
-                    self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
-                else:
-                    tensor = _build_tensor(src + 1).fill_(worker_value)
-                    if cuda:
-                        tensor = tensor.cuda(rank_to_GPU[rank][0])
-                    dist.all_reduce(tensor, op, group_id)
-                    self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
+                curr_value = master_value if rank == src else worker_value
+
+                tensor = _build_tensor(src + 1, dtype=dtype).fill_(curr_value)
+                if cuda:
+                    tensor = tensor.cuda(rank_to_GPU[rank][0])
+                dist.all_reduce(tensor, op, group_id)
+                expected_tensor = _build_tensor(src + 1, expected_value, dtype=dtype)
+                self.assertEqual(tensor, expected_tensor)
 
             self._barrier()
 
@@ -1289,6 +1286,50 @@ class DistributedTest:
                 2 + (10 * (len(group) - 1)),
                 True,
                 rank_to_GPU,
+            )
+
+        @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        def test_all_reduce_sum_complex(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_all_reduce_helper(
+                group,
+                group_id,
+                rank,
+                dist.ReduceOp.SUM,
+                complex(2, 3),
+                complex(10, 11),
+                complex(2, 3) + (complex(10, 11) * (len(group) - 1)),
+                dtype=torch.cfloat,
+            )
+
+        @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        def test_all_reduce_complex_unsupported_ops(self):
+            unsupported_ops = [dist.ReduceOp.MAX, dist.ReduceOp.MIN, dist.ReduceOp.PRODUCT,
+                               dist.ReduceOp.BAND, dist.ReduceOp.BOR, dist.ReduceOp.BXOR]
+            group, group_id, rank = self._init_global_test()
+            for unsupported_op in unsupported_ops:
+                with self.assertRaisesRegex(RuntimeError, "all_reduce does not support"):
+                    dist.all_reduce(_build_tensor(1, dtype=torch.cfloat), unsupported_op, group_id)
+
+        @unittest.skipIf(
+            BACKEND != "gloo",
+            "Only Gloo backend will have CUDA allReduce tested",
+        )
+        @skip_if_no_gpu
+        def test_all_reduce_sum_cuda_complex(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_reduce_helper(
+                group,
+                group_id,
+                rank,
+                dist.ReduceOp.SUM,
+                complex(2, 3),
+                complex(10, 11),
+                complex(2, 3) + (complex(10, 11) * (len(group) - 1)),
+                True,
+                rank_to_GPU,
+                dtype=torch.cfloat,
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
@@ -1429,9 +1470,10 @@ class DistributedTest:
         @staticmethod
         def _all_reduce_coalesced_sum_test_cases(group_size):
             return (
-                [2, 3],
-                [10, 11],
-                [2 + 10 * (group_size - 1), 3 + 11 * (group_size - 1)]
+                [2, 3, complex(2, 3)],
+                [10, 11, complex(10, 11)],
+                [2 + 10 * (group_size - 1), 3 + 11 * (group_size - 1), complex(2, 3) + complex(10, 11) * (group_size - 1)],
+                [torch.float, torch.float, torch.cfloat],
             )
 
         @staticmethod
@@ -1439,7 +1481,8 @@ class DistributedTest:
             return (
                 [1, 2],
                 [3, 4],
-                [1 * 3 ** (group_size - 1), 2 * 4 ** (group_size - 1)]
+                [1 * 3 ** (group_size - 1), 2 * 4 ** (group_size - 1)],
+                [torch.float, torch.float],
             )
 
         @staticmethod
@@ -1447,7 +1490,8 @@ class DistributedTest:
             return (
                 [1, 4],
                 [2, 3],
-                [1, 3]
+                [1, 3],
+                [torch.float, torch.float],
             )
 
         @staticmethod
@@ -1455,8 +1499,15 @@ class DistributedTest:
             return (
                 [1, 4],
                 [2, 3],
-                [2, 4]
+                [2, 4],
+                [torch.float, torch.float],
             )
+
+        @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        def test_all_reduce_coalesced_max_complex_unsupported(self):
+            group, group_id, rank = self._init_global_test()
+            with self.assertRaisesRegex(RuntimeError, "all_reduce does not support"):
+                dist.all_reduce_coalesced([_build_tensor(1, dtype=torch.cfloat)], dist.ReduceOp.MAX, group_id)
 
         def _test_all_reduce_coalesced_helper(
             self,
@@ -1474,22 +1525,24 @@ class DistributedTest:
                 dist.ReduceOp.MAX: self._all_reduce_coalesced_max_test_cases
             }[op]
 
-            master_values, worker_values, expected_values = test_case_func(len(group))
+            master_values, worker_values, expected_values, dtypes = test_case_func(len(group))
 
             for src in group:
+                curr_values = master_values if rank == src else worker_values
                 tensors = [
-                    _build_tensor(src + 1, val)
-                    for val in (master_values if rank == src else worker_values)
+                    _build_tensor(src + 1, val, dtype=dtype)
+                    for dtype, val in zip(dtypes, curr_values)
                 ]
                 if cuda:
                     tensors = list(map(tensors, lambda t: t.cuda(rank_to_GPU[rank][0])))
                 dist.all_reduce_coalesced(tensors, op, group_id)
+                expected_tensors = [
+                    _build_tensor(src + 1, expected_value, dtype=dtype)
+                    for dtype, expected_value in zip(dtypes, expected_values)
+                ]
                 self.assertEqual(
                     tensors,
-                    [
-                        _build_tensor(src + 1, expected_value)
-                        for expected_value in expected_values
-                    ]
+                    expected_tensors
                 )
 
             self._barrier()
@@ -1750,17 +1803,18 @@ class DistributedTest:
 
         # ALL GATHER
         def _test_all_gather_helper(
-            self, group, group_id, rank, cuda=False, rank_to_GPU=None
+            self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float
         ):
+
             for dest in group:
-                tensor = _build_tensor(dest + 1, rank)
-                tensors = [_build_tensor(dest + 1, -1) for i in group]
+                tensor = _build_tensor(dest + 1, rank, dtype=dtype)
+                tensors = [_build_tensor(dest + 1, -1, dtype=dtype) for i in group]
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
                     tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
                 dist.all_gather(tensors, tensor, group_id)
 
-                expected_tensors = [_build_tensor(dest + 1, i) for i in group]
+                expected_tensors = [_build_tensor(dest + 1, i, dtype=dtype) for i in group]
                 for t1, t2 in zip(tensors, expected_tensors):
                     self.assertEqual(t1, t2)
 
@@ -1778,6 +1832,19 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
             self._test_all_gather_helper(group, group_id, rank, True, rank_to_GPU)
+
+        @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        def test_all_gather_complex(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_all_gather_helper(group, group_id, rank, dtype=torch.cfloat)
+
+        @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA all gather")
+        @unittest.skipIf(BACKEND == "nccl", "CUDA all gather skipped for NCCL")
+        @skip_if_no_gpu
+        def test_all_gather_cuda_complex(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_gather_helper(group, group_id, rank, True, rank_to_GPU, dtype=torch.cfloat)
 
         @skip_if_small_worldsize
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
@@ -1807,7 +1874,7 @@ class DistributedTest:
             return True
 
         def _test_all_gather_coalesced_helper(
-            self, group, group_id, rank
+            self, group, group_id, rank, dtype=torch.float
         ):
             # TODO: Instead we should probably go through _rank_not_in_group
             # mechanism to disable sending tensors
@@ -1817,13 +1884,16 @@ class DistributedTest:
                     # [1], [2x2], [3x3x3] ... to be sent in one batch
                     input_tensors = [
                         _build_multidim_tensor(
-                            tensor_id, tensor_id, rank + tensor_id) for tensor_id in range(
+                            tensor_id,
+                            tensor_id,
+                            rank + tensor_id,
+                            dtype=dtype) for tensor_id in range(
                                 1, test_case_id)
                     ]
                     output_tensor_lists = [
                         [
                             _build_multidim_tensor(
-                                tensor_id, tensor_id, -1) for tensor_id in range(
+                                tensor_id, tensor_id, -1, dtype=dtype) for tensor_id in range(
                                     1, test_case_id)
                         ] for _ in group
                     ]
@@ -1832,7 +1902,8 @@ class DistributedTest:
                             _build_multidim_tensor(
                                 tensor_id,
                                 tensor_id,
-                                rank_iter + tensor_id) for tensor_id in range(
+                                rank_iter + tensor_id,
+                                dtype=dtype) for tensor_id in range(
                                     1, test_case_id)
                         ] for rank_iter in group
                     ]
@@ -1848,6 +1919,12 @@ class DistributedTest:
         def test_all_gather_coalesced_simple(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_gather_coalesced_helper(group, group_id, rank)
+
+        @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+        @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
+        def test_all_gather_coalesced_complex(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_all_gather_coalesced_helper(group, group_id, rank, dtype=torch.cfloat)
 
         @skip_if_small_worldsize
         @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
@@ -2222,21 +2299,16 @@ class DistributedTest:
             master_value,
             worker_value,
             expected_value,
+            dtype=torch.float,
         ):
             for src in group:
-                if rank == src:
-                    tensors = [
-                        _build_tensor(src + 1, master_value).cuda(device=i)
-                        for i in rank_to_GPU[rank]
-                    ]
-                else:
-                    tensors = [
-                        _build_tensor(src + 1, worker_value).cuda(device=i)
-                        for i in rank_to_GPU[rank]
-                    ]
-
+                curr_value = master_value if rank == src else worker_value
+                tensors = [
+                    _build_tensor(src + 1, curr_value, dtype=dtype).cuda(device=i)
+                    for i in rank_to_GPU[rank]
+                ]
                 dist.all_reduce_multigpu(tensors, op, group_id)
-                expected_tensor = _build_tensor(src + 1, expected_value)
+                expected_tensor = _build_tensor(src + 1, expected_value, dtype=dtype)
                 for tensor in tensors:
                     self.assertEqual(tensor, expected_tensor)
 
@@ -2257,6 +2329,24 @@ class DistributedTest:
                 2,
                 10,
                 (2 + 10 * (len(group) - 1)) * len(rank_to_GPU[0]),
+            )
+
+        @unittest.skipIf(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
+        @unittest.skipIf(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
+        @skip_if_no_gpu
+        def test_all_reduce_multigpu_complex(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_reduce_multigpu_helper(
+                group,
+                group_id,
+                rank,
+                rank_to_GPU,
+                dist.ReduceOp.SUM,
+                complex(2, 3),
+                complex(10, 11),
+                (complex(2, 3) + complex(10, 11) * (len(group) - 1)) * len(rank_to_GPU[0]),
+                dtype=torch.cfloat,
             )
 
         def _test_reduce_multigpu_helper(
@@ -2305,10 +2395,10 @@ class DistributedTest:
                 (2 + 10 * (len(group) - 1)) * len(rank_to_GPU[0]),
             )
 
-        def _test_all_gather_multigpu_helper(self, group, group_id, rank, rank_to_GPU):
+        def _test_all_gather_multigpu_helper(self, group, group_id, rank, rank_to_GPU, dtype=torch.float):
             for dest in group:
                 tensors = [
-                    _build_tensor(dest + 1).cuda(device=i) for i in rank_to_GPU[rank]
+                    _build_tensor(dest + 1, dtype=dtype).cuda(device=i) for i in rank_to_GPU[rank]
                 ]
 
                 # construct expected output along with
@@ -2316,10 +2406,10 @@ class DistributedTest:
                 output_tensors = []
                 expected_output = []
                 output_per_gpu = (
-                    [_build_tensor(dest + 1, -1)] * len(rank_to_GPU[0]) * len(group)
+                    [_build_tensor(dest + 1, -1, dtype=dtype)] * len(rank_to_GPU[0]) * len(group)
                 )
                 expected_per_gpu = (
-                    [_build_tensor(dest + 1)] * len(rank_to_GPU[0]) * len(group)
+                    [_build_tensor(dest + 1, dtype=dtype)] * len(rank_to_GPU[0]) * len(group)
                 )
                 for gpu in rank_to_GPU[rank]:
                     output_tensors.append([t.cuda(device=gpu) for t in output_per_gpu])
@@ -2336,6 +2426,13 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
             self._test_all_gather_multigpu_helper(group, group_id, rank, rank_to_GPU)
+
+        @unittest.skipIf(BACKEND != "nccl", "Only Nccl backend supports allgather multigpu")
+        @skip_if_no_gpu
+        def test_all_gather_multigpu_complex(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_gather_multigpu_helper(group, group_id, rank, rank_to_GPU, dtype=torch.cfloat)
 
         def _model_step(self, model):
             for param in model.parameters():
@@ -2972,8 +3069,14 @@ class DistributedTest:
         def test_DistributedSampler_padding(self):
             # Tests padding of distributed sampler.
             world_size = dist.get_world_size()
+
+            # Simulates the 'casual' dataset size
             dataset_size = 100 + world_size + 1
             dataset = [torch.ones(1).to(self.rank) * i for i in range(dataset_size)]
+
+            # Simulates the 'tiny' dataset size
+            dataset_tiny_size = max(world_size // 2 - 1, 1)
+            dataset_tiny = [torch.ones(1).to(self.rank) * i for i in range(dataset_tiny_size)]
 
             # Specifying drop_last=True will cause the tail of the data to be dropped.
             dist_sampler = DistributedSampler(dataset=dataset, drop_last=True)
@@ -3023,6 +3126,22 @@ class DistributedTest:
 
             # Ensure that each rank processes the same number of samples.
             validate_global_samples(local_num_samples)
+
+            # Ensure additional samples are padded even when
+            # the extremely small dataset is given.
+            dist_sampler_added_samples_tiny = DistributedSampler(dataset=dataset_tiny)
+            local_num_samples, local_dataset_size = (
+                dist_sampler_added_samples_tiny.num_samples,
+                dist_sampler_added_samples_tiny.total_size,
+            )
+            self.assertEqual(
+                local_num_samples, math.ceil(dataset_tiny_size / world_size)
+            )
+            self.assertEqual(local_dataset_size, local_num_samples * world_size)
+            indices_list = list(iter(dist_sampler_added_samples_tiny))
+            self.assertEqual(len(indices_list), local_num_samples)
+            validate_global_samples(local_num_samples)
+
 
         @require_backend({"nccl", "gloo"})
         @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
