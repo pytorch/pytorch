@@ -196,13 +196,32 @@ def prepare(model, inplace=False, allow_list=None,
         observer_non_leaf_module_list: list of non-leaf modules we want to add observer
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare")
+    if is_custom_observed_module_class(model):
+        # In case the top level is a custom module
+        if inplace:
+            warnings.warn("'inplace' does not apply to the custom modules")
+        model = get_observed_custom_module_class(model).from_float(model)
+        return prepare(
+            model, inplace=True, allow_list=allow_list,
+            observer_non_leaf_module_list=observer_non_leaf_module_list)
     if not inplace:
         model = copy.deepcopy(model)
+
+    # Replace any custom module children
+    custom_modules = []
+    for name, child in model.named_children():
+        if is_custom_observed_module_class(child):
+            custom_modules.append((name, child))
 
     qconfig_propagation_list = allow_list
     if qconfig_propagation_list is None:
         qconfig_propagation_list = get_qconfig_propagation_list()
+
     propagate_qconfig_(model, qconfig_dict=None)
+
+    for name, child in custom_modules:
+        new_child = get_observed_custom_module_class(child).from_float(child)
+        model._modules[name] = new_child
 
     # sanity check common API misusage
     if not any(hasattr(m, 'qconfig') and m.qconfig for m in model.modules()):
