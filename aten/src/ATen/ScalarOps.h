@@ -3,6 +3,7 @@
 #include <c10/core/Scalar.h>
 #include <ATen/Tensor.h>
 #include <ATen/Functions.h>
+#include <ATen/FastPass.h>
 
 // This is in the c10 namespace because we use ADL to find the functions in it.
 namespace c10 {
@@ -11,16 +12,16 @@ namespace c10 {
 // to implement this without going through Derived Types (which are not part of core).
 inline at::Tensor scalar_to_tensor(Scalar s, const Device device = at::kCPU) {
   // This is the fast track we have for CPU scalar tensors.
-  if (device == at::kCPU) {
+  if (device == at::kCPU && !s.isComplex()) {
     if (s.isFloatingPoint()) {
-      return at::native::scalar_tensor(s, at::device(at::kCPU).dtype(at::kDouble));
+      return at::scalar_tensor_fast(s, at::device(at::kCPU).dtype(at::kDouble));
     } else if (s.isBoolean()) {
-      return at::native::scalar_tensor(s, at::device(at::kCPU).dtype(at::kBool));
+      return at::scalar_tensor_fast(s, at::device(at::kCPU).dtype(at::kBool));
     } else if (s.isComplex()) {
-      return at::native::scalar_tensor(s, at::device(at::kCPU).dtype(at::kComplexDouble));
+      return at::scalar_tensor_fast(s, at::device(at::kCPU).dtype(at::kComplexDouble));
     } else {
       AT_ASSERT(s.isIntegral(false));
-      return at::native::scalar_tensor(s, at::device(at::kCPU).dtype(at::kLong));
+      return at::scalar_tensor_fast(s, at::device(at::kCPU).dtype(at::kLong));
     }
   }
   if (s.isFloatingPoint()) {
