@@ -205,7 +205,7 @@ class RNNBase(Module):
             return hx
         return apply_permutation(hx, permutation)
 
-    def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tuple[Union[Tensor, PackedSequence], Tensor]:
+    def forward(self, input: Union[Tensor, PackedSequence], hx: Optional[Tensor] = None) -> Tuple[Union[Tensor, PackedSequence], Tensor]:
         is_packed = isinstance(input, PackedSequence)
         if is_packed:
             input, batch_sizes, sorted_indices, unsorted_indices = input
@@ -236,7 +236,7 @@ class RNNBase(Module):
         else:
             result = _impl(input, batch_sizes, hx, self._flat_weights, self.bias,
                            self.num_layers, self.dropout, self.training, self.bidirectional)
-        
+
         output: Union[Tensor, PackedSequence]
         output = result[0]
         hidden = result[1]
@@ -284,8 +284,8 @@ class RNNBase(Module):
         self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
 
     @property
-    def all_weights(self) -> List[Parameter]:
-        return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]  # type: ignore
+    def all_weights(self) -> List[List[Parameter]]:
+        return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
 
     def _replicate_for_data_parallel(self):
         replica = super(RNNBase, self)._replicate_for_data_parallel()
@@ -703,7 +703,7 @@ class GRU(RNNBase):
     def __init__(self, *args, **kwargs):
         super(GRU, self).__init__('GRU', *args, **kwargs)
 
-    @overload
+    @overload  # type: ignore
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:  # noqa: F811
         pass
