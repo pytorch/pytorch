@@ -104,7 +104,11 @@ struct Dist {
 
   // Special general pnorm derivative if p is less than two
   struct lttdist_calc {
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return dist == 0.0 ? Vec(0) : sign(diff) * diff.abs().pow(p - Vec(1)) * Vec(grad) / Vec(dist).pow(p - Vec(1)); }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) {
+      Vec result = (dist == 0.0) ? Vec(0) : (sign(diff) * diff.abs().pow(p - Vec(1)) * Vec(grad) / Vec(dist).pow(p - Vec(1)));
+      result = Vec::blendv(result, Vec(0), (diff == Vec(0)) & (p < Vec(1)));
+      return result;
+    }
   };
 
   // Two norm

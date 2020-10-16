@@ -1,4 +1,4 @@
-if(USE_DISTRIBUTED)
+if(USE_DISTRIBUTED AND NOT WIN32)
   set(DIST_AUTOGRAD_TEST_DIR "${TORCH_ROOT}/test/cpp/dist_autograd")
   set(DIST_AUTOGRAD_TEST_SOURCES
     ${TORCH_ROOT}/test/cpp/common/main.cpp

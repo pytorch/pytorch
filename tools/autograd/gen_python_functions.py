@@ -36,6 +36,7 @@ from .gen_variable_type import should_trace
 from .utils import write, is_tensor_method
 
 from tools.codegen.code_template import CodeTemplate
+from tools.codegen.gen import cpp_string
 
 #
 # declarations blocklist
@@ -264,6 +265,7 @@ def create_python_bindings(python_functions, is_python_method, module):
 UNPACK_METHODS = {
     'const Tensor &': 'tensor',
     'Tensor &': 'tensor',
+    'Stream': 'stream',
     'c10::optional<Tensor>': 'optionalTensor',
     'const c10::optional<Tensor>&': 'optionalTensor',
     'c10::optional<Generator>': 'generator',
@@ -281,6 +283,7 @@ UNPACK_METHODS = {
     'c10::optional<bool>': 'toBoolOptional',
     'c10::optional<double>': 'toDoubleOptional',
     'c10::optional<ArrayRef<double>>': 'doublelistOptional',
+    'ArrayRef<double>': 'doublelist',
     'IntArrayRef': 'intlist',
     'Scalar': 'scalar',
     'ScalarType': 'scalartype',
@@ -404,7 +407,6 @@ SUPPORTED_RETURN_TYPES = {
     'std::tuple<Tensor,Tensor,Tensor,Tensor,int64_t>',
     'std::tuple<Tensor,Tensor,double,Tensor,int64_t>',
     'std::tuple<double,int64_t>',
-    'std::tuple<double,double>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
     'QScheme', 'double',
@@ -964,7 +966,7 @@ def method_impl(name, declarations, is_python_method, module):
     dispatch = []
     for i, dictionary in enumerate(grouped):
         signature = dictionary['signature']
-        signatures.append('"{}",'.format(signature))
+        signatures.append(f'{cpp_string(str(signature))},')
         overload_index = i if not is_singleton else None
         dispatch.append(emit_dispatch_case(overload_index, dictionary, is_python_method))
 
