@@ -58,8 +58,9 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
   }
 }
 
-bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {
-  return k != DispatchKey::Undefined && getRuntimeDispatchKeySet(alias).has(k);
+bool isIncludedInAlias(DispatchKey k, DispatchKey alias, bool include_undefined) {
+  if (k == DispatchKey::Undefined) return include_undefined;
+  return getRuntimeDispatchKeySet(alias).has(k);
 }
 
 std::string toString(DispatchKeySet ts) {

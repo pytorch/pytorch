@@ -222,7 +222,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 
   // 2.1 Use DefaultBackend kernel if available.
   //     See Note [Undefined in dispatchTable_] for the special handling for Undefined.
-  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::DefaultBackend)) {
+  if (isIncludedInAlias(dispatch_key, DispatchKey::DefaultBackend, /*include_undefined=*/true)) {
     if (auto default_backend_registration = getKernelForDispatchKey(DispatchKey::DefaultBackend)) {
       return {*default_backend_registration.value(), "default backend kernel"};
     }
@@ -238,7 +238,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //      For AutogradOther, we return ambiguousAutogradOtherKernel_ if there's registration
   //      to any of its backends.
   //      See Note [Undefined in dispatchTable_] for the special handling for Undefined.
-  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::Math)) {
+  if (isIncludedInAlias(dispatch_key, DispatchKey::Math, /*include_undefined=*/true)) {
     if (auto math_registration = getKernelForDispatchKey(DispatchKey::Math)) {
       if (dispatch_key == DispatchKey::AutogradOther
           && hasKernelForAnyDispatchKey(c10::autogradother_backends)) {

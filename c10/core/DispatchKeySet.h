@@ -232,7 +232,7 @@ C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
 // This API exists because we have a use case for checking
 // getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefind)
 // in OperatorEntry.cpp but we disallow it in has() API.
-C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
+C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias, bool include_undefined=false);
 
 // Historically, every tensor only had a single DispatchKey, and it was always
 // something like CPU, and there wasn't any of this business where TLS
