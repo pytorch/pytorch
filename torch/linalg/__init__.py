@@ -160,6 +160,9 @@ Args:
     dims (Tuple[int]): dimensions of `:attr:`input` to reorder to the right, before solve.
         If None (default), no reordering is done.
 
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
 Example::
 
     >>> a = torch.eye(2 * 3 * 4).reshape((2 * 3, 4, 2, 3, 4))

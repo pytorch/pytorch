@@ -1640,6 +1640,30 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
   return result.reshape(result_shape);
 }
 
+Tensor& linalg_tensorsolve_out(Tensor& result, const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
+  CheckedFrom c = "linalg_tensorsolve_out";
+  TensorArg result_arg(result, "result", 0);
+  TensorArg self_arg(result, "self", 1);
+  checkSameType(c, result_arg, self_arg);
+
+  Tensor self_ = self;
+  // move dimensions of `self_` from `dims` to the end
+  if (dims.has_value()) {
+    DimVector dest_axes(dims.value().size());
+    std::iota(dest_axes.begin(), dest_axes.end(), self.dim() - dest_axes.size());
+    self_ = at::movedim(self_, dims.value(), dest_axes);
+  }
+
+  auto expected_result_shape = self_.sizes().slice(other.dim(), self.dim() - other.dim());
+  TORCH_CHECK(result.sizes().equals(expected_result_shape),
+    "Expected result tensor to have size of ", expected_result_shape, ", but got tensor of size ", result.sizes());
+
+  // We've already reordered self with dims, let's pass that result
+  Tensor result_tmp = at::linalg_tensorsolve(self_, other, c10::nullopt);
+  result.copy_(result_tmp);
+  return result;
+}
+
 static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {
   if (i == j)
     return matrices[i];

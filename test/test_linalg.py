@@ -935,6 +935,12 @@ class TestLinalg(TestCase):
             expected = np.linalg.tensorsolve(a.cpu().numpy(), b.cpu().numpy(), axes=dims)
             self.assertEqual(result, expected)
 
+            # check the out= variant
+            out = torch.empty_like(result)
+            ans = torch.linalg.tensorsolve(a, b, dims=dims, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
+
         a_shapes = [(2, 3, 6), (3, 4, 4, 3)]
         dims = [None, (0, 2)]
         for a_shape, d in itertools.product(a_shapes, dims):
@@ -967,13 +973,18 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32)
-    def test_tensorsolve_error(self, device, dtype):
+    def test_tensorsolve_errors(self, device, dtype):
         # tensorsolve expects the input that can be reshaped to a square matrix
         a = torch.eye(2 * 3 * 4).reshape((2 * 3, 4, 2, 3, 4))
         b = torch.randn(8, 4)
         self.assertTrue(np.prod(a.shape[2:]) != np.prod(b.shape))
         with self.assertRaisesRegex(RuntimeError, r'Expected self to be a \'square\' tensor'):
             torch.linalg.tensorsolve(a, b)
+
+        # out tensor should have the correct resulting shape
+        out = torch.empty_like(a)
+        with self.assertRaisesRegex(RuntimeError, r'Expected result tensor to have size of'):
+            ans = torch.linalg.tensorsolve(a, b, out=out)
 
 instantiate_device_type_tests(TestLinalg, globals())
 
