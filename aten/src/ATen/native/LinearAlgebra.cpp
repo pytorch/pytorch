@@ -1614,15 +1614,11 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
   int64_t ndim = self.dim();
   Tensor self_ = self;
 
-  // prepare the permutation vector with given dims and permute self_
+  // move dimensions of `self_` from `dims` to the end
   if (dims.has_value()) {
-    std::vector<int64_t> permutation_dims(ndim);
-    std::iota(permutation_dims.begin(), permutation_dims.end(), 0);
-    for (int64_t k : dims.value().vec()) {
-      auto it = std::find(permutation_dims.begin(), permutation_dims.end(), k);
-      std::rotate(it, it + 1, permutation_dims.end());
-    }
-    self_ = self_.permute(permutation_dims);
+    DimVector dest_axes(dims.value().size());
+    std::iota(dest_axes.begin(), dest_axes.end(), ndim - dest_axes.size());
+    self_ = at::movedim(self_, dims.value(), dest_axes);
   }
 
   // result_shape is self_.sizes[-(an-other.dim):]
