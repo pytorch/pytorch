@@ -39,7 +39,7 @@ C10_DEFINE_string(
     "The root of the caffe test folder.");
 
 GTEST_API_ int main(int argc, char **argv) {
-  // std::cout << "Running main() from gtest_main.cc\n";
+  std::cout << "Running main() from gtest_main.cc\n";
   testing::InitGoogleTest(&argc, argv);
   caffe2::GlobalInit(&argc, &argv);
   return RUN_ALL_TESTS();
