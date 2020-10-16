@@ -5,6 +5,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
+#include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
 #include <ATen/metal/Context.h>
@@ -131,7 +132,11 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 
   if (self.device().type() == at::kVulkan || src.device().type() == at::kVulkan) {
+  #ifdef USE_VULKAN_API
+    return vulkan::ops::copy_(self, src);
+  #else
     return at::vulkan::vulkan_copy_(self, src);
+  #endif
   }
 
   if (self.device().type() == at::kMetal || src.device().type() == at::kMetal) {

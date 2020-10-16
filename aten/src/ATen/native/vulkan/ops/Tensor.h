@@ -174,8 +174,14 @@ class vTensor final {
   Buffer::Object buffer() const &;
   Buffer::Object buffer(Access::Flags access) &;
 
+  Buffer::Object buffer(api::Command::Buffer&) const &;
+  Buffer::Object buffer(api::Command::Buffer&, Access::Flags) &;
+
   Image::Object image() const &;
   Image::Object image(Access::Flags access) &;
+
+  Image::Object image(api::Command::Buffer&) const &;
+  Image::Object image(api::Command::Buffer&, Access::Flags) &;
 
  private:
   // Some overloads below are intentionally disabled to enforce a usage pattern
@@ -202,10 +208,16 @@ class vTensor final {
   */
 
   Buffer::Object buffer() const && = delete;
-  Buffer::Object buffer(Access::Flags access) && = delete;
+  Buffer::Object buffer(Access::Flags) && = delete;
+
+  Buffer::Object buffer(api::Command::Buffer&) const && = delete;
+  Buffer::Object buffer(api::Command::Buffer&, Access::Flags) && = delete;
 
   Image::Object image() const && = delete;
-  Image::Object image(Access::Flags access) && = delete;
+  Image::Object image(Access::Flags) && = delete;
+
+  Image::Object image(api::Command::Buffer&) const && = delete;
+  Image::Object image(api::Command::Buffer&, Access::Flags) && = delete;
 
  private:
   class View final {
@@ -218,8 +230,11 @@ class vTensor final {
 
     // Accessor
     Buffer& buffer(Access::Flags) const;
+    Buffer& buffer(api::Command::Buffer&, Access::Flags) const;
     Image& image(Access::Flags) const;
+    Image& image(api::Command::Buffer&, Access::Flags) const;
     Buffer& staging(Access::Flags) const;
+    Buffer& staging(api::Command::Buffer&, Access::Flags) const;
     vTensor::Memory& wait();
 
    private:
@@ -326,6 +341,10 @@ class vTensor final {
 };
 
 using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
+
+const vTensor& convert(const Tensor& tensor);
+vTensor& convert(Tensor& tensor);
+
 void verify(const TensorOptions& options);
 
 //
@@ -446,6 +465,28 @@ inline void vTensor::View::State::set_clean(
 inline void vTensor::View::State::set_dirty(
     const Component::Flags components) {
   dirty_ |= components;
+}
+
+inline const vTensor& convert(const Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT(
+      tensor.is_vulkan(),
+      "Vulkan tensor expected!");
+
+  const vTensorImpl* const impl =
+      static_cast<const vTensorImpl*>(tensor.unsafeGetTensorImpl());
+
+  return const_cast<vTensorImpl*>(impl)->unsafe_opaque_handle();
+}
+
+inline vTensor& convert(Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT(
+      tensor.is_vulkan(),
+      "Vulkan tensor expected!");
+
+  vTensorImpl* const impl =
+      static_cast<vTensorImpl*>(tensor.unsafeGetTensorImpl());
+
+  return impl->unsafe_opaque_handle();
 }
 
 } // namespace ops

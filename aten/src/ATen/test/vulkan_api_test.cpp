@@ -15,6 +15,22 @@ TEST(VulkanAPITest, empty) {
   ASSERT_NO_THROW(at::empty({1, 3, 64, 64}, at::device(at::kVulkan).dtype(at::kFloat)));
 }
 
+TEST(VulkanAPITest, copy) {
+  if (!at::native::vulkan::api::available()) {
+    return;
+  }
+
+  {
+    const auto vulkan = at::empty({1, 3, 64, 64}, at::device(at::kVulkan).dtype(at::kFloat));
+    const auto cpu = vulkan.cpu();
+  }
+
+  {
+    const auto cpu = at::empty({1, 3, 64, 64}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto vulkan = cpu.vulkan();
+  }
+}
+
 TEST(VulkanAPITest, add) {
   if (!at::native::vulkan::api::available()) {
     return;
@@ -25,9 +41,9 @@ TEST(VulkanAPITest, add) {
   const auto c_cpu = at::add(a_cpu, b_cpu, 2);
   const auto a_vulkan = a_cpu.vulkan();
   const auto b_vulkan = b_cpu.vulkan();
-  // const auto c_vulkan = at::add(a_vulkan, b_vulkan, 2);
+  const auto c_vulkan = at::add(a_vulkan, b_vulkan, 2);
 
-  // ASSERT_TRUE(almostEqual(c_cpu, c_vulkan.cpu()));
+  ASSERT_TRUE(almostEqual(c_cpu, c_vulkan.cpu()));
 }
 
 } // namespace
