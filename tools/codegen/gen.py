@@ -154,10 +154,14 @@ def cpp_string(s: str) -> str:
 # code we want.
 Target = Enum('Target', ('DEFINITION', 'DECLARATION', 'REGISTRATION'))
 
+# Dispatch keywords in native_functions.yaml that support all backends.
+KEYWORD_ALL_BACKENDS = ('DefaultBackend', 'Math')
+
 # Generates {dispatch}Type.cpp and {dispatch}Type.h (e.g., CPUType.cpp
 # and CPUType.h).  This function is also reused to implement per-operator
 # registration.  It also generates TypeDefault.cpp and TypeDefault.h when
-# dispatch is None.
+# dispatch target is for all backends (dispatch is None or dispatch in
+# KEYWORD_ALL_BACKENDS).
 #
 # {dispatch}Type.cpp
 #   - The primary function of this file is to register all of the
@@ -214,6 +218,7 @@ def compute_type_method(
         returns_type = native.returns_type(f.func.returns)
         args = native.arguments(f.func)
         args_str = ', '.join(map(str, args))
+        dispatch_to_all_backends = dispatch is None or dispatch in KEYWORD_ALL_BACKENDS
 
         if target is Target.DECLARATION:
             return f"{returns_type} {name}({args_str});"
@@ -230,7 +235,7 @@ def compute_type_method(
             return_kw = "    return "
 
             cuda_guard = ""
-            if dispatch is None or 'CUDA' in dispatch or 'Vulkan' == dispatch:
+            if dispatch_to_all_backends or 'CUDA' in dispatch or 'Vulkan' == dispatch:  # type: ignore
                 self_args = (a for a in f.func.arguments if a.name == "self")
 
                 # There is precedence for which argument we use to do
@@ -255,7 +260,7 @@ def compute_type_method(
 
                 # TODO: There is probably a simpler version of this that
                 # works just as well.
-                if f.device_guard and (dispatch is None or 'Vulkan' == dispatch) and has_tensor_options:
+                if f.device_guard and (dispatch_to_all_backends or 'Vulkan' == dispatch) and has_tensor_options:
                     cuda_guard = cuda_guard_from_tensor_options
                 elif f.device_guard and dispatch is not None and 'CUDA' in dispatch and has_tensor_options:
                     cuda_guard = f"""\
@@ -280,7 +285,7 @@ def compute_type_method(
         elif target is Target.REGISTRATION:
             dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
-            if dispatch is None or dispatch == 'Math' or dispatch == 'DefaultBackend':
+            if dispatch_to_all_backends:
                 type_name = f'TypeDefault::{name}'
             else:
                 type_name = f'{dispatch}Type::{name}'
@@ -506,11 +511,7 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_sig.type()}>();
   {compute_dk}
-  // This trick allows calling Autograd backend kernel first and then backend kernel,
-  // without adding another AutogradBackendSelect dispatch key.
-  DispatchKey _current_dk = at::impl::variable_excluded_from_dispatch()
-                            ? _dk : c10::getAutogradKeyFromBackend(_dk);
-  return op.callWithDispatchKey(_current_dk, {', '.join(a.expr for a in dispatcher_exprs)});
+  return op.callWithDispatchKey(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
 """
         elif target is Target.REGISTRATION:
@@ -810,7 +811,7 @@ def compute_registration_declarations(f: NativeFunction) -> str:
     comment_data : Dict[str, str] = {
         'schema': f'aten::{f.func}',
         'dispatch': str(f.dispatch is not None),
-        'math': str(f.dispatch is not None and 'Math' in f.dispatch)
+        'default': str(f.dispatch is not None and any(k in f.dispatch for k in KEYWORD_ALL_BACKENDS))
     }
     return f"""{returns_type} {name}({args_str}); // {json.dumps(comment_data)}
 """
@@ -1029,8 +1030,10 @@ def main() -> None:
             native_functions)) +
         list(mapMaybe(
             compute_type_method('Math', target=Target.DECLARATION, op_registration_whitelist=op_registration_whitelist),
+            native_functions)) +
+        list(mapMaybe(
+            compute_type_method('DefaultBackend', target=Target.DECLARATION, op_registration_whitelist=op_registration_whitelist),
             native_functions)),
-
     })
     cpu_fm.write('TypeDefault.cpp', lambda: {
         'type_method_definitions':
