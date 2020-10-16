@@ -1,8 +1,8 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/metal/MetalPrepackOpContext.h>
+#include <torch/script.h>
 
 #if defined(C10_IOS)
-#import <ATen/native/metal/MetalUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNNOps.h>
 #endif
 
@@ -19,7 +19,6 @@ c10::intrusive_ptr<Conv2dOpContext> unpack(
     int64_t groups,
     c10::optional<Scalar> output_min,
     c10::optional<Scalar> output_max) {
-#if defined(C10_IOS)
   const Tensor weightContig = weight.contiguous();
   const auto ws = weightContig.sizes();
   auto packed_buffer = permuteWeights(weightContig.data_ptr<float>(), ws.vec());
@@ -35,18 +34,6 @@ c10::intrusive_ptr<Conv2dOpContext> unpack(
       groups,
       output_min,
       output_max);
-#else
-  TORCH_CHECK(false, "unpack can only be invoked on iOS")
-  return c10::make_intrusive<Conv2dOpContext>(
-      std::move(weight),
-      std::move(bias),
-      stride,
-      padding,
-      dilation,
-      groups,
-      output_min,
-      output_max);
-#endif
 }
 
 TORCH_LIBRARY(metal, m) {
