@@ -901,7 +901,7 @@ vTensor::Buffer& vTensor::View::staging(
   return staging();
 }
 
-vTensor::Memory& vTensor::View::wait() {
+const vTensor::Memory& vTensor::View::wait() const {
   if (fence_) {
     fence_.wait();
   }
@@ -988,6 +988,10 @@ void verify(const TensorOptions& options) {
       !options.has_memory_format(),
       "'memory_format' tensor option is not yet supported under Vulkan!");
 }
+
+//
+// Debug
+//
 
 namespace {
 
