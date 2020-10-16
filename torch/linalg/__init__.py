@@ -150,24 +150,25 @@ This function returns a namedtuple ``(U, S, Vh)`` which is the singular value
 decomposition of a input real matrix or batches of real matrices :attr:`input` such that
 :math:`input = U \times diag(S) \times V^H` (where :math:`V^H` is ``Vh``).
 
-.. warning:: This function is similar to :meth:`~torch.svd`, but has the following important
-             differences to make it more compatible with ``numpy``:
+.. warning:: **Differences with** :meth:`~torch.svd`:
 
-                * :attr:`full_matrices` is effectively the opposite of
-                  ``torch.svd(some=...)``. And the default is the opposite as well.
+             * :attr:`full_matrices` is the opposite of
+               :meth:`~torch.svd`'s :attr:`some`. Note that default value
+               for both is ``True``, so the default behavior is effectively
+               the opposite.
 
-                * it returns ``Vh``, whereas :meth:`~torch.svd` returns
-                  ``V``. The result is that when using :meth:`~torch.svd` you
-                  need to manually transpose and conjugate ``V`` in order to
-                  reconstruct the original matrix.
+             * it returns ``Vh``, whereas :meth:`~torch.svd` returns
+               ``V``. The result is that when using :meth:`~torch.svd` you
+               need to manually transpose and conjugate ``V`` in order to
+               reconstruct the original matrix.
 
-                * If :attr:`compute_uv=False`, it returns ``None`` for ``U`` and
-                  ``V``, whereas :meth:`~torch.svd` returns zero-filled tensors.
+             * If :attr:`compute_uv=False`, it returns ``None`` for ``U`` and
+               ``V``, whereas :meth:`~torch.svd` returns zero-filled tensors.
 
-             This function has also a difference w.r.t. numpy:
+             **Differences with** ``numpy.linalg.svd``:
 
-                * if :attr:`compute_uv=False` it returns ``(None, S, None)``,
-                  whereas numpy returns ``S``.
+             * if :attr:`compute_uv=False` it returns ``(None, S, None)``,
+               whereas numpy returns ``S``.
 
 
 The dtype of ``U`` and ``V`` is the same as the ``input`` matrix. The dtype of
