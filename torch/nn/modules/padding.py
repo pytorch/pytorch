@@ -18,7 +18,7 @@ class _ConstantPadNd(Module):
         self.value = value
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.pad(input, self.padding, 'constant', self.value)  # type: ignore[arg-type]
+        return F.pad(input, self.padding, 'constant', self.value)
 
     def extra_repr(self) -> str:
         return 'padding={}, value={}'.format(self.padding, self.value)
@@ -167,7 +167,7 @@ class _ReflectionPadNd(Module):
     __constants__ = ['padding']
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.pad(input, self.padding, 'reflect')  # type: ignore[arg-type]
+        return F.pad(input, self.padding, 'reflect')
 
     def extra_repr(self) -> str:
         return '{}'.format(self.padding)
@@ -268,7 +268,7 @@ class _ReplicationPadNd(Module):
     __constants__ = ['padding']
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.pad(input, self.padding, 'replicate')  # type: ignore[arg-type]
+        return F.pad(input, self.padding, 'replicate')
 
     def extra_repr(self) -> str:
         return '{}'.format(self.padding)
