@@ -9,9 +9,6 @@ from ..quantization_mappings import (
     get_static_quant_module_class,
     get_quantized_operator,
 )
-from ..custom_module_class_mappings import (
-    get_quantized_custom_module_class,
-)
 from .pattern_utils import (
     register_quant_pattern,
 )
@@ -48,7 +45,7 @@ class QuantizeHandler(ABC):
         self.all_nodes = True
 
     @abstractmethod
-    def convert(self, quantizer, node, load_arg, debug=False):
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         """ Convert the given node to a quantized node and insert
         it to the quantized graph
         """
@@ -69,7 +66,7 @@ class Add(QuantizeHandler):
         self.add_node = node
         self.all_nodes = all([isinstance(a, Node) for a in self.add_node.args[:2]])
 
-    def convert(self, quantizer, node, load_arg, debug=False):
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         if not self.all_nodes:
             # add scalar
             if self.relu_node is not None:
@@ -88,8 +85,7 @@ class Add(QuantizeHandler):
                 op = torch.ops.quantized.add_relu
             else:
                 op = torch.ops.quantized.add
-            kwargs = self.add_node.kwargs
-            kwargs.update({'scale': scale, 'zero_point': zero_point})
+            kwargs = {**self.add_node.kwargs, 'scale': scale, 'zero_point': zero_point}
             return quantizer.quantized_graph.create_node(
                 'call_function', op, load_arg(quantized=True)(self.add_node.args), kwargs)
 
@@ -108,7 +104,7 @@ class Mul(QuantizeHandler):
         self.mul_node = node
         self.all_nodes = all([isinstance(a, Node) for a in self.mul_node.args[:2]])
 
-    def convert(self, quantizer, node, load_arg, debug=False):
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         if not self.all_nodes:
             # mul scalar
             if self.relu_node is not None:
@@ -126,21 +122,19 @@ class Mul(QuantizeHandler):
                 op = torch.ops.quantized.mul_relu
             else:
                 op = torch.ops.quantized.mul
-            kwargs = self.mul_node.kwargs
-            kwargs.update({'scale': scale, 'zero_point': zero_point})
+            kwargs = {**self.mul_node.kwargs, 'scale': scale, 'zero_point': zero_point}
             return quantizer.quantized_graph.create_node('call_function', op, load_arg(quantized=True)(self.mul_node.args), kwargs)
 
 @register_quant_pattern(torch.cat)
 class Cat(QuantizeHandler):
-    def convert(self, quantizer, node, load_arg, debug=False):
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         if not self.all_nodes:
             return NotImplemented
         activation_post_process = quantizer.activation_post_process_map[node.name]
         scale, zero_point = activation_post_process.calculate_qparams()
         scale = float(scale)
         zero_point = int(zero_point)
-        kwargs = load_arg(quantized=False)(node.kwargs)
-        kwargs.update({'scale': scale, 'zero_point': zero_point})
+        kwargs = {**load_arg(quantized=False)(node.kwargs), 'scale': scale, 'zero_point': zero_point}
         return quantizer.quantized_graph.create_node(
             'call_function', torch.ops.quantized.cat, load_arg(quantized=[0])(node.args), kwargs)
 
@@ -174,7 +168,7 @@ class ConvRelu(QuantizeHandler):
         if node.op == 'call_module':
             self.conv = quantizer.modules[self.conv_node.target]
 
-    def convert(self, quantizer, node, load_arg, debug=False):
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         # TODO: debug option for conv module
         if self.conv_node.op == 'call_module':
             # note that relu should already be fused into conv module in the fusion step
@@ -253,7 +247,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         if node.op == 'call_module':
             self.linear = quantizer.modules[self.linear_node.target]
 
-    def convert(self, quantizer, node, load_arg, debug=False):
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         qconfig = quantizer.qconfig_map[node.name]
         activation_statically_quantized = activation_is_statically_quantized(qconfig)
         # TODO: debug option for linear module
@@ -322,7 +316,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 linear_weight = load_arg(quantized=weight_quantized)(self.linear_node.args[1])
 
                 # get other arguments
-                kwargs = load_arg(quantized=False)(self.linear_node.kwargs)
+                kwargs = {**load_arg(quantized=False)(self.linear_node.kwargs)}
                 # pack weight
                 bias = None
                 # all args after bias, including bias
@@ -365,7 +359,7 @@ class BatchNorm(QuantizeHandler):
         self.bn_node = node
         self.bn = quantizer.modules[self.bn_node.target]
 
-    def convert(self, quantizer, node, load_arg, debug=False):
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         # 1. attach activation post process to module
         activation_post_process = quantizer.activation_post_process_map[node.name]
         if type(self.bn) in \
@@ -403,7 +397,7 @@ ARGS_TO_SKIP = {
 class DefaultNode(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
-    def convert(self, quantizer, node, load_arg, debug=False):
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         if not self.all_nodes:
             return NotImplemented
         assert node.op in ['call_module', 'call_function'], 'Only call_module and ' + \
@@ -429,8 +423,7 @@ class DefaultNode(QuantizeHandler):
 
             quantized_op = get_quantized_operator(node.target)
             args = load_arg(quantized=[0])(node.args)
-            kwargs = load_arg(quantized=False)(node.kwargs)
-            kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
+            kwargs = {**load_arg(quantized=False)(node.kwargs), 'output_scale': scale, 'output_zero_point': zero_point}
             if quantized_op in ARGS_TO_SKIP:
                 args_to_skip = ARGS_TO_SKIP[quantized_op]
                 for arg in args_to_skip:
@@ -442,15 +435,14 @@ class DefaultNode(QuantizeHandler):
 # TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
 @register_quant_pattern(torch.nn.functional.elu)
 class ELU(QuantizeHandler):
-    def convert(self, quantizer, node, load_arg, debug=False):
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         activation_post_process = quantizer.activation_post_process_map[node.name]
         scale, zero_point = activation_post_process.calculate_qparams()
         scale = float(scale)
         zero_point = int(zero_point)
         quantized_op = get_quantized_operator(node.target)
         args = load_arg(quantized=[0])(node.args)
-        kwargs = load_arg(quantized=False)(node.kwargs)
-        kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
+        kwargs = {**load_arg(quantized=False)(node.kwargs), 'output_scale': scale, 'output_zero_point': zero_point}
         kwargs.pop('inplace')
         return quantizer.quantized_graph.create_node(
             'call_function', quantized_op, args, kwargs)
@@ -533,7 +525,7 @@ class ELU(QuantizeHandler):
 @register_quant_pattern('unsqueeze_')
 @register_quant_pattern('view')
 class CopyNode(QuantizeHandler):
-    def convert(self, quantizer, node, load_arg, debug=False):
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
 # Default quantization handler, used for quantization of input and output
@@ -548,16 +540,20 @@ class DefaultQuant(QuantizeHandler):
             node, quantizer.activation_post_process_map[node.name])
 
 class CustomModuleQuantizeHandler(QuantizeHandler):
-    def convert(self, quantizer, node, load_arg, debug=False):
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         """ Convert a float custom module to quantized custom module
         """
         assert node.op == 'call_module'
+        assert convert_custom_config_dict is not None
+        custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", None)
+        assert custom_module_class_mapping is not None
         observed_custom_module = quantizer.modules[node.target]
         if node.name in quantizer.activation_post_process_map:
             observed_custom_module.activation_post_process = \
                 quantizer.activation_post_process_map[node.name]
-        quantized_custom_module_class = \
-            get_quantized_custom_module_class(observed_custom_module._FLOAT_MODULE)
+        quantized_custom_module_class = custom_module_class_mapping.get(type(observed_custom_module), None)
+        assert quantized_custom_module_class is not None, "did not found quantized custom module for:" + \
+            str(type(observed_custom_module))
         quantized_custom_module = \
             quantized_custom_module_class.from_observed(observed_custom_module)
         parent_name, name = _parent_name(node.target)
@@ -572,7 +568,7 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
     """ Converts an observed standalone module to quantized standalone module
     by calling convert_fx on the observed standalone module.
     """
-    def convert(self, quantizer, node, load_arg, debug=False):
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         assert node.op == 'call_module'
         qconfig = quantizer.qconfig_map[node.name]
         convert = torch.quantization.quantize_fx._convert_standalone_module_fx

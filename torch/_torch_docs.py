@@ -110,6 +110,19 @@ tf32_notes = {
     "tf32_note": """This operator supports :ref:`TensorFloat32<tf32_on_ampere>`."""
 }
 
+
+reproducibility_notes = {
+    "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
+a CUDA device. See :doc:`/notes/randomness` for more information.""",
+    "backward_reproducibility_note": """This operation may produce nondeterministic gradients when given tensors on \
+a CUDA device. See :doc:`/notes/randomness` for more information.""",
+    "cudnn_reproducibility_note": """In some circumstances when given tensors on a CUDA device \
+and using CuDNN, this operator may select a nondeterministic algorithm to increase performance. If this is \
+undesirable, you can try to make the operation deterministic (potentially at \
+a performance cost) by setting ``torch.backends.cudnn.deterministic = True``. \
+See :doc:`/notes/randomness` for more information."""
+}
+
 add_docstr(torch.abs, r"""
 abs(input, *, out=None) -> Tensor
 
@@ -938,12 +951,7 @@ tensor of size 0. If :attr:`minlength` is specified, the number of bins is at le
 ``out[n] += 1``.
 
 Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
+    {backward_reproducibility_note}
 
 Arguments:
     input (Tensor): 1-d int tensor
@@ -968,7 +976,7 @@ Example::
 
     >>> input.bincount(weights)
     tensor([0.0000, 0.0000, 0.0000, 1.0000, 1.0000, 0.0000, 0.5000])
-""")
+""".format(**reproducibility_notes))
 
 add_docstr(torch.bitwise_not,
            r"""
@@ -1208,6 +1216,64 @@ Example::
 
 
 """.format(**common_args))
+
+add_docstr(torch.tensor_split,
+           r"""
+tensor_split(input, indices_or_sections, dim=0) -> List of Tensors
+
+Splits a tensor into multiple sub-tensors, all of which are views of :attr:`input`,
+along dimension :attr:`dim` according to the indices or number of sections specified
+by :attr:`indices_or_sections`. This function is based on NumPy's
+:func:`numpy.array_split`.
+
+Args:
+    input (Tensor): the tensor to split
+    indices_or_sections (int or (list(int))):
+        If :attr:`indices_or_sections` is an integer ``n``, :attr:`input` is split
+        into ``n`` sections along dimension :attr:`dim`. If :attr:`input` is divisible
+        by ``n`` along dimension :attr:`dim`, each section will be of equal size,
+        :code:`input.size(dim) / n`. If :attr:`input` is not divisible by ``n``, the
+        sizes of the first :code:`int(input.size(dim) % n)` sections will have size
+        :code:`int(input.size(dim) / n) + 1`, and the rest will have size
+        :code:`int(input.size(dim) / n)`.
+
+        If :attr:`indices_or_sections` is a list of ints, :attr:`input` is split along
+        dimension :attr:`dim` at each of the indices in the list. For instance,
+        :code:`indices_or_sections=[2, 3]` and :code:`dim=0` would result in the tensors
+        :code:`input[:2]`, :code:`input[2:3]`, and :code:`input[3:]`.
+
+    dim (int, optional): dimension along which to split the tensor. Default: ``0``
+
+Example::
+    >>> x = torch.arange(8)
+    >>> torch.tensor_split(x, 3)
+    (tensor([0, 1, 2]), tensor([3, 4, 5]), tensor([6, 7]))
+
+    >>> x = torch.arange(7)
+    >>> torch.tensor_split(x, 3)
+    (tensor([0, 1, 2]), tensor([3, 4]), tensor([5, 6]))
+    >>> torch.tensor_split(x, (1, 6))
+    (tensor([0]), tensor([1, 2, 3, 4, 5]), tensor([6]))
+
+    >>> x = torch.arange(14).reshape(2, 7)
+    >>> x
+    tensor([[ 0,  1,  2,  3,  4,  5,  6],
+            [ 7,  8,  9, 10, 11, 12, 13]])
+    >>> torch.tensor_split(x, 3, dim=1)
+    (tensor([[0, 1, 2],
+            [7, 8, 9]]),
+     tensor([[ 3,  4],
+            [10, 11]]),
+     tensor([[ 5,  6],
+            [12, 13]]))
+    >>> torch.tensor_split(x, (1, 6), dim=1)
+    (tensor([[0],
+            [7]]),
+     tensor([[ 1,  2,  3,  4,  5],
+            [ 8,  9, 10, 11, 12]]),
+     tensor([[ 6],
+            [13]]))
+""")
 
 add_docstr(torch.chunk,
            r"""
@@ -3663,9 +3729,9 @@ spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
 
 .. math::
     (\text{start},
-    \text{start} + \frac{\text{end} - \text{start}}{\text{steps}},
+    \text{start} + \frac{\text{end} - \text{start}}{\text{steps} - 1},
     \ldots,
-    \text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{\text{steps}},
+    \text{start} + (\text{steps} - 2) * \frac{\text{end} - \text{start}}{\text{steps} - 1},
     \text{end})
 """ + """
 
@@ -3988,9 +4054,9 @@ with base :attr:`base`. That is, the values are:
 
 .. math::
     (\text{base}^{\text{start}},
-    \text{base}^{(\text{start} + \frac{\text{end} - \text{start}}{ \text{steps}})},
+    \text{base}^{(\text{start} + \frac{\text{end} - \text{start}}{ \text{steps} - 1})},
     \ldots,
-    \text{base}^{(\text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{ \text{steps}})},
+    \text{base}^{(\text{start} + (\text{steps} - 2) * \frac{\text{end} - \text{start}}{ \text{steps} - 1})},
     \text{base}^{\text{end}})
 """ + """
 
@@ -4292,16 +4358,15 @@ Example::
 
 add_docstr(torch.matrix_exp,
            r"""
-matrix_power(input) -> Tensor
-
 Returns the matrix exponential. Supports batched input.
 For a matrix ``A``, the matrix exponential is defined as
 
 .. math::
-    \exp^A = \sum_{k=0}^\infty A^k / k!.
+    \mathrm{e}^A = \sum_{k=0}^\infty A^k / k!
 
 """ + r"""
 The implementation is based on:
+
 Bader, P.; Blanes, S.; Casas, F.
 Computing the Matrix Exponential with an Optimized Taylor Polynomial Approximation.
 Mathematics 2019, 7, 1174.
@@ -4561,13 +4626,12 @@ add_docstr(torch.median,
            r"""
 median(input) -> Tensor
 
-Returns the median value of all elements in the :attr:`input` tensor.
+Returns the median of the values in :attr:`input`.
 
 .. note::
     The median is not unique for :attr:`input` tensors with an even number
     of elements. In this case the lower of the two medians is returned. To
-    compute the mean of both medians in :attr:`input`, use :func:`torch.quantile`
-    with ``q=0.5`` instead.
+    compute the mean of both medians, use :func:`torch.quantile` with ``q=0.5`` instead.
 
 .. warning::
     This function produces deterministic (sub)gradients unlike ``median(dim=0)``
@@ -4585,9 +4649,8 @@ Example::
 
 .. function:: median(input, dim=-1, keepdim=False, *, out=None) -> (Tensor, LongTensor)
 
-Returns a namedtuple ``(values, indices)`` where ``values`` is the median
-value of each row of the :attr:`input` tensor in the given dimension
-:attr:`dim`. And ``indices`` is the index location of each median value found.
+Returns a namedtuple ``(values, indices)`` where ``values`` contains the median of each row of :attr:`input`
+in the dimension :attr:`dim`, and ``indices`` contains the index of the median values found in the dimension :attr:`dim`.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` tensor.
 
@@ -4609,14 +4672,15 @@ the outputs tensor having 1 fewer dimension than :attr:`input`.
     Do not expect the same result when run on CPU and GPU in general.
     For the same reason do not expect the gradients to be deterministic.
 
-
 Args:
     {input}
     {dim}
     {keepdim}
 
 Keyword args:
-    out (tuple, optional): the result tuple of two output tensors (max, max_indices)
+    out ((Tensor, Tensor), optional): The first tensor will be populated with the median values and the second
+                                      tensor, which must have dtype long, with their indices in the dimension
+                                      :attr:`dim` of :attr:`input`.
 
 Example::
 
@@ -4628,6 +4692,60 @@ Example::
             [ 1.0778, -1.9510,  0.7048,  0.4742, -0.7125]])
     >>> torch.median(a, 1)
     torch.return_types.median(values=tensor([-0.3982,  0.2270,  0.2488,  0.4742]), indices=tensor([1, 4, 4, 3]))
+""".format(**single_dim_common))
+
+add_docstr(torch.nanmedian,
+           r"""
+nanmedian(input) -> Tensor
+
+Returns the median of the values in :attr:`input`, ignoring ``NaN`` values.
+
+This function is identical to :func:`torch.median` when there are no ``NaN`` values in :attr:`input`.
+When :attr:`input` has one or more ``NaN`` values, :func:`torch.median` will always return ``NaN``,
+while this function will return the median of the non-``NaN`` elements in :attr:`input`.
+If all the elements in :attr:`input` are ``NaN`` it will also return ``NaN``.
+
+Args:
+    {input}
+
+Example::
+
+    >>> a = torch.tensor([1, float('nan'), 3, 2])
+    >>> a.median()
+    tensor(nan)
+    >>> a.nanmedian()
+    tensor(2.)
+
+.. function:: nanmedian(input, dim=-1, keepdim=False, *, out=None) -> (Tensor, LongTensor)
+
+Returns a namedtuple ``(values, indices)`` where ``values`` contains the median of each row of :attr:`input`
+in the dimension :attr:`dim`, ignoring ``NaN`` values, and ``indices`` contains the index of the median values
+found in the dimension :attr:`dim`.
+
+This function is identical to :func:`torch.median` when there are no ``NaN`` values in a reduced row. When a reduced row has
+one or more ``NaN`` values, :func:`torch.median` will always reduce it to ``NaN``, while this function will reduce it to the
+median of the non-``NaN`` elements. If all the elements in a reduced row are ``NaN`` then it will be reduced to ``NaN``, too.
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    out ((Tensor, Tensor), optional): The first tensor will be populated with the median values and the second
+                                      tensor, which must have dtype long, with their indices in the dimension
+                                      :attr:`dim` of :attr:`input`.
+
+Example::
+
+    >>> a = torch.tensor([[2, 3, 1], [float('nan'), 1, float('nan')]])
+    >>> a
+    tensor([[2., 3., 1.],
+            [nan, 1., nan]])
+    >>> a.median(0)
+    torch.return_types.median(values=tensor([nan, 1., nan]), indices=tensor([1, 1, 1]))
+    >>> a.nanmedian(0)
+    torch.return_types.nanmedian(values=tensor([2., 1., 1.]), indices=tensor([0, 1, 0]))
 """.format(**single_dim_common))
 
 add_docstr(torch.quantile,
@@ -6368,6 +6486,25 @@ Example::
     >>> torch.arange(1, 2.5, 0.5)
     tensor([ 1.0000,  1.5000,  2.0000])
 """.format(**factory_common_args))
+
+add_docstr(torch.ravel,
+           r"""
+ravel(input) -> Tensor
+
+Return a contiguous flattened tensor. A copy is made only if needed.
+
+Args:
+    {input}
+
+Example::
+
+    >>> t = torch.tensor([[[1, 2],
+    ...                    [3, 4]],
+    ...                   [[5, 6],
+    ...                    [7, 8]]])
+    >>> torch.ravel(t)
+    tensor([1, 2, 3, 4, 5, 6, 7, 8])
+""".format(**common_args))
 
 add_docstr(torch.remainder,
            r"""

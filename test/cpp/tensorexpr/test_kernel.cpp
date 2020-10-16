@@ -522,5 +522,232 @@ void testKernelSumMultipleAxes() {
   }
 }
 
+// This test and the following ones testing Softmax only tests with dim set
+// to one of the valid input dimensions. It does not test with dim=None
+// because that is supposed to be deprecated.
+void testKernelSoftmax2D() {
+  const auto graph_template = R"IR(
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
+        %1 : int = prim::Constant[value=${dim}]()
+        %2 : int = prim::Constant[value=7]()
+        %3 : Tensor = aten::softmax(%0, %1, %2)
+        return (%3))IR";
+
+  auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+
+  const std::string& verification_template =
+      R"IR(
+        # CHECK: for (int i0 = 0; i0 < 5
+        # CHECK-NEXT: for (int i1 = 0; i1 < 3
+        # CHECK-NEXT: input1
+        # CHECK: for (int i${other_dim}_1 = 0; i${other_dim}_1 < ${other_dim_size}
+        # CHECK: for (int i${softmax_dim}_1 = 0; i${softmax_dim}_1 < ${softmax_dim_size}
+        # CHECK-NEXT: aten_softmax_max
+        # CHECK: for (int i0_2 = 0; i0_2 < 5
+        # CHECK-NEXT: for (int i1_2 = 0; i1_2 < 3
+        # CHECK-NEXT: aten_softmax_exp
+        # CHECK: for (int i${other_dim}_3 = 0; i${other_dim}_3 < ${other_dim_size}
+        # CHECK: for (int i${softmax_dim}_3 = 0; i${softmax_dim}_3 < ${softmax_dim_size}
+        # CHECK-NEXT: aten_softmax_sum
+        # CHECK: for (int i0_4 = 0; i0_4 < 5
+        # CHECK-NEXT: for (int i1_4 = 0; i1_4 < 3
+        # CHECK-NEXT: aten_softmax)IR";
+
+  for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
+    auto softmax_dim_size = a.sizes()[softmax_dim];
+    auto other_dim = (softmax_dim + 1) % a.dim();
+
+    KernelScope kernel_scope;
+    TemplateEnv env;
+    env.d("dim", softmax_dim);
+    const auto graph_string = format(graph_template, env);
+
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+
+    TensorExprKernel k(graph);
+    std::vector<at::Tensor> inputs = {a};
+    Stmt* s = k.getCodeGenStmt();
+
+    std::ostringstream oss;
+    oss << *s;
+
+    TemplateEnv ver_env;
+    ver_env.d("other_dim", other_dim);
+    ver_env.d("other_dim_size", a.sizes()[other_dim]);
+    ver_env.d("softmax_dim", softmax_dim);
+    ver_env.d("softmax_dim_size", softmax_dim_size);
+    const auto verification_pattern = format(verification_template, ver_env);
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    auto output = stack[0].toTensor();
+    auto ref = a.softmax(softmax_dim);
+    ASSERT_EQ(output.sizes(), ref.sizes());
+    ASSERT_TRUE(at::allclose(output, ref));
+  }
+}
+
+void testKernelSoftmax3D() {
+  const auto graph_template = R"IR(
+      graph(%0 : Float(3, 4, 5, strides=[20, 5, 1], device=cpu)):
+        %1 : int = prim::Constant[value=${dim}]()
+        %2 : int = prim::Constant[value=7]()
+        %3 : Tensor = aten::softmax(%0, %1, %2)
+        return (%3))IR";
+
+  auto a = at::rand({3, 4, 5}, TensorOptions(kCPU).dtype(at::kFloat));
+
+  const std::string& verification_template =
+      R"IR(
+        # CHECK: for (int i0 = 0; i0 < 3
+        # CHECK-NEXT: for (int i1 = 0; i1 < 4
+        # CHECK-NEXT: for (int i2 = 0; i2 < 5
+        # CHECK-NEXT: input1
+        # CHECK: for (int i${dim1}_1 = 0; i${dim1}_1 < ${dim1_size}
+        # CHECK-NEXT: for (int i${dim2}_1 = 0; i${dim2}_1 < ${dim2_size}
+        # CHECK: for (int i${softmax_dim}_1 = 0; i${softmax_dim}_1 < ${softmax_dim_size}
+        # CHECK-NEXT: aten_softmax_max
+        # CHECK: for (int i0_2 = 0; i0_2 < 3
+        # CHECK-NEXT: for (int i1_2 = 0; i1_2 < 4
+        # CHECK-NEXT: for (int i2_2 = 0; i2_2 < 5
+        # CHECK-NEXT: aten_softmax_exp
+        # CHECK: for (int i${dim1}_3 = 0; i${dim1}_3 < ${dim1_size}
+        # CHECK-NEXT: for (int i${dim2}_3 = 0; i${dim2}_3 < ${dim2_size}
+        # CHECK: for (int i${softmax_dim}_3 = 0; i${softmax_dim}_3 < ${softmax_dim_size}
+        # CHECK-NEXT: aten_softmax_sum
+        # CHECK: for (int i0_4 = 0; i0_4 < 3
+        # CHECK-NEXT: for (int i1_4 = 0; i1_4 < 4
+        # CHECK-NEXT: for (int i2_4 = 0; i2_4 < 5
+        # CHECK-NEXT: aten_softmax)IR";
+
+  for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
+    auto softmax_dim_size = a.sizes()[softmax_dim];
+    std::vector<int> other_dims;
+    for (int i = 0; i < a.dim(); ++i) {
+      if (i != softmax_dim) {
+        other_dims.push_back(i);
+      }
+    }
+
+    KernelScope kernel_scope;
+    TemplateEnv env;
+    env.d("dim", softmax_dim);
+    const auto graph_string = format(graph_template, env);
+
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+
+    TensorExprKernel k(graph);
+    std::vector<at::Tensor> inputs = {a};
+    Stmt* s = k.getCodeGenStmt();
+
+    std::ostringstream oss;
+    oss << *s;
+
+    TemplateEnv ver_env;
+    ver_env.d("dim1", other_dims[0]);
+    ver_env.d("dim1_size", a.sizes()[other_dims[0]]);
+    ver_env.d("dim2", other_dims[1]);
+    ver_env.d("dim2_size", a.sizes()[other_dims[1]]);
+    ver_env.d("softmax_dim", softmax_dim);
+    ver_env.d("softmax_dim_size", softmax_dim_size);
+    const auto verification_pattern = format(verification_template, ver_env);
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    auto output = stack[0].toTensor();
+
+    auto ref = a.softmax(softmax_dim);
+    ASSERT_EQ(output.sizes(), ref.sizes());
+    ASSERT_TRUE(at::allclose(output, ref));
+  }
+}
+
+void testKernelSoftmax4D() {
+  const auto graph_template = R"IR(
+      graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], device=cpu)):
+        %1 : int = prim::Constant[value=${dim}]()
+        %2 : int = prim::Constant[value=7]()
+        %3 : Tensor = aten::softmax(%0, %1, %2)
+        return (%3))IR";
+
+  auto a = at::rand({2, 3, 2, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+
+  const std::string& verification_template =
+      R"IR(
+        # CHECK: for (int i0 = 0; i0 < 2
+        # CHECK-NEXT: for (int i1 = 0; i1 < 3
+        # CHECK-NEXT: for (int i2 = 0; i2 < 2
+        # CHECK-NEXT: for (int i3 = 0; i3 < 3
+        # CHECK-NEXT: input1
+        # CHECK: for (int i${dim1}_1 = 0; i${dim1}_1 < ${dim1_size}
+        # CHECK-NEXT: for (int i${dim2}_1 = 0; i${dim2}_1 < ${dim2_size}
+        # CHECK-NEXT: for (int i${dim3}_1 = 0; i${dim3}_1 < ${dim3_size}
+        # CHECK: for (int i${softmax_dim}_1 = 0; i${softmax_dim}_1 < ${softmax_dim_size}
+        # CHECK-NEXT: aten_softmax_max
+        # CHECK: for (int i0_2 = 0; i0_2 < 2
+        # CHECK-NEXT: for (int i1_2 = 0; i1_2 < 3
+        # CHECK-NEXT: for (int i2_2 = 0; i2_2 < 2
+        # CHECK-NEXT: for (int i3_2 = 0; i3_2 < 3
+        # CHECK-NEXT: aten_softmax_exp
+        # CHECK: for (int i${dim1}_3 = 0; i${dim1}_3 < ${dim1_size}
+        # CHECK-NEXT: for (int i${dim2}_3 = 0; i${dim2}_3 < ${dim2_size}
+        # CHECK-NEXT: for (int i${dim3}_3 = 0; i${dim3}_3 < ${dim3_size}
+        # CHECK: for (int i${softmax_dim}_3 = 0; i${softmax_dim}_3 < ${softmax_dim_size}
+        # CHECK-NEXT: aten_softmax_sum
+        # CHECK: for (int i0_4 = 0; i0_4 < 2
+        # CHECK-NEXT: for (int i1_4 = 0; i1_4 < 3
+        # CHECK-NEXT: for (int i2_4 = 0; i2_4 < 2
+        # CHECK-NEXT: for (int i3_4 = 0; i3_4 < 3
+        # CHECK-NEXT: aten_softmax)IR";
+
+  for (int softmax_dim = 0; softmax_dim < a.dim(); ++softmax_dim) {
+    auto softmax_dim_size = a.sizes()[softmax_dim];
+    std::vector<int> other_dims;
+    for (int i = 0; i < a.dim(); ++i) {
+      if (i != softmax_dim) {
+        other_dims.push_back(i);
+      }
+    }
+
+    KernelScope kernel_scope;
+    TemplateEnv env;
+    env.d("dim", softmax_dim);
+    const auto graph_string = format(graph_template, env);
+
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+
+    TensorExprKernel k(graph);
+    std::vector<at::Tensor> inputs = {a};
+    Stmt* s = k.getCodeGenStmt();
+
+    std::ostringstream oss;
+    oss << *s;
+
+    TemplateEnv ver_env;
+    ver_env.d("dim1", other_dims[0]);
+    ver_env.d("dim1_size", a.sizes()[other_dims[0]]);
+    ver_env.d("dim2", other_dims[1]);
+    ver_env.d("dim2_size", a.sizes()[other_dims[1]]);
+    ver_env.d("dim3", other_dims[2]);
+    ver_env.d("dim3_size", a.sizes()[other_dims[2]]);
+    ver_env.d("softmax_dim", softmax_dim);
+    ver_env.d("softmax_dim_size", softmax_dim_size);
+    const auto verification_pattern = format(verification_template, ver_env);
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    auto output = stack[0].toTensor();
+    auto ref = a.softmax(softmax_dim);
+    ASSERT_EQ(output.sizes(), ref.sizes());
+    ASSERT_TRUE(at::allclose(output, ref));
+  }
+}
+
 } // namespace jit
 } // namespace torch

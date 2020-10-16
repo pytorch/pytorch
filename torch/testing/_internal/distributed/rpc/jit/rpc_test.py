@@ -1039,6 +1039,30 @@ class JitRpcTest(
         self.assertEqual(fut.wait(), torch.ones(n, n) + 1 + num_cbs)
 
     @dist_init
+    def test_add_done_callback(self):
+        callback_called = None
+
+        def callback(fut):
+            nonlocal callback_called
+            callback_called = fut.wait() * 2
+
+        future = rpc.rpc_async(
+            worker_name((self.rank + 1) % self.world_size),
+            script_fork_wait_udf,
+            args=(torch.ones(2),),
+        )
+
+        future.add_done_callback(callback)
+        future_then = future.then(lambda _: True)
+
+        self.assertEqual(future.wait(), torch.ones(2) * 2)
+
+        # We have no guarantee that the add_done_callback fn will execute before the test finishes.
+        # Adding a 'then' callback that runs afterwards to guarantee we wait for the first callback
+        future_then.wait()
+        self.assertEqual(callback_called, torch.ones(2) * 4)
+
+    @dist_init
     def test_async_script_throw(self):
         future = rpc.rpc_async(
             worker_name((self.rank + 1) % self.world_size),

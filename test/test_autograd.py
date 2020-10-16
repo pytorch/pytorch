@@ -2509,9 +2509,7 @@ class TestAutograd(TestCase):
             root = root + torch.eye(dims[-1])
 
             gradcheck(func, [root, upper])
-            # TODO: gradgradcheck does not work correctly yet for complex
-            if not dtype.is_complex:
-                gradgradcheck(func, [root, upper])
+            gradgradcheck(func, [root, upper])
 
             root = torch.rand(*dims, dtype=dtype)
             root = torch.matmul(root, root.transpose(-1, -2).conj())
@@ -2684,9 +2682,9 @@ class TestAutograd(TestCase):
 
     @skipIfNoLapack
     def test_triangular_solve(self):
-        def _test_with_size(A_dims, B_dims):
-            A = torch.rand(*A_dims).requires_grad_()
-            b = torch.rand(*B_dims).requires_grad_()
+        def run_test(A_dims, B_dims, dtype):
+            A = torch.rand(*A_dims, dtype=dtype).requires_grad_()
+            b = torch.rand(*B_dims, dtype=dtype).requires_grad_()
 
             for upper, transpose, unitriangular in product((True, False), repeat=3):
                 def func(A, b):
@@ -2695,10 +2693,11 @@ class TestAutograd(TestCase):
                 gradcheck(func, [A, b])
                 gradgradcheck(func, [A, b])
 
-        _test_with_size((3, 3), (3, 4))
-        _test_with_size((3, 3), (3, 2))
-        _test_with_size((2, 3, 3), (2, 3, 4))
-        _test_with_size((2, 3, 3), (2, 3, 2))
+        for dtype in (torch.double, torch.cdouble):
+            run_test((3, 3), (3, 4), dtype)
+            run_test((3, 3), (3, 2), dtype)
+            run_test((2, 3, 3), (2, 3, 4), dtype)
+            run_test((2, 3, 3), (2, 3, 2), dtype)
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_fft_ifft_rfft_irfft(self):
@@ -4833,7 +4832,11 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
-                'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot'] + separate_complex_tests
+                'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split',
+                'matmul', 'bmm', 'mv', 'ger', 'diagonal', ] + separate_complex_tests
+
+# this list corresponds to cases that are not currently implemented
+skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex']
 
 # TODO(@anjali411): add tests for 'sub', 'div
 # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition - @anjali411
@@ -5018,6 +5021,11 @@ def add_test(
 
             for skip in skipTestIf:
                 do_test = skip(do_test)
+
+            # TODO: remove this once tests from skip_cuda_list work
+            do_test = skipCUDAIf(
+                any(skip_test in test_name for skip_test in skip_cuda_list),
+                "not implemented for CUDA yet")(do_test)
 
             setattr(TestAutogradDeviceType, test_name, do_test)
 
@@ -6082,7 +6090,7 @@ class TestAutogradFunctional(TestCase):
 class TestAutogradDeviceType(TestCase):
 
     def test_min_max_median_backprops_to_all_values(self, device):
-        for f in [torch.min, torch.max, torch.median]:
+        for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
             x1 = torch.tensor([1., 0., 1., 0., 1., 0.], device=device, requires_grad=True)
             x2 = torch.tensor([float('nan'), float('nan'), float('nan')], requires_grad=True)
             for x in [x1, x2]:
