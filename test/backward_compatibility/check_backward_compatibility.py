@@ -124,6 +124,10 @@ allow_list = [
     ("aten::_foreach_sub_scalar_list_", datetime.date(2020, 11, 10)),
     ("aten::_foreach_div_scalar_list", datetime.date(2020, 11, 10)),
     ("aten::_foreach_div_scalar_list_", datetime.date(2020, 11, 10)),
+    ("aten::_foreach_addcmul_", datetime.date(2020, 10, 15)),
+    ("aten::_foreach_addcdiv_", datetime.date(2020, 10, 15)),
+    ("aten::_foreach_addcdiv", datetime.date(2020, 10, 15)),
+    ("aten::_foreach_addcmul", datetime.date(2020, 10, 15)),
 ]
 
 def allow_listed(schema, allow_list):
