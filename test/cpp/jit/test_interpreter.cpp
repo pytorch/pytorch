@@ -163,7 +163,7 @@ TEST(InterpreterTest, runAsyncBasicTest) {
   auto asyncCounter = 0;
   std::mutex mtx;
   // a dummy executor which actually use at::launch, but add up a counter
-  auto executor = [&](std::function<void()> f) {
+  auto launcher = [&](std::function<void()> f) {
     mtx.lock();
     ++asyncCounter;
     mtx.unlock();
@@ -171,7 +171,7 @@ TEST(InterpreterTest, runAsyncBasicTest) {
   };
   std::vector<IValue> stack;
   stack.push_back(model._ivalue());
-  InterpreterState interp(function, executor);
+  InterpreterState interp(function, launcher);
   interp.runAsync(stack)->wait();
   ASSERT_TRUE(asyncCounter > 0);
 }

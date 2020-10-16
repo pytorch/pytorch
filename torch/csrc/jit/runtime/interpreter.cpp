@@ -1031,8 +1031,8 @@ struct CodeImpl {
 
 // InterpreterState state that and used to compute a Code
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
-  InterpreterStateImpl(const Code& code, TaskExecutor task_executor)
-      : task_executor_(task_executor) {
+  InterpreterStateImpl(const Code& code, TaskLauncher taskLauncher)
+      : taskLauncher_(taskLauncher) {
     enterFrame(code, 0);
   }
 
@@ -1058,7 +1058,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // including any inputs to this function
   int64_t stack_start_ = -1;
   c10::intrusive_ptr<Future> future_;
-  TaskExecutor task_executor_;
+  TaskLauncher taskLauncher_;
 
   // this holds all the tensors for this interpreter run
   // we don't bother minimizing the size of this vector, since the extra
@@ -1342,7 +1342,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 }
                 void operator()() {
                   static_cast<InterpreterStateImpl*>(state_.pImpl.get())
-                      ->task_executor_(InterpreterContinuation(
+                      ->taskLauncher_(InterpreterContinuation(
                           state_,
                           std::move(stack_),
                           dist_autograd_context_id_));
@@ -1514,14 +1514,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 forked_fn->get_executor()
                     .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
                     .code,
-                task_executor_);
+                taskLauncher_);
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
                 getDistAutogradContextId());
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
-            task_executor_(std::move(continuation));
+            taskLauncher_(std::move(continuation));
             ++frame.pc;
           } break;
           case WARN: {
@@ -1743,10 +1743,10 @@ size_t Code::register_size() const {
   return pImpl->register_size_;
 }
 
-InterpreterState::InterpreterState(const Code& code, TaskExecutor task_executor)
+InterpreterState::InterpreterState(const Code& code, TaskLauncher taskLauncher)
     : pImpl(c10::make_intrusive<InterpreterStateImpl>(
           code,
-          std::move(task_executor))) {}
+          std::move(taskLauncher))) {}
 InterpreterState::~InterpreterState() = default;
 
 void InterpreterState::run(Stack& stack) {

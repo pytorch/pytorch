@@ -41,8 +41,8 @@ void GraphFunction::run(Stack&& stack) {
 
 c10::intrusive_ptr<c10::ivalue::Future> GraphFunction::runAsync(
     Stack& stack,
-    TaskExecutor task_executor) {
-  return get_executor().runAsync(stack, std::move(task_executor));
+    TaskLauncher taskLauncher) {
+  return get_executor().runAsync(stack, std::move(taskLauncher));
 }
 
 IValue GraphFunction::operator()(

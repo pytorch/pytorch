@@ -27,7 +27,7 @@ struct TORCH_API GraphFunction : public Function {
 
   c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& stack,
-      TaskExecutor task_executor) override;
+      TaskLauncher taskLauncher = at::launch) override;
 
   IValue operator()(std::vector<IValue> stack, const Kwargs& kwargs = Kwargs())
       override;

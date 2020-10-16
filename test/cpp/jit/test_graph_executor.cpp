@@ -52,7 +52,7 @@ TEST(GraphExecutorTest, runAsync_executor) {
   auto asyncCounter = 0;
   std::mutex mtx;
   // a dummy executor which actually use at::launch, but add up a counter
-  auto taskExecutor = [&](std::function<void()> f) {
+  auto launcher = [&](std::function<void()> f) {
     mtx.lock();
     ++asyncCounter;
     mtx.unlock();
@@ -60,7 +60,7 @@ TEST(GraphExecutorTest, runAsync_executor) {
   };
   std::vector<IValue> stack;
   stack.push_back(module._ivalue());
-  graphExecutor.runAsync(stack, taskExecutor)->wait();
+  graphExecutor.runAsync(stack, launcher)->wait();
   ASSERT_TRUE(asyncCounter > 0);
 }
 
