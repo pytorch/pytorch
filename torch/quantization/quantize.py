@@ -403,7 +403,7 @@ def convert(
     end if remove_qconfig is set to True.
 
     Args:
-        `module`: input module
+        `module`: prepared and calibrated module
         `mapping`: a dictionary that maps from source module type to target
                    module type, can be overwritten to allow swapping user defined
                    Modules
@@ -411,7 +411,10 @@ def convert(
                    is mutated
         `convert_custom_config_dict`: custom configuration dictionary for convert function
 
+    Returns: A module with all the children quantized
+
     Example:
+
     .. testcode::
         convert_custom_config_dict = {
             # user will manually define the corresponding quantized
