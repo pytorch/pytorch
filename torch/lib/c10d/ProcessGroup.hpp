@@ -11,6 +11,13 @@
 
 #include <c10d/Types.hpp>
 
+// *************************************************************************
+// PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
+// versions 1.7 and 1.8.
+// PLEASE DO NOT ADD ANY DEPENDENCIES.
+// SEE RFC: https://github.com/pytorch/pytorch/issues/39662
+// *************************************************************************
+
 constexpr auto kNoTimeout = std::chrono::milliseconds(0);
 
 namespace c10d {
@@ -63,6 +70,11 @@ bool isP2POp(OpType opType);
 //
 class ProcessGroup {
  public:
+
+  // Please do not use ProcessGroup::Work API, it is going away, to be
+  // replaced by ivalue::Future.
+  // Python binding for this class might change, please do not assume
+  // this will be bound using pybind.
   class Work {
    public:
     Work();
