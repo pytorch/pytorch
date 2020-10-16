@@ -36,6 +36,10 @@ from torch.testing._internal.distributed.rpc.rpc_test import (
     TensorPipeAgentRpcTest,
 )
 
+from torch.testing._internal.distributed.rpc.example_test import (
+    ExampleTest
+)
+
 
 # The tests for the RPC module need to cover multiple possible combinations:
 # - different aspects of the API, each one having its own suite of tests;
@@ -83,6 +87,7 @@ MP_HELPERS_AND_SUFFIXES = {
 # for each agent (except the faulty agent, which is special).
 GENERIC_TESTS = [
     RpcTest,
+    ExampleTest,
     DistAutogradTest,
     DistOptimizerTest,
     JitRpcTest,
