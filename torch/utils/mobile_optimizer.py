@@ -39,11 +39,12 @@ def optimize_for_mobile(
     if preserved_methods is None:
         preserved_methods = []
 
-    if backend == 'CPU':
+    backend = backend.lower()
+    if backend == 'cpu':
         optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(script_module._c, optimization_blocklist, preserved_methods)
-    elif backend == 'Vulkan':
+    elif backend == 'vulkan':
         optimized_cpp_module = torch._C._jit_pass_vulkan_optimize_for_mobile(script_module._c, preserved_methods)
-    elif backend == 'Metal' or backend == 'metal':
+    elif backend == 'metal':
         optimized_cpp_module = torch._C._jit_pass_metal_optimize_for_mobile(script_module._c, preserved_methods)
     else:
         raise TypeError("Unknown backend, must be one of 'CPU', 'Vulkan' or 'Metal'")
