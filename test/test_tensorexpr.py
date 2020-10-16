@@ -1055,6 +1055,29 @@ class TestTensorExprFuser(BaseTestClass):
     def test_cat_cuda(self):
         self._test_cat('cuda')
 
+    def _test_cat_negative_dim(self, device):
+        def foo(*args):
+            args_2 = [v + i for i, v in enumerate(args)]
+            v = torch.cat(args_2, dim=-1)
+            return v * v
+
+        M = 16
+        Ns = [128, 16, 1]
+        values = [torch.zeros(M, N, device=device) for N in Ns]
+        traced = torch.jit.trace(foo, values)
+
+        x = warmup_and_run_forward(traced, *values)
+        self.assertLastGraphAllFused()
+        ref = foo(*values)
+        np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
+
+    def test_cat_negative_dim_cpu(self):
+        self._test_cat_negative_dim('cpu')
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_cat_negative_dim_cuda(self):
+        self._test_cat_negative_dim('cuda')
+
     def test_scalar(self):
         @torch.jit.script
         def test_float(x, y, z, a, b):
@@ -1164,6 +1187,22 @@ class TestTensorExprFuser(BaseTestClass):
         cuda = CudaCodeGenExecuted()
         self._test_softmax('cuda')
         assert cuda.elapsed_value() == 1
+
+    def test_half_gelu(self):
+        devices = ["cuda"] if torch.cuda.is_available() else []
+
+        @torch.jit.script
+        def bias_gelu(bias, y):
+            x = bias + y
+            return x * 0.5 * (1.0 + torch.erf(x / 1.41421))
+
+
+        for device in devices:
+            a = torch.rand(1024, dtype=torch.half, device=device)
+            b = torch.rand(1024, dtype=torch.half, device=device)
+            traced = torch.jit.trace(bias_gelu, (a, b))
+            x = warmup_and_run_forward(traced, a, b)
+            self.assertLastGraphAllFused()
 
     def test_transpose(self):
         @torch.jit.script

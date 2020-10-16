@@ -334,7 +334,7 @@ class TestOptim(TestCase):
             ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=1)),
         ]
 
-        kIterations = 1001
+        kIterations = 11
         device = 'cuda'
 
         for optimizers, params in optimizer_pairs_with_flags:
@@ -1388,6 +1388,18 @@ class TestLRScheduler(TestCase):
         momentum_targets = [momentum_target, momentum_target]
         scheduler = OneCycleLR(self.opt, max_lr=25, final_div_factor=2, base_momentum=1, max_momentum=22,
                                total_steps=10, anneal_strategy='linear')
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10)
+
+    def test_onecycle_lr_linear_annealing_three_phases(self):
+        lr_target = [1, 9, 17, 25, 17, 9, 1, 0.75, 0.5, 0.25]
+        momentum_target = [22, 15, 8, 1, 8, 15, 22, 22, 22, 22]
+        lr_targets = [lr_target, lr_target]
+        momentum_targets = [momentum_target, momentum_target]
+        scheduler = OneCycleLR(self.opt, max_lr=25, div_factor=25,
+                               base_momentum=1, max_momentum=22,
+                               total_steps=10, anneal_strategy='linear',
+                               pct_start=0.4, final_div_factor=4,
+                               three_phase=True)
         self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10)
 
     def test_onecycle_lr_cosine_annealing(self):
