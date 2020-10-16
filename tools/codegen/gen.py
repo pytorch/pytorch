@@ -937,7 +937,7 @@ def main() -> None:
         d = pre_grouped_native_functions[f.func.signature()]
         assert f.func.kind() not in d
         d[f.func.kind()] = f
-    grouped_native_functions = list(map(NativeFunctionGroup.from_dict, pre_grouped_native_functions.values()))
+    grouped_native_functions = [NativeFunctionGroup.from_dict(v) for v in pre_grouped_native_functions.values()]
     # NB: At the moment, grouped_native_functions isn't used by anything,
     # this code lives here to help potential future consumers; for a live
     # example see https://github.com/pytorch/pytorch/pull/45277
@@ -1094,9 +1094,9 @@ def main() -> None:
             }
         cpu_fm.write('SchemaRegister.cpp', computeSchemaRegister)
 
-    cpu_fm.write('Declarations.yaml', lambda: format_yaml(list(map(compute_declaration_yaml, native_functions))))
+    cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]))
     cpu_fm.write('RegistrationDeclarations.h', lambda: {
-        'registration_declarations': list(map(compute_registration_declarations, native_functions)),
+        'registration_declarations': [compute_registration_declarations(f) for f in native_functions],
     })
 
     if options.output_dependencies:

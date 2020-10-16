@@ -111,7 +111,7 @@ class PackedSequenceTest(TestCase):
     def _padded_sequence(self, tensor_type):
         """Create Tensor of random padded sequences"""
         ordered = self._ordered_sequence(tensor_type)
-        lengths = list(map(len, ordered))
+        lengths = [len(i) for i in ordered]
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
 
@@ -11331,7 +11331,7 @@ class TestNNDeviceType(NNTestCase):
     def _padded_sequence(self, device, dtype):
         """Create Tensor of random padded sequences"""
         ordered = self._ordered_sequence(device, dtype)
-        lengths = list(map(len, ordered))
+        lengths = [len(i) for i in ordered]
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
 

@@ -53,7 +53,7 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
 def run_ort(ort_sess, input):
     input_copy = copy.deepcopy(input)
     input, _ = torch.jit._flatten(input_copy)
-    inputs = list(map(to_numpy, input))
+    inputs = [to_numpy(inp) for inp in input]
 
     ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
     ort_outs = ort_sess.run(None, ort_inputs)
@@ -62,7 +62,7 @@ def run_ort(ort_sess, input):
 
 def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
     output, _ = torch.jit._flatten(output)
-    outputs = list(map(to_numpy, output))
+    outputs = [to_numpy(outp) for outp in output]
 
     # compare onnxruntime and PyTorch results
     assert len(outputs) == len(ort_outs), "number of outputs differ"

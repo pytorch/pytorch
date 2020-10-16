@@ -1534,7 +1534,7 @@ class DistributedTest:
                     for dtype, val in zip(dtypes, curr_values)
                 ]
                 if cuda:
-                    tensors = list(map(tensors, lambda t: t.cuda(rank_to_GPU[rank][0])))
+                    tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
                 dist.all_reduce_coalesced(tensors, op, group_id)
                 expected_tensors = [
                     _build_tensor(src + 1, expected_value, dtype=dtype)
