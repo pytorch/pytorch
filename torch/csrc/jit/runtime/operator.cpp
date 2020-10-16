@@ -224,6 +224,8 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       c10::onnx::Shape, // only used in onnx
       prim::AutogradZero, // temporarily inserted by autograd
       prim::AutogradAnyNonZero, // temporarily inserted by autograd
+      prim::AutogradAllNonZero, // temporarily inserted by autograd
+      prim::AutogradAllZero, // temporarily inserted by autograd
       prim::AutogradAdd, // temporarily inserted by autograd
       prim::ConstantChunk, // optimization pass adds it
       prim::DifferentiableGraph, // optimization pass adds it,

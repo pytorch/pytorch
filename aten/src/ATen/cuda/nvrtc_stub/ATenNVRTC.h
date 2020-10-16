@@ -42,6 +42,7 @@ namespace at { namespace cuda {
   _(nvrtcGetProgramLog)                          \
   _(nvrtcGetLoweredName)                         \
   _(cuModuleLoadData)                            \
+  _(cuModuleLoadDataEx)                          \
   _(cuModuleGetFunction)                         \
   _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
   _(cuGetErrorString)                            \
@@ -76,22 +77,24 @@ namespace at { namespace cuda {
 #define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR cuOccupancyMaxActiveBlocksPerMultiprocessor
 #endif
 
-#define AT_FORALL_NVRTC(_)                       \
-  _(nvrtcVersion)                                \
-  _(nvrtcCreateProgram)                          \
-  _(nvrtcDestroyProgram)                         \
-  _(nvrtcGetPTXSize)                             \
-  _(nvrtcGetPTX)                                 \
-  _(cuModuleLoadData)                            \
-  _(cuModuleGetFunction)                         \
-  _(HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR)\
-  _(nvrtcGetErrorString)                         \
-  _(nvrtcGetProgramLogSize)                      \
-  _(nvrtcGetProgramLog)                          \
-  _(cuLaunchKernel)                              \
-  _(nvrtcCompileProgram)                         \
-  _(cuCtxGetCurrent)                             \
-  _(cuModuleUnload)                              \
+#define AT_FORALL_NVRTC(_)                        \
+  _(nvrtcVersion)                                 \
+  _(nvrtcCreateProgram)                           \
+  _(nvrtcAddNameExpression)                       \
+  _(nvrtcDestroyProgram)                          \
+  _(nvrtcGetPTXSize)                              \
+  _(nvrtcGetPTX)                                  \
+  _(cuModuleLoadData)                             \
+  _(cuModuleGetFunction)                          \
+  _(HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR) \
+  _(nvrtcGetErrorString)                          \
+  _(nvrtcGetProgramLogSize)                       \
+  _(nvrtcGetProgramLog)                           \
+  _(cuLaunchKernel)                               \
+  _(nvrtcCompileProgram)                          \
+  _(cuCtxGetCurrent)                              \
+  _(nvrtcGetLoweredName)                          \
+  _(cuModuleUnload)                               \
   _(cuDevicePrimaryCtxGetState)
 
 #endif

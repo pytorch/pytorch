@@ -231,6 +231,25 @@ The dynamic control flow is captured correctly. We can verify in backends with d
     #       [37, 37, 37]], dtype=int64)]
 
 
+To avoid exporting a variable scalar tensor as a fixed value constant as part of the ONNX model, please
+avoid use of ``torch.Tensor.item()``. Torch supports implicit cast of single-element tensors to numbers.
+E.g.: ::
+
+    class LoopModel(torch.nn.Module):
+        def forward(self, x, y):
+            res = []
+            arr = x.split(2, 0)
+            for i in range(int(y)):
+                res += [arr[i].sum(0, False)]
+            return torch.stack(res)
+
+    model = torch.jit.script(LoopModel())
+    inputs = (torch.randn(16), torch.tensor(8))
+
+    out = model(*inputs)
+    torch.onnx.export(model, inputs, 'loop_and_list.onnx', opset_version=11, example_outputs=out)
+
+
 TorchVision support
 -------------------
 
@@ -262,6 +281,7 @@ The following operators are supported:
 * Conv
 * Dropout
 * Embedding (no optional arguments supported)
+* EmbeddingBag
 * FeatureDropout (training mode not supported)
 * Index
 * MaxPool1d
@@ -289,6 +309,7 @@ The following operators are supported:
 * avg_pool2d
 * avg_pool2d
 * avg_pool3d
+* as_strided
 * baddbmm
 * bitshift
 * cat
@@ -314,6 +335,7 @@ The following operators are supported:
 * exp
 * expand
 * expand_as
+* eye
 * flatten
 * floor
 * floor_divide
@@ -335,9 +357,11 @@ The following operators are supported:
 * instance_norm
 * interpolate
 * isnan
+* KLDivLoss
 * layer_norm
 * le
 * leaky_relu
+* len
 * log
 * log1p
 * log2
@@ -358,6 +382,9 @@ The following operators are supported:
 * narrow
 * ne
 * neg
+* new_empty
+* new_full
+* new_zeros
 * nll_loss
 * nonzero
 * norm
@@ -622,16 +649,16 @@ This mode is used to export all operators as regular ONNX operators. This is the
 
   Example torch ir graph:
 
-    graph(%0 : Float(2:12, 3:4, 4:1)):
-      %3 : Float(2:12, 3:4, 4:1) = aten:exp(%0)
-      %4 : Float(2:12, 3:4, 4:1) = aten:div(%0, %3)
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %3 : Float(2, 3, 4, strides=[12, 4, 1]) = aten:exp(%0)
+      %4 : Float(2, 3, 4, strides=[12, 4, 1]) = aten:div(%0, %3)
       return (%4)
 
   Is exported as:
 
-    graph(%0 : Float(2:12, 3:4, 4:1)):
-      %1 : Float(2:12, 3:4, 4:1) = onnx:Exp(%0)
-      %2 : Float(2:12, 3:4, 4:1) = onnx:Div(%0, %1)
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %1 : Float(2, 3, 4, strides=[12, 4, 1]) = onnx:Exp(%0)
+      %2 : Float(2, 3, 4, strides=[12, 4, 1]) = onnx:Div(%0, %1)
       return (%2)
 
 
@@ -641,16 +668,16 @@ This mode is used to export all operators as ATen ops, and avoid conversion to O
 
   Example torch ir graph:
 
-    graph(%0 : Float(2:12, 3:4, 4:1)):
-      %3 : Float(2:12, 3:4, 4:1) = aten::exp(%0)
-      %4 : Float(2:12, 3:4, 4:1) = aten::div(%0, %3)
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %3 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::exp(%0)
+      %4 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::div(%0, %3)
       return (%4)
 
   Is exported as:
 
-    graph(%0 : Float(2:12, 3:4, 4:1)):
-      %1 : Float(2:12, 3:4, 4:1) = aten::ATen[operator="exp"](%0)
-      %2 : Float(2:12, 3:4, 4:1) = aten::ATen[operator="div"](%0, %1)
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %1 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::ATen[operator="exp"](%0)
+      %2 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::ATen[operator="div"](%0, %1)
       return (%2)
 
 ONNX_ATEN_FALLBACK
@@ -680,7 +707,7 @@ To export a raw ir. ::
 
   Example torch ir graph:
 
-    graph(%x.1 : Float(1:1)):
+    graph(%x.1 : Float(1, strides=[1])):
       %1 : Tensor = aten::exp(%x.1)
       %2 : Tensor = aten::div(%x.1, %1)
       %y.1 : Tensor[] = prim::ListConstruct(%2)
@@ -688,7 +715,7 @@ To export a raw ir. ::
 
   is exported as:
 
-    graph(%x.1 : Float(1:1)):
+    graph(%x.1 : Float(1, strides=[1])):
       %1 : Tensor = aten::exp(%x.1)
       %2 : Tensor = aten::div(%x.1, %1)
       %y.1 : Tensor[] = prim::ListConstruct(%2)
@@ -702,18 +729,18 @@ enables users to register and implement the operator as part of their runtime ba
 
   Example torch ir graph:
 
-    graph(%0 : Float(2:12, 3:4, 4:1),
-          %1 : Float(2:12, 3:4, 4:1)):
-      %6 : Float(2:12, 3:4, 4:1) = foo_namespace::bar(%0, %1) # custom op
-      %7 : Float(2:12, 3:4, 4:1) = aten::div(%6, %0) # registered op
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1]),
+          %1 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %6 : Float(2, 3, 4, strides=[12, 4, 1]) = foo_namespace::bar(%0, %1) # custom op
+      %7 : Float(2, 3, 4, strides=[12, 4, 1]) = aten::div(%6, %0) # registered op
       return (%7))
 
   is exported as:
 
-    graph(%0 : Float(2:12, 3:4, 4:1),
-          %1 : Float(2:12, 3:4, 4:1)):
-      %2 : Float(2:12, 3:4, 4:1) = foo_namespace::bar(%0, %1) # custom op
-      %3 : Float(2:12, 3:4, 4:1) = onnx::Div(%2, %0) # registered op
+    graph(%0 : Float(2, 3, 4, strides=[12, 4, 1]),
+          %1 : Float(2, 3, 4, strides=[12, 4, 1])):
+      %2 : Float(2, 3, 4, strides=[12, 4, 1]) = foo_namespace::bar(%0, %1) # custom op
+      %3 : Float(2, 3, 4, strides=[12, 4, 1]) = onnx::Div(%2, %0) # registered op
       return (%3
 
 
@@ -811,7 +838,10 @@ Q: Is tensor list exportable to ONNX?
 
   Yes, this is supported now for ONNX opset version >= 11. ONNX introduced the concept of Sequence in opset 11.
   Similar to list, Sequence is a data type that contains arbitrary number of Tensors.
-  Associated operators are also introduced in ONNX, such as SequenceInsert, SequenceAt, etc. E.g.: ::
+  Associated operators are also introduced in ONNX, such as SequenceInsert, SequenceAt, etc.
+  However, in-place list append within loops is not exportable to ONNX. To implement this, please use inplace
+  add operator.
+  E.g.: ::
 
     class ListLoopModel(torch.nn.Module):
         def forward(self, x):
@@ -820,8 +850,8 @@ Q: Is tensor list exportable to ONNX?
             arr = x.split(2, 0)
             res2 = torch.zeros(3, 4, dtype=torch.long)
             for i in range(len(arr)):
-                res = res.append(arr[i].sum(0, False))
-                res1 = res1.append(arr[-1 - i].sum(0, False))
+                res += [arr[i].sum(0, False)]
+                res1 += [arr[-1 - i].sum(0, False)]
                 res2 += 1
             return torch.stack(res), torch.stack(res1), res2
 

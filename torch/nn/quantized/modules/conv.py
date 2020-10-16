@@ -519,15 +519,22 @@ class ConvTranspose1d(_ConvTransposeNd):
     composed of several input planes.
     For details on input arguments, parameters, and implementation see
     :class:`~torch.nn.ConvTranspose1d`.
+
     .. note:: Currently only the QNNPACK engine is implemented.
+        Please, set the `torch.backends.quantized.engine = 'qnnpack'`
+
     For special notes, please, see :class:`~torch.nn.quantized.Conv1d`
+
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
                              parameter.
         scale (Tensor):      scalar for the output scale
         zero_point (Tensor): scalar for the output zero point
     See :class:`~torch.nn.ConvTranspose2d` for other attributes.
+
     Examples::
+
+        >>> torch.backends.quantized.engine = 'qnnpack'
         >>> # With square kernels and equal stride
         >>> m = nnq.ConvTranspose1d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
@@ -598,15 +605,22 @@ class ConvTranspose2d(_ConvTransposeNd):
     composed of several input planes.
     For details on input arguments, parameters, and implementation see
     :class:`~torch.nn.ConvTranspose2d`.
+
     .. note:: Currently only the QNNPACK engine is implemented.
+        Please, set the `torch.backends.quantized.engine = 'qnnpack'`
+
     For special notes, please, see :class:`~torch.nn.quantized.Conv2d`
+
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
                              parameter.
         scale (Tensor):      scalar for the output scale
         zero_point (Tensor): scalar for the output zero point
     See :class:`~torch.nn.ConvTranspose2d` for other attributes.
+
     Examples::
+
+        >>> torch.backends.quantized.engine = 'qnnpack'
         >>> # With square kernels and equal stride
         >>> m = nnq.ConvTranspose2d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding

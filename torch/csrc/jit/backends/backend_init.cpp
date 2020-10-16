@@ -226,11 +226,13 @@ void initJitBackendBindings(PyObject* module) {
   m.def(
       "_jit_to_backend",
       [=](const std::string& backend_name,
-          const Module& orig_module,
+          py::handle orig_module,
           const py::dict& method_compile_spec) {
         return py::module::import("torch.jit._recursive")
-            .attr("wrap_cpp_module")(
-                codegen_lambda(backend_name, orig_module, method_compile_spec));
+            .attr("wrap_cpp_module")(codegen_lambda(
+                backend_name,
+                py::cast<Module>(orig_module.attr("_c")),
+                method_compile_spec));
       });
 }
 } // namespace jit

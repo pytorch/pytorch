@@ -4,6 +4,7 @@
 
 #include "onnx/onnx_pb.h"
 
+#include "c10/util/Exception.h"
 #include "c10/util/SmallVector.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
@@ -65,7 +66,7 @@ class OnnxifiOp final : public Operator<Context> {
     CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
     if (use_glow_aot_) {
       auto netdef_str =
-        this->template GetSingleArgument<std::string>("netdef_str", "");
+          this->template GetSingleArgument<std::string>("netdef_str", "");
       CAFFE_ENFORCE(ParseProtoFromLargeString(netdef_str, &netdef_));
     } else if (!use_onnx_) {
       CAFFE_ENFORCE(ParseProtoFromLargeString(onnx_model_str, &netdef_));
@@ -187,7 +188,7 @@ class OnnxifiOp final : public Operator<Context> {
         this->template GetRepeatedArgument<std::string>("initializers");
     // Build the Onnxifi engine
     auto backend_index =
-      this->template GetSingleArgument<int>("backend_id", use_onnx_ ? 1 : 0);
+        this->template GetSingleArgument<int>("backend_id", use_onnx_ ? 1 : 0);
     // If using Glow AOT, override the backend_id to 1, since it uses a custom
     // ONNX format, and that's the id we use for the ONNX backend.
     if (use_glow_aot_) {
@@ -263,18 +264,27 @@ class OnnxifiOp final : public Operator<Context> {
         defered_blob_reader = ws->GetBlob("__DEFERRED_BLOB_READER__");
       }
       onnxGraph graph{nullptr};
-      CAFFE_ENFORCE_EQ(
-          lib_->onnxInitGraph(
-              backend,
-              nullptr,
-              onnx_model_str.size(),
-              (const void*)(onnx_model_str.c_str()),
-              weight_descs.size(),
-              weight_descs.data(),
-              &graph,
-              static_cast<uint32_t>(max_seq_size_),
-              defered_blob_reader),
-          ONNXIFI_STATUS_SUCCESS);
+
+      static const uint64_t auxPropertiesListAOT[] = {
+          ONNXIFI_OPTIMIZATION_AOT, ONNXIFI_GRAPH_PROPERTY_NONE};
+      auto ret = lib_->onnxInitGraph(
+          backend,
+          use_glow_aot_ ? auxPropertiesListAOT : nullptr,
+          onnx_model_str.size(),
+          (const void*)(onnx_model_str.c_str()),
+          weight_descs.size(),
+          weight_descs.data(),
+          &graph,
+          static_cast<uint32_t>(max_seq_size_),
+          defered_blob_reader);
+      if (ret != ONNXIFI_STATUS_SUCCESS) {
+        if (ret == ONNXIFI_STATUS_FATAL_ERROR) {
+          C10_THROW_ERROR(
+              OnnxfiBackendSystemError, "Fatal error during onnxInitGraph");
+        } else {
+          CAFFE_THROW("onnxInitGraph failed");
+        }
+      }
 
       return std::make_shared<onnx::BackendGraphInfo>(
           backend_id, backend, graph, lib_, std::move(weight_shape_info));
