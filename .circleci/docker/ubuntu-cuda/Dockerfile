@@ -78,9 +78,9 @@ ADD ./common/install_jni.sh install_jni.sh
 ADD ./java/jni.h jni.h
 RUN bash ./install_jni.sh && rm install_jni.sh
 
-# Install NCCL for *-xenial-cuda10.1*-
+# Install NCCL for when CUDA is version 10.1
 ADD ./common/install_nccl.sh install_nccl.sh
-RUN if [ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]; then bash ./install_nccl.sh; fi
+RUN if [ "${CUDA_VERSION}" = 10.1 ]; then bash ./install_nccl.sh; fi
 RUN rm install_nccl.sh
 
 # Include BUILD_ENVIRONMENT environment variable in image
