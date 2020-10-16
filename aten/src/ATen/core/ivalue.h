@@ -39,8 +39,10 @@ TORCH_API torch::jit::Function* checkObjectSortSchema(
 // A comparator that checks ordering of two IValues of same type.
 typedef std::function<bool(const IValue& a, const IValue& b)> IValueComparator;
 
-TORCH_API IValueComparator getLessThanComparator(const IValue& v);
-TORCH_API IValueComparator getGreaterThanComparator(const IValue& v);
+TORCH_API IValueComparator getLessThanComparator(const IValue& v, std::stringstream& why_not);
+TORCH_API IValueComparator getLessThanComparatorWithNone(const IValue& v, std::stringstream& why_not);
+TORCH_API IValueComparator getGreaterThanComparator(const IValue& v, std::stringstream& why_not);
+TORCH_API IValueComparator getGreaterThanComparatorWithNone(const IValue& v, std::stringstream& why_not);
 
 namespace ivalue {
 struct Tuple;

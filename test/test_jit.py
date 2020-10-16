@@ -33,6 +33,7 @@ from jit.test_enum import TestEnum  # noqa: F401
 from jit.test_profiler import TestProfiler  # noqa: F401
 from jit.test_slice import TestSlice  # noqa: F401
 from jit.test_warn import TestWarn  # noqa: F401
+from jit.test_sortoptional import TestSortOptional  # noqa: F401
 
 # Torch
 from torch import Tensor

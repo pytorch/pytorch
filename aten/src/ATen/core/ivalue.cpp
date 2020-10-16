@@ -495,7 +495,7 @@ torch::jit::Function* checkObjectSortSchema(const c10::ClassTypePtr& t, std::str
     return nullptr;
 }
 
-IValueComparator getLessThanComparator(const IValue& v) {
+IValueComparator getLessThanComparator(const IValue& v, std::stringstream& why_not) {
   if (v.isTensor()) {
       return [](const IValue& a, const IValue& b) {
         return a.toTensor().lt(b.toTensor()).is_nonzero();
@@ -533,7 +533,14 @@ IValueComparator getLessThanComparator(const IValue& v) {
       std::vector<IValueComparator> elements_lts;
       elements_lts.reserve(n);
       for (size_t i = 0; i < n; ++i) {
-        elements_lts.push_back(getLessThanComparator(elements[i]));
+        if (elements[i].isNone()) {
+          elements_lts.push_back(nullptr);
+        } else {
+          auto lt_func = getLessThanComparatorWithNone(elements[i], why_not);
+          if (lt_func == nullptr)
+            return nullptr;
+          elements_lts.push_back(lt_func);
+        }
       }
 
       return [elements_lts=std::move(elements_lts), n](const IValue& a, const IValue& b) {
@@ -541,8 +548,16 @@ IValueComparator getLessThanComparator(const IValue& v) {
         const auto& b_elements = b.toTuple()->elements();
 
         for (size_t i = 0; i < n; ++i) {
-          if (elements_lts[i](a_elements[i], b_elements[i])) {
-            return true;
+          if (elements_lts[i] != nullptr) {
+            // a_elements[i] is not None, use the comparator.
+            if (elements_lts[i](a_elements[i], b_elements[i])) {
+              return true;
+            }
+          } else {
+            // a_elements[i] is None, only if b_element[i] is not None can we return true.
+            if (!b_elements[i].isNone()) {
+              return true;
+            }
           }
           if (a_elements[i] == b_elements[i]) {
             continue;
@@ -555,11 +570,10 @@ IValueComparator getLessThanComparator(const IValue& v) {
   }
 
   if (v.isObject()) {
-    std::stringstream why_not;
     torch::jit::Function* lt_func =
         checkObjectSortSchema(v.type()->expect<ClassType>(), why_not);
     if (!lt_func) {
-      AT_ERROR(why_not.str());
+      return nullptr;
     }
 
     return [lt_func](const IValue& a, const IValue& b) {
@@ -575,12 +589,45 @@ IValueComparator getLessThanComparator(const IValue& v) {
     };
   }
 
-  AT_ERROR("IValues of type: ", v.tagKind(), " are not comparable");
+  why_not << "IValues of type: " << v.tagKind() << " are not comparable";
+  return nullptr;
 }
 
-IValueComparator getGreaterThanComparator(const IValue& v) {
-  auto lt = getLessThanComparator(v);
+IValueComparator getLessThanComparatorWithNone(const IValue& v, std::stringstream& why_not) {
+  auto lt = getLessThanComparator(v, why_not);
+  if (!lt)
+    return nullptr;
   return [lt = std::move(lt)](const IValue& a, const IValue& b) {
+    if (a.type() == NoneType::get() && b.type() == NoneType::get())
+      return false;
+    if (b.type() == NoneType::get())
+      return false;
+    if (a.type() == NoneType::get())
+      return true;
+    return lt(a, b);  // gt(a, b) === lt(b, a)
+  };
+}
+
+IValueComparator getGreaterThanComparator(const IValue& v, std::stringstream& why_not) {
+  auto lt = getLessThanComparator(v, why_not);
+  if (!lt)
+    return nullptr;
+  return [lt = std::move(lt)](const IValue& a, const IValue& b) {
+    return lt(b, a);  // gt(a, b) === lt(b, a)
+  };
+}
+
+IValueComparator getGreaterThanComparatorWithNone(const IValue& v, std::stringstream& why_not) {
+  auto lt = getLessThanComparatorWithNone(v, why_not);
+  if (!lt)
+    return nullptr;
+  return [lt = std::move(lt)](const IValue& a, const IValue& b) {
+    if (a.type() == NoneType::get() && b.type() == NoneType::get())
+      return true;
+    if (b.type() == NoneType::get())
+      return true;
+    if (a.type() == NoneType::get())
+      return false;
     return lt(b, a);  // gt(a, b) === lt(b, a)
   };
 }
