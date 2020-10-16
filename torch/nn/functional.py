@@ -2816,6 +2816,8 @@ Examples::
 """)
 
 channel_shuffle = _add_docstr(torch.channel_shuffle, r"""
+channel_shuffle(input, groups) -> Tensor
+
 Divide the channels in a tensor of shape :math:`(*, C , H, W)`
 into g groups and rearrange them as :math:`(*, C \frac g, g, H, W)`,
 while keeping the original tensor shape.

@@ -277,7 +277,7 @@ def gradcheck(
             identical inputs through the differentiation, the results must either match
             exactly (default, 0.0) or be within this tolerance.
         check_undefined_grad (bool, options): if True, check if undefined output grads
-            are supported and treated as zeros
+            are supported and treated as zeros, for ``Tensor`` outputs.
 
     Returns:
         True if all differences satisfy allclose condition
@@ -462,7 +462,11 @@ def gradcheck(
                 return True
 
             # All backward functions must work properly if all output grads are undefined
-            outputs_to_check = [[torch._C._functions.UndefinedGrad()(o) for o in _differentiable_outputs(func(*tupled_inputs))]]
+            outputs_to_check = [[
+                torch._C._functions.UndefinedGrad()(o) for o in _differentiable_outputs(func(*tupled_inputs))
+                # This check filters out Tensor-likes that aren't instances of Tensor.
+                if isinstance(o, torch.Tensor)
+            ]]
 
             # If there are multiple output grads, we should be able to undef one at a time without error
             if len(outputs_to_check[0]) > 1:
