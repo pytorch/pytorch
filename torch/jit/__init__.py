@@ -91,9 +91,9 @@ def isinstance(obj, target_type):
     .. testcode::
 
         import torch
-        import torch.nn as nn
+        from typing import Any, Dict, List
 
-        class MyModule(nn.Module):
+        class MyModule(torch.nn.Module):
             def __init__(self):
                 super(MyModule, self).__init__()
 
