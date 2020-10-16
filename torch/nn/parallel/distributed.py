@@ -368,7 +368,7 @@ class DistributedDataParallel(Module):
             if device_ids is None:
                 device_ids = _get_all_device_indices()
 
-            self.device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
+            self.device_ids = [_get_device_index(x, True) for x in device_ids]
 
             if output_device is None:
                 output_device = device_ids[0]

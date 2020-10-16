@@ -2663,7 +2663,7 @@ class DistributedTest:
             self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
 
             # test device_ids
-            gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
+            gpus = [torch.device('cuda:' + str(i)) for i in gpus]
             self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
@@ -2681,7 +2681,7 @@ class DistributedTest:
                 gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
 
             # test device_ids
-            gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
+            gpus = [torch.device('cuda:' + str(i)) for i in gpus]
             self._test_DistributedDataParallel(
                 gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
 
@@ -2766,7 +2766,7 @@ class DistributedTest:
                 output_device=torch.device('cuda'))
 
             # test device_ids
-            gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
+            gpus = [torch.device('cuda:' + str(i)) for i in gpus]
             self._test_DistributedDataParallel_SyncBatchNorm(
                 gpu_subset=gpus,
                 rank=rank,
