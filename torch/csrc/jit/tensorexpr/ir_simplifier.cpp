@@ -516,10 +516,10 @@ const Expr* PolynomialTransformer::mutate(const Sub* v) {
   if (rhsPoly && lhsTerm) {
     // Negate every part of the Polynomial.
     const Expr* minusOne = getImmediateByType(lhsTerm->dtype(), -1);
-    const Expr* negateScalar = evaluateOp(new Mul(minusOne, lhsTerm->scalar()));
+    const Expr* negateScalar = evaluateOp(new Mul(minusOne, rhsPoly->scalar()));
 
     std::vector<const Term*> variables;
-    for (auto* t : lhsPoly->variables()) {
+    for (auto* t : rhsPoly->variables()) {
       const Expr* negate = evaluateOp(new Mul(minusOne, t->scalar()));
       variables.push_back(new Term(hasher_, negate, t->variables()));
     }
@@ -1503,9 +1503,23 @@ const Expr* TermExpander::mutate(const Term* v) {
     if (lastNode) {
       // We want to avoid a leaving a CastNode on the scalar, so handle that
       // now.
-      if (v->scalar()->dtype() != lastNode->dtype()) {
-        lastNode = new Mul(
-            evaluateOp(new Cast(lastNode->dtype(), v->scalar())), lastNode);
+      auto termDtype = v->scalar()->dtype();
+      auto lastNodeDtype = lastNode->dtype();
+      if (termDtype != lastNodeDtype) {
+        const Expr* castV = v->scalar();
+        // Take care of lane mismatch first.
+        if (termDtype.lanes() != lastNodeDtype.lanes()) {
+          castV = new Broadcast(v->scalar(), lastNodeDtype.lanes());
+        }
+        // Now take care of scalar type as well.
+        if (termDtype.scalar_type() != lastNodeDtype.scalar_type()) {
+          castV = new Cast(lastNode->dtype(), castV);
+          // For scalars, we can simplify the cast further.
+          if (lastNodeDtype.lanes() == 1) {
+            castV = evaluateOp(castV);
+          }
+        }
+        lastNode = new Mul(castV, lastNode);
       } else {
         lastNode = new Mul(v->scalar(), lastNode);
       }
@@ -1895,6 +1909,7 @@ Block* TermExpander::fuseConditions(Block* v) {
       stmts.push_back(s);
       continue;
     }
+
     // Fuse the two Conds by appending the bodies of the second Cond to the
     // first.
     Block* true_block = new Block({});
@@ -1925,11 +1940,13 @@ Block* TermExpander::fuseConditions(Block* v) {
       false_block = nullptr;
     }
 
-    prev_cond = prev_cond->cloneWithNewBodies(true_block, false_block);
+    Stmt* new_cond = prev_cond->cloneWithNewBodies(true_block, false_block)
+                         ->accept_mutator(this);
+    prev_cond = dynamic_cast<Cond*>(new_cond);
 
     // erase, which shortens the list.
     stmts.pop_back();
-    stmts.push_back(prev_cond);
+    stmts.push_back(new_cond);
     did_anything = true;
   }
 

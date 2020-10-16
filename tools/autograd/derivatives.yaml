@@ -275,8 +275,8 @@
   self: zeros_like(grad)
 
 - name: bmm(Tensor self, Tensor mat2) -> Tensor
-  self: grad.bmm(mat2.transpose(1, 2))
-  mat2: self.transpose(1, 2).bmm(grad)
+  self: grad.bmm(mat2.transpose(1, 2).conj())
+  mat2: self.transpose(1, 2).conj().bmm(grad)
 
 - name: _bmm(Tensor self, Tensor mat2, *, bool deterministic=False) -> Tensor
   self: at::_bmm(grad, mat2.transpose(1, 2), deterministic)
@@ -404,12 +404,12 @@
   self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
-  self: grad * tensor
-  tensor: grad * self
+  self: handle_r_to_c(self.scalar_type(), grad * tensor.conj())
+  tensor: handle_r_to_c(tensor.scalar_type(), grad * self.conj())
 
 - name: vdot(Tensor self, Tensor other) -> Tensor
-  self: 'not_implemented("vdot: self")'
-  other: 'not_implemented("vdot: other")'
+  self: handle_r_to_c(self.scalar_type(), grad.conj() * other)
+  other: handle_r_to_c(other.scalar_type(), grad * self)
 
 - name: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
   self: _fused_dropout_backward(grad, result1, p)
@@ -498,8 +498,8 @@
   self: not_implemented("geqrf")
 
 - name: ger(Tensor self, Tensor vec2) -> Tensor
-  self: grad.mv(vec2)
-  vec2: grad.t().mv(self)
+  self: grad.mv(vec2.conj())
+  vec2: grad.t().mv(self.conj())
 
 - name: indices(Tensor(a) self) -> Tensor(a)
   output_differentiability: [False]
@@ -695,6 +695,9 @@
 - name: median(Tensor self) -> Tensor
   self: evenly_distribute_backward(grad, self, result)
 
+- name: nanmedian(Tensor self) -> Tensor
+  self: evenly_distribute_backward(grad, self, result)
+
 # This is in theory incorrect in the following case:
 #   sorted list: [..., a, b, b, ..., b, b, c, ...] with median = b and the value
 #                            |                     at middle position of the
@@ -710,6 +713,9 @@
 # The backward implementation is correct in the sense that it returns the
 # subgradient on one side.
 - name: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
+
+- name: nanmedian.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
@@ -743,11 +749,14 @@
   self: mul_tensor_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
-  self: grad.ger(vec)
-  vec: self.t().mv(grad)
+  self: grad.ger(vec.conj())
+  vec: self.conj().t().mv(grad)
 
 - name: mvlgamma(Tensor self, int p) -> Tensor
   self: mvlgamma_backward(grad, self, p)
+
+- name: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
+  self: grad * at::isfinite(self)
 
 - name: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   input, weight, bias: "grad.defined() ? native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, eps, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
@@ -887,7 +896,7 @@
   self: renorm_backward(grad, self, p, dim, maxnorm)
 
 - name: repeat(Tensor self, int[] repeats) -> Tensor
-  self: repeat_backward(grad, self.dim(), repeats)
+  self: repeat_backward(grad, repeats, self.sizes())
 
 # DO NOT define a backward for reshape!
 # reshape is special in that it sometimes returns a view, and sometimes not.
@@ -1221,9 +1230,9 @@
   self: nll_loss2d_backward(grad, self, target, weight, reduction, ignore_index, total_weight)
   target: non_differentiable
 
-- name: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  self: smooth_l1_loss_backward(grad, self, target, reduction)
-  target: smooth_l1_loss_backward(grad, target, self, reduction)
+- name: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean, float beta=1.0) -> Tensor
+  self: smooth_l1_loss_backward(grad, self, target, reduction, beta)
+  target: smooth_l1_loss_backward(grad, target, self, reduction, beta)
 
 - name: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: soft_margin_loss_backward(grad, self, target, reduction)
@@ -1589,10 +1598,10 @@
   grad_output: replication_pad3d(grad, padding)
   self: zeros_like(self)
 
-- name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
-  grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
-  self: smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction)
-  target: -smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction)
+- name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta) -> Tensor
+  grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction, beta)
+  self: smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction, beta)
+  target: -smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction, beta)
 
 - name: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output) -> Tensor
   grad_output: softplus_backward(grad, self, beta, threshold, output)
