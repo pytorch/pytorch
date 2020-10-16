@@ -131,7 +131,6 @@ from typing import Optional, Union, Sequence, Set, List, Tuple
 #   +-------> |  Cpp Signatures   | --> |        Cpp Function Dispatch        |
 #             +-------------------+     +-------------------------------------+
 
-
 @dataclass(frozen=True)
 class PythonArgument:
     name: str
@@ -183,7 +182,6 @@ class PythonArgument:
         return l.size \
             if l is not None and l.size is not None and str(l.elem) != 'bool' else None
 
-
 @dataclass(frozen=True)
 class PythonOutArgument(PythonArgument):
     # In Python signature multiple output fields are packed into one 'out' argument.
@@ -218,7 +216,6 @@ class PythonOutArgument(PythonArgument):
                 outputs=outputs,
             )
         raise AssertionError(r'Unexpected PythonOutArgument size')
-
 
 @dataclass(frozen=True)
 class PythonSignature:
@@ -284,8 +281,6 @@ class PythonSignature:
 
 # The deprecated python signature involves some special logic, so create a
 # dedicated data model to store these extra properties.
-
-
 @dataclass(frozen=True)
 class PythonSignatureDeprecated(PythonSignature):
     # We need keep the order of arguments in deprecated signature.
@@ -316,8 +311,6 @@ class PythonSignatureDeprecated(PythonSignature):
 # variants - see details below.
 # This data model is used to represent arguments of the lambda function
 # signature.
-
-
 @dataclass(frozen=True)
 class DispatchLambdaArgument:
     name: str
@@ -330,8 +323,6 @@ class DispatchLambdaArgument:
 # is done by PythonArgParser.
 # This data model is used to represent the output of PythonArgParser.
 # It has 1-1 mapping with PythonArgument in PythonSignature.
-
-
 @dataclass(frozen=True)
 class PythonArgParserOutputExpr:
     # argument name
@@ -357,8 +348,6 @@ class PythonArgParserOutputExpr:
 # They are not always 1-1 mapped, e.g. scattered TensorOptions fields
 # need be packed into a TensorOptions object, which is the argument
 # that the lambda function wrapper takes.
-
-
 @dataclass(frozen=True)
 class DispatchLambdaArgumentExprs:
     # The exprs that provide the binding for lambda arguments, e.g.:
@@ -369,7 +358,6 @@ class DispatchLambdaArgumentExprs:
     #
     # It has 1-1 mapping with DispatchLambdaArgument.
     exprs: Sequence[str]
-
 
 @dataclass(frozen=True)
 class LocalInitExprs:
@@ -398,8 +386,6 @@ class LocalInitExprs:
 #   'Tensor' instead of 'const Tensor &' / 'Tensor &'
 #
 # TODO: This needs to be consistent with python_arg_parser - can we simplify it?
-
-
 def _simple_type(cpp_type_str: str) -> str:
     simple_type = cpp_type_str.replace(' &', '').replace('const ', '')
     opt_match = re.match(r'c10::optional<(.+)>', simple_type)
@@ -409,14 +395,12 @@ def _simple_type(cpp_type_str: str) -> str:
         simple_type = f'{typename}?' if typename != 'Layout' else 'Layout'
     return simple_type
 
-
 def _cpp_signature(f: NativeFunction, *, method: bool = False) -> cpp.CppSignature:
-    return cpp.signature_group(f.func, method=method).signature_prefer_gathered()
-
+    return CppSignatureGroup.from_schema(f.func, method=method).signature
 
 def has_tensor_options(f: NativeFunction) -> bool:
-    return any(isinstance(a, TensorOptionsArguments) for a in _cpp_signature(f).arguments)
-
+    return any(filter(lambda a: isinstance(a, TensorOptionsArguments),
+                      cpp.group_arguments(f.func, method=False)))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -439,7 +423,6 @@ def argument(cpp_arg: CppArgument) -> PythonArgument:
         default_init=None,
     )
 
-
 def signature(f: NativeFunction, *, method: bool = False) -> PythonSignature:
     # Use cpp api to gather TensorOptions fields from kwargs.
     # Always set 'method' to false as ThisArgument is not relevant - 'self'
@@ -452,7 +435,7 @@ def signature(f: NativeFunction, *, method: bool = False) -> PythonSignature:
     # Skip TensorOptionsArguments in C++ signature. Python side TensorOptions
     # arguments are created based on different rules - see below.
     cpp_arguments = tuple(filter(lambda a: not (method and a.name == 'self') and
-                                 not isinstance(a.argument, TensorOptionsArguments), cpp_sig.cpp_arguments()))
+                                 not isinstance(a.argument, TensorOptionsArguments), cpp_sig.arguments()))
 
     kwarg_only_set = set(a.name for a in f.func.kwarg_only_arguments)
     out_arg_set = set(a.name for a in f.func.out_arguments)
@@ -544,14 +527,11 @@ def signature(f: NativeFunction, *, method: bool = False) -> PythonSignature:
     )
 
 # TODO blowtorch
-
-
 def _dtype_default_type_hack(name: str) -> str:
     if name.startswith('randperm') or name == 'tril_indices' or name == 'triu_indices':
         return 'torch.int64'
     else:
         return 'None'
-
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -596,7 +576,7 @@ def dispatch_lambda_args(f: NativeFunction, method: bool, *,
                          python_signature: Optional[PythonSignature] = None,
                          ) -> Tuple[DispatchLambdaArgument, ...]:
     # Start with cpp arguments - dispatch lambda signature always include 'self'
-    cpp_args: Sequence[CppArgument] = _cpp_signature(f, method=False).cpp_arguments()
+    cpp_args: Sequence[CppArgument] = _cpp_signature(f, method=False).arguments()
 
     # Special reorder logic for deprecated python signature
     if isinstance(python_signature, PythonSignatureDeprecated):
@@ -633,7 +613,6 @@ def dispatch_lambda_args(f: NativeFunction, method: bool, *,
 
     return tuple(map(dispatch_lambda_arg, cpp_args))
 
-
 # [old codegen] XXX: if you got here because of an assertion failure, it doesn't mean
 # it's enough to just extend the list here. Before you do this, make sure
 # to add an appropriate wrap() overload in torch/csrc/autograd/utils/wrap_outputs.h.
@@ -654,7 +633,6 @@ SUPPORTED_RETURN_TYPES = {
     'IntArrayRef',
     'ScalarType'
 }
-
 
 def dispatch_lambda_return_str(f: NativeFunction) -> str:
     # [old codegen] Remove type annotation (e.g. 'Tensor' rather than 'Tensor &')
@@ -682,7 +660,6 @@ def dispatch_lambda_return_str(f: NativeFunction) -> str:
         raise RuntimeError(f'{f.func.name} returns unsupported type {return_str}')
     return return_str
 
-
 def cpp_dispatch_target(f: NativeFunction) -> str:
     name = cpp.name(f.func)
     if Variant.method in f.variants:
@@ -695,11 +672,10 @@ def cpp_dispatch_target(f: NativeFunction) -> str:
         return f'{namespace}::{name}'
     raise RuntimeError(f'could not dispatch, neither function nor method: {f.func}')
 
-
 def cpp_dispatch_exprs(f: NativeFunction, method: bool, *,
                        python_signature: Optional[PythonSignature] = None,
                        ) -> Tuple[str, ...]:
-    cpp_args: Sequence[CppArgument] = _cpp_signature(f, method=False).cpp_arguments()
+    cpp_args: Sequence[CppArgument] = _cpp_signature(f, method=False).arguments()
 
     exprs: Tuple[str, ...] = tuple()
     if not isinstance(python_signature, PythonSignatureDeprecated):
@@ -715,7 +691,6 @@ def cpp_dispatch_exprs(f: NativeFunction, method: bool, *,
 
     return exprs
 
-
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
 #                     Python / C++ Args Binding
@@ -725,6 +700,7 @@ def cpp_dispatch_exprs(f: NativeFunction, method: bool, *,
 UNPACK_METHODS = {
     'const Tensor &': 'tensor',
     'Tensor &': 'tensor',
+    'Stream': 'stream',
     'c10::optional<Tensor>': 'optionalTensor',
     'const c10::optional<Tensor>&': 'optionalTensor',
     'c10::optional<Generator>': 'generator',
@@ -771,8 +747,6 @@ UNPACK_WITH_DEFAULT_METHODS = {
 
 # Return RHS expression for python argument using PythonArgParser output.
 # e.g. for arg name 'foo', arg type 'bool', arg_index = 2, returns '_r.toBool(2)'
-
-
 def arg_parser_output_expr(
     arg_index: int, a: PythonArgument, la: Optional[DispatchLambdaArgument]
 ) -> PythonArgParserOutputExpr:
@@ -830,7 +804,6 @@ def arg_parser_output_expr(
         argument=a,
     )
 
-
 # argument name to 'simple_type' for scattered tensor options fields
 TENSOR_OPTIONS_FIELDS = {
     'dtype': 'ScalarType',
@@ -839,7 +812,6 @@ TENSOR_OPTIONS_FIELDS = {
     'pin_memory': 'bool',
     'requires_grad': 'bool',
 }
-
 
 def bind_python_cpp(
     ps: PythonSignature, f: NativeFunction, method: bool

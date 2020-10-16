@@ -8,8 +8,9 @@ from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
-from torch.fx.experimental.Partitioner import DAG, Partitioner
 from torch.fx.experimental.subgraph_creation_example import split_module
+from torch.fx.immutable_collections import immutable_dict, immutable_list
+from copy import deepcopy
 
 from torch.fx.proxy import TraceError
 
@@ -791,28 +792,6 @@ class TestFX(JitTestCase):
         output : torch.fx.Node = graph.output(b)
         self.assertTrue('typing.List[float]' in str(graph))
 
-    def test_find_single_partition(self):
-        class testModule(torch.nn.Module):
-            def forward(self, a, b):
-                return a + b
-        m = testModule()
-        traced = symbolic_trace(m)
-        partitioner = Partitioner()
-        devices = [{"name": "dev_0", "available_mem": float('inf')}]
-        dag = partitioner.partition_graph(traced, devices)
-        for node in traced.graph.nodes:
-            assert node.op == 'output' or node.partition_ids == [1]
-        nodes = list(traced.graph.nodes)
-        res_dag = DAG()
-        res_dag.create_node(0, [], [1], [], [])
-        res_dag.create_node(1, [0], [], [nodes[0], nodes[1]], [nodes[2]])
-        for r, d in zip(res_dag.nodes, dag.nodes):
-            assert(r.partition_id == d.partition_id)
-            assert(r.parents == d.parents)
-            assert(r.children == d.children)
-            assert(r.input_nodes == d.input_nodes)
-            assert(r.output_nodes == d.output_nodes)
-
     def test_subgraph_creation(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -865,7 +844,7 @@ class TestFX(JitTestCase):
         to_erase = []
         for node in rn18_traced.graph.nodes:
             if node.op == 'call_function' and node.target in [torch.relu, torch.nn.functional.relu]:
-                kwargs = node.kwargs
+                kwargs = node.kwargs.copy()
                 # Neg doesn't have in-place
                 kwargs.pop('inplace')
                 with rn18_traced.graph.inserting_before(node):
@@ -919,6 +898,13 @@ class TestFX(JitTestCase):
             if node.target in [operator.add, torch.relu]:
                 with self.assertRaisesRegex(RuntimeError, 'but it still had .* users in the graph'):
                     traced.graph.erase_node(node)
+
+    def test_copy_it(self):
+        d = immutable_dict([(3, 4), (5, 6)])
+        l = immutable_list([(3, 4), (5, 6)])
+
+        self.assertEqual(d, deepcopy(d))
+        self.assertEqual(l, deepcopy(l))
 
     def test_find_uses(self):
         graph = torch.fx.Graph()
@@ -994,6 +980,14 @@ class TestFX(JitTestCase):
         # z = x + y -> z = y + y
         z.node.args = (y.node, y.node)
         self.assertEqual(x.node.users.keys(), [zed.node])
+
+    def test_trace_function(self):
+        def foo(x, y):
+            return torch.relu(x) + y
+
+        x, y = torch.randn(3, 4), torch.randn(3, 4)
+        self.checkGraphModule(foo, (x, y))
+
 
 if __name__ == '__main__':
     run_tests()

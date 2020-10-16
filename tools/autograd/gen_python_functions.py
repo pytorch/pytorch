@@ -268,71 +268,6 @@ def create_python_bindings(python_functions, is_python_method, module):
     }
 
 
-# addition to output-variant handler in which tensor options params
-# (if present) are checked against properties of a tensor output param
-# TODO remove hardcoding, use unpack logic from emit_single_dispatch
-PY_VARIABLE_CHECK_OUT_TYPE_HACK = CodeTemplate("""\
-check_out_type_matches(_r.tensor(${out_idx}), _r.scalartype(${type_idx}),
-                       _r.isNone(${type_idx}), _r.layoutOptional(${layout_idx}),
-                       _r.device(${device_idx}), _r.isNone(${device_idx}));
-""")
-
-# Unpack parsed args to locals, call the op, and wrap the result.
-# Lambda is so GIL is back on by wrap() time (wrap can allocate)
-PY_VARIABLE_WRAP = CodeTemplate("""\
-${inits}
-auto dispatch_${name} = [](${lambda_formals}) -> ${simple_return_type} {
-  ${auto_no_gil}
-  return ${dispatch};
-};
-return wrap(${namedtuple_typeref}dispatch_${name}(${lambda_args})${set_requires_grad});
-""")
-
-# void return variant
-PY_VARIABLE_RETURN_VOID = CodeTemplate("""\
-${inits}
-auto dispatch_${name} = [](${lambda_formals}) -> ${simple_return_type} {
-  ${auto_no_gil}
-  ${dispatch};
-};
-dispatch_${name}(${lambda_args})${set_requires_grad};
-Py_RETURN_NONE;
-""")
-
-def emit_single_dispatch(python_sig, declaration, is_python_method):
-    """
-    Emit dispatch code for a single declared overload.
-    """
-    f = declaration['native_function']
-    deprecated = '[deprecated] ' if python_sig.deprecated else ''
-    schema_comment = f'// {deprecated}aten::{f.func}'
-    lambda_formals = gen_lambda_args_str(f, is_python_method, python_sig)
-    binding_inits, lambda_args, parser_outputs = gen_python_cpp_binding(f, is_python_method, python_sig)
-    dispatch = gen_cpp_dispatch(f, is_python_method, python_sig)
-    set_requires_grad = f'.set_requires_grad({parser_outputs["requires_grad"].expr})' \
-        if python_sig.tensor_options_args and not has_tensor_options(f) else ''
-
-    auto_no_gil = [] if declaration['with_gil'] else ['pybind11::gil_scoped_release no_gil;']
-
-    simple_return_type = gen_lambda_return_str(f)
-    if simple_return_type == 'void':
-        template = PY_VARIABLE_RETURN_VOID
-    else:
-        template = PY_VARIABLE_WRAP
-
-    return template.substitute(
-        name=declaration['name'],
-        inits=[schema_comment] + binding_inits,
-        lambda_formals=lambda_formals,
-        lambda_args=lambda_args,
-        dispatch=dispatch,
-        auto_no_gil=auto_no_gil,
-        set_requires_grad=set_requires_grad,
-        simple_return_type=simple_return_type,
-        namedtuple_typeref=declaration['namedtuple_typeref'],
-    )
-
-
 # handler for output/no-output overload pair
 # (plugged into PY_VARIABLE_CASE as ${call_dispatch})
 PY_VARIABLE_OUT = CodeTemplate("""\
@@ -956,45 +891,61 @@ def decl_to_python_signature(decl: Dict[str, Any], *, method: bool) -> PythonSig
     return python_sig
 
 
-def gen_lambda_args_str(f: NativeFunction, method: bool, ps: PythonSignature) -> str:
+def emit_single_dispatch(ps: PythonSignature, declaration, method: bool):
+    """
+    Emit dispatch code for a single declared overload.
+    """
+    f = declaration['native_function']
 
     @with_native_function
     def go(f: NativeFunction) -> str:
-        return ', '.join(map(lambda a: f"{a.type_str} {a.name}",
-                             dispatch_lambda_args(f, method, python_signature=ps)))
+        # header comments
+        deprecated = '[deprecated] ' if ps.deprecated else ''
+        schema_comment = f'// {deprecated}aten::{f.func}'
 
-    return go(f)
+        # dispatch lambda signature
+        name = declaration['name']
+        lambda_formals = ', '.join(map(lambda a: f"{a.type_str} {a.name}",
+                                    dispatch_lambda_args(f, method, python_signature=ps)))
+        lambda_return = dispatch_lambda_return_str(f)
 
+        # dispatch lambda body
+        dispatch_callee = cpp_dispatch_target(f)
+        dispatch_args = ', '.join(cpp_dispatch_exprs(f, method, python_signature=ps))
 
-@with_native_function
-def gen_lambda_return_str(f: NativeFunction) -> str:
-    return dispatch_lambda_return_str(f)
+        # from arg parser outputs to dispatch lambda arguments
+        binding_init_exprs, lambda_arg_exprs, parser_outputs = bind_python_cpp(ps, f, method)
+        inits = '\n'.join(binding_init_exprs.exprs)
+        lambda_args = ', '.join(lambda_arg_exprs.exprs)
 
+        # scatter fields
+        set_requires_grad = f'.set_requires_grad({parser_outputs["requires_grad"].expr})' \
+            if ps.tensor_options_args and not has_tensor_options(f) else ''
 
-def gen_cpp_dispatch(f: NativeFunction, method: bool, ps: PythonSignature) -> str:
+        auto_no_gil = '' if declaration['with_gil'] else 'pybind11::gil_scoped_release no_gil;'
 
-    @with_native_function
-    def go(f: NativeFunction) -> str:
-        callee = cpp_dispatch_target(f)
-        args = ', '.join(cpp_dispatch_exprs(f, method, python_signature=ps))
-        return f'{callee}({args})'
+        namedtuple_typeref = declaration['namedtuple_typeref']
 
-    return go(f)
-
-
-def gen_python_cpp_binding(f: NativeFunction, method: bool, ps: PythonSignature) -> Tuple[
-    Sequence[str],
-    str,
-    Dict[str, PythonArgParserOutputExpr],
-]:
-
-    @with_native_function
-    def go(f: NativeFunction) -> Tuple[
-        Sequence[str],
-        str,
-        Dict[str, PythonArgParserOutputExpr],
-    ]:
-        inits, exprs, argmaps = bind_python_cpp(ps, f, method)
-        return (inits.exprs, ', '.join(exprs.exprs), argmaps)
+        if lambda_return == 'void':
+            return f"""\
+{schema_comment}
+{inits}
+auto dispatch_{name} = []({lambda_formals}) -> {lambda_return} {{
+  {auto_no_gil}
+  {dispatch_callee}({dispatch_args});
+}};
+dispatch_{name}({lambda_args}){set_requires_grad};
+Py_RETURN_NONE;
+"""
+        else:
+            return f"""\
+{schema_comment}
+{inits}
+auto dispatch_{name} = []({lambda_formals}) -> {lambda_return} {{
+  {auto_no_gil}
+  return {dispatch_callee}({dispatch_args});
+}};
+return wrap({namedtuple_typeref}dispatch_{name}({lambda_args}){set_requires_grad});
+"""
 
     return go(f)

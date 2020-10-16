@@ -101,13 +101,10 @@ static PyObject * THCPStream_eq(THCPStream *self, THCPStream *other) {
 }
 
 static struct PyMemberDef THCPStream_members[] = {
-  {(char*)"_cdata",
-    T_ULONGLONG, offsetof(THCPStream, cdata), READONLY, nullptr},
   {nullptr}
 };
 
 static struct PyGetSetDef THCPStream_properties[] = {
-  {"device", (getter)THCPStream_get_device, nullptr, nullptr, nullptr},
   {"cuda_stream",
     (getter)THCPStream_get_cuda_stream, nullptr, nullptr, nullptr},
   {"priority", (getter)THCPStream_get_priority, nullptr, nullptr, nullptr},
@@ -154,7 +151,7 @@ PyTypeObject THCPStreamType = {
   0,                                     /* tp_iternext */
   THCPStream_methods,                    /* tp_methods */
   THCPStream_members,                    /* tp_members */
-  THCPStream_properties,                /* tp_getset */
+  THCPStream_properties,                 /* tp_getset */
   0,                                     /* tp_base */
   0,                                     /* tp_dict */
   0,                                     /* tp_descr_get */
@@ -168,6 +165,8 @@ PyTypeObject THCPStreamType = {
 
 void THCPStream_init(PyObject *module)
 {
+  Py_INCREF(THPStreamClass);
+  THCPStreamType.tp_base = THPStreamClass;
   THCPStreamClass = (PyObject*)&THCPStreamType;
   if (PyType_Ready(&THCPStreamType) < 0) {
     throw python_error();
