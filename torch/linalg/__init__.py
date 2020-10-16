@@ -146,9 +146,7 @@ linalg.tensorsolve(input, other, dims=None) -> Tensor
 
 Computes a tensor ``x`` such that ``tensordot(input, x, dims=len(x.shape)) = other``.
 
-.. note::
-    Supports real and complex inputs.
-    Complex inputs are only supported on the CPU.
+Supports real and, only on the CPU, complex inputs.
 
 Args:
     input (Tensor): left-hand-side tensor of shape ``b.shape + Q``.
