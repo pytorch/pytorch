@@ -142,6 +142,8 @@ Using the :attr:`dim` argument to compute matrix norms::
 """)
 
 
+_add_docstr(_linalg.linalg_svd, "See ``linalg.svd``")
+
 def svd(a, full_matrices=True, compute_uv=True):
     r"""
 linalg.svd(input, full_matrices=True, compute_uv=True, out=None) -> (Tensor, Tensor, Tensor)
