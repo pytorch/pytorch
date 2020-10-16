@@ -180,7 +180,7 @@ class AllocateReuseModifier final : private OptOutDispatch {
               eval_evaluator_.inferValue(allocation->size());
           if (inferred_register_size.has_value()) {
             local_valid =
-                inferred_register_size.value() > register_size_threshold_;
+                inferred_register_size.value() > static_cast<int64_t>(register_size_threshold_);
           }
         }
 
