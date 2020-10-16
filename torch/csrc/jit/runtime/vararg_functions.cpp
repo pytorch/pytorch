@@ -14,6 +14,7 @@ void addFormattedArg(
     const IValue& ival,
     std::stringstream& ss,
     int precision = defaultPrecision) {
+  std::streamsize original_precision = ss.precision();
   // TODO: Implement precison-based formatting
   switch (key) {
     case 'd':
@@ -50,7 +51,7 @@ void addFormattedArg(
       if (key == 'E') {
         ss << std::nouppercase;
       }
-      ss << std::setprecision(defaultPrecision) << std::defaultfloat;
+      ss << std::setprecision(original_precision) << std::defaultfloat;
       break;
     case 'f':
     case 'F':
@@ -66,7 +67,7 @@ void addFormattedArg(
       } else {
         ss << static_cast<float>(ival.toDouble());
       }
-      ss << std::setprecision(defaultPrecision) << std::defaultfloat;
+      ss << std::setprecision(original_precision) << std::defaultfloat;
       break;
     case 'c':
       TORCH_CHECK(
