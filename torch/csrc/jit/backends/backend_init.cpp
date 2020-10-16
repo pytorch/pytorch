@@ -45,20 +45,18 @@ void toBackendSelectiveImpl(
     c10::QualifiedName qual_module_name(module_to_lower);
     auto& atoms = qual_module_name.atoms();
 
-    // Record all of the ancestor modules (the last being the parent)
-    // so that the type of the lowered module can be remapped in their
-    // graphs if needed.
-    std::vector<Module> ancestors;
-    ancestors.reserve(atoms.size() - 1);
-
     // Search through the module hierarchy using the atoms of
     // qual_module_name until current points to the module to
-    // be lowered while storing references all of the ancestors.
+    // be lowered and parent points to its parent.
     Module current = mod;
+    Module parent;
+
     for (size_t i = 0, e = atoms.size(); i < e; ++i) {
       IValue submodule = current.attr(atoms[i]);
       if (submodule.isModule()) {
-        ancestors.emplace_back(current);
+        if (i == e - 1) {
+          parent = current;
+        }
         current = submodule.toModule();
       } else {
         std::stringstream err;
@@ -77,7 +75,6 @@ void toBackendSelectiveImpl(
 
     // Adjust the parent's type so that the type of the submodule matches
     // the type of lowered_submodule.
-    Module parent = ancestors.back();
     auto parent_type = parent.type();
     parent_type->unsafeChangeAttributeType(
         atoms.back(), lowered_submodule.type());
@@ -340,8 +337,7 @@ void initJitBackendBindings(PyObject* module) {
 
   m.def(
       "_jit_to_backend_selective",
-      [=](const std::string& backend_name,
-          py::handle orig_module,
+      [=](py::handle orig_module,
           py::function to_backend,
           const std::vector<std::string>& modules_to_lower) {
         if (auto original_module =
