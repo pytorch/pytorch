@@ -61,8 +61,6 @@ shape_stride_t getInputOutputShapeAndStride(const Tensor &t, int64_t groups) {
   std::vector<int64_t> strides = t.strides().vec();
   int64_t cstride = strides[1];
   strides.insert(strides.begin() + 1, cstride * shape[2]);
-  std::cout << shape << std::endl;
-  std::cout << strides << std::endl;
   return {shape, strides};
 }
 
@@ -74,8 +72,6 @@ shape_stride_t getFilterShapeAndStride(const Tensor &t, int64_t groups) {
   std::vector<int64_t> strides = t.strides().vec();
   int64_t cstride = strides[0];
   strides.insert(strides.begin(), cstride * shape[1]);
-  std::cout << shape << std::endl;
-  std::cout << strides << std::endl;
   return {shape, strides};
 }
 
@@ -100,7 +96,9 @@ Tensor _cudnn_convolution_v8(
   TORCH_CHECK(!benchmark && !deterministic, "not supported yet");
 
   std::cout << "input.sizes() " << input.sizes() << std::endl;
+  std::cout << "input.strides() " << input.strides() << std::endl;
   std::cout << "weight.sizes() " << weight.sizes() << std::endl;
+  std::cout << "weight.strides() " << weight.strides() << std::endl;
 
   TensorArg input_  { input,  "input",  1 },
             weight_ { weight, "weight", 2 };
@@ -132,7 +130,6 @@ Tensor _cudnn_convolution_v8(
       .setDilation(convDim, dilation.vec().data())
       .build();
 
-  std::cout << stride << ", " << padding << ", " << dilation << std::endl;
   std::cout << getTensorDescriptor(input, groups, 'x').describe() << std::endl;
   std::cout << getTensorDescriptor(output, groups, 'y').describe() << std::endl;
   std::cout << getTensorDescriptor(weight, groups, 'w').describe() << std::endl;
@@ -166,23 +163,28 @@ Tensor _cudnn_convolution_v8(
 
   auto &engine_config = heuristics.getEngineConfig();
 
-  auto plan = cudnn_frontend::ExecutionPlanBuilder()
-      .setHandle(handle)
-      .setEngineConfig(engine_config[0])
-      .build();
+  for (auto &cfg : engine_config) {
+    try {
+      auto plan = cudnn_frontend::ExecutionPlanBuilder()
+          .setHandle(handle)
+          .setEngineConfig(cfg)
+          .build();
 
-  auto workspace_size = plan.getWorkspaceSize();
-  auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
-  void * data_ptrs[] = {input.data_ptr(), output.data_ptr(), weight.data_ptr()};
-  std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
-  int64_t uids[] = {'x', 'y', 'w'};
-  auto variantPack = cudnn_frontend::VariantPackBuilder()
-      .setWorkspacePointer(workspace.data_ptr())
-      .setDataPointers(3, data_ptrs)
-      .setUids(3, uids)
-      .build();
-  AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
-  return output;
+      auto workspace_size = plan.getWorkspaceSize();
+      auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
+      void * data_ptrs[] = {input.data_ptr(), output.data_ptr(), weight.data_ptr()};
+      std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
+      int64_t uids[] = {'x', 'y', 'w'};
+      auto variantPack = cudnn_frontend::VariantPackBuilder()
+          .setWorkspacePointer(workspace.data_ptr())
+          .setDataPointers(3, data_ptrs)
+          .setUids(3, uids)
+          .build();
+      AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
+      return output;
+    } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
+  }
+  TORCH_CHECK(false, "Unable to find an engine to execute this computation")
 }
 
 }}
