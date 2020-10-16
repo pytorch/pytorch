@@ -1037,9 +1037,11 @@ class TestCase(expecttest.TestCase):
                 rtol, atol = self._getDefaultRtolAndAtol(torch.float32, torch.float32)
             else:
                 rtol, atol = 0, 0
+        rtol = cast(float, rtol)
+        atol = cast(float, atol)
         atol = max(atol, self.precision)
 
-        return _compare_scalars_internal(a, b, rtol=cast(float, rtol), atol=cast(float, atol), equal_nan=equal_nan)
+        return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
     def assertEqualIgnoreType(self, *args, **kwargs) -> None:
         # If you are seeing this function used, that means test is written wrongly
