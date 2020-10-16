@@ -349,7 +349,7 @@ void testKernel_4() {
     parseIR(graph_string, &*graph);
     auto compile = [&]() {
       TensorExprKernel k(graph);
-      Stmt* s = k.getCodeGenStmt();
+      k.getCodeGenStmt();
     };
     ASSERT_THROWS_WITH(compile(), "Empty input list is passed to aten::cat");
   }
