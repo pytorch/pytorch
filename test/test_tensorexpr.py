@@ -1084,7 +1084,7 @@ class TestTensorExprFuser(BaseTestClass):
         def foo(*args):
             args_2 = [v + i for i, v in enumerate(args)]
             v = torch.cat(args_2, dim=-1)
-            return v*v
+            return v * v
 
         M = 16
         Ns = [128, 16, 1]
