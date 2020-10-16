@@ -1286,18 +1286,18 @@ def method_tests():
         ('le_', (S, S, S), ((1,),), 'broadcast_rhs'),
         ('le_', (), ((),), 'scalar'),
         ('le_', (S, S, S), ((),), 'scalar_broadcast_rhs'),
-        ('eq_', (S, S, S), (0,), 'pyscalar'),
-        ('ne_', (S, S, S), (0,), 'pyscalar'),
-        ('gt_', (S, S, S), (0,), 'pyscalar'),
-        ('ge_', (S, S, S), (0,), 'pyscalar'),
-        ('le_', (S, S, S), (0,), 'pyscalar'),
-        ('lt_', (), (0,), 'pyscalar'),
-        ('eq_', (), (0,), 'pyscalar_scalar'),
-        ('ne_', (), (0,), 'pyscalar_scalar'),
-        ('gt_', (), (0,), 'pyscalar_scalar'),
-        ('ge_', (), (0,), 'pyscalar_scalar'),
-        ('lt_', (), (0,), 'pyscalar_scalar'),
-        ('le_', (), (0,), 'pyscalar_scalar'),
+        ('eq_', (S, S, S), (0,), 'pyscalar', (), (), (), ident, {}, True),
+        ('ne_', (S, S, S), (0,), 'pyscalar', (), (), (), ident, {}, True),
+        ('gt_', (S, S, S), (0,), 'pyscalar', (), (), (), ident, {}, True),
+        ('ge_', (S, S, S), (0,), 'pyscalar', (), (), (), ident, {}, True),
+        ('le_', (S, S, S), (0,), 'pyscalar', (), (), (), ident, {}, True),
+        ('lt_', (), (0,), 'pyscalar', (), (), (), ident, {}, True),
+        ('eq_', (), (0,), 'pyscalar_scalar', (), (), (), ident, {}, True),
+        ('ne_', (), (0,), 'pyscalar_scalar', (), (), (), ident, {}, True),
+        ('gt_', (), (0,), 'pyscalar_scalar', (), (), (), ident, {}, True),
+        ('ge_', (), (0,), 'pyscalar_scalar', (), (), (), ident, {}, True),
+        ('lt_', (), (0,), 'pyscalar_scalar', (), (), (), ident, {}, True),
+        ('le_', (), (0,), 'pyscalar_scalar', (), (), (), ident, {}, True),
         ('permute', (1, 2, 3, 4), (0, 2, 3, 1), '', (True,)),
         ('permute', (1, 2, 3, 4), (0, -2, -1, 1), 'neg_dim', (True,)),
         ('permute', (), (dont_convert(()),), 'scalar', (True,)),
@@ -1417,7 +1417,7 @@ def method_tests():
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
     ]
 
-def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
+def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, match_scalar_dtype=False, device=None):
     if not isinstance(call_args, tuple):
         call_args = (call_args,)
 
@@ -1452,6 +1452,9 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
             return v
         elif callable(arg):
             return map_arg(arg())
+        elif match_scalar_dtype:
+            # cast scalar to the same dtype as the input tensor
+            return torch.tensor([arg], dtype=dtype).item()
         else:
             return arg
     args_out = tuple(map_arg(arg) for arg in call_args)

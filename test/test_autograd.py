@@ -4894,7 +4894,8 @@ def add_test(
         dim_args_idx=(),
         skipTestIf=(),
         output_process_fn=lambda x: x,
-        kwargs=None):
+        kwargs=None,
+        match_scalar_dtype=False):
     kwargs = kwargs if kwargs else {}
     basic_test_name = 'test_' + name
     if variant_name != '':
@@ -4928,7 +4929,7 @@ def add_test(
             # for-loop bodies don't define scopes, so we have to save the variables
             # we want to close over in some way
             def do_test(self, device, dtype=dtype, name=name, self_size=self_size, args=new_args, test_name=test_name,
-                        output_process_fn=output_process_fn):
+                        output_process_fn=output_process_fn, match_scalar_dtype=match_scalar_dtype):
                 def check(name):
                     is_magic_method = name[:2] == '__' and name[-2:] == '__'
                     is_inplace = name[-1] == "_" and not is_magic_method
@@ -4938,7 +4939,8 @@ def add_test(
                         self_variable.requires_grad = False
                     # need to record this because methods can change the size (e.g. unsqueeze)
                     args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace,
-                                                                  call_kwargs=kwargs, dtype=dtype, device=device)
+                                                                  call_kwargs=kwargs, dtype=dtype,
+                                                                  match_scalar_dtype=match_scalar_dtype, device=device)
                     self_tensor = deepcopy(self_variable)
                     args_tensor = deepcopy(unpack_variables(args_variable))
                     if not exclude_tensor_method(name, test_name):
