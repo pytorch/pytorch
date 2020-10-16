@@ -194,6 +194,13 @@ def prepare(model, inplace=False, allow_list=None,
     Example:
 
     .. testcode::
+        import torch
+        class CustomModule(torch.nn.Module):
+            pass
+
+        class ObservedCustomModule(torch.nn.Module):
+            pass
+
         prepare_custom_config_dict = {
             # user will manually define the corresponding observed
             # module class which has a from_float class method that converts
@@ -202,7 +209,7 @@ def prepare(model, inplace=False, allow_list=None,
                 CustomModule: ObservedCustomModule
             }
          }
-         # get around the no code warning
+         # get around the no code/output warning
          print(prepare_custom_config_dict)
 
     """
@@ -418,6 +425,13 @@ def convert(
     Example:
 xo
     .. testcode::
+        import torch
+        class ObservedCustomModule(torch.nn.Module):
+            pass
+
+        class QuantizedCustomModule(torch.nn.Module):
+            pass
+
         convert_custom_config_dict = {
             # user will manually define the corresponding quantized
             # module class which has a from_observed class method that converts
@@ -426,7 +440,7 @@ xo
                 ObservedCustomModule: QuantizedCustomModule
             }
         }
-        # get around the no code warning
+        # get around the no code/output warning
         print(convert_custom_config_dict)
 
     """
