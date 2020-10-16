@@ -488,12 +488,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   // replaces a fallback graph inserted by
   // specialize_autogradzero if one exists
   replaceFallbackGraphWithFallbackFunction(copy->block());
-  // Make sure there are no prim::profile nodes
-  // in the optimized graph
-  // An example of how this may happen is
-  // a user disables optimizations after they
-  // already did a profiling run
-  RemoveProfilingNodes(copy);
   GRAPH_DUMP("Optimized Graph: ", copy);
   optimized_plan_ =
       ExecutionPlan(copy, function_name_, *remaining_bailout_depth_);
