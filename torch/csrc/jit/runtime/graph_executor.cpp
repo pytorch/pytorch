@@ -737,7 +737,7 @@ void GraphExecutor::run(Stack& inputs) {
 c10::intrusive_ptr<Future> GraphExecutor::runAsync(
     Stack& stack,
     TaskLauncher taskLauncher) {
-  return pImpl->runAsync(stack, taskLauncher);
+  return pImpl->runAsync(stack, std::move(taskLauncher));
 }
 
 size_t GraphExecutor::getDefaultNumBailOuts() {

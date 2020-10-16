@@ -1032,7 +1032,7 @@ struct CodeImpl {
 // InterpreterState state that and used to compute a Code
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
   InterpreterStateImpl(const Code& code, TaskLauncher taskLauncher)
-      : taskLauncher_(taskLauncher) {
+      : taskLauncher_(std::move(taskLauncher)) {
     enterFrame(code, 0);
   }
 
