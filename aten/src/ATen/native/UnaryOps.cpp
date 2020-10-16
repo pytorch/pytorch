@@ -416,7 +416,7 @@ Tensor& nan_to_num_out(
       " should be same as input: ",
       self.scalar_type());
 
-  if (c10::isIntegralType(self.scalar_type())) {
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
     result.resize_as_(self);
     result.copy_(self);
     return result;

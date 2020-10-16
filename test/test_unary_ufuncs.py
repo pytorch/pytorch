@@ -443,7 +443,8 @@ class TestUnaryUfuncs(TestCase):
             else:
                 self._test_out_arg(op, input, out)
 
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool] +
+              torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_nan_to_num(self, device, dtype):
         for contiguous in [False, True]:
             x = make_tensor((64, 64), low=0., high=100., dtype=dtype, device=device)
