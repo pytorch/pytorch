@@ -340,7 +340,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
         dim = dim + shape.size() + 1;
       }
       if (dim < 0 || dim > shape.size()) {
-        throw std::runtime_error("Invalid 'dim' input in aten::unsqueeze");
+        throw std::runtime_error("Invalid 'dim' input in aten::cat");
       }
       shape[dim] = concat_size;
       return shape;
