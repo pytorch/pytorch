@@ -164,7 +164,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'cosh', '__rmul__', 'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
-    'dot', 'vdot', 'cholesky'
+    'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
+    'bmm', 'diagonal'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -391,12 +392,6 @@ RUN_ONLY_IN_DEBUG_MODE = CodeTemplate("""\
 #ifndef NDEBUG
 ${statements}
 #endif
-""")
-
-# Generate a file that lists all functions and their schema string. Used for XLA
-REGISTRATION_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${declaration_formals}); \
-// {"schema": "${schema_string}", "compound": "${compound}", "has_math_kernel": "${has_math_kernel}"}
 """)
 
 # TraceType templates
@@ -690,31 +685,6 @@ def gen_variable_type(out, aten_declarations, template_path):
         gen_variable_type_shard(out, shard, template_path, '_%d' % i, False)
     gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False)
 
-    REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(template_path + "/RegistrationDeclarations.h")
-    registration_declarations = []
-
-    for declaration in aten_declarations:
-        if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
-            declaration_formals = declaration['schema_order_formals']
-        else:
-            assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-            declaration_formals = declaration['formals']
-        if dispatch_strategy(declaration) == 'use_derived':
-            registration_declarations.append(
-                REGISTRATION_DECLARATION.substitute(declaration,
-                                                    declaration_formals=declaration_formals,
-                                                    compound='False'))
-        else:
-            registration_declarations.append(
-                REGISTRATION_DECLARATION.substitute(declaration,
-                                                    declaration_formals=declaration_formals,
-                                                    compound='True'))
-
-    env = {
-        'registration_declarations': registration_declarations,
-    }
-    write(out, 'RegistrationDeclarations.h', REGISTRATION_DECLARATIONS_H, env)
-
 
 def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
@@ -750,6 +720,12 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
 
         # See Note [Manual catchAll kernels]
         assert (declaration['name'] in MANUAL_CATCHALL) == declaration['manual_kernel_registration']
+        # If you want to register a kernel to Autograd, you must make the op abstract.
+        # In other words, this op must have dispatch section in native_functions.yaml.
+        if declaration['name'] in MANUAL_AUTOGRAD_AND_TRACER or declaration['derivative']:
+            msg = (f'Did you add a formula for {declaration["name"]}(or its functional variant) in derivatives.yaml?'
+                   f'If so please add a dispatch section for it with DefaultBackend in native_functions.yaml.')
+            assert declaration['abstract'], msg
 
         # Emit TraceType code
         if declaration['name'] not in MANUAL_TRACER:
