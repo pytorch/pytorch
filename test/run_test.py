@@ -20,6 +20,7 @@ from typing import Dict, Optional
 
 TESTS = [
     'test_autograd',
+    'benchmark_utils/test_benchmark_utils',
     'test_bundled_inputs',
     'test_complex',
     'test_cpp_api_parity',
@@ -92,6 +93,7 @@ TESTS = [
     'test_determination',
     'test_futures',
     'test_fx',
+    'test_fx_experimental',
     'test_functional_autograd_benchmark',
     'test_package',
 ]

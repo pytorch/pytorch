@@ -219,6 +219,9 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
   DispatchKey::SparseHIP,
 });
 
+// true if t is a backend dispatch key
+C10_API bool isBackendDispatchKey(DispatchKey t);
+
 // Resolve alias dispatch key to DispatchKeySet if applicable
 C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
 
