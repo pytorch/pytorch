@@ -516,7 +516,9 @@ void GraphExecutorImplBase::run(Stack& stack) {
   last_executed_optimized_graph = plan.graph;
 }
 
-c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(Stack& stack) {
+c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(
+    Stack& stack,
+    TaskExecutor task_executor) {
   TORCH_CHECK(
       stack.size() >= num_inputs,
       "expected ",
@@ -529,13 +531,14 @@ c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(Stack& stack) {
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
   struct Frame {
-    explicit Frame(ExecutionPlan eplan)
-        : plan(std::move(eplan)), state(plan.code) {}
+    explicit Frame(ExecutionPlan eplan, TaskExecutor task_executor)
+        : plan(std::move(eplan)), state(plan.code, std::move(task_executor)) {}
     ExecutionPlan plan;
     InterpreterState state;
   };
   auto frame = std::make_shared<Frame>(
-      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts()));
+      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts()),
+      std::move(task_executor));
   auto res = frame->state.runAsync(stack);
   last_executed_optimized_graph = frame->plan.graph;
   if (!res->completed()) {
@@ -731,8 +734,10 @@ void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
 }
 
-c10::intrusive_ptr<Future> GraphExecutor::runAsync(Stack& stack) {
-  return pImpl->runAsync(stack);
+c10::intrusive_ptr<Future> GraphExecutor::runAsync(
+    Stack& stack,
+    TaskExecutor task_executor) {
+  return pImpl->runAsync(stack, task_executor);
 }
 
 size_t GraphExecutor::getDefaultNumBailOuts() {
