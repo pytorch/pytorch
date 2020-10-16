@@ -193,7 +193,7 @@ def prepare(model, inplace=False, allow_list=None,
 
     Example:
 
-    .. testcode::
+    .. note::
         import torch
         class CustomModule(torch.nn.Module):
             pass
@@ -424,7 +424,7 @@ def convert(
 
     Example:
 xo
-    .. testcode::
+    .. note::
         import torch
         class ObservedCustomModule(torch.nn.Module):
             pass
