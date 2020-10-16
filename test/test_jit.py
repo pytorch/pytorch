@@ -15611,7 +15611,8 @@ def add_autograd_test(
         dim_args_idx=(),
         skipTestIf=(),
         output_process_fn=lambda x: x,
-        kwargs=None):
+        kwargs=None,
+        match_scalar_dtype=False):
 
     # Disable complex tests
     # TODO: Add complex support for jit
