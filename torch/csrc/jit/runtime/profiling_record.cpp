@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include "jit/ir/ir.h"
 
 namespace torch {
 namespace jit {
@@ -114,6 +115,49 @@ c10::SymbolicShape ProfilingRecord::mergeSymbolicShapes(
   }
 
   return c10::SymbolicShape(new_symbols);
+}
+
+void ProfilingRecord::profileOptionalValue(const Use& use) {
+  c10::List<int64_t> elems{0, 0};
+  // elems.push_back(0);
+  // elems.push_back(0);
+  IValue init_val(elems);
+
+  auto combine = [](const IValue& acc, const IValue& val) {
+    auto noneCounts = acc.toIntList();
+    auto index = static_cast<int>(!val.isNone());
+    noneCounts.set(index, noneCounts.get(0) + 1);
+    return IValue{noneCounts};
+  };
+  insertProfileIValueOp(use, combine, init_val, "none_counts");
+}
+
+void ProfilingRecord::insertProfileIValueOp(
+    const Use& use,
+    std::function<IValue(const IValue& acc, const IValue& val)> combine,
+    const IValue& init,
+    const std::string attr_name) {
+  Value* i = use.user->input(use.offset);
+  auto pn = new ProfileIValueOp(use.user->owningGraph(), {nullptr});
+  pn->addInput(i);
+  auto pno = pn->addOutput();
+  pn->ival_(Symbol::attr(attr_name), init);
+  pno->setType(i->type());
+  //
+  std::function<void(Stack&)> wrapper =
+      [this, pn, combine, attr_name](Stack& stack) {
+        int64_t frame_id = 0;
+        pop(stack, frame_id);
+        IValue val;
+        pop(stack, val);
+        std::lock_guard<std::mutex> lock(this->mutex_);
+        auto old_val = pn->ival(Symbol::attr(attr_name));
+        auto new_val = combine(old_val, val);
+        pn->ival_(Symbol::attr(attr_name), new_val);
+        push(stack, val);
+      };
+
+  pn->setCallback(wrapper);
 }
 
 void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
@@ -240,27 +284,7 @@ void ProfilingRecord::instrumentBlock(Block* block) {
         // here we are profile the definition instead of the use,
         // because we are only optimizing in the case of a None value which is
         // immutable
-        auto opt_pn = createProfileOptionalNode(nullptr, {i});
-        std::function<void(Stack&)> optional_profiler = [this,
-                                                         opt_pn](Stack& stack) {
-          std::lock_guard<std::mutex> lock(this->mutex_);
-          // frame_id is unused
-          int64_t frame_id = 0;
-          pop(stack, frame_id);
-          IValue value;
-          pop(stack, value);
-          if (value.isNone()) {
-            opt_pn->i_(attr::num_none, opt_pn->i(attr::num_none) + 1);
-          } else {
-            opt_pn->i_(attr::num_present, opt_pn->i(attr::num_present) + 1);
-          }
-          push(stack, value);
-        };
-        opt_pn->setCallback(optional_profiler);
-        auto pno = opt_pn->addOutput();
-        pno->setType(i->type());
-        opt_pn->insertAfter(i->node());
-        i->replaceAllUsesAfterNodeWith(opt_pn, pno);
+        profileOptionalValue({n, offset});
       }
     }
 
@@ -285,7 +309,8 @@ void ProfilingRecord::instrumentBlock(Block* block) {
 
 void ProfilingRecord::removeProfilingNodes(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-    if (it->kind() == prim::profile || it->kind() == prim::profile_optional) {
+    if (it->kind() == prim::profile || it->kind() == prim::profile_optional ||
+        it->kind() == prim::profile_ivalue) {
       it->output()->replaceAllUsesWith(it->input());
       it.destroyCurrent();
     } else {

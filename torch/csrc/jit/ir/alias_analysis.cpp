@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/memory.h>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -525,6 +526,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeSetAttr(node);
     case prim::profile_optional:
     case prim::profile:
+    case prim::profile_ivalue:
       makePointerTo(node->output(), node->inputs().at(0));
       return;
     case prim::TypeCheck: {

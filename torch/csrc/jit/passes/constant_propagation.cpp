@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/csrc/utils/memory.h>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -96,6 +97,7 @@ std::unordered_set<Symbol> skip_list = {
     prim::Guard,
     prim::profile,
     prim::profile_optional,
+    prim::profile_ivalue,
     prim::unchecked_unwrap_optional, // TODO remove
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.

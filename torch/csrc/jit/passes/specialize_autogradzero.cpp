@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -121,15 +122,21 @@ struct AutogradZeroSpecializer {
     std::vector<Value*> nonzero_values;
 
     for (auto inp : graph_->inputs()) {
-      if (auto profile_optional_node = getUse(inp, prim::profile_optional)) {
-        if (profile_optional_node->i(attr::num_present) == 0 &&
-            profile_optional_node->i(attr::num_none) != 0) {
-          auto check = graph_->insert(aten::__is__, {inp, none_val})->node();
-          checks.push_back(check->output());
-          profiled_none_.insert(inp);
+      if (auto profile_optional_node = getUse(inp, prim::profile_ivalue)) {
+        if (profile_optional_node->hasAttribute(Symbol::attr("none_counts"))) {
+          auto none_counts =
+              profile_optional_node->ival(Symbol::attr("none_counts"))
+                  .toIntList();
+          auto num_none = none_counts.get(0);
+          auto num_present = none_counts.get(1);
+          if (num_present == 0 && num_none != 0) {
+            auto check = graph_->insert(aten::__is__, {inp, none_val})->node();
+            checks.push_back(check->output());
+            profiled_none_.insert(inp);
+          }
+          removeProfiledOptionalUses(inp);
+          continue;
         }
-        removeProfiledOptionalUses(inp);
-        continue;
       }
 
       if (inp->uses().size() == 0 || !inp->type()->cast<TensorType>()) {

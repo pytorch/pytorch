@@ -23,6 +23,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include "ATen/core/interned_strings.h"
 
 #ifdef USE_RPC
 #include <torch/csrc/distributed/autograd/context/container.h>
@@ -791,6 +792,9 @@ struct CodeImpl {
     } else if (node->cast<ProfileOptionalOp>()) {
       profile_function_table_.push_back(
           node->cast<ProfileOptionalOp>()->getCallback());
+    } else if (node->cast<ProfileIValueOp>()->getCallback()) {
+      profile_function_table_.push_back(
+          node->cast<ProfileIValueOp>()->getCallback());
     } else {
       TORCH_INTERNAL_ASSERT(false);
     }
@@ -947,6 +951,7 @@ struct CodeImpl {
         break;
       case prim::profile_optional:
       case prim::profile:
+      case prim::profile_ivalue:
         emitProfile(node);
         break;
       case prim::GetAttr:

@@ -179,6 +179,12 @@ struct ProfilingRecord {
   TORCH_API static void removeProfilingNodes(Block* b);
   TORCH_API static void removeProfileCounter(Block* b);
 
+  TORCH_API void insertProfileIValueOp(
+      const Use& use,
+      std::function<IValue(const IValue& acc, const IValue& val)> combine,
+      const IValue& init,
+      const std::string attr_name);
+
   std::shared_ptr<Graph> profiled_graph_;
   std::mutex mutex_;
   size_t profiling_count_;
@@ -212,6 +218,7 @@ struct ProfilingRecord {
   void instrumentBlock(Block* block);
   void insertShapeProfile(Node* n, size_t offset);
   ProfilingRecord(std::shared_ptr<Graph> g);
+  void profileOptionalValue(const Use& use);
 };
 
 } // namespace jit
