@@ -9,6 +9,8 @@
 #include <c10d/PrefixStore.hpp>
 #include <c10d/TCPStore.hpp>
 
+constexpr int64_t kShortStoreTimeoutMillis = 100;
+
 // Different ports for different tests.
 void testHelper(const std::string& prefix = "") {
   const auto numThreads = 16;
@@ -51,6 +53,8 @@ void testHelper(const std::string& prefix = "") {
     EXPECT_FALSE(delFailure);
     numKeys = serverStore->getNumKeys();
     EXPECT_EQ(numKeys, 4);
+    auto timeout = std::chrono::milliseconds(kShortStoreTimeoutMillis);
+    serverStore->setTimeout(timeout);
     EXPECT_THROW(serverStore->get("key0"), std::runtime_error);
   });
 
