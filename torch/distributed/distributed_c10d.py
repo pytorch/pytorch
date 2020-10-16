@@ -768,7 +768,7 @@ def recv(tensor,
     if src is None:
         work = pg.recv_anysource([tensor], tag)
         work.wait()
-        src_rank = work.source_rank()
+        src_rank = work._source_rank()
         if group == GroupMember.WORLD:
             return src_rank
         else:
