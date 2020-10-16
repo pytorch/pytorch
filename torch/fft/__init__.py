@@ -146,7 +146,7 @@ Example:
 """)
 
 ifft2 = _add_docstr(_fft.fft_ifft2, r"""
-ifftn(input, s=None, dim=(-2, -1), norm=None) -> Tensor
+ifft2(input, s=None, dim=(-2, -1), norm=None) -> Tensor
 
 Computes the 2 dimensional inverse discrete Fourier transform of :attr:`input`.
 Equivalent to :func:`~torch.fft.ifftn` but IFFTs only the last two dimensions by default.
