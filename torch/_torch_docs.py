@@ -3295,16 +3295,16 @@ Computes the regularized lower incomplete gamma function:
 .. math::
     \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_0^{\text{other}_i} t^{\text{input}_i-1} e^{-t} dt
 
-where (1) :attr:`input` and :attr:`other` must be non-negative and (2)
-:attr:`input` and :attr:`other` must not be zero at the same index.
-Violating the constraints will return `nan`.
+where both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
+and at least one is strictly positive.
+If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
 
 .. note::
-    The backward pass with respect to :attr:`input` is not supported.
-    Please open a feature request on github if you need it.
+    The backward pass with respect to :attr:`input` is not yet supported.
+    Please open an issue on PyTorch's Github to request it.
 
 """ + r"""
 Args:

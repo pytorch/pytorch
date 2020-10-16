@@ -175,7 +175,11 @@ static inline __host__ __device__ scalar_t calc_polygamma(int n, scalar_t x) {
 }
 
 /*
- * For licensing information, please refer to the the cpu implementation located in "ATen/native/Math.h".
+ * The implementation of incomplete gamma function as well as the helper
+ * functions are derived from the implementation of gammainc from SciPy
+ * that also uses part of code from Cephes's igam and igamc as well as
+ * Boost's lanczos approximations.
+ * For further information about the licenses, please see NOTICE.
  */
 // regularized lower & upper incomplete gamma
 template <typename scalar_t>
@@ -233,9 +237,6 @@ static __host__ __device__ scalar_t ratevl(scalar_t x, const scalar_t num[], int
   }
 }
 
-/*
- * For licensing information, please refer to the the cpu implementation located in "ATen/native/Math.h".
- */
 template <typename scalar_t>
 static __host__ __device__ scalar_t lanczos_sum_expg_scaled(scalar_t x) {
   // lanczos approximation

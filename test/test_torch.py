@@ -17403,9 +17403,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 input1 = input1.to(torch.float)
             expected = scipy.special.gammainc(input0.cpu().numpy(), input1.cpu().numpy())
             expected = torch.from_numpy(expected).to(dtype)
-            if half_prec:
-                actual = actual.to(torch.float)
-                expected = expected.to(torch.float)
             self.assertEqual(actual, expected)
 
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
@@ -17419,6 +17416,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
+    @onlyOnCPUAndCUDA
     def test_igamma_edge_cases(self, device, dtype):
         tkwargs = {"dtype": dtype, "device": device}
         infs = torch.zeros((3,), **tkwargs) + float("inf")
