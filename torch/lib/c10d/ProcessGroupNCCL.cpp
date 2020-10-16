@@ -1580,7 +1580,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& /* unused */,
     std::vector<at::Tensor>& /* unused */,
     const AllToAllOptions& /* unused */) {
-  throw std::runtime_error("ProcessGroupNCCL does not support alltoall");
+  throw std::runtime_error(
+      "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
