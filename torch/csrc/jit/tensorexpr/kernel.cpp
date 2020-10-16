@@ -324,6 +324,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       // The sizes of the output tensor on that dimension is a sum of the
       // corresponding sizes of the input tensors, the other dimension have the
       // same sizes.
+      // Negative dim will correspond to dim = dim + input.dim() + 1.
       auto const& n = v->node();
       auto inputs = n->input(0)->node()->inputs();
       TORCH_INTERNAL_ASSERT(n->input(1)->node()->kind() == prim::Constant);
@@ -335,6 +336,12 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       }
       concat_size = IRSimplifier::simplify(concat_size);
       auto shape = sizesForValue(inputs[0]);
+      if (dim < 0) {
+        dim = dim + shape.size() + 1;
+      }
+      if (dim < 0 || dim > shape.size()) {
+        throw std::runtime_error("Invalid 'dim' input in aten::unsqueeze");
+      }
       shape[dim] = concat_size;
       return shape;
     }
@@ -1175,7 +1182,11 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           [this, v](const std::vector<VarHandle>& axes) {
             auto const& n = v->node();
             auto inputs = n->inputs()[0]->node()->inputs();
-            size_t dim = n->inputs()[1]->node()->i(attr::value);
+            int64_t dim = n->inputs()[1]->node()->i(attr::value);
+            if (dim < 0) {
+              dim += axes.size();
+            }
+            TORCH_INTERNAL_ASSERT(dim >= 0, "invalid 'dim' value in aten::cat");
 
             std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
             ExprHandle load = tensorOrConstant(inputs[0], newAxes);
@@ -1745,6 +1756,7 @@ std::vector<int64_t> TensorExprKernel::getReductionAxes(
 
 void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
+  GRAPH_DUMP("TensorExprKernel graph:", graph_);
   // Bind inputs to buffers.
   nInputs_ = graph_->inputs().size();
   for (auto const& input : graph_->inputs()) {

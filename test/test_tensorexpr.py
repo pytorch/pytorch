@@ -1055,6 +1055,29 @@ class TestTensorExprFuser(BaseTestClass):
     def test_cat_cuda(self):
         self._test_cat('cuda')
 
+    def _test_cat_negative_dim(self, device):
+        def foo(*args):
+            args_2 = [v + i for i, v in enumerate(args)]
+            v = torch.cat(args_2, dim=-1)
+            return v*v
+
+        M = 16
+        Ns = [128, 16, 1]
+        values = [torch.zeros(M, N, device=device) for N in Ns]
+        traced = torch.jit.trace(foo, values)
+
+        x = warmup_and_run_forward(traced, *values)
+        self.assertLastGraphAllFused()
+        ref = foo(*values)
+        np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
+
+    def test_cat_negative_dim_cpu(self):
+        self._test_cat_negative_dim('cpu')
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_cat_negative_dim_cuda(self):
+        self._test_cat_negative_dim('cuda')
+
     def test_scalar(self):
         @torch.jit.script
         def test_float(x, y, z, a, b):
