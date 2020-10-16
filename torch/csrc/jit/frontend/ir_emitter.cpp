@@ -3124,8 +3124,7 @@ struct to_ir {
     return std::make_shared<SimpleValue>(rpc_node_output);
   }
 
-  // This is an auxiliary function that is only called from `emitSimpleExpr`.
-  Value* emitSimpleExprFromBuiltInFunction(const TreeRef& tree) {
+  Value* emitBinaryOp(const TreeRef& tree) {
     const auto& inputs = tree->trees();
     auto kind = getNodeKind(tree->kind(), inputs.size());
     auto overload = getOperatorOverload(tree->kind(), inputs.size());
@@ -3165,7 +3164,7 @@ struct to_ir {
           output->setType(StringType::get());
           return output;
         } else {
-          return emitSimpleExprFromBuiltInFunction(tree);
+          return emitBinaryOp(tree);
         }
       }
       case TK_IN:
@@ -3185,7 +3184,7 @@ struct to_ir {
       case '^':
       case TK_LSHIFT:
       case TK_RSHIFT:
-        return emitSimpleExprFromBuiltInFunction(tree);
+        return emitBinaryOp(tree);
       case TK_IS:
       case TK_ISNOT:
       case TK_AND:

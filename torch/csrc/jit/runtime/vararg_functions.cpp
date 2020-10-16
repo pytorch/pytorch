@@ -50,6 +50,7 @@ void addFormattedArg(
       if (key == 'E') {
         ss << std::nouppercase;
       }
+      ss << std::setprecision(defaultPrecision) << std::defaultfloat;
       break;
     case 'f':
     case 'F':
@@ -65,6 +66,7 @@ void addFormattedArg(
       } else {
         ss << static_cast<float>(ival.toDouble());
       }
+      ss << std::setprecision(defaultPrecision) << std::defaultfloat;
       break;
     case 'c':
       TORCH_CHECK(
@@ -144,11 +146,11 @@ void percentFormat(Stack& stack, size_t num_inputs) {
   size_t begin = 0;
   while (true) {
     size_t percent_idx = format_str.find('%', begin);
-    size_t format_idx = percent_idx + 1;
     if (percent_idx == std::string::npos) {
       ss << format_str.substr(begin);
       break;
     }
+    size_t format_idx = percent_idx + 1;
     TORCH_CHECK(
         percent_idx < format_str.length() - 1, "Incomplete format specifier");
     ss << format_str.substr(begin, percent_idx - begin);
