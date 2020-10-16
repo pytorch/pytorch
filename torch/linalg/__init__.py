@@ -157,8 +157,8 @@ Args:
         number of its rightmost dimensions, and must be such that ``prod(Q) == prod(b.shape)``.
         ``Q`` is also equal to ``x.shape``.
     other (Tensor): right-hand-side tensor of any shape.
-    dims (Tuple[int]): dimensions of `:attr:`input` to reorder to the right, before solve.
-        If None (default), no reordering is done.
+    dims (Tuple[int]): dimensions of `:attr:`input` to be moved to the right, before solve.
+        If None (default), no reordering of dimensions is done.
 
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
