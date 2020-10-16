@@ -13,7 +13,7 @@ C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(RoIAlignRotated)
 namespace caffe2 {
 
 template <typename T, class Context>
-class CAFFE2_API RoIAlignRotatedOp final : public Operator<Context> {
+class RoIAlignRotatedOp final : public Operator<Context> {
  public:
   template <class... Args>
   explicit RoIAlignRotatedOp(Args&&... args)
@@ -47,6 +47,8 @@ class CAFFE2_API RoIAlignRotatedOp final : public Operator<Context> {
   int sampling_ratio_;
   bool aligned_;
 };
+
+template <> bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice();
 
 } // namespace caffe2
 
