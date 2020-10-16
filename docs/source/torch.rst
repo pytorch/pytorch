@@ -277,6 +277,7 @@ Pointwise Ops
     clamp
     clip
     conj
+    copysign
     cos
     cosh
     deg2rad
