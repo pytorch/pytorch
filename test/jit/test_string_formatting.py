@@ -19,7 +19,7 @@ class TestStringFormatting(JitTestCase):
     def test_modulo_operator(self):
         def fn(dividend: int, divisor: int) -> int:
             return dividend % divisor
-        self.checkScript(fn, (1,))
+        self.checkScript(fn, (5, 2))
 
     def test_string_interpolation_with_string_placeholder_and_string_variable(self):
         def fn(arg1: str):

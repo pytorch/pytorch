@@ -4,42 +4,8 @@
 namespace torch {
 namespace jit {
 
-#define PRECISION 6
-
-void tupleUnpack(Stack& stack) {
-  auto tuple = pop(stack).toTuple();
-  stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
-}
-
-void format(Stack& stack, size_t num_inputs) {
-  // static const std::regex unsupported_options("\\{(.*?)\\}");
-  auto format = peek(stack, 0, num_inputs).toStringRef();
-  // // Temporally comment out the warning message because of
-  // // "StdRegexIsAwful" internal Lint error, to prevent sev
-  // // of std::regex from PT mobile.
-  // if (std::regex_search(format, unsupported_options)) {
-  //   TORCH_WARN("Format options are not supported.");
-  // }
-
-  auto args = last(stack, num_inputs - 1);
-  std::stringstream ss;
-  for (size_t begin = 0, used_args = 0; true; ++used_args) {
-    size_t loc = format.find("{}", begin);
-    if (loc == std::string::npos) {
-      ss << format.substr(begin);
-      break;
-    }
-    ss << format.substr(begin, loc - begin);
-    if (used_args >= args.size()) {
-      AT_ERROR("Too few arguments for format string: ", format);
-    }
-    ss << args[used_args];
-    begin = loc + 2;
-  }
-
-  drop(stack, num_inputs);
-  push(stack, ss.str());
-}
+namespace {
+static constexpr int defaultPrecision = 6;
 
 // IValue tags are intentionally private, so we need additional logic to cast
 // the IValue type to the specified format.
@@ -47,7 +13,7 @@ void addFormattedArg(
     char key,
     const IValue& ival,
     std::stringstream& ss,
-    int precision = PRECISION) {
+    int precision = defaultPrecision) {
   // TODO: Implement precison-based formatting
   switch (key) {
     case 'd':
@@ -127,6 +93,43 @@ void addFormattedArg(
           key,
           " is not supported in TorchScript format strings");
   }
+}
+
+} // namespace
+
+void tupleUnpack(Stack& stack) {
+  auto tuple = pop(stack).toTuple();
+  stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
+}
+
+void format(Stack& stack, size_t num_inputs) {
+  // static const std::regex unsupported_options("\\{(.*?)\\}");
+  auto format = peek(stack, 0, num_inputs).toStringRef();
+  // // Temporally comment out the warning message because of
+  // // "StdRegexIsAwful" internal Lint error, to prevent sev
+  // // of std::regex from PT mobile.
+  // if (std::regex_search(format, unsupported_options)) {
+  //   TORCH_WARN("Format options are not supported.");
+  // }
+
+  auto args = last(stack, num_inputs - 1);
+  std::stringstream ss;
+  for (size_t begin = 0, used_args = 0; true; ++used_args) {
+    size_t loc = format.find("{}", begin);
+    if (loc == std::string::npos) {
+      ss << format.substr(begin);
+      break;
+    }
+    ss << format.substr(begin, loc - begin);
+    if (used_args >= args.size()) {
+      AT_ERROR("Too few arguments for format string: ", format);
+    }
+    ss << args[used_args];
+    begin = loc + 2;
+  }
+
+  drop(stack, num_inputs);
+  push(stack, ss.str());
 }
 
 void percentFormat(Stack& stack, size_t num_inputs) {
