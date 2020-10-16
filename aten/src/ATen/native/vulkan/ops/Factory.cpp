@@ -15,9 +15,8 @@ Tensor empty_memory_format(
       !(options_.has_memory_format() && memory_format.has_value()),
       "Cannot set memory_format both in TensorOptions and explicit argument!");
 
-  const TensorOptions options =
-      options_.merge_in(TensorOptions().memory_format(memory_format));
-
+  const TensorOptions options = options_.merge_in(
+      TensorOptions().memory_format(memory_format));
   verify(options);
 
   return at::detail::make_tensor<vTensorImpl>(

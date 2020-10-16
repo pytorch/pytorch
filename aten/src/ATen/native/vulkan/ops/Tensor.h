@@ -198,6 +198,7 @@ class vTensor final {
 
   template<typename Type>
   Future<Type, Access::Read> host() const && = delete;
+
   template<typename Type, Access::Flags kAccess>
   Future<Type, kAccess> host() && = delete;
 
@@ -233,7 +234,7 @@ class vTensor final {
 
     Buffer& staging(Access::Flags) const;
     Buffer& staging(api::Command::Buffer&, Access::Flags) const;
-    const vTensor::Memory& wait() const;
+    vTensor::Memory& wait() const;
 
    private:
     class CMD;
