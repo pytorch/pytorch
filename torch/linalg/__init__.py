@@ -148,6 +148,9 @@ Computes a tensor ``x`` such that ``tensordot(input, x, dims=len(x.shape)) = oth
 
 Supports real and, only on the CPU, complex inputs.
 
+.. note:: If :attr:`input` is not a 'square' tensor, meaning it does not satisfy the requirement
+          ``prod(x.shape) == prod(b.shape)``, then a RuntimeError will be thrown.
+
 Args:
     input (Tensor): left-hand-side tensor of shape ``b.shape + Q``.
         ``Q`` is the shape of that sub-tensor of `:attr:`input` consisting of the appropriate

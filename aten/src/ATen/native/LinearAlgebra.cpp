@@ -1624,8 +1624,15 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
   // result_shape is self_.sizes[-(an-other.dim):]
   std::vector<int64_t> result_shape = self_.sizes().slice(other.dim(), ndim - other.dim()).vec();
 
-  int64_t product = std::accumulate(result_shape.begin(), result_shape.end(), int64_t{1}, std::multiplies<int64_t>());
-  self_ = self_.reshape({product, product});
+  int64_t result_product = std::accumulate(result_shape.begin(), result_shape.end(), int64_t{1}, std::multiplies<int64_t>());
+  int64_t other_product = std::accumulate(other.sizes().begin(), other.sizes().end(), int64_t{1}, std::multiplies<int64_t>());
+
+  // Check whether the self tensor can be reshaped to the 2D square matrix
+  TORCH_CHECK(result_product == other_product,
+    "Expected self to be a 'square' tensor such that prod(result.shape) == prod(other.shape), but got ",
+    result_product, " != ", other_product);
+
+  self_ = self_.reshape({result_product, result_product});
 
   // 0th output of at::solve is the solution
   // normally `other` would be flattened by at::solve expects 2D input
