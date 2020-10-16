@@ -516,10 +516,10 @@ const Expr* PolynomialTransformer::mutate(const Sub* v) {
   if (rhsPoly && lhsTerm) {
     // Negate every part of the Polynomial.
     const Expr* minusOne = getImmediateByType(lhsTerm->dtype(), -1);
-    const Expr* negateScalar = evaluateOp(new Mul(minusOne, lhsTerm->scalar()));
+    const Expr* negateScalar = evaluateOp(new Mul(minusOne, rhsPoly->scalar()));
 
     std::vector<const Term*> variables;
-    for (auto* t : lhsPoly->variables()) {
+    for (auto* t : rhsPoly->variables()) {
       const Expr* negate = evaluateOp(new Mul(minusOne, t->scalar()));
       variables.push_back(new Term(hasher_, negate, t->variables()));
     }
