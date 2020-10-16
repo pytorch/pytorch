@@ -1877,19 +1877,21 @@ copysign(input, other, *, out=None) -> Tensor
 Returns a new tensor with the magnitude of :attr:`input` and the sign of :attr:`other` elementwise.
 
 .. math::
-    out_i = \begin{cases}
-        -abs(input_i) & \text{if } input_i < 0 \\
-        abs(input_i) & \text{if } input_i \geq 0 \\
+    \text{out}_{i} = \begin{cases}
+        -|\text{input}_{i}| & \text{if } \text{other}_{i} < 0 \\
+        |\text{input}_{i}| & \text{if } \text{other}_{i} \geq 0 \\
     \end{cases}
 """ + r"""
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
-:ref:`type promotion <type-promotion-doc>`, and integer, float inputs.
-Always promotes integer types to the default scalar type.
+and integer, float inputs. Always promotes integral/boolean/half/float16 types to the float type.
 
 Args:
-    input (Tensor): the magnitude of output
-    other (Tensor or Number): the sign of output
+    input (Tensor): value with the magnitude of output value.
+    other (Tensor or Number): value with the sign of output value.
+        If the shape of :attr:`input` is different from the shape of
+        :attr:`other`, they must be broadcastable to a common shape
+        (which becomes the shape of the output).
 
 Keyword args:
     {out}

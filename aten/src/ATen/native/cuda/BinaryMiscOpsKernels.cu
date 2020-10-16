@@ -108,12 +108,38 @@ void heaviside_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void copysign_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, iter.dtype(), "copysign_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+template<typename scalar_t, typename accscalar_t>
+struct CopySignScalarFunctor {
+    MulScalarFunctor(accscalar_t b_): b(b_) {}
+    __device__ scalar_t operator() (scalar_t a) const {
       return ::copysign(a, b);
+    }
+  private:
+    accscalar_t b;
+};
+
+template<typename scalar_t>
+struct CopySignFunctor {
+  __device__ scalar_t operator() (scalar_t a, scalar_t b) const {
+    return ::copysign(a, b);
+  }
+};
+
+void copysign_kernel_cuda(TensorIterator& iter) {
+  if (!isIntegralType(iter.common_dtype(), /*includeBool*/ false) && iter.is_cpu_scalar(2)) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "copysign_cuda", [&]() {
+      using accscalar_t = at::acc_type<scalar_t, true>;
+      auto b = iter.scalar_value<accscalar_t>(2);
+      iter.remove_operand(2);
+      CopySignScalarFunctor<scalar_t, decltype(b)> f(b);
+      gpu_kernel(iter, f);
     });
-  });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, iter.common_dtype(), "copysign_cuda", [&]() {
+      CopySignFunctor<scalar_t> f;
+      gpu_kernel_with_scalars(iter, f);
+    });
+  }
 }
 
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
