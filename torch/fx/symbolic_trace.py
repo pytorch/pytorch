@@ -113,13 +113,14 @@ class Tracer(TracerBase):
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
-    def get_module_qualified_name(self, mod):
+    def path_of_module(self, mod):
         for n, p in self.root.named_modules():
             if mod is p:
                 return n
         raise NameError('module is not installed as a submodule')
 
-    def call_module(self, m: torch.nn.Module, module_qualified_name: str, forward: Callable[..., Any], args, kwargs):
+    def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args, kwargs):
+        module_qualified_name = self.path_of_module(m)
         if not self.is_leaf_module(m, module_qualified_name):
             return forward(*args, **kwargs)
         return self.create_proxy('call_module', module_qualified_name, args, kwargs)
@@ -167,12 +168,10 @@ class Tracer(TracerBase):
         orig_call = torch.nn.Module.__call__
 
         def module_call_wrapper(mod, *args, **kwargs):
-            module_qualified_name = self.get_module_qualified_name(mod)
-
             def forward(*args, **kwargs):
                 return orig_call(mod, *args, **kwargs)
 
-            return self.call_module(mod, module_qualified_name, forward, args, kwargs)
+            return self.call_module(mod, forward, args, kwargs)
 
         try:
             torch.nn.Module.__call__ = module_call_wrapper
