@@ -353,6 +353,9 @@ namespace jit {
   _(KernelSumAllAxes)                               \
   _(KernelSumOneAxis)                               \
   _(KernelSumMultipleAxes)                          \
+  _(KernelSoftmax2D)                                \
+  _(KernelSoftmax3D)                                \
+  _(KernelSoftmax4D)                                \
   _(FuserPass_1)                                    \
   _(FuserPass_2)                                    \
   _(FuserPass_3)                                    \
