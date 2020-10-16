@@ -53,8 +53,8 @@ class LazyModuleMixin:
     r"""A mixin for modules that lazily initialize parameters, also known as "lazy modules."
 
     .. warning:
-    Lazy modules are an experimental new feature under active development,
-    and their API is likely to change.
+        Lazy modules are an experimental new feature under active development,
+        and their API is likely to change.
 
     Modules that lazily initialize parameters, or "lazy modules",
     derive the shapes of their parameters from the first input(s)
@@ -114,7 +114,7 @@ class LazyModuleMixin:
     than the parameters of a network without lazy modules.
     For example, if the LazyMLP class defined above had a :class:`torch.nn.LazyLinear` module
     first and then a regular :class:`torch.nn.Linear` second, the second module would be
-    initialized on construction and the first module would be initialized during the first dry run."
+    initialized on construction and the first module would be initialized during the first dry run.
 
     Lazy modules can be serialized with a state dict like other modules. For example:
 
@@ -128,8 +128,10 @@ class LazyModuleMixin:
                  ('fc2.weight', Uninitialized parameter),
                  ('fc2.bias', tensor([0.0019]))])
 
-    Lazy modules can also load regular :class:`torch.nn.Parameter`s,
-    which replace their :class:`torch.nn.UninitializedParameter`s:
+
+    Lazy modules can also load regular :class:`torch.nn.Parameter` s,
+    which replace their :class:`torch.nn.UninitializedParameter` s:
+
 
     >>> full_mlp = LazyMLP()
     >>> # Dry run to initialize another module
@@ -161,22 +163,22 @@ class LazyModuleMixin:
 
 
     .. note:: A `LazyModule`, or a module containing a `LazyModule` requires an explicit
-    dummy forward call in the following scenarios.
+        dummy forward call in the following scenarios.
 
-    * Access an :class:`UnitializedParameter` data or properties
-    >>> lazy_module.weight.shape
+        Access an :class:`UnitializedParameter` data or properties
+        >>> lazy_module.weight.shape
 
-    * Use an Optimizer that accesses Parameters data in their constructor 
-    >>> optim = torch.optim.AdaGrad(lazy_module.parameters())
+        Use an Optimizer that accesses Parameters data in their constructor 
+        >>> optim = torch.optim.AdaGrad(lazy_module.parameters())
 
-    * Use :class:`torch.nn.DataParallel` or :class:`torch.nn.DistributedDataParallel`
-    >>> module_dp = torch.nn.DataParallel(lazy_module)
+        Use :class:`torch.nn.DataParallel` or :class:`torch.nn.DistributedDataParallel`
+        >>> module_dp = torch.nn.DataParallel(lazy_module)
 
-    * Module reparametrization using :func:`torch.nn.utils.weight_norm` or :func:`torch.nn.utils.spectral_norm`
-    >>> torch.nn.utils.weight_norm(lazy_module)
+        Module reparametrization using :func:`torch.nn.utils.weight_norm` or :func:`torch.nn.utils.spectral_norm`
+        >>> torch.nn.utils.weight_norm(lazy_module)
 
-    * When dealing with non-default module initialization
-    >>> torch.nn.init.uniform_(lazy_module.weight)
+        When dealing with non-default module initialization
+        >>> torch.nn.init.uniform_(lazy_module.weight)
 
     """
 
