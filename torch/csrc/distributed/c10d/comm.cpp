@@ -85,13 +85,6 @@ void broadcast_coalesced(
   }
 }
 
-GradBucket::GradBucket(std::vector<at::Tensor> tensors)
-    : tensors_(std::move(tensors)){};
-
-const std::vector<at::Tensor>& GradBucket::getTensors() const {
-  return tensors_;
-}
-
 PythonCommHook::PythonCommHook(py::object state, py::object hook)
     : state_(std::move(state)), hook_(std::move(hook)){};
 

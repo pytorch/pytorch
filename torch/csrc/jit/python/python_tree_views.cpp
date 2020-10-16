@@ -4,6 +4,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <sstream>
 
@@ -168,7 +169,18 @@ void initTreeViewBindings(PyObject* module) {
                        const Def& getter,
                        Def* setter) {
         return Property::create(r, name, getter, wrap_maybe(r, setter));
-      }));
+      }))
+      .def("name", [](const Property& property) { return property.name(); })
+      .def(
+          "getter_name",
+          [](const Property& property) { return property.getter().name(); })
+      .def("setter_name", [](const Property& property) {
+        if (property.setter().present()) {
+          return c10::optional<Ident>(property.setter().get().name());
+        }
+
+        return c10::optional<Ident>(c10::nullopt);
+      });
 
   py::class_<ClassDef, TreeView>(m, "ClassDef")
       .def(py::init([](const Ident& name,

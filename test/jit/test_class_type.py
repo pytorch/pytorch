@@ -1,4 +1,3 @@
-from __future__ import division
 import io
 import os
 import sys
@@ -7,6 +6,7 @@ import unittest
 import torch
 import torch.nn as nn
 from torch.testing import FileCheck
+from typing import Any
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -14,7 +14,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.testing._internal.jit_utils
 from torch.testing._internal.common_utils import IS_SANDCASTLE
-from typing import List, Tuple, Iterable
+from typing import List, Tuple, Iterable, Optional, Dict
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -385,6 +385,14 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(test_sorted_copies(), (3, 1))
 
+        @torch.jit.script
+        def test_nested_inside_tuple():
+            li = [(1, Foo(12)), (1, Foo(11))]
+            li.sort()
+            return [(li[0][0], li[0][1].getVal()), (li[1][0], li[1][1].getVal())]
+
+        self.assertEqual(test_nested_inside_tuple(), [(1, 11), (1, 12)])
+
         with self.assertRaisesRegex(RuntimeError, "bool\' for argument \'reverse"):
             @torch.jit.script
             def test():
@@ -437,6 +445,39 @@ class TestClassType(JitTestCase):
             class Derived(Base):
                 def two(self, x):
                     return x + self.b + 2
+
+
+    def test_class_inheritance_implicit(self):
+        """
+        Test that inheritance is detected in
+        implicit scripting codepaths (e.g. try_ann_to_type).
+        """
+        class A:
+            def __init__(self, t):
+                self.t = t
+
+            @staticmethod
+            def f(a: torch.Tensor):
+                return A(a + 1)
+
+        class B(A):
+            def __init__(self, t):
+                self.t = t + 10
+
+            @staticmethod
+            def f(a: torch.Tensor):
+                return A(a + 1)
+
+        x = A(torch.tensor([3]))
+
+        def fun(x: Any):
+            if isinstance(x, A):
+                return A.f(x.t)
+            else:
+                return B.f(x.t)
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to access nonexistent attribute or method"):
+            sc = torch.jit.script(fun)
 
     @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
     def test_imported_classes(self):
@@ -1013,6 +1054,106 @@ class TestClassType(JitTestCase):
             y.my_list = new_list
             return y
 
+    def test_default_args(self):
+        """
+        Test that methods on class types can have default arguments.
+        """
+        @torch.jit.script
+        class ClassWithDefaultArgs:
+            def __init__(
+                self,
+                a: int = 1,
+                b: Optional[List[int]] = None,
+                c: Tuple[int, int, int] = (1, 2, 3),
+                d: Optional[Dict[int, int]] = None,
+                e: Optional[str] = None,
+            ):
+                self.int = a
+                self.tup = c
+                self.str = e
+
+                self.list = [1, 2, 3]
+                if b is not None:
+                    self.list = b
+
+                self.dict = {1: 2, 3: 4}
+                if d is not None:
+                    self.dict = d
+
+            def add(self, b: int, scale: float = 1.0) -> float:
+                return self.int * scale + b
+
+        def all_defaults() -> int:
+            obj: ClassWithDefaultArgs = ClassWithDefaultArgs()
+            return obj.int + obj.list[2] + obj.tup[1]
+
+        def some_defaults() -> int:
+            obj: ClassWithDefaultArgs = ClassWithDefaultArgs(b=[5, 6, 7])
+            return obj.int + obj.list[2] + obj.dict[1]
+
+        def override_defaults() -> int:
+            obj: ClassWithDefaultArgs = ClassWithDefaultArgs(3, [9, 10, 11], (12, 13, 14), {3: 4}, "str")
+            s: int = obj.int
+
+            for x in obj.list:
+                s += x
+
+            for y in obj.tup:
+                s += y
+
+            s += obj.dict[3]
+
+            st = obj.str
+            if st is not None:
+                s += len(st)
+
+            return s
+
+        def method_defaults() -> float:
+            obj: ClassWithDefaultArgs = ClassWithDefaultArgs()
+            return obj.add(3) + obj.add(3, 0.25)
+
+        self.checkScript(all_defaults, ())
+        self.checkScript(some_defaults, ())
+        self.checkScript(override_defaults, ())
+        self.checkScript(method_defaults, ())
+
+        # The constructor of this class below has some arguments without default values.
+        class ClassWithSomeDefaultArgs:  # noqa: B903
+            def __init__(
+                self,
+                a: int,
+                b: int = 1,
+            ):
+                self.a = a
+                self.b = b
+
+        def default_b() -> int:
+            obj: ClassWithSomeDefaultArgs = ClassWithSomeDefaultArgs(1)
+            return obj.a + obj.b
+
+        def set_b() -> int:
+            obj: ClassWithSomeDefaultArgs = ClassWithSomeDefaultArgs(1, 4)
+            return obj.a + obj.b
+
+        self.checkScript(default_b, ())
+        self.checkScript(set_b, ())
+
+        # The constructor of this class below has mutable arguments. This should throw
+        # an error.
+        class ClassWithMutableArgs:   # noqa: B903
+            def __init__(
+                self,
+                a: List[int] = [1, 2, 3],  # noqa: B006
+            ):
+                self.a = a
+
+        def should_fail():
+            obj: ClassWithMutableArgs = ClassWithMutableArgs()
+
+        with self.assertRaisesRegex(RuntimeError, "Mutable default parameters are not supported"):
+            torch.jit.script(should_fail)
+
     def test_staticmethod(self):
         """
         Test static methods on class types.
@@ -1060,12 +1201,27 @@ class TestClassType(JitTestCase):
 
         @torch.jit.script
         class Properties(object):
+            __jit_unused_properties__ = ["unsupported"]
+
             def __init__(self, a: int):
                 self.a = a
 
             @property
             def attr(self) -> int:
                 return self.a - 1
+
+            @property
+            def unsupported(self) -> int:
+                return sum([self.a])
+
+            @torch.jit.unused
+            @property
+            def unsupported_2(self) -> int:
+                return sum([self.a])
+
+            @unsupported_2.setter
+            def unsupported_2(self, value):
+                self.a = sum([self.a])
 
             @attr.setter
             def attr(self, value: int):
@@ -1113,3 +1269,42 @@ class TestClassType(JitTestCase):
                 return self.props.attr + no_setter.attr + method_uses_property.forward()
 
         self.checkModule(ModuleWithProperties(5), (5, 6, 7, 8,))
+
+    def test_custom_delete(self):
+        """
+        Test that del can be called on an instance of a class that
+        overrides __delitem__.
+        """
+        class Example(object):
+            def __init__(self):
+                self._data: Dict[str, torch.Tensor] = {"1": torch.tensor(1.0)}
+
+            def check(self, key: str) -> bool:
+                return key in self._data
+
+            def __delitem__(self, key: str):
+                del self._data[key]
+
+        def fn() -> bool:
+            example = Example()
+            del example["1"]
+            return example.check("1")
+
+        self.checkScript(fn, ())
+
+        # Test the case in which the class does not have __delitem__ defined.
+        class NoDelItem(object):
+            def __init__(self):
+                self._data: Dict[str, torch.Tensor] = {"1": torch.tensor(1.0)}
+
+            def check(self, key: str) -> bool:
+                return key in self._data
+
+        def fn() -> bool:
+            example = NoDelItem()
+            key = "1"
+            del example[key]
+            return example.check(key)
+
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"Class does not define __delitem__", "example[key]"):
+            self.checkScript(fn, ())

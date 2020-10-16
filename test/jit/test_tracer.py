@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import suppress_warnings, \
     IS_SANDCASTLE, IS_WINDOWS
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, \
     _tmp_donotuse_dont_inline_everything, _trace, RUN_CUDA, RUN_CUDA_MULTI_GPU
+from torch.testing._internal.common_cuda import with_tf32_off
 from typing import List, Tuple
 from torch import Tensor
 
@@ -397,6 +398,18 @@ class TestTracer(JitTestCase):
         y = torch.randn(2, 7)
         self.assertEqual(ge(y).shape, y.shape)
         self.assertEqual(ge(x).shape, x.shape)
+
+    # Test that the trace of setitem doesn't store shapes as constants
+    # Fix https://github.com/pytorch/pytorch/issues/43548
+    def test_trace_slice_setitem_dynamic_shape(self):
+        def slice_setitem(x, y):
+            x[:, 2] = y + 1
+            return x
+
+        x = torch.randn(3, 4)
+        traced = torch.jit.trace(slice_setitem, (x, x[:, 0]))
+        x = torch.randn(10, 5)
+        self.assertEqual(traced(x.clone(), x[:, 0]), slice_setitem(x.clone(), x[:, 0]))
 
     # Suppression: we are intentionally slicing a tensor, we don't care that it
     # will be constantified
@@ -900,6 +913,9 @@ class TestTracer(JitTestCase):
         self.assertEqual(foo(x), x + x + x)
 
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")
+    # By default, on Ampere or later GPUs, nn.Linear computes float tensors at TF32 precision.
+    # We want float tensors to be computed at full precision in order to use the default precision
+    @with_tf32_off
     def test_traced_module_cuda(self):
         class Model(nn.Module):
             def __init__(self, num_features, num_layers):
@@ -1188,6 +1204,17 @@ class TestTracer(JitTestCase):
             torch.tensor([15])
         )
 
+        @torch.jit.script
+        def use_device(x):
+            return torch.zeros_like(x, device=x.device)
+
+        def foo(x):
+            return use_device(x)
+
+        traced_tensor_size = torch.jit.trace(foo, torch.rand(7,))
+        self.run_pass('inline', traced_tensor_size.graph)
+        FileCheck().check("prim::device").run(traced_tensor_size.graph)
+
     @unittest.skipIf(IS_WINDOWS, "temp file name on windows")
     def test_trace_save(self):
         def fn(x):
@@ -1298,6 +1325,39 @@ class TestTracer(JitTestCase):
 
         imported = self.getExportImportCopy(traced)
         check(imported.foo)
+
+        # Note that Bar's forward can only be traced, but not scripted
+        class Bar(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch.jit.export
+            def addTwo(self, x):
+                return x + 2
+
+            def forward(self, input):
+                return (lambda a: a + 1)(input)
+
+        # When tracing Bar as a submodule, we only want to script the
+        # exported methods, and we want to keep the forwards still
+        # being traced.
+        class WrapperExports(torch.nn.Module):
+            def __init__(self):
+                super(WrapperExports, self).__init__()
+                self.bar = Bar()
+
+            @torch.jit.export
+            def addOne(self, x):
+                return x + 1
+
+            def forward(self, x):
+                return self.bar(x)
+
+        f = WrapperExports()
+
+        traced = torch.jit.trace(f, (torch.rand(3, 4),))
+        expected_names = ['addOne']
+        check(traced)
 
     def test_trace_autograd_function(self):
         class TestFunc(torch.autograd.Function):

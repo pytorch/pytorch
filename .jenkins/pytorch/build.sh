@@ -89,8 +89,14 @@ if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
   POSSIBLE_JAVA_HOMES+=(/usr/local)
   POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
   POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  # Add the Windows-specific JNI
+  POSSIBLE_JAVA_HOMES+=("$PWD/.circleci/windows-jni/")
   for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
     if [[ -e "$JH/include/jni.h" ]] ; then
+      # Skip if we're not on Windows but haven't found a JAVA_HOME
+      if [[ "$JH" == "$PWD/.circleci/windows-jni/" && "$OSTYPE" != "msys" ]] ; then
+        break
+      fi
       echo "Found jni.h under $JH"
       export JAVA_HOME="$JH"
       export BUILD_JNI=ON
@@ -218,9 +224,11 @@ else
     # set only when building other architectures
     # only use for "python setup.py install" line
     if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
-      WERROR=1 python setup.py install
+      WERROR=1 python setup.py bdist_wheel
+      python -mpip install dist/*.whl
     else
-      python setup.py install
+      python setup.py bdist_wheel
+      python -mpip install dist/*.whl
     fi
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
@@ -232,6 +240,11 @@ else
     fi
 
     assert_git_not_dirty
+    # Copy ninja build logs to dist folder
+    mkdir -p dist
+    if [ -f build/.ninja_log ]; then
+      cp build/.ninja_log dist
+    fi
 
     # Build custom operator tests.
     CUSTOM_OP_BUILD="$PWD/../custom-op-build"

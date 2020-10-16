@@ -7,7 +7,7 @@ conda install -y six
 pip install -q hypothesis "librosa>=0.6.2" "numba<=0.49.1" psutil
 
 # TODO move this to docker
-pip install unittest-xml-reporting
+pip install unittest-xml-reporting pytest
 
 # faulthandler become built-in since 3.3
 if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
@@ -63,7 +63,7 @@ test_python_all() {
   # Increase default limit on open file handles from 256 to 1024
   ulimit -n 1024
 
-  python test/run_test.py --verbose --exclude test_jit_cuda_fuser_profiling test_jit_cuda_fuser_legacy test_jit_legacy test_jit_fuser_legacy --determine-from="$DETERMINE_FROM"
+  python test/run_test.py --verbose --exclude-jit-executor --determine-from="$DETERMINE_FROM"
 
   assert_git_not_dirty
 }

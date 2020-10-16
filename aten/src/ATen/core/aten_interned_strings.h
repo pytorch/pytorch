@@ -72,6 +72,7 @@ _(aten, _embedding_bag_sparse_backward) \
 _(aten, _erf) \
 _(aten, _erfc) \
 _(aten, _exp) \
+_(aten, _exp2) \
 _(aten, _expm1) \
 _(aten, _fft_with_size) \
 _(aten, _fill) \
@@ -136,7 +137,6 @@ _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
-_(aten, _th_median) \
 _(aten, _th_mode) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
@@ -291,8 +291,6 @@ _(aten, fill_diagonal_) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
-_(aten, div) \
-_(aten, div_) \
 _(aten, dot) \
 _(aten, dropout) \
 _(aten, dstack) \
@@ -400,6 +398,7 @@ _(aten, isreal) \
 _(aten, istft) \
 _(aten, isposinf) \
 _(aten, isneginf) \
+_(aten, kaiser_window) \
 _(aten, kl_div) \
 _(aten, kl_div_backward) \
 _(aten, kthvalue) \
@@ -463,6 +462,7 @@ _(aten, max_unpool3d_forward) \
 _(aten, max_values) \
 _(aten, mean) \
 _(aten, median) \
+_(aten, nanmedian) \
 _(aten, meshgrid) \
 _(aten, min) \
 _(aten, min_values) \
@@ -492,8 +492,6 @@ _(aten, mode) \
 _(aten, mse_loss) \
 _(aten, mse_loss_backward) \
 _(aten, mse_loss_forward) \
-_(aten, mul) \
-_(aten, mul_) \
 _(aten, multi_margin_loss) \
 _(aten, multi_margin_loss_backward) \
 _(aten, multi_margin_loss_forward) \
@@ -504,6 +502,7 @@ _(aten, multinomial) \
 _(aten, mv) \
 _(aten, mvlgamma) \
 _(aten, nansum) \
+_(aten, nan_to_num) \
 _(aten, narrow) \
 _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
@@ -555,6 +554,7 @@ _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
 _(aten, quantile) \
+_(aten, nanquantile) \
 _(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \
@@ -565,6 +565,7 @@ _(aten, randn_like) \
 _(aten, random) \
 _(aten, randperm) \
 _(aten, range) \
+_(aten, ravel) \
 _(aten, reciprocal) \
 _(aten, reflection_pad1d) \
 _(aten, reflection_pad1d_backward) \
@@ -612,6 +613,7 @@ _(aten, sigmoid) \
 _(aten, sign) \
 _(aten, signbit) \
 _(aten, silu) \
+_(aten, sgn) \
 _(aten, sin) \
 _(aten, sinh) \
 _(aten, size) \
@@ -663,6 +665,7 @@ _(aten, tan) \
 _(aten, tanh) \
 _(aten, tensor) \
 _(aten, tensordot) \
+_(aten, tensor_split) \
 _(aten, th_addmm) \
 _(aten, th_clone) \
 _(aten, th_norm) \
@@ -900,6 +903,7 @@ _(attr, maxnorm) \
 _(attr, maximum) \
 _(attr, mean) \
 _(attr, median) \
+_(attr, nanmedian) \
 _(attr, min) \
 _(attr, min_indices) \
 _(attr, min_val) \

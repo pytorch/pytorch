@@ -182,12 +182,12 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
         int64_t groups,
         bool transpose) {
   TORCH_CHECK(
-      kSpatialDim == 2,
+      kSpatialDim == 2,  // 1D is packed as 2d, hence we don't need other checks
       "QNNPACK packing only supports 2D convolution.");
   TORCH_CHECK(
       weight.ndimension() == kSpatialDim + 2,
       "quantized::conv_prepack (qnnpack): Weights are expected to have ",
-      kSpatialDim + 2, "dimensions");
+      kSpatialDim + 2, " dimensions, found shape ", weight.sizes());
   TORCH_CHECK(
       stride.size() == kSpatialDim,
       "quantized::conv_prepack (qnnpack): ",
@@ -415,19 +415,21 @@ class QConv1dPackWeightInt8 final {
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   // Conv
   // conv_prepack is deprecated, please use conv2d_prepack for 2D conv.
-  m.impl("conv_prepack", TORCH_FN(QConvPackWeightInt8<2>::run_conv));
-  m.impl("conv1d_prepack", TORCH_FN(QConv1dPackWeightInt8::run_conv));
-  m.impl("conv2d_prepack", TORCH_FN(QConvPackWeightInt8<2>::run_conv));
-  m.impl("conv3d_prepack", TORCH_FN(QConvPackWeightInt8<3>::run_conv));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_prepack"), TORCH_FN(QConvPackWeightInt8<2>::run_conv));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_prepack"), TORCH_FN(QConv1dPackWeightInt8::run_conv));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_prepack"), TORCH_FN(QConvPackWeightInt8<2>::run_conv));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_prepack"), TORCH_FN(QConvPackWeightInt8<3>::run_conv));
   // ConvTranspose
-  m.impl("conv_transpose2d_prepack", TORCH_FN(QConvPackWeightInt8<2>::run_deconv));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose1d_prepack"), TORCH_FN(QConv1dPackWeightInt8::run_deconv));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_prepack"), TORCH_FN(QConvPackWeightInt8<2>::run_deconv));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
   // Conv
-  m.impl("conv2d_prepack", TORCH_FN(QConvPackWeightInt8<2>::run_conv));
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv2d_prepack"), TORCH_FN(QConvPackWeightInt8<2>::run_conv));
   // ConvTranspose
-  m.impl("conv_transpose2d_prepack", TORCH_FN(QConvPackWeightInt8<2>::run_deconv));
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose1d_prepack"), TORCH_FN(QConv1dPackWeightInt8::run_deconv));
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose2d_prepack"), TORCH_FN(QConvPackWeightInt8<2>::run_deconv));
 }
 
 } // namespace

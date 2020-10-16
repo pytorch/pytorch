@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 import torch.nn.qat as nnqat
 import torch.nn.intrinsic
 import torch.nn.functional as F
@@ -35,5 +34,5 @@ class LinearReLU(nnqat.Linear):
         return F.relu(F.linear(input, self.weight_fake_quant(self.weight), self.bias))
 
     @classmethod
-    def from_float(cls, mod, qconfig=None):
-        return super(LinearReLU, cls).from_float(mod, qconfig)
+    def from_float(cls, mod):
+        return super(LinearReLU, cls).from_float(mod)

@@ -12,6 +12,7 @@ from . import (
     PyRRef,
     RemoteProfilerManager,
     WorkerInfo,
+    get_rpc_timeout,
     _cleanup_python_rpc_handler,
     _delete_all_user_and_unforked_owner_rrefs,
     _destroy_rref_context,
@@ -34,7 +35,7 @@ from .internal import (
     _build_rpc_profiling_key,
 )
 
-from .constants import UNSET_RPC_TIMEOUT
+from .constants import DEFAULT_SHUTDOWN_TIMEOUT, UNSET_RPC_TIMEOUT
 
 
 logger = logging.getLogger(__name__)
@@ -142,7 +143,7 @@ def _broadcast_to_followers(sequence_id, objects_map):
 
 
 @_require_initialized
-def _all_gather(obj):
+def _all_gather(obj, timeout=UNSET_RPC_TIMEOUT):
     r"""
     This is similar to torch.distributed.all_gather(), but is using RPC. It
     picks the worker with the smallest name (alphabetic order) as the leader.
@@ -163,8 +164,8 @@ def _all_gather(obj):
         _all_gather_sequence_id += 1
 
     is_leader = leader_name == self_name
-    # Set a long enough timeout for all shutdown messages to be processed.
-    timeout = 5  # second
+    if timeout == UNSET_RPC_TIMEOUT:
+        timeout = get_rpc_timeout()
 
     # Phase 1: Followers send it's object to the leader
     if is_leader:
@@ -178,9 +179,7 @@ def _all_gather(obj):
         )
 
     with _all_gather_dict_lock:
-        states = _all_gather_sequence_id_to_states[
-            sequence_id
-        ]
+        states = _all_gather_sequence_id_to_states[sequence_id]
     states.proceed_signal.wait()
 
     # Phase 2: Leader broadcast gathered results to all followers
@@ -196,15 +195,20 @@ def _all_gather(obj):
                 timeout=timeout
             )
             worker_name_to_response_future_dict[follower_name] = fut
+
+        errors = []
         for follower_name, fut in worker_name_to_response_future_dict.items():
             try:
                 fut.wait()
             except RuntimeError as ex:
-                logger.error(
-                    "{worker_name} failed to respond to 'Shutdown Proceed.' request in {timeout}".format(
-                        worker_name=follower_name, timeout=timeout
-                    )
-                )
+                errors.append((follower_name, ex))
+
+        if errors:
+            raise RuntimeError(
+                f"Followers {[e[0] for e in errors]} timed out in _all_gather "
+                f"after {timeout:.2f} seconds. The first exception is {errors[0][1]}"
+            )
+
     return states.gathered_objects
 
 
@@ -217,7 +221,12 @@ def _wait_all_workers():
     terminate the RPC framework, and there is no guarantee that the RPC
     framework will work after this method returns.
     """
-    _all_gather(None)
+    try:
+        _all_gather(None, timeout=DEFAULT_SHUTDOWN_TIMEOUT)
+    except RuntimeError as ex:
+        logger.error(
+            f"Failed to respond to 'Shutdown Proceed' in time, got error {ex}"
+        )
 
 
 @_require_initialized
@@ -315,13 +324,25 @@ def get_worker_info(worker_name=None):
         return _get_current_rpc_agent().get_worker_info()
 
 
-def _to_worker_info(name_or_info):
-    if isinstance(name_or_info, WorkerInfo):
-        return name_or_info
-    elif isinstance(name_or_info, str):
-        return get_worker_info(name_or_info)
+def _to_worker_info(to):
+    if isinstance(to, WorkerInfo):
+        return to
+    elif isinstance(to, str) or isinstance(to, int):
+        return get_worker_info(to)
     else:
-        raise ValueError("Cannot get WorkerInfo from name {}".format(name_or_info))
+        raise ValueError("Cannot get WorkerInfo from name {}".format(to))
+
+
+def _rref_typeof_on_owner(rref):
+    return type(rref.local_value())
+
+
+def _rref_typeof_on_user(rref):
+    return rpc_sync(
+        rref.owner(),
+        _rref_typeof_on_owner,
+        args=(rref,)
+    )
 
 
 T = TypeVar("T")
@@ -396,7 +417,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     are no living references to it.
 
     Arguments:
-        to (str or WorkerInfo): id or name of the destination worker.
+        to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
         func (callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
@@ -651,7 +672,7 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     method is thread-safe.
 
     Arguments:
-        to (str or WorkerInfo): id or name of the destination worker.
+        to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
         func (callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.
@@ -730,7 +751,7 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     :class:`~torch.futures.Future` that can be awaited on.
 
     Arguments:
-        to (str or WorkerInfo): id or name of the destination worker.
+        to (str or WorkerInfo or int): name/rank/``WorkerInfo`` of the destination worker.
         func (callable): a callable function, such as Python callables, builtin
                          operators (e.g. :meth:`~torch.add`) and annotated
                          TorchScript functions.

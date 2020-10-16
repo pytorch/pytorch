@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
@@ -31,6 +30,10 @@ class TORCH_API CodeGen {
 
   Stmt* stmt() const {
     return stmt_;
+  }
+
+  void set_stmt(Stmt* s) {
+    stmt_ = s;
   }
 
   void apply_mutator(IRMutator* mutator) {
@@ -67,20 +70,10 @@ class TORCH_API CodeGen {
 
 class CodeGen::BufferArg {
  public:
-  BufferArg(const Buffer& buffer)
+  BufferArg(const Placeholder& buffer)
       : var_(buffer.data()->base_handle()), dtype_(buffer.dtype()) {}
   BufferArg(Tensor* tensor)
-      : var_(tensor->function()
-                 ->func_var(tensor->output_index())
-                 ->base_handle()),
-        dtype_(tensor->function()->body(tensor->output_index())->dtype()) {}
-  BufferArg(const Function& func)
-      : var_(func.func_var(0)->base_handle()), dtype_(func.body(0)->dtype()) {
-    // TODO: Support multiple-output functions
-    if (func.func_vars().size() != 1) {
-      throw unimplemented_lowering();
-    }
-  }
+      : var_(tensor->buf()->base_handle()), dtype_(tensor->body()->dtype()) {}
   BufferArg(const VarHandle& var)
       : var_(var.node()), dtype_(var.dtype()), isVar_(true) {}
 

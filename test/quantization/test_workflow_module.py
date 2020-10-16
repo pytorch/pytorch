@@ -5,15 +5,17 @@ from torch.quantization import (
     PerChannelMinMaxObserver,
     MovingAverageMinMaxObserver,
     MovingAveragePerChannelMinMaxObserver,
-    MinMaxDynamicQuantObserver,
     HistogramObserver,
     RecordingObserver,
+    PlaceholderObserver,
+    NoopObserver,
     FakeQuantize,
     default_debug_qconfig,
     default_observer,
     default_per_channel_weight_observer,
     get_observer_dict,
     prepare,
+    QConfig,
 )
 
 from torch.quantization._learnable_fake_quantize import (
@@ -26,6 +28,7 @@ import torch.nn as nn
 # Standard library
 import copy
 import io
+import itertools
 import unittest
 import math
 import numpy as np
@@ -41,6 +44,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     AnnotatedSingleLayerLinearModel,
     test_only_eval_fn,
+    SingleLayerLinearModel,
 )
 
 from torch.testing._internal.common_quantized import (
@@ -262,25 +266,6 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=4,
-                                              min_side=1, max_side=10),
-                       qparams=hu.qparams()),
-           reduce_range=st.booleans())
-    def test_per_tensor_dynamic_quant_observers(self, X, reduce_range):
-
-        X, (scale, zero_point, torch_type) = X
-        x = torch.from_numpy(X)
-
-        obs = MinMaxDynamicQuantObserver(dtype=torch.quint8, reduce_range=reduce_range)
-
-        result = obs(x)
-        qparams = obs.calculate_qparams()
-        ref = torch._choose_qparams_per_tensor(x, reduce_range)
-
-        self.assertEqual(ref[0], qparams[0])
-        self.assertEqual(ref[1], qparams[1])
-
-
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric, torch.per_channel_affine_float_qparams)),
            ch_axis=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
@@ -391,7 +376,7 @@ class TestObserver(QuantizationTestCase):
 
 
     def test_observer_scriptable(self):
-        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver(), MinMaxDynamicQuantObserver()]
+        obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver()]
         for obs in obs_list:
             scripted = torch.jit.script(obs)
 
@@ -405,6 +390,96 @@ class TestObserver(QuantizationTestCase):
             buf.seek(0)
             loaded = torch.jit.load(buf)
             self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @override_qengines
+    def test_state_dict_respects_device_affinity(self):
+        """
+        Tests that loading from a state dict loads buffers to the correct
+        device.
+        """
+        device_cpu = torch.device('cpu')
+        device_cuda = torch.device('cuda:0')
+        test_cases = itertools.product(
+            [device_cpu, device_cuda],
+            [device_cpu, device_cuda],
+            [MinMaxObserver, MovingAverageMinMaxObserver,
+             PerChannelMinMaxObserver,
+             MovingAveragePerChannelMinMaxObserver,
+             # TODO: enable this (separate PR)
+             # HistogramObserver,
+             PlaceholderObserver, RecordingObserver, NoopObserver])
+
+        for device_source, device_target, obs_cls in test_cases:
+            # calibrated source model
+            model = obs_cls()
+            model.to(device_source)
+            model(torch.randn(4, 1, 4, 4, device=device_source))
+            # target model
+            model2 = obs_cls()
+            model2.to(device_target)
+            model2.load_state_dict(model.state_dict())
+            # verify that buffers stayed on model2's device
+            model_devices = {p.device for p in model2.parameters()} | \
+                {p.device for p in model2.buffers()}
+            # some observers do not have any buffers, so lessEqual instead of
+            # Equal
+            self.assertLessEqual(len(model_devices), 1)
+            if len(model_devices) == 1:
+                model_device = next(iter(model_devices))
+                self.assertEqual(model_device, device_target)
+
+    def test_histogram_observer_consistent_buffer_shape(self):
+        """
+        Ensures that the buffer shapes do not change from uninitialized to
+        initialized states for HistogramObserver.
+        """
+        obs = HistogramObserver()
+        min_shape_before = obs.min_val.shape
+        max_shape_before = obs.max_val.shape
+        for _ in range(2):
+            obs(torch.randn(4, 4, 4, 4))
+        self.assertEqual(min_shape_before, obs.min_val.shape)
+        self.assertEqual(max_shape_before, obs.max_val.shape)
+
+    def test_histogram_observer_save_load_state_dict(self):
+        """
+        Smoke test on saving/loading state_dict
+        """
+        obs1 = HistogramObserver()
+        obs1(torch.randn(4, 4, 4, 4))
+        obs2 = HistogramObserver()
+        obs2.load_state_dict(obs1.state_dict())
+        self.assertEqual(obs2.min_val.shape, torch.Size([]))
+        self.assertEqual(obs2.max_val.shape, torch.Size([]))
+
+
+    def test_save_load_state_dict_script(self):
+        """
+        Tests that we can save and load state_dict for observers that are scripted
+        in a quantized model.
+        """
+        obs_list = [MinMaxObserver, MovingAverageMinMaxObserver,
+                    PerChannelMinMaxObserver,
+                    MovingAveragePerChannelMinMaxObserver, HistogramObserver]
+
+        for obs in obs_list:
+            model = SingleLayerLinearModel().eval()
+            qconfig = QConfig(activation=default_observer, weight=obs)
+            qconfig_dict = {'' : qconfig}
+            scripted = torch.jit.script(model)
+            scripted = torch.quantization.prepare_jit(scripted, qconfig_dict)
+            x = torch.rand(5, 5)
+            scripted(x)
+            obs_dict = torch.quantization.get_observer_state_dict(scripted)
+
+            # Load stats
+            scripted_2 = torch.jit.script(model)
+            scripted_2 = torch.quantization.prepare_jit(scripted_2, qconfig_dict)
+            torch.quantization.load_observer_state_dict(scripted_2, obs_dict)
+            # Verify that state_dict matches exactly with original one.
+            self.assertEqual(scripted.state_dict(), scripted_2.state_dict())
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
@@ -1350,7 +1425,6 @@ class TestDistributed(QuantizationTestCase):
         observer_types = [
             torch.quantization.MinMaxObserver.with_args(dtype=torch.qint8),
             torch.quantization.MovingAverageMinMaxObserver.with_args(dtype=torch.qint8),
-            torch.quantization.MinMaxDynamicQuantObserver.with_args(dtype=torch.qint8),
             torch.quantization.PerChannelMinMaxObserver.with_args(dtype=torch.qint8),
             torch.quantization.MovingAveragePerChannelMinMaxObserver.with_args(dtype=torch.qint8),
             torch.quantization.HistogramObserver.with_args(dtype=torch.qint8),
@@ -1468,6 +1542,21 @@ class TestDistributed(QuantizationTestCase):
             self.assertTrue(
                 isinstance(fused_model.conv.bn, nn.SyncBatchNorm),
                 "Expected BN to be converted to SyncBN")
+
+    def test_syncbn_preserves_qconfig(self):
+        """
+        Makes sure that if a BatchNorm is not fused and a qconfig exists,
+        convering the module to SyncBatchNorm preserves the qconfig.
+        """
+        m = nn.Sequential(
+            nn.Conv2d(1, 1, 1),
+            nn.BatchNorm2d(1),
+        )
+        m[1].qconfig = torch.quantization.default_qconfig
+        m = torch.nn.SyncBatchNorm.convert_sync_batchnorm(m)
+        self.assertTrue(
+            hasattr(m[1], "qconfig"),
+            "missing qconfig after SyncBatchNorm conversion")
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")

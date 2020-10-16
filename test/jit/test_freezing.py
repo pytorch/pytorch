@@ -237,8 +237,8 @@ class TestFreezing(JitTestCase):
 
     def test_freeze_module_with_fork2(self):
         @torch.jit.script
-        def foo(x, y):
-            return x * y
+        def foo(x):
+            return x * 2
 
         class TestModule(nn.Module):
             def __init__(self):
@@ -247,8 +247,8 @@ class TestFreezing(JitTestCase):
                 self.b = torch.ones(20, 20)
 
             def forward(self, x):
-                fut = torch.jit._fork(foo, self.a, self.b)
-                y_hat = foo(self.a, self.b)
+                fut = torch.jit._fork(foo, self.a)
+                y_hat = foo(self.b)
                 y = torch.jit._wait(fut)
                 return y_hat + y
 
@@ -272,6 +272,50 @@ class TestFreezing(JitTestCase):
         # conservatively assumes there is a mutation because attributes are
         # passed to fork subgraph. both 'a' and 'b' are preserved.
         self.assertTrue(mf.hasattr('a'))
+        self.assertFalse(mf.hasattr('b'))
+        output_f = mf.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    def test_freeze_module_with_fork_calling_module_method(self):
+        @torch.jit.script
+        def foo(x, y):
+            return x * y
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.a = torch.ones(20, 20)
+                self.b = torch.ones(20, 20)
+
+            @torch.jit.export
+            def foo(self, x):
+                return x * self.a
+
+            @torch.jit.export
+            def bar(self, x):
+                return x * self.b
+
+            def forward(self, x):
+                fut = torch.jit._fork(self.foo, self.b)
+                y_hat = self.bar(self.a)
+                y = torch.jit._wait(fut)
+                return y_hat + y
+
+        m = torch.jit.script(TestModule())
+        m.eval()
+        input = torch.randn(2, 2)
+        output_s = m.forward(input)
+        mf = torch._C._freeze_module(m._c)
+        # Check if frozen module looks as below:
+        # module m {
+        #   attributes {
+        #     self.b = ..
+        #   }
+        #   ...
+        # TODO:  Although there are no mutation, the alias analysis
+        # conservatively assumes there is a mutation because attributes are
+        # passed to fork subgraph. 'b' is preserved.
+        self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
         output_f = mf.forward(input)
         self.assertEqual(output_s, output_f)
@@ -480,6 +524,77 @@ class TestFreezing(JitTestCase):
         self.assertEqual(output_s, output_f)
 
 
+    def test_freeze_module_with_preserve_sub_module(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = torch.tensor([1.1])
+                self.b = 2.2
+
+            def forward(self, x):
+                return self.a
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub1 = SubModule()  # aliasing
+                self.sub2 = SubModule()
+
+            def forward(self, x):
+                return self.sub2(x) + self.sub1(x)
+        m = TestModule()
+        ms = torch.jit.script(m)
+        ms.eval()
+        mf = torch._C._freeze_module(ms._c, ["sub1"])
+
+        # Test that 'sub1' is preserved entirely and 'sub2' is completely folded
+        self.assertTrue(mf.hasattr('sub1'))
+        self.assertTrue(mf.sub1.hasattr('a'))
+        self.assertTrue(mf.sub1.hasattr('b'))
+        self.assertFalse(mf.hasattr('sub2'))
+        input = torch.randn(2, 2)
+        output_s = ms.forward(input)
+        output_f = mf.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    def test_freeze_module_with_preserve_sub_module_and_mutation(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = torch.tensor([1.1])
+                self.b = 2.2
+
+            def forward(self, x):
+                self.a[0] = 3.3
+                return self.a
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub1 = SubModule()  # aliasing
+                self.sub2 = SubModule()
+
+            def forward(self, x):
+                return self.sub2(x) + self.sub1(x)
+        m = TestModule()
+        ms = torch.jit.script(m)
+        ms.eval()
+        mf = torch._C._freeze_module(ms._c, ["sub1"])
+
+        # Test that be both sub1 and sub1 are preserved and 'b' is preserved
+        # even if it is not used. To fulfill user request to preserve 'sub1'
+        self.assertTrue(mf.hasattr('sub1'))
+        self.assertTrue(mf.sub1.hasattr('a'))
+        self.assertTrue(mf.sub1.hasattr('b'))
+        self.assertTrue(mf.hasattr('sub2'))
+        self.assertTrue(mf.sub2.hasattr('a'))
+        self.assertTrue(mf.sub2.hasattr('b'))
+        input = torch.randn(2, 2)
+        output_s = ms.forward(input)
+        output_f = mf.forward(input)
+        self.assertEqual(output_s, output_f)
+
+
     def test_freeze_module_with_helperfunction(self):
         class SubModule(nn.Module):
             def __init__(self):
@@ -510,7 +625,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mf.hasattr('sub'))
         self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
-        with self.assertRaisesRegex(RuntimeError, "TestModule does not have a field with name '_forward'"):
+        with self.assertRaisesRegex(AttributeError, "TestModule does not have a field with name '_forward'"):
             mf._forward(x)
 
     def test_freeze_module_with_inplace_mutable(self):
@@ -932,7 +1047,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mEval_freezed.hasattr('fc1'))
         self.assertFalse(mEval_freezed.hasattr('dropout2'))
         self.assertFalse(mEval_freezed.hasattr('fc2'))
-        with self.assertRaisesRegex(RuntimeError, "does not have a field with name 'state_dict'"):
+        with self.assertRaisesRegex(AttributeError, "does not have a field with name 'state_dict'"):
             print(mEval_freezed.state_dict())
         buffer = io.BytesIO()
         torch.jit.save(mEval_freezed, buffer)
@@ -1080,3 +1195,29 @@ class TestFreezing(JitTestCase):
             # It used to segfault while running frozen module.
             m_frozen_res = m_frozen(data)
             self.assertEqual(m_res, m_frozen_res)
+
+    def test_module_getattr_indirection(self):
+        @torch.jit.script
+        class ValHolder(object):
+            def __init__(self, val: int):
+                self.val: int = val
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.mod1 = ValHolder(1)
+                self.mod2 = ValHolder(2)
+
+            def forward(self, cond: bool):
+                if cond:
+                    mod = self.mod1
+                else:
+                    mod = self.mod2
+                return mod.val
+
+        mod = Mod()
+        mod.eval()
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod))
+        mod_eager = Mod()
+        self.assertEqual(mod_eager(True), frozen_mod(True))
+        self.assertEqual(mod_eager(False), frozen_mod(False))

@@ -21,6 +21,7 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_numbers.h>
+#include <fmt/format.h>
 
 using namespace torch;
 
@@ -182,7 +183,7 @@ static PyObject *THPModule_removeWorkerPIDs(PyObject *module, PyObject *loader_i
   int64_t key = THPUtils_unpackLong(loader_id);
   auto it = worker_pids.find(key);
   if (it == worker_pids.end()) {
-    throw ValueError("Cannot find worker information for _BaseDataLoaderIter with id %" PRId64, key);
+    throw ValueError(fmt::format("Cannot find worker information for _BaseDataLoaderIter with id {}", key));
   }
   worker_pids.erase(it);
 

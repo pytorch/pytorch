@@ -308,69 +308,132 @@ __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
 
   const float LR = lr[0];
   // num_indices blocks, each block process one index
-  int sorted_linear_indice_id = blockIdx.x; // the index of sorted_linear_ind
-  if (sorted_linear_indice_id >= num_indices) {
-    // don't have warp divergence when embedding dim is multiple of 32
-    return;
+  int sorted_linear_indice_id;
+  if (ExactBlock) {
+    sorted_linear_indice_id =
+        blockIdx.x * blockDim.y + threadIdx.y; // the index of sorted_linear_ind
+  } else {
+    sorted_linear_indice_id = blockIdx.x; // the index of sorted_linear_ind
   }
-
-  // check if this thread block is responsible for this whole linear index
-  bool linear_index_start =
-      (sorted_linear_indice_id == 0 ||
-       sorted_linear_ind_data[sorted_linear_indice_id - 1] !=
-           sorted_linear_ind_data[sorted_linear_indice_id]);
-
-  if (!linear_index_start) {
+  if (sorted_linear_indice_id >= num_indices) {
     // don't have warp divergence when embedding dim is multiple of 32
     return;
   }
 
   // the index row in the embedding table
   SIndex index = sorted_linear_ind_data[sorted_linear_indice_id];
-  // find the num of duplicated indices.
-  int num_dup = 1;
-  while (sorted_linear_indice_id + num_dup < num_indices &&
-         sorted_linear_ind_data[sorted_linear_indice_id + num_dup] == index) {
-    num_dup += 1;
+
+  // check if this thread block is responsible for this whole linear index
+  bool linear_index_start =
+      (sorted_linear_indice_id == 0 ||
+       sorted_linear_ind_data[sorted_linear_indice_id - 1] != index);
+
+  if (!linear_index_start) {
+    // don't have warp divergence when embedding dim is multiple of 32
+    return;
   }
 
-  // TODO: Tuning NumThreads for sum_squares
-  typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
-  __shared__ BlockReduce::TempStorage temp_storage;
-  int valid = min(block_size, blockDim.x);
-
-  float sum_squares = 0.0;
-  __shared__ float row_sum_squares_avg;
-  extern __shared__ float x_ij[];
-
-  for (int i = threadIdx.x; i < block_size; i += blockDim.x) {
-    // i: index in the embedding dimension
-    float t_x_ij = 0.0;
-
-    for (int dup_id = 0; dup_id < num_dup; dup_id++) {
-      int group = sorted_seg_id_data[sorted_linear_indice_id + dup_id];
-      t_x_ij += grad[group * block_size + i];
+  if (ExactBlock) {
+    // find the num of duplicated indices.
+    int num_dup = 1;
+    while (true) {
+      int segment_continue = 0;
+      if (sorted_linear_indice_id + num_dup + threadIdx.x < num_indices) {
+        segment_continue =
+            sorted_linear_ind_data[sorted_linear_indice_id + num_dup + threadIdx.x] ==
+            index;
+      }
+#ifndef __HIP_PLATFORM_HCC__
+      int32_t num_dup_incr = __popc(__ballot_sync(0xFFFFFFFF, segment_continue));
+#else
+      int32_t num_dup_incr = __popc(__ballot(segment_continue));
+#endif
+      num_dup += num_dup_incr;
+      if (num_dup_incr != kWarpSize) {
+        break;
+      }
     }
-    t_x_ij += weight_decay *
-      rand_factor.convertTypeFromParamToTarget(param[index * block_size + i]);;
-    sum_squares += t_x_ij * t_x_ij;
-    x_ij[i] = t_x_ij;
-  }
-  float reduce_result = BlockReduce(temp_storage).Sum(sum_squares, valid);
 
-  if (threadIdx.x == 0) {
-    row_sum_squares_avg = reduce_result / static_cast<float>(block_size);
-    float mom_new = param_mom[index] + static_cast<T>(row_sum_squares_avg);
+    float sum_squares = 0.0;
+    extern __shared__ float x_ij[];
+
+    // we need to avoid index collision for the threads in the same block.
+    // Different threadIdx.y works on different `index`.
+    int sm_offset = threadIdx.y * block_size;
+
+    for (int i = threadIdx.x; i < block_size; i += blockDim.x) {
+      // i: index in the embedding dimension
+      float t_x_ij = 0.0;
+
+      for (int dup_id = 0; dup_id < num_dup; dup_id++) {
+        int group = sorted_seg_id_data[sorted_linear_indice_id + dup_id];
+        t_x_ij += grad[group * block_size + i];
+      }
+      t_x_ij += weight_decay *
+          rand_factor.convertTypeFromParamToTarget(param[index * block_size + i]);
+      sum_squares += t_x_ij * t_x_ij;
+
+      x_ij[sm_offset + i] = t_x_ij;
+    }
+
+    // We have a strong assumption that blockDim.x = 32, which is equal to the warp size.
+    float row_sum_squares_avg = warpReduceAllSum<float>(sum_squares) / static_cast<float>(block_size);
+    float mom_new = param_mom[index] + row_sum_squares_avg;
     param_mom[index] = mom_new;
-  }
-  __syncthreads();
 
-  // update param
-  float step = LR / (sqrtf(param_mom[index]) + epsilon);
-  for (int i = threadIdx.x; i < block_size; i += blockDim.x) {
-    const size_t paramIdx = index * block_size + i; // index for param
-    param[paramIdx] =
-        rand_factor.convertTypeFromTargetToParam(param[paramIdx] + x_ij[i] * step);
+    // update param
+    float step = LR / (sqrtf(mom_new) + epsilon);
+    for (int i = threadIdx.x; i < block_size; i += blockDim.x) {
+      const size_t paramIdx = index * block_size + i; // index for param
+      param[paramIdx] = rand_factor.convertTypeFromTargetToParam(
+          rand_factor.convertTypeFromParamToTarget(param[paramIdx]) + x_ij[sm_offset + i] * step);
+    }
+  } else {
+    // find the num of duplicated indices.
+    int num_dup = 1;
+    while (sorted_linear_indice_id + num_dup < num_indices &&
+          sorted_linear_ind_data[sorted_linear_indice_id + num_dup] == index) {
+      num_dup += 1;
+    }
+
+    // TODO: Tuning NumThreads for sum_squares
+    typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
+    __shared__ BlockReduce::TempStorage temp_storage;
+    int valid = min(block_size, blockDim.x);
+
+    float sum_squares = 0.0;
+    __shared__ float row_sum_squares_avg;
+    extern __shared__ float x_ij[];
+
+    for (int i = threadIdx.x; i < block_size; i += blockDim.x) {
+      // i: index in the embedding dimension
+      float t_x_ij = 0.0;
+
+      for (int dup_id = 0; dup_id < num_dup; dup_id++) {
+        int group = sorted_seg_id_data[sorted_linear_indice_id + dup_id];
+        t_x_ij += grad[group * block_size + i];
+      }
+      t_x_ij += weight_decay *
+          rand_factor.convertTypeFromParamToTarget(param[index * block_size + i]);
+      sum_squares += t_x_ij * t_x_ij;
+      x_ij[i] = t_x_ij;
+    }
+    float reduce_result = BlockReduce(temp_storage).Sum(sum_squares, valid);
+
+    if (threadIdx.x == 0) {
+      row_sum_squares_avg = reduce_result / static_cast<float>(block_size);
+      float mom_new = param_mom[index] + row_sum_squares_avg;
+      param_mom[index] = mom_new;
+    }
+    __syncthreads();
+
+    // update param
+    float step = LR / (sqrtf(param_mom[index]) + epsilon);
+    for (int i = threadIdx.x; i < block_size; i += blockDim.x) {
+      const size_t paramIdx = index * block_size + i; // index for param
+      param[paramIdx] = rand_factor.convertTypeFromTargetToParam(
+        rand_factor.convertTypeFromParamToTarget(param[paramIdx]) + x_ij[i] * step);
+    }
   }
 }
 
@@ -570,7 +633,10 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
         is_mean ? grad_buffer_.template mutable_data<T>() : NULL;
     if (is_mean) {
       gradient_mean_kernel<T>
-          <<<num_lengths, std::min(maxThreads, block_size), 0, context_.cuda_stream()>>>(
+          <<<num_lengths,
+             std::min(maxThreads, block_size),
+             0,
+             context_.cuda_stream()>>>(
               grad, lengths, grad_buffer_data, block_size);
     }
 
@@ -934,7 +1000,10 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
         is_mean ? grad_buffer_.template mutable_data<T>() : NULL;
     if (is_mean) {
       gradient_mean_kernel<T>
-          <<<num_lengths, std::min(maxThreads, block_size), 0, context_.cuda_stream()>>>(
+          <<<num_lengths,
+             std::min(maxThreads, block_size),
+             0,
+             context_.cuda_stream()>>>(
               grad, lengths, grad_buffer_data, block_size);
     }
 
@@ -1179,10 +1248,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
     sorted_seg_id_buffer_.ResizeLike(indicesInput);
 
     linear_index_weight_offsets_dedup_kernel<IndexType>
-        <<<num_lengths,
-           32,
-           0,
-           context_.cuda_stream()>>>(
+        <<<num_lengths, 32, 0, context_.cuda_stream()>>>(
             indices,
             prefix_sum_length_data,
             seg_id_buffer_.template mutable_data<int>());
@@ -1206,60 +1272,137 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
       seed.y = maxThreads * block_size;
     }
 
-    CAFFE_ENFORCE_LE(block_size, 10240,
-      "Block size is too big and will exceed the max size of the shared memory");
-    if (round_option_ == STOCHASTIC) {
-      rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel<
-          IndexType,
-          TParam,
-          T,
-          false,
-          STOCHASTIC>
-          <<<num_indices,
-             std::min(maxThreads, block_size),
-             block_size * sizeof(float),
-             context_.cuda_stream()>>>(
-              prefix_sum_length_data,
-              N,
-              block_size,
-              num_lengths,
-              num_indices,
-              epsilon_,
-              paramOut,
-              momentOut,
-              indices,
-              is_mean ? grad_buffer_data : grad,
-              sorted_linear_ind_buffer_.template data<IndexType>(),
-              sorted_seg_id_buffer_.template data<int>(),
-              lr,
-              seed,
-              weight_decay_);
+    if (block_size <= maxThreads / 2 && block_size % 32 == 0) {
+      // Fast path when the embedding dimension is a multiple of 32, using
+      // WarpReduce.
+      constexpr int kWarpNum = 8;
+      const dim3 threads(kWarpSize, kWarpNum);
+      const dim3 blocks((num_indices + kWarpNum - 1) / kWarpNum);
+      CAFFE_ENFORCE_LE(
+          kWarpNum * kWarpSize,
+          maxThreads,
+          "the total number of threads in a block should be smaller than or equal to maxThreads");
+
+      const int sm_size = block_size * kWarpNum * sizeof(float);
+      // Maximum shared memory allocated per thread block is 48 KB on Maxwell/Pascal
+      CAFFE_ENFORCE_LE(
+        sm_size,
+        1024 * 48,
+        "Block size is too big and will exceed the max size of the shared memory");
+
+      if (round_option_ == STOCHASTIC) {
+        rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel<
+            IndexType,
+            TParam,
+            T,
+            true,
+            STOCHASTIC>
+            <<<blocks,
+               threads,
+               sm_size,
+               context_.cuda_stream()>>>(
+                prefix_sum_length_data,
+                N,
+                block_size,
+                num_lengths,
+                num_indices,
+                epsilon_,
+                paramOut,
+                momentOut,
+                indices,
+                is_mean ? grad_buffer_data : grad,
+                sorted_linear_ind_buffer_.template data<IndexType>(),
+                sorted_seg_id_buffer_.template data<int>(),
+                lr,
+                seed,
+                weight_decay_);
+      } else {
+        rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel<
+            IndexType,
+            TParam,
+            T,
+            true,
+            NEAREST>
+            <<<blocks,
+               threads,
+               sm_size,
+               context_.cuda_stream()>>>(
+                prefix_sum_length_data,
+                N,
+                block_size,
+                num_lengths,
+                num_indices,
+                epsilon_,
+                paramOut,
+                momentOut,
+                indices,
+                is_mean ? grad_buffer_data : grad,
+                sorted_linear_ind_buffer_.template data<IndexType>(),
+                sorted_seg_id_buffer_.template data<int>(),
+                lr,
+                seed,
+                weight_decay_);
+      }
     } else {
-      rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel<
-          IndexType,
-          TParam,
-          T,
-          false,
-          NEAREST>
-          <<<num_indices,
-             std::min(maxThreads, block_size),
-             block_size * sizeof(float),
-             context_.cuda_stream()>>>(
-              prefix_sum_length_data,
-              N,
-              block_size,
-              num_lengths,
-              num_indices,
-              epsilon_,
-              paramOut,
-              momentOut,
-              indices,
-              is_mean ? grad_buffer_data : grad,
-              sorted_linear_ind_buffer_.template data<IndexType>(),
-              sorted_seg_id_buffer_.template data<int>(),
-              lr,
-              seed,
-              weight_decay_);
+      const int sm_size = block_size * sizeof(float);
+      // Maximum shared memory allocated per thread block is 48 KB on Maxwell/Pascal
+      CAFFE_ENFORCE_LE(
+        sm_size,
+        1024 * 48,
+        "Block size is too big and will exceed the max size of the shared memory");
+      if (round_option_ == STOCHASTIC) {
+        rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel<
+            IndexType,
+            TParam,
+            T,
+            false,
+            STOCHASTIC>
+            <<<num_indices,
+               std::min(maxThreads, block_size),
+               sm_size,
+               context_.cuda_stream()>>>(
+                prefix_sum_length_data,
+                N,
+                block_size,
+                num_lengths,
+                num_indices,
+                epsilon_,
+                paramOut,
+                momentOut,
+                indices,
+                is_mean ? grad_buffer_data : grad,
+                sorted_linear_ind_buffer_.template data<IndexType>(),
+                sorted_seg_id_buffer_.template data<int>(),
+                lr,
+                seed,
+                weight_decay_);
+      } else {
+        rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel<
+            IndexType,
+            TParam,
+            T,
+            false,
+            NEAREST>
+            <<<num_indices,
+               std::min(maxThreads, block_size),
+               sm_size,
+               context_.cuda_stream()>>>(
+                prefix_sum_length_data,
+                N,
+                block_size,
+                num_lengths,
+                num_indices,
+                epsilon_,
+                paramOut,
+                momentOut,
+                indices,
+                is_mean ? grad_buffer_data : grad,
+                sorted_linear_ind_buffer_.template data<IndexType>(),
+                sorted_seg_id_buffer_.template data<int>(),
+                lr,
+                seed,
+                weight_decay_);
+      }
     }
 
     return true;

@@ -2,11 +2,12 @@ import torch
 import unittest
 import itertools
 from math import inf, nan, isnan
+from random import randrange
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY)
+    (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN, make_tensor)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, skipCUDAIfNoMagma, skipCPUIfNoLapack)
+    (instantiate_device_type_tests, dtypes, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck
 
@@ -16,21 +17,143 @@ if TEST_NUMPY:
 class TestLinalg(TestCase):
     exact_dtype = True
 
-    # TODO: test out variant
-    # Tests torch.ger, and its alias, torch.outer, vs. NumPy
+    # Tests torch.outer, and its alias, torch.ger, vs. NumPy
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(torch.float)
+    @precisionOverride({torch.bfloat16: 1e-1})
+    @dtypes(*(torch.testing.get_all_dtypes()))
     def test_outer(self, device, dtype):
-        a = torch.randn(50, device=device, dtype=dtype)
-        b = torch.randn(50, device=device, dtype=dtype)
+        def run_test_case(a, b):
+            if dtype == torch.bfloat16:
+                a_np = a.to(torch.double).cpu().numpy()
+                b_np = b.to(torch.double).cpu().numpy()
+            else:
+                a_np = a.cpu().numpy()
+                b_np = b.cpu().numpy()
+            expected = np.outer(a_np, b_np)
 
-        ops = (torch.ger, torch.Tensor.ger,
-               torch.outer, torch.Tensor.outer)
+            self.assertEqual(torch.outer(a, b), expected)
+            self.assertEqual(torch.Tensor.outer(a, b), expected)
 
-        expected = np.outer(a.cpu().numpy(), b.cpu().numpy())
-        for op in ops:
-            actual = op(a, b)
-            self.assertEqual(actual, expected)
+            self.assertEqual(torch.ger(a, b), expected)
+            self.assertEqual(torch.Tensor.ger(a, b), expected)
+
+            # test out variant
+            out = torch.empty(a.size(0), b.size(0), device=device, dtype=dtype)
+            torch.outer(a, b, out=out)
+            self.assertEqual(out, expected)
+
+            out = torch.empty(a.size(0), b.size(0), device=device, dtype=dtype)
+            torch.ger(a, b, out=out)
+            self.assertEqual(out, expected)
+
+        a = torch.randn(50).to(device=device, dtype=dtype)
+        b = torch.randn(50).to(device=device, dtype=dtype)
+        run_test_case(a, b)
+
+        # test 0 strided tensor
+        zero_strided = torch.randn(1).to(device=device, dtype=dtype).expand(50)
+        run_test_case(zero_strided, b)
+        run_test_case(a, zero_strided)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @precisionOverride({torch.bfloat16: 1e-1})
+    @dtypes(*(torch.testing.get_all_dtypes()))
+    def test_addr(self, device, dtype):
+        def run_test_case(m, a, b, beta=1, alpha=1):
+            if dtype == torch.bfloat16:
+                a_np = a.to(torch.double).cpu().numpy()
+                b_np = b.to(torch.double).cpu().numpy()
+                m_np = m.to(torch.double).cpu().numpy()
+            else:
+                a_np = a.cpu().numpy()
+                b_np = b.cpu().numpy()
+                m_np = m.cpu().numpy()
+
+            if beta == 0:
+                expected = alpha * np.outer(a_np, b_np)
+            else:
+                expected = beta * m_np + alpha * np.outer(a_np, b_np)
+
+            self.assertEqual(torch.addr(m, a, b, beta=beta, alpha=alpha), expected)
+            self.assertEqual(torch.Tensor.addr(m, a, b, beta=beta, alpha=alpha), expected)
+
+            result_dtype = torch.addr(m, a, b, beta=beta, alpha=alpha).dtype
+            out = torch.empty_like(m, dtype=result_dtype)
+            torch.addr(m, a, b, beta=beta, alpha=alpha, out=out)
+            self.assertEqual(out, expected)
+
+        a = torch.randn(50).to(device=device, dtype=dtype)
+        b = torch.randn(50).to(device=device, dtype=dtype)
+        m = torch.randn(50, 50).to(device=device, dtype=dtype)
+
+        # when beta is zero
+        run_test_case(m, a, b, beta=0., alpha=2)
+
+        # when beta is not zero
+        run_test_case(m, a, b, beta=0.5, alpha=2)
+
+        # test transpose
+        m_transpose = torch.transpose(m, 0, 1)
+        run_test_case(m_transpose, a, b, beta=0.5, alpha=2)
+
+        # test 0 strided tensor
+        zero_strided = torch.randn(1).to(device=device, dtype=dtype).expand(50)
+        run_test_case(m, zero_strided, b, beta=0.5, alpha=2)
+
+        # test scalar
+        m_scalar = torch.tensor(1, device=device, dtype=dtype)
+        run_test_case(m_scalar, a, b)
+
+    @dtypes(*itertools.product(torch.testing.get_all_dtypes(),
+                               torch.testing.get_all_dtypes()))
+    def test_outer_type_promotion(self, device, dtypes):
+        a = torch.randn(5).to(device=device, dtype=dtypes[0])
+        b = torch.randn(5).to(device=device, dtype=dtypes[1])
+        for op in (torch.outer, torch.Tensor.outer, torch.ger, torch.Tensor.ger):
+            result = op(a, b)
+            self.assertEqual(result.dtype, torch.result_type(a, b))
+
+    @dtypes(*itertools.product(torch.testing.get_all_dtypes(),
+                               torch.testing.get_all_dtypes()))
+    def test_addr_type_promotion(self, device, dtypes):
+        a = torch.randn(5).to(device=device, dtype=dtypes[0])
+        b = torch.randn(5).to(device=device, dtype=dtypes[1])
+        m = torch.randn(5, 5).to(device=device,
+                                 dtype=torch.result_type(a, b))
+        for op in (torch.addr, torch.Tensor.addr):
+            # pass the integer 1 to the torch.result_type as both
+            # the default values of alpha and beta are integers (alpha=1, beta=1)
+            desired_dtype = torch.result_type(m, 1)
+            result = op(m, a, b)
+            self.assertEqual(result.dtype, desired_dtype)
+
+            desired_dtype = torch.result_type(m, 2.)
+            result = op(m, a, b, beta=0, alpha=2.)
+            self.assertEqual(result.dtype, desired_dtype)
+
+    # Tests migrated from test_torch.py
+    # 1) test the shape of the result tensor when there is empty input tensor
+    # 2) test the Runtime Exception when there is scalar input tensor
+    def test_outer_ger_addr_legacy_tests(self, device):
+        for size in ((0, 0), (0, 5), (5, 0)):
+            a = torch.rand(size[0], device=device)
+            b = torch.rand(size[1], device=device)
+
+            self.assertEqual(torch.outer(a, b).shape, size)
+            self.assertEqual(torch.ger(a, b).shape, size)
+
+            m = torch.empty(size, device=device)
+            self.assertEqual(torch.addr(m, a, b).shape, size)
+
+        m = torch.randn(5, 6, device=device)
+        a = torch.randn(5, device=device)
+        b = torch.tensor(6, device=device)
+        self.assertRaises(RuntimeError, lambda: torch.outer(a, b))
+        self.assertRaises(RuntimeError, lambda: torch.outer(b, a))
+        self.assertRaises(RuntimeError, lambda: torch.ger(a, b))
+        self.assertRaises(RuntimeError, lambda: torch.ger(b, a))
+        self.assertRaises(RuntimeError, lambda: torch.addr(m, a, b))
+        self.assertRaises(RuntimeError, lambda: torch.addr(m, b, a))
 
     # Tests torch.det and its alias, torch.linalg.det, vs. NumPy
     @skipCUDAIfNoMagma
@@ -55,11 +178,12 @@ class TestLinalg(TestCase):
 
         # NOTE: det requires a 2D+ tensor
         t = torch.randn(1, device=device, dtype=dtype)
-        with self.assertRaises(IndexError):
+        with self.assertRaises(RuntimeError):
             op(t)
 
     # This test confirms that torch.linalg.norm's dtype argument works
     # as expected, according to the function's documentation
+    @skipCUDAIfNoMagma
     def test_norm_dtype(self, device):
         def run_test_case(input_size, ord, keepdim, from_dtype, to_dtype, compare_dtype):
             msg = (
@@ -153,6 +277,7 @@ class TestLinalg(TestCase):
 
     # This test compares torch.linalg.norm and numpy.linalg.norm to ensure that
     # their matrix norm results match
+    @skipCUDAIfNoMagma
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.float, torch.double)
     def test_norm_matrix(self, device, dtype):
@@ -216,11 +341,13 @@ class TestLinalg(TestCase):
             ('norm', (S, S, S), (), 'default_3d'),
             ('norm', (S,), (inf,), 'vector_inf'),
             ('norm', (S,), (3.5,), 'vector_3_5'),
+            ('norm', (S,), (0.5,), 'vector_0_5'),
             ('norm', (S,), (2,), 'vector_2'),
             ('norm', (S,), (1,), 'vector_1'),
             ('norm', (S,), (0,), 'vector_0'),
             ('norm', (S,), (-inf,), 'vector_neg_inf'),
             ('norm', (S,), (-3.5,), 'vector_neg_3_5'),
+            ('norm', (S,), (-0.5,), 'vector_neg_0_5'),
             ('norm', (S,), (2,), 'vector_neg_2'),
             ('norm', (S,), (1,), 'vector_neg_1'),
             ('norm', (S, S), (inf,), 'matrix_inf'),
@@ -353,9 +480,6 @@ class TestLinalg(TestCase):
             unsupported_matrix_ords = [
                 (None, r'norm with p=2 not supported for complex tensors'),
                 ('fro', r'frobenius norm not supported for complex tensors'),
-                (2, r'"svd_cuda" not implemented for \'Complex'),
-                (-2, r'"svd_cuda" not implemented for \'Complex'),
-                ('nuc', r'"svd_cuda" not implemented for \'Complex'),
             ]
 
         # Test supported ords
@@ -399,6 +523,8 @@ class TestLinalg(TestCase):
 
     # Test that linal.norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(IS_MACOS, "Skipped on MacOS!")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
@@ -439,14 +565,14 @@ class TestLinalg(TestCase):
                 result_n = np.linalg.norm(x_n, ord=ord)
 
                 if is_broken_matrix_norm_case(ord, x):
-                    self.assertNotEqual(result, result_n, msg=msg)
+                    continue
                 else:
                     self.assertEqual(result, result_n, msg=msg)
 
     # Test degenerate shape results match numpy for linalg.norm vector norms
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped on ASAN since it checks for undefined behavior.")
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_norm_vector_degenerate_shapes(self, device, dtype):
         def run_test_case(input, ord, dim, keepdim, should_error):
@@ -526,6 +652,275 @@ class TestLinalg(TestCase):
                 input = torch.randn(*input_size, dtype=dtype, device=device)
                 for ord in ord_matrix:
                     run_test_case(input, ord, dim, keepdim, ord in error_ords)
+
+    def test_norm_fastpaths(self, device):
+        x = torch.randn(3, 5, device=device)
+
+        # slow path
+        result = torch.linalg.norm(x, 4.5, 1)
+        expected = torch.pow(x.abs().pow(4.5).sum(1), 1.0 / 4.5)
+        self.assertEqual(result, expected)
+
+        # fast 0-norm
+        result = torch.linalg.norm(x, 0, 1)
+        expected = (x != 0).type_as(x).sum(1)
+        self.assertEqual(result, expected)
+
+        # fast 1-norm
+        result = torch.linalg.norm(x, 1, 1)
+        expected = x.abs().sum(1)
+        self.assertEqual(result, expected)
+
+        # fast 2-norm
+        result = torch.linalg.norm(x, 2, 1)
+        expected = torch.sqrt(x.pow(2).sum(1))
+        self.assertEqual(result, expected)
+
+        # fast 3-norm
+        result = torch.linalg.norm(x, 3, 1)
+        expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
+        self.assertEqual(result, expected)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_norm_old(self, device):
+        def gen_error_message(input_size, p, keepdim, dim=None):
+            return "norm failed for input size %s, p=%s, keepdim=%s, dim=%s" % (
+                input_size, p, keepdim, dim)
+
+        for keepdim in [False, True]:
+            # full reduction
+            x = torch.randn(25, device=device)
+            xn = x.cpu().numpy()
+            for p in [0, 1, 2, 3, 4, inf, -inf, -1, -2, -3, 1.5]:
+                res = x.norm(p, keepdim=keepdim).cpu()
+                expected = np.linalg.norm(xn, p, keepdims=keepdim)
+                self.assertEqual(res, expected, atol=1e-5, rtol=0, msg=gen_error_message(x.size(), p, keepdim))
+
+            # one dimension
+            x = torch.randn(25, 25, device=device)
+            xn = x.cpu().numpy()
+            for p in [0, 1, 2, 3, 4, inf, -inf, -1, -2, -3]:
+                dim = 1
+                res = x.norm(p, dim, keepdim=keepdim).cpu()
+                expected = np.linalg.norm(xn, p, dim, keepdims=keepdim)
+                msg = gen_error_message(x.size(), p, keepdim, dim)
+                self.assertEqual(res.shape, expected.shape, msg=msg)
+                self.assertEqual(res, expected, msg=msg)
+
+            # matrix norm
+            for p in ['fro', 'nuc']:
+                res = x.norm(p, keepdim=keepdim).cpu()
+                expected = np.linalg.norm(xn, p, keepdims=keepdim)
+                msg = gen_error_message(x.size(), p, keepdim)
+                self.assertEqual(res.shape, expected.shape, msg=msg)
+                self.assertEqual(res, expected, msg=msg)
+
+            # zero dimensions
+            x = torch.randn((), device=device)
+            xn = x.cpu().numpy()
+            res = x.norm(keepdim=keepdim).cpu()
+            expected = np.linalg.norm(xn, keepdims=keepdim)
+            msg = gen_error_message(x.size(), None, keepdim)
+            self.assertEqual(res.shape, expected.shape, msg=msg)
+            self.assertEqual(res, expected, msg=msg)
+
+            # larger tensor sanity check
+            self.assertEqual(
+                2 * torch.norm(torch.ones(10000), keepdim=keepdim),
+                torch.norm(torch.ones(40000), keepdim=keepdim))
+
+            # matrix norm with non-square >2-D tensors, all combinations of reduction dims
+            x = torch.randn(5, 6, 7, 8, device=device)
+            xn = x.cpu().numpy()
+            for p in ['fro', 'nuc']:
+                for dim in itertools.product(*[list(range(4))] * 2):
+                    if dim[0] == dim[1]:
+                        continue
+                    res = x.norm(p=p, dim=dim, keepdim=keepdim).cpu()
+                    expected = np.linalg.norm(xn, ord=p, axis=dim, keepdims=keepdim)
+                    msg = gen_error_message(x.size(), p, keepdim, dim)
+                    self.assertEqual(res.shape, expected.shape, msg=msg)
+                    self.assertEqual(res, expected, msg=msg)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_norm_complex_old(self, device):
+        def gen_error_message(input_size, p, keepdim, dim=None):
+            return "complex norm failed for input size %s, p=%s, keepdim=%s, dim=%s" % (
+                input_size, p, keepdim, dim)
+
+        if device == 'cpu':
+            for keepdim in [False, True]:
+                # vector norm
+                x = torch.randn(25, device=device) + 1j * torch.randn(25, device=device)
+                xn = x.cpu().numpy()
+                for p in [0, 1, 3, inf, -1, -2, -3, -inf]:
+                    res = x.norm(p, keepdim=keepdim).cpu()
+                    expected = np.linalg.norm(xn, p, keepdims=keepdim)
+                    msg = gen_error_message(x.size(), p, keepdim)
+                    self.assertEqual(res.shape, expected.shape, msg=msg)
+                    self.assertEqual(res, expected, msg=msg)
+
+                # matrix norm
+                x = torch.randn(25, 25, device=device) + 1j * torch.randn(25, 25, device=device)
+                xn = x.cpu().numpy()
+                for p in ['nuc']:
+                    res = x.norm(p, keepdim=keepdim).cpu()
+                    expected = np.linalg.norm(xn, p, keepdims=keepdim)
+                    msg = gen_error_message(x.size(), p, keepdim)
+                    self.assertEqual(res.shape, expected.shape, msg=msg)
+                    self.assertEqual(res, expected, msg=msg)
+
+            # TODO: remove error test and add functionality test above when 2-norm support is added
+            with self.assertRaisesRegex(RuntimeError, r'norm with p=2 not supported for complex tensors'):
+                x = torch.randn(2, device=device, dtype=torch.complex64).norm(p=2)
+
+            # TODO: remove error test and add functionality test above when frobenius support is added
+            with self.assertRaisesRegex(RuntimeError, r'frobenius norm not supported for complex tensors'):
+                x = torch.randn(2, 2, device=device, dtype=torch.complex64).norm(p='fro')
+
+        elif device == 'cuda':
+            with self.assertRaisesRegex(RuntimeError, r'"norm_cuda" not implemented for \'ComplexFloat\''):
+                (1j * torch.randn(25)).norm()
+
+    # Ensure torch.norm with p='fro' and p=2 give the same results for mutually supported input combinations
+    @dtypes(torch.float)
+    def test_norm_fro_2_equivalence_old(self, device, dtype):
+        input_sizes = [
+            (0,),
+            (10,),
+            (0, 0),
+            (4, 30),
+            (0, 45),
+            (100, 0),
+            (45, 10, 23),
+            (0, 23, 59),
+            (23, 0, 37),
+            (34, 58, 0),
+            (0, 0, 348),
+            (0, 3434, 0),
+            (0, 0, 0),
+            (5, 3, 8, 1, 3, 5)]
+
+        for input_size in input_sizes:
+            a = make_tensor(input_size, device, dtype, low=-9, high=9)
+
+            # Try full reduction
+            dim_settings = [None]
+
+            # Try all possible 1-D reductions
+            dim_settings += list(range(-a.dim(), a.dim()))
+
+            def wrap_dim(dim, ndims):
+                assert (dim < ndims) and (dim >= -ndims)
+                if dim >= 0:
+                    return dim
+                else:
+                    return dim + ndims
+
+            # Try all possible 2-D reductions
+            dim_settings += [
+                (d0, d1) for d0, d1 in itertools.combinations(range(-a.dim(), a.dim()), 2)
+                if wrap_dim(d0, a.dim()) != wrap_dim(d1, a.dim())]
+
+            for dim in dim_settings:
+                for keepdim in [True, False]:
+                    a_norm_2 = torch.norm(a, p=2, dim=dim, keepdim=keepdim)
+                    a_norm_fro = torch.norm(a, p='fro', dim=dim, keepdim=keepdim)
+                    self.assertEqual(a_norm_fro, a_norm_2)
+
+    @skipCUDAIfNoMagma
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_nuclear_norm_axes_small_brute_force_old(self, device):
+        def check_single_nuclear_norm(x, axes):
+            if self.device_type != 'cpu' and randrange(100) < 95:
+                return  # too many cpu <==> device copies
+
+            a = np.array(x.cpu(), copy=False)
+            expected = np.linalg.norm(a, "nuc", axis=axes)
+
+            ans = torch.norm(x, "nuc", dim=axes)
+            self.assertTrue(ans.is_contiguous())
+            self.assertEqual(ans.shape, expected.shape)
+            self.assertEqual(ans.cpu(), expected, rtol=1e-02, atol=1e-03, equal_nan=True)
+
+            out = torch.zeros(expected.shape, dtype=x.dtype, device=x.device)
+            ans = torch.norm(x, "nuc", dim=axes, out=out)
+            self.assertIs(ans, out)
+            self.assertTrue(ans.is_contiguous())
+            self.assertEqual(ans.shape, expected.shape)
+            self.assertEqual(ans.cpu(), expected, rtol=1e-02, atol=1e-03, equal_nan=True)
+
+        for n in range(1, 3):
+            for m in range(1, 3):
+                for axes in itertools.permutations([0, 1], 2):
+                    # 2d, inner dimensions C
+                    x = torch.randn(n, m, device=device)
+                    check_single_nuclear_norm(x, axes)
+
+                    # 2d, inner dimensions Fortran
+                    x = torch.randn(m, n, device=device).transpose(-1, -2)
+                    check_single_nuclear_norm(x, axes)
+
+                    # 2d, inner dimensions non-contiguous
+                    x = torch.randn(n, 2 * m, device=device)[:, ::2]
+                    check_single_nuclear_norm(x, axes)
+
+                    # 2d, all dimensions non-contiguous
+                    x = torch.randn(7 * n, 2 * m, device=device)[::7, ::2]
+                    check_single_nuclear_norm(x, axes)
+
+                for o in range(1, 3):
+                    for axes in itertools.permutations([0, 1, 2], 2):
+                        # 3d, inner dimensions C
+                        x = torch.randn(o, n, m, device=device)
+                        check_single_nuclear_norm(x, axes)
+
+                        # 3d, inner dimensions Fortran
+                        x = torch.randn(o, m, n, device=device).transpose(-1, -2)
+                        check_single_nuclear_norm(x, axes)
+
+                        # 3d, inner dimensions non-contiguous
+                        x = torch.randn(o, n, 2 * m, device=device)[:, :, ::2]
+                        check_single_nuclear_norm(x, axes)
+
+                        # 3d, all dimensions non-contiguous
+                        x = torch.randn(7 * o, 5 * n, 2 * m, device=device)[::7, ::5, ::2]
+                        check_single_nuclear_norm(x, axes)
+
+                    for r in range(1, 3):
+                        for axes in itertools.permutations([0, 1, 2, 3], 2):
+                            # 4d, inner dimensions C
+                            x = torch.randn(r, o, n, m, device=device)
+                            check_single_nuclear_norm(x, axes)
+
+                            # 4d, inner dimensions Fortran
+                            x = torch.randn(r, o, n, m, device=device).transpose(-1, -2)
+                            check_single_nuclear_norm(x, axes)
+
+                            # 4d, inner dimensions non-contiguous
+                            x = torch.randn(r, o, n, 2 * m, device=device)[:, :, :, ::2]
+                            check_single_nuclear_norm(x, axes)
+
+                            # 4d, all dimensions non-contiguous
+                            x = torch.randn(7 * r, 5 * o, 11 * n, 2 * m, device=device)[::7, ::5, ::11, ::2]
+                            check_single_nuclear_norm(x, axes)
+
+    @skipCUDAIfNoMagma
+    def test_nuclear_norm_exceptions_old(self, device):
+        for lst in [], [1], [1, 2]:
+            x = torch.tensor(lst, dtype=torch.double, device=device)
+            for axes in (), (0,):
+                self.assertRaises(RuntimeError, torch.norm, x, "nuc", axes)
+            self.assertRaises(IndexError, torch.norm, x, "nuc", (0, 1))
+
+        x = torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.double, device=device)
+        self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
+        self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
+
 
 instantiate_device_type_tests(TestLinalg, globals())
 

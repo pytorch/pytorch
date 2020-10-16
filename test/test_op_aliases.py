@@ -45,7 +45,7 @@ alias_infos = (
               decorators=(skipCPUIfNoLapack, skipCUDAIfNoMagma)),
     # NOTE: only runs on CPU because it leaks CUDA memory
     #   (see https://github.com/pytorch/pytorch/issues/43119)
-    AliasInfo('outer', torch.outer, 'ger', torch.ger,
+    AliasInfo('ger', torch.ger, 'outer', torch.outer,
               lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.randn(20, device=d),),
               decorators=(onlyCPU,)),
     AliasInfo('arccosh', torch.arccosh, 'acosh', torch.acosh,
@@ -127,6 +127,28 @@ alias_infos = (
     AliasInfo('not_equal_', torch.Tensor.not_equal_, 'ne_', torch.Tensor.ne_,
               lambda d: torch.randn(20, device=d),
               get_args=lambda d: (torch.randn(20, device=d),),
+              decorators=(onlyCPU,)),
+    # NOTE: only runs on CPU because it leaks CUDA memory
+    #   (see https://github.com/pytorch/pytorch/issues/43119)
+    AliasInfo('divide', torch.divide, 'div', torch.div,
+              lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.rand(20, device=d) + .1,),
+              decorators=(onlyCPU,)),
+    AliasInfo('divide_', torch.Tensor.divide_, 'div_', torch.Tensor.div_,
+              lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.rand(20, device=d) + .1,),
+              decorators=(onlyCPU,)),
+    # NOTE: only runs on CPU because it leaks CUDA memory
+    #   (see https://github.com/pytorch/pytorch/issues/43119)
+    AliasInfo('multiply', torch.multiply, 'mul', torch.mul,
+              lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.rand(20, device=d),),
+              decorators=(onlyCPU,)),
+    AliasInfo('multiply_', torch.Tensor.multiply_, 'mul_', torch.Tensor.mul_,
+              lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.rand(20, device=d),),
+              decorators=(onlyCPU,)),
+    AliasInfo('true_divide', torch.true_divide, 'div', torch.div,
+              lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.rand(20, device=d) + .1,),
+              decorators=(onlyCPU,)),
+    AliasInfo('true_divide_', torch.Tensor.true_divide_, 'div_', torch.Tensor.div_,
+              lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.rand(20, device=d) + .1,),
               decorators=(onlyCPU,)),
 )
 
