@@ -96,7 +96,12 @@ void runNooptPassPipeline(std::shared_ptr<Graph>& graph) {
   LowerGradOf(*graph);
   GRAPH_DEBUG("After LowerGradOf, before RemoveExpands\n", *graph);
   RemoveExpands(graph);
-  GRAPH_DEBUG("After RemoveExpands, before RemoveProfilingNodes\n", *graph);
+  GRAPH_DEBUG("After RemoveExpands, before CanonicalizeOps\n", *graph);
+  CanonicalizeOps(graph);
+  GRAPH_DEBUG("After CanonicalizeOps, before EliminateDeadCode\n", *graph);
+  EliminateDeadCode(graph);
+  GRAPH_DEBUG(
+      "After EliminateDeadCode (end of runNooptPassPipeline)\n", *graph);
 }
 
 void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
@@ -337,6 +342,11 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     std::shared_ptr<Graph>& copy) {
   GRAPH_DEBUG("Before runProfilingOptimizations:\n", *copy);
+  if (!getGraphExecutorOptimize()) {
+    runNooptPassPipeline(copy);
+    return;
+  }
+
   runPreAutodiffPassPipeline(copy);
 
   if (needsGradientInProfilingMode(copy->block())) {
@@ -375,7 +385,11 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
   GRAPH_DEBUG(
       "Before inlining (beginning of runProfilingInsensitiveOptimizations)\n",
       *graph);
-  Inline(*graph);
+  // TODO: maybe this can go later in pipeline / directly in autodiff forward
+  // creation
+  if (getGraphExecutorOptimize()) {
+    Inline(*graph);
+  }
   GRAPH_DEBUG("After inlining, before ClearProfilingInformation\n", *graph);
   ClearProfilingInformation(graph);
   GRAPH_DEBUG("After ClearProfilingInformation, before LowerGradOf\n", *graph);
@@ -387,14 +401,19 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
   // from profiled backward graphs
   ClearUndefinedness(graph);
   // runRequiredPasses
-  GRAPH_DEBUG("After ClearUndefinedness, before RemoveExpands\n", *graph);
-  RemoveExpands(graph);
-  GRAPH_DEBUG("After RemoveExpands, before CanonicalizeOps\n", *graph);
-  CanonicalizeOps(graph);
-  GRAPH_DEBUG("After CanonicalizeOps, before EliminateDeadCode\n", *graph);
-  EliminateDeadCode(graph);
-
-  return;
+  {
+    GRAPH_DEBUG("After ClearUndefinedness, before RemoveExpands\n", *graph);
+    RemoveExpands(graph);
+    GRAPH_DEBUG("After RemoveExpands, before CanonicalizeOps\n", *graph);
+    CanonicalizeOps(graph);
+    GRAPH_DEBUG("After CanonicalizeOps, before EliminateDeadCode\n", *graph);
+    EliminateDeadCode(graph);
+  }
+  if (!getGraphExecutorOptimize()) {
+    GRAPH_DEBUG(
+        "After EliminateDeadCode (end of runProfilingInsensitiveOptimizations)\n",
+        *graph);
+    return;
   }
 
   GRAPH_DEBUG("After EliminateDeadCode, before DecomposeOps\n", *graph);
@@ -437,7 +456,11 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   if (!getGraphExecutorOptimize()) {
     if (!fallback_plan_) {
       auto copy = graph->copy();
-      runNooptPassPipeline(copy);
+      GRAPH_DEBUG(
+          "Before LowerGradOf (beginning of runNooptPassPipeline)\n", *graph);
+      LowerGradOf(*copy);
+      GRAPH_DEBUG("After LowerGradOf, before RemoveExpands\n", *graph);
+      RemoveExpands(copy);
       fallback_plan_ = ExecutionPlan(copy, function_name_);
       GRAPH_DUMP("NoOpt Graph: ", copy);
     }
@@ -466,8 +489,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
     optimized_plan_ = ExecutionPlan(copy, function_name_);
     return *optimized_plan_;
   }
-
-  // profiling mode
 
   // if a profiling graph hasn't been created yet
   if (!pr_) {
