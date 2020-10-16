@@ -69,7 +69,7 @@ struct GraphExecutorImplBase {
 
   // entry point where execution begins
   void run(Stack& stack);
-  c10::intrusive_ptr<Future> runAsync(Stack& stack);
+  c10::intrusive_ptr<Future> runAsync(Stack& stack, TaskExecutor task_executor);
 
   virtual ExecutionPlan getPlanFor(
       Stack& stack,
