@@ -901,7 +901,7 @@ vTensor::Buffer& vTensor::View::staging(
   return staging();
 }
 
-const vTensor::Memory& vTensor::View::wait() const {
+vTensor::Memory& vTensor::View::wait() const {
   if (fence_) {
     fence_.wait();
   }
