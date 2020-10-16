@@ -63,6 +63,34 @@ void InsertPrepackUnpack(Module& module) {
   }
 }
 
+// Addresses the case where fork and wait calls are in different subgraphs,
+// and calling inline fork-wait only removes the fork call and leaves aten::wait
+// calls in the graph, with Tensor as input (instead of Future[Tensor]).
+void removeExtraWaitCalls(Block* b) {
+  auto nodes = b->nodes();
+  for (auto it = nodes.begin(); it != nodes.end(); it++) {
+    auto node = *it;
+    if (node->kind() != aten::wait) {
+      continue;
+    }
+    TORCH_INTERNAL_ASSERT(node->inputs().size() == 1);
+    TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
+    // If input type is not a from aten::fork call then the
+    // aten::wait operator can be deleted.
+    if (node->input()->type()->kind() != TypeKind::FutureType) {
+      node->output()->replaceAllUsesWith(node->input());
+      it.destroyCurrent();
+    }
+  }
+  // For the remaining nodes, recurse.
+  for (auto it = nodes.begin(); it != nodes.end(); it++) {
+    auto node = *it;
+    for (auto sub_b : node->blocks()) {
+      removeExtraWaitCalls(sub_b);
+    }
+  }
+}
+
 void FoldQuantizedPrepackingOps(Module& module) {
   auto filter_fn = [](const Node* n) -> bool {
     return (
@@ -96,6 +124,8 @@ Module Finalize(
   GRAPH_DUMP("Before QuantFusion:", graph);
   QuantFusion(graph, quant_type);
   auto frozen = freeze_module(module, preserved_attrs);
+  auto frozen_graph = frozen.get_method("forward").graph();
+  removeExtraWaitCalls(frozen_graph->block());
   FoldQuantizedPrepackingOps(frozen);
   return frozen;
 }
