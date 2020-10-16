@@ -206,6 +206,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::relu:
     case aten::log:
     case aten::log10:
+    case aten::log1p:
     case aten::log2:
     case aten::exp:
     case aten::expm1:
@@ -337,6 +338,11 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       shape[dim] = concat_size;
       return shape;
     }
+
+    case aten::softmax:
+      // Output of Softmax has the same shape as input 0.
+      return sizesForValue(v->node()->input(0));
+
     case aten::slice:
       throw std::runtime_error(
           "Shape info is not implemented for this kind of node");
@@ -902,6 +908,11 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           "aten_log10", v, [](const ExprHandle& a) { return log10(a); });
     } break;
 
+    case aten::log1p: {
+      return computeOneOperand(
+          "aten_log1p", v, [](const ExprHandle& a) { return log1p(a); });
+    } break;
+
     case aten::log2: {
       return computeOneOperand(
           "aten_log2", v, [](const ExprHandle& a) { return log2(a); });
@@ -1232,6 +1243,10 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       return computeSum(v);
     }
 
+    case aten::softmax: {
+      return computeSoftmax(v);
+    }
+
     default: {
       throw std::runtime_error("Unhandled node kind");
     }
@@ -1552,6 +1567,110 @@ Tensor* TensorExprKernel::computeSum(const torch::jit::Value* v) {
         }
       },
       reduction_info.reductionDims);
+}
+
+Tensor* TensorExprKernel::computeSoftmax(const torch::jit::Value* v) {
+  // Softmax is computed as follows:
+  //    softmax(vi) = exp(vi) / sum(exp(vi))
+  //
+  // In order to avoid overflow issues due to exp of a large number, we
+  // subtract the max of that dim before computing exp.
+  //    softmax(vi) = exp(vi - max(vi)) / sum(exp(vi - max(vi)))
+  //
+  // This is implemented as 4 loopnests:
+  //   - First loop computes the max over the softmax dim.
+  //   - Second loop computes exp for every element in v after subtracting
+  //     the max of the softmax dim it belongs to.
+  //   - Third loop computes the sum over the softmax dim.
+  //   - Final loop computes softmax for every element in v.
+
+  TORCH_INTERNAL_ASSERT(v->node()->inputs().size() == 3);
+  auto output_dims = dimsFromSizes(sizesForValue(v));
+
+  // We do not handle None for dims (input 1) because that is supposed to
+  // be deprecated.
+  TORCH_INTERNAL_ASSERT(v->node()->input(1)->node()->kind() == prim::Constant);
+  size_t softmax_dim = v->node()->input(1)->node()->i(attr::value);
+  TORCH_INTERNAL_ASSERT(softmax_dim < output_dims.size());
+
+  std::vector<DimArg> non_softmax_dims;
+  for (size_t i = 0; i < output_dims.size(); ++i) {
+    if (i != softmax_dim) {
+      non_softmax_dims.push_back(output_dims[i]);
+    }
+  }
+
+  // Softmax implementation includes two reductions, one to find the max and
+  // the other to calculate the sum along the softmax dim. These reductions
+  // will have the softmax dimension as the inner most loop. So, the innermost
+  // index in the indices will refer to the softmax dimension.
+
+  // Update the indices by moving the softmax dimension index to the
+  // appropriate position.
+  auto move_softmax_dim_index_to_pos = [&](const ParameterList& indices) {
+    std::vector<ExprHandle> new_indices;
+    for (auto ind : indices) {
+      new_indices.push_back(ind);
+    }
+    for (size_t i = softmax_dim; i < indices.size() - 1; ++i) {
+      new_indices[i + 1] = indices[i];
+    }
+    new_indices[softmax_dim] = indices[indices.size() - 1];
+    return new_indices;
+  };
+
+  // Remove the index corresponding to the softmax dimension.
+  auto remove_softmax_dim_index = [&](const ParameterList& indices) {
+    std::vector<ExprHandle> new_indices;
+    for (size_t i = 0; i < indices.size(); ++i) {
+      if (i != softmax_dim) {
+        new_indices.push_back(indices[i]);
+      }
+    }
+    return new_indices;
+  };
+
+  auto convert_indices_to_expr_handle = [&](const ParameterList& indices) {
+    std::vector<ExprHandle> new_indices(indices.size());
+    for (size_t i = 0; i < indices.size(); ++i) {
+      new_indices[i] = indices[i];
+    }
+    return new_indices;
+  };
+
+  c10::optional<Dtype> dtype = ToDtype(ScalarType::None);
+  auto maybe_dtype = v->node()->get(attr::dtype);
+  if (maybe_dtype && !maybe_dtype->isNone()) {
+    dtype = ToDtype(static_cast<ScalarType>(maybe_dtype->toInt()));
+  }
+
+  auto max = Reduce(
+      "aten_softmax_max",
+      non_softmax_dims,
+      Maximum(dtype.value()),
+      [&](ParameterList& indices) {
+        return tensorOrConstant(
+            v->node()->inputs()[0], move_softmax_dim_index_to_pos(indices));
+      },
+      {output_dims[softmax_dim]});
+  auto e =
+      Compute("aten_softmax_exp", output_dims, [&](ParameterList& indices) {
+        auto inp = tensorOrConstant(
+            v->node()->inputs()[0], convert_indices_to_expr_handle(indices));
+        return exp(inp - max->call(remove_softmax_dim_index(indices)));
+      });
+  auto sum = Reduce(
+      "aten_softmax_sum",
+      non_softmax_dims,
+      Sum(),
+      [&](ParameterList& indices) {
+        return e->call(move_softmax_dim_index_to_pos(indices));
+      },
+      {output_dims[softmax_dim]});
+  auto res = Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
+    return e->call(indices) / sum->call(remove_softmax_dim_index(indices));
+  });
+  return res;
 }
 
 TensorExprKernel::ReductionInfo TensorExprKernel::getReductionInfo(

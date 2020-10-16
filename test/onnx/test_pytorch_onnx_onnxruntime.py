@@ -713,14 +713,19 @@ class TestONNXRuntime(unittest.TestCase):
                     return torch.squeeze(x)
 
         x2 = [] if x2 is None else [x2]
-        self.run_test(Squeeze(d), x1, input_names=['input'], dynamic_axes={'input': {0: '0', 1: '1', 2: '2'}}, test_with_inputs=x2)
+        if len(x2) > 0:
+            self.run_test(Squeeze(d), x1,
+                          input_names=['input'], dynamic_axes={'input': {0: '0', 1: '1', 2: '2'}},
+                          test_with_inputs=x2)
+        else:
+            self.run_test(Squeeze(d), x1)
 
     def test_squeeze_without_no_op(self):
         x = torch.randn(2, 1, 4)
         self.squeeze_model_tests(1, x, None)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    def test_squeeze(self):
+    def test_squeeze_dynamic(self):
         x_squeeze = torch.randn(2, 1, 4)
         x_noop = torch.randn(2, 2, 3)
         self.squeeze_model_tests(1, x_squeeze, x_noop)
@@ -745,10 +750,6 @@ class TestONNXRuntime(unittest.TestCase):
         x_noop = torch.randn(2, 1, 4)
         x_squeeze = torch.randn(2, 2, 1)
         self.squeeze_model_tests(2, x_noop, x_squeeze)
-
-    def test_squeeze_no_op_without_additional_inputs(self):
-        x_noop = torch.randn(2, 1, 4)
-        self.squeeze_model_tests(2, x_noop, None)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_squeeze_runtime_dim(self):
@@ -1667,7 +1668,14 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(16, 16, requires_grad=True)
         self.run_test(MyModel(), (x, y))
 
-    @disableScriptTest()
+    def test_interpolate_adaptive_pooling_error(self):
+        x = torch.randn(1, 2, 6, requires_grad=True)
+        with self.assertRaises(RuntimeError) as cm:
+            self._interpolate(x, "area", True, True)
+
+        with self.assertRaises(RuntimeError) as cm:
+            self._interpolate(x, "area", False, True)
+
     def test_groupnorm(self):
         model = torch.nn.GroupNorm(3, 6, 0.002)
         x = torch.randn(4, 6, 180, 180, 180)
@@ -3256,6 +3264,31 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(MaskedSelectModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_to_masked_fill(self):
+        class MaskedFillModel(torch.nn.Module):
+            def forward(self, input_mask, some_const):
+                mask = input_mask.clone()
+                mask[mask != some_const] = 1
+                mask[mask == some_const] = 0
+                return mask
+
+        mask = torch.randn(2, 2, 2, requires_grad=True)
+        constant = torch.tensor(5, dtype=torch.float)
+        self.run_test(MaskedFillModel(), (mask, constant))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_to_masked_scatter(self):
+        class MaskedScatterModel(torch.nn.Module):
+            def forward(self, input_mask, some_const):
+                mask = input_mask.clone()
+                mask[mask != some_const] = torch.ones(8)
+                return mask
+
+        mask = torch.randn(2, 2, 2, requires_grad=True)
+        constant = torch.tensor(5, dtype=torch.float)
+        self.run_test(MaskedScatterModel(), (mask, constant))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_pixel_shuffle(self):

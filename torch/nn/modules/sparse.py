@@ -50,6 +50,23 @@ class Embedding(Module):
         output. The gradient for this vector from :class:`~torch.nn.Embedding`
         is always zero.
 
+    .. note::
+        When :attr:`max_norm` is not ``None``, :class:`Embedding`'s forward method will modify the
+        :attr:`weight` tensor in-place. Since tensors needed for gradient computations cannot be
+        modified in-place, performing a differentiable operation on ``Embedding.weight`` before
+        calling :class:`Embedding`'s forward method requires cloning ``Embedding.weight`` when        
+        :attr:`max_norm` is not ``None``. For example::
+
+            n, d, m = 3, 5, 7
+            embedding = nn.Embedding(n, d, max_norm=True)
+            W = torch.randn((m, d), requires_grad=True)
+            idx = torch.tensor([1, 2])
+            a = embedding.weight.clone() @ W.t()  # weight must be cloned for this to be differentiable
+            b = embedding(idx) @ W.t()  # modifies weight in-place 
+            out = (a.unsqueeze(0) + b.unsqueeze(1))
+            loss = out.sigmoid().prod()
+            loss.backward()
+
     Examples::
 
         >>> # an Embedding module containing 10 tensors of size 3
