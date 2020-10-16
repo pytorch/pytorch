@@ -144,18 +144,22 @@ Using the :attr:`dim` argument to compute matrix norms::
 tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
 linalg.tensorsolve(input, other, dims=None, *, out=None) -> Tensor
 
-Computes a tensor ``x`` such that ``tensordot(input, x, dims=len(x.shape)) = other``.
+Computes a tensor ``x`` such that ``tensordot(input, x, dims=x.ndim) = other``.
+The resulting tensor ``x`` has the shape equal to ``Q``, where ``Q`` is the shape
+of the sub-tensor of `:attr:`input` consisting of the appropriate number of
+its rightmost dimensions such that ``input.shape = other.shape + Q``.
+Before computing ``x``, dimensions of `:attr:`input` can be moved to the right
+using :attr:`dims` to match the shape requirements.
 
 Supports real and, only on the CPU, complex inputs.
 
 .. note:: If :attr:`input` is not a 'square' tensor, meaning it does not satisfy the requirement
-          ``prod(x.shape) == prod(b.shape)``, then a RuntimeError will be thrown.
+          ``prod(x.shape) == prod(other.shape)``, then a RuntimeError will be thrown.
 
 Args:
-    input (Tensor): left-hand-side tensor of shape ``b.shape + Q``.
+    input (Tensor): left-hand-side tensor of shape ``other.shape + Q``.
         ``Q`` is the shape of that sub-tensor of `:attr:`input` consisting of the appropriate
-        number of its rightmost dimensions, and must be such that ``prod(Q) == prod(b.shape)``.
-        ``Q`` is also equal to ``x.shape``.
+        number of its rightmost dimensions, and must be such that ``prod(Q) == prod(other.shape)``.
     other (Tensor): right-hand-side tensor of any shape.
     dims (Tuple[int]): dimensions of `:attr:`input` to be moved to the right, before solve.
         If None (default), no reordering of dimensions is done.
@@ -163,13 +167,23 @@ Args:
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
 
-Example::
+Examples::
 
     >>> a = torch.eye(2 * 3 * 4).reshape((2 * 3, 4, 2, 3, 4))
     >>> b = torch.randn(2 * 3, 4)
     >>> x = torch.linalg.tensorsolve(a, b)
     >>> x.shape
     torch.Size([2, 3, 4])
-    >>> torch.allclose(torch.tensordot(a, x, dims=len(x.shape)), b)
+    >>> torch.allclose(torch.tensordot(a, x, dims=x.ndim), b)
+    True
+
+    >>> a = torch.randn(6, 4, 4, 3, 2)
+    >>> b = torch.randn(4, 3, 2)
+    >>> x = torch.linalg.tensorsolve(a, b, dims=(0, 2))
+    >>> x.shape
+    torch.Size([6, 4])
+    >>> a.permute(1, 3, 4, 0, 2).shape[b.ndim:]
+    torch.Size([6, 4])
+    >>> torch.allclose(torch.tensordot(a, x, dims=((0, 2), (0, 1))), b, atol=1e-6)
     True
 """)
