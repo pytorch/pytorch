@@ -364,16 +364,47 @@ class profile(object):
             use_cuda=False,
             record_shapes=False,
             profile_memory=False,
-            with_stack=False):
+            with_stack=False,
+            use_kineto=False):
         self.enabled = enabled
-        self.use_cuda = use_cuda
-        self.function_events = None
         if not self.enabled:
             return
+        self.use_cuda = use_cuda
+        self.function_events = None
         self.entered = False
         self.record_shapes = record_shapes
         self.profile_memory = profile_memory
         self.with_stack = with_stack
+        self.use_kineto = use_kineto
+
+        self.profiler_kind = None
+        self.kineto_activities = []
+        if self.use_kineto:
+            if self.use_cuda:
+                self.profiler_kind = torch.autograd.ProfilerState.KINETO
+                self.kineto_activities = [
+                    torch.autograd.ProfilerActivity.CPU,
+                    # uses CUPTI
+                    torch.autograd.ProfilerActivity.CUDA_RUNTIME,
+                    torch.autograd.ProfilerActivity.CUDA]
+            else:
+                # intially we're not using Kineto for CPU only case
+                self.profiler_kind = torch.autograd.ProfilerState.CPU
+        elif self.use_cuda:
+            # legacy CUDA mode
+            self.profiler_kind = torch.autograd.ProfilerState.CUDA
+        else:
+            self.profiler_kind = torch.autograd.ProfilerState.CPU
+        self.kineto_activities = set(self.kineto_activities)
+
+        if self.profiler_kind == torch.autograd.ProfilerState.KINETO:
+            assert torch.autograd.kineto_available()
+
+        self.config = torch.autograd.ProfilerConfig(
+            self.profiler_kind,
+            self.record_shapes,
+            self.profile_memory,
+            self.with_stack)
 
     def __enter__(self):
         if not self.enabled:
@@ -381,15 +412,8 @@ class profile(object):
         if self.entered:
             raise RuntimeError("autograd profiler traces are not reentrant")
         self.entered = True
-        profiler_kind = torch.autograd.ProfilerState.CUDA if self.use_cuda \
-            else torch.autograd.ProfilerState.CPU
-
-        config = torch.autograd.ProfilerConfig(
-            profiler_kind,
-            self.record_shapes,
-            self.profile_memory,
-            self.with_stack)
-        torch.autograd._enable_profiler(config)
+        torch.autograd._prepare_profiler(self.config, self.kineto_activities)
+        torch.autograd._enable_profiler(self.config)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -732,7 +756,7 @@ class FunctionEvent(FormattedTimesMixin):
     def __init__(
             self, id, node_id, name, thread, cpu_start, cpu_end, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
-            is_remote=True, sequence_nr=-1):
+            is_remote=True, sequence_nr=-1, device_id=-1):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
@@ -751,6 +775,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.is_async: bool = is_async
         self.is_remote: bool = is_remote
         self.sequence_nr: int = sequence_nr
+        self.device_id: int = device_id
 
     def append_kernel(self, name, device, start, end):
         self.kernels.append(Kernel(name, device, Interval(start, end)))
@@ -802,15 +827,21 @@ class FunctionEvent(FormattedTimesMixin):
 
     @property
     def cuda_time_total(self):
+        if self.device_id >= 0:
+            return self.cpu_interval.elapsed_us()
         return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels)
 
     @property
     def self_cuda_time_total(self):
+        if self.device_id >= 0:
+            return self.cuda_time_total - sum([child.cuda_time_total for child in self.cpu_children])
         return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels) - \
             sum([child.cuda_time_total for child in self.cpu_children])
 
     @property
     def cpu_time_total(self):
+        if self.device_id >= 0:
+            return 0
         return self.cpu_interval.elapsed_us()
 
     @property
@@ -1045,6 +1076,7 @@ def parse_event_records(thread_records):
                     is_async=is_async,
                     is_remote=is_remote_event,
                     sequence_nr=start.sequence_nr(),
+                    device_id=start.device_id(),
                 )
                 # note: async events have only cpu total time
                 if not is_async and start.has_cuda():
@@ -1180,7 +1212,9 @@ def build_table(
     has_input_shapes = any(
         [(event.input_shapes is not None and len(event.input_shapes) > 0) for event in events])
 
+    MAX_NAME_COLUMN_WIDTH = 55
     name_column_width = max([len(evt.key) for evt in events]) + 4
+    name_column_width = min(name_column_width, MAX_NAME_COLUMN_WIDTH)
 
     DEFAULT_COLUMN_WIDTH = 12
 
@@ -1288,8 +1322,11 @@ def build_table(
             continue
         else:
             event_limit += 1
+        name = evt.key
+        if len(name) >= MAX_NAME_COLUMN_WIDTH-3:
+            name = name[:(MAX_NAME_COLUMN_WIDTH-3)] + "..."
         row_values = [
-            evt.key,  # Name
+            name,
             # Self CPU total, 0 for async events. %
             format_time_share(evt.self_cpu_time_total,
                               self_cpu_time_total),

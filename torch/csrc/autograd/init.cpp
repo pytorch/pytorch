@@ -39,7 +39,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("Disabled", ProfilerState::Disabled)
       .value("CPU", ProfilerState::CPU)
       .value("CUDA", ProfilerState::CUDA)
-      .value("NVTX", ProfilerState::NVTX);
+      .value("NVTX", ProfilerState::NVTX)
+      .value("KINETO", ProfilerState::KINETO);
+
+  py::enum_<ActivityType>(m, "ProfilerActivity")
+      .value("CPU", ActivityType::CPU)
+      .value("CUDA_RUNTIME", ActivityType::CUDA_RUNTIME)
+      .value("CUDA", ActivityType::CUDA);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
       .def(py::init<ProfilerState, bool, bool, bool>());
@@ -61,11 +67,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("is_remote", &Event::isRemote)
       .def("sequence_nr", &Event::sequenceNr)
       .def("stack", &Event::stack)
-      .def("scope", &Event::scope);
+      .def("scope", &Event::scope)
+      .def("device_id", &Event::device);
 
   py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")
     .def(py::init<bool, bool>());
 
+  m.def("kineto_available", kinetoAvailable);
+
+  m.def("_prepare_profiler", prepareProfiler);
   m.def("_enable_profiler", enableProfiler);
   m.def(
       "_disable_profiler",

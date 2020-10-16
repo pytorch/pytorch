@@ -104,10 +104,19 @@ struct TORCH_API ProfilerDisableOptions {
 };
 
 enum class C10_API_ENUM ProfilerState {
-    Disabled,
-    CPU, // CPU-only profiling
-    CUDA, // CPU + CUDA events
-    NVTX,  // only emit NVTX markers
+  Disabled = 0,
+  CPU, // CPU-only profiling
+  CUDA, // CPU + CUDA events
+  NVTX,  // only emit NVTX markers
+  KINETO, // use libkineto
+  NUM_PROFILER_STATES, // must be the last one
+};
+
+enum class C10_API_ENUM ActivityType {
+  CPU = 0,
+  CUDA_RUNTIME, // CUDA host events
+  CUDA, // CUDA kernels
+  NUM_KINETO_ACTIVITIES, // must be the last one
 };
 
 struct TORCH_API ProfilerConfig {
@@ -238,6 +247,10 @@ struct TORCH_API Event final {
     return cpu_ns_ / (1000.0);
   }
 
+  void setCpuUS(double cpu_us) {
+    cpu_ns_ = (int64_t)(cpu_us * 1000);
+  }
+
   double cudaElapsedUs(const Event& e) const;
 
   bool hasCuda() const {
@@ -246,6 +259,10 @@ struct TORCH_API Event final {
 
   int device() const {
     return device_;
+  }
+
+  void setDevice(int device) {
+    device_ = device;
   }
 
   void updateMemoryStats(int64_t alloc_size, c10::Device device) {
@@ -303,6 +320,14 @@ struct TORCH_API Event final {
     return sequence_nr_;
   }
 
+  void setCorrelationId(uint64_t correlation_id) {
+    correlation_id_ = correlation_id;
+  }
+
+  uint64_t correlationId() const {
+    return correlation_id_;
+  }
+
   const std::vector<std::string>& stack() const {
     return stack_;
   }
@@ -347,6 +372,8 @@ struct TORCH_API Event final {
 
   std::vector<std::string> stack_;
   uint8_t scope_;
+
+  uint64_t correlation_id_;
 };
 
 // a linked-list of fixed sized vectors, to avoid
@@ -402,6 +429,11 @@ TORCH_API bool profilerEnabled();
 TORCH_API ProfilerConfig getProfilerConfig();
 // Writes profiled events to a stream.
 TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<Event*>& events);
+
+TORCH_API bool kinetoAvailable();
+TORCH_API void prepareProfiler(
+    const ProfilerConfig& new_config,
+    const std::set<ActivityType>& activities);
 
 // Usage:
 //   {
