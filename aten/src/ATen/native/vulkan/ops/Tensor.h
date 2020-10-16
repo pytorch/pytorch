@@ -66,7 +66,7 @@ namespace ops {
 // support.
 //
 
-class C10_EXPORT vTensor final {
+class vTensor final {
  public:
   vTensor() = default;
   vTensor(
@@ -217,9 +217,9 @@ class C10_EXPORT vTensor final {
         const TensorOptions& options);
 
     // Accessor
-    Buffer& buffer(Access::Flags access) const;
-    Image& image(Access::Flags access) const;
-    Buffer& staging(Access::Flags access) const;
+    Buffer& buffer(Access::Flags) const;
+    Image& image(Access::Flags) const;
+    Buffer& staging(Access::Flags) const;
     vTensor::Memory& wait();
 
    private:
@@ -282,11 +282,17 @@ class C10_EXPORT vTensor final {
     typedef State::Component Component;
 
    private:
-    // Lazy allocation
+    // Accessors / Lazy Allocation
     Buffer& buffer() const;
+    Buffer& buffer(CMD&, Access::Flags) const;
     Image& image() const;
+    Image& image(CMD&, Access::Flags) const;
     Buffer& staging() const;
+    Buffer& staging(CMD&, Access::Flags) const;
     Fence& fence() const;
+
+    // Validation
+    void verify() const;
 
    private:
     // Resources

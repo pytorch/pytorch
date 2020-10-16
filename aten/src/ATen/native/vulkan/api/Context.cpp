@@ -129,6 +129,10 @@ void Context::flush() {
   command().pool.purge();
 }
 
+bool available() {
+  return context();
+}
+
 Context* context() {
   Context* const context = initialize();
   TORCH_CHECK(context, "Vulkan: Backend not available on this platform!");

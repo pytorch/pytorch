@@ -55,7 +55,6 @@ class Runtime final {
   Handle<VkDebugReportCallbackEXT, Debug> debug_report_callback_;
 };
 
-bool available();
 Runtime* runtime();
 
 } // namespace api
