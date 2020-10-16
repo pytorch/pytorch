@@ -32,10 +32,12 @@ ignored_attributes = [
     "dump_patches",
 ]
 
+
 def make_stub(func, name):
     rcb = _jit_internal.createResolutionCallbackFromClosure(func)
     ast = get_jit_def(func, name, self_name="RecursiveScriptModule")
     return ScriptMethodStub(rcb, ast, func)
+
 
 def make_stub_from_method(nn_module, method_name):
     func = getattr(nn_module, method_name)
@@ -70,6 +72,7 @@ def make_stubs_from_exported_methods(mod):
 # If you edit this list, then you also need to edit the handlers in
 # ConstantValue in jit/script/init.cpp
 _constant_types = (bool, float, int, str, type(None), torch.device, torch.layout, torch.dtype)
+
 
 def _get_valid_constant(attr, v, owner_type):
     if isinstance(v, _constant_types):
@@ -107,7 +110,11 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
     if "self" in class_annotations:
         self_type = torch.jit.annotations.ann_to_type(class_annotations["self"], _jit_internal.fake_range())
-        concrete_type_builder.set_hint(self_type)
+        concrete_type_builder.set_contained_type_hint(self_type)
+
+    # Get user-annotated ignored attributes.
+    user_annotated_ignored_attributes = getattr(nn_module, "__jit_ignored_attributes__", list())
+    concrete_type_builder.add_ignored_attributes(user_annotated_ignored_attributes)
 
     # try to infer the type from type annotation or from the object itself
     def infer_type(name, item):
@@ -127,6 +134,9 @@ def infer_concrete_type_builder(nn_module, share_types=True):
     added_names = set()
 
     for name, item in nn_module._parameters.items():
+        if name in user_annotated_ignored_attributes:
+            continue
+
         assert item is None or isinstance(item, torch.Tensor)
         attr_type = infer_type(name, item)
         # We currently have the invariant in various places in our code
@@ -138,12 +148,18 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         added_names.add(name)
 
     for name, item in nn_module._buffers.items():
+        if name in user_annotated_ignored_attributes:
+            continue
+
         assert item is None or isinstance(item, torch.Tensor)
         attr_type = infer_type(name, item)
         concrete_type_builder.add_attribute(name, attr_type, False, True)
         added_names.add(name)
 
     for name, item in nn_module._modules.items():
+        if name in user_annotated_ignored_attributes:
+            continue
+
         attr_type = infer_type(name, item)
         if item is None:
             # Modules can be None. We don't have direct support for optional
@@ -212,6 +228,9 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             # PyTorch adds a few more. Prevent these from getting compiled.
             continue
 
+        if name in user_annotated_ignored_attributes:
+            continue
+
         if name in added_names:
             # Don't re-add anything we already added
             continue
@@ -265,6 +284,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
     return concrete_type_builder
 
+
 class ConcreteTypeStore(object):
     type_store: Dict[Type[Module], List[torch._C.ConcreteModuleType]]
     methods_compiled: Set[torch._C.ConcreteModuleType]
@@ -297,6 +317,7 @@ class ConcreteTypeStore(object):
         self.type_store[nn_module_type].append(concrete_type)
         return concrete_type
 
+
 concrete_type_store = ConcreteTypeStore()
 
 
@@ -308,7 +329,8 @@ def create_methods_and_properties_from_stubs(concrete_type, method_stubs, proper
     property_defs = [p.def_ for p in property_stubs]
     property_rcbs = [p.resolution_callback for p in property_stubs]
 
-    concrete_type._create_methods_and_properties(property_defs, property_rcbs, method_defs, method_rcbs, method_defaults)
+    concrete_type._create_methods_and_properties(
+        property_defs, property_rcbs, method_defs, method_rcbs, method_defaults)
 
 
 def get_module_concrete_type(nn_module, share_types=True):
@@ -341,6 +363,7 @@ def get_module_concrete_type(nn_module, share_types=True):
 
     return concrete_type
 
+
 def create_script_module(nn_module, stubs_fn, share_types=True):
     """
     Creates a new ScriptModule from an nn.Module
@@ -357,6 +380,7 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
     check_module_initialized(nn_module)
     concrete_type = get_module_concrete_type(nn_module, share_types)
     return create_script_module_impl(nn_module, concrete_type, stubs_fn)
+
 
 def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     """
@@ -397,7 +421,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
 
-        # 3. Copy @ignored/@unused methods from the original `nn_module` to the new ScriptModule.
+        # 3. Copy @ignored/@unused methods and attrs from the original `nn_module` to the new ScriptModule.
         #    This ensures we can access these Python methods on the ScriptModule.
         for name in dir(nn_module):
             item = getattr(nn_module, name, None)
@@ -405,6 +429,8 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 unbound_function = getattr(type(nn_module), name)
                 bound_method = unbound_function.__get__(script_module)
                 setattr(script_module, name, bound_method)
+            elif concrete_type.is_ignored_attribute(name):
+                setattr(script_module, name, item)
 
         # For convenience, attach the concrete type to the new ScriptModule
         script_module._concrete_type = concrete_type
@@ -430,7 +456,6 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         else:
             script_module.define("def __contains__(self, key: str):\n   return False\n")
 
-
     # Make the compiled methods available to the Python ScriptModule class.
     for method_stub in method_stubs:
         if method_stub.original_method is None:
@@ -454,7 +479,6 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         # be found first when `name` is looked up (as opposed to the stubs or
         # nn.Module.forward)
         script_module.__dict__[name] = wrapped_script_method
-
 
     # Make module properties available on the Python ScriptModule class.
     for property_stub in property_stubs:
@@ -487,9 +511,11 @@ def script_model_defines_attr(script_model, attr):
         return False
     return script_attr != default_attr
 
+
 def add_python_attr_to_scripted_model(script_model, orig, attr):
     if hasattr(orig, attr) and script_model_defines_attr(script_model, attr):
         setattr(script_model, attr, getattr(orig, attr))
+
 
 def get_overload_annotations(mod):
     # original function => [(mangled overload name, overload function)]
@@ -511,6 +537,7 @@ def get_overload_annotations(mod):
 
     return overloads
 
+
 def get_overload_name_mapping(overload_info):
     # Same format as __overloads__
     # original function => [overload names]
@@ -524,11 +551,13 @@ def get_overload_name_mapping(overload_info):
             overload_name_mappings[original_name].append(overload_name)
     return overload_name_mappings
 
+
 def _check_no_signature(func):
     signature = torch.jit.annotations.get_signature(func, None, _jit_internal.fake_range(), inspect.ismethod(func))
     if signature is None:
         qual_name = _jit_internal._qualified_name(func)
         raise RuntimeError("Must explicitly add type annotations to overloaded functions: {}".format(qual_name))
+
 
 def make_stubs_for_overloads(overload_info):
     overload_stubs = []
@@ -542,11 +571,13 @@ def make_stubs_for_overloads(overload_info):
             overload_stubs.append(ScriptMethodStub(_rcb, new_ast, overload_fn))
     return overload_stubs
 
+
 def check_module_initialized(mod):
     assert isinstance(mod, torch.nn.Module)
     if not hasattr(mod, '_parameters'):
         raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
                            .format(torch.typename(type(mod))))
+
 
 def infer_methods_to_compile(nn_module):
     """
@@ -646,6 +677,7 @@ def interface_script(mod_interface, nn_module):
 
     return create_script_module(nn_module, infer_interface_methods_to_compile)
 
+
 def try_compile_fn(fn, loc):
     if _jit_internal.is_ignored_fn(fn):
         # Don't do anything for @ignore'd functions
@@ -667,6 +699,7 @@ def try_compile_fn(fn, loc):
     rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
     return torch.jit.script(fn, _rcb=rcb)
 
+
 def wrap_cpp_module(cpp_module):
     """
     Wrap this torch._C.ScriptModule in a Python ScriptModule, recursively for all submodules
@@ -677,6 +710,7 @@ def wrap_cpp_module(cpp_module):
         script_module._concrete_type = torch._C.ConcreteModuleType.from_jit_type(script_module._c._type())
     return torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
 
+
 def compile_unbound_method(concrete_type, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
@@ -686,6 +720,7 @@ def compile_unbound_method(concrete_type, fn):
         # this function is not yet complete
         create_methods_and_properties_from_stubs(concrete_type, (stub,), ())
     return stub
+
 
 def lazy_bind(concrete_type, unbound_method):
     """

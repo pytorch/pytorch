@@ -1,7 +1,7 @@
 import os
 import sys
 
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Tuple
 from collections import OrderedDict
 import torch
 import torch.nn as nn
@@ -15,6 +15,7 @@ if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
+
 
 class TestModuleContainers(JitTestCase):
     def test_sequential_intermediary_types(self):
@@ -121,7 +122,6 @@ class TestModuleContainers(JitTestCase):
                     x2 = mod(mod(x2))
 
                 return x, x2, names, iter
-
 
         for name in ["", "one", "two", "three"]:
             inp = torch.tensor(1)
@@ -239,7 +239,6 @@ class TestModuleContainers(JitTestCase):
 
         with self.assertRaisesRegex(Exception, "Index -11 out of range"):
             torch.jit.script(M2())
-
 
         class M2(M):
             def __init__(self):
@@ -439,24 +438,25 @@ class TestModuleContainers(JitTestCase):
             def forward(self, inp: Any) -> Any:
                 pass
 
-
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
+        class ImplementsInterface(torch.nn.Module):
             def forward(self, inp: Any) -> Any:
                 if isinstance(inp, torch.Tensor):
                     return torch.max(inp, dim=0)
 
                 return inp
 
+        class DoesNotImplementInterface(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                return torch.max(inp, dim=0)
+
+        # Test annotation of submodule.
 
         class Mod(torch.nn.Module):
             __annotations__ = {"d": Dict[str, ModuleInterface]}
 
             def __init__(self):
                 super().__init__()
-                self.d = torch.nn.ModuleDict({"module": MyModule()})
+                self.d = torch.nn.ModuleDict({"module": ImplementsInterface()})
 
             def forward(self, x: torch.Tensor, key: str) -> Any:
                 return self.d[key].forward(x)
@@ -464,15 +464,30 @@ class TestModuleContainers(JitTestCase):
         m = Mod()
         self.checkModule(m, (torch.randn(2, 2), "module"))
 
-
+        # Test annotation of self.
         class ModDict(torch.nn.ModuleDict):
             __annotations__ = {"self": Dict[str, ModuleInterface]}
 
             def __init__(self):
-                super().__init__({"module": MyModule()})
+                super().__init__({"module": ImplementsInterface()})
 
             def forward(self, x: torch.Tensor, key: str) -> Any:
                 return self[key].forward(x)
 
         m = ModDict()
         self.checkModule(m, (torch.randn(2, 2), "module"))
+
+        # Test error message thrown when annotated attribute does not comply with the
+        # annotation.
+        class ModWithWrongAnnotation(torch.nn.ModuleDict):
+            __annotations__ = {"d": Dict[str, ModuleInterface]}
+
+            def __init__(self):
+                super().__init__()
+                self.d = torch.nn.ModuleDict({"module": DoesNotImplementInterface()})
+
+            def forward(self, x: torch.Tensor, key: str) -> Any:
+                return self.d[key].forward(x)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attribute module is not of annotated type"):
+            torch.jit.script(ModWithWrongAnnotation())

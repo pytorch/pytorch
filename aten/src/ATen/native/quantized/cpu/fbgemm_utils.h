@@ -333,4 +333,12 @@ struct CAFFE2_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
     bool sparse,
     const c10::optional<at::Tensor>& per_sample_weights_,
     bool include_last_offset) override;
+
+  at::Tensor embeddingbag_4bit(
+    const at::Tensor& indices,
+    const c10::optional<at::Tensor>& offsets,
+    bool sparse,
+    const c10::optional<at::Tensor>& per_sample_weights_,
+    const c10::optional<at::Tensor>& compressed_indices_mapping,
+    bool include_last_offset) override;
 };

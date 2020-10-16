@@ -220,22 +220,26 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
 ModuleValue::ModuleValue(
     Value* self,
     std::shared_ptr<ConcreteModuleType> concreteType,
-    TypePtr hint)
-    : self_(self), concreteType_(std::move(concreteType)), hint_(hint) {
-  // If concreteType_ has a hint, that means that self was annotated and this
-  // ModuleValue represents the type of self. If hint_ is not null, that means
-  // this represents the type of a submodule.
-  if (concreteType_->getHint()) {
-    // If concreteType_ has a type hint, hint_ should be empty.
-    TORCH_INTERNAL_ASSERT(!hint);
-    hint_ = concreteType_->getHint();
+    TypePtr containedTypeHint)
+    : self_(self),
+      concreteType_(std::move(concreteType)),
+      containedTypeHint_(containedTypeHint) {
+  // If concreteType_ has a containedTypeHint, that means that self was
+  // annotated and this ModuleValue represents the type of self. If
+  // containedTypeHint_ is not null, that means this represents the type of a
+  // submodule.
+  if (concreteType_->getContainedTypeHint()) {
+    // If concreteType_ has a type containedTypeHint, containedTypeHint_ should
+    // be empty.
+    TORCH_INTERNAL_ASSERT(!containedTypeHint);
+    containedTypeHint_ = concreteType_->getContainedTypeHint();
   }
 
-  if (hint_) {
-    // For now, only dict type hints are supported. Generate and emit the
-    // dictionary representing the ModuleDict into the graph once so that it can
-    // be reused across lookups.
-    DictTypePtr dict_type = hint_->expect<DictType>();
+  if (containedTypeHint_) {
+    // For now, only dict type containedTypeHints are supported. Generate and
+    // emit the dictionary representing the ModuleDict into the graph once so
+    // that it can be reused across lookups.
+    DictTypePtr dict_type = containedTypeHint_->expect<DictType>();
     auto* graph = self_->owningGraph();
     std::vector<Value*> keys, values;
 
@@ -245,6 +249,13 @@ ModuleValue::ModuleValue(
     for (size_t i = 0; i < self_type->numAttributes(); ++i) {
       const auto& attr_type = self_type->getAttribute(i);
       if (attr_type->is_module()) {
+        if (!attr_type->isSubtypeOf(dict_type->getValueType())) {
+          auto loc = self->node()->sourceRange();
+          throw ErrorReport(loc)
+              << "Attribute " << self_type->getAttributeName(i)
+              << " is not of annotated type "
+              << dict_type->getValueType()->annotation_str();
+        }
         submodule_names.push_back(self_type->getAttributeName(i));
       }
     }
@@ -301,7 +312,7 @@ SugaredValuePtr ModuleValue::getitem(
         }
       }
       throw ErrorReport(loc) << "Key Error, " << idx_str;
-    } else if (hint_) {
+    } else if (containedTypeHint_) {
       // There was a type hint provided for this ModuleDict, so we can emit code
       // to do a dictionary lookup at runtime instead of desugaring at compile
       // time.
@@ -508,7 +519,7 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
     // ...if it's a submodule, return it as a new ModuleValue.
     if (const auto submoduleConcreteType =
             concreteType_->findSubmoduleConcreteType(field)) {
-      auto hint = concreteType_->findSubmoduleHint(field);
+      auto hint = concreteType_->findSubmoduleContainedTypeHint(field);
       return std::make_shared<ModuleValue>(
           m.graph()->insertGetAttr(self_, field), submoduleConcreteType, hint);
     }
@@ -641,6 +652,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   std::string hint;
   if (auto failureReason = concreteType_->findFailedAttribute(field)) {
     hint = *failureReason;
+  } else if (concreteType_->isIgnoredAttribute(field)) {
+    hint = "attribute was ignored during compilation";
   }
 
   throw ErrorReport(loc)

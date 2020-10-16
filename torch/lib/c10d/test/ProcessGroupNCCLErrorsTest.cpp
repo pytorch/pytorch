@@ -16,8 +16,10 @@ class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
  public:
   WorkNCCLSimulateErrors(
       const std::vector<at::Device>& devices,
-      bool simulate_error)
-      : WorkNCCL(devices), simulate_error_(simulate_error) {}
+      bool simulate_error,
+      int rank,
+      c10d::OpType opType)
+      : WorkNCCL(devices, rank, opType), simulate_error_(simulate_error) {}
 
   std::exception_ptr checkForNCCLErrors(
       const std::vector<std::shared_ptr<c10d::NCCLComm>>& ncclComms)
@@ -55,8 +57,11 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
   }
 
   std::shared_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
-      std::vector<at::Device> devices) override {
-    return std::make_shared<WorkNCCLSimulateErrors>(devices, simulate_error_);
+      std::vector<at::Device> devices,
+      int rank,
+      c10d::OpType opType) override {
+    return std::make_shared<WorkNCCLSimulateErrors>(
+        devices, simulate_error_, rank, opType);
   }
 
   size_t getNCCLCommCacheSize() {
@@ -79,8 +84,11 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
  public:
   WorkNCCLTimedoutErrors(
       const std::vector<at::Device>& devices,
-      bool set_timedout_error)
-      : WorkNCCL(devices), set_timedout_error_(set_timedout_error) {}
+      bool set_timedout_error,
+      int rank,
+      c10d::OpType opType)
+      : WorkNCCL(devices, rank, opType),
+        set_timedout_error_(set_timedout_error) {}
 
  private:
   bool isCompleted() override {
@@ -105,9 +113,11 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
         set_timedout_error_(false) {}
 
   std::shared_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
-      std::vector<at::Device> devices) override {
+      std::vector<at::Device> devices,
+      int rank,
+      c10d::OpType opType) override {
     return std::make_shared<WorkNCCLTimedoutErrors>(
-        devices, set_timedout_error_);
+        devices, set_timedout_error_, rank, opType);
   }
 
   void set_timedout_error() {

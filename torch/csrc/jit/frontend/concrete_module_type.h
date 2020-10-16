@@ -84,9 +84,10 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
       std::vector<std::string> overloadedMethodNames);
   void addBuiltinFunction(std::string name, std::string symbol_name);
   void addFailedAttribute(std::string name, std::string failureReason);
+  void addIgnoredAttribute(std::string name);
   void setIterableModuleKind(IterableModuleKind kind);
   // Set a type hint on this Module (perhaps an InterfaceType).
-  void setHint(TypePtr hint);
+  void setContainedTypeHint(TypePtr containedTypeHint);
 
   // If a ConcreteModuleType is poisoned, it will never compare equal to any
   // other concrete type
@@ -131,14 +132,19 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
     ModuleInfo(
         std::string name,
         std::shared_ptr<ConcreteModuleType> meta,
-        TypePtr hint = nullptr)
-        : name_(std::move(name)), meta_(std::move(meta)), hint_(hint) {}
+        TypePtr containedTypeHint = nullptr)
+        : name_(std::move(name)),
+          meta_(std::move(meta)),
+          containedTypeHint_(containedTypeHint) {}
 
     friend bool operator==(const ModuleInfo& lhs, const ModuleInfo& rhs);
 
     std::string name_;
     std::shared_ptr<ConcreteModuleType> meta_;
-    TypePtr hint_;
+    // A type hint for this submodule (most likely an InterfaceType or some
+    // related type). This can be used to unlock additional operations like
+    // indexing without a static key.
+    TypePtr containedTypeHint_;
   };
 
  private:
@@ -159,6 +165,9 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // Any attributes we failed to convert to TorchScript, along with a hint as to
   // why
   std::unordered_map<std::string, std::string> failedAttributes_;
+  // Any attributes that were marked as ignored. They cannot be used in
+  // TorchScript but can still be used in ignored function in Python.
+  std::unordered_set<std::string> ignoredAttributes_;
   // Any function attributes. These are special right now because functions are
   // not first-class in the type system.
   std::unordered_map<std::string, FunctionAttribute> functionAttributes_;
@@ -180,7 +189,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // A type hint for this Module (most likely an InterfaceType or some related
   // type). This can be used to unlock additional operations like indexing
   // without a static key.
-  TypePtr hint_{nullptr};
+  TypePtr containedTypeHint_{nullptr};
 
   // NOTE: If you ever add any more state to this struct, you need to make sure
   // operator== still makes sense!
@@ -195,7 +204,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
 
   static std::shared_ptr<ConcreteModuleType> fromJitType(TypePtr type);
 
-  TypePtr getHint() const;
+  TypePtr getContainedTypeHint() const;
   TypePtr getJitType() const;
   c10::optional<py::object> getPyClass() const;
   IterableModuleKind getIterableModuleKind() const;
@@ -205,8 +214,9 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   c10::optional<c10::Symbol> findBuiltinFunction(const std::string& name) const;
   std::shared_ptr<ConcreteModuleType> findSubmoduleConcreteType(
       const std::string& name) const;
-  TypePtr findSubmoduleHint(const std::string& name) const;
+  TypePtr findSubmoduleContainedTypeHint(const std::string& name) const;
   c10::optional<std::string> findFailedAttribute(const std::string& name) const;
+  bool isIgnoredAttribute(const std::string& name) const;
 
   // These getters are only here to return things as types that can be
   // automatically converted by pybind.

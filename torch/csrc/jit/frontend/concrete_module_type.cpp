@@ -95,8 +95,8 @@ bool operator==(
   bool equals = lhs.name_ == rhs.name_;
   equals &= lhs.meta_->equals(*rhs.meta_);
 
-  if (lhs.hint_ && rhs.hint_) {
-    equals &= *lhs.hint_ == *rhs.hint_;
+  if (lhs.containedTypeHint_ && rhs.containedTypeHint_) {
+    equals &= *lhs.containedTypeHint_ == *rhs.containedTypeHint_;
   }
 
   return equals;
@@ -113,6 +113,7 @@ bool ConcreteModuleTypeBuilder::equals(
     bool equal =
       pyClass_.is(other.pyClass_) &&
       iterableModuleKind_ == other.iterableModuleKind_ &&
+      ignoredAttributes_ == other.ignoredAttributes_ &&
       constants_ == other.constants_ &&
       attributes_ == other.attributes_ &&
       overloads_ == other.overloads_ &&
@@ -146,8 +147,8 @@ bool ConcreteModuleTypeBuilder::equals(
   return thisSorted == otherSorted;
 }
 
-TypePtr ConcreteModuleType::getHint() const {
-  return data_.hint_;
+TypePtr ConcreteModuleType::getContainedTypeHint() const {
+  return data_.containedTypeHint_;
 }
 
 TypePtr ConcreteModuleType::getJitType() const {
@@ -197,6 +198,10 @@ c10::optional<std::string> ConcreteModuleType::findFailedAttribute(
   return c10::nullopt;
 }
 
+bool ConcreteModuleType::isIgnoredAttribute(const std::string& name) const {
+  return data_.ignoredAttributes_.count(name) > 0;
+}
+
 std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
     findSubmoduleConcreteType(const std::string& name) const {
   const auto it = std::find_if(
@@ -209,7 +214,8 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
   return it->meta_;
 }
 
-TypePtr ConcreteModuleType::findSubmoduleHint(const std::string& name) const {
+TypePtr ConcreteModuleType::findSubmoduleContainedTypeHint(
+    const std::string& name) const {
   const auto it = std::find_if(
       data_.modules_.cbegin(),
       data_.modules_.cend(),
@@ -217,11 +223,12 @@ TypePtr ConcreteModuleType::findSubmoduleHint(const std::string& name) const {
         return info.name_ == name;
       });
   TORCH_INTERNAL_ASSERT(it != data_.modules_.end());
-  return it->hint_;
+  return it->containedTypeHint_;
 }
 
-void ConcreteModuleTypeBuilder::setHint(TypePtr hint) {
-  hint_ = hint;
+void ConcreteModuleTypeBuilder::setContainedTypeHint(
+    TypePtr containedTypeHint) {
+  containedTypeHint_ = containedTypeHint;
 }
 
 void ConcreteModuleTypeBuilder::setIterableModuleKind(IterableModuleKind kind) {
@@ -291,9 +298,9 @@ void ConcreteModuleTypeBuilder::addBuiltinFunction(
 void ConcreteModuleTypeBuilder::addModule(
     std::string name,
     std::shared_ptr<ConcreteModuleType> meta,
-    TypePtr hint) {
+    TypePtr containedTypeHint) {
   modules_.emplace_back(ConcreteModuleTypeBuilder::ModuleInfo{
-      std::move(name), std::move(meta), hint});
+      std::move(name), std::move(meta), containedTypeHint});
 }
 
 void ConcreteModuleTypeBuilder::addOverload(
@@ -306,6 +313,10 @@ void ConcreteModuleTypeBuilder::addFailedAttribute(
     std::string name,
     std::string failureReason) {
   failedAttributes_.emplace(std::move(name), std::move(failureReason));
+}
+
+void ConcreteModuleTypeBuilder::addIgnoredAttribute(std::string name) {
+  ignoredAttributes_.emplace(std::move(name));
 }
 
 void ConcreteModuleType::dump() const {
@@ -334,8 +345,9 @@ void ConcreteModuleType::dump() const {
   if (jitType_) {
     std::cout << "jit type: " << jitType_->annotation_str() << "\n";
   }
-  if (data_.hint_) {
-    std::cout << "hint: " << data_.hint_->annotation_str() << "\n";
+  if (data_.containedTypeHint_) {
+    std::cout << "containedTypeHint: "
+              << data_.containedTypeHint_->annotation_str() << "\n";
   }
 }
 
