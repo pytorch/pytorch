@@ -205,7 +205,10 @@ class RNNBase(Module):
             return hx
         return apply_permutation(hx, permutation)
 
-    def forward(self, input: Union[Tensor, PackedSequence], hx: Optional[Tensor] = None) -> Tuple[Union[Tensor, PackedSequence], Tensor]:
+    def forward(self,
+                input: Union[Tensor, PackedSequence],
+                hx: Optional[Tensor] = None
+    ) -> Tuple[Union[Tensor, PackedSequence], Tensor]:
         is_packed = isinstance(input, PackedSequence)
         if is_packed:
             input, batch_sizes, sorted_indices, unsorted_indices = input
