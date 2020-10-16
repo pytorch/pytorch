@@ -11,61 +11,67 @@
 namespace at {
 
 /*
-philox_cuda_state_t and unpack() in
-cuda/StatefulCUDAOpsUtils.cuh allow non-divergent use of
-CUDAGeneratorImplHostState::philox_cuda_state() and
-CUDAGeneratorImplDeviceState::philox_cuda_state()
-in callers without synchronization.
+ * PhiloxCudaState in this file, and unpack() in
+ * cuda/StatefulCUDAOpsUtils.cuh allow non-divergent use of
+ * CUDAGeneratorImplHostState::philox_cuda_state() and
+ * CUDAGeneratorImplDeviceState::philox_cuda_state()
+ * in callers without synchronization.
+ *
+ * Each PhiloxCudaState instance should be used for one and only one
+ * consumer kernel.
+ *
+ * Example (see e.g. native/cuda/Dropout.cu):
+ *
+ * #include <ATen/cuda/philox_kernelarg_helper.h>
+ *
+ * __global__ void kernel(..., PhiloxCudaState philox_args) {
+ *   auto seeds = at::cuda::philox::unpack(philox_args);
+ *   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
+ *   curandStatePhilox4_32_10_t state;
+ *   curand_init(std::get<0>(seeds),       // seed
+ *               std::get<1>(seeds) + idx, // per-thread subsequence
+ *               std::get<2>(seeds),       // offset in subsequence
+ *               &state);
+ *   ...
+ * }
+ *
+ * host_caller(...) {
+ *   PhiloxCudaState rng_engine_inputs;
+ *   {
+ *     // See Note [Acquire lock when using random generators]
+ *     std::lock_guard<std::mutex> lock(gen->mutex_);
+ *
+ *     // gen could be HostState or DeviceState here!
+ *     // No divergent code needed!
+ *     rng_engine_inputs = gen->philox_cuda_state(counter_offset);
+ *   }
+ *   kernel<<<...>>>(..., rng_engine_inputs);
+ * }
+ *
+ */
 
-Intended usage (see e.g. native/cuda/Dropout.cu):
-
-#include <ATen/cuda/philox_kernelarg_helper.h>
-
-__global__ void kernel(..., philox_cuda_state_t philox_args) {
-  // Provides std::pair<uint64_t, uint64_t>
-  auto seeds = at::cuda::philox::unpack(philox_args);
-}
-
-host_caller(...) {
-  philox_cuda_state_t rng_engine_inputs;
-  {
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-    // gen could be HostState or DeviceState here!
-    // No divergent code needed!
-    rng_engine_inputs = gen->philox_cuda_state(counter_offset);
-  }
-  ...
-  // rng_engine_inputs may contain device tensors, and extends the
-  // lifetime of those tensors, so rng_engine_input
-  // MUST REMAIN ALIVE on the host across the kernel launch.
-  kernel<<<...>>>(..., rng_engine_inputs);
-}
-*/
-
-struct philox_cuda_state_t {
-  philox_cuda_state_t() {}
-  // Called by philox_cuda_state_t::to_kernel_arg if state lives on the CPU.
-  philox_cuda_state_t(uint64_t seed,
-                      uint64_t offset,
-                      subseq_pool_start)
-    : has_device_ptrs_{false},
+struct PhiloxCudaState {
+  PhiloxCudaState() = default;
+  PhiloxCudaState(const PhiloxCudaState&) = default;
+  // Called by CUDAGeneratorImplDeviceState
+  PhiloxCudaState(uint64_t seed,
+                  uint64_t offset,
+                  uint64_t subseq_pool_start)
+    : subseq_pool_start_{subseq_pool_start},
+      has_device_ptrs_{false},
       seed_{seed},
-      offset_{offset},
-      subseq_pool_start_{subseq_pool_start} {}
-  // Called by philox_cuda_state_t::to_kernel_arg if state lives on the GPU.
+      offset_{offset} {}
+  // Called by CUDAGeneratorImplDeviceState.
   // Pointers are int64_t*, not uint64_t* (there's no such thing as uint64_t Tensors)
-  philox_cuda_state_t(int64_t* seed,
-                      int64_t* offset,
-                      int64_t* next_offset,
-                      uint64_t increment,
-                      int subseq_pool_start)
-    : has_device_ptrs_{true},
-      seed_{seed},
-      offset_{offset},
-      next_offset_{next_offset},
-      increment_{increment},
-      subseq_pool_start_{subseq_start_this_stream} {}
+  PhiloxCudaState(int64_t* seed,
+                  int64_t* offset,
+                  int64_t* next_offset,
+                  uint64_t subseq_pool_start)
+    : subseq_pool_start_{subseq_pool_start},
+      has_device_ptrs_{true},
+      seed_ptr_{seed},
+      offset_ptr_{offset},
+      next_offset_ptr_{next_offset} {}
 
   // Public members, directly accessible by at::cuda::philox::unpack.
   // If we made them private with getters/setters, the getters/setters
@@ -74,19 +80,19 @@ struct philox_cuda_state_t {
 
   // Helps select a subsequence from the active stream's pool.
   // See Note [Per stream and device RNG states] in CUDAGeneratorImpl.cpp.
-  int64_t subseq_pool_start_;
+  uint64_t subseq_pool_start_;
 
   // false if the state came from the CPU, true if it lives on the GPU.
-  const bool has_device_ptrs_;
+  bool has_device_ptrs_ = false;
 
   // Contains the state if has_device_ptrs_ is false.
   uint64_t seed_;
-  uintt64_t offset_;
+  uint64_t offset_;
 
   // The following are only populated and used by unpack() if has_device_ptrs_ is true.
   int64_t* seed_ptr_;
-  int64_t* offset_ptr;
-  int64_t* next_offset_ptr;
+  int64_t* offset_ptr_;
+  int64_t* next_offset_ptr_;
 
   // Added to this launch's offset to compute next launch's offset
   uint64_t increment_;
@@ -118,13 +124,16 @@ struct TORCH_CUDA_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // Adds methods specific to the CUDAGeneratorImpl interface:
   virtual void set_philox_offset_per_thread(uint64_t offset) = 0;
   virtual uint64_t philox_offset_per_thread() const = 0;
-  virtual philox_cuda_state_t philox_cuda_state(uint64_t increment) = 0;
+  virtual PhiloxCudaState philox_cuda_state(uint64_t increment) = 0;
   virtual bool state_on_device() const = 0;
   virtual std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment) = 0;
+
+  protected:
+  bool seeded_ = false;
 };
 
 // Maintains philox state on the CPU.  Simple and fast, but not cuda graph-safe.
-struct TORCH_CUDA_API CUDAGeneratorImplHostState : public CUDAGeneratorImpl {
+struct TORCH_CUDA_API CUDAGeneratorImplHostState final : public CUDAGeneratorImpl {
   // Constructors
   CUDAGeneratorImplHostState(DeviceIndex device_index = -1);
   ~CUDAGeneratorImplHostState() = default;
@@ -134,7 +143,7 @@ struct TORCH_CUDA_API CUDAGeneratorImplHostState : public CUDAGeneratorImpl {
   uint64_t current_seed() const override;
   void set_philox_offset_per_thread(uint64_t offset) override;
   uint64_t philox_offset_per_thread() const override;
-  philox_cuda_state_t philox_cuda_state(uint64_t increment) override;
+  PhiloxCudaState philox_cuda_state(uint64_t increment) override;
   bool state_on_device() const override { return false; }
 
   // Temporarily accommodates call sites that use philox_engine_inputs.
@@ -150,7 +159,7 @@ struct TORCH_CUDA_API CUDAGeneratorImplHostState : public CUDAGeneratorImpl {
 };
 
 // Maintains philox state on the GPU. More complex, but fully cuda graph-safe.
-struct TORCH_CUDA_API CUDAGeneratorImplDeviceState : public CUDAGeneratorImpl {
+struct TORCH_CUDA_API CUDAGeneratorImplDeviceState final : public CUDAGeneratorImpl {
   // Constructors
   CUDAGeneratorImplDeviceState(DeviceIndex device_index = -1);
   ~CUDAGeneratorImplDeviceState() = default;
@@ -160,7 +169,7 @@ struct TORCH_CUDA_API CUDAGeneratorImplDeviceState : public CUDAGeneratorImpl {
   uint64_t current_seed() const override;
   void set_philox_offset_per_thread(uint64_t offset) override;
   uint64_t philox_offset_per_thread() const override;
-  philox_cuda_state_t philox_cuda_state(uint64_t increment) override;
+  PhiloxCudaState philox_cuda_state(uint64_t increment) override;
   bool state_on_device() const override { return false; }
 
   // Throws an error at call sites that haven't been refactored to use philox_cuda_state.
@@ -169,18 +178,22 @@ struct TORCH_CUDA_API CUDAGeneratorImplDeviceState : public CUDAGeneratorImpl {
   std::shared_ptr<CUDAGeneratorImplDeviceState> clone() const;
 
   private:
-  void clear_states();
+  using LiveRefs = std::tuple<Tensor, Tensor, Tensor, c10::Stream>;
+  using StateWithRefs = std::pair<PhiloxCudaState, LiveRefs>;
+  using StreamStatesWithRefs = std::unordered_map<StreamId, StateWithRefs>;
+
+  StateWithRefs& get_state_lazy_init();
+  StateWithRefs& add_stream_state(Tensor,
+                                  Tensor,
+                                  Tensor,
+                                  c10::Stream);
   CUDAGeneratorImplDeviceState* clone_impl() const override;
-  using per_stream_states_t = std::unordered_map<StreamId, philox_cuda_state_t>>;
-  using live_refs_t = std::vector<std::tuple<Tensor, Tensor, Tensor, c10::Stream>>;
   void accept_clone_impl(const uint64_t&,
                          const uint64_t&,
-                         const per_stream_states_t&,
-                         const live_refs_t&);
+                         const StreamStatesWithRefs&);
   uint64_t init_seed_;
   uint64_t init_offset_;
-  per_stream_states_t per_stream_states_;
-  live_refs_t live_refs_;
+  StreamStatesWithRefs stream_states_;
 };
 
 

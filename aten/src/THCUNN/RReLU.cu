@@ -40,13 +40,17 @@ inline double __device__ curand_uniform_type<double>(curandStatePhilox4_32_10_t 
 }
 
 template <typename T>
-__global__ void rreluUpdateOutputTrain(int n, at::philox_kernelarg_t philox_args,
+__global__ void rreluUpdateOutputTrain(int n, at::PhiloxCudaState philox_args,
   T *input, T* noise, T *output, double a, double b)
 {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   auto seeds = at::cuda::philox::unpack(philox_args);
   curandStatePhilox4_32_10_t state;
-  curand_init(seeds.first, idx, seeds.second, &state);
+  curand_init(std::get<0>(seeds),
+              std::get<1>(seeds) + idx,
+              std::get<2>(seeds),
+              &state);
+
   CUDA_KERNEL_LOOP(i, n)
   {
     if (input[i] <= 0)
