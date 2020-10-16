@@ -2676,7 +2676,7 @@ class AbstractTestCases:
             orig = [1, 2, 3, 4, 5, 6, 7]
             perm = torch.randperm(7).tolist()
             x = torch.Tensor(*orig).fill_(0)
-            new = list(map(lambda x: x - 1, x.permute(*perm).size()))
+            new = [i - 1 for i in x.permute(*perm).size()]
             self.assertEqual(perm, new)
             self.assertEqual(x.size(), orig)
 

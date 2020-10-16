@@ -1222,8 +1222,8 @@ class TestLRScheduler(TestCase):
         diff_lr = max_lr - base_lr
         gamma = 0.9
         xs = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.50, 0.25, 0, 0.25, 0.5, 0.75, 1]
-        lr_target = list(map(lambda x: base_lr + x[1] * diff_lr * gamma**x[0], enumerate(xs)))
-        momentum_target = list(map(lambda x: max_lr - x[1] * diff_lr * gamma**x[0], enumerate(xs)))
+        lr_target = [base_lr + x * diff_lr * gamma**i for i, x in enumerate(xs)]
+        momentum_target = [max_lr - x * diff_lr * gamma**i for i, x in enumerate(xs)]
         lr_targets = [lr_target, lr_target]
         momentum_targets = [momentum_target, momentum_target]
         scheduler = CyclicLR(self.opt, base_lr=base_lr,
@@ -1267,11 +1267,11 @@ class TestLRScheduler(TestCase):
 
         gamma = 0.9
         xs = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.50, 0.25, 0, 0.25, 0.5, 0.75, 1]
-        lr_target_1 = list(map(lambda x: base_lr_1 + x[1] * diff_lr_1 * gamma**x[0], enumerate(xs)))
-        lr_target_2 = list(map(lambda x: base_lr_2 + x[1] * diff_lr_2 * gamma**x[0], enumerate(xs)))
+        lr_target_1 = [base_lr_1 + x * diff_lr_1 * gamma**i for i, x in enumerate(xs)]
+        lr_target_2 = [base_lr_2 + x * diff_lr_2 * gamma**i for i, x in enumerate(xs)]
         lr_targets = [lr_target_1, lr_target_2]
-        momentum_target_1 = list(map(lambda x: max_lr_1 - x[1] * diff_lr_1 * gamma**x[0], enumerate(xs)))
-        momentum_target_2 = list(map(lambda x: max_lr_2 - x[1] * diff_lr_2 * gamma**x[0], enumerate(xs)))
+        momentum_target_1 = [max_lr_1 - x * diff_lr_1 * gamma**i for i, x in enumerate(xs)]
+        momentum_target_2 = [max_lr_2 - x * diff_lr_2 * gamma**i for i, x in enumerate(xs)]
         momentum_targets = [momentum_target_1, momentum_target_2]
         scheduler = CyclicLR(self.opt, base_lr=[base_lr_1, base_lr_2],
                              max_lr=[max_lr_1, max_lr_2], step_size_up=4,
