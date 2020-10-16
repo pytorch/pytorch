@@ -1476,6 +1476,54 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
   }
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<at::Tensor>& inputTensors,
+    const AllToAllOptions& /* unused */) {
+  auto device = outputTensors[0].device();
+  for (size_t r = 0; r < outputTensors.size(); r++) {
+    check_gpu_single_tensor(outputTensors[r]);
+    check_gpu_single_tensor(inputTensors[r]);
+    TORCH_CHECK(device == outputTensors[r].device() && device == inputTensors[r].device(),
+      "Tensors must be on the same device")
+  }
+  std::vector<at::Tensor> inputTensor0 = {inputTensors[0]};
+  std::vector<at::Tensor> outputTensor0 = {outputTensors[0]};
+  return collective(
+    inputTensor0,
+    outputTensor0,
+    [&](at::Tensor& /* unused */,
+        at::Tensor& /* unused */,
+        ncclComm_t comm,
+        at::cuda::CUDAStream& stream) {
+      C10D_NCCL_CHECK(ncclGroupStart());
+      for (size_t r = 0; r < outputTensors.size(); r++) {
+        at::Tensor &input = inputTensors[r];
+        at::Tensor &output = outputTensors[r];
+        if (input.numel() != 0) {
+          C10D_NCCL_CHECK(ncclSend(
+              input.data_ptr(),
+              input.numel(),
+              getNcclDataType(input.scalar_type()),
+              r,
+              comm,
+              stream.stream()));
+        }
+        if (output.numel() != 0) {
+          C10D_NCCL_CHECK(ncclRecv(
+              output.data_ptr(),
+              output.numel(),
+              getNcclDataType(output.scalar_type()),
+              r,
+              comm,
+              stream.stream()));
+        }
+      }
+      C10D_NCCL_CHECK(ncclGroupEnd());
+      return ncclSuccess;
+    });
+}
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
@@ -1524,6 +1572,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
       "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
+    std::vector<at::Tensor>& /* unused */,
+    std::vector<at::Tensor>& /* unused */,
+    const AllToAllOptions& /* unused */) {
+  throw std::runtime_error("ProcessGroupNCCL does not support alltoall");
+}
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */,
@@ -1554,63 +1609,6 @@ void ProcessGroupNCCL::groupEnd() {
 #endif
   --ncclActiveGroupCounter_;
 }
-
-#ifdef ENABLE_NCCL_P2P_SUPPORT
-std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
-    std::vector<at::Tensor>& outputTensors,
-    std::vector<at::Tensor>& inputTensors,
-    const AllToAllOptions& /* unused */) {
-  auto device = outputTensors[0].device();
-  for (size_t r = 0; r < outputTensors.size(); r++) {
-    check_gpu_single_tensor(outputTensors[r]);
-    check_gpu_single_tensor(inputTensors[r]);
-    TORCH_CHECK(device == outputTensors[r].device() && device == inputTensors[r].device(),
-      "Tensors must be on the same device")
-  }
-  std::vector<at::Tensor> inputTensor0 = {inputTensors[0]};
-  std::vector<at::Tensor> outputTensor0 = {outputTensors[0]};
-  return collective(
-    inputTensor0,
-    outputTensor0,
-    [&](at::Tensor& /* unused */,
-        at::Tensor& /* unused */,
-        ncclComm_t comm,
-        at::cuda::CUDAStream& stream) {
-      C10D_NCCL_CHECK(ncclGroupStart());
-      for (size_t r = 0; r < outputTensors.size(); r++) {
-        at::Tensor &input = inputTensors[r];
-        at::Tensor &output = outputTensors[r];
-        if (input.numel() != 0) {
-          C10D_NCCL_CHECK(ncclSend(
-              input.data_ptr(),
-              input.numel(),
-              getNcclDataType(input.scalar_type()),
-              r,
-              comm,
-              stream.stream()));
-        }
-        if (output.numel() != 0) {
-          C10D_NCCL_CHECK(ncclRecv(
-              output.data_ptr(),
-              output.numel(),
-              getNcclDataType(output.scalar_type()),
-              r,
-              comm,
-              stream.stream()));
-        }
-      }
-      C10D_NCCL_CHECK(ncclGroupEnd());
-      return ncclSuccess;
-    });
-}
-#else
-std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
-    std::vector<at::Tensor>& /* unused */,
-    std::vector<at::Tensor>& /* unused */,
-    const AllToAllOptions& /* unused */) {
-  throw std::runtime_error("ProcessGroupNCCL does not support alltoall");
-}
-#endif
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
     std::vector<std::vector<at::Tensor>>& /* unused */,
