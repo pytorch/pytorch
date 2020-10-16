@@ -2,6 +2,7 @@ from functools import update_wrapper
 from numbers import Number
 import torch
 import torch.nn.functional as F
+from typing import Dict, Any
 
 
 def broadcast_all(*values):
@@ -23,13 +24,14 @@ def broadcast_all(*values):
     if not all(isinstance(v, torch.Tensor) or isinstance(v, Number) for v in values):
         raise ValueError('Input arguments must all be instances of numbers.Number or torch.tensor.')
     if not all([isinstance(v, torch.Tensor) for v in values]):
-        options = dict(dtype=torch.get_default_dtype())
+        options: Dict[str, Any] = dict(dtype=torch.get_default_dtype())
         for value in values:
             if isinstance(value, torch.Tensor):
                 options = dict(dtype=value.dtype, device=value.device)
                 break
-        values = [v if isinstance(v, torch.Tensor) else torch.tensor(v, **options)
-                  for v in values]
+        new_values = [v if isinstance(v, torch.Tensor) else torch.tensor(v, **options)
+                      for v in values]
+        return torch.broadcast_tensors(*new_values)
     return torch.broadcast_tensors(*values)
 
 
@@ -94,7 +96,7 @@ class lazy_property(object):
     """
     def __init__(self, wrapped):
         self.wrapped = wrapped
-        update_wrapper(self, wrapped)
+        update_wrapper(self, wrapped)  # type: ignore[arg-type]
 
     def __get__(self, instance, obj_type=None):
         if instance is None:

@@ -963,31 +963,6 @@ def container_checker(obj, target_type):
 
 
 def _isinstance(obj, target_type) -> bool:
-    """
-    This function provides for type refinement in TorchScript. It can refine parameterized 
-    containers of the List, Dict, Tuple, and Optional types. E.g. ``List[str]``,
-    ``Dict[str, List[torch.Tensor]]``, ``Optional[Tuple[int,str,int]]``. 
-
-    Example (using ``torch.jit.isinstance`` for type refinement):
-    .. testcode::
-
-        import torch
-        import torch.nn as nn
-
-        class MyModule(nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-
-            def forward(self, input: Any): # note the Any type
-                if torch.jit.isinstance(input, List[torch.Tensor]):
-                    for t in input:
-                        y = t.clamp(0, 0.5)
-                elif torch.jit.isinstance(input, Dict[str, str]):
-                    for val in input.values():
-                        print(val)
-
-        m = torch.jit.script(MyModule())
-    """
     origin_type = get_origin(target_type)    
     if origin_type:
         return container_checker(obj, target_type)
