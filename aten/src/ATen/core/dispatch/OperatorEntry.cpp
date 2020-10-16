@@ -99,7 +99,7 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
 
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
-  // Redirect registrations to catchAll to Math.
+  // Redirect catchAll registrations to Math.
   auto& k = dispatch_key.has_value() ? kernels_[*dispatch_key] : kernels_[DispatchKey::Math];
 
   if (k.size() > 0) {
@@ -127,7 +127,7 @@ void OperatorEntry::deregisterKernel_(
   c10::optional<DispatchKey> dispatch_key,
   std::list<AnnotatedKernel>::iterator kernel
 ) {
-  // Redirect registrations to catchAll to Math.
+  // Redirect catchAll deregistrations to Math.
   DispatchKey dk = dispatch_key.has_value() ? *dispatch_key : DispatchKey::Math;
   auto found = kernels_.find(dk);
   TORCH_INTERNAL_ASSERT(found != kernels_.end(), "Tried to deregister a kernel for dispatch key ", toString(dispatch_key), " but there are no kernels registered for this dispatch key. The operator is ", toString(name_));

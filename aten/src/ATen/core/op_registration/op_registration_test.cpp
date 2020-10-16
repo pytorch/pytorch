@@ -777,22 +777,6 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKer
   EXPECT_TRUE(called);
 }
 
-TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndCatchallKernelForSameBackend_thenCallsFallbackKernel) {
-  auto registrar = c10::Dispatcher::singleton().registerFallback(c10::DispatchKey::CPU, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>(), "");
-
-  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()", c10::RegisterOperators::options()
-      .catchAllKernel([] (Tensor, std::string) {
-        called = true;
-      }));
-  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
-  ASSERT_TRUE(op.has_value());
-
-  called = false;
-  auto stack = callOp(*op, dummyTensor(c10::DispatchKey::CPU), "hello ");
-  // CatchAll now maps to Math and has higher precedence than backend fallback.
-  EXPECT_TRUE(called);
-}
-
 bool called_autograd = false;
 bool called_nonautograd = false;
 
@@ -833,20 +817,6 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_th
   op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU, /*requires_grad=*/true));
   EXPECT_FALSE(called_nonautograd);
   EXPECT_TRUE(called_autograd);
-}
-
-TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_thenCanCallRegularKernel) {
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .kernel<decltype(nonautograd_kernel), nonautograd_kernel>(DispatchKey::CPU)
-    .kernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::Autograd));
-
-  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
-  ASSERT_TRUE(op.has_value());
-
-  called_nonautograd = called_autograd = false;
-  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU));
-  EXPECT_TRUE(called_nonautograd);
-  EXPECT_FALSE(called_autograd);
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_thenCanCallAutogradKernel) {
@@ -1626,6 +1596,39 @@ TEST(NewOperatorRegistrationTest, schema) {
   EXPECT_EQ(Dispatcher::singleton().findSchema({"test::def2", ""})->schema().aliasAnalysis(), c10::AliasAnalysisKind::FROM_SCHEMA);
   EXPECT_EQ(Dispatcher::singleton().findSchema({"test::def3", ""})->schema().aliasAnalysis(), c10::AliasAnalysisKind::PURE_FUNCTION);
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"test::def4", ""})->schema().isDefaultAliasAnalysisKind());
+}
+
+TEST(NewOperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndCatchallKernelForSameBackend_thenCallsFallbackKernel) {
+  auto m1 = MAKE_TORCH_LIBRARY_IMPL(_, CPU);
+  m1.fallback(CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
+
+  bool called = false;
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn(Tensor t, str input) -> ()");
+  m.impl("fn", [&] (Tensor, std::string) { called = true; });
+
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called = false;
+  auto stack = callOp(*op, dummyTensor(c10::DispatchKey::CPU), "hello ");
+  // CatchAll now maps to Math and has higher precedence than backend fallback.
+  EXPECT_TRUE(called);
+}
+
+TEST(NewOperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_thenCanCallRegularKernel) {
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn(Tensor dummy) -> ()");
+  m.impl("fn", c10::DispatchKey::CPU, nonautograd_kernel);
+  m.impl("fn", c10::DispatchKey::Autograd, autograd_kernel);
+
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called_nonautograd = called_autograd = false;
+  callOp(*op, dummyTensor(DispatchKey::CPU));
+  EXPECT_TRUE(called_nonautograd);
+  EXPECT_FALSE(called_autograd);
 }
 
 TEST(NewOperatorRegistrationTest, dispatchWithMathKernel) {
