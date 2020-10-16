@@ -3429,6 +3429,7 @@ class DistributedTest:
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
         def test_ddp_uneven_inputs(self):
+            raise ValueError("Intentional failure")
             class DDPUnevenTestInput(NamedTuple):
                 name: str
                 model: nn.Module
