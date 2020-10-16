@@ -7,7 +7,7 @@ from torch.nn import Module
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.types import _device
 from torch import Tensor
-from .optimizer import Optimizer
+from ._optimizer import Optimizer
 
 
 class AveragedModel(Module):

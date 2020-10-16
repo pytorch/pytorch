@@ -8,7 +8,7 @@ from collections import Counter
 from bisect import bisect_right
 from typing import Iterable, Any, Optional, Callable, Union, List
 
-from .optimizer import Optimizer
+from ._optimizer import Optimizer
 
 
 EPOCH_DEPRECATION_WARNING = (

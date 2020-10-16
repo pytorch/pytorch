@@ -2,7 +2,7 @@ import math
 from typing import Tuple
 
 import torch
-from .optimizer import Optimizer, _params_t
+from ._optimizer import Optimizer, _params_t
 
 
 class AdamW(Optimizer):

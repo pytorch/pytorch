@@ -1,6 +1,6 @@
 import torch
 from . import functional as F
-from .optimizer import Optimizer, _params_t
+from ._optimizer import Optimizer, _params_t
 
 
 class Adagrad(Optimizer):

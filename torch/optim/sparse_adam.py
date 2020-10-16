@@ -2,7 +2,7 @@ import math
 from typing import Tuple, List, Union
 
 import torch
-from .optimizer import Optimizer, _params_t
+from ._optimizer import Optimizer, _params_t
 
 
 class SparseAdam(Optimizer):

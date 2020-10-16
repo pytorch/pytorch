@@ -15,7 +15,7 @@ from .asgd import ASGD
 from .sgd import SGD
 from .rprop import Rprop
 from .rmsprop import RMSprop
-from .optimizer import Optimizer
+from ._optimizer import Optimizer
 from .lbfgs import LBFGS
 from . import lr_scheduler
 from . import swa_utils
@@ -24,17 +24,3 @@ from . import swa_utils
 __all__ = ['ASGD', 'Adadelta', 'Adagrad', 'Adam', 'AdamW', 'Adamax',
            'LBFGS', 'Optimizer', 'RMSprop', 'Rprop', 'SGD', 'SparseAdam',
            'lr_scheduler', 'swa_utils']
-
-
-del adadelta
-del adagrad
-del adam
-del adamw
-del sparse_adam
-del adamax
-del asgd
-del sgd
-del rprop
-del rmsprop
-del optimizer
-del lbfgs
