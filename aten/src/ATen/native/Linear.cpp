@@ -139,98 +139,157 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
 Tensor einsum(std::string equation, TensorList operands) {
   TORCH_CHECK(!operands.empty(), "einsum() must provide at least one operand");
 
+  // Code for ellipsis (...)
+  constexpr int ELLIPSIS = '.';
+
   // Find arrow (->) to split equation into lhs and rhs
   std::size_t arrow_pos = equation.find("->");
+
+  // Split lhs of equation into labels per operand
+  std::string lhs = equation.substr(0, arrow_pos);
+  std::vector<std::vector<int>> op_labels(operands.size());
+  bool found_ellipsis = false;
+  std::size_t curr_op = 0;
   
-  // Extract labels for each operand
-  std::istringstream lhs(equation.substr(0, arrow_pos));
-  std::vector<std::string> operand_labels;
-  while (lhs.good()) {
-    std::string token;
-    std::getline(lhs, token, ',');
-    operand_labels.emplace_back(token);
+  for (std::size_t i = 0; i < lhs.length(); ++i) {
+    switch (lhs[i]) {
+      case ' ':
+        break;
+
+      case '.':
+        TORCH_CHECK(
+            !found_ellipsis,
+            "einsum() found \'.\' for operand ",
+            curr_op,
+            " for which an ellipsis was already specified");
+        TORCH_CHECK(
+            i + 2 < lhs.length() && lhs[++i] == '.' && lhs[++i] == '.',
+            "einsum() found \'.\' for operand ",
+            curr_op,
+            " that is not part of any ellipsis");
+        op_labels[curr_op].push_back(ELLIPSIS);
+        found_ellipsis = true;
+        break;
+
+      case ',':
+        TORCH_CHECK(
+            ++curr_op < operands.size(),
+            "einsum() fewer operands were provided than specified in the equation");
+        found_ellipsis = false;
+        break;
+
+      default:
+        TORCH_CHECK(
+            lhs[i] >= 'a' && lhs[i] <= 'z',
+            "einsum() operand subscript must be in range [a, z] but found ",
+            lhs[i],
+            " for operand ",
+            curr_op);
+        op_labels[curr_op].push_back(lhs[i] - 'a');
+    }
   }
-  
+
   TORCH_CHECK(
-      operand_labels.size() == operands.size(),
-      "einsum() the number of operands specified in the equation (",
-      operand_labels.size(),
-      ") does not match the number of operands provided (",
-      operands.size(),
-      ")");
-  
+      curr_op == operands.size() - 1,
+      "einsum() more operands were provided than specified in the equation");
+
   constexpr int total_labels = 'z' - 'a' + 1;
   std::vector<int> label_count(total_labels, 0);
-  std::vector<std::size_t> label_last_operand(total_labels, -1);
+  int64_t ell_num_dim = 0;
   
-  // Parse labels for each operand
+  // Check labels and compute counts
   for (std::size_t i = 0; i < operands.size(); ++i) {
     Tensor operand = operands[i];
-    std::string labels = operand_labels[i];
-    int count = 0;
-    for (char c : labels) {
-      if (c != ' ') {
-        TORCH_CHECK(
-            c >= 'a' && c <= 'z',
-            "einsum() subscripts must be in range [a, z] but found ",
-            c);
-        if (operand.size(count) > 1) {
-          label_last_operand[c - 'a'] = i;
-        }
-        ++label_count[c - 'a'];
-        ++count;
+    std::vector<int> labels = op_labels[i];
+    int64_t nlabels = labels.size();
+    int64_t ndims = operand.dim();
+    bool has_ellipsis = false;
+
+    for (int label : labels) {
+      if (label == ELLIPSIS) {
+        has_ellipsis = true;
+        ell_num_dim = std::max(ell_num_dim, ndims - nlabels + 1);
+      } else {
+        ++label_count[label];
       }
     }
+
     TORCH_CHECK(
-        count == operand.dim(),
+        has_ellipsis ? nlabels - 1 <= ndims : nlabels == ndims,
         "einsum() the number of subscripts in the equation (",
-        count,
-        ") does not match the number of dimensions (",
-        operand.dim(),
+        nlabels,
+        has_ellipsis ? ") is more than the number of dimensions ("
+                     : ") does not match the number of dimensions (",
+        nlabels,
         ") for operand ",
-        i);
+        i,
+        has_ellipsis ? "" : " and no ellipsis was given");
   }
 
   // Parse output labels
   std::vector<int> label_out_index(total_labels, -1);
-  std::vector<int> permuted_labels;
-  int out_index = 0;
+  int64_t out_index = 0;
+  int64_t ell_index = 0;
+
   if (arrow_pos == std::string::npos) {
+    out_index = ell_num_dim;
     for (int label = 0; label < total_labels; ++label) {
       if (label_count[label] == 1) {
         label_out_index[label] = out_index++;
-        permuted_labels.emplace_back(label);
       }
     }
   } else {
     std::string rhs = equation.substr(arrow_pos + 2);
-    for (char c : rhs) {
-      if (c != ' ') {
-        TORCH_CHECK(
-            c >= 'a' && c <= 'z',
-            "einsum() subscripts must be in range [a, z] but found ",
-            c);
-        TORCH_CHECK(
-            label_count[c - 'a'] > 0,
-            "einsum() output subscript ",
-            c,
-            label_count[c - 'a'] == -1 
-            ? " appears more than once in the output string"
-            : " does not appear in the equation for any input operand");
-        label_out_index[c - 'a'] = out_index++;
-        label_count[c - 'a'] = -1;
-        permuted_labels.emplace_back(c - 'a');
+    found_ellipsis = false;
+    for (std::size_t i = 0; i < rhs.length(); ++i) {
+      switch (rhs[i]) {
+        case ' ':
+          break;
+
+        case '.':
+          TORCH_CHECK(
+              !found_ellipsis,
+              "einsum() found \'.\' for output but an ellipsis (...) was already found");
+          TORCH_CHECK(
+              i + 2 < rhs.length() && rhs[++i] == '.' && rhs[++i] == '.',
+              "einsum() found \'.\' for operand ",
+              op_labels.size(),
+              " that is not part of any ellipsis (...)");
+          ell_index = out_index;
+          out_index += ell_num_dim;
+          found_ellipsis = true;
+          break;
+
+        default:
+          TORCH_CHECK(
+              rhs[i] >= 'a' && rhs[i] <= 'z',
+              "einsum() subscripts must be in range [a, z] but found ",
+              rhs[i],
+              " for the output");
+          TORCH_CHECK(
+              label_count[rhs[i] - 'a'] > 0,
+              "einsum() output subscript ",
+              rhs[i],
+              label_count[rhs[i] - 'a'] == -1
+                  ? " appears more than once in the output string"
+                  : " does not appear in the equation for any input operand");
+          label_out_index[rhs[i] - 'a'] = out_index++;
+          label_count[rhs[i] - 'a'] = -1;
       }
     }
+        
+    TORCH_CHECK(
+        ell_num_dim <= 0 || found_ellipsis,
+        "einsum() ellipsis (...) covering one or more dimensions was given in the input but not in the output");
   }
   
+  // Save output size before adding contraction labels
   int out_size = out_index;
 
-  // Parse contraction labels
+  // Parse contraction labels (labels not present in output)
   for (int label = 0; label < total_labels; ++label) {
     if (label_count[label] > 0 && label_out_index[label] == -1) {
       label_out_index[label] = out_index++;
-      permuted_labels.emplace_back(label);
     }
   }
 
@@ -240,38 +299,50 @@ Tensor einsum(std::string equation, TensorList operands) {
   for (std::size_t i = 0; i < operands.size(); ++i) {
     std::vector<int64_t> perm_shape(out_index, -1);
     std::vector<int64_t> label_dim(total_labels, -1);
-    std::string labels = operand_labels[i];
+    std::vector<int> labels = op_labels[i];
     Tensor operand = operands[i];
     std::size_t j = 0;
-    for (char c : labels) {
-      if (c != ' ') {
-        if (label_dim[c - 'a'] != -1) {
-          // Repeated label, take diagonal
-          int64_t dim = label_dim[c - 'a'];
-          TORCH_CHECK(
-              operand.size(j) == operand.size(dim),
-              "einsum() subscript ",
-              c,
-              " is repeated for operand ",
-              i,
-              " but the sizes don't match, ",
-              operand.size(j),
-              " != ",
-              operand.size(dim));
-          operand = operand.diagonal(0, j, dim);
-          operand.unsqueeze_(dim).transpose_(dim, -1).squeeze_(-1);
-        } else {
-          label_dim[c - 'a'] = j;
-          perm_shape[label_out_index[c - 'a']] = j++;
+    
+    for (int label : labels) {
+      if (label == ELLIPSIS) {
+        // Broadcast shape under ellipsis
+        int64_t num_dim_diff = ell_num_dim - (operand.dim() - labels.size() + 1);
+        for (int64_t k = 0; k < num_dim_diff; ++k) {
+          operand = operand.unsqueeze(j);
         }
+        for (int64_t k = 0; k < ell_num_dim; ++k) {
+          perm_shape[ell_index + k] = j++;
+        }
+      } else if (label_dim[label] != -1) {
+        // Repeated label, take diagonal
+        int64_t dim = label_dim[label];
+        TORCH_CHECK(
+            operand.size(j) == operand.size(dim),
+            "einsum() subscript ",
+            char(label + 'a'),
+            " is repeated for operand ",
+            i,
+            " but the sizes don't match, ",
+            operand.size(j),
+            " != ",
+            operand.size(dim));
+        operand = operand.diagonal(0, j, dim);
+        operand.unsqueeze_(dim).transpose_(dim, -1).squeeze_(-1);
+      } else {
+        // Lookup output index for label
+        label_dim[label] = j;
+        perm_shape[label_out_index[label]] = j++;
       }
     }
+    
+    // Add missing dimensions
     for (int64_t& index : perm_shape) {
       if (index == -1) {
         operand = operand.unsqueeze(-1);
         index = j++;
       }
     }
+    
     permuted_operands.push_back(operand.permute(perm_shape));
   }
 
@@ -287,26 +358,6 @@ Tensor einsum(std::string equation, TensorList operands) {
     std::iota(sum_dims.begin(), sum_dims.end(), out_size);
     result = result.sum(sum_dims);
   }
-
-  // if (permuted_operands.size() == 1 && out_size < out_index) {
-  //   std::vector<int64_t> sum_dims(out_index - out_size);
-  //   std::iota(sum_dims.begin(), sum_dims.end(), out_size);
-  //   result = result.sum(sum_dims);
-  // }
-
-  // for (std::size_t i = 1; i < permuted_operands.size(); ++i) {
-  //   std::vector<int64_t> sum_dims;
-  //   for (int dim = out_size; dim < out_index; ++dim) {
-  //     if (label_last_operand[permuted_labels[dim]] <= i) {
-  //       sum_dims.emplace_back(dim);
-  //     }
-  //   }
-  //   result = sumproduct_pair(
-  //       result,
-  //       permuted_operands[i],
-  //       sum_dims,
-  //       i < permuted_operands.size() - 1);
-  // }
 
   return result;
 }

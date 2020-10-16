@@ -96,7 +96,19 @@ class CheckpointFunction(torch.autograd.Function):
 
         if isinstance(outputs, torch.Tensor):
             outputs = (outputs,)
-        torch.autograd.backward(outputs, args)
+
+        # run backward() with only tensor that requires grad
+        outputs_with_grad = []
+        args_with_grad = []
+        for i in range(len(outputs)):
+            if outputs[i].requires_grad:
+                outputs_with_grad.append(outputs[i])
+                args_with_grad.append(args[i])
+        if len(outputs_with_grad) == 0:
+            raise RuntimeError(
+                "none of output has requires_grad=True,"
+                " this checkpoint() is not necessary")
+        torch.autograd.backward(outputs_with_grad, args_with_grad)
         grads = tuple(inp.grad if isinstance(inp, torch.Tensor) else inp
                       for inp in detached_inputs)
         return (None, None) + grads
@@ -132,15 +144,16 @@ def checkpoint(function, *args, **kwargs):
     .. warning::
         If checkpointed segment contains tensors detached from the computational
         graph by `detach()` or `torch.no_grad()`, the backward pass will raise an
-        error. This is because `checkpoint` makes all the outputs require 
-        gradients which causes issues when a tensor is defined to have no 
-        gradient in the model. To circumvent this, detach the tensors outside of 
+        error. This is because `checkpoint` makes all the outputs require
+        gradients which causes issues when a tensor is defined to have no
+        gradient in the model. To circumvent this, detach the tensors outside of
         the `checkpoint` function.
 
     .. warning:
         At least one of the inputs needs to have :code:`requires_grad=True` if
         grads are needed for model inputs, otherwise the checkpointed part of the
-        model won't have gradients.
+        model won't have gradients. At least one of the outputs needs to have
+        :code:`requires_grad=True` as well.
 
     Args:
         function: describes what to run in the forward pass of the model or

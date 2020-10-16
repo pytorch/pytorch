@@ -2,6 +2,7 @@
 
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Cache.h>
+#include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
 #include <c10/util/hash.h>
 
@@ -30,6 +31,20 @@ namespace api {
 //
 
 struct Pipeline final {
+  //
+  // Barrier
+  //
+
+  struct Barrier final {
+    struct Stage final {
+      VkPipelineStageFlags src;
+      VkPipelineStageFlags dst;
+    } stage;
+
+    c10::SmallVector<Resource::Buffer::Barrier, 1u> buffers;
+    c10::SmallVector<Resource::Image::Barrier, 1u> images;
+  };
+
   //
   // Layout
   //
@@ -111,11 +126,35 @@ struct Pipeline final {
   };
 
   /*
+    Object
+  */
+
+  struct Object final {
+    VkPipeline handle;
+    VkPipelineLayout layout;
+
+    operator bool() const;
+  };
+
+  /*
     Cache
   */
 
-  typedef api::Cache<Factory> Cache;
-  Cache cache;
+  class Cache final {
+   public:
+    explicit Cache(Factory factory);
+    Cache(const Cache&) = delete;
+    Cache& operator=(const Cache&) = delete;
+    Cache(Cache&&) = default;
+    Cache& operator=(Cache&&) = default;
+    ~Cache() = default;
+
+    Object retrieve(const Descriptor& descriptor);
+    void purge();
+
+   private:
+    api::Cache<Factory> cache_;
+  } cache;
 
   explicit Pipeline(const GPU& gpu)
     : layout(gpu),
@@ -154,6 +193,23 @@ inline size_t Pipeline::Factory::Hasher::operator()(
       descriptor.work_group.x,
       descriptor.work_group.y,
       descriptor.work_group.z);
+}
+
+inline Pipeline::Object Pipeline::Cache::retrieve(
+    const Descriptor& descriptor) {
+  return {
+    cache_.retrieve(descriptor),
+    descriptor.pipeline_layout,
+  };
+}
+
+inline void Pipeline::Cache::purge() {
+  cache_.purge();
+}
+
+inline Pipeline::Object::operator bool() const {
+  return (VK_NULL_HANDLE != handle) &&
+         (VK_NULL_HANDLE != layout);
 }
 
 } // namespace api
