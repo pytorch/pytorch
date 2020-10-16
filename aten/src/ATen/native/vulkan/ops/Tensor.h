@@ -97,7 +97,7 @@ class vTensor final {
             Access::Pointer<Type, kAccess>>::value>;
 
    public:
-    explicit Future(vTensor* tensor);
+    explicit Future(const vTensor* tensor);
     Future(const Future&) = delete;
     Future& operator=(const Future&) = delete;
     Future(Future&&);
@@ -137,7 +137,7 @@ class vTensor final {
     friend class Future;
 
    private:
-    vTensor* tensor_;
+    const vTensor* tensor_;
   };
 
   /*
@@ -173,13 +173,12 @@ class vTensor final {
 
   Buffer::Object buffer() const &;
   Buffer::Object buffer(Access::Flags access) &;
-
   Buffer::Object buffer(api::Command::Buffer&) const &;
   Buffer::Object buffer(api::Command::Buffer&, Access::Flags) &;
 
+  bool has_image() const;
   Image::Object image() const &;
   Image::Object image(Access::Flags access) &;
-
   Image::Object image(api::Command::Buffer&) const &;
   Image::Object image(api::Command::Buffer&, Access::Flags) &;
 
@@ -199,7 +198,6 @@ class vTensor final {
 
   template<typename Type>
   Future<Type, Access::Read> host() const && = delete;
-
   template<typename Type, Access::Flags kAccess>
   Future<Type, kAccess> host() && = delete;
 
@@ -209,13 +207,11 @@ class vTensor final {
 
   Buffer::Object buffer() const && = delete;
   Buffer::Object buffer(Access::Flags) && = delete;
-
   Buffer::Object buffer(api::Command::Buffer&) const && = delete;
   Buffer::Object buffer(api::Command::Buffer&, Access::Flags) && = delete;
 
   Image::Object image() const && = delete;
   Image::Object image(Access::Flags) && = delete;
-
   Image::Object image(api::Command::Buffer&) const && = delete;
   Image::Object image(api::Command::Buffer&, Access::Flags) && = delete;
 
@@ -228,14 +224,16 @@ class vTensor final {
         IntArrayRef sizes,
         const TensorOptions& options);
 
-    // Accessor
     Buffer& buffer(Access::Flags) const;
     Buffer& buffer(api::Command::Buffer&, Access::Flags) const;
+
+    bool has_image() const;
     Image& image(Access::Flags) const;
     Image& image(api::Command::Buffer&, Access::Flags) const;
+
     Buffer& staging(Access::Flags) const;
     Buffer& staging(api::Command::Buffer&, Access::Flags) const;
-    vTensor::Memory& wait();
+    const vTensor::Memory& wait() const;
 
    private:
     class CMD;
@@ -353,7 +351,7 @@ void verify(const TensorOptions& options);
 
 template<typename Type, vTensor::Access::Flags kAccess>
 inline vTensor::Future<Type, kAccess>::Future(
-    vTensor* const tensor)
+    const vTensor* const tensor)
   : tensor_(tensor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       tensor_,
@@ -397,8 +395,13 @@ vTensor::Future<Type, kAccess>::operator=(
 template<typename Type, vTensor::Access::Flags kAccess>
 inline vTensor::Future<Type, kAccess>::~Future() {
   // Sync eagerly in an effort to hide latency.
-  if (Access::Write & kAccess) {
-    ;
+  if (tensor_ && (Access::Write & kAccess)) {
+    if (tensor_->has_image()) {
+      tensor_->image();
+    }
+    else {
+      tensor_->buffer();
+    }
   }
 }
 
@@ -421,6 +424,14 @@ inline vTensor::Future<Type, vTensor::Access::Read> vTensor::host() const & {
 template<typename Type, vTensor::Access::Flags kAccess>
 inline vTensor::Future<Type, kAccess> vTensor::host() & {
   return Future<Type, kAccess>(host(kAccess));
+}
+
+inline bool vTensor::has_image() const {
+  return view_.has_image();
+}
+
+inline bool vTensor::View::has_image() const {
+  return state_.is_available(View::Component::Image);
 }
 
 inline vTensor::View::State::Bundle::Buffer::operator bool() const {
@@ -475,7 +486,7 @@ inline const vTensor& convert(const Tensor& tensor) {
   const vTensorImpl* const impl =
       static_cast<const vTensorImpl*>(tensor.unsafeGetTensorImpl());
 
-  return const_cast<vTensorImpl*>(impl)->unsafe_opaque_handle();
+  return impl->opaque_handle();
 }
 
 inline vTensor& convert(Tensor& tensor) {
