@@ -350,8 +350,8 @@ void initJitBackendBindings(PyObject* module) {
           // Module.
           Module& mod = original_module.value();
           if (allModuleTypesUnique(mod)) {
-            // Clone the Module to avoid editing types that are shared with Modules
-            // in other instances outside this hierarchy.
+            // Clone the Module to avoid editing types that are shared with
+            // Modules in other instances outside this hierarchy.
             auto cloned_mod = mod.clone();
             toBackendSelectiveImpl(cloned_mod, to_backend, modules_to_lower);
             // Wrap the result in a RecursiveScriptModule because that's what
