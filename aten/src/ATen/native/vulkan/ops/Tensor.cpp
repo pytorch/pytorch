@@ -276,16 +276,40 @@ vTensor::Buffer::Object vTensor::buffer() const & {
   return view_.buffer(Access::Read).object;
 }
 
-vTensor::Buffer::Object vTensor::buffer(const Access::Flags access) & {
+vTensor::Buffer::Object vTensor::buffer(
+    const Access::Flags access) & {
   return view_.buffer(access).object;
+}
+
+vTensor::Buffer::Object vTensor::buffer(
+    api::Command::Buffer& command_buffer) const & {
+  return view_.buffer(command_buffer, Access::Read).object;
+}
+
+vTensor::Buffer::Object vTensor::buffer(
+    api::Command::Buffer& command_buffer,
+    const Access::Flags access) & {
+  return view_.buffer(command_buffer, access).object;
 }
 
 vTensor::Image::Object vTensor::image() const & {
   return view_.image(Access::Read).object;
 }
 
-vTensor::Image::Object vTensor::image(const Access::Flags access) & {
+vTensor::Image::Object vTensor::image(
+    const Access::Flags access) & {
   return view_.image(access).object;
+}
+
+vTensor::Image::Object vTensor::image(
+    api::Command::Buffer& command_buffer) const & {
+  return view_.image(command_buffer, Access::Read).object;
+}
+
+vTensor::Image::Object vTensor::image(
+    api::Command::Buffer& command_buffer,
+    const Access::Flags access) & {
+  return view_.image(command_buffer, access).object;
 }
 
 vTensor::View::View()
@@ -329,6 +353,7 @@ vTensor::View::View(
 class vTensor::View::CMD final {
  public:
   explicit CMD(const View& view);
+  CMD(const View& view, api::Command::Buffer& external);
   CMD(const CMD&) = delete;
   CMD& operator=(const CMD&) = delete;
   CMD(CMD&&) = delete;
@@ -368,20 +393,48 @@ class vTensor::View::CMD final {
 
  private:
   const View& view_;
-  api::Command::Buffer command_buffer_;
+
+  enum class Type {
+    Internal,
+    External,
+  } type;
+
+  union {
+    api::Command::Buffer internal;
+    api::Command::Buffer* external;
+  } command_buffer_;
 };
 
 vTensor::View::CMD::CMD(const View& view)
-  : view_(view) {
+  : view_(view),
+    type(Type::Internal),
+    command_buffer_{} {
+}
+
+vTensor::View::CMD::CMD(const View& view, api::Command::Buffer& external)
+  : view_(view),
+    type(Type::External),
+    command_buffer_{
+      .external = &external,
+    } {
 }
 
 api::Command::Buffer& vTensor::View::CMD::command_buffer() {
-  if (!command_buffer_) {
-    command_buffer_ = view_.context_->command().pool.allocate();
-    command_buffer_.begin();
-  }
+  switch (type) {
+    case Type::Internal:
+      if (!command_buffer_.internal) {
+        command_buffer_.internal = view_.context_->command().pool.allocate();
+        command_buffer_.internal.begin();
+      }
+      return command_buffer_.internal;
 
-  return command_buffer_;
+    case Type::External:
+      return *(command_buffer_.external);
+
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unknown command buffer type!");
+      break;
+  }
 }
 
 void vTensor::View::CMD::barrier(State::Transition transition) {
@@ -613,9 +666,9 @@ void vTensor::View::CMD::copy_image_to_buffer(
 }
 
 void vTensor::View::CMD::submit(const api::Resource::Fence fence) {
-  if (command_buffer_) {
-    command_buffer_.end();
-    command_buffer_.submit(view_.context_->gpu().queue, fence);
+  if ((Type::Internal == type) && command_buffer_.internal) {
+    command_buffer_.internal.end();
+    command_buffer_.internal.submit(view_.context_->gpu().queue, fence);
   }
 }
 
@@ -630,12 +683,20 @@ vTensor::Buffer& vTensor::View::buffer() const {
   return buffer_;
 }
 
-vTensor::Buffer& vTensor::View::buffer(const Access::Flags access) const {
+vTensor::Buffer& vTensor::View::buffer(
+    const Access::Flags access) const {
   CMD command_buffer(*this);
   Buffer& buffer = this->buffer(command_buffer, access);
   command_buffer.submit();
 
   return buffer;
+}
+
+vTensor::Buffer& vTensor::View::buffer(
+    api::Command::Buffer& command_buffer_,
+    const Access::Flags access) const {
+  CMD command_buffer(*this, command_buffer_);
+  return buffer(command_buffer, access);
 }
 
 vTensor::Buffer& vTensor::View::buffer(
@@ -706,12 +767,20 @@ vTensor::Image& vTensor::View::image() const {
   return image_;
 }
 
-vTensor::Image& vTensor::View::image(const Access::Flags access) const {
+vTensor::Image& vTensor::View::image(
+    const Access::Flags access) const {
   CMD command_buffer(*this);
   Image& image = this->image(command_buffer, access);
   command_buffer.submit();
 
   return image;
+}
+
+vTensor::Image& vTensor::View::image(
+    api::Command::Buffer& command_buffer_,
+    const Access::Flags access) const {
+  CMD command_buffer(*this, command_buffer_);
+  return image(command_buffer, access);
 }
 
 vTensor::Image& vTensor::View::image(
