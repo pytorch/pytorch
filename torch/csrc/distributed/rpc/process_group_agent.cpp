@@ -153,6 +153,8 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
 }
 
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
+  TORCH_CHECK(
+      id >= 0 && id < allWorkerInfo_.size(), "Invalid destination: ", id);
   return allWorkerInfo_[id];
 }
 

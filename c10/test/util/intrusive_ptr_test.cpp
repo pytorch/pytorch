@@ -1659,7 +1659,13 @@ TEST(WeakIntrusivePtrTest, expiredPtr_whenLocking_thenReturnsNullType) {
   var.ptr.reset();
   EXPECT_TRUE(var.weak.expired());
   intrusive_ptr<SomeClass> locked = var.weak.lock();
-  EXPECT_TRUE(!locked.defined());
+  EXPECT_FALSE(locked.defined());
+}
+
+TEST(WeakIntrusivePtrTest, weakNullPtr_locking) {
+  auto weak_ptr = make_invalid_weak<SomeClass>();
+  intrusive_ptr<SomeClass> locked = weak_ptr.lock();
+  EXPECT_FALSE(locked.defined());
 }
 
 TEST(
