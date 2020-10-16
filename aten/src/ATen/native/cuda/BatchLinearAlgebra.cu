@@ -1618,7 +1618,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
     }
 
     U_working_copy = same_stride_to(U_working_copy, self.options());
-    S_working_copy = same_stride_to(S_working_copy, self.options());
+    S_working_copy = same_stride_to(S_working_copy, S_working_copy.options().device(self.device()));
     VT_working_copy = same_stride_to(VT_working_copy, self.options());
 
     if (compute_uv) {
@@ -1631,7 +1631,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
     }
   } else {
     U_working_copy = same_stride_to(U_working_copy, self.options()).zero_();
-    S_working_copy = same_stride_to(S_working_copy, self.options());
+    S_working_copy = same_stride_to(S_working_copy, S_working_copy.options().device(self.device()));
     VT_working_copy = same_stride_to(VT_working_copy, self.options()).zero_();
   }
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);

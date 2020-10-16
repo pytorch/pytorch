@@ -15,14 +15,16 @@ Tensor empty_memory_format(
       !(options_.has_memory_format() && memory_format.has_value()),
       "Cannot set memory_format both in TensorOptions and explicit argument!");
 
-  const TensorOptions options = options_.merge_in(TensorOptions().memory_format(memory_format));
+  const TensorOptions options =
+      options_.merge_in(TensorOptions().memory_format(memory_format));
+
   verify(options);
 
   return at::detail::make_tensor<vTensorImpl>(
       DispatchKeySet(DispatchKey::Vulkan),
       options.dtype(),
       at::Device(at::kVulkan),
-      vTensor(sizes, options),
+      vTensor(api::context(), sizes, options),
       sizes,
       IntArrayRef{});
 }
@@ -79,7 +81,7 @@ Tensor to(
   // std::cout << "from " << self.options().device() << " to " << *device << std::endl;
   // std::cout << "from " << self.options().pinned_memory() << " to " << *pin_memory << std::endl;
 
-  return empty_memory_format(std::vector<int64_t>{1, 2, 3, 3}, to_options);
+  return empty_memory_format(self.sizes(), to_options, memory_format);
 }
 
 #ifdef USE_VULKAN_API

@@ -268,6 +268,25 @@ class TestCheckpoint(TestCase):
         out = checkpoint(run_fn, input_var, None)
         out.sum().backward()
 
+    def test_checkpoint_partial_grad(self):
+        def run_fn(tensor1, tensor2):
+            # tensor 2 is used for other application logic
+            return tensor1, tensor2
+        input_var = torch.randn(1, 4, requires_grad=True)
+        input_var2 = torch.randn(1, 4, requires_grad=False)
+        out = checkpoint(run_fn, input_var, input_var2)
+        out[0].sum().backward()
+
+        def run_fn(tensor1, tensor2):
+            return tensor1
+        input_var = torch.randn(1, 4, requires_grad=False)
+        input_var2 = torch.randn(1, 4, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"none of output has requires_grad=True, this checkpoint\(\) is not necessary"
+        ):
+            out = checkpoint(run_fn, input_var, input_var2)
+            out.sum().backward()
 
 class TestDataLoader(TestCase):
     def setUp(self):
