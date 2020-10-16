@@ -77,6 +77,8 @@ TypePtr IValue::type() const {
       return TensorType::create(toTensor());
     case Tag::Double:
       return FloatType::get();
+    case Tag::ComplexDouble:
+      return FloatType::get();
     case Tag::Int:
       return IntType::get();
     case Tag::Bool:
