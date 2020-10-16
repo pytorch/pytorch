@@ -736,7 +736,13 @@ c10::intrusive_ptr<Future> GraphExecutor::runAsync(Stack& stack) {
 }
 
 size_t GraphExecutor::getDefaultNumBailOuts() {
-  return getProfilingMode() ? getBailoutDepth().load() : 0;
+  // if getGraphExecutorOptimize is not set we shouldn't
+  // be profiling. Returning 0 makes us run SimpleExecutor
+  // which in turn also checks getGraphExecutorOptimize
+  // and runs only required passes
+  return getProfilingMode() && getGraphExecutorOptimize()
+      ? getBailoutDepth().load()
+      : 0;
 }
 
 ExecutionPlan GraphExecutor::getPlanFor(
