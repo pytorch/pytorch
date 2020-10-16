@@ -285,8 +285,8 @@ class TestUnaryUfuncs(TestCase):
                 exact_dtype = False
 
                 if dtype in [torch.uint8, torch.int8, torch.bool]:
-                    # For the above dtypes,
-                    # `torch` prmotes and computes output in `float` while numpy in `float16`
+                    # NOTE: For these dtypes, PyTorch computes in the default scalar type (float)
+                    # while NumPy computes in float16
                     self.assertEqualHelper(actual, expected, msg, dtype=dtype,
                                            exact_dtype=exact_dtype, rtol=1e-4, atol=1e-3)
                     continue
