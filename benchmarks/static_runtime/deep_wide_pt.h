@@ -57,7 +57,8 @@ struct DeepAndWideFast : torch::nn::Module {
 
       auto user_emb_t = at::native::transpose(user_emb, 1, 2);
       auto dp_unflatten = at::native::bmm_cpu(ad_emb_packed, user_emb_t);
-      auto dp = at::native::flatten(dp_unflatten, 1);
+      // auto dp = at::native::flatten(dp_unflatten, 1);
+      auto dp = dp_unflatten.view({dp_unflatten.size(0), 1});
       auto input = at::native::_cat_cpu({dp, wide_preproc}, 1);
 
       // fc1 = torch::nn::functional::linear(input, fc_w_, fc_b_);
@@ -79,16 +80,26 @@ struct DeepAndWideFast : torch::nn::Module {
 
       return pred;
     } else {
+      // Potential optimization: add and mul could be fused together (e.g. with
+      // Eigen).
       at::native::add_out(prealloc_tensors[0], wide, mu_);
       at::native::mul_out(prealloc_tensors[1], prealloc_tensors[0], sigma_);
-      // Placeholder for ReplaceNaN
+
       at::native::clamp_out(
           prealloc_tensors[2], prealloc_tensors[1], -10.0, 10.0);
 
+      // Potential optimization: original tensor could be pre-transposed.
       prealloc_tensors[3] = at::native::transpose(user_emb, 1, 2);
+
+      // Potential optimization: call MKLDNN directly.
       at::native::bmm_out_cpu(
           prealloc_tensors[4], ad_emb_packed, prealloc_tensors[3]);
-      prealloc_tensors[5] = at::native::flatten(prealloc_tensors[4], 1);
+
+      prealloc_tensors[5] =
+          prealloc_tensors[4].view({prealloc_tensors[4].size(0), 1});
+
+      // Potential optimization: we can replace cat with carefully constructed
+      // tensor views on the output that are passed to the _out ops above.
       at::native::_cat_out_cpu(
           prealloc_tensors[6], {prealloc_tensors[5], prealloc_tensors[2]}, 1);
       at::native::addmm_cpu_out(

@@ -13,6 +13,10 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends | Disp
   DispatchKey::PrivateUse3,
 });
 
+bool isBackendDispatchKey(DispatchKey t) {
+  return t != DispatchKey::Undefined && backend_dispatch_keyset.has(t);
+}
+
 // math_dispatch_keyset contains all keys in backend_dispatch_keyset and autograd_dispatch_keyset
 // Alias key DispatchKey::Math maps to math_dispatch_keyset.
 constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset | autograd_dispatch_keyset;
@@ -31,6 +35,8 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   }
 }
 
+// for a given autograd key, return the (guaranteed nonempty) set of associated backend keys.
+// for a non-autograd key, return the empty keyset.
 DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
   switch (t) {
     case DispatchKey::AutogradCPU:
