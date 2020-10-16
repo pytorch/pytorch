@@ -452,6 +452,21 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   std::lock_guard<std::mutex> lock(compile_mutex);
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
 
+  // no opt mode
+  if (!getGraphExecutorOptimize()) {
+    if (!fallback_plan_) {
+      auto copy = graph->copy();
+      GRAPH_DEBUG(
+          "Before LowerGradOf (beginning of runNooptPassPipeline)\n", *graph);
+      LowerGradOf(*copy);
+      GRAPH_DEBUG("After LowerGradOf, before RemoveExpands\n", *graph);
+      RemoveExpands(copy);
+      fallback_plan_ = ExecutionPlan(copy, function_name_);
+      GRAPH_DUMP("NoOpt Graph: ", copy);
+    }
+    return *fallback_plan_;
+  }
+
   // if tensorExprFuserEnabled() returns true we need to persist the very first
   // time ProfilingGraphExecutorImpl is called, so we can update it correctly
   // for fallback functions in ProfilingGraphExecutorImpl Else,
