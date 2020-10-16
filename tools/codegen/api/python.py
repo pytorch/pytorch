@@ -112,31 +112,82 @@ from typing import Optional, Union, Sequence, Set, List, Tuple
 #    As demonstrated above, the binding can involve reordering,
 #    packing, unpacking and special local inits.
 #
-# The following diagram illustrates how different data models are used
-# to generate different parts of the code:
 #
-#             +-------------------+     +-------------------------------------+
-#   +-------> | Python Signatures | --> |       PythonArgParser Schema        |
-#   |         +-------------------+     +-------------------------------------+
-#   |                         |                            .
-#   |                         |                            .
-#   |                         |                            .
-# +------------------+        |         +-------------------------------------+
-# | Native Functions |        +-------> | PythonArgParser -> Cpp Args Binding |
-# +------------------+        |         +-------------------------------------+
-#   |                         |                            .
-#   |                         |                            .
-#   |                         |                            .
-#   |         +-------------------+     +-------------------------------------+
-#   +-------> |  Cpp Signatures   | --> |        Cpp Function Dispatch        |
-#             +-------------------+     +-------------------------------------+
+#  Let's look at a concrete example:
+#
+#      static PythonArgParser parser({
+#        "abs(Tensor input, *, Tensor out=None)",
+#        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#         ^
+#         +--- Python Schema, represented by PythonSignature and PythonArgument
+#
+#      }, /*traceable=*/true);
+#
+#      ParsedArgs<2> parsed_args;
+#      auto _r = parser.parse(nullptr, args, kwargs, parsed_args);
+#
+#      ...
+#
+#      if (_r.isNone(1)) {
+#          ~~~~~~~~~~~~  <--- Scattered PythonArgParser output (arg name = 'out')
+#                             represented by PythonArgParserOutputExpr
+#
+#        // aten::abs(Tensor self) -> Tensor
+#        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#         ^
+#         +--- NativeFunction schema, base version
+#
+#        auto dispatch_abs = [](const Tensor & self) -> Tensor {
+#                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#                             ^
+#                             +--- dispatch_lambda_args / dispatch_lambda_return_str
+#                                  generated from NativeFunction / CppSignature
+#                                  (deprecated PythonSignature is special)
+#                                  arguments are represented by DispatchLambdaArgument
+#
+#          pybind11::gil_scoped_release no_gil;
+#          return self.abs();
+#                 ~~~~~~~~~~~  <--- cpp_dispatch_target / cpp_dispatch_exprs
+#                                   generated from NativeFunction / CppSignature
+#        };
+#        return wrap(dispatch_abs(_r.tensor(0)));
+#                                 ~~~~~~~~~~~~~
+#                                  ^
+#                                  +--- dispatch_lambda_exprs
+#                                       binding PythonArgParserOutputExpr (python args)
+#                                       and DispatchLambdaArgument (c++ args)
+#
+#      } else {
+#        // aten::abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+#        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#         ^
+#         +--- NativeFunction schema, out-variant
+#
+#        auto dispatch_abs_out = [](Tensor out, const Tensor & self) -> Tensor {
+#          pybind11::gil_scoped_release no_gil;
+#          return at::abs_out(out, self);
+#        };
+#        return wrap(dispatch_abs_out(_r.tensor(1), _r.tensor(0)));
+#      }
+#
 
 @dataclass(frozen=True)
 class PythonArgument:
     name: str
     type: Type
-    cpp_type_str: str  # TODO: maybe generate on-the-fly?
+
+    # Consistent with 'type' for most cases, except for some TensorOptions fields
+    # which are hardcoded (see 'signature()' method).
+    cpp_type_str: str
+
     default: Optional[str]
+
+    # Used to generate the default init expr for some PythonArgParser outputs, e.g.:
+    #
+    #   _r.layoutWithDefault(3, layout_from_backend(self.options().backend())))
+    #                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    #                            ^
+    #                            +--- default_init str
     default_init: Optional[str]
 
     # Compute argument formal for python argument parsing.
@@ -207,6 +258,8 @@ class PythonOutArgument(PythonArgument):
                 outputs=outputs,
             )
         elif size > 1:
+            if any(map(lambda a: not a.type.is_tensor_like(), outputs)):
+                raise RuntimeError(f'Unsupported output type: {outputs}')
             return PythonOutArgument(
                 name='out',
                 type=ListType(BaseType(BaseTy.Tensor), size),
@@ -804,6 +857,17 @@ def arg_parser_output_expr(
         argument=a,
     )
 
+# Returns a map with key = arg_name and value = PythonArgParserOutputExpr.
+def arg_parser_output_exprs(
+    ps: PythonSignature, f: NativeFunction, *, method: bool
+) -> Dict[str, PythonArgParserOutputExpr]:
+    lambda_args = dispatch_lambda_args(f, method, python_signature=ps)
+    lambda_args_map = dict(map(lambda a: (a.name, a), lambda_args))
+
+    return dict(map(lambda e: (e.name, e),
+                    map(lambda i: arg_parser_output_expr(i[0], i[1], lambda_args_map.get(i[1].name)),
+                        enumerate(ps.arguments()))))
+
 # argument name to 'simple_type' for scattered tensor options fields
 TENSOR_OPTIONS_FIELDS = {
     'dtype': 'ScalarType',
@@ -813,30 +877,27 @@ TENSOR_OPTIONS_FIELDS = {
     'requires_grad': 'bool',
 }
 
-def bind_python_cpp(
-    ps: PythonSignature, f: NativeFunction, method: bool
+# bind arg parser outputs (python args) with dispatch lambda arguments (c++ args).
+def dispatch_lambda_exprs(
+    ps: PythonSignature, f: NativeFunction, *, method: bool
 ) -> Tuple[
     LocalInitExprs,
     DispatchLambdaArgumentExprs,
-    Dict[str, PythonArgParserOutputExpr],
 ]:
-    has_toptions = has_tensor_options(f)
+    # This method is to bind 'arg_parser_outputs' and 'lambda_args' by producing
+    # 'inits' and 'lambda_args_exprs' for each lambda argument using arg parser
+    # outputs.
+    arg_parser_outputs = arg_parser_output_exprs(ps, f, method=method)
     lambda_args = dispatch_lambda_args(f, method, python_signature=ps)
     inits: List[str] = []
     lambda_args_exprs: Dict[str, str] = dict()
 
-    # 1. bind python argument names and PythonArgParser output RHS expr.
-    lambda_args_map = dict(map(lambda a: (a.name, a), lambda_args))
+    has_toptions = has_tensor_options(f)
 
-    arg_parser_output_exprs: Dict[str, PythonArgParserOutputExpr] = \
-        dict(map(lambda e: (e.name, e),
-                 map(lambda i: arg_parser_output_expr(i[0], i[1], lambda_args_map.get(i[1].name)),
-                     enumerate(ps.arguments()))))
-
-    # 2. special inits/unpacking to provide binding exprs for lambda arguments.
+    # 1. special inits/unpacking to provide binding exprs for lambda arguments.
     for a in ps.arguments(skip_tensor_options=True):
         name = a.name
-        arg_parser_expr = arg_parser_output_exprs[a.name].expr
+        arg_parser_expr = arg_parser_outputs[a.name].expr
 
         if has_toptions and name == 'self':
             # TODO: why this needs to be special case?
@@ -869,7 +930,7 @@ def bind_python_cpp(
     if method:
         lambda_args_exprs['self'] = 'self'
 
-    # 3. special packing/checking for TensorOptions.
+    # 2. special packing/checking for TensorOptions.
     tensor_options_args_names = list(map(lambda a: a.name, ps.tensor_options_args))
     if has_toptions:
         if f.func.is_out_fn():
@@ -887,16 +948,16 @@ def bind_python_cpp(
 
         inits.append(f'''\
 const auto options = TensorOptions()
-    .dtype({arg_parser_output_exprs['dtype'].expr})
-    .device({arg_parser_output_exprs['device'].expr})
-    .layout({arg_parser_output_exprs['layout'].expr})
-    .requires_grad({arg_parser_output_exprs['requires_grad'].expr})
-    .pinned_memory({arg_parser_output_exprs['pin_memory'].expr});
+    .dtype({arg_parser_outputs['dtype'].expr})
+    .device({arg_parser_outputs['device'].expr})
+    .layout({arg_parser_outputs['layout'].expr})
+    .requires_grad({arg_parser_outputs['requires_grad'].expr})
+    .pinned_memory({arg_parser_outputs['pin_memory'].expr});
 torch::utils::maybe_initialize_cuda(options);
 ''')
         lambda_args_exprs['options'] = 'options'
 
-    # 4. special case - access scattered TensorOptions fields without packing
+    # 3. special case - access scattered TensorOptions fields without packing
     # TODO: maybe move to the generator side as it's not related to binding.
     if not has_toptions and tensor_options_args_names:
         if 'dtype' in tensor_options_args_names:
@@ -909,9 +970,9 @@ torch::utils::maybe_initialize_cuda(options);
                     f'{f.func}: incomplete tensor options for output check')
 
             inits.append(f"""\
-check_out_type_matches({arg_parser_output_exprs['out'].expr}, {arg_parser_output_exprs['dtype'].expr},
-                       {arg_parser_output_exprs['dtype'].is_none_expr}, {arg_parser_output_exprs['layout'].expr},
-                       {arg_parser_output_exprs['device'].expr}, {arg_parser_output_exprs['device'].is_none_expr});
+check_out_type_matches({arg_parser_outputs['out'].expr}, {arg_parser_outputs['dtype'].expr},
+                       {arg_parser_outputs['dtype'].is_none_expr}, {arg_parser_outputs['layout'].expr},
+                       {arg_parser_outputs['device'].expr}, {arg_parser_outputs['device'].is_none_expr});
 """)
         # we'll set requires_grad on outgoing tensor
         if 'requires_grad' not in tensor_options_args_names:
@@ -923,5 +984,4 @@ check_out_type_matches({arg_parser_output_exprs['out'].expr}, {arg_parser_output
         DispatchLambdaArgumentExprs(
             exprs=tuple(map(lambda a: lambda_args_exprs[a.name], lambda_args)),
         ),
-        arg_parser_output_exprs,
     )

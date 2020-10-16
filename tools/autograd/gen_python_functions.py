@@ -40,7 +40,7 @@ from tools.codegen.api.python import *
 from tools.codegen.gen import cpp_string, with_native_function
 from tools.codegen.model import *
 
-from typing import Dict, Optional, Sequence, List, Tuple, Any
+from typing import Dict, Optional, List, Any
 
 #
 # declarations blocklist
@@ -845,7 +845,9 @@ def init(native_yaml_path: str) -> None:
 # Multiple decl entries can map to the same native function (because of deprecated decl).
 def decl_to_native_function(decl: Dict[str, Any]) -> NativeFunction:
     assert NF_TABLE is not None, 'need to initialize codegen.api.python with init()'
-    function_schema_str = decl['schema_string'][6:]
+    function_schema_str = decl['schema_string']
+    assert function_schema_str.startswith('aten::'), f'unknown namespace: {function_schema_str}'
+    function_schema_str = function_schema_str[len('aten::'):]
     assert function_schema_str in NF_TABLE, f'cannot find func: {function_schema_str}'
     return NF_TABLE[function_schema_str]
 
@@ -891,11 +893,11 @@ def decl_to_python_signature(decl: Dict[str, Any], *, method: bool) -> PythonSig
     return python_sig
 
 
-def emit_single_dispatch(ps: PythonSignature, declaration, method: bool):
+def emit_single_dispatch(ps: PythonSignature, decl: Dict[str, Any], method: bool) -> str:
     """
     Emit dispatch code for a single declared overload.
     """
-    f = declaration['native_function']
+    f = decl['native_function']
 
     @with_native_function
     def go(f: NativeFunction) -> str:
@@ -904,9 +906,9 @@ def emit_single_dispatch(ps: PythonSignature, declaration, method: bool):
         schema_comment = f'// {deprecated}aten::{f.func}'
 
         # dispatch lambda signature
-        name = declaration['name']
+        name = decl['name']
         lambda_formals = ', '.join(map(lambda a: f"{a.type_str} {a.name}",
-                                    dispatch_lambda_args(f, method, python_signature=ps)))
+                                       dispatch_lambda_args(f, method, python_signature=ps)))
         lambda_return = dispatch_lambda_return_str(f)
 
         # dispatch lambda body
@@ -914,7 +916,8 @@ def emit_single_dispatch(ps: PythonSignature, declaration, method: bool):
         dispatch_args = ', '.join(cpp_dispatch_exprs(f, method, python_signature=ps))
 
         # from arg parser outputs to dispatch lambda arguments
-        binding_init_exprs, lambda_arg_exprs, parser_outputs = bind_python_cpp(ps, f, method)
+        parser_outputs = arg_parser_output_exprs(ps, f, method=method)
+        binding_init_exprs, lambda_arg_exprs = dispatch_lambda_exprs(ps, f, method=method)
         inits = '\n'.join(binding_init_exprs.exprs)
         lambda_args = ', '.join(lambda_arg_exprs.exprs)
 
@@ -922,9 +925,9 @@ def emit_single_dispatch(ps: PythonSignature, declaration, method: bool):
         set_requires_grad = f'.set_requires_grad({parser_outputs["requires_grad"].expr})' \
             if ps.tensor_options_args and not has_tensor_options(f) else ''
 
-        auto_no_gil = '' if declaration['with_gil'] else 'pybind11::gil_scoped_release no_gil;'
+        auto_no_gil = '' if decl['with_gil'] else 'pybind11::gil_scoped_release no_gil;'
 
-        namedtuple_typeref = declaration['namedtuple_typeref']
+        namedtuple_typeref = decl['namedtuple_typeref']
 
         if lambda_return == 'void':
             return f"""\
