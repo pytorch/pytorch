@@ -43,7 +43,9 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
 
 
 def pin_memory(data):
-    if isinstance(data, torch.Tensor):
+    if hasattr(data, "pin_memory"):
+        return data.pin_memory()
+    elif isinstance(data, torch.Tensor):
         return data.pin_memory()
     elif isinstance(data, string_classes):
         return data
@@ -53,7 +55,5 @@ def pin_memory(data):
         return type(data)(*(pin_memory(sample) for sample in data))
     elif isinstance(data, container_abcs.Sequence):
         return [pin_memory(sample) for sample in data]
-    elif hasattr(data, "pin_memory"):
-        return data.pin_memory()
     else:
         return data
