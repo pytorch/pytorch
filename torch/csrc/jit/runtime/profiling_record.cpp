@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <ATen/core/interned_strings.h>
-#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -10,6 +9,41 @@
 
 namespace torch {
 namespace jit {
+
+namespace {
+
+class ProfileRegistry {
+ public:
+  static ProfileRegistry* getRegistry() {
+    static ProfileRegistry profile_registry_;
+    return &profile_registry_;
+  }
+
+  void registerProfileNode(const std::function<bool(const Node*)>& func) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    registry_funcs_.push_back(func);
+  }
+
+  bool shouldProfileNode(const Node* node) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    for (auto func : registry_funcs_) {
+      if (func(node)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+ private:
+  std::vector<std::function<bool(const Node*)>> registry_funcs_;
+  std::mutex mutex_;
+};
+
+} // namespace
+
+void RegisterProfilingNode(const std::function<bool(const Node*)>& func) {
+  ProfileRegistry::getRegistry()->registerProfileNode(func);
+}
 
 bool ShapeSymbolTable::bindSymbolicShapes(
     at::IntArrayRef new_sizes,
@@ -168,10 +202,6 @@ bool needsProfiledInputs(Node* n) {
     return true;
   }
 
-  if (fuser::cuda::canFuseNode(n)) {
-    return true;
-  }
-
   switch (n->kind()) {
     // specialize_autogradzero
     case prim::AutogradAdd:
@@ -194,7 +224,7 @@ bool needsProfiledInputs(Node* n) {
     case aten::mm:
       return true;
     default:
-      return false;
+      return ProfileRegistry::getRegistry()->shouldProfileNode(n);
   }
 }
 
@@ -203,16 +233,12 @@ bool needsProfiledOutput(Node* n) {
     return true;
   }
 
-  if (fuser::cuda::canFuseNode(n)) {
-    return true;
-  }
-
   switch (n->kind()) {
     case prim::AutogradAdd:
     case prim::AutogradZero:
       return true;
     default:
-      return false;
+      return ProfileRegistry::getRegistry()->shouldProfileNode(n);
   }
 }
 

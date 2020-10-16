@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <ATen/core/dispatch/OperatorOptions.h>
-#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
@@ -83,8 +82,6 @@ bool canFuseNode(const Node* node) {
 bool complyWith(
     const at::Tensor& tensor,
     const c10::TensorTypePtr& guard_tensor_type) {
-  FUSER_PERF_SCOPE("CudaFusionGuard::complyWith");
-
   // guard broadcast semantics, contiguity & stride order;
   TORCH_INTERNAL_ASSERT(
       guard_tensor_type && guard_tensor_type->dim().has_value());
@@ -200,7 +197,6 @@ RegisterOperators reg_guard({
         // analysis, we should update aliasdb pass.
         [](const Node* node) -> Operation {
           return [node](Stack* stack) {
-            FUSER_PERF_SCOPE("CudaFusionGuard");
             // TODO: check latency here!!!!
             std::vector<TypePtr> types = node->tys(attr::types);
             const auto num_inputs = types.size();
