@@ -202,6 +202,8 @@ def prepare(model, inplace=False, allow_list=None,
                 CustomModule: ObservedCustomModule
             }
          }
+         # get around the no code warning
+         print(prepare_custom_config_dict)
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare")
@@ -414,7 +416,7 @@ def convert(
     Returns: A module with all the children quantized
 
     Example:
-
+xo
     .. testcode::
         convert_custom_config_dict = {
             # user will manually define the corresponding quantized
@@ -424,6 +426,8 @@ def convert(
                 ObservedCustomModule: QuantizedCustomModule
             }
         }
+        # get around the no code warning
+        print(convert_custom_config_dict)
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.convert")
