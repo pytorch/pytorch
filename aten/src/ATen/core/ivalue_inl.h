@@ -14,6 +14,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/hash.h>
 
 namespace torch {
 namespace jit {
@@ -239,6 +240,10 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
     return std::move(elements_);
   }
   std::shared_ptr<TupleType> type() const;
+
+  static size_t hash(const Tuple& t) {
+    return c10::get_hash(t.elements());
+  }
 
   CAFFE2_API friend bool operator==(
       const ivalue::Tuple& lhs,

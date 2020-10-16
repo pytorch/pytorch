@@ -5,6 +5,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/hash.h>
 #include <cmath>
 
 namespace c10 {
@@ -292,6 +293,46 @@ IValue IValue::equals(const IValue& rhs) const {
       // Unitialized ivalues show up in no-ops when the compiler can prove a
       // value will never be used. Just return false on any equality comparison.
       return false;
+  }
+  // the above switch should be exhaustive
+  TORCH_INTERNAL_ASSERT(false, "we should never reach here")
+}
+
+size_t IValue::hash(const IValue& v) {
+  switch (v.tag) {
+    case Tag::None:
+      return 0;
+    case Tag::Bool:
+      return c10::get_hash(v.payload.as_bool);
+    case Tag::Double:
+      return c10::get_hash(v.payload.as_double);
+    case Tag::Tensor:
+      // Tensor __hash__ is equivalent to `id()`, so take the pointer value of
+      // the tensor to emulate it
+      return c10::get_hash(v.payload.as_int);
+    case Tag::Int:
+      return c10::get_hash(v.payload.as_int);
+    case Tag::String:
+      return c10::get_hash(v.toStringRef());
+    case Tag::Tuple:
+      return c10::get_hash(*v.toTuple());
+    case Tag::Device:
+      return c10::get_hash(v.toDevice());
+    case Tag::GenericDict:
+    case Tag::GenericList:
+    case Tag::Blob:
+    case Tag::Future:
+    case Tag::RRef:
+    case Tag::Object:
+    case Tag::PyObject:
+    case Tag::Capsule:
+    case Tag::Generator:
+    case Tag::Quantizer:
+    case Tag::Enum:
+    case Tag::Stream:
+    case Tag::Uninitialized:
+      throw std::runtime_error(
+          "unhashable type: '" + v.type()->repr_str() + "'");
   }
   // the above switch should be exhaustive
   TORCH_INTERNAL_ASSERT(false, "we should never reach here")

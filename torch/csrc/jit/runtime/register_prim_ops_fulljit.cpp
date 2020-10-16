@@ -635,11 +635,9 @@ RegisterOperators logging_operators(
          },
          aliasAnalysisFromSchema())});
 
-template <typename T>
 void hashValue(Stack* stack) {
   auto value = pop(stack);
-  auto hash = std::hash<T>()(value.to<T>());
-  push(stack, int64_t(hash));
+  push(stack, value.hash());
 }
 
 // As described in https://docs.python.org/3/library/functions.html#round
@@ -1088,16 +1086,8 @@ RegisterOperators reg2({
 
 #undef DEFINE_DIVMOD_MIXED_OP
     Operator(
-        "aten::hash.str(str t) -> int",
-        hashValue<std::string>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::hash.int(int t) -> int",
-        hashValue<int>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::hash.float(float t) -> int",
-        hashValue<double>,
+        "aten::hash.generic(t value) -> int",
+        hashValue,
         aliasAnalysisFromSchema()),
 });
 
