@@ -192,6 +192,7 @@ def prepare(model, inplace=False, allow_list=None,
         `prepare_custom_config_dict`: customization configuration dictionary for prepare function
 
     .. code-block:: python
+
        # Example of prepare_custom_config_dict:
        prepare_custom_config_dict = {
            # user will manually define the corresponding observed
@@ -411,6 +412,7 @@ def convert(
         `convert_custom_config_dict`: custom configuration dictionary for convert function
 
     .. code-block:: python
+
        # Example of convert_custom_config_dict:
        convert_custom_config_dict = {
            # user will manually define the corresponding quantized
