@@ -200,7 +200,7 @@ class PythonArgument:
         # to be consistent across tensor and other types after make Tensor? be
         # optional instead of undefined
         if self.type.is_nullable() and '?' not in typename:
-            typename = '{}?'.format(typename)
+            typename = f'{typename}?'
 
         # s/self/input/ outside method bindings
         # [old codegen] TODO: remove this? doesn't rename in codegen, it's just
@@ -509,7 +509,7 @@ def signature(f: NativeFunction, *, method: bool = False) -> PythonSignature:
     has_tensor_input_arg = any(a.type.is_tensor_like()
                                for a in itertools.chain(f.func.arguments, f.func.kwarg_only_arguments))
     if any(a.name == 'requires_grad' for a in f.func.schema_order_arguments()):
-        raise ValueError('argument named requires_grad not supported')
+        raise ValueError('argument named requires_grad is reserved, should not explicitly add it in the schema')
 
     # [old codegen] this probably won't work if one of the returns is not a tensor,
     # but it will produce a compile-time error that is obvious.
@@ -610,7 +610,7 @@ def _dtype_default_type_hack(name: str) -> str:
 # For out variant the 'out' argument's type is changed from 'Tensor &'
 # to 'Tensor'. It's because when calling the lambda it passes in the
 # PythonArgParser output '_r.tensor(3)', which is stack allocated object
-# and needs to pass by value.
+# and needs to pass by value. Also see comments in 'dispatch_lambda_return_str()'.
 #
 #   // aten::add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
 #   [](Tensor out, const Tensor & self, const Tensor & other, Scalar alpha) -> Tensor
@@ -625,19 +625,18 @@ def _dtype_default_type_hack(name: str) -> str:
 # For deprecated python signature, it should follow deprecated python arg order.
 # TODO: This is to keep same byte-for-byte result as the old codegen - maybe unnecessary?
 
-def dispatch_lambda_args(f: NativeFunction, method: bool, *,
-                         python_signature: Optional[PythonSignature] = None,
+def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction, *, method: bool,
                          ) -> Tuple[DispatchLambdaArgument, ...]:
     # Start with cpp arguments - dispatch lambda signature always include 'self'
     cpp_args: Sequence[CppArgument] = _cpp_signature(f, method=False).arguments()
 
     # Special reorder logic for deprecated python signature
-    if isinstance(python_signature, PythonSignatureDeprecated):
+    if isinstance(ps, PythonSignatureDeprecated):
         m: Dict[str, CppArgument] = dict((a.name, a) for a in cpp_args)
         # reorder according to the deprecated signature
         # ignore 'out' argument when binding to non-output function.
         ordered_args = filter(lambda n: n != 'out' or f.func.is_out_fn(),
-                              python_signature.deprecated_args_names)
+                              ps.deprecated_args_names)
         cpp_args = list(map(lambda n: m[n], ordered_args))
 
     out_args: Set[str] = set(a.name for a in f.func.out_arguments)
@@ -652,6 +651,8 @@ def dispatch_lambda_args(f: NativeFunction, method: bool, *,
         else:
             # For other cases we need prevent dangling refs to temps (unless it's
             # unpacked scattered output)
+            # The reason is explained in the comments above and in 'dispatch_lambda_return_str()'.
+            # TODO: avoid this special handling?
             ensure_temp_safe = len(out_args) <= 1 or not is_out_arg
             if ensure_temp_safe:
                 type_str = {
@@ -861,12 +862,11 @@ def arg_parser_output_expr(
 def arg_parser_output_exprs(
     ps: PythonSignature, f: NativeFunction, *, method: bool
 ) -> Dict[str, PythonArgParserOutputExpr]:
-    lambda_args = dispatch_lambda_args(f, method, python_signature=ps)
+    lambda_args = dispatch_lambda_args(ps, f, method=method)
     lambda_args_map = dict(map(lambda a: (a.name, a), lambda_args))
 
-    return dict(map(lambda e: (e.name, e),
-                    map(lambda i: arg_parser_output_expr(i[0], i[1], lambda_args_map.get(i[1].name)),
-                        enumerate(ps.arguments()))))
+    return {e.name: e for i, a in enumerate(ps.arguments())
+            for e in (arg_parser_output_expr(i, a, lambda_args_map.get(a.name)), )}
 
 # argument name to 'simple_type' for scattered tensor options fields
 TENSOR_OPTIONS_FIELDS = {
@@ -888,7 +888,7 @@ def dispatch_lambda_exprs(
     # 'inits' and 'lambda_args_exprs' for each lambda argument using arg parser
     # outputs.
     arg_parser_outputs = arg_parser_output_exprs(ps, f, method=method)
-    lambda_args = dispatch_lambda_args(f, method, python_signature=ps)
+    lambda_args = dispatch_lambda_args(ps, f, method=method)
     inits: List[str] = []
     lambda_args_exprs: Dict[str, str] = dict()
 

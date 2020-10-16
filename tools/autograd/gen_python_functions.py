@@ -908,7 +908,7 @@ def emit_single_dispatch(ps: PythonSignature, decl: Dict[str, Any], method: bool
         # dispatch lambda signature
         name = decl['name']
         lambda_formals = ', '.join(map(lambda a: f"{a.type_str} {a.name}",
-                                       dispatch_lambda_args(f, method, python_signature=ps)))
+                                       dispatch_lambda_args(ps, f, method=method)))
         lambda_return = dispatch_lambda_return_str(f)
 
         # dispatch lambda body
