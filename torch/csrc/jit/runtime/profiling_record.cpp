@@ -26,7 +26,7 @@ class ProfileRegistry {
 
   bool shouldProfileNode(const Node* node) {
     std::lock_guard<std::mutex> guard(mutex_);
-    for (auto func : registry_funcs_) {
+    for (const auto& func : registry_funcs_) {
       if (func(node)) {
         return true;
       }
