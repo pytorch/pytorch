@@ -349,7 +349,7 @@ void testKernel_4() {
     parseIR(graph_string, &*graph);
     auto compile = [&]() {
       TensorExprKernel k(graph);
-      Stmt* s = k.getCodeGenStmt();
+      k.getCodeGenStmt();
     };
     ASSERT_THROWS_WITH(compile(), "Empty input list is passed to aten::cat");
   }
@@ -376,7 +376,7 @@ void testKernel_4() {
       auto graph = std::make_shared<Graph>();
       parseIR(graph_string, &*graph);
       TensorExprKernel k(graph);
-      Stmt* s = k.getCodeGenStmt();
+      k.getCodeGenStmt();
     };
     ASSERT_THROWS_WITH(compile(ir_dim_99), "invalid 'dim' value in aten::cat");
     ASSERT_THROWS_WITH(
@@ -403,7 +403,6 @@ void testKernelCatInputTypesPromotion() {
     auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
     auto b = at::rand({5, 7, 2}, TensorOptions(kCPU).dtype(at::kHalf));
     auto c = at::rand({5, 9, 2}, TensorOptions(kCPU).dtype(at::kDouble));
-    auto o = at::zeros({5, 19, 2}, TensorOptions(kCPU).dtype(at::kDouble));
     auto ref = at::cat({a, b, c}, 1);
 
     TensorExprKernel k(graph);
@@ -424,7 +423,7 @@ void testKernelCatInputTypesPromotion() {
 
     std::vector<IValue> stack = fmap<IValue>(inputs);
     k.run(stack);
-    o = stack[0].toTensor();
+    auto o = stack[0].toTensor();
 
     // Check sizes
     CHECK_EQ(o.sizes().size(), ref.sizes().size());
