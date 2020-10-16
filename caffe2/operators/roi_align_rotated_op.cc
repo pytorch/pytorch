@@ -291,7 +291,7 @@ void ROIAlignRotatedForward(
 } // namespace
 
 template <>
-C10_EXPORT bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
+CAFFE2_API bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
 
@@ -405,6 +405,8 @@ Based on https://arxiv.org/abs/1703.01086.
         "is a pooled feature map cooresponding to the r-th RoI.");
 
 } // namespace caffe2
+
+
 
 using RoIAlignRotatedOpFloatCPU =
     caffe2::RoIAlignRotatedOp<float, caffe2::CPUContext>;

@@ -13,7 +13,7 @@ C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(RoIAlignRotated)
 namespace caffe2 {
 
 template <typename T, class Context>
-class C10_EXPORT RoIAlignRotatedOp final : public Operator<Context> {
+class CAFFE2_API RoIAlignRotatedOp final : public Operator<Context> {
  public:
   template <class... Args>
   explicit RoIAlignRotatedOp(Args&&... args)
@@ -49,5 +49,6 @@ class C10_EXPORT RoIAlignRotatedOp final : public Operator<Context> {
 };
 
 } // namespace caffe2
+
 
 #endif // ROTATED_ROI_ALIGN_OP_H_
