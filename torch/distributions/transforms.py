@@ -9,6 +9,7 @@ from torch.distributions.utils import (_sum_rightmost, broadcast_all,
                                        lazy_property)
 from torch.nn.functional import pad
 from torch.nn.functional import softplus
+from typing import List
 
 __all__ = [
     'AbsTransform',
@@ -77,6 +78,7 @@ class Transform(object):
             transforms that act jointly on matrices, etc.
     """
     bijective = False
+    codomain: constraints.Constraint
     event_dim = 0
 
     def __init__(self, cache_size=0):
@@ -185,22 +187,27 @@ class _InverseTransform(Transform):
 
     @constraints.dependent_property
     def domain(self):
+        assert self._inv is not None
         return self._inv.codomain
 
     @constraints.dependent_property
     def codomain(self):
+        assert self._inv is not None
         return self._inv.domain
 
     @property
     def bijective(self):
+        assert self._inv is not None
         return self._inv.bijective
 
     @property
     def sign(self):
+        assert self._inv is not None
         return self._inv.sign
 
     @property
     def event_dim(self):
+        assert self._inv is not None
         return self._inv.event_dim
 
     @property
@@ -208,17 +215,21 @@ class _InverseTransform(Transform):
         return self._inv
 
     def with_cache(self, cache_size=1):
+        assert self._inv is not None
         return self.inv.with_cache(cache_size).inv
 
     def __eq__(self, other):
         if not isinstance(other, _InverseTransform):
             return False
+        assert self._inv is not None
         return self._inv == other._inv
 
     def __call__(self, x):
+        assert self._inv is not None
         return self._inv._inv_call(x)
 
     def log_abs_det_jacobian(self, x, y):
+        assert self._inv is not None
         return -self._inv.log_abs_det_jacobian(y, x)
 
 
@@ -500,8 +511,8 @@ class AffineTransform(Transform):
 
     @property
     def sign(self):
-        if isinstance(self.scale, numbers.Number):
-            return 1 if self.scale > 0 else -1 if self.scale < 0 else 0
+        if isinstance(self.scale, numbers.Real):
+            return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
         return self.scale.sign()
 
     def _call(self, x):
@@ -513,7 +524,7 @@ class AffineTransform(Transform):
     def log_abs_det_jacobian(self, x, y):
         shape = x.shape
         scale = self.scale
-        if isinstance(scale, numbers.Number):
+        if isinstance(scale, numbers.Real):
             result = torch.full_like(x, math.log(abs(scale)))
         else:
             result = torch.abs(scale).log()
@@ -575,7 +586,7 @@ class StickBreakingTransform(Transform):
         offset = x.shape[-1] + 1 - x.new_ones(x.shape[-1]).cumsum(-1)
         z = _clipped_sigmoid(x - offset.log())
         z_cumprod = (1 - z).cumprod(-1)
-        y = pad(z, (0, 1), value=1) * pad(z_cumprod, (1, 0), value=1)
+        y = pad(z, [0, 1], value=1) * pad(z_cumprod, [1, 0], value=1)
         return y
 
     def _inverse(self, y):
@@ -619,6 +630,7 @@ class LowerCholeskyTransform(Transform):
 
 
 class CatTransform(Transform):
+    tseq: List[numbers.Number]
     """
     Transform functor that applies a sequence of transforms `tseq`
     component-wise to each submatrix at `dim`, of length `lengths[dim]`,

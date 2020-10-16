@@ -13,6 +13,8 @@ namespace at {
 enum class C10_API_ENUM RecordScope : uint8_t {
   // c10/ATen ops, autograd nodes
   FUNCTION = 0,
+  // Functions/nodes called from the autograd
+  BACKWARD_FUNCTION,
   // TorchScript functions, methods
   TORCHSCRIPT_FUNCTION,
   // User defined scope (e.g. with record_function())
@@ -115,8 +117,20 @@ struct TORCH_API RecordFunction {
   // Retrieves the thread_id that this RecordFunction ran start callbacks with.
   // Useful for writing thread safe end callbacks that may be potentially
   // executed in a different thread (async ops)
-  inline uint64_t getStartCallbacksThreadId() const {
+  inline uint64_t threadId() const {
     return thread_id_;
+  }
+
+  // For backward functions - thread id of the corresponding forward function,
+  // or zero otherwise;
+  // used alongside with sequence number to correlate backward functions with
+  // the forward ones
+  inline uint64_t forwardThreadId() const {
+    return fwd_thread_id_;
+  }
+
+  inline void setForwardThreadId(uint64_t thread_id) {
+    fwd_thread_id_ = thread_id;
   }
 
   inline RecordScope scope() const {
@@ -204,6 +218,9 @@ struct TORCH_API RecordFunction {
 
   // The logical thread_id that this RecordFunction was created with
   uint64_t thread_id_ = 0;
+
+  // For backward functions - thread id of the the forward function
+  uint64_t fwd_thread_id_ = 0;
 
   // Unique id for this RecordFunction, used in callbacks to track start
   // and end of ranges
