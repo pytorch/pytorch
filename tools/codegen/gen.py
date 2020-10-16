@@ -235,7 +235,7 @@ def compute_type_method(
             return_kw = "    return "
 
             cuda_guard = ""
-            if dispatch_to_all_backends or 'CUDA' in dispatch or 'Vulkan' == dispatch or 'Metal' == dispatch:  # type: ignore
+            if dispatch_to_all_backends or 'CUDA' in dispatch or 'Vulkan' == dispatch:  # type: ignore
                 self_args = (a for a in f.func.arguments if a.name == "self")
 
                 # There is precedence for which argument we use to do
@@ -260,7 +260,7 @@ def compute_type_method(
 
                 # TODO: There is probably a simpler version of this that
                 # works just as well.
-                if f.device_guard and (dispatch_to_all_backends or 'Vulkan' == dispatch or 'Metal' == dispatch) and has_tensor_options:
+                if f.device_guard and (dispatch_to_all_backends or 'Vulkan' == dispatch) and has_tensor_options:
                     cuda_guard = cuda_guard_from_tensor_options
                 elif f.device_guard and dispatch is not None and 'CUDA' in dispatch and has_tensor_options:
                     cuda_guard = f"""\
