@@ -11,6 +11,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 using id_map = std::unordered_map<IterDomain*, IterDomain*>;
 
@@ -568,6 +569,7 @@ std::pair<TensorView*, unsigned int> TransformReplay::replayCasP(
   return {consumer, replay.second};
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

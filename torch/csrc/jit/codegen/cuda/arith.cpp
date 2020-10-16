@@ -6,6 +6,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace {
 
@@ -731,6 +732,7 @@ TensorView* clamp(TensorView* in, Val* min_val, Val* max_val) {
   return clamp(in->as<Val>(), min_val, max_val)->as<TensorView>();
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

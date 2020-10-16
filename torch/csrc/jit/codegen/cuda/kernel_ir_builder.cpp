@@ -4,6 +4,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 namespace kir {
 
 bool isLoweredScalar(const Val* val) {
@@ -99,6 +100,7 @@ Val* IrBuilder::modExpr(Val* lhs, Val* rhs) {
 }
 
 } // namespace kir
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

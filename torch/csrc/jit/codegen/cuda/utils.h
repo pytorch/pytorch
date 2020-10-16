@@ -6,6 +6,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // Common Functions
 constexpr int64_t ceilDiv(int64_t a, int64_t b) {
@@ -74,6 +75,7 @@ class PolymorphicBase {
   }
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

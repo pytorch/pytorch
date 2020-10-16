@@ -14,6 +14,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 std::vector<kir::Bool*> PredicateCompute::computePredicates(
     const TensorView* tv,
@@ -287,6 +288,7 @@ UnrollPredicate::UnrollPredicate(
   openLoop(unrolled_loop);
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

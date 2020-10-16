@@ -13,6 +13,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // Generates a DOT (https://www.graphviz.org) graph
 // representation of a fuser IR
@@ -110,6 +111,7 @@ class TORCH_CUDA_API IrGraphGenerator : private OptInConstDispatch {
   int next_id_ = 1;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch
