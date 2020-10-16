@@ -1382,6 +1382,8 @@ def method_tests():
         ('sort', (), NO_ARGS, 'scalar'),
         ('sort', (), (0,), 'dim_scalar'),
         ('sort', (), (0, True), 'dim_desc_scalar'),
+        ('linalg.tensorsolve', (2, S, M), ((2, S),),
+         '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('topk', (S, M, S), (3,)),
         ('topk', (S, M, S), (3, 1), 'dim', (), [1]),
         ('topk', (S, M, S), (3, 1, True), 'dim_desc', (), [1]),
@@ -1707,5 +1709,7 @@ def exclude_tensor_method(name, test_name):
     if not is_inplace and name in exclude_outplace_tensor_method:
         return True
     if 'fft.' in name:
+        return True
+    if 'linalg.' in name:
         return True
     return False
