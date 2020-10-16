@@ -54,6 +54,7 @@ Creating TorchScript Code
     load
     ignore
     unused
+    isinstance
 
 Mixing Tracing and Scripting
 ----------------------------
