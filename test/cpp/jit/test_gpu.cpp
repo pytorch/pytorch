@@ -1399,7 +1399,7 @@ int ceilDiv_(int a, int b) {
   return (a + b - 1) / b;
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAt1) {
+TEST(NVFuserTest, FusionAdvancedComputeAt1_CUDA) {
   // Case 1
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
@@ -1475,7 +1475,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAt1) {
   TORCH_CHECK(at::allclose(kernel_tv7, t7));
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAt2) {
+TEST(NVFuserTest, FusionAdvancedComputeAt2_CUDA) {
   // Case 2
   // tv1 = tv0 * -1
   // tv2 = tv0 + 3
@@ -1537,7 +1537,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAt2) {
   TORCH_CHECK(at::allclose(outputs[1], t6));
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAt3) {
+TEST(NVFuserTest, FusionAdvancedComputeAt3_CUDA) {
   // Case 3
   // T2 = T1 * 0.979361
   // T3 = T2 * T0
@@ -1592,7 +1592,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAt3) {
   TORCH_CHECK(at::allclose(kernel_tv3, t3));
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAt4) {
+TEST(NVFuserTest, FusionAdvancedComputeAt4_CUDA) {
   // Case 4
   // T4 = T2 - T3
   // T5 = T1 + T4
@@ -1658,7 +1658,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAt4) {
   TORCH_CHECK(at::allclose(outputs[0], t6));
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAt5) {
+TEST(NVFuserTest, FusionAdvancedComputeAt5_CUDA) {
   // Case 5
   // tv2 = tv0 + 2.0
   // tv3 = tv1 * tv2
@@ -3837,7 +3837,7 @@ TEST(NVFuserTest, FusionComplexBCast_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing1) {
+TEST(NVFuserTest, FusionAdvancedIndexing1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3888,7 +3888,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing1) {
   TORCH_CHECK(t4.allclose(outputs[0]));
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing2) {
+TEST(NVFuserTest, FusionAdvancedIndexing2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3939,7 +3939,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing2) {
   TORCH_CHECK(t4.allclose(outputs[0]));
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing3) {
+TEST(NVFuserTest, FusionAdvancedIndexing3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3970,7 +3970,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing3) {
   TORCH_CHECK(t3.allclose(outputs[0]));
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing4) {
+TEST(NVFuserTest, FusionAdvancedIndexing4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4901,7 +4901,7 @@ TEST(NVFuserTest, FusionReductionMultiConsumer_CUDA) {
       tv1->getThisComputeAtAxis() == 2 && tv1->getRelativeComputeAtAxis() == 2);
 }
 
-TEST(NVFuserTest, FusionComputeAtExprOrder1) {
+TEST(NVFuserTest, FusionComputeAtExprOrder1_CUDA) {
   for (int i = 0; i < 2; ++i) {
     Fusion fusion;
     FusionGuard fg(&fusion);
@@ -4937,7 +4937,7 @@ TEST(NVFuserTest, FusionComputeAtExprOrder1) {
   }
 }
 
-TEST(NVFuserTest, FusionComputeAtExprOrder2) {
+TEST(NVFuserTest, FusionComputeAtExprOrder2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
