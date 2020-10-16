@@ -191,15 +191,8 @@ def prepare(model, inplace=False, allow_list=None,
         `observer_non_leaf_module_list`: list of non-leaf modules we want to add observer
         `prepare_custom_config_dict`: customization configuration dictionary for prepare function
 
-    .. note::
-       Example of prepare_custom_config_dict:
-       import torch
-       class CustomModule(torch.nn.Module):
-           pass
-
-       class ObservedCustomModule(torch.nn.Module):
-           pass
-
+    .. code-block:: python
+       # Example of prepare_custom_config_dict:
        prepare_custom_config_dict = {
            # user will manually define the corresponding observed
            # module class which has a from_float class method that converts
@@ -208,8 +201,6 @@ def prepare(model, inplace=False, allow_list=None,
                CustomModule: ObservedCustomModule
            }
         }
-         # get around the no code/output warning
-         print(prepare_custom_config_dict)
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare")
@@ -223,7 +214,7 @@ def prepare(model, inplace=False, allow_list=None,
     qconfig_propagation_list = allow_list
     if qconfig_propagation_list is None:
         qconfig_propagation_list = get_qconfig_propagation_list()
-    propagate_qconfig_(model, qconfig_dict=None)
+        propagate_qconfig_(model, qconfig_dict=None)
 
     # sanity check common API misusage
     if not any(hasattr(m, 'qconfig') and m.qconfig for m in model.modules()):
@@ -419,15 +410,8 @@ def convert(
                    is mutated
         `convert_custom_config_dict`: custom configuration dictionary for convert function
 
-    .. note::
-       Example of convert_custom_config_dict:
-       import torch
-       class ObservedCustomModule(torch.nn.Module):
-           pass
-
-       class QuantizedCustomModule(torch.nn.Module):
-           pass
-
+    .. code-block:: python
+       # Example of convert_custom_config_dict:
        convert_custom_config_dict = {
            # user will manually define the corresponding quantized
            # module class which has a from_observed class method that converts
@@ -436,8 +420,6 @@ def convert(
                ObservedCustomModule: QuantizedCustomModule
            }
        }
-
-    Returns: A module with all the children quantized
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.convert")
