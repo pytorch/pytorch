@@ -11,14 +11,14 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
     vTensor& v_self = convert(self);
 
     // CPU -> Vulkan
-    if ((at::kCPU == src.device().type())) {
+    if (at::kCPU == src.device().type()) {
       using Future = vTensor::Future<void, vTensor::Access::Write>;
       Future v_self_future = v_self.host<void, vTensor::Access::Write>();
       Future::Payload v_self_payload = v_self_future.wait();
 
       memcpy(
         v_self_payload.get(),
-        src.data_ptr<float>(),
+        src.contiguous().data_ptr<float>(),
         std::min(src.nbytes(), self.nbytes()));
     }
     // Vulkan -> Vulkan
@@ -38,7 +38,7 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
     }
   }
   // Vulkan -> X
-  else if ((at::kVulkan == src.device().type())) {
+  else if (at::kVulkan == src.device().type()) {
     const vTensor& v_src = convert(src);
 
     {
