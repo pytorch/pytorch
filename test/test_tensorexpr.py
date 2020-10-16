@@ -1057,13 +1057,12 @@ class TestTensorExprFuser(BaseTestClass):
 
     def _test_cat_negative_dim(self, device):
         def foo(*args):
-            args_2 = [v + i for i, v in enumerate(args)]
-            v = torch.cat(args_2, dim=-1)
+            v = torch.cat(args, dim=-1)
             return v * v
 
         M = 16
         Ns = [128, 16, 1]
-        values = [torch.zeros(M, N, device=device) for N in Ns]
+        values = [torch.randn(M, N, device=device) for N in Ns]
         traced = torch.jit.trace(foo, values)
 
         x = warmup_and_run_forward(traced, *values)
