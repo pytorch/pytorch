@@ -868,11 +868,24 @@ class TestONNXRuntime(unittest.TestCase):
                 if x.size(0) > 1:
                     a = x + 2
                     if a.is_floating_point():
-                        return x.new_zeros(x.shape[1:])
-                    return x.new_zeros(x.shape)
+                        return x.new_zeros(x.shape[1:], dtype=torch.long)
+                    return x.new_zeros(x.shape, dtype=torch.long)
                 return x
 
-        x = torch.randn(2, 3, 4)
+        x = torch.randn(2, 3, 4).to(torch.int32)
+        self.run_test(FloatingPoint(), x)
+
+        class FloatingPoint(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                if x.size(0) > 1:
+                    a = x + 2
+                    if a.is_floating_point():
+                        return x + 1
+                    return x
+                return x
+
+        x = torch.randn(2, 3, 4).to(torch.int32)
         self.run_test(FloatingPoint(), x)
 
     def test_arithmetic(self):
