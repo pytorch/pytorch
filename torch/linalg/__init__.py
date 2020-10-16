@@ -142,7 +142,7 @@ Using the :attr:`dim` argument to compute matrix norms::
 """)
 
 tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
-linalg.tensorsolve(input, other, dims=None) -> Tensor
+linalg.tensorsolve(input, other, dims=None, *, out=None) -> Tensor
 
 Computes a tensor ``x`` such that ``tensordot(input, x, dims=len(x.shape)) = other``.
 
