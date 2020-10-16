@@ -335,6 +335,24 @@ void testKernel_4() {
       CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
     }
   }
+  {
+    // Test that we throw an error when input list for aten::cat is empty
+    KernelScope kernel_scope;
+
+    const auto graph_string = R"IR(
+      graph():
+        %dim : int = prim::Constant[value=1]()
+        %inputs : Tensor[] = prim::ListConstruct()
+        %r : Tensor = aten::cat(%inputs, %dim)
+        return (%r))IR";
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+    auto compile = [&]() {
+      TensorExprKernel k(graph);
+      k.getCodeGenStmt();
+    };
+    ASSERT_THROWS_WITH(compile(), "Empty input list is passed to aten::cat");
+  }
 }
 
 namespace {

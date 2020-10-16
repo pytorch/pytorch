@@ -323,25 +323,29 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       // The sizes of the output tensor on that dimension is a sum of the
       // corresponding sizes of the input tensors, the other dimension have the
       // same sizes.
-      // Negative dim will correspond to dim = dim + input.dim() + 1.
+      // Negative dim will correspond to dim = dim + input.dim().
       auto const& n = v->node();
       auto inputs = n->input(0)->node()->inputs();
+      if (inputs.size() == 0) {
+        throw std::runtime_error("Empty input list is passed to aten::cat");
+      }
+
       TORCH_INTERNAL_ASSERT(n->input(1)->node()->kind() == prim::Constant);
       int64_t dim = n->input(1)->node()->i(attr::value);
-
-      ExprHandle concat_size = IntImm::make(0);
-      for (auto input : inputs) {
-        concat_size = concat_size + sizesForValue(input)[dim];
-      }
-      concat_size = IRSimplifier::simplify(concat_size);
       auto shape = sizesForValue(inputs[0]);
       if (dim < 0) {
-        dim = dim + shape.size() + 1;
+        dim += shape.size();
       }
       if (dim < 0 || dim > shape.size()) {
         throw std::runtime_error("Invalid 'dim' input in aten::cat");
       }
-      shape[dim] = concat_size;
+
+      ExprHandle concat_dim_size = 0;
+      for (auto input : inputs) {
+        concat_dim_size = concat_dim_size + sizesForValue(input)[dim];
+      }
+      concat_dim_size = IRSimplifier::simplify(concat_dim_size);
+      shape[dim] = concat_dim_size;
       return shape;
     }
     case aten::slice:
@@ -1171,6 +1175,10 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           [this, v](const std::vector<VarHandle>& axes) {
             auto const& n = v->node();
             auto inputs = n->inputs()[0]->node()->inputs();
+            if (inputs.size() == 0) {
+              throw std::runtime_error(
+                  "Empty input list is passed to aten::cat");
+            }
             int64_t dim = n->inputs()[1]->node()->i(attr::value);
             if (dim < 0) {
               dim += axes.size();
