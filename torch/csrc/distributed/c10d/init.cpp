@@ -1022,7 +1022,17 @@ Arguments:
           py::arg("timeout") = kNoTimeout,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "get_future",
+          "_get_profiling_future",
+          [](const ::c10d::ProcessGroup::Work& work) {
+          return std::make_shared<jit::PythonFutureWrapper>(
+              work.getProfilingFuture());
+          },
+          py::call_guard<py::gil_scoped_acquire>(),
+          R"(
+        Returns future that completes when the profiling event corresponding
+        to the creation of this RRef on the remote node has been recorded.
+        )")
+        .def("get_future",
           [](::c10d::ProcessGroup::Work& work)
               -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());

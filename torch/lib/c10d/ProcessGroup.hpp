@@ -77,9 +77,7 @@ class ProcessGroup {
   // this will be bound using pybind.
   class Work {
    public:
-    Work();
-
-    Work(int rank, OpType opType);
+    Work(int rank = -1, OpType opType = OpType::UNKNOWN, const char* profiling_title = nullptr);
 
     virtual ~Work();
 
@@ -137,6 +135,10 @@ class ProcessGroup {
 
     OpType retrieveOpType();
 
+    // Keeps track of the future responsible for profiling owner creation
+    // acknowledgement
+    c10::intrusive_ptr<c10::ivalue::Future> getProfilingFuture() const;
+
    protected:
     // Completes the work object and optionally sets the exception in a
     // thread-safe manner. Notifies all waiting condition variables as well.
@@ -156,6 +158,9 @@ class ProcessGroup {
 
     // Operation type that this work object refers to.
     OpType opType_;
+
+    std::function<void()> recordFunctionEndCallback_;
+    c10::intrusive_ptr<c10::ivalue::Future> profilingFuture_;
   };
 
   explicit ProcessGroup(int rank, int size);

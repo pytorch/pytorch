@@ -956,9 +956,9 @@ class DistributedTest:
                             opts = dist.BroadcastOptions()
                             opts.rootTensor = 0
                             opts.rootRank = src
-                            group_id.broadcast([expected_tensor], opts).wait()
+                            self.call_dist_op("broadcast", True, group_id.broadcast, [expected_tensor], opts)
                         else:
-                            dist.broadcast(expected_tensor, src, group_id)
+                            self.call_dist_op("broadcast", False, dist.broadcast, expected_tensor, src, group_id)
                     else:
                         tensor = _build_tensor(src + 1, -1, dtype)
                         if cuda:
@@ -967,9 +967,9 @@ class DistributedTest:
                             opts = dist.BroadcastOptions()
                             opts.rootTensor = 0
                             opts.rootRank = src
-                            group_id.broadcast([tensor], opts).wait()
+                            self.call_dist_op("broadcast", True, group_id.broadcast, [tensor], opts)
                         else:
-                            dist.broadcast(tensor, src, group_id)
+                            self.call_dist_op("broadcast", False, dist.broadcast, tensor, src, group_id)
                         self.assertEqual(tensor.size(), expected_tensor.size())
                         self.assertEqual(tensor.ne(expected_tensor).max(), torch.tensor(False))
 
@@ -1036,19 +1036,15 @@ class DistributedTest:
             expected_value,
             cuda=False,
             rank_to_GPU=None,
+            async_op=False,
         ):
             for src in group:
+                tensor = _build_tensor(src + 1).fill_(master_value if rank == src else worker_value)
+                if cuda:
+                    tensor = tensor.cuda(rank_to_GPU[rank][0])
+                self.call_dist_op("reduce", async_op, dist.reduce, tensor, src, op, group_id)
                 if rank == src:
-                    tensor = _build_tensor(src + 1).fill_(master_value)
-                    if cuda:
-                        tensor = tensor.cuda(rank_to_GPU[rank][0])
-                    dist.reduce(tensor, src, op, group_id)
                     self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
-                else:
-                    tensor = _build_tensor(src + 1).fill_(worker_value)
-                    if cuda:
-                        tensor = tensor.cuda(rank_to_GPU[rank][0])
-                    dist.reduce(tensor, src, op, group_id)
 
             self._barrier()
 
@@ -1229,6 +1225,25 @@ class DistributedTest:
                 self.assertEqual(result, [_build_tensor(src + 1, expected_value)])
             self._barrier()
 
+        def call_dist_op(self, profiling_title, async_op, op, *args, expect_event=True, **kwargs):
+            with torch.autograd.profiler.profile() as prof:
+                work = op(*args, async_op=async_op, **kwargs)
+                if async_op:
+                    work.wait()
+                    work._get_profiling_future().wait()
+
+            def get_event(partial_key):
+                events = [event for event in prof.function_events if partial_key in event.name]
+                return events[0] if len(events) > 0 else None
+
+            recv_event = get_event(profiling_title)
+            if expect_event:
+                self.assertEqual(recv_event.count, 1)
+                self.assertGreater(recv_event.cpu_time, 0)
+            else:
+                self.assertIsNone(recv_event)
+
+
         # ALL REDUCE
         def _test_all_reduce_helper(
             self,
@@ -1242,6 +1257,7 @@ class DistributedTest:
             cuda=False,
             rank_to_GPU=None,
             dtype=torch.float,
+            async_op=False,
         ):
             for src in group:
                 curr_value = master_value if rank == src else worker_value
@@ -1249,9 +1265,7 @@ class DistributedTest:
                 tensor = _build_tensor(src + 1, dtype=dtype).fill_(curr_value)
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
-                dist.all_reduce(tensor, op, group_id)
-                expected_tensor = _build_tensor(src + 1, expected_value, dtype=dtype)
-                self.assertEqual(tensor, expected_tensor)
+                self.call_dist_op("all_reduce", async_op, dist.all_reduce, tensor, op, group_id)
 
             self._barrier()
 
@@ -1266,6 +1280,20 @@ class DistributedTest:
                 2,
                 10,
                 2 + (10 * (len(group) - 1)),
+            )
+
+        @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        def test_all_reduce_sum_async(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_all_reduce_helper(
+                group,
+                group_id,
+                rank,
+                dist.ReduceOp.SUM,
+                2,
+                10,
+                2 + (10 * (len(group) - 1)),
+                async_op=True
             )
 
         @unittest.skipIf(
@@ -1286,6 +1314,27 @@ class DistributedTest:
                 2 + (10 * (len(group) - 1)),
                 True,
                 rank_to_GPU,
+            )
+
+        @unittest.skipIf(
+            BACKEND != "gloo" and BACKEND != "nccl",
+            "Only Gloo backend will have CUDA allReduce tested",
+        )
+        @skip_if_no_gpu
+        def test_all_reduce_sum_cuda_async(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_reduce_helper(
+                group,
+                group_id,
+                rank,
+                dist.ReduceOp.SUM,
+                2,
+                10,
+                2 + (10 * (len(group) - 1)),
+                True,
+                rank_to_GPU,
+                async_op=True
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
@@ -1535,7 +1584,7 @@ class DistributedTest:
                 ]
                 if cuda:
                     tensors = list(map(tensors, lambda t: t.cuda(rank_to_GPU[rank][0])))
-                dist.all_reduce_coalesced(tensors, op, group_id)
+                self.call_dist_op("all_reduce", False, dist.all_reduce_coalesced, tensors, op, group_id)
                 expected_tensors = [
                     _build_tensor(src + 1, expected_value, dtype=dtype)
                     for dtype, expected_value in zip(dtypes, expected_values)
@@ -1703,7 +1752,7 @@ class DistributedTest:
                 tensors = (
                     [_build_tensor(dest + 1, i) for i in group] if rank == dest else []
                 )
-                dist.scatter(tensor, src=dest, scatter_list=tensors, group=group_id)
+                self.call_dist_op("scatter", False, dist.scatter, tensor, src=dest, scatter_list=tensors, group=group_id)
                 self.assertEqual(tensor, expected_tensor)
 
             self._barrier()
@@ -1754,7 +1803,7 @@ class DistributedTest:
                 tensors = (
                     [_build_tensor(dest + 1, -1) for i in group] if rank == dest else []
                 )
-                dist.gather(tensor, dst=dest, gather_list=tensors, group=group_id)
+                self.call_dist_op("gather", False, dist.gather, tensor, dst=dest, gather_list=tensors, group=group_id)
                 if rank == dest:
                     expected_tensors = [_build_tensor(dest + 1, i) for i in group]
                     for t1, t2 in zip(tensors, expected_tensors):
@@ -1812,7 +1861,7 @@ class DistributedTest:
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
                     tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
-                dist.all_gather(tensors, tensor, group_id)
+                self.call_dist_op("all_gather", False, dist.all_gather, tensors, tensor, group_id)
 
                 expected_tensors = [_build_tensor(dest + 1, i, dtype=dtype) for i in group]
                 for t1, t2 in zip(tensors, expected_tensors):
@@ -1864,8 +1913,8 @@ class DistributedTest:
             Helper that runs all_gather_coalesced and returns true if output
             matches expectations.
             """
-            dist.all_gather_coalesced(
-                output_tensor_lists, input_tensors, group_id)
+            self.call_dist_op("all_gather", False, dist.all_gather_coalesced,
+                              output_tensor_lists, input_tensors, group_id)
 
             for l1, l2 in zip(output_tensor_lists, expected_tensors):
                 for t1, t2 in zip(l1, l2):
@@ -1980,6 +2029,7 @@ class DistributedTest:
             rank,
             cuda=False,
             rank_to_GPU=None,
+            async_op=False,
         ):
             if group_id is not None:
                 size = len(group)
@@ -1990,7 +2040,7 @@ class DistributedTest:
                     in_tensor = in_tensor.cuda(rank_to_GPU[rank][0])
                     expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
                     out_tensor = out_tensor.cuda(rank_to_GPU[rank][0])
-                dist.all_to_all_single(out_tensor, in_tensor, group=group_id)
+                self.call_dist_op("all_to_all", async_op, dist.all_to_all_single, out_tensor, in_tensor, group=group_id)
                 self.assertEqual(out_tensor, expected_tensor)
             self._barrier()
 
@@ -2307,7 +2357,7 @@ class DistributedTest:
                     _build_tensor(src + 1, curr_value, dtype=dtype).cuda(device=i)
                     for i in rank_to_GPU[rank]
                 ]
-                dist.all_reduce_multigpu(tensors, op, group_id)
+                self.call_dist_op("all_reduce", False, dist.all_reduce_multigpu, tensors, op, group_id)
                 expected_tensor = _build_tensor(src + 1, expected_value, dtype=dtype)
                 for tensor in tensors:
                     self.assertEqual(tensor, expected_tensor)
@@ -2366,7 +2416,9 @@ class DistributedTest:
                         _build_tensor(src + 1, master_value).cuda(device=i)
                         for i in rank_to_GPU[rank]
                     ]
-                    dist.reduce_multigpu(tensors, src, op, group_id)
+                    self.call_dist_op(
+                        "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
+                        expect_event=len(tensors) == 1)
                     expected_tensor = _build_tensor(src + 1, expected_value)
                     self.assertEqual(tensors[0], expected_tensor)
                 else:
@@ -2374,7 +2426,9 @@ class DistributedTest:
                         _build_tensor(src + 1, worker_value).cuda(device=i)
                         for i in rank_to_GPU[rank]
                     ]
-                    dist.reduce_multigpu(tensors, src, op, group_id)
+                    self.call_dist_op(
+                        "reduce", False, dist.reduce_multigpu, tensors, src, op, group_id,
+                        expect_event=len(tensors) == 1)
 
             self._barrier()
 
@@ -2415,7 +2469,10 @@ class DistributedTest:
                     output_tensors.append([t.cuda(device=gpu) for t in output_per_gpu])
                     expected_output.append([t.cuda(device=gpu) for t in expected_per_gpu])
 
-                dist.all_gather_multigpu(output_tensors, tensors, group_id)
+                self.call_dist_op(
+                    "all_gather", False,
+                    dist.all_gather_multigpu, output_tensors, tensors, group_id,
+                    expect_event=len(expected_output) == 1)
                 self.assertEqual(output_tensors, expected_output)
 
             self._barrier()

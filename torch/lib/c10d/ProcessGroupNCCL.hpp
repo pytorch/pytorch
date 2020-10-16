@@ -65,7 +65,7 @@ class ProcessGroupNCCL : public ProcessGroup {
                    public std::enable_shared_from_this<WorkNCCL> {
    public:
     // Constructor takes a list of CUDA devices
-    WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType);
+    WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType, const char* profiling_title = nullptr);
     // Copy constructor doing partial copy without outputs_. Cleanup thread
     // monitors and removes finished works. However it will deadlock when
     // destructs outputs_ tensors who are view tensors in autograd graph.
@@ -481,7 +481,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   virtual std::shared_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       std::vector<at::Device> devices,
       int rank,
-      OpType opType);
+      OpType opType,
+      const char* profiling_title=nullptr);
 
  private:
   // Helper that encapsulates work shared across all collective communication
@@ -495,7 +496,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
       Fn fn,
-      OpType opType);
+      OpType opType,
+      const char* profiling_title = nullptr);
   template <typename Fn, typename PreProcess, typename PostProcess>
   std::shared_ptr<ProcessGroup::Work> collective(
       std::vector<at::Tensor>& input,
@@ -503,7 +505,8 @@ class ProcessGroupNCCL : public ProcessGroup {
       Fn fn,
       PreProcess pre,
       PostProcess post,
-      OpType opType);
+      OpType opType,
+      const char* profiling_title = nullptr);
 
   // Helper that encapsulates work shared across point-to-point communication
   // primitives. It is the same structure as the helper used for collective
