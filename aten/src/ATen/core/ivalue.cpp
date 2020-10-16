@@ -97,6 +97,8 @@ TypePtr IValue::type() const {
       return RRefType::create(toRRef()->type());
     case Tag::Device:
       return DeviceObjType::get();
+    case Tag::Stream:
+      return StreamObjType::get();
     case Tag::Object:
       return toObjectRef().type();
     case Tag::PyObject:
@@ -271,6 +273,8 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isGenericDict() && lhs.toGenericDict() == rhs.toGenericDict();
     case Tag::Tuple:
       return rhs.isTuple() && *lhs.toTuple() == *rhs.toTuple();
+    case Tag::Stream:
+      return rhs.isStream() && lhs.toStream() == lhs.toStream();
     case Tag::Device:
       return rhs.isDevice() && lhs.toDevice() == rhs.toDevice();
     case Tag::GenericList:
@@ -644,6 +648,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "Uninitialized";
     case IValue::Tag::Device:
       return out << v.toDevice();
+    case IValue::Tag::Stream:
+      return out << v.toStream();
     case IValue::Tag::GenericDict:
       return printDict(out, v.toGenericDict(), formatter);
     case IValue::Tag::PyObject: {

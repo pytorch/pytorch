@@ -244,7 +244,7 @@ class BenchmarkRunner(object):
     def _launch_forward(self, test_case, iters, print_per_iter):
         """ Use Python's timeit module to measure execution time (unit: second).
         """
-        cuda_sync = True if 'cuda' in test_case.test_config.test_name else False
+        cuda_sync = 'cuda' in test_case.test_config.test_name
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward

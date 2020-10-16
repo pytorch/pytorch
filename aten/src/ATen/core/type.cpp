@@ -27,7 +27,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << "Tensor";
     }
     if (auto ndim = value->sizes().size()) {
-      bool has_valid_strides_info =
+      bool has_valid_strides_info = *ndim > 0 &&
           value->strides().isComplete() && value->strides().size() == ndim;
 
       out << "(";
@@ -41,10 +41,17 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         } else {
           out << "*";
         }
-        if (has_valid_strides_info &&
-            type_verbosity() >= TypeVerbosity::TypeAndStride) {
-          out << ":" << *value->strides()[i];
+      }
+      if (has_valid_strides_info &&
+          type_verbosity() >= TypeVerbosity::TypeAndStride) {
+        out << ", strides=[";
+        for (size_t i = 0; i < *ndim; ++i) {
+          if (i > 0) {
+            out << ", ";
+          }
+          out << *value->strides()[i];
         }
+        out << "]";
       }
       if (type_verbosity() >= TypeVerbosity::Full) {
         if (value->requiresGrad()) {
@@ -155,6 +162,10 @@ DeviceObjTypePtr DeviceObjType::get() {
   static auto value = DeviceObjType::create();
   return value;
 }
+StreamObjTypePtr StreamObjType::get() {
+  static auto value = StreamObjType::create();
+  return value;
+}
 ScalarTypeTypePtr ScalarTypeType::get() {
 static auto value = ScalarTypeType::create();
 return value;
@@ -187,7 +198,7 @@ ListTypePtr ListType::ofFloats() {
   static auto value = ListType::create(FloatType::get());
   return value;
 }
-ListTypePtr ListType::ofComplexDouble() {
+ListTypePtr ListType::ofComplexDoubles() {
   static auto value = ListType::create(ComplexDoubleType::get());
   return value;
 }

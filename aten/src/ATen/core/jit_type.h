@@ -48,6 +48,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(OptionalType)           \
   _(VarType)                \
   _(DeviceObjType)          \
+  _(StreamObjType)          \
   _(FunctionType)           \
   _(ClassType)              \
   _(PyObjectType)           \
@@ -489,6 +490,13 @@ struct CAFFE2_API SymbolicShape {
     dims_ = shape_symbols;
   }
 
+  ShapeSymbol operator[](size_t i) const {
+    if (!dims_) {
+      throw std::runtime_error("Rank isn't fixed");
+    }
+    return (*dims_).at(i);
+  }
+
   // Returns rank or nullopt in case of unranked shape.
   c10::optional<size_t> rank() const {
     if(!dims_) {
@@ -549,7 +557,7 @@ struct VaryingShape {
     return dims_ == other.dims_;
   }
 
-  const c10::optional<T>& operator[](int i) const {
+  const c10::optional<T> &operator[](size_t i) const {
     if (!dims_) {
       throw std::runtime_error("Rank isn't fixed");
     }
@@ -881,6 +889,7 @@ struct CAFFE2_API ListType
   static ListTypePtr ofTensors();
   static ListTypePtr ofInts();
   static ListTypePtr ofFloats();
+  static ListTypePtr ofComplexDoubles();
   static ListTypePtr ofBools();
   static ListTypePtr ofStrings();
 
@@ -1328,7 +1337,7 @@ struct CAFFE2_API FloatType : public NumberType {
 };
 
 struct ComplexDoubleType;
-using ComplexDoublePtr = std::shared_ptr<ComplexDoubleType>;
+using ComplexDoubleTypePtr = std::shared_ptr<ComplexDoubleType>;
 // This type represents a Python float number
 struct CAFFE2_API ComplexDoubleType : public NumberType {
   static ComplexDoubleTypePtr create() {
@@ -1348,7 +1357,7 @@ struct CAFFE2_API ComplexDoubleType : public NumberType {
   static ComplexDoubleTypePtr get();
 
  private:
-  ComplexDoubleTypePtr() : NumberType(TypeKind::ComplexDoubleType) {}
+  ComplexDoubleType() : NumberType(TypeKind::ComplexDoubleType) {}
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     return "complex";
   }
@@ -1573,6 +1582,28 @@ struct CAFFE2_API DeviceObjType : public Type {
   DeviceObjType() : Type(TypeKind::DeviceObjType) {}
 };
 
+struct StreamObjType;
+using StreamObjTypePtr = std::shared_ptr<StreamObjType>;
+// This type represents a Generator
+struct CAFFE2_API StreamObjType : public Type {
+  static StreamObjTypePtr create() {
+    return StreamObjTypePtr(
+      new StreamObjType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Stream";
+  }
+  static const TypeKind Kind = TypeKind::StreamObjType;
+  // global singleton
+  static StreamObjTypePtr get();
+
+private:
+  StreamObjType() : Type(TypeKind::StreamObjType) {}
+};
+
 struct VarType;
 using VarTypePtr = std::shared_ptr<VarType>;
 // This type represents a type variable, used in FunctionSchema
@@ -1751,6 +1782,12 @@ template <>
 struct getTypePtr_<at::Tensor> final {
   static TypePtr call() {
     return TensorType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::Stream> final {
+  static TypePtr call() {
+    return StreamObjType::get();
   }
 };
 template <>
