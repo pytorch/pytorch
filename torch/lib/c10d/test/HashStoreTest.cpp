@@ -19,6 +19,15 @@ void testGetSet(std::string prefix = "") {
     c10d::test::check(store, "key0", "value0");
     c10d::test::check(store, "key1", "value1");
     c10d::test::check(store, "key2", "value2");
+    auto numKeys = store.getNumKeys();
+    EXPECT_EQ(numKeys, 3);
+    auto delSuccess = store.deleteKey("key0");
+    EXPECT_TRUE(delSuccess);
+    numKeys = store.getNumKeys();
+    EXPECT_EQ(numKeys, 2);
+    auto delFailure = store.deleteKey("badKeyName");
+    EXPECT_FALSE(delFailure);
+    EXPECT_THROW(store.get("key0"), std::runtime_error);
   }
 
   // get() waits up to timeout_.

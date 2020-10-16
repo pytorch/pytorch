@@ -21,6 +21,7 @@
 #endif
 
 #include <c10d/PrefixStore.hpp>
+#include <fmt/format.h>
 #include <pybind11/chrono.h>
 
 #include <torch/csrc/Exceptions.h>
@@ -52,6 +53,11 @@ std::vector<std::string> split(char separator, const std::string& string) {
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
+
+constexpr auto kDeprecationWarning =
+    "{} API is being deprecated, please ping "
+    "https://github.com/pytorch/pytorch/issues/46291 "
+    "if you see this warning";
 
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
@@ -976,15 +982,40 @@ Arguments:
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
-      .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
-      .def("exception", &::c10d::ProcessGroup::Work::exception)
-      .def("source_rank", &::c10d::ProcessGroup::Work::sourceRank)
+      .def(
+          "is_success",
+          [](::c10d::ProcessGroup::Work& work) -> bool {
+            TORCH_WARN_ONCE(fmt::format(
+                kDeprecationWarning, "ProcessGroup::Work::is_success"));
+            return work.isSuccess();
+          })
+      .def(
+          "exception",
+          [](::c10d::ProcessGroup::Work& work) -> std::exception_ptr {
+            TORCH_WARN_ONCE(fmt::format(
+                kDeprecationWarning, "ProcessGroup::Work::exception"));
+            return work.exception();
+          })
+      .def(
+          "source_rank",
+          [](::c10d::ProcessGroup::Work& work) -> int {
+            TORCH_WARN_ONCE(fmt::format(
+                kDeprecationWarning, "ProcessGroup::Work::source_rank"));
+            return work.sourceRank();
+          })
+      .def("_source_rank", &::c10d::ProcessGroup::Work::sourceRank)
       .def(
           "result",
           [](::c10d::ProcessGroup::Work& work) -> std::vector<at::Tensor> {
             return work.result();
           })
-      .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
+      .def(
+          "synchronize",
+          [](::c10d::ProcessGroup::Work& work) -> void {
+            TORCH_WARN_ONCE(fmt::format(
+                kDeprecationWarning, "ProcessGroup::Work::synchronize"));
+            work.synchronize();
+          })
       .def(
           "wait",
           &::c10d::ProcessGroup::Work::wait,
@@ -1119,6 +1150,8 @@ Arguments:
 
   Py_RETURN_TRUE;
 }
+
+#undef PROCESS_GROUP_DEPRECATION_WARNING
 
 } // namespace
 
