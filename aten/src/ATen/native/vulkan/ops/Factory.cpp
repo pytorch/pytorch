@@ -45,51 +45,11 @@ Tensor empty_strided(
           pinned_memory(pin_memory));
 }
 
-Tensor to(
-    const Tensor& self,
-    const c10::optional<ScalarType> dtype,
-    const c10::optional<Layout> layout,
-    const c10::optional<Device> device,
-    const c10::optional<bool> pin_memory,
-    const bool non_blocking,
-    const bool copy,
-    const c10::optional<MemoryFormat> memory_format) {
-  const TensorOptions& from_options = self.options();
-  verify(from_options);
-
-  const TensorOptions to_options = TensorOptions().
-      dtype(dtype).
-      layout(layout).
-      device(device).
-      pinned_memory(pin_memory);
-  verify(to_options);
-
-  TORCH_INTERNAL_ASSERT(
-      (kVulkan == from_options.device().type()) || (kVulkan == to_options.device().type()),
-      "Incorrect dispatch!  Either the source or destination of `aten::to` must be Vulkan.");
-
-  if ((from_options.dtype() == to_options.dtype()) &&
-      (from_options.layout() == to_options.layout()) &&
-      (from_options.device() == to_options.device()) &&
-      (from_options.pinned_memory() == to_options.pinned_memory()) &&
-      !copy) {
-    return self;
-  }
-
-  // std::cout << "from " << self.options().dtype() << " to " << *dtype << std::endl;
-  // std::cout << "from " << self.options().layout() << " to " << *layout << std::endl;
-  // std::cout << "from " << self.options().device() << " to " << *device << std::endl;
-  // std::cout << "from " << self.options().pinned_memory() << " to " << *pin_memory << std::endl;
-
-  return empty_memory_format(self.sizes(), to_options, memory_format);
-}
-
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl_UNBOXED("empty.memory_format", at::native::vulkan::ops::empty_memory_format);
   m.impl("empty_strided", TORCH_FN(at::native::vulkan::ops::empty_strided));
-  m.impl("to.dtype_layout", TORCH_FN(at::native::vulkan::ops::to));
 }
 
 #endif /* USE_VULKAN_API */

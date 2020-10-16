@@ -66,7 +66,7 @@ class Context final {
   Resource resource_;
 };
 
-bool available();
+C10_EXPORT bool available();
 Context* context();
 
 //
