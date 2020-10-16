@@ -1185,6 +1185,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
         at::Tensor& /* unused */,
         ncclComm_t comm,
         at::cuda::CUDAStream& stream) {
+      C10D_NCCL_CHECK(ncclGroupStart());
       for (size_t r = 0; r < outputTensors.size(); r++) {
         at::Tensor &input = inputTensors[r];
         at::Tensor &output = outputTensors[r];
@@ -1207,6 +1208,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
               stream.stream()));
         }
       }
+      C10D_NCCL_CHECK(ncclGroupEnd());
       return ncclSuccess;
     });
 }
