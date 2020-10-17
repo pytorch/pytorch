@@ -580,10 +580,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(fut.wait(), torch.ones(2, 2) + 1 + 3 + torch.ones(2, 2))
 
     @dist_init
-    def test_123(self):
-        self.assertEqual(1, 1)
-
-    @dist_init
     def test_self_remote_rref_as_rpc_arg(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         self._test_self_remote_rref_as_rpc_arg(dst)

@@ -1,38 +1,20 @@
-import os
+# https://github.com/pytorch/examples/blob/master/distributed/rpc/batch/parameter_server.py
+
 import threading
 from datetime import datetime
-import math
 
 import torch
 import torch.distributed.rpc as rpc
-import torch.multiprocessing as mp
 import torch.nn as nn
 from torch import optim
-
-from torch.testing._internal.dist_utils import (
-    dist_init,
-    get_function_event,
-    initialize_pg,
-    wait_until_node_failure,
-    wait_until_pending_futures_and_users_flushed,
-    wait_until_owners_and_forks_on_rank,
-    worker_name,
-    single_threaded_process_group_agent,
-)
-
-from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
-    RpcAgentTestFixture,
-)
-
-# =========================== Example ===========================
-# https://github.com/pytorch/examples/blob/master/distributed/rpc/batch/parameter_server.py
 
 batch_size = 20
 image_w = 64
 image_h = 64
 num_classes = 30
-batch_update_size = 5
+batch_update_size = 3
 num_batches = 6
+
 
 def timed_log(text):
     print(f"{datetime.now().strftime('%H:%M:%S')} {text}")
@@ -90,7 +72,7 @@ class Trainer(object):
         for _ in range(num_batches):
             inputs = torch.randn(batch_size, 100)
             labels = torch.zeros(batch_size, num_classes) \
-                        .scatter_(1, self.one_hot_indices, 1)
+                          .scatter_(1, self.one_hot_indices, 1)
             yield inputs, labels
 
     def train(self):
@@ -124,47 +106,3 @@ def run_ps(trainers):
 
     torch.futures.wait_all(futs)
     timed_log("Finish training")
-
-
-def run(rank, world_size):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '29500'
-    options=rpc.TensorPipeRpcBackendOptions(
-        num_worker_threads=16,
-        rpc_timeout=0  # infinite timeout
-     )
-    if rank != 0:
-        rpc.init_rpc(
-            f"trainer{rank}",
-            rank=rank,
-            world_size=world_size,
-            rpc_backend_options=options
-        )
-        # trainer passively waiting for ps to kick off training iterations
-    else:
-        rpc.init_rpc(
-            "ps",
-            rank=rank,
-            world_size=world_size,
-            rpc_backend_options=options
-        )
-        run_ps([f"trainer{r}" for r in range(1, world_size)])
-
-    # block until all rpcs finish
-    rpc.shutdown()
-
-# =========================== End exmaple ===========================
-
-# if __name__=="__main__":
-#     world_size = batch_update_size + 1
-#     mp.spawn(run, args=(world_size, ), nprocs=world_size, join=True)
-
-class ExampleTest(RpcAgentTestFixture):
-    @dist_init
-    def test_batch_updating_parameter_server(self):
-        mp.spawn(run, args=(self.world_size, ), nprocs=self.world_size, join=True)
-        self.assertEqual(1, 1)
-
-def test_another_one():
-    world_size = batch_update_size + 1
-    mp.spawn(run, args=(world_size, ), nprocs=world_size, join=True)
