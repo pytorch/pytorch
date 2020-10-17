@@ -348,8 +348,7 @@ Tensor einsum(std::string equation, TensorList operands) {
             operand.size(j),
             " != ",
             operand.size(dim));
-        operand = operand.diagonal(0, j, dim);
-        operand.unsqueeze_(dim).transpose_(dim, -1).squeeze_(-1);
+        operand = operand.diagonal(0, j, dim).movedim(-1, dim);
       } else {
         // Lookup output index for label
         label_dim[label] = j;
@@ -408,7 +407,7 @@ Tensor einsum(std::string equation, TensorList operands) {
   for (int i = dim; i < out_index; ++i, ++dim) {
     if (dim_last_op[i] == 0) {
       if (result.size(dim) == 1) {
-        result.squeeze_(dim--);
+        result = result.squeeze(dim--);
       } else {
         result = result.sum(dim--);
       }
@@ -423,11 +422,11 @@ Tensor einsum(std::string equation, TensorList operands) {
     dim = out_size;
     for (int j = dim; j < out_index; ++j, ++dim) {
       if (dim_last_op[j] < i) {
-        operand.squeeze_(dim--);
+        operand = operand.squeeze(dim--);
       } else if (dim_last_op[j] == i) {
         if (result.size(dim) == 1) {
           operand = operand.sum(dim);
-          result.squeeze_(dim--);
+          result = result.squeeze(dim--);
         } else {
           sum_dims.push_back(dim);
         }
