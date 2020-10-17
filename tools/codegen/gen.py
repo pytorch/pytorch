@@ -1087,14 +1087,12 @@ def main() -> None:
 
         'function_registrations': list(mapMaybe(
             compute_type_method(None, target=Target.REGISTRATION, selector=selector),
-            native_functions)),
+            native_functions)) + list(mapMaybe(
+                compute_type_method('Math', target=Target.REGISTRATION, selector=selector),
+                native_functions)),
 
         'default_backend_function_registrations': list(mapMaybe(
             compute_type_method('DefaultBackend', target=Target.REGISTRATION, selector=selector),
-            native_functions)),
-
-        'math_function_registrations': list(mapMaybe(
-            compute_type_method('Math', target=Target.REGISTRATION, selector=selector),
             native_functions)),
     })
     cpu_fm.write('Functions.h', lambda: {
