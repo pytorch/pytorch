@@ -88,19 +88,14 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
                       context.stride,
                       context.dilation,
                       context.groups};
-  MPSCNNConvOp* op = (__bridge MPSCNNConvOp*)(context.conv2dOp);
+  MPSCNNConvOp* op = (MPSCNNConvOp*)context.extra;
   NeuronType nt = neuronType(context);
   if (!op) {
     float* w = context.weight.data_ptr<float>();
     float* b = context.bias.has_value() ? ((*context.bias).data_ptr<float>())
                                         : nullptr;
     op = [MPSCNNConvOp conv2d:params weights:w bias:b neuronFilter:nt];
-    context.conv2dOp = (void*)CFBridgingRetain(op);
-    context.releaseCallback = ^(void* res) {
-      if (res) {
-        CFBridgingRelease(res);
-      }
-    };
+    context.extra = op;
   }
 
   auto outputSize = params.output_sizes();
