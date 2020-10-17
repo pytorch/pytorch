@@ -1163,7 +1163,7 @@ void Reducer::finalize_backward() {
       bucket.future_work->wait();
 
       auto future_result =
-          comm_hook_->processFuture(bucket.future_work->value());
+          comm_hook_->parseFromHookResult(bucket.future_work->value());
 
       for (size_t i = 0; i < future_result.size(); i++) {
         auto& replica = bucket.replicas[i];

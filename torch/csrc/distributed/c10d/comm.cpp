@@ -85,8 +85,23 @@ void broadcast_coalesced(
   }
 }
 
-PythonCommHook::PythonCommHook(py::object state, py::object hook)
-    : state_(std::move(state)), hook_(std::move(hook)){};
+std::vector<at::Tensor> CommHookInterface::parseFromHookResult(
+    const c10::IValue& result) {
+  TORCH_INTERNAL_ASSERT(
+      result.isPyObject() || result.isTensorList(),
+      "expected the future value is either a PyObject (if PythonCommHook is used) or TensorList (if CppCommHook is used)");
+
+  if (result.isPyObject()) {
+    py::gil_scoped_acquire ag;
+    py::object obj = torch::jit::toPyObject(result);
+    auto value = torch::jit::toIValue(
+        obj, c10::ListType::create(c10::TensorType::get()));
+
+    return value.toTensorVector();
+  }
+
+  return result.toTensorVector();
+}
 
 c10::intrusive_ptr<torch::jit::Future> PythonCommHook::runHook(
     const GradBucket& bucket) {
@@ -107,22 +122,6 @@ c10::intrusive_ptr<torch::jit::Future> PythonCommHook::runHook(
         type.attr("__qualname__").cast<std::string>());
     throw std::runtime_error(errMsg);
   }
-}
-
-std::vector<at::Tensor> PythonCommHook::processFuture(
-    c10::IValue future_value) {
-  // Since we have a Python hook, future_value can be a PyObject.
-  if (future_value.isPyObject()) {
-    // We first convert it to an IValue that contains a TensorVector.
-    py::gil_scoped_acquire ag;
-    py::object obj = torch::jit::toPyObject(future_value);
-    auto value = torch::jit::toIValue(
-        obj, c10::ListType::create(c10::TensorType::get()));
-
-    return value.toTensorVector();
-  }
-
-  return future_value.toTensorVector();
 }
 
 } // namespace c10d
