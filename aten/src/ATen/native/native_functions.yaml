@@ -6156,11 +6156,11 @@
     CPU: _svd_helper_cpu
     CUDA: _svd_helper_cuda
 
-- func: swapaxes(Tensor(a) self, int dim1, int dim2) -> Tensor(a)
+- func: swapaxes(Tensor(a) self, int axis1, int axis2) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function, method
 
-- func: swapaxes_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
+- func: swapaxes_(Tensor(a!) self, int axis1, int axis2) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   device_guard: False
@@ -6169,7 +6169,7 @@
   use_c10_dispatcher: full
   variants: function, method
 
-- func: swapdims_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
+- func: swapdims_(Tensor(a!) self, int dim1, int dim2) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   device_guard: False
