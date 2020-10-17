@@ -227,7 +227,6 @@ private:
   // currently not high-pri.
   ska::flat_hash_map<DispatchKey, std::list<AnnotatedKernel>> kernels_;
 
-  std::list<AnnotatedKernel> catchAllKernel_;
   AnnotatedKernel missingKernel_;
   static const AnnotatedKernel ambiguousAutogradOtherKernel_;
 

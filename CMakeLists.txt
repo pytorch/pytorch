@@ -165,7 +165,8 @@ option(USE_GLOG "Use GLOG" OFF)
 option(USE_LEVELDB "Use LEVELDB" OFF)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_LMDB "Use LMDB" OFF)
-option(USE_METAL "Use Metal for iOS build" OFF)
+option(USE_METAL "Use Metal for Caffe2 iOS build" ON)
+option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(
     USE_NCCL "Use NCCL" ON
