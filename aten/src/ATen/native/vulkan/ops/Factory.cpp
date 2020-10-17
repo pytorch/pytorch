@@ -19,13 +19,7 @@ Tensor empty_memory_format(
       TensorOptions().memory_format(memory_format));
   verify(options);
 
-  return at::detail::make_tensor<vTensorImpl>(
-      DispatchKeySet(DispatchKey::Vulkan),
-      options.dtype(),
-      at::Device(at::kVulkan),
-      vTensor(api::context(), sizes, options),
-      sizes,
-      IntArrayRef{});
+  return convert(vTensor(api::context(), sizes, options));
 }
 
 Tensor empty_strided(
