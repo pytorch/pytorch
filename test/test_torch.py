@@ -17376,19 +17376,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertEqual(actual, expected)
 
     def _helper_test_igamma(self, loglo, loghi, device, dtype):
-        torch.manual_seed(123)
-
-        # generating random distribution from lo to hi with a loguniform
-        # distribution
-        def randrange(shape):
-            a = torch.rand(shape).to(device) * (loghi - loglo) + loglo
-            return torch.exp(a.to(torch.float64)).to(dtype)
-
-        vec1 = randrange((100, 1))
+        exp1 = 2.71828182846
+        vec1 = torch.logspace(loglo, loghi, steps=500, base=exp1,
+            dtype=dtype, device=device).unsqueeze(-1)
         inputs = [
-            (randrange((10,)), randrange((10,))),
-            (randrange((3, 3, 3)), randrange((3, 3, 3))),
-            (randrange((100, 1)), randrange((100, 1)).transpose(0, 1)),
+            (vec1, vec1.transpose(0, 1)),
             (vec1, vec1),  # for large number, it should approach 0.5
             (vec1, 0.5 * vec1),  # test for considerable ratio
             (vec1, 2.0 * vec1),
