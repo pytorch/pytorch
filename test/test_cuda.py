@@ -3221,5 +3221,49 @@ class TestCudaComm(TestCase):
             self.assertEqual(expected_a, x.a)
             self.assertEqual(expected_b, x.b)
 
+    def test_dropout_state_on_device_rng(self):
+        a = torch.randn((10000,), device="cuda", dtype=torch.float)
+
+        def run(input):
+            out = torch.nn.functional.dropout(input, p=0.1)
+            return torch.nn.functional.dropout(input, p=0.1)
+
+        torch.cuda.manual_seed(5)
+
+        # Control
+        out_hoststate = run(run(a))
+
+        torch.backends.cuda._stateful_ops.state_on_device = True
+        # Seeds DevState generator
+        gen_devstate = torch._C._cuda_getCurrentGeneratorTestingOnly()
+        gen_devstate.manual_seed(5)
+
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+
+        # Pushes a long kernel to main stream so if side stream's update
+        # transactions race with main stream updates for some reason,
+        # main stream probably picks up the error
+        torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+
+        # Creates output on main stream, weaves in dropout on side stream
+        # to make sure side stream offset updates don't interfere with main stream
+        out_devstate = run(a)
+        with torch.cuda.stream(stream):
+            out_devstate_sidestream = run(a)
+        out_devstate = run(out_devstate)
+        with torch.cuda.stream(stream):
+            out_devstate_sidestream = run(out_devstate_sidestream)
+        torch.backends.cuda._stateful_ops.state_on_device = False
+
+        self.assertEqual(out_hoststate, out_devstate)
+        self.assertNotEqual(out_devstate, out_devstate_sidestream)
+
+
+
+    def test_distributions_state_on_device(self):
+        gen_device_state = torch.Generator(device="cuda")
+
+
 if __name__ == '__main__':
     run_tests()

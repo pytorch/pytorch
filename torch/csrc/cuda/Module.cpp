@@ -483,6 +483,15 @@ PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self, PyObject *noargs
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_getCurrentGeneratorTestingOnly(PyObject *self, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+  auto gen = at::cuda::detail::getDefaultCUDAGenerator();
+  auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
+  return (PyObject*)cast_gen;
+  END_HANDLE_TH_ERRORS
+}
+
 static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_init",        (PyCFunction)THCPModule_initExtension,    METH_NOARGS,  nullptr},
   {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       nullptr},
@@ -495,6 +504,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_getDefaultStream",
     (PyCFunction)THCPModule_getDefaultStream_wrap, METH_O, nullptr},
   {"_cuda_getCurrentBlasHandle", (PyCFunction)THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, nullptr},
+  {"_cuda_getCurrentGeneratorTestingOnly", (PyCFunction)THCPModule_getCurrentGeneratorTestingOnly, METH_NOARGS, nullptr},
   {"_cuda_setStream",    (PyCFunction)THCPModule_setStream_wrap,  METH_O, nullptr},
   {"_cuda_getCompiledVersion", (PyCFunction)THCPModule_getCompiledVersion, METH_NOARGS, nullptr},
   {"_cuda_hasPrimaryContext", (PyCFunction) THCPModule_hasPrimaryContext,  METH_O,  nullptr},

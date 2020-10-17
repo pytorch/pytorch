@@ -40,11 +40,13 @@ std::once_flag num_gpu_init_flag;
 // Total number of gpus in the system.
 int64_t num_gpus;
 
-// Ensures default_gens_cuda is initialized once.
-std::deque<std::once_flag> cuda_gens_init_flag;
+// Ensures default_gens* are initialized once.
+std::deque<std::once_flag> cuda_gens_init_flag_host_state;
+std::deque<std::once_flag> cuda_gens_init_flag_dev_state;
 
 // Default, global CUDA generators, one per GPU.
-std::vector<Generator> default_gens_cuda;
+std::vector<Generator> default_gens_host_state;
+std::vector<Generator> default_gens_dev_state;
 
 /*
 * Populates the global variables related to CUDA generators
@@ -52,8 +54,10 @@ std::vector<Generator> default_gens_cuda;
 */
 void initCUDAGenVector(){
   num_gpus = c10::cuda::device_count();
-  cuda_gens_init_flag.resize(num_gpus);
-  default_gens_cuda.resize(num_gpus);
+  cuda_gens_init_flag_host_state.resize(num_gpus);
+  cuda_gens_init_flag_dev_state.resize(num_gpus);
+  default_gens_host_state.resize(num_gpus);
+  default_gens_dev_state.resize(num_gpus);
 }
 } // anonymous namespace
 
@@ -73,16 +77,22 @@ const Generator& getDefaultCUDAGenerator(DeviceIndex device_index) {
   } else {
     TORCH_CHECK(idx >= 0 && idx < num_gpus);
   }
-  std::call_once(cuda_gens_init_flag[idx],
-                 [&] {
-                   if (at::globalContext().statefulCUDAOpStatesOnDevice()) {
-                     default_gens_cuda[idx] = make_generator<CUDAGeneratorImplDeviceState>(idx);
-                   } else {
-                     default_gens_cuda[idx] = make_generator<CUDAGeneratorImplHostState>(idx);
-                   }
-                   default_gens_cuda[idx].seed();
-                 });
-  return default_gens_cuda[idx];
+
+  if (at::globalContext().statefulCUDAOpStatesOnDevice()) {
+    std::call_once(cuda_gens_init_flag_dev_state[idx],
+                   [&] {
+                     default_gens_dev_state[idx] = make_generator<CUDAGeneratorImplDevState>(idx);
+                     default_gens_dev_state[idx].seed();
+                   });
+    return default_gens_dev_state[idx];
+  } else {
+    std::call_once(cuda_gens_init_flag_host_state[idx],
+                   [&] {
+                     default_gens_host_state[idx] = make_generator<CUDAGeneratorImplHostState>(idx);
+                     default_gens_host_state[idx].seed();
+                   });
+    return default_gens_host_state[idx];
+  }
 }
 
 /**
@@ -97,8 +107,8 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
   TORCH_CHECK(idx >= 0 && idx < num_gpus, "The device_index is invalid.");
 
   if (at::globalContext().statefulCUDAOpStatesOnDevice()) {
-    auto gen = make_generator<CUDAGeneratorImplDeviceState>(idx);
-    auto cuda_gen = check_generator<CUDAGeneratorImplDeviceState>(gen);
+    auto gen = make_generator<CUDAGeneratorImplDevState>(idx);
+    auto cuda_gen = check_generator<CUDAGeneratorImplDevState>(gen);
     cuda_gen->set_current_seed(default_rng_seed_val);
     cuda_gen->set_philox_offset_per_thread(0);
     return gen;
@@ -148,7 +158,7 @@ uint64_t CUDAGeneratorImpl::seed() {
  * See Note [Acquire lock when using random generators]
  */
 std::shared_ptr<CUDAGeneratorImpl> CUDAGeneratorImpl::clone() const {
-  // The concrete type will always be CUDAGeneratorImplDeviceState or
+  // The concrete type will always be CUDAGeneratorImplDevState or
   // CUDAGeneratorImplHostState, so safe to cast
   return std::shared_ptr<CUDAGeneratorImpl>(static_cast<CUDAGeneratorImpl*>(this->clone_impl()));
 }
@@ -249,18 +259,18 @@ CUDAGeneratorImplHostState* CUDAGeneratorImplHostState::clone_impl() const {
 }
 
 /**
- * CUDAGeneratorImplDeviceState methods
+ * CUDAGeneratorImplDevState methods
  * See descriptions of corresponding HostState methods.
  *
  * Some casts back and forth between uint64_t and int64_t occur because
- * there's no such thing as uint64_t Tensors, but DeviceState must match
+ * there's no such thing as uint64_t Tensors, but DevState must match
  * HostState's uint64_t interface.
  */
 
-CUDAGeneratorImplDeviceState::CUDAGeneratorImplDeviceState(DeviceIndex device_index)
+CUDAGeneratorImplDevState::CUDAGeneratorImplDevState(DeviceIndex device_index)
   : CUDAGeneratorImpl(device_index) {}
 
-void CUDAGeneratorImplDeviceState::set_current_seed(uint64_t seed) {
+void CUDAGeneratorImplDevState::set_current_seed(uint64_t seed) {
   // Sets up this instance to lazily recreate per-stream states from the new seed.
   init_seed_ = seed;
   init_offset_ = 0;
@@ -268,8 +278,8 @@ void CUDAGeneratorImplDeviceState::set_current_seed(uint64_t seed) {
   seeded_ = true;
 }
 
-uint64_t CUDAGeneratorImplDeviceState::current_seed() const {
-  TORCH_CHECK(seeded_, "CUDAGeneratorImplDeviceState instance not yet seeded");
+uint64_t CUDAGeneratorImplDevState::current_seed() const {
+  TORCH_CHECK(seeded_, "CUDAGeneratorImplDevState instance not yet seeded");
   auto state_iter = stream_states_.find(at::cuda::getCurrentCUDAStream().id());
   if (state_iter == stream_states_.end()) {
     // Returns init_seed_ instead of lazy-initing state, because this function is const.
@@ -281,15 +291,15 @@ uint64_t CUDAGeneratorImplDeviceState::current_seed() const {
   }
 }
 
-void CUDAGeneratorImplDeviceState::set_philox_offset_per_thread(uint64_t offset) {
-  TORCH_CHECK(seeded_, "CUDAGeneratorImplDeviceState instance not yet seeded");
+void CUDAGeneratorImplDevState::set_philox_offset_per_thread(uint64_t offset) {
+  TORCH_CHECK(seeded_, "CUDAGeneratorImplDevState instance not yet seeded");
   // Sets up this instance to lazily recreate per-stream states from the new offset.
   init_offset_ = 0;
   stream_states_.clear();
 }
 
-uint64_t CUDAGeneratorImplDeviceState::philox_offset_per_thread() const {
-  TORCH_CHECK(seeded_, "CUDAGeneratorImplDeviceState instance not yet seeded");
+uint64_t CUDAGeneratorImplDevState::philox_offset_per_thread() const {
+  TORCH_CHECK(seeded_, "CUDAGeneratorImplDevState instance not yet seeded");
   auto state_iter = stream_states_.find(at::cuda::getCurrentCUDAStream().id());
   if (state_iter == stream_states_.end()) {
     // Returns init_offset_ instead of lazy-initing state, because this function is const.
@@ -301,12 +311,12 @@ uint64_t CUDAGeneratorImplDeviceState::philox_offset_per_thread() const {
   }
 }
 
-CUDAGeneratorImplDeviceState::StateWithRefs&
-CUDAGeneratorImplDeviceState::add_stream_state(Tensor seed,
-                                               Tensor offset,
-                                               Tensor next_offset,
-                                               c10::Stream stream) {
-  TORCH_CHECK(seeded_, "CUDAGeneratorImplDeviceState instance not yet seeded");
+CUDAGeneratorImplDevState::StateWithRefs&
+CUDAGeneratorImplDevState::add_stream_state(Tensor seed,
+                                            Tensor offset,
+                                            Tensor next_offset,
+                                            c10::Stream stream) {
+  TORCH_CHECK(seeded_, "CUDAGeneratorImplDevState instance not yet seeded");
   LiveRefs new_refs{seed,
                     offset,
                     next_offset,
@@ -323,9 +333,9 @@ CUDAGeneratorImplDeviceState::add_stream_state(Tensor seed,
   return (*outcome.first).second;
 }
 
-CUDAGeneratorImplDeviceState::StateWithRefs&
-CUDAGeneratorImplDeviceState::get_state_lazy_init() {
-  TORCH_CHECK(seeded_, "CUDAGeneratorImplDeviceState instance not yet seeded");
+CUDAGeneratorImplDevState::StateWithRefs&
+CUDAGeneratorImplDevState::get_state_lazy_init() {
+  TORCH_CHECK(seeded_, "CUDAGeneratorImplDevState instance not yet seeded");
 
   auto stream = at::cuda::getCurrentCUDAStream();
   auto state_iter = stream_states_.find(stream.id());
@@ -347,8 +357,8 @@ CUDAGeneratorImplDeviceState::get_state_lazy_init() {
 }
 
 // Warning:  The retrieved PhiloxCudaState should be used for one and only one kernel.
-PhiloxCudaState CUDAGeneratorImplDeviceState::philox_cuda_state(uint64_t increment) {
-  TORCH_CHECK(seeded_, "CUDAGeneratorImplDeviceState instance not yet seeded");
+PhiloxCudaState CUDAGeneratorImplDevState::philox_cuda_state(uint64_t increment) {
+  TORCH_CHECK(seeded_, "CUDAGeneratorImplDevState instance not yet seeded");
 
   // Retrieves state for current stream, creates it if necessary
   auto& state = get_state_lazy_init().first;
@@ -367,9 +377,9 @@ PhiloxCudaState CUDAGeneratorImplDeviceState::philox_cuda_state(uint64_t increme
 
 /**
  * Unlike the HostState version, this version throws an error, so if we requested
- * DeviceState, it points out ops that need refactoring to use philox_cuda_state().
+ * DevState, it points out ops that need refactoring to use philox_cuda_state().
  */
-std::pair<uint64_t, uint64_t> CUDAGeneratorImplDeviceState::philox_engine_inputs(uint64_t increment) {
+std::pair<uint64_t, uint64_t> CUDAGeneratorImplDevState::philox_engine_inputs(uint64_t increment) {
   TORCH_CHECK(false,
               "An op called philox_engine_inputs, which is incompatible with maintaining "
               "cuda rng states on the device.  The op should be refactored to use "
@@ -377,27 +387,27 @@ std::pair<uint64_t, uint64_t> CUDAGeneratorImplDeviceState::philox_engine_inputs
   return std::pair<uint64_t, uint64_t>{};
 }
 
-std::shared_ptr<CUDAGeneratorImplDeviceState> CUDAGeneratorImplDeviceState::clone() const {
-  TORCH_CHECK(seeded_, "CUDAGeneratorImplDeviceState instance not yet seeded");
-  return std::shared_ptr<CUDAGeneratorImplDeviceState>(this->clone_impl());
+std::shared_ptr<CUDAGeneratorImplDevState> CUDAGeneratorImplDevState::clone() const {
+  TORCH_CHECK(seeded_, "CUDAGeneratorImplDevState instance not yet seeded");
+  return std::shared_ptr<CUDAGeneratorImplDevState>(this->clone_impl());
 }
 
 // Tries to implement the following guarantee:
 // If cloned instance is used identically to source instance in the future,
 // it will behave identically to source instance.
-CUDAGeneratorImplDeviceState* CUDAGeneratorImplDeviceState::clone_impl() const {
-  TORCH_CHECK(seeded_, "CUDAGeneratorImplDeviceState instance not yet seeded");
-  auto gen = new CUDAGeneratorImplDeviceState(this->device().index());
+CUDAGeneratorImplDevState* CUDAGeneratorImplDevState::clone_impl() const {
+  TORCH_CHECK(seeded_, "CUDAGeneratorImplDevState instance not yet seeded");
+  auto gen = new CUDAGeneratorImplDevState(this->device().index());
   gen->accept_clone_impl(this->init_seed_,
                          this->init_offset_,
                          this->stream_states_);
   return gen;
 }
 
-void CUDAGeneratorImplDeviceState::accept_clone_impl(const uint64_t& init_seed,
+void CUDAGeneratorImplDevState::accept_clone_impl(const uint64_t& init_seed,
                                                      const uint64_t& init_offset,
                                                      const StreamStatesWithRefs& stream_states) {
-  TORCH_CHECK(seeded_, "CUDAGeneratorImplDeviceState instance not yet seeded");
+  TORCH_CHECK(seeded_, "CUDAGeneratorImplDevState instance not yet seeded");
   init_seed_ = init_seed;
   init_offset_ = init_offset;
   stream_states_.clear();
