@@ -19029,8 +19029,8 @@ else:
         self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
     @dtypes(torch.int64, torch.float, torch.complex128)
-    def test_swapdims_invalid(self, device, dtype):
-        for fn in (torch.swapdims, torch.swapaxes):
+    def test_transpose_invalid(self, device, dtype):
+        for fn in (torch.swapdims, torch.swapaxes, torch.transpose):
             shape = self._rand_shape(4, min_size=5, max_size=10)
             x = self._generate_input(shape, dtype, device, False)
 
@@ -19041,10 +19041,9 @@ else:
             with self.assertRaisesRegex(IndexError, "Dimension out of range"):
                 fn(x, 0, 5)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.int64, torch.float, torch.complex128)
-    def test_swapdims(self, device, dtype):
-        for fn in (torch.swapdims, torch.swapaxes):
+    def test_transpose_vs_numpy(self, device, dtype):
+        for fn in (torch.swapdims, torch.swapaxes, torch.transpose):
             for nd in range(5):
                 shape = self._rand_shape(nd, min_size=5, max_size=10)
                 x = self._generate_input(shape, dtype, device, with_extremal=False)
@@ -19060,13 +19059,24 @@ else:
                             src_dim = src_dim - nd
                             dst_dim = dst_dim - nd
 
-                        torch_fn = partial(fn, dim1=src_dim, dim2=dst_dim)
+                        partial_map = {
+                            torch.swapdims: partial(torch.swapdims, dim1=src_dim, dim2=dst_dim),
+                            torch.swapaxes: partial(torch.swapaxes, axis1=src_dim, axis2=dst_dim),
+                            torch.transpose: partial(torch.transpose, dim0=src_dim, dim1=dst_dim),
+                        }
+
+                        torch_fn = partial_map[fn]
                         np_fn = partial(np.swapaxes, axis1=src_dim, axis2=dst_dim)
                         self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
             # Move dim to same position
             x = torch.randn(2, 3, 5, 7, 11)
-            torch_fn = partial(fn, dim1=0, dim2=0)
+            partial_map = {
+                torch.swapdims: partial(torch.swapdims, dim1=0, dim2=0),
+                torch.swapaxes: partial(torch.swapaxes, axis1=0, axis2=0),
+                torch.transpose: partial(torch.transpose, dim0=0, dim1=0),
+            }
+            torch_fn = partial_map[fn]
             np_fn = partial(np.swapaxes, axis1=0, axis2=0)
             self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
@@ -19870,12 +19880,13 @@ class TestViewOps(TestCase):
         self.assertEqual(t[1, 0], v[0, 1])
 
     def test_transpose_view(self, device):
-        t = torch.ones((5, 5), device=device)
-        v = torch.transpose(t, 0, 1)
-        self.assertTrue(self.is_view_of(t, v))
+        for fn in (torch.swapdims, torch.swapaxes, torch.transpose):
+            t = torch.ones((5, 5), device=device)
+            v = fn(t, 0, 1)
+            self.assertTrue(self.is_view_of(t, v))
 
-        v[0, 1] = 0
-        self.assertEqual(t[1, 0], v[0, 1])
+            v[0, 1] = 0
+            self.assertEqual(t[1, 0], v[0, 1])
 
     def test_t_view(self, device):
         t = torch.ones((5, 5), device=device)
@@ -20042,7 +20053,7 @@ class TestViewOps(TestCase):
             v[0, 0] = idx + 1
             self.assertEqual(t[idx, 0], v[0, 0])
 
-    def _test_movedim_swapdim_view(self, device, op):
+    def _test_movedim_view(self, device, op):
         t = torch.zeros(3, 3, device=device)
         out = op(t)
 
@@ -20058,14 +20069,10 @@ class TestViewOps(TestCase):
 
     def test_movedim_view(self, device):
         op = partial(torch.movedim, source=(0, 1), destination=(1, 0))
-        self._test_movedim_swapdim_view(device, op)
+        self._test_movedim_view(device, op)
 
         op = partial(torch.movedim, source=0, destination=1)
-        self._test_movedim_swapdim_view(device, op)
-
-    def test_swapdim_view(self, device):
-        op = partial(torch.swapdims, dim1=0, dim2=1)
-        self._test_movedim_swapdim_view(device, op)
+        self._test_movedim_view(device, op)
 
 # Below are fixtures and functions that generate tensor op comparison tests
 # These tests run a single op on both a CPU and device tensor and compare the
