@@ -227,17 +227,14 @@ Barrier categorize(
   if (vTensor::Access::Read == (src_access & vTensor::Access::Read)) {
     if (vTensor::Access::Read == (dst_access & vTensor::Access::Read)) {
       // RAR (Read after Read)
-      printf("Barrier::None\n");
       return Barrier::None;
     }
 
     // WAR (Write after Read)
-    printf("Barrier::Exectution\n");
     return Barrier::Exectution;
   }
 
   // RAW (Read after Write), or WAR (Write after Read)
-  printf("Barrier::Memory\n");
   return Barrier::Memory;
 };
 
@@ -339,6 +336,7 @@ vTensor::View::View(
     state_(context, sizes),
     // Metadata
     sizes_(sizes),
+    strides_(sizes.size()),
     options_(options) {
   ops::verify(options);
 }
@@ -962,8 +960,8 @@ vTensor::View::State::transition(const Bundle bundle) {
       std::ostream&,
       const View::State::Bundle&);
 
-  std::cout << "From:" << std::endl << from << std::endl;
-  std::cout << "To:" << std::endl << to << std::endl;
+  // std::cout << "From:" << std::endl << from << std::endl;
+  // std::cout << "To:" << std::endl << to << std::endl;
 
   return Transition{
     from,

@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/glsl.h>
 #include <torch/library.h>
 
 namespace at {
@@ -11,10 +12,48 @@ Tensor add(
     const Tensor& self,
     const Tensor& other,
     const Scalar alpha) {
+  api::Context* const context = api::context();
 
-  auto xt = self.is_vulkan() ? self : self.vulkan();
+  const vTensor& v_self = convert(self.is_vulkan() ? self : self.vulkan());
+  const vTensor& v_other = convert(other.is_vulkan() ? other : self.vulkan());
+  vTensor v_output(context, self.sizes().vec(), self.options());
 
-  return Tensor{};
+  api::Command::Buffer command_buffer = context->command().pool.allocate();
+  command_buffer.begin();
+
+  api::Descriptor::Set descriptor_set = context->load(
+      command_buffer,
+      {
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+      },
+      {
+        add_glsl,
+      },
+      {
+
+      });
+
+  descriptor_set.
+      bind(0u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, v_output.image(command_buffer, vTensor::Access::Write)).
+      bind(1u, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, v_self.image(command_buffer)).
+      bind(2u, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, v_other.image(command_buffer));
+
+  context->dispatch(
+      command_buffer,
+      descriptor_set,
+      {
+
+      });
+
+  command_buffer.end();
+  command_buffer.submit(context->gpu().queue);
+
+  return convert(v_output);
 }
 
 #ifdef USE_VULKAN_API

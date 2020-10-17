@@ -104,21 +104,32 @@ Context::~Context() {
   }
 }
 
-void Context::dispatch(
+Descriptor::Set Context::load(
     Command::Buffer& command_buffer,
-      const Shader::Layout::Descriptor& shader_layout_descriptor,
-      const Shader::Descriptor& shader_descriptor,
-      const Descriptor::Set& descriptor_set) {
+    const Shader::Layout::Descriptor& shader_layout_descriptor,
+    const Shader::Descriptor& shader_descriptor,
+    const Shader::WorkGroup& local_work_group) {
+  const VkDescriptorSetLayout descriptor_set_layout =
+      shader().layout.cache.retrieve(shader_layout_descriptor);
+
   command_buffer.bind(
       pipeline().cache.retrieve({
         pipeline().layout.cache.retrieve({
-          shader().layout.cache.retrieve(shader_layout_descriptor),
+          descriptor_set_layout,
         }),
         shader().cache.retrieve(shader_descriptor),
-        Shader::WorkGroup{},
+        local_work_group,
       }));
+
+  return descriptor().pool.allocate(descriptor_set_layout);
+}
+
+void Context::dispatch(
+      Command::Buffer& command_buffer,
+      const Descriptor::Set& descriptor_set,
+      const Shader::WorkGroup& global_work_group) {
   command_buffer.bind(descriptor_set);
-  command_buffer.dispatch(Shader::WorkGroup{});
+  command_buffer.dispatch(global_work_group);
 }
 
 void Context::flush() {
