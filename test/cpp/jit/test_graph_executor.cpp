@@ -1,4 +1,3 @@
-#include <boost/filesystem.hpp>
 #include <gtest/gtest.h>
 
 #include "test/cpp/jit/test_utils.h"
@@ -46,8 +45,9 @@ TEST(GraphExecutorTest, runAsync_executor) {
   demo = DemoModule()
   torch.jit.save(torch.jit.script(demo), 'test_interpreter_async.pth')
   */
-  auto currentDir = boost::filesystem::path(__FILE__).parent_path().string();
-  auto module = load(currentDir.append("/test_interpreter_async.pth"));
+  auto filePath = std::string(__FILE__);
+  auto currentDir = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  auto module = load(currentDir.append("test_interpreter_async.pth"));
   module.to(at::kCPU);
   auto graph = module.get_method("forward").graph();
   GraphExecutor graphExecutor(graph, "");

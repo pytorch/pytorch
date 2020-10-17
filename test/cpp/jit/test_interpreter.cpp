@@ -1,4 +1,3 @@
-#include <boost/filesystem.hpp>
 #include <gtest/gtest.h>
 
 #include <ATen/Parallel.h>
@@ -157,8 +156,9 @@ TEST(InterpreterTest, runAsyncBasicTest) {
   demo = DemoModule()
   torch.jit.save(torch.jit.script(demo), 'test_interpreter_async.pth')
   */
-  auto currentDir = boost::filesystem::path(__FILE__).parent_path().string();
-  auto model = load(currentDir.append("/test_interpreter_async.pth"));
+  auto filePath = std::string(__FILE__);
+  auto currentDir = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  auto model = load(currentDir.append("test_interpreter_async.pth"));
   model.to(at::kCPU);
   auto graph = model.get_method("forward").graph();
   Code function(graph, "");

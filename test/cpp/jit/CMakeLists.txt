@@ -1,8 +1,5 @@
 set(JIT_TEST_ROOT ${TORCH_ROOT}/test/cpp/jit)
 
-# add boost package
-find_package(Boost REQUIRED COMPONENTS filesystem)
-
 # Build separate libraries the define custom classes/operators used from our Python tests.
 # These are intended to be used with torch.ops.load_library() in our Python test suite.
 add_library(torchbind_test SHARED
@@ -77,7 +74,7 @@ if(USE_SYSTEM_ONNX)
   target_link_libraries(test_jit PRIVATE onnx_proto onnx)
 endif()
 
-set(JIT_TEST_DEPENDENCIES torch gtest Boost::filesystem)
+set(JIT_TEST_DEPENDENCIES torch gtest)
 
 if(MSVC)
   list(APPEND JIT_TEST_DEPENDENCIES onnx_library)
