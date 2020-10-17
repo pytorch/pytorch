@@ -1943,8 +1943,20 @@ Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
   return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
 }
 
-Tensor swapdim(const Tensor& self, int64_t dim1, int64_t dim2) {
+Tensor swapaxes(const Tensor& self, int64_t dim1, int64_t dim2) {
   return self.transpose(dim1, dim2);
+}
+
+Tensor& swapaxes_(Tensor& self, int64_t dim1, int64_t dim2) {
+  return self.transpose_(dim1, dim2);
+}
+
+Tensor swapdims(const Tensor& self, int64_t dim1, int64_t dim2) {
+  return self.transpose(dim1, dim2);
+}
+
+Tensor& swapdims_(Tensor& self, int64_t dim1, int64_t dim2) {
+  return self.transpose_(dim1, dim2);
 }
 
 }} // at::native

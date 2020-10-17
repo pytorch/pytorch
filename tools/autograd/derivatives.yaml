@@ -1026,9 +1026,6 @@
 - name: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: symeig_backward(grads, self, eigenvectors, upper, eigenvalues, eigenvectors_return)
 
-- name: swapdim(Tensor(a) self, int dim1, int dim2) -> Tensor(a)
-  self: swapdim(grad, dim1, dim2)
-
 - name: t(Tensor(a) self) -> Tensor(a)
   self: grad.t()
 

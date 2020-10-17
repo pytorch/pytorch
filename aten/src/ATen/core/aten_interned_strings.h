@@ -658,7 +658,6 @@ _(aten, rsub) \
 _(aten, sum) \
 _(aten, sum_to_size) \
 _(aten, svd) \
-_(aten, swapdim) \
 _(aten, symeig) \
 _(aten, t) \
 _(aten, take) \
@@ -698,7 +697,6 @@ _(aten, to_sparse) \
 _(aten, to_dense) \
 _(aten, topk) \
 _(aten, trace) \
-_(aten, transpose) \
 _(aten, triangular_solve) \
 _(aten, tril) \
 _(aten, triplet_margin_loss) \
