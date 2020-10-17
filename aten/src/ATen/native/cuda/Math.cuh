@@ -429,7 +429,7 @@ static __host__ __device__ scalar_t _igam_helper_asymptotic_series(scalar_t a, s
     eta = ::sqrt(-2 * (::log1p(sigma) - sigma));
   }
   else if (lambda < 1) {
-    eta = -std::sqrt(-2 * (std::log1p(sigma) - sigma));
+    eta = -::sqrt(-2 * (::log1p(sigma) - sigma));
   }
   else {
     eta = 0;

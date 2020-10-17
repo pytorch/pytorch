@@ -15072,8 +15072,6 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.frac(),
                 lambda x, y: x.hypot(y),
                 lambda x, y: x.hypot_(y),
-                lambda x, y: x.igamma(y),
-                lambda x, y: x.igamma_(y),
                 lambda x, y: x.i0(),
                 lambda x, y: x.i0_(),
                 lambda x, y: x.lerp(y, 0.5),
@@ -17408,6 +17406,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @onlyOnCPUAndCUDA
     def test_igamma_common(self, device, dtype):
         # test igamma for reasonable range of values
         loglo = -4  # approx 0.018
