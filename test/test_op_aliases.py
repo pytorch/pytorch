@@ -150,6 +150,18 @@ alias_infos = (
     AliasInfo('true_divide_', torch.Tensor.true_divide_, 'div_', torch.Tensor.div_,
               lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.rand(20, device=d) + .1,),
               decorators=(onlyCPU,)),
+    AliasInfo('swapdims', torch.Tensor.swapdims, 'transpose', torch.Tensor.transpose,
+              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1),
+              decorators=(onlyCPU,)),
+    AliasInfo('swapdims_', torch.Tensor.swapdims_, 'transpose_', torch.Tensor.transpose_,
+              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1),
+              decorators=(onlyCPU,)),
+    AliasInfo('swapaxes', torch.Tensor.swapaxes, 'transpose', torch.Tensor.transpose,
+              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1),
+              decorators=(onlyCPU,)),
+    AliasInfo('swapaxes_', torch.Tensor.swapaxes_, 'transpose_', torch.Tensor.transpose_,
+              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1),
+              decorators=(onlyCPU,)),
 )
 
 # Placeholder test class for validating that aliases are correctly
