@@ -54,7 +54,7 @@ class TORCH_API CommHookInterface {
 class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
  public:
   PythonCommHook(py::object state, py::object hook)
-      : state_(std::move(state)), hook_(std::move(hook)){};
+      : state_(std::move(state)), hook_(std::move(hook)) {}
 
   ~PythonCommHook() override {
     py::gil_scoped_acquire ag;
