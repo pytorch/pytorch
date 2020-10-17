@@ -1,14 +1,15 @@
 #include <benchmark/benchmark.h>
-#include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
-#include "torch/csrc/jit/tensorexpr/loopnest.h"
-#include "torch/csrc/jit/tensorexpr/tensor.h"
-#include "torch/torch.h"
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
+#include <torch/torch.h>
 
 namespace te = torch::jit::tensorexpr;
 
+namespace {
 class Gemm : public benchmark::Fixture {
  public:
-  void SetUp(const benchmark::State& state) {
+  void SetUp(const benchmark::State& state) override {
     M = state.range(0);
     N = state.range(1);
     K = state.range(2);
@@ -17,7 +18,7 @@ class Gemm : public benchmark::Fixture {
     C = torch::mm(A, B);
   }
 
-  void TearDown(benchmark::State& state) {
+  void TearDown(benchmark::State& state) override {
     state.counters["GFLOPS"] = benchmark::Counter(
         uint64_t(state.iterations()) * 2 * M * N * K,
         benchmark::Counter::kIsRate);
@@ -30,6 +31,7 @@ class Gemm : public benchmark::Fixture {
   at::Tensor B;
   at::Tensor C;
 };
+}
 
 BENCHMARK_DEFINE_F(Gemm, Torch)(benchmark::State& state) {
   for (auto _ : state) {
@@ -128,5 +130,3 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile32x32)(benchmark::State& state) {
 BENCHMARK_REGISTER_F(Gemm, Torch)->Args({128, 128, 128});
 BENCHMARK_REGISTER_F(Gemm, TensorExprNoopt)->Args({128, 128, 128});
 BENCHMARK_REGISTER_F(Gemm, TensorExprTile32x32)->Args({128, 128, 128});
-
-BENCHMARK_MAIN();

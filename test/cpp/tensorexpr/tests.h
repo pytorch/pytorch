@@ -116,6 +116,14 @@ namespace jit {
   _(ReduceInlineReduction)                          \
   _(ReduceInlineConsumer)                           \
   _(ReduceInlineReducerInternal)                    \
+  _(ReductionCacheAccessesOuter)                    \
+  _(ReductionCacheAccessesInner)                    \
+  _(ReductionCacheBodyAccess)                       \
+  _(ReductionCacheConsumerAccess)                   \
+  _(ReductionSplitCacheConsumerAccess)              \
+  _(ReductionReorderCacheConsumerAccess)            \
+  _(ReductionRfactorCacheTempOuter)                 \
+  _(ReductionRfactorCacheTempInner)                 \
   _(TypeTest01)                                     \
   _(TypePropagation)                                \
   _(Cond01)                                         \
@@ -307,7 +315,6 @@ namespace jit {
   _(LoopNestComputeAt_1)                            \
   _(LoopNestComputeAt_2)                            \
   _(LoopNestComputeAt_3)                            \
-  _(LoopNestComputeAt_4)                            \
   _(LoopNestReorderAxis1)                           \
   _(LoopNestReorderPartialAxes)                     \
   _(LoopNestReorderInternalAxis)                    \
@@ -333,14 +340,30 @@ namespace jit {
   _(NormalizeOnNestedOuterLoop)                     \
   _(NormalizeOnNestedInnerLoop)                     \
   _(NormalizeAndSplitWithTail)                      \
+  _(FlattenSimpleLoopNest2D)                        \
+  _(FlattenSimpleLoopNest3D)                        \
+  _(FlattenLoopNestAfterNormalize)                  \
+  _(FlattenImperfectLoopNest)                       \
+  _(FlattenReductionLoopNest)                       \
+  _(FlattenReductionLoopNestFromTensor)             \
+  _(FlattenIncorrectLoopsAsInput)                   \
   _(DetectInlineRankMismatch)                       \
+  _(CacheReadsSimple)                               \
+  _(CacheReadsOuter)                                \
+  _(CacheReadsInternal)                             \
+  _(CacheReadsInner)                                \
+  _(CacheWritesSimple)                              \
   _(Kernel_1)                                       \
   _(Kernel_2)                                       \
   _(Kernel_3)                                       \
   _(Kernel_4)                                       \
+  _(KernelCatInputTypesPromotion)                   \
   _(KernelSumAllAxes)                               \
   _(KernelSumOneAxis)                               \
   _(KernelSumMultipleAxes)                          \
+  _(KernelSoftmax2D)                                \
+  _(KernelSoftmax3D)                                \
+  _(KernelSoftmax4D)                                \
   _(FuserPass_1)                                    \
   _(FuserPass_2)                                    \
   _(FuserPass_3)                                    \

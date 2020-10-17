@@ -227,7 +227,6 @@ private:
   // currently not high-pri.
   ska::flat_hash_map<DispatchKey, std::list<AnnotatedKernel>> kernels_;
 
-  std::list<AnnotatedKernel> catchAllKernel_;
   AnnotatedKernel missingKernel_;
   static const AnnotatedKernel ambiguousAutogradOtherKernel_;
 
@@ -254,7 +253,7 @@ private:
   void updateDispatchTableFull_(const c10::Dispatcher& dispatcher);
 
   // Returns true if kernel_ has entry for any key in ks.
-  bool hasKernelForDispatchKeySet(DispatchKeySet ks) const;
+  bool hasKernelForAnyDispatchKey(DispatchKeySet ks) const;
   // Retrieves a pointer to AnnotatedKernel at kernels_.at(dispatch_key).front().
   c10::optional<const AnnotatedKernel*> getKernelForDispatchKey(DispatchKey dispatch_key) const;
 };

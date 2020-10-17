@@ -1624,6 +1624,10 @@ Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
   return native::flatten(self, *dims.begin(), *(dims.end() - 1), out_dim);
 }
 
+Tensor ravel(const Tensor& self) {
+  return self.reshape(-1);
+}
+
 Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
   dim = maybe_wrap_dim(dim, self.dim());
 
@@ -1633,7 +1637,7 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::option
   auto numel = std::accumulate(sizes.begin(), sizes.end(), 1, std::multiplies<int64_t>());
   if (self.has_names()) {
     TORCH_CHECK(numel == self.size(dim),
-      "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ", 
+      "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
       dim, " (", self.names()[dim], ": ", self.size(dim), ") in Tensor", self.names());
     TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
   } else {
