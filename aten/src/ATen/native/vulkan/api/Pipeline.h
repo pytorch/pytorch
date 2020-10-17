@@ -195,6 +195,11 @@ inline size_t Pipeline::Factory::Hasher::operator()(
       descriptor.work_group.z);
 }
 
+inline Pipeline::Object::operator bool() const {
+  return (VK_NULL_HANDLE != handle) &&
+         (VK_NULL_HANDLE != layout);
+}
+
 inline Pipeline::Object Pipeline::Cache::retrieve(
     const Descriptor& descriptor) {
   return {
@@ -205,11 +210,6 @@ inline Pipeline::Object Pipeline::Cache::retrieve(
 
 inline void Pipeline::Cache::purge() {
   cache_.purge();
-}
-
-inline Pipeline::Object::operator bool() const {
-  return (VK_NULL_HANDLE != handle) &&
-         (VK_NULL_HANDLE != layout);
 }
 
 } // namespace api

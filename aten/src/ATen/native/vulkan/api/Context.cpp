@@ -109,19 +109,19 @@ Descriptor::Set Context::load(
     const Shader::Layout::Descriptor& shader_layout_descriptor,
     const Shader::Descriptor& shader_descriptor,
     const Shader::WorkGroup& local_work_group) {
-  const VkDescriptorSetLayout descriptor_set_layout =
+  const Shader::Layout::Object shader_layout =
       shader().layout.cache.retrieve(shader_layout_descriptor);
 
   command_buffer.bind(
       pipeline().cache.retrieve({
         pipeline().layout.cache.retrieve({
-          descriptor_set_layout,
+          shader_layout.handle,
         }),
         shader().cache.retrieve(shader_descriptor),
         local_work_group,
       }));
 
-  return descriptor().pool.allocate(descriptor_set_layout);
+  return descriptor().pool.allocate(shader_layout);
 }
 
 void Context::dispatch(
