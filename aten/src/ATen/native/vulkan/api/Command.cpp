@@ -69,10 +69,6 @@ VkCommandBuffer allocate_command_buffer(
 
 } // namespace
 
-Command::Buffer::Buffer()
-  : command_buffer_(VK_NULL_HANDLE) {
-}
-
 Command::Buffer::Buffer(
     const VkDevice device,
     const VkCommandPool command_pool)
