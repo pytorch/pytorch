@@ -22,9 +22,11 @@ unpack(at::PhiloxCudaState arg) {
         blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0) {
       *arg.next_offset_ptr_ = offset + arg.increment_;
     }
-    return {seed, arg.subseq_pool_start_, offset};
+    // {seed, arg.subseq_pool_start_, offset}; fails for cuda 9.2, gcc 5.4 with
+    // error: copy-list-initialization cannot use a constructor marked "explicit"
+    return std::make_tuple(seed, arg.subseq_pool_start_, offset);
   } else {
-    return {arg.seed_, arg.subseq_pool_start_, arg.offset_};
+    return std::make_tuple(arg.seed_, arg.subseq_pool_start_, arg.offset_);
   }
 }
 
