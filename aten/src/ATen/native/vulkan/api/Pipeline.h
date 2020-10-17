@@ -43,8 +43,6 @@ struct Pipeline final {
 
     c10::SmallVector<Resource::Buffer::Barrier, 1u> buffers;
     c10::SmallVector<Resource::Image::Barrier, 1u> images;
-
-    operator bool() const;
   };
 
   //
@@ -167,13 +165,6 @@ struct Pipeline final {
 //
 // Impl
 //
-
-inline Pipeline::Barrier::operator bool() const {
-  return (0u != stage.src) ||
-         (0u != stage.dst) ||
-         !buffers.empty() ||
-         !images.empty();
-}
 
 inline bool operator==(
     const Pipeline::Layout::Descriptor& _1,
