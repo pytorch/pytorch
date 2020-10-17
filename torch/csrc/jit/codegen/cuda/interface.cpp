@@ -163,7 +163,7 @@ bool complyWith(
     // check c, we go along semantic ordered dimensions
     // check broadcast / size-1:
     bool guard_bcast = sizes[j].has_value() && sizes[j].value() == 1;
-    if (guard_bcast ^ (t_sizes[j] == 1)) {
+    if (guard_bcast != (t_sizes[j] == 1)) {
       return false;
     }
   }
