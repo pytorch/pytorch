@@ -38,15 +38,20 @@ class Context final {
   Descriptor& descriptor();
   Resource& resource();
 
-  void dispatch(
+  Descriptor::Set load(
       Command::Buffer& command_buffer,
       const Shader::Layout::Descriptor& shader_layout_descriptor,
       const Shader::Descriptor& shader_descriptor,
-      const Descriptor::Set& descriptor_set);
+      const Shader::WorkGroup& local_work_group);
 
-  // This function is very expensive and its use is bad for performance.
-  // Only use this function for debugging or as a short term hack on way to a
-  // more performant solution.
+  void dispatch(
+      Command::Buffer& command_buffer,
+      const Descriptor::Set& descriptor_set,
+      const Shader::WorkGroup& global_work_group);
+
+  // This function is expensive and its use bad for performance. Only use this
+  // function for debugging or as a short term hack on way to a more performant
+  // solution.
 
   void flush();
 
