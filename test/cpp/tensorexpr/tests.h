@@ -340,6 +340,13 @@ namespace jit {
   _(NormalizeOnNestedOuterLoop)                     \
   _(NormalizeOnNestedInnerLoop)                     \
   _(NormalizeAndSplitWithTail)                      \
+  _(FlattenSimpleLoopNest2D)                        \
+  _(FlattenSimpleLoopNest3D)                        \
+  _(FlattenLoopNestAfterNormalize)                  \
+  _(FlattenImperfectLoopNest)                       \
+  _(FlattenReductionLoopNest)                       \
+  _(FlattenReductionLoopNestFromTensor)             \
+  _(FlattenIncorrectLoopsAsInput)                   \
   _(DetectInlineRankMismatch)                       \
   _(CacheReadsSimple)                               \
   _(CacheReadsOuter)                                \
