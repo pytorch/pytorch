@@ -992,10 +992,10 @@ class TestLinalg(TestCase):
 
     def test_einsum_corner_cases(self, device):
         def check(equation, *operands, expected_output):
-            tensors = [torch.tensor(operand, device=device) if not isinstance(operand, tuple)
-                       else torch.rand(operand, device=device) for operand in operands]
+            tensors = [torch.tensor(operand, dtype=torch.float32, device=device) if not isinstance(operand, tuple)
+                       else torch.rand(operand, dtype=torch.float32, device=device) for operand in operands]
             output = torch.einsum(equation, tensors)
-            self.assertEqual(output, torch.tensor(expected_output, device=device))
+            self.assertEqual(output, torch.tensor(expected_output, dtype=torch.float32, device=device))
 
         # Test equation variantions
         check(' ', 1, expected_output=1)
