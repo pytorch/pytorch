@@ -9,7 +9,6 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-
 Shader::Layout::Factory::Factory(const GPU& gpu)
   : device_(gpu.device) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -55,6 +54,10 @@ Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
     descriptor_set_layout,
     Deleter(device_),
   };
+}
+
+Shader::Layout::Cache::Cache(Factory factory)
+  : cache_(std::move(factory)) {
 }
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME
