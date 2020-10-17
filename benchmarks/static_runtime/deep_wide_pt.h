@@ -89,14 +89,25 @@ struct DeepAndWideFast : torch::nn::Module {
           prealloc_tensors[2], prealloc_tensors[1], -10.0, 10.0);
 
       // Potential optimization: original tensor could be pre-transposed.
-      prealloc_tensors[3] = at::native::transpose(user_emb, 1, 2);
+      // prealloc_tensors[3] = at::native::transpose(user_emb, 1, 2);
+      auto sizes = user_emb.sizes();
+      auto strides = user_emb.strides();
+      prealloc_tensors[3].set_(
+          user_emb.storage(),
+          0,
+          {sizes[0], sizes[2], sizes[1]},
+          {strides[0], strides[2], strides[1]});
 
       // Potential optimization: call MKLDNN directly.
       at::native::bmm_out_cpu(
           prealloc_tensors[4], ad_emb_packed, prealloc_tensors[3]);
 
-      prealloc_tensors[5] =
-          prealloc_tensors[4].view({prealloc_tensors[4].size(0), 1});
+      if (prealloc_tensors[5].data_ptr() != prealloc_tensors[4].data_ptr()) {
+        // in unlikely case that the input tensor changed we need to
+        // reinitialize the view
+        prealloc_tensors[5] =
+            prealloc_tensors[4].view({prealloc_tensors[4].size(0), 1});
+      }
 
       // Potential optimization: we can replace cat with carefully constructed
       // tensor views on the output that are passed to the _out ops above.
