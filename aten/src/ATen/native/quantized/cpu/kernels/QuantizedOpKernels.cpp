@@ -2568,26 +2568,40 @@ void dequantize_tensor_per_tensor_affine_cpu(
 #endif // USE_FBGEMM
 
 // TODO: add fbgemm for per channel
-#if defined(__ARM_NEON__) || defined(__aarch64__)
 // Generic template defaults to naive quantize implementation
 template <typename T>
-void quantize_tensor_per_channel_arm(
-    const float* in,
+void quantize_tensor_per_channel_impl(
+    Tensor rtensor,
     Tensor qtensor,
-    const double* scales,
-    const int64_t* zero_points,
-    const bool channels_last,
-    const int64_t batches,
-    const int64_t elements_per_channel,
-    const int64_t channels) {
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis) {
+  // TODO: channels last kernel can be made faster.
+  // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
+  // For channels_last/3d however axis == 0 or 1.
+  // Since current implemntation on channels_last format does not
+  // cover per channel quant with arbitrary axis value, it is better
+  // to check and fail.
+  int64_t batches = size_to_dim_(axis, rtensor.sizes());
+  int64_t elements_per_channel = size_from_dim_(axis + 1, rtensor.sizes());
+  int64_t channels = rtensor.size(axis);
+  auto scales_data = scales.data_ptr<double>();
+  auto zero_points_data = zero_points.data_ptr<int64_t>();
+  const float* in = rtensor.data_ptr<float>();
   auto out = qtensor.data_ptr<T>();
-  if (channels_last) {
+  if (axis == 1 &&
+      (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
+       rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
+    // This code handles per channel quant when axis = 1 and
+    // channels_last contig.
+    // If axis = 0 and channels_last contig, implementation for channels
+    // first (NCHW) works.
     for (auto b = 0; b < batches; ++b) {
       for (auto e = 0; e < elements_per_channel; ++e) {
         for (auto c = 0; c < channels; ++c) {
           auto i = b * channels * elements_per_channel + e * channels + c;
-          out[i] =
-              at::native::quantize_val<T>(scales[c], zero_points[c], in[i]);
+          out[i] = at::native::quantize_val<T>(
+              scales_data[c], zero_points_data[c], in[i]);
         }
       }
     }
@@ -2597,31 +2611,35 @@ void quantize_tensor_per_channel_arm(
         for (auto e = 0; e < elements_per_channel; ++e) {
           auto i = b * channels * elements_per_channel +
               c * elements_per_channel + e;
-          out[i] =
-              at::native::quantize_val<T>(scales[c], zero_points[c], in[i]);
+          out[i] = at::native::quantize_val<T>(
+              scales_data[c], zero_points_data[c], in[i]);
         }
       }
     }
   }
 }
 
+#if defined(__ARM_NEON__) || defined(__aarch64__)
 // Specialized implementation from caffe2::Int8Quantize.
 // There may be slight accuracy difference between this and implementation of
 // quantize_val
-// TODO Update quantize_tensor_per_channel_arm implementation to follow
+// TODO Update quantize_tensor_per_channel_impl implementation to follow
 // quantize_val, i.e. f = Round(value/scale + zero_point)
-// TODO Make quantize_tensor_per_channel_arm work for other datatypes too (int8,
-// int32).
+// TODO Make quantize_tensor_per_channel_impl work for other datatypes too
+// (int8, int32).
 template <>
-void quantize_tensor_per_channel_arm<c10::quint8>(
-    const float* in,
+void quantize_tensor_per_channel_impl<c10::quint8>(
+    Tensor rtensor,
     Tensor qtensor,
-    const double* scales,
-    const int64_t* zero_points,
-    const bool channels_last,
-    const int64_t batches,
-    const int64_t elements_per_channel,
-    const int64_t channels) {
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis) {
+  int64_t batches = size_to_dim_(axis, rtensor.sizes());
+  int64_t elements_per_channel = size_from_dim_(axis + 1, rtensor.sizes());
+  int64_t channels = rtensor.size(axis);
+  auto scales_data = scales.data_ptr<double>();
+  auto zero_points_data = zero_points.data_ptr<int64_t>();
+  const float* in = rtensor.data_ptr<float>();
   auto out = (uint8_t*)qtensor.data_ptr<c10::quint8>();
 #if defined(__ARM_NEON__)
   // magic float and magic int to take care of rounding
@@ -2636,27 +2654,30 @@ void quantize_tensor_per_channel_arm<c10::quint8>(
   // get only the mantissa. This works if -2**22 < x < 2**22, but preserves the
   // sign for negative numbers.
   const float32x4_t vmagic_float = vdupq_n_f32(12582912.0f);
-  const int32x4_t vmagic_int = vdupq_n_s32(0x4B400000);
-  // Copy zero_points (int64_t) into int32_t array
   // Copy reciprocal of scales (double) into float array
-  int32_t zero_points_int32t[channels];
-  float inv_scales[channels];
+  // Copy zero_points with magic int (int64_t) into int32_t array
+  std::vector<float> inv_scales(channels);
+  std::vector<int32_t> zero_points_int32t(channels);
   for (int i = 0; i < channels; ++i) {
-    zero_points_int32t[i] = (int32_t)(uint32_t)zero_points[i];
-    inv_scales[i] = 1.0f / (float)scales[i];
+    inv_scales[i] = 1.0f / (float)scales_data[i];
+    zero_points_int32t[i] = (int32_t)(uint32_t)zero_points_data[i] - 0x4B400000;
   }
-  if (channels_last) {
+  if (axis == 1 &&
+      (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
+       rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
+    // This code handles per channel quant when axis = 1 and
+    // channels_last contig.
+    // If axis = 0 and channels_last contig, implementation for channels
+    // first (NCHW) works.
     for (uint32_t b = 0; b < batches; ++b) {
       for (uint32_t e = 0; e < elements_per_channel; ++e) {
         uint32_t c = 0;
         while (c + 8 < channels) {
-          const int32x4_t voffset0123 =
-              vsubq_s32(vld1q_s32(zero_points_int32t + c), vmagic_int);
-          const float32x4_t vinv_scale0123 = vld1q_f32(inv_scales + c);
+          const int32x4_t voffset0123 = vld1q_s32(&zero_points_int32t[c]);
+          const float32x4_t vinv_scale0123 = vld1q_f32(&inv_scales[c]);
           c += 4;
-          const int32x4_t voffset4567 =
-              vsubq_s32(vld1q_s32(zero_points_int32t + c), vmagic_int);
-          const float32x4_t vinv_scale4567 = vld1q_f32(inv_scales + c);
+          const int32x4_t voffset4567 = vld1q_s32(&zero_points_int32t[c]);
+          const float32x4_t vinv_scale4567 = vld1q_f32(&inv_scales[c]);
           c += 4;
           const float32x4_t vin0123 = vld1q_f32(in);
           in += 4;
@@ -2677,8 +2698,8 @@ void quantize_tensor_per_channel_arm<c10::quint8>(
           out += 8;
         }
         for (; c < channels; ++c) {
-          (*out++) = at::native::quantize_val_arm(
-              scales[c], zero_points[c], (*in++));
+          (*out++) =
+              at::native::quantize_val_arm(scales_data[c], zero_points_data[c], (*in++));
         }
       }
     }
@@ -2686,7 +2707,7 @@ void quantize_tensor_per_channel_arm<c10::quint8>(
     for (uint32_t b = 0; b < batches; ++b) {
       for (uint32_t c = 0; c < channels; ++c) {
         uint32_t e = 0;
-        const int32x4_t voffset = vdupq_n_s32(zero_points_int32t[c] - 0x4B400000);
+        const int32x4_t voffset = vdupq_n_s32(zero_points_int32t[c]);
         const float32x4_t vinv_scale = vdupq_n_f32(inv_scales[c]);
         for (; e + 8 < elements_per_channel; e += 8) {
           const float32x4_t vin0123 = vld1q_f32(in);
@@ -2708,30 +2729,36 @@ void quantize_tensor_per_channel_arm<c10::quint8>(
           out += 8;
         }
         for (; e < elements_per_channel; ++e) {
-          (*out++) = at::native::quantize_val_arm(
-              scales[c], zero_points[c], (*in++));
+          (*out++) =
+              at::native::quantize_val_arm(scales_data[c], zero_points_data[c], (*in++));
         }
       }
     }
   }
 #else // defined(__ARM_NEON__)
-  // Copy zero_points (int64_t) into int16_t array
   // Copy scales (double) into float array
-  int16_t zero_points_int16t[channels];
-  float inv_scales[channels];
+  // Copy zero_points (int64_t) into int16_t array
+  std::vector<float> inv_scales(channels);
+  std::vector<int16_t> zero_points_int16t(channels);
   for (int i = 0; i < channels; ++i) {
-    zero_points_int16t[i] = (int16_t)(uint16_t)zero_points[i];
-    inv_scales[i] = 1.0f / (float)scales[i];
+    inv_scales[i] = 1.0f / (float)scales_data[i];
+    zero_points_int16t[i] = (int16_t)(uint16_t)zero_points_data[i];
   }
-  if (channels_last) {
+  if (axis == 1 &&
+      (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
+       rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
+    // This code handles per channel quant when axis = 1 and
+    // channels_last contig.
+    // If axis = 0 and channels_last contig, implementation for channels
+    // first (NCHW) works.
     for (uint32_t b = 0; b < batches; ++b) {
       for (uint32_t e = 0; e < elements_per_channel; ++e) {
         uint32_t c = 0;
         while (c + 8 < channels) {
-          const int16x8_t vzero_point = vld1q_s16(zero_points_int16t + c);
-          const float32x4_t vinv_scale0123 = vld1q_f32(inv_scales + c);
+          const int16x8_t vzero_point = vld1q_s16(&zero_points_int16t[c]);
+          const float32x4_t vinv_scale0123 = vld1q_f32(&inv_scales[c]);
           c += 4;
-          const float32x4_t vinv_scale4567 = vld1q_f32(inv_scales + c);
+          const float32x4_t vinv_scale4567 = vld1q_f32(&inv_scales[c]);
           c += 4;
           const float32x4_t vin0123 = vld1q_f32(in);
           in += 4;
@@ -2750,7 +2777,7 @@ void quantize_tensor_per_channel_arm<c10::quint8>(
         }
         for (; c < channels; ++c) {
           (*out++) =
-              at::native::quantize_val_arm(scales[c], zero_points[c], (*in++));
+              at::native::quantize_val_arm(scales_data[c], zero_points_data[c], (*in++));
         }
       }
     }
@@ -2778,7 +2805,7 @@ void quantize_tensor_per_channel_arm<c10::quint8>(
         }
         for (; e < elements_per_channel; ++e) {
           (*out++) =
-              at::native::quantize_val_arm(scales[c], zero_points[c], (*in++));
+              at::native::quantize_val_arm(scales_data[c], zero_points_data[c], (*in++));
         }
       }
     }
@@ -2793,84 +2820,16 @@ void quantize_tensor_per_channel_affine_cpu(
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
-  // TODO: channels last kernel can be made faster.
-  // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
-  // For channels_last/3d however axis == 0 or 1.
-  // Since current implemntation on channels_last format does not
-  // cover per channel quant with arbitrary axis value, it is better
-  // to check and fail.
   TORCH_CHECK(
       rtensor.is_contiguous() || (axis <= 1),
       "If tensor is channels_last contig then per channel quantization "
       "is supported only for axis = 0 or 1.");
-#if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_channel_affine_cpu", [&]() {
-        const float* const rdata = rtensor.data_ptr<float>();
-        int64_t batches = size_to_dim_(axis, rtensor.sizes());
-        int64_t elements_per_channel =
-            size_from_dim_(axis + 1, rtensor.sizes());
-        int64_t channels = rtensor.size(axis);
-        double* scales_data = scales.data_ptr<double>();
-        int64_t* zero_points_data = zero_points.data_ptr<int64_t>();
-        auto channels_last =
-            (axis == 1 &&
-             (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
-              rtensor.is_contiguous(MemoryFormat::ChannelsLast3d)));
         check_tensor_memory_format(rtensor, qtensor);
-        quantize_tensor_per_channel_arm<scalar_t>(
-            rdata,
-            qtensor,
-            scales_data,
-            zero_points_data,
-            channels_last,
-            batches,
-            elements_per_channel,
-            channels);
+        quantize_tensor_per_channel_impl<scalar_t>(
+            rtensor, qtensor, scales, zero_points, axis);
       });
-#else
-  // Fallback path
-  AT_DISPATCH_QINT_TYPES(
-      qtensor.scalar_type(), "quantize_tensor_per_channel_affine_cpu", [&]() {
-        int64_t batches = size_to_dim_(axis, rtensor.sizes());
-        int64_t elements_per_channel =
-            size_from_dim_(axis + 1, rtensor.sizes());
-        int64_t channel = rtensor.size(axis);
-        auto scales_data = scales.data_ptr<double>();
-        auto zero_points_data = zero_points.data_ptr<int64_t>();
-        check_tensor_memory_format(rtensor, qtensor);
-        const float* rdata = rtensor.data_ptr<float>();
-        auto qdata = qtensor.data_ptr<scalar_t>();
-        if (axis == 1 &&
-            (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
-             rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
-          // This code handles per channel quant when axis = 1 and
-          // channels_last contig.
-          // If axis = 0 and channels_last contig, implementation for channels
-          // first (NCHW) works.
-          for (auto b = 0; b < batches; ++b) {
-            for (auto e = 0; e < elements_per_channel; ++e) {
-              for (auto c = 0; c < channel; ++c) {
-                auto i = b * channel * elements_per_channel + e * channel + c;
-                qdata[i] = quantize_val<scalar_t>(
-                    scales_data[c], zero_points_data[c], rdata[i]);
-              }
-            }
-          }
-        } else {
-          for (auto b = 0; b < batches; ++b) {
-            for (auto c = 0; c < channel; ++c) {
-              for (auto e = 0; e < elements_per_channel; ++e) {
-                auto i = b * channel * elements_per_channel +
-                    c * elements_per_channel + e;
-                qdata[i] = quantize_val<scalar_t>(
-                    scales_data[c], zero_points_data[c], rdata[i]);
-              }
-            }
-          }
-        }
-      });
-#endif // defined(__ARM_NEON__) || defined(__aarch64__)
 }
 
 template<typename T, typename N, typename Q>
