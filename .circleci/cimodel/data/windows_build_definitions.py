@@ -140,6 +140,8 @@ WORKFLOW_DATA = [
     WindowsJob(1, _VC2019, None, master_only_pred=TruePred),
     WindowsJob(2, _VC2019, None, master_only_pred=TruePred),
     WindowsJob(1, _VC2019, CudaVersion(10, 1), force_on_cpu=True, master_only_pred=TruePred),
+    # caffe2 ops test
+    WindowsJob(3, _VC2019, None),
 ]
 
 

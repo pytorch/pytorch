@@ -7405,6 +7405,18 @@ workflows:
           vc_product: Community
           vc_version: ""
           vc_year: "2019"
+      - pytorch_windows_test:
+          build_environment: pytorch-win-vs2019-cpu-py3
+          cuda_version: cpu
+          name: pytorch_windows_vs2019_py36_cpu_test3
+          python_version: "3.6"
+          requires:
+            - pytorch_windows_vs2019_py36_cpu_build
+          test_name: pytorch-windows-test3
+          use_cuda: "0"
+          vc_product: Community
+          vc_version: ""
+          vc_year: "2019"
       - update_s3_htmls:
           context: org-member
           filters:
