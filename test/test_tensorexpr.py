@@ -1029,31 +1029,56 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(npr_a + npr_b, x.numpy())
 
     def _test_cat(self, device):
-        def easy(*args):
+        def foo(*args):
+            args_2 = [v + i for i, v in enumerate(args)]
+            v = torch.cat(args_2, dim=1)
+            return v * v
+
+        M = 16
+        Ns = [128, 16, 1]
+        values = [torch.zeros(M, N, device=device) for N in Ns]
+        traced = torch.jit.trace(foo, values)
+
+        x = warmup_and_run_forward(traced, *values)
+        self.assertLastGraphAllFused()
+        ref = foo(*values)
+        np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
+
+    def test_cat_cpu(self):
+        self._test_cat('cpu')
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_cat_cuda(self):
+        self._test_cat('cuda')
+
+    # This test checks that we correctly handle fusion group with just aten::cat in it.
+    # Note that the test only makes sense with min_fusion_group=1, otherwise no
+    # fusion groups would be formed at all.
+    # TODO: Fix and re-enable the test.
+    def _test_cat_only(self, device):
+        def foo(*args):
             args_2 = [v + i for i, v in enumerate(args)]
             v = torch.cat(args_2, dim=1)
             return v
 
-        M = 1024
-        Ns = [1024, 512, 256, 128]
+        M = 16
+        Ns = [128, 16, 1]
         values = [torch.zeros(M, N, device=device) for N in Ns]
-        traced = torch.jit.trace(easy, values)
+        traced = torch.jit.trace(foo, values)
 
         x = warmup_and_run_forward(traced, *values)
         self.assertLastGraphAllFused()
-        npr = [v.cpu().numpy() for v in values]
-        npr_2 = [v + i for i, v in enumerate(npr)]
-        npr_x = np.concatenate(npr_2, axis=1)
-        np.testing.assert_allclose(npr_x, x.cpu().numpy())
+        ref = foo(*values)
+        np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
 
     @unittest.skip("temporarily disable")
-    def test_cat_cpu(self):
-        self._test_cat('cpu')
+    def test_cat_only_cpu(self):
+        self._test_cat_only('cpu')
 
     @unittest.skip("temporarily disable")
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_cat_cuda(self):
-        self._test_cat('cuda')
+    def test_cat_only_cuda(self):
+        self._test_cat_only('cuda')
 
     def _test_cat_negative_dim(self, device):
         def foo(*args):
