@@ -17378,7 +17378,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def _helper_test_igamma(self, loglo, loghi, device, dtype):
         exp1 = 2.71828182846
         vec1 = torch.logspace(loglo, loghi, steps=500, base=exp1,
-            dtype=dtype, device=device).unsqueeze(-1)
+                              dtype=torch.float64, device=device).unsqueeze(-1)
+        vec1 = vec1.to(dtype)
         inputs = [
             (vec1, vec1.transpose(0, 1)),
             (vec1, vec1),  # for large number, it should approach 0.5
