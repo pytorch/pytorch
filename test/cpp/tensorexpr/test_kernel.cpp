@@ -391,7 +391,7 @@ void testKernelCatInputTypesPromotion() {
 
     const auto graph_string = R"IR(
       graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
-            %b : Half(5, 7, 2, strides=[14, 2, 1], device=cpu),
+            %b : Float(5, 7, 2, strides=[14, 2, 1], device=cpu),
             %c : Double(5, 9, 2, strides=[18, 2, 1], device=cpu)):
         %dim : int = prim::Constant[value=1]()
         %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
@@ -401,7 +401,7 @@ void testKernelCatInputTypesPromotion() {
     parseIR(graph_string, &*graph);
 
     auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-    auto b = at::rand({5, 7, 2}, TensorOptions(kCPU).dtype(at::kHalf));
+    auto b = at::rand({5, 7, 2}, TensorOptions(kCPU).dtype(at::kFloat));
     auto c = at::rand({5, 9, 2}, TensorOptions(kCPU).dtype(at::kDouble));
     auto ref = at::cat({a, b, c}, 1);
 
@@ -427,6 +427,7 @@ void testKernelCatInputTypesPromotion() {
 
     // Check sizes
     CHECK_EQ(o.sizes().size(), ref.sizes().size());
+    CHECK_EQ(o.dtype(), ref.dtype());
     size_t num_el = 1;
     for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
       CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
