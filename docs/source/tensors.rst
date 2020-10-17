@@ -572,6 +572,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sum
    .. automethod:: sum_to_size
    .. automethod:: svd
+   .. automethod:: swapaxes
+   .. automethod:: swapdims
    .. automethod:: symeig
    .. automethod:: t
    .. automethod:: t_

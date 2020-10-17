@@ -5381,8 +5381,8 @@ Examples::
             [[-0.8437,  0.1727, -0.1398]]])
 """.format(**common_args))
 
-add_docstr(torch.swapdim, r"""
-swapdim(input, dim1, dim2) -> Tensor
+add_docstr(torch.swapdims, r"""
+swapdims(input, dim1, dim2) -> Tensor
 
 Swaps the dimension of :attr:`input` at the position in :attr:`dim1`
 to the position in :attr:`dim2`.
