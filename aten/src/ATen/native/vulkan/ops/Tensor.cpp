@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/ops/Tensor.h>
+#include <ATen/native/vulkan/glsl.h>
 
 namespace at {
 namespace native {
@@ -350,8 +351,8 @@ vTensor::View::View(
 
 class vTensor::View::CMD final {
  public:
-  explicit CMD(const View& view);
-  CMD(const View& view, api::Command::Buffer& external);
+  CMD(const View&);
+  CMD(const View&, api::Command::Buffer&);
   CMD(const CMD&) = delete;
   CMD& operator=(const CMD&) = delete;
   CMD(CMD&&) = delete;
@@ -367,22 +368,22 @@ class vTensor::View::CMD final {
   void copy_buffer_to_staging(
       State& state,
       const Buffer::Object& buffer,
-      const Buffer::Object& staging);
+      Buffer::Object& staging);
 
   void copy_staging_to_buffer(
       State& state,
       const Buffer::Object& staging,
-      const Buffer::Object& buffer);
+      Buffer::Object& buffer);
 
   void copy_buffer_to_image(
       State& state,
       const Buffer::Object& buffer,
-      const Image::Object& image);
+      Image::Object& image);
 
   void copy_image_to_buffer(
       State& state,
       const Image::Object& image,
-      const Buffer::Object& buffer);
+      Buffer::Object& buffer);
 
   void submit(Fence fence = {});
 
@@ -403,13 +404,16 @@ class vTensor::View::CMD final {
   } command_buffer_;
 };
 
-vTensor::View::CMD::CMD(const View& view)
+vTensor::View::CMD::CMD(
+    const View& view)
   : view_(view),
     type(Type::Internal),
     command_buffer_{} {
 }
 
-vTensor::View::CMD::CMD(const View& view, api::Command::Buffer& external)
+vTensor::View::CMD::CMD(
+    const View& view,
+    api::Command::Buffer& external)
   : view_(view),
     type(Type::External),
     command_buffer_{
@@ -556,7 +560,7 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
 void vTensor::View::CMD::copy_buffer_to_staging(
     State& state,
     const Buffer::Object& buffer,
-    const Buffer::Object& staging) {
+    Buffer::Object& staging) {
   if (state.is_clean(Component::Staging) || state.is_uma()) {
     return;
   }
@@ -583,7 +587,7 @@ void vTensor::View::CMD::copy_buffer_to_staging(
 void vTensor::View::CMD::copy_staging_to_buffer(
     State& state,
     const Buffer::Object& staging,
-    const Buffer::Object& buffer) {
+    Buffer::Object& buffer) {
   if (state.is_clean(Component::Buffer) || state.is_uma()) {
     return;
   }
@@ -610,7 +614,7 @@ void vTensor::View::CMD::copy_staging_to_buffer(
 void vTensor::View::CMD::copy_buffer_to_image(
     State& state,
     const Buffer::Object& buffer,
-    const Image::Object& image) {
+    Image::Object& image) {
   if (state.is_clean(Component::Image)) {
     return;
   }
@@ -632,13 +636,33 @@ void vTensor::View::CMD::copy_buffer_to_image(
           },
         }));
 
-  // launch
+  api::Descriptor::Set descriptor_set = view_.context_->load(
+      command_buffer(),
+      {
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+      },
+      {
+        nchw_to_image_glsl,
+      },
+      {
+        8, 8, 1,
+      });
+
+  descriptor_set.
+      bind(0u, image).
+      bind(1u, buffer);
+
+  // command_buffer().dispatch();
 }
 
 void vTensor::View::CMD::copy_image_to_buffer(
     State& state,
     const Image::Object& image,
-    const Buffer::Object& buffer) {
+    Buffer::Object& buffer) {
   if (state.is_clean(Component::Buffer)) {
     return;
   }
@@ -660,7 +684,27 @@ void vTensor::View::CMD::copy_image_to_buffer(
           },
         }));
 
-  // launch
+  api::Descriptor::Set descriptor_set = view_.context_->load(
+      command_buffer(),
+      {
+        {
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+      },
+      {
+        image_to_nchw_glsl,
+      },
+      {
+        8, 8, 1,
+      });
+
+  descriptor_set.
+      bind(0u, image).
+      bind(1u, buffer);
+
+  // command_buffer().dispatch();
 }
 
 void vTensor::View::CMD::submit(const api::Resource::Fence fence) {
