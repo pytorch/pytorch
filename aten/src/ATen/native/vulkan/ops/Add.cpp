@@ -35,19 +35,18 @@ Tensor add(
         add_glsl,
       },
       {
-
+        8, 8, 1,
       });
 
   descriptor_set.
-      bind(0u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, v_output.image(command_buffer, vTensor::Access::Write)).
-      bind(1u, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, v_self.image(command_buffer)).
-      bind(2u, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, v_other.image(command_buffer));
+      bind(0u, v_output.image(command_buffer, vTensor::Access::Write)).
+      bind(1u, v_self.image(command_buffer)).
+      bind(2u, v_other.image(command_buffer));
 
   context->dispatch(
       command_buffer,
       descriptor_set,
       {
-
       });
 
   command_buffer.end();

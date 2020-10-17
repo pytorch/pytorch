@@ -68,12 +68,32 @@ struct Shader final {
       VkDevice device_;
     };
 
+    struct Object final {
+      VkDescriptorSetLayout handle;
+      Descriptor descriptor;
+
+      operator bool() const;
+    };
+
     /*
       Cache
     */
 
-    typedef api::Cache<Factory> Cache;
-    Cache cache;
+    class Cache final {
+     public:
+      explicit Cache(Factory factory);
+      Cache(const Cache&) = delete;
+      Cache& operator=(const Cache&) = delete;
+      Cache(Cache&&) = default;
+      Cache& operator=(Cache&&) = default;
+      ~Cache() = default;
+
+      Object retrieve(const Descriptor& descriptor);
+      void purge();
+
+     private:
+      api::Cache<Factory> cache_;
+    } cache;
 
     explicit Layout(const GPU& gpu)
       : cache(Factory(gpu)) {
@@ -179,6 +199,22 @@ inline size_t Shader::Layout::Factory::Hasher::operator()(
   }
 
   return hash;
+}
+
+inline Shader::Layout::Object::operator bool() const {
+  return VK_NULL_HANDLE != handle;
+}
+
+inline Shader::Layout::Object Shader::Layout::Cache::retrieve(
+    const Descriptor& descriptor) {
+  return {
+    cache_.retrieve(descriptor),
+    descriptor,
+  };
+}
+
+inline void Shader::Layout::Cache::purge() {
+  cache_.purge();
 }
 
 inline bool operator==(
