@@ -5,6 +5,11 @@
 #include <atomic>
 #include <stdexcept>
 
+namespace pybind11 {
+  template <typename, typename...>
+  class class_;
+}
+
 namespace c10 {
 class intrusive_ptr_target;
 namespace raw {
@@ -207,27 +212,24 @@ class intrusive_ptr final {
     target_ = NullType::singleton();
   }
 
+  // Make pybind11::class_ be a friend class of intrusive_ptr, so that custom smart
+  // holder in pybind11 could access the private constructor of intrusive_ptr(T*)
+  // which took the ownership of the object.
+  // This is required by customer holder macro PYBIND11_DECLARE_HOLDER_TYPE, where
+  // it uses intrusive_ptr(TTarget*) to initialize and take ownership of the object.
+  // For details, see
+  // https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#custom-smart-pointers
+  template <typename, typename...>
+  friend class pybind11::class_;
+
+  // This constructor will not increase the ref counter for you.
+  // This is not public because we shouldn't make intrusive_ptr out of raw
+  // pointers except from inside the make_intrusive() and
+  // weak_intrusive_ptr::lock() implementations
+  explicit intrusive_ptr(TTarget* target) noexcept : target_(target) {}
+
  public:
   using element_type = TTarget;
-
-  // This constructor will by_default increase the ref counter for you.
-  // This is public because:
-  // 1. Boost intrusive_ptr has the same public API
-  //    https://www.boost.org/doc/libs/1_74_0/boost/smart_ptr/intrusive_ptr.hpp
-  // 2. Pybind11 custom smart pointer requires pointer/raw pointer constructor
-  //    to be a part of public API
-  //    https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#custom-smart-pointers
-  explicit intrusive_ptr(TTarget* target, bool add_ref=true) noexcept : target_(target) {
-    if (target_ != NullType::singleton() && add_ref) {
-      // We can't use retain_(), because we also have to increase weakcount
-      // and because we allow raising these values from 0, which retain_()
-      // has an assertion against.
-
-      ++target_->refcount_;
-      ++target_->weakcount_;
-    }
-  }
-
 
   intrusive_ptr() noexcept : intrusive_ptr(NullType::singleton()) {}
 
@@ -360,12 +362,19 @@ class intrusive_ptr final {
    * passed in *must* have been created using intrusive_ptr::release().
    */
   static intrusive_ptr reclaim(TTarget* owning_ptr) {
-    return intrusive_ptr(owning_ptr, false);
+    return intrusive_ptr(owning_ptr);
   }
 
   template <class... Args>
   static intrusive_ptr make(Args&&... args) {
-    return intrusive_ptr(new TTarget(std::forward<Args>(args)...));
+    auto result = intrusive_ptr(new TTarget(std::forward<Args>(args)...));
+    // We can't use retain_(), because we also have to increase weakcount
+    // and because we allow raising these values from 0, which retain_()
+    // has an assertion against.
+    ++result.target_->refcount_;
+    ++result.target_->weakcount_;
+
+    return result;
   }
 
   /**
@@ -606,7 +615,7 @@ class weak_intrusive_ptr final {
           return intrusive_ptr<TTarget, NullType>(NullType::singleton());
         }
       } while (!target_->refcount_.compare_exchange_weak(refcount, refcount + 1));
-      return intrusive_ptr<TTarget, NullType>(target_, false);
+      return intrusive_ptr<TTarget, NullType>(target_);
     }
   }
 
