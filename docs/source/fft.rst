@@ -21,10 +21,14 @@ Fast Fourier Transforms
 
 .. autofunction:: fft
 .. autofunction:: ifft
+.. autofunction:: fft2
+.. autofunction:: ifft2
 .. autofunction:: fftn
 .. autofunction:: ifftn
 .. autofunction:: rfft
 .. autofunction:: irfft
+.. autofunction:: rfft2
+.. autofunction:: irfft2
 .. autofunction:: rfftn
 .. autofunction:: irfftn
 .. autofunction:: hfft
