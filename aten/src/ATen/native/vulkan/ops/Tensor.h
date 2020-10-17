@@ -182,6 +182,14 @@ class vTensor final {
   Image::Object image(api::Command::Buffer&) const &;
   Image::Object image(api::Command::Buffer&, Access::Flags) &;
 
+  /*
+    Metadata
+  */
+
+  const TensorOptions& options() const;
+  IntArrayRef sizes() const;
+  IntArrayRef strides() const;
+
  private:
   // Some overloads below are intentionally disabled to enforce a usage pattern
   // that ensures the Tensor's lifetime exceeds that of the scope in which the
@@ -235,6 +243,10 @@ class vTensor final {
     Buffer& staging(Access::Flags) const;
     Buffer& staging(api::Command::Buffer&, Access::Flags) const;
     vTensor::Memory& wait() const;
+
+    const TensorOptions& options() const;
+    IntArrayRef sizes() const;
+    IntArrayRef strides() const;
 
    private:
     class CMD;
@@ -323,6 +335,7 @@ class vTensor final {
 
     // Metadata
     c10::SmallVector<int64_t, 6u> sizes_;
+    c10::SmallVector<int64_t, 6u> strides_;
     TensorOptions options_;
 
    private:
@@ -339,11 +352,11 @@ class vTensor final {
       const View::State::Bundle&);
 };
 
-using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
-
 const vTensor& convert(const Tensor& tensor);
 vTensor& convert(Tensor& tensor);
+Tensor convert(const vTensor& tensor);
 
+using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
 void verify(const TensorOptions& options);
 
 //
@@ -431,8 +444,32 @@ inline bool vTensor::has_image() const {
   return view_.has_image();
 }
 
+inline const TensorOptions& vTensor::options() const {
+  return view_.options();
+}
+
+inline IntArrayRef vTensor::sizes() const {
+  return view_.sizes();
+}
+
+inline IntArrayRef vTensor::strides() const {
+  return view_.strides();
+}
+
 inline bool vTensor::View::has_image() const {
   return state_.is_available(View::Component::Image);
+}
+
+inline const TensorOptions& vTensor::View::options() const {
+  return options_;
+}
+
+inline IntArrayRef vTensor::View::sizes() const {
+  return sizes_;
+}
+
+inline IntArrayRef vTensor::View::strides() const {
+  return strides_;
 }
 
 inline vTensor::View::State::Bundle::Buffer::operator bool() const {
@@ -499,6 +536,16 @@ inline vTensor& convert(Tensor& tensor) {
       static_cast<vTensorImpl*>(tensor.unsafeGetTensorImpl());
 
   return impl->unsafe_opaque_handle();
+}
+
+inline Tensor convert(const vTensor& tensor) {
+  return at::detail::make_tensor<vTensorImpl>(
+      DispatchKeySet(DispatchKey::Vulkan),
+      tensor.options().dtype(),
+      at::Device(at::kVulkan),
+      tensor,
+      tensor.sizes(),
+      tensor.strides());
 }
 
 } // namespace ops
