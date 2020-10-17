@@ -286,6 +286,7 @@ namespace jit {
   _(Kernel_2)                               \
   _(Kernel_3)                               \
   _(Kernel_4)                               \
+  _(KernelCatInputTypesPromotion)           \
   _(KernelSumAllAxes)                       \
   _(KernelSumOneAxis)                       \
   _(KernelSumMultipleAxes)                  \

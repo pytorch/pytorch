@@ -1011,6 +1011,45 @@ class TestTensorExprFuser(BaseTestClass):
     def test_cat_negative_dim_cuda(self):
         self._test_cat_negative_dim('cuda')
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_cat_promote_inputs(self):
+        def foo(*args):
+            v = torch.cat(args, dim=1)
+            return v * v
+
+        M = 16
+        Ns = [128, 16, 1]
+        dtypes = [torch.half, torch.float32, torch.double]
+        values = [torch.randn(M, N, device='cuda', dtype=dt) for N, dt in zip(Ns, dtypes)]
+        traced = torch.jit.trace(foo, values)
+
+        x = warmup_and_run_forward(traced, *values)
+        ref = foo(*values)
+        np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_cat_empty_tensors(self):
+        def foo(*args):
+            v = torch.cat(args, dim=1)
+            return v * v
+
+        M = 16
+        Ns = [128, 16, 1]
+        empty = torch.tensor([], device='cuda', dtype=torch.double)
+        values = [empty] + [torch.randn(M, N, device='cuda') for N in Ns]
+        traced = torch.jit.trace(foo, values)
+
+        x = warmup_and_run_forward(traced, *values)
+        ref = foo(*values)
+        np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
+
+        # now test with only empty tensors
+        values = [empty for i in range(3)]
+        traced = torch.jit.trace(foo, values)
+        x = warmup_and_run_forward(traced, *values)
+        ref = foo(*values)
+        np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
+
     def test_scalar(self):
         @torch.jit.script
         def test_float(x, y, z, a, b):
