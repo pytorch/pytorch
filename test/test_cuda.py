@@ -3221,7 +3221,7 @@ class TestCudaComm(TestCase):
             self.assertEqual(expected_a, x.a)
             self.assertEqual(expected_b, x.b)
 
-    def test_dropout_state_on_device_rng(self):
+    def test_state_on_device_dropout(self):
         a = torch.randn((10000,), device="cuda", dtype=torch.float)
 
         def run(input):
@@ -3261,7 +3261,7 @@ class TestCudaComm(TestCase):
 
 
 
-    def test_distributions_state_on_device(self):
+    def test_state_on_device_distributions(self):
         gen_device_state = torch.Generator(device="cuda")
 
 

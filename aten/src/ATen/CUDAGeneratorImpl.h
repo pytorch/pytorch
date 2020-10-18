@@ -6,7 +6,6 @@
 #include <ATen/Context.h>
 
 // TODO: this file should be in ATen/cuda, not top level
-// Should I move it to ATen/cuda as part of this PR?
 
 namespace at {
 
@@ -22,7 +21,8 @@ namespace at {
  *
  * Example (see e.g. native/cuda/Dropout.cu):
  *
- * #include <ATen/cuda/philox_kernelarg_helper.h>
+ * #include <ATen/cuda/CUDAGeneratorImpl.h>
+ * #include <ATen/cuda/StatefulCUDAOpsUtils.cuh>
  *
  * __global__ void kernel(..., PhiloxCudaState philox_args) {
  *   auto seeds = at::cuda::philox::unpack(philox_args);
@@ -41,9 +41,8 @@ namespace at {
  *     // See Note [Acquire lock when using random generators]
  *     std::lock_guard<std::mutex> lock(gen->mutex_);
  *
- *     // gen could be HostState or DevState here!
- *     // No divergent code needed!
- *     rng_engine_inputs = gen->philox_cuda_state(counter_offset);
+ *     // gen could be HostState or DevState here! No divergent code needed!
+ *     rng_engine_inputs = gen->philox_cuda_state(offset_increment);
  *   }
  *   kernel<<<...>>>(..., rng_engine_inputs);
  * }

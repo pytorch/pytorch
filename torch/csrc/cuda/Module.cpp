@@ -486,7 +486,7 @@ PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self, PyObject *noargs
 PyObject * THCPModule_getCurrentGeneratorTestingOnly(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  auto gen = at::cuda::detail::getDefaultCUDAGenerator();
+  const auto& gen = at::cuda::detail::getDefaultCUDAGenerator();
   auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
   return (PyObject*)cast_gen;
   END_HANDLE_TH_ERRORS

@@ -383,7 +383,7 @@ std::pair<uint64_t, uint64_t> CUDAGeneratorImplDevState::philox_engine_inputs(ui
   TORCH_CHECK(false,
               "An op called philox_engine_inputs, which is incompatible with maintaining "
               "cuda rng states on the device.  The op should be refactored to use "
-              "philox_cuda_state instead.");
+              "PhiloxCudaState instead.");
   return std::pair<uint64_t, uint64_t>{};
 }
 
@@ -414,6 +414,7 @@ void CUDAGeneratorImplDevState::accept_clone_impl(const uint64_t& init_seed,
   for (const auto& source_state : stream_states) {
     auto& source_refs = source_state.second.second;
     auto& source_stream = std::get<3>(source_refs);
+    // Clones per-stream state tensors on their streams.
     c10::OptionalStreamGuard guard(source_stream);
     add_stream_state(std::get<0>(source_refs).clone(),
                      std::get<1>(source_refs).clone(),
