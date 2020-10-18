@@ -104,34 +104,6 @@ Context::~Context() {
   }
 }
 
-Descriptor::Set Context::load(
-    Command::Buffer& command_buffer,
-    const Shader::Layout::Descriptor& shader_layout_descriptor,
-    const Shader::Descriptor& shader_descriptor,
-    const Shader::WorkGroup& local_work_group) {
-  const Shader::Layout::Object shader_layout =
-      shader().layout.cache.retrieve(shader_layout_descriptor);
-
-  command_buffer.bind(
-      pipeline().cache.retrieve({
-        pipeline().layout.cache.retrieve({
-          shader_layout.handle,
-        }),
-        shader().cache.retrieve(shader_descriptor),
-        local_work_group,
-      }));
-
-  return descriptor().pool.allocate(shader_layout);
-}
-
-void Context::dispatch(
-      Command::Buffer& command_buffer,
-      const Descriptor::Set& descriptor_set,
-      const Shader::WorkGroup& global_work_group) {
-  command_buffer.bind(descriptor_set);
-  command_buffer.dispatch(global_work_group);
-}
-
 void Context::flush() {
   VK_CHECK(vkDeviceWaitIdle(device()));
 
@@ -149,6 +121,40 @@ Context* context() {
   TORCH_CHECK(context, "Vulkan: Backend not available on this platform!");
 
   return context;
+}
+
+Descriptor::Set dispatch_prologue(
+    Command::Buffer& command_buffer,
+    const Shader::Layout::Signature& shader_layout_signature,
+    const Shader::Descriptor& shader_descriptor,
+    const Shader::WorkGroup& local_work_group) {
+  Descriptor& descriptor = context()->descriptor();
+  Pipeline& pipeline = context()->pipeline();
+  Shader& shader = context()->shader();
+
+  const Shader::Layout::Object shader_layout =
+      shader.layout.cache.retrieve({
+        shader_layout_signature,
+      });
+
+  command_buffer.bind(
+      pipeline.cache.retrieve({
+        pipeline.layout.cache.retrieve({
+          shader_layout.handle,
+        }),
+        shader.cache.retrieve(shader_descriptor),
+        local_work_group,
+      }));
+
+  return descriptor.pool.allocate(shader_layout);
+}
+
+void dispatch_epilogue(
+    Command::Buffer& command_buffer,
+    const Descriptor::Set& descriptor_set,
+    const Shader::WorkGroup& global_work_group) {
+  command_buffer.bind(descriptor_set);
+  command_buffer.dispatch(global_work_group);
 }
 
 } // namespace api
