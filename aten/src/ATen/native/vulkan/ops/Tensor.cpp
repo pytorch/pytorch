@@ -1,5 +1,4 @@
 #include <ATen/native/vulkan/ops/Tensor.h>
-#include <ATen/native/vulkan/glsl.h>
 
 namespace at {
 namespace native {
@@ -645,9 +644,7 @@ void vTensor::View::CMD::copy_buffer_to_image(
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
       },
-      {
-        nchw_to_image_glsl,
-      },
+      VK_KERNEL(nchw_to_image),
       {
         8, 8, 1,
       });
@@ -693,9 +690,7 @@ void vTensor::View::CMD::copy_image_to_buffer(
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
       },
-      {
-        image_to_nchw_glsl,
-      },
+      VK_KERNEL(image_to_nchw),
       {
         8, 8, 1,
       });
