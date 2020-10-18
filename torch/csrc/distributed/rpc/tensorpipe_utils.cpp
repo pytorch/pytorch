@@ -4,6 +4,8 @@
 
 #include <torch/csrc/distributed/rpc/utils.h>
 
+#include <tensorpipe/common/cuda_buffer.h>
+
 #include <tensorpipe/core/message.h>
 
 namespace torch {
@@ -37,7 +39,8 @@ inline c10::Device indexToDevice(c10::DeviceIndex index) {
 
 std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     Message&& rpcMessage,
-    std::vector<c10::DeviceIndex> deviceIndices) {
+    std::vector<c10::DeviceIndex> deviceIndices,
+    const DevicesContext& ctx) {
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers buffers;
 
@@ -62,6 +65,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
       tensorpipe::Message::Payload{payloadPtr, buffers.payload.size()});
 
   // Tensors
+  /*
   if (deviceIndices.empty()) {
     buffers.tensors = cloneSparseTensors(rpcMessage.tensors()).vec();
   } else {
@@ -72,6 +76,8 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     }
     buffers.tensors = cloneSparseTensors(tensors).vec();
   }
+  */
+  buffers.tensors = cloneSparseTensors(rpcMessage.tensors()).vec();
 
   torch::jit::Pickler pickler([&](const void* buf, size_t sz) -> size_t {
     buffers.pickle.insert(
@@ -88,7 +94,8 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
       buffers.pickle.data(), buffers.pickle.size()});
   const auto& tensorDataVec = pickler.tensorData();
   for (size_t i = 0; i < tensorDataVec.size(); ++i) {
-    const auto& tensorData = jit::getWriteableTensorData(tensorDataVec[i]);
+    const auto& tensorData = jit::getWriteableTensorData(
+        tensorDataVec[i], /* toCPU */ false);
     // Enforce memory copy if tensor is created from torch::from_blob, means
     // that the tensor doesn't own the memory.
     std::string metadata =
@@ -106,9 +113,31 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
       // it uses non-const ptrs even though it doesn't modify them when writing.
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       char* tensorPtr = const_cast<char*>(tensorData.data());
-      tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
-          tensorpipe::CpuBuffer{tensorPtr, tensorData.sizeInBytes()},
-          std::move(metadata)});
+      if (tensorDataVec[i].device().is_cpu()) {
+        tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
+            tensorpipe::CpuBuffer{tensorPtr, tensorData.sizeInBytes()},
+            std::move(metadata)});
+#ifdef USE_CUDA
+      } else {
+        cudaStream_t stream =
+            ctx.streams()[tensorDataVec[i].device().index()].stream();
+        tensorpipe::Buffer buf = tensorpipe::CudaBuffer{
+          tensorPtr,
+          tensorData.sizeInBytes(),
+          stream
+        };
+        tpMessage.tensors.push_back(
+            tensorpipe::Message::Tensor{std::move(buf), std::move(metadata)});
+        /*
+        tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
+            tensorpipe::CudaBuffer{
+                tensorPtr,
+                tensorData.sizeInBytes(),
+                ctx.streams()[tensorDataVec[i].device().index()].stream()},
+            std::move(metadata)});
+        */
+#endif
+      }
     }
   }
 

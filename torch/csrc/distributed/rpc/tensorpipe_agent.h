@@ -6,14 +6,13 @@
 #include <thread>
 
 #include <c10/core/thread_pool.h>
-#ifdef USE_CUDA
-#include <c10/cuda/CUDAFunctions.h>
-#include <c10/cuda/CUDAStream.h>
-#endif
 #include <c10d/PrefixStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+
+#include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
+
 
 // Forward-declare the TensorPipe classes we need, to avoid including its
 // headers in PyTorch's ones and thus have it become a public dependency.
@@ -138,13 +137,6 @@ struct AggregatedNetworkData {
   uint64_t totalErrors{0};
 };
 
-#ifdef USE_CUDA
-using at::cuda::CUDAStream;
-#endif
-
-namespace {
-struct DevicesContext;
-}
 
 // TensorPipeAgent leverages TensorPipe (https://github.com/pytorch/tensorpipe)
 // to transparently move tensors and payloads through the fastest available
@@ -221,6 +213,7 @@ class TensorPipeAgent : public RpcAgent {
       const std::shared_ptr<tensorpipe::Pipe>&,
       Message&& message,
       std::vector<c10::DeviceIndex>&& devices,
+      DevicesContext&& ctx,
       std::function<void(const tensorpipe::Error&)>) noexcept;
 
   // Callback of listener accept()

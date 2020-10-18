@@ -7,7 +7,6 @@
 #include <fmt/format.h>
 #include <tensorpipe/tensorpipe.h>
 
-#include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
@@ -28,79 +27,6 @@ const std::string kNumIdleThreads = "agent.num_idle_threads";
 const std::string kClientActiveCalls = "agent.client_active_calls";
 const std::string kServerActiveCalls = "agent.server_active_calls";
 const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
-
-
-struct DevicesContext {
-
-  DevicesContext(const DevicesContext& other) = default;
-  DevicesContext(DevicesContext&& other) = default;
-
-  DevicesContext& operator=(const DevicesContext& rhs) = default;
-  DevicesContext& operator=(DevicesContext&& rhs) & = default;
-
-  void synchronize() {}
-
-#ifndef USE_CUDA
-  explicit DevicesContext(bool noCuda=true) : noCuda_(noCuda) {}
-#else
-  // Use the noCuda arg to disable streams management when deviceMaps are not
-  // set.
-  explicit DevicesContext(bool noCuda=true) : noCuda_(noCuda) {
-    if (!noCuda_) {
-      auto deviceNum = at::cuda::device_count();
-      streams_.reserve(deviceNum);
-      for (c10::DeviceIndex idx = 0; idx < deviceNum; ++idx) {
-        streams_.emplace_back(at::cuda::getStreamFromPool(idx));
-      }
-    }
-  }
-
-  inline const std::vector<CUDAStream>& getCUDAStreams() const {
-    return streams_;
-  }
-
- private:
-  std::vector<CUDAStream> streams_;
-#endif
-
- private:
-  const bool noCuda_;
-};
-
-
-struct DevicesStateGuard {
-
-#ifdef USE_CUDA
-  DevicesStateGuard(const DevicesContext& ctx) {
-    const auto& streams = ctx.getCUDAStreams();
-    std::vector<CUDAStream> prevStreams_;
-    prevStreams_.reserve(streams.size());
-    for (const auto& stream: streams) {
-      prevStreams_.emplace_back(
-          at::cuda::getCurrentCUDAStream(stream.device_index()));
-      at::cuda::setCurrentCUDAStream(stream);
-    }
-  }
-
-  ~DevicesStateGuard() noexcept {
-    for (auto& stream : prevStreams_) {
-      at::cuda::setCurrentCUDAStream(std::move(stream));
-    }
-  }
-#else
-  DevicesStateGuard(DevicesContext /* unused */) {};
-#endif
-
-  DevicesStateGuard(const DevicesStateGuard& other) = delete;
-  DevicesStateGuard(DevicesStateGuard&& other) = delete;
-  DevicesStateGuard& operator=(const DevicesStateGuard& rhs) = delete;
-  DevicesStateGuard& operator=(DevicesStateGuard&& rhs) = delete;
-
- private:
-#ifdef USE_CUDA
-  std::vector<CUDAStream> prevStreams_;
-#endif
-};
 
 } // namespace
 
@@ -481,18 +407,20 @@ void TensorPipeAgent::pipeWrite(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
     Message&& rpcMessage,
     std::vector<c10::DeviceIndex>&& devices,
+    DevicesContext&& ctx,
     std::function<void(const tensorpipe::Error&)> fn) noexcept {
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers tpBuffers;
 
-  std::tie(tpMessage, tpBuffers) =
-      tensorpipeSerialize(std::move(rpcMessage), std::move(devices));
+  std::tie(tpMessage, tpBuffers) = tensorpipeSerialize(
+      std::move(rpcMessage), std::move(devices), ctx);
 
   pipe->write(
       std::move(tpMessage),
       [tpBuffers{
            std::make_shared<TensorpipeWriteBuffers>(std::move(tpBuffers))},
-       fn{std::move(fn)}](
+       fn{std::move(fn)},
+       ctx{std::move(ctx)}](
           const tensorpipe::Error& error, tensorpipe::Message /* unused */) {
         fn(error);
       });
@@ -527,12 +455,12 @@ void TensorPipeAgent::sendCompletedResponseMessage(
       responseMessage = createExceptionResponse(e.what(), responseMessage.id());
     }
 
-    // TODO: pass streams to pipeWrite
     pipeWrite(
         pipe,
         std::move(responseMessage),
         std::move(devices),
-        [this, pipe, messageId, ctx{std::move(ctx)}](
+        std::move(ctx),
+        [this, pipe, messageId](
             const tensorpipe::Error& error) {
           if (error) {
             LOG(WARNING)
@@ -551,7 +479,8 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     pipeWrite(
         pipe,
         createExceptionResponse(error->what(), responseMessage.id()),
-        {},
+        /* devices */{},
+        std::move(ctx),
         [this, pipe, messageId](const tensorpipe::Error& error) {
           if (error) {
             LOG(WARNING)
@@ -735,6 +664,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
       clientPipe.pipe_,
       std::move(requestMessage),
       std::move(devices),
+      DevicesContext(/*noCuda*/ devices.empty()),
       [this, &clientPipe, messageId](const tensorpipe::Error& error) mutable {
         if (error) {
           if (error.isOfType<tensorpipe::PipeClosedError>() &&
@@ -1143,6 +1073,7 @@ std::vector<c10::DeviceIndex> TensorPipeAgent::getDevicesForTensors(
     std::vector<c10::DeviceIndex> deviceIndices;
     deviceIndices.reserve(message.tensors().size());
     const auto& deviceMap = iter->second;
+    bool hasCudaTensor = false;
     for (const auto& t : message.tensors()) {
       if (t.device().is_cpu()) {
         deviceIndices.push_back(-1);
@@ -1155,7 +1086,11 @@ std::vector<c10::DeviceIndex> TensorPipeAgent::getDevicesForTensors(
             t.device(),
             " but received a tensor on that device.");
         deviceIndices.push_back(deviceIter->second);
+        hasCudaTensor = true;
       }
+    }
+    if (!hasCudaTensor) {
+      deviceIndices.clear();
     }
     return deviceIndices;
   }

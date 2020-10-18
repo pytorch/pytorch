@@ -4,6 +4,11 @@
 
 #include <torch/csrc/distributed/rpc/utils.h>
 
+#ifdef USE_CUDA
+#include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAStream.h>
+#endif
+
 namespace tensorpipe {
 class Message;
 } // namespace tensorpipe
@@ -11,6 +16,83 @@ class Message;
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+#ifdef USE_CUDA
+using at::cuda::CUDAStream;
+#endif
+
+struct DevicesContext {
+
+  DevicesContext(const DevicesContext& other) = default;
+  DevicesContext(DevicesContext&& other) = default;
+
+  DevicesContext& operator=(const DevicesContext& rhs) = default;
+  DevicesContext& operator=(DevicesContext&& rhs) & = default;
+
+  void synchronize() {}
+
+#ifndef USE_CUDA
+  explicit DevicesContext(bool noCuda=true) : noCuda_(noCuda) {}
+#else
+  // Use the noCuda arg to disable streams management when deviceMaps are not
+  // set.
+  explicit DevicesContext(bool noCuda=true) : noCuda_(noCuda) {
+    if (!noCuda_) {
+      auto deviceNum = at::cuda::device_count();
+      streams_.reserve(deviceNum);
+      for (c10::DeviceIndex idx = 0; idx < deviceNum; ++idx) {
+        streams_.emplace_back(at::cuda::getStreamFromPool(idx));
+      }
+    }
+  }
+
+  inline const std::vector<CUDAStream>& streams() const {
+    return streams_;
+  }
+
+ private:
+  std::vector<CUDAStream> streams_;
+#endif
+
+ private:
+  const bool noCuda_;
+};
+
+
+struct DevicesStateGuard {
+
+#ifdef USE_CUDA
+  DevicesStateGuard(const DevicesContext& ctx) {
+    const auto& streams = ctx.streams();
+    std::vector<CUDAStream> prevStreams_;
+    prevStreams_.reserve(streams.size());
+    for (const auto& stream: streams) {
+      prevStreams_.emplace_back(
+          at::cuda::getCurrentCUDAStream(stream.device_index()));
+      at::cuda::setCurrentCUDAStream(stream);
+    }
+  }
+
+  ~DevicesStateGuard() noexcept {
+    for (auto& stream : prevStreams_) {
+      at::cuda::setCurrentCUDAStream(std::move(stream));
+    }
+  }
+#else
+  DevicesStateGuard(DevicesContext /* unused */) {};
+#endif
+
+  DevicesStateGuard(const DevicesStateGuard& other) = delete;
+  DevicesStateGuard(DevicesStateGuard&& other) = delete;
+  DevicesStateGuard& operator=(const DevicesStateGuard& rhs) = delete;
+  DevicesStateGuard& operator=(DevicesStateGuard&& rhs) = delete;
+
+ private:
+#ifdef USE_CUDA
+  std::vector<CUDAStream> prevStreams_;
+#endif
+};
+
 
 // A struct that holds pointers that keep alive all the memory that will be
 // accessed by TensorPipe during a write operation.
@@ -43,7 +125,8 @@ struct TensorpipeReadBuffers {
 TORCH_API std::tuple<tensorpipe::Message, TensorpipeWriteBuffers>
 tensorpipeSerialize(
     Message&& rpcMessage,
-    std::vector<c10::DeviceIndex> devices = {});
+    std::vector<c10::DeviceIndex> devices = {},
+    const DevicesContext& = DevicesContext(/* noCuda */ true));
 
 // Allocate the buffers that will hold the incoming data. They will be managed
 // by the returned holder, which must be kept alive until the asynchronous read
