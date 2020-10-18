@@ -4,9 +4,9 @@ import torch
 from torch._C import _add_docstr, _fft  # type: ignore
 from torch._torch_docs import factory_common_args
 
-__all__ = ['fft', 'ifft', 'fftn', 'ifftn',
-           'rfft', 'irfft', 'rfftn', 'irfftn', 'hfft', 'ihfft',
-           'fftfreq', 'rfftfreq', 'fftshift', 'ifftshift',
+__all__ = ['fft', 'ifft', 'fft2', 'ifft2', 'fftn', 'ifftn',
+           'rfft', 'irfft', 'rfft2', 'irfft2', 'rfftn', 'irfftn',
+           'hfft', 'ihfft', 'fftfreq', 'rfftfreq', 'fftshift', 'ifftshift',
            'Tensor']
 
 Tensor = torch.Tensor
@@ -91,6 +91,102 @@ Example:
     >>> t = torch.tensor([ 6.+0.j, -2.+2.j, -2.+0.j, -2.-2.j])
     >>> torch.fft.ifft(t)
     tensor([0.+0.j, 1.+0.j, 2.+0.j, 3.+0.j])
+""")
+
+fft2 = _add_docstr(_fft.fft_fft2, r"""
+fft2(input, s=None, dim=(-2, -1), norm=None) -> Tensor
+
+Computes the 2 dimensional discrete Fourier transform of :attr:`input`.
+Equivalent to :func:`~torch.fft.fftn` but FFTs only the last two dimensions by default.
+
+Note:
+    The Fourier domain representation of any real signal satisfies the
+    Hermitian property: ``X[i, j] = conj(X[-i, -j])``. This
+    function always returns all positive and negative frequency terms even
+    though, for real inputs, half of these values are redundant.
+    :func:`~torch.fft.rfft2` returns the more compact one-sided representation
+    where only the positive frequencies of the last dimension are returned.
+
+Args:
+    input (Tensor): the input tensor
+    s (Tuple[int], optional): Signal size in the transformed dimensions.
+        If given, each dimension ``dim[i]`` will either be zero-padded or
+        trimmed to the length ``s[i]`` before computing the FFT.
+        If a length ``-1`` is specified, no padding is done in that dimension.
+        Default: ``s = [input.size(d) for d in dim]``
+    dim (Tuple[int], optional): Dimensions to be transformed.
+        Default: last two dimensions.
+    norm (str, optional): Normalization mode. For the forward transform
+        (:func:`~torch.fft.fft2`), these correspond to:
+
+        * ``"forward"`` - normalize by ``1/n``
+        * ``"backward"`` - no normalization
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the FFT orthonormal)
+
+        Where ``n = prod(s)`` is the logical FFT size.
+        Calling the backward transform (:func:`~torch.fft.ifft2`) with the same
+        normalization mode will apply an overall normalization of ``1/n``
+        between the two transforms. This is required to make
+        :func:`~torch.fft.ifft2` the exact inverse.
+
+        Default is ``"backward"`` (no normalization).
+
+Example:
+
+    >>> import torch.fft
+    >>> x = torch.rand(10, 10, dtype=torch.complex64)
+    >>> fft2 = torch.fft.fft2(t)
+
+    The discrete Fourier transform is separable, so :func:`~torch.fft.fft2`
+    here is equivalent to two one-dimensional :func:`~torch.fft.fft` calls:
+
+    >>> two_ffts = torch.fft.fft(torch.fft.fft(x, dim=0), dim=1)
+    >>> torch.allclose(fft2, two_ffts)
+
+""")
+
+ifft2 = _add_docstr(_fft.fft_ifft2, r"""
+ifft2(input, s=None, dim=(-2, -1), norm=None) -> Tensor
+
+Computes the 2 dimensional inverse discrete Fourier transform of :attr:`input`.
+Equivalent to :func:`~torch.fft.ifftn` but IFFTs only the last two dimensions by default.
+
+Args:
+    input (Tensor): the input tensor
+    s (Tuple[int], optional): Signal size in the transformed dimensions.
+        If given, each dimension ``dim[i]`` will either be zero-padded or
+        trimmed to the length ``s[i]`` before computing the IFFT.
+        If a length ``-1`` is specified, no padding is done in that dimension.
+        Default: ``s = [input.size(d) for d in dim]``
+    dim (Tuple[int], optional): Dimensions to be transformed.
+        Default: last two dimensions.
+    norm (str, optional): Normalization mode. For the backward transform
+        (:func:`~torch.fft.ifft2`), these correspond to:
+
+        * ``"forward"`` - no normalization
+        * ``"backward"`` - normalize by ``1/n``
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the IFFT orthonormal)
+
+        Where ``n = prod(s)`` is the logical IFFT size.
+        Calling the forward transform (:func:`~torch.fft.fft2`) with the same
+        normalization mode will apply an overall normalization of ``1/n`` between
+        the two transforms. This is required to make :func:`~torch.fft.ifft2`
+        the exact inverse.
+
+        Default is ``"backward"`` (normalize by ``1/n``).
+
+Example:
+
+    >>> import torch.fft
+    >>> x = torch.rand(10, 10, dtype=torch.complex64)
+    >>> ifft2 = torch.fft.ifft2(t)
+
+    The discrete Fourier transform is separable, so :func:`~torch.fft.ifft2`
+    here is equivalent to two one-dimensional :func:`~torch.fft.ifft` calls:
+
+    >>> two_iffts = torch.fft.ifft(torch.fft.ifft(x, dim=0), dim=1)
+    >>> torch.allclose(ifft2, two_iffts)
+
 """)
 
 fftn = _add_docstr(_fft.fft_fftn, r"""
@@ -298,6 +394,137 @@ Example:
 
     >>> torch.fft.irfft(T, t.numel())
     tensor([0.0000, 1.0000, 2.0000, 3.0000, 4.0000])
+""")
+
+rfft2 = _add_docstr(_fft.fft_rfft2, r"""
+rfft2(input, s=None, dim=(-2, -1), norm=None) -> Tensor
+
+Computes the 2-dimensional discrete Fourier transform of real :attr:`input`.
+Equivalent to :func:`~torch.fft.rfftn` but FFTs only the last two dimensions by default.
+
+The FFT of a real signal is Hermitian-symmetric, ``X[i, j] = conj(X[-i, -j])``,
+so the full :func:`~torch.fft.fft2` output contains redundant information.
+:func:`~torch.fft.rfft2` instead omits the negative frequencies in the last
+dimension.
+
+Args:
+    input (Tensor): the input tensor
+    s (Tuple[int], optional): Signal size in the transformed dimensions.
+        If given, each dimension ``dim[i]`` will either be zero-padded or
+        trimmed to the length ``s[i]`` before computing the real FFT.
+        If a length ``-1`` is specified, no padding is done in that dimension.
+        Default: ``s = [input.size(d) for d in dim]``
+    dim (Tuple[int], optional): Dimensions to be transformed.
+        Default: last two dimensions.
+    norm (str, optional): Normalization mode. For the forward transform
+        (:func:`~torch.fft.rfft2`), these correspond to:
+
+        * ``"forward"`` - normalize by ``1/n``
+        * ``"backward"`` - no normalization
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the real FFT orthonormal)
+
+        Where ``n = prod(s)`` is the logical FFT size.
+        Calling the backward transform (:func:`~torch.fft.irfft2`) with the same
+        normalization mode will apply an overall normalization of ``1/n`` between
+        the two transforms. This is required to make :func:`~torch.fft.irfft2`
+        the exact inverse.
+
+        Default is ``"backward"`` (no normalization).
+
+Example:
+
+    >>> import torch.fft
+    >>> t = torch.rand(10, 10)
+    >>> rfft2 = torch.fft.rfft2(t)
+    >>> rfft2.size()
+    torch.Size([10, 6])
+
+    Compared against the full output from :func:`~torch.fft.fft2`, we have all
+    elements up to the Nyquist frequency.
+
+    >>> fft2 = torch.fft.fft2(t)
+    >>> torch.allclose(fft2[..., :6], rfft2)
+    True
+
+    The discrete Fourier transform is separable, so :func:`~torch.fft.rfft2`
+    here is equivalent to a combination of :func:`~torch.fft.fft` and
+    :func:`~torch.fft.rfft`:
+
+    >>> two_ffts = torch.fft.fft(torch.fft.rfft(x, dim=1), dim=0)
+    >>> torch.allclose(rfft2, two_ffts)
+
+""")
+
+irfft2 = _add_docstr(_fft.fft_irfft2, r"""
+irfft2(input, s=None, dim=(-2, -1), norm=None) -> Tensor
+
+Computes the inverse of :func:`~torch.fft.rfft2`.
+Equivalent to :func:`~torch.fft.irfftn` but IFFTs only the last two dimensions by default.
+
+:attr:`input` is interpreted as a one-sided Hermitian signal in the Fourier
+domain, as produced by :func:`~torch.fft.rfft2`. By the Hermitian property, the
+output will be real-valued.
+
+Note:
+    Some input frequencies must be real-valued to satisfy the Hermitian
+    property. In these cases the imaginary component will be ignored.
+    For example, any imaginary component in the zero-frequency term cannot
+    be represented in a real output and so will always be ignored.
+
+Note:
+    The correct interpretation of the Hermitian input depends on the length of
+    the original data, as given by :attr:`s`. This is because each input shape
+    could correspond to either an odd or even length signal. By default, the
+    signal is assumed to be even length and odd signals will not round-trip
+    properly. So, it is recommended to always pass the signal shape :attr:`s`.
+
+Args:
+    input (Tensor): the input tensor
+    s (Tuple[int], optional): Signal size in the transformed dimensions.
+        If given, each dimension ``dim[i]`` will either be zero-padded or
+        trimmed to the length ``s[i]`` before computing the real FFT.
+        If a length ``-1`` is specified, no padding is done in that dimension.
+        Defaults to even output in the last dimension:
+        ``s[-1] = 2*(input.size(dim[-1]) - 1)``.
+    dim (Tuple[int], optional): Dimensions to be transformed.
+        The last dimension must be the half-Hermitian compressed dimension.
+        Default: last two dimensions.
+    norm (str, optional): Normalization mode. For the backward transform
+        (:func:`~torch.fft.irfft2`), these correspond to:
+
+        * ``"forward"`` - no normalization
+        * ``"backward"`` - normalize by ``1/n``
+        * ``"ortho"`` - normalize by ``1/sqrt(n)`` (making the real IFFT orthonormal)
+
+        Where ``n = prod(s)`` is the logical IFFT size.
+        Calling the forward transform (:func:`~torch.fft.rfft2`) with the same
+        normalization mode will apply an overall normalization of ``1/n`` between
+        the two transforms. This is required to make :func:`~torch.fft.irfft2`
+        the exact inverse.
+
+        Default is ``"backward"`` (normalize by ``1/n``).
+
+Example:
+
+    >>> import torch.fft
+    >>> t = torch.rand(10, 9)
+    >>> T = torch.fft.rfft2(t)
+
+    Without specifying the output length to :func:`~torch.fft.irfft2`, the output
+    will not round-trip properly because the input is odd-length in the last
+    dimension:
+
+    >>> torch.fft.irfft2(T).size()
+    torch.Size([10, 10])
+
+    So, it is recommended to always pass the signal shape :attr:`s`.
+
+    >>> roundtrip = torch.fft.irfft2(T, t.size())
+    >>> roundtrip.size()
+    torch.Size([10, 9])
+    >>> torch.allclose(roundtrip, t)
+    True
+
 """)
 
 rfftn = _add_docstr(_fft.fft_rfftn, r"""
