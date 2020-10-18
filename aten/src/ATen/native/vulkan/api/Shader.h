@@ -39,11 +39,17 @@ struct Shader final {
 
   struct Layout final {
     /*
+      Signature
+    */
+
+    typedef c10::SmallVector<VkDescriptorType, 8u> Signature;
+
+    /*
       Descriptor
     */
 
     struct Descriptor final {
-      c10::SmallVector<VkDescriptorType, 8u> types;
+      Signature signature;
     };
 
     /*
@@ -70,7 +76,7 @@ struct Shader final {
 
     struct Object final {
       VkDescriptorSetLayout handle;
-      Descriptor descriptor;
+      Signature signature;
 
       operator bool() const;
     };
@@ -185,14 +191,14 @@ struct Shader final {
 inline bool operator==(
     const Shader::Layout::Descriptor& _1,
     const Shader::Layout::Descriptor& _2) {
-  return _1.types == _2.types;
+  return _1.signature == _2.signature;
 }
 
 inline size_t Shader::Layout::Factory::Hasher::operator()(
     const Descriptor& descriptor) const {
   size_t hash = 0u;
 
-  for (const VkDescriptorType type : descriptor.types) {
+  for (const VkDescriptorType type : descriptor.signature) {
     hash = c10::hash_combine(
         hash,
         c10::get_hash(type));
@@ -209,7 +215,7 @@ inline Shader::Layout::Object Shader::Layout::Cache::retrieve(
     const Descriptor& descriptor) {
   return {
     cache_.retrieve(descriptor),
-    descriptor,
+    descriptor.signature,
   };
 }
 
