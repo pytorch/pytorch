@@ -3096,7 +3096,7 @@ def foo(x):
         FileCheck().check_not("goodbye").check_not("hello").run(traced_bad.graph)
 
         # Working example
-        untraceable = torch.jit._script_if_tracing(untraceable)
+        untraceable = torch.jit.script_if_tracing(untraceable)
 
         def fn2(x):
             return untraceable(x)
@@ -3109,7 +3109,7 @@ def foo(x):
         def foo(x: int):
             return x + 1
 
-        @torch.jit._script_if_tracing
+        @torch.jit.script_if_tracing
         def fee(x: int = 2):
             return foo(1) + x
 
