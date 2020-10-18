@@ -21,7 +21,7 @@ Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
   c10::SmallVector<VkDescriptorSetLayoutBinding, 8u> bindings;
 
   uint32_t binding = 0u;
-  for (const VkDescriptorType type : descriptor.types) {
+  for (const VkDescriptorType type : descriptor.signature) {
     bindings.push_back({
       binding++,
       type,

@@ -91,7 +91,7 @@ struct Descriptor final {
    private:
     VkDevice device_;
     VkDescriptorSet descriptor_set_;
-    Shader::Layout::Descriptor shader_layout_descriptor_;
+    Shader::Layout::Signature shader_layout_signature_;
 
     struct {
       c10::SmallVector<Item, 8u> items;

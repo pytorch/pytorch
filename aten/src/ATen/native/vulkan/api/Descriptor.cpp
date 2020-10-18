@@ -126,7 +126,7 @@ Descriptor::Set::Set(
             device_,
             descriptor_pool,
             shader_layout.handle)),
-    shader_layout_descriptor_(shader_layout.descriptor),
+    shader_layout_signature_(shader_layout.signature),
     bindings_{} {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       descriptor_set_,
@@ -166,7 +166,7 @@ Descriptor::Set& Descriptor::Set::bind(
 
   update({
       binding,
-      shader_layout_descriptor_.types[binding],
+      shader_layout_signature_[binding],
       {
         .buffer = {
           buffer.handle,
@@ -189,7 +189,7 @@ Descriptor::Set& Descriptor::Set::bind(
 
   update({
       binding,
-      shader_layout_descriptor_.types[binding],
+      shader_layout_signature_[binding],
       {
         .image = {
           image.sampler,

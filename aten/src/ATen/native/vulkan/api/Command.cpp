@@ -242,17 +242,21 @@ void Command::Buffer::copy(
 }
 
 void Command::Buffer::dispatch(
-    const Shader::WorkGroup& work_group) {
+    const Shader::WorkGroup& global_work_group) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
       "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
+  const auto div_round_up = [](const uint32_t n, const uint32_t d) {
+    return (n + d - 1u) / d;
+  };
+
   vkCmdDispatch(
       command_buffer_,
-      work_group.x,
-      work_group.y,
-      work_group.z);
+      div_round_up(global_work_group.x, bound_.pipeline.local_work_group.x),
+      div_round_up(global_work_group.y, bound_.pipeline.local_work_group.y),
+      div_round_up(global_work_group.z, bound_.pipeline.local_work_group.z));
 }
 
 void Command::Buffer::submit(
