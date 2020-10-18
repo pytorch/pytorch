@@ -74,16 +74,14 @@ vTensor::Buffer allocate_buffer(
       return {
         VMA_MEMORY_USAGE_GPU_ONLY,
         0u,
-        0u,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
       };
     }
 
     return {
       VMA_MEMORY_USAGE_UNKNOWN,
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
-          VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
     };
   }();
 
@@ -160,7 +158,7 @@ vTensor::Image allocate_image(
           {
             VMA_MEMORY_USAGE_GPU_ONLY,
             0u,
-            0u,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
           },
         },
         // View
@@ -196,8 +194,7 @@ vTensor::Buffer allocate_staging(
           {
             VMA_MEMORY_USAGE_CPU_ONLY,
             0u,
-            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
-                VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+            0u,
           },
         },
       });
@@ -234,7 +231,7 @@ Barrier categorize(
     return Barrier::Exectution;
   }
 
-  // RAW (Read after Write), or WAR (Write after Read)
+  // RAW (Read after Write), or WAW (Write after Write)
   return Barrier::Memory;
 };
 
@@ -427,6 +424,7 @@ api::Command::Buffer& vTensor::View::CMD::command_buffer() {
         command_buffer_.internal = view_.context_->command().pool.allocate();
         command_buffer_.internal.begin();
       }
+
       return command_buffer_.internal;
 
     case Type::External:
@@ -442,23 +440,15 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
   if (view_.state_.is_uma()) {
     transition.first.buffer.stage |= transition.first.staging.stage;
     transition.first.buffer.access |= transition.first.staging.access;
+    transition.first.staging = {};
 
     transition.second.buffer.stage |= transition.second.staging.stage;
     transition.second.buffer.access |= transition.second.staging.access;
-
-    transition.first.staging = {};
     transition.second.staging = {};
   }
 
   // Filter out host dependencies out of source, per Vulkan spec host write ordering guarantees:
   // https://www.khronos.org/registry/vulkan/specs/1.2/html/vkspec.html#synchronization-submission-host-writes
-
-  const auto filter_access =[](VkAccessFlags& access) {
-    access &= ~(VK_ACCESS_HOST_READ_BIT | VK_ACCESS_HOST_WRITE_BIT);
-  };
-
-  filter_access(transition.first.buffer.access);
-  filter_access(transition.first.staging.access);
 
   const auto filter_stage =[](VkPipelineStageFlags& stage) {
     stage &= ~VK_PIPELINE_STAGE_HOST_BIT;
@@ -467,11 +457,18 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
   filter_stage(transition.first.buffer.stage);
   filter_stage(transition.first.staging.stage);
 
+  const auto filter_access =[](VkAccessFlags& access) {
+    access &= ~(VK_ACCESS_HOST_READ_BIT | VK_ACCESS_HOST_WRITE_BIT);
+  };
+
+  filter_access(transition.first.buffer.access);
+  filter_access(transition.first.staging.access);
+
   api::Pipeline::Barrier barrier{};
 
   if (transition.second.staging) {
-    const State::Bundle::Buffer& from = transition.first.staging;
-    const State::Bundle::Buffer& to = transition.second.staging;
+    const State::Bundle::Buffer from = transition.first.staging;
+    const State::Bundle::Buffer to = transition.second.staging;
 
     const Barrier category = categorize(
         from.access,
@@ -494,8 +491,8 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
   }
 
   if (transition.second.buffer) {
-    State::Bundle::Buffer from = transition.first.buffer;
-    State::Bundle::Buffer to = transition.second.buffer;
+    const State::Bundle::Buffer from = transition.first.buffer;
+    const State::Bundle::Buffer to = transition.second.buffer;
 
     const Barrier category = categorize(
         from.access,
@@ -518,8 +515,8 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
   }
 
   if (transition.second.image) {
-    const State::Bundle::Image& from = transition.first.image;
-    const State::Bundle::Image& to = transition.second.image;
+    const State::Bundle::Image from = transition.first.image;
+    const State::Bundle::Image to = transition.second.image;
 
     const Barrier category = categorize(
         from.access,
@@ -528,11 +525,7 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
         to.layout);
 
     if (Barrier::None != category) {
-      barrier.stage.src |=
-          (0u == from.stage) ?
-              VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT :
-              from.stage;
-
+      barrier.stage.src |= from.stage;
       barrier.stage.dst |= to.stage;
 
       if (Barrier::Memory == category) {
@@ -552,6 +545,14 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
   }
 
   if (barrier) {
+    if (0u == barrier.stage.src) {
+      barrier.stage.src = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    }
+
+    if (0u == barrier.stage.dst) {
+      barrier.stage.src = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    }
+
     command_buffer().barrier(barrier);
   }
 }
@@ -593,19 +594,19 @@ void vTensor::View::CMD::copy_staging_to_buffer(
 
   barrier(
       state.transition({
-            // Staging
-            {
-              VK_PIPELINE_STAGE_TRANSFER_BIT,
-              VK_ACCESS_TRANSFER_READ_BIT,
-            },
-            // Buffer
-            {
-              VK_PIPELINE_STAGE_TRANSFER_BIT,
-              VK_ACCESS_TRANSFER_WRITE_BIT,
-            },
-            // Image
-            {},
-          }));
+          // Staging
+          {
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_ACCESS_TRANSFER_READ_BIT,
+          },
+          // Buffer
+          {
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
+          },
+          // Image
+          {},
+        }));
 
   command_buffer().copy(staging, buffer);
 }
@@ -635,25 +636,66 @@ void vTensor::View::CMD::copy_buffer_to_image(
           },
         }));
 
-  api::Descriptor::Set descriptor_set = view_.context_->load(
-      command_buffer(),
-      {
+  struct Uniform final {
+    uint32_t width;
+    uint32_t height;
+  };
+
+  api::Resource::Buffer uniform =
+      view_.context_->resource().pool.buffer({
+        sizeof(Uniform),
         {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+          {
+            VMA_MEMORY_USAGE_CPU_TO_GPU,
+            0u,
+            0u,
+          },
         },
-      },
-      VK_KERNEL(nchw_to_image),
-      {
-        8, 8, 1,
       });
 
-  descriptor_set.
-      bind(0u, image).
-      bind(1u, buffer);
+  // Uniform* ptr = uniform.memory.map<Uniform>();
 
-  // command_buffer().dispatch();
+  view_.context_->dispatch(
+    command_buffer(),
+    {
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+    },
+    VK_KERNEL(nchw_to_image),
+    {
+      8, 8, 1,
+    },
+    {
+      10, 10, 10,
+    },
+    image,
+    buffer);
+
+  // api::Descriptor::Set descriptor_set = view_.context_->load(
+  //     command_buffer(),
+  //     {
+  //       {
+  //         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+  //         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+  //         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+  //       },
+  //     },
+  //     VK_KERNEL(nchw_to_image),
+  //     {
+  //       8, 8, 1,
+  //     });
+
+  // descriptor_set.
+  //     bind(0u, image).
+  //     bind(1u, buffer).
+  //     bind(2u, uniform.object);
+
+  // view_.context_->dispatch(
+  //     command_buffer(),
+  //     descriptor_set,
+  //     {});
 }
 
 void vTensor::View::CMD::copy_image_to_buffer(
@@ -681,25 +723,28 @@ void vTensor::View::CMD::copy_image_to_buffer(
           },
         }));
 
-  api::Descriptor::Set descriptor_set = view_.context_->load(
-      command_buffer(),
-      {
-        {
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        },
-      },
-      VK_KERNEL(image_to_nchw),
-      {
-        8, 8, 1,
-      });
+  // api::Descriptor::Set descriptor_set = view_.context_->load(
+  //     command_buffer(),
+  //     {
+  //       {
+  //         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+  //         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+  //         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+  //       },
+  //     },
+  //     VK_KERNEL(image_to_nchw),
+  //     {
+  //       8, 8, 1,
+  //     });
 
-  descriptor_set.
-      bind(0u, image).
-      bind(1u, buffer);
+  // descriptor_set.
+  //     bind(0u, image).
+  //     bind(1u, buffer);
 
-  // command_buffer().dispatch();
+  // view_.context_->dispatch(
+  //     command_buffer(),
+  //     descriptor_set,
+  //     {});
 }
 
 void vTensor::View::CMD::submit(const api::Resource::Fence fence) {
