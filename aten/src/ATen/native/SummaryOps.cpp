@@ -213,14 +213,15 @@ std::tuple<Tensor,Tensor> _histogram_cpu_uniform_bins(
                 flattened_weights,
                 range,
                 density);
+          default:
+            AT_ERROR("Scalar type ", scalar, " not supported for weights");
+            return std::make_tuple(Tensor(), Tensor());
         }
-        AT_ERROR("Scalar type not supported for weights");
-        return std::make_tuple(Tensor(), Tensor());
     });
 
 }
 
-//Device-generic implementation for histogram with custom, possibly non-uniform binning
+// Device-generic implementation for histogram with custom, possibly non-uniform binning
 std::tuple<Tensor, Tensor> histogram(
     const Tensor& self,
     const Tensor& bins,
@@ -232,7 +233,9 @@ std::tuple<Tensor, Tensor> histogram(
       "custom bin edges must be represented as a one dimensional tensor, but got a tensor with dimension ",
       bins.dim());
 
-  //Skip the input check for CUDA to avoid device synchronization.
+  // TODO: Throw an error if weights scalar type is complex, because bincount casts them to double.
+
+  // Skip the input check for CUDA to avoid device synchronization.
   if (self.device().type() == kCPU) {
     TORCH_CHECK(
         at::all(bins.slice(0, 1, bins.numel()) >= bins.slice(0, 0, -1))
