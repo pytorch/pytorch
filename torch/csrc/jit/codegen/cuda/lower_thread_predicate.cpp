@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>

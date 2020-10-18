@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 
 namespace torch {

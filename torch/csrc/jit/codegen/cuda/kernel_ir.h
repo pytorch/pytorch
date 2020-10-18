@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/jit/codegen/cuda/type.h>
