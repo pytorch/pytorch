@@ -391,6 +391,8 @@ class MinMaxObserver(_ObserverBase):
 
     def forward(self, x_orig):
         r"""Records the running minimum and maximum of ``x``."""
+        if x_orig.numel() == 0:
+            return x_orig
         x = x_orig.detach()  # avoid keeping autograd tape
         x = x.to(self.min_val.dtype)
         min_val_cur, max_val_cur = torch._aminmax(x)
@@ -464,6 +466,8 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
                                                           quant_max=quant_max)
 
     def forward(self, x_orig):
+        if x_orig.numel() == 0:
+            return x_orig
         x = x_orig.detach()  # avoid keeping autograd tape
         x = x.to(self.min_val.dtype)
         min_val = self.min_val
@@ -533,6 +537,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
         return self._forward(x_orig)
 
     def _forward(self, x_orig):
+        if x_orig.numel() == 0:
+            return x_orig
         x = x_orig.detach()  # avoid keeping autograd tape
         min_vals = self.min_vals
         max_vals = self.max_vals
@@ -639,6 +645,8 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         self.averaging_constant = averaging_constant
 
     def forward(self, x_orig):
+        if x_orig.numel() == 0:
+            return x_orig
         x = x_orig.detach()  # avoid keeping autograd tape
         x = x.to(self.min_vals.dtype)
         min_vals = self.min_vals
@@ -880,6 +888,8 @@ class HistogramObserver(_ObserverBase):
 
     def forward(self, x_orig):
         # type: (torch.Tensor) -> torch.Tensor
+        if x_orig.numel() == 0:
+            return x_orig
         x = x_orig.detach()
         min_val = self.min_val
         max_val = self.max_val
