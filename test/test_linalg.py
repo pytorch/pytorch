@@ -964,6 +964,17 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @dtypesIfCUDA(torch.float32, torch.float64)
+    def test_tensorinv_empty(self, device, dtype):
+        for ind in range(1, 4):
+            # Check for empty inputs. NumPy does not work for these cases.
+            a = torch.empty(0, 0, 1, 2, 3, 0, dtype=dtype, device=device)
+            a_inv = torch.linalg.tensorinv(a, ind=ind)
+            self.assertEqual(a_inv.shape, a.shape[ind:] + a.shape[:ind])
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float32, torch.float64)
     def test_tensorinv_errors(self, device, dtype):
 
         def check_shape(a_shape, ind):
