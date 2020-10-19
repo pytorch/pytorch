@@ -133,7 +133,9 @@ tensorpipeSerialize(
 // has finished. Pointers to these buffers will be stored in-place in the
 // TensorPipe message.
 TORCH_API TensorpipeReadBuffers
-tensorpipeAllocate(tensorpipe::Message& tpMessage);
+tensorpipeAllocate(
+    tensorpipe::Message& tpMessage,
+    const DevicesContext& ctx = DevicesContext(/* noCuda */ true));
 
 // Convert a TensorPipe message back into an RPC message. This requires the data
 // to be available and can thus only be performed once the asynchronous read has
