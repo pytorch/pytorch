@@ -8319,7 +8319,7 @@
   python_module: linalg
   variants: function
 
-- func: linalg_tensorinv(Tensor self, int? ind=2) -> Tensor
+- func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
   python_module: linalg
   variants: function
 

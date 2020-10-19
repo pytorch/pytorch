@@ -1601,7 +1601,7 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, opt
   return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
 }
 
-Tensor linalg_tensorinv(const Tensor& self, optional<int64_t> ind) {
+Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   /*
   The idea is to reduce the problem to 2D square matrix inversion.
   Step 1. calculate the shape of the result and the shape of the intermediate 2D matrix.
@@ -1611,13 +1611,12 @@ Tensor linalg_tensorinv(const Tensor& self, optional<int64_t> ind) {
           so at this stage an error from at::inverse can be thrown
   Step 4. reshape the result.
   */
-  int64_t ind_value = ind.has_value() ? ind.value() : 2;
-  TORCH_CHECK(ind_value > 0, "Expected a strictly positive integer for 'ind', but got ", ind_value);
+  TORCH_CHECK(ind > 0, "Expected a strictly positive integer for 'ind', but got ", ind);
 
   // self[ind:]
-  std::vector<int64_t> shape_ind_end = self.sizes().slice(ind_value).vec();
+  std::vector<int64_t> shape_ind_end = self.sizes().slice(ind).vec();
   // self[:ind]
-  std::vector<int64_t> shape_start_ind = self.sizes().slice(0, ind_value).vec();
+  std::vector<int64_t> shape_start_ind = self.sizes().slice(0, ind).vec();
 
   int64_t product = std::accumulate(shape_ind_end.begin(), shape_ind_end.end(), int64_t{1}, std::multiplies<int64_t>());
 

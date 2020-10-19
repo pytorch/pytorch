@@ -28,7 +28,7 @@ inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, opt
   return torch::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor tensorinv(const Tensor& self, optional<int64_t> ind) {
+inline Tensor tensorinv(const Tensor& self, int64_t ind) {
   return torch::linalg_tensorinv(self, ind);
 }
 
@@ -67,7 +67,7 @@ inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string o
 /// int64_t ind = 2;
 /// auto ainv = torch::linalg::tensorinv(a, ind);
 /// ```
-inline Tensor tensorinv(const Tensor& self, optional<int64_t> ind) {
+inline Tensor tensorinv(const Tensor& self, int64_t ind) {
   return detail::tensorinv(self, ind);
 }
 
