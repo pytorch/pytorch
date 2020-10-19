@@ -1,4 +1,4 @@
-from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type
+from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast
 
 """
 Contains utility functions for working with nested python data structures.
@@ -35,25 +35,25 @@ class NodeDef(NamedTuple):
 
 SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
 
-def _register_pytree_node(typ: Any, flatten_fn: FlattenFunc, unflatten_fn: UnflattenFunc):
+def _register_pytree_node(typ: Any, flatten_fn: FlattenFunc, unflatten_fn: UnflattenFunc) -> None:
     SUPPORTED_NODES[typ] = NodeDef(flatten_fn, unflatten_fn)
 
-def _dict_flatten(d):
-    return d.values(), list(d.keys())
+def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
+    return list(d.values()), list(d.keys())
 
-def _dict_unflatten(values, context):
+def _dict_unflatten(values: List[Any], context: Context) -> Dict[Any, Any]:
     return {key: value for key, value in zip(context, values)}
 
-def _list_flatten(d):
+def _list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
     return d, None
 
-def _list_unflatten(values, context):
+def _list_unflatten(values: List[Any], context: Context) -> List[Any]:
     return list(values)
 
-def _tuple_flatten(d):
+def _tuple_flatten(d: Tuple[Any, ...]) -> Tuple[List[Any], Context]:
     return list(d), None
 
-def _tuple_unflatten(values, context):
+def _tuple_unflatten(values: List[Any], context: Context) -> Tuple[Any, ...]:
     return tuple(values)
 
 _register_pytree_node(dict, _dict_flatten, _dict_unflatten)
@@ -72,34 +72,36 @@ def _is_leaf(pytree: PyTree) -> bool:
 # children_specs: specs for each child of the root Node
 # num_leaves: the number of leaves
 class TreeSpec:
-    def __init__(self, typ: Any, context: Context, children_specs: List['TreeSpec']):
+    def __init__(self, typ: Any, context: Context, children_specs: List['TreeSpec']) -> None:
         self.type = typ
         self.context = context
         self.children_specs = children_specs
         self.num_leaves: int = sum([spec.num_leaves for spec in children_specs])
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f'TreeSpec({self.type.__name__}, {self.context}, {self.children_specs})'
 
-    def __eq__(self, other):
-        return self.type == other.type and self.context == other.context \
+    def __eq__(self, other: Any) -> bool:
+        result = self.type == other.type and self.context == other.context \
             and self.children_specs == other.children_specs \
             and self.num_leaves == other.num_leaves
+        # This should really not be necessary, but mypy errors out without it.
+        return cast(bool, result)
 
-    def __ne__(self, other):
+    def __ne__(self, other: Any) -> bool:
         return not self.__eq__(other)
 
 
 class LeafSpec(TreeSpec):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(None, None, [])
         self.num_leaves = 1
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return '*'
 
 
-def tree_flatten(pytree: PyTree) -> Tuple[List, TreeSpec]:
+def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
     """Flattens a pytree into a list of values and a TreeSpec that can be used
     to reconstruct the pytree.
     """
@@ -120,7 +122,7 @@ def tree_flatten(pytree: PyTree) -> Tuple[List, TreeSpec]:
     return result, TreeSpec(type(pytree), context, children_specs)
 
 
-def tree_unflatten(values: List, spec: TreeSpec) -> PyTree:
+def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
     """Given a list of values and a TreeSpec, builds a pytree.
     This is the inverse operation of `tree_flatten`.
     """
