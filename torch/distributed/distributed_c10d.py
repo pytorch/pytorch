@@ -458,9 +458,6 @@ def init_process_group(backend,
             group_name=group_name,
             timeout=timeout)
 
-    if not group_name:
-        _group_count += 1
-
     _pg_group_ranks[_default_pg] = {i: i for i in range(_default_pg.size())}
     _backend = _pg_map[_default_pg][0]
     _default_pg_init_method = init_method
@@ -490,6 +487,7 @@ def _new_process_group_helper(world_size,
     global _group_count
     global _pg_names
 
+    group_name_=group_name
     if not group_name:
         group_name = str(_group_count)
 
@@ -555,6 +553,9 @@ def _new_process_group_helper(world_size,
                 timeout)
             _pg_map[pg] = (backend, store)
             _pg_names[pg] = group_name
+
+    if not group_name_:
+        _group_count += 1
 
     return pg
 
