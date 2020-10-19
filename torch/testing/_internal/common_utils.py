@@ -513,6 +513,11 @@ def slowTest(fn):
     return wrapper
 
 
+def slowAwareTest(fn):
+    fn.__dict__['slow_test'] = True
+    return fn
+
+
 def skipCUDAMemoryLeakCheckIf(condition):
     def dec(fn):
         if getattr(fn, '_do_cuda_memory_leak_check', True):  # if current True
