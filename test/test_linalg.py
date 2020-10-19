@@ -932,6 +932,8 @@ class TestLinalg(TestCase):
             if equation not in {"i,i->", "i,i->i", "ij,ij->ij"}:
                 ops = [op.detach().requires_grad_() for op in operands]
                 self.assertTrue(torch.autograd.gradcheck(lambda *ops: torch.einsum(equation, ops), ops))
+                for op in ops:
+                    self.assertTrue(op._version == 0)
 
         # Test cases from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
         x = torch.rand(5, device=device)
@@ -987,8 +989,8 @@ class TestLinalg(TestCase):
         # torch.bilinear
         l = torch.randn(5, 10, device=device)
         r = torch.randn(5, 20, device=device)
-        w = torch.randn(30, 10, 20, device=device)
-        ("bn,anm,bm->ba", l, w, r)
+        w = torch.randn(15, 10, 20, device=device)
+        check("bn,anm,bm->ba", l, w, r)
 
     def test_einsum_corner_cases(self, device):
         def check(equation, *operands, expected_output):
@@ -1025,6 +1027,37 @@ class TestLinalg(TestCase):
         check('...->...', 1, expected_output=1)
         check('i...->i', [1], expected_output=[1])
         check('i...->...i', [1], expected_output=[1])
+
+    def test_einsum_error_cases(self, device):
+        def check(equation, operands, regex, exception=RuntimeError):
+            with self.assertRaisesRegex(exception, r'einsum\(\) ' + regex):
+                torch.einsum(equation, operands)
+
+        x = torch.rand(2)
+        y = torch.rand(2, 3)
+
+        check('', [], r'must provide at least one operand')
+        check('. ..', [x], r'found \'.\' for operand 0 that is not part of any ellipsis')
+        check('... ...', [x], r'found \'.\' for operand 0 for which an ellipsis was already found')
+        check('A', [x], r'operand subscript must be in range \[a, z\] but found A for operand 0')
+        check(',', [x], r'fewer operands were provided than specified in the equation')
+        check('', [x, x], r'more operands were provided than specified in the equation')
+        check('', [x], r'the number of subscripts in the equation \(0\) does not match the number '
+                       r'of dimensions \(1\) for operand 0 and no ellipsis was given')
+        check('ai', [x], r'the number of subscripts in the equation \(2\) does not match the number '
+                         r'of dimensions \(1\) for operand 0 and no ellipsis was given')
+        check('ai...', [x], r'the number of subscripts in the equation \(2\) is more than the number '
+                            r'of dimensions \(1\) for operand 0')
+        check('a->... .', [x], r'found \'.\' for output but an ellipsis \(...\) was already found')
+        check('a->..', [x], r'found \'.\' for output that is not part of any ellipsis \(...\)')
+        check('a->A', [x], r'subscripts must be in range \[a, z\] but found A for the output')
+        check('a->aa', [x], r'output subscript a appears more than once in the output')
+        check('a->i', [x], r'output subscript i does not appear in the equation for any input operand')
+        check('...->', [x], r'ellipsis \(...\) covering one or more dimensions was given in the input '
+                            r'but not in the output')
+        check('aa', [y], r'subscript a is repeated for operand 0 but the sizes don\'t match, 3 != 2')
+        check('a, ba', [x, y], r'operands do not broadcast with remapped shapes \[original->remapped\]: '
+                               r'\[2\]->\[1, 2\] \[2, 3\]->\[2, 3\]')
 
 instantiate_device_type_tests(TestLinalg, globals())
 

@@ -265,17 +265,19 @@ This function provides a way of computing multilinear expressions (i.e. sums of 
 Einstein summation convention.
 
 Args:
-    equation (string): The equation is given in terms of lower case letters (indices) to be associated
-           with each dimension of the operands and result. The left hand side lists the operands
-           dimensions, separated by commas. There should be one index letter per tensor dimension.
-           The right hand side follows after `->` and gives the indices for the output.
-           If the `->` and right hand side are omitted, it implicitly defined as the alphabetically
-           sorted list of all indices appearing exactly once in the left hand side.
-           The indices not apprearing in the output are summed over after multiplying the operands
-           entries.
-           If an index appears several times for the same operand, a diagonal is taken.
-           Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
-           the ellipsis dimensions are at the beginning of the output.
+    equation (string): The subscripts for the Einstein summation specified as comma separated list of
+            subscript labels (lower case letters [a, z]). The left-hand-side must specify the subscripts for each
+            dimension of the input operands, separating operands by comma (,). The right-hand-side follows after an
+            arrow (->) and specifies the subscript labels for the output. These must appear in at least one operand.
+            If the arrow (->) and right-hand-side are ommited, the output is implicitly defined as the alphabetically
+            sorted list of all subscript labels appearing exactly once in the left-hand-side. The subscript labels
+            ommited in the output will be summed over after multiplying the input operands. If a subscript label is
+            repeated for a input operand, a diagonal is taken for the dimensions corresponding to the label. An
+            ellipsis (...) may be given for each input operand for broadcasting dimensions. In this case, the ellipsis
+            will cover a contiguous range of dimensions not covered by any subscript label and the dimensions under
+            the ellipsis will be broadcasted across the input operands. If the output is inferred (arrow -> is ommited)
+            the ellipsis dimensions will be the left-most dimensions of the output. The dimensions under the ellipsis
+            are not summed over so if they cover at least one dimension they must be specified in the output.
     operands (Tensor): The operands to compute the Einstein sum of.
 
 .. note::
