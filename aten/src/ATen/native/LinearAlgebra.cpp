@@ -1618,12 +1618,19 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   // self[:ind]
   std::vector<int64_t> shape_start_ind = self.sizes().slice(0, ind).vec();
 
-  int64_t product = std::accumulate(shape_ind_end.begin(), shape_ind_end.end(), int64_t{1}, std::multiplies<int64_t>());
+  int64_t prod_ind_end = std::accumulate(shape_ind_end.begin(), shape_ind_end.end(), int64_t{1}, std::multiplies<int64_t>());
+  int64_t prod_start_ind = std::accumulate(shape_start_ind.begin(), shape_start_ind.end(), int64_t{1}, std::multiplies<int64_t>());
 
-  // Concatenate shape_ind_end and shape_start_ind
+  // Check whether the self tensor can be reshaped to the 2D square matrix
+  TORCH_CHECK(prod_ind_end == prod_start_ind,
+    "Expected self to be a 'square' tensor such that prod(self.shape[ind:]) == prod(self.shape[:ind]), but got ",
+    prod_ind_end, " != ", prod_start_ind);
+
+  // Concatenate shape_ind_end and shape_start_ind to form the shape of the result
+  // self[ind:] + self[:ind]
   shape_ind_end.insert(shape_ind_end.end(), shape_start_ind.begin(), shape_start_ind.end());
 
-  Tensor result = at::inverse(self.reshape({product, -1}));
+  Tensor result = at::inverse(self.reshape({prod_ind_end, prod_ind_end}));
   return result.reshape(shape_ind_end);
 }
 

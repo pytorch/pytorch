@@ -924,9 +924,8 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @dtypesIfCPU(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @dtypesIfCUDA(torch.float, torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float32, torch.float64)
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     def test_tensorinv(self, device, dtype):
 
@@ -936,16 +935,6 @@ class TestLinalg(TestCase):
             result = torch.linalg.tensorinv(a, ind=ind)
             expected = np.linalg.tensorinv(a_numpy, ind=ind)
             self.assertEqual(result, expected)
-
-        def check_shape(a_shape, ind):
-            a = torch.rand(a_shape)
-            with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
-                torch.linalg.tensorinv(a, ind=ind)
-
-        def check_ind(a_shape, ind):
-            a = torch.rand(a_shape)
-            with self.assertRaisesRegex(RuntimeError, "Expected a strictly positive integer"):
-                torch.linalg.tensorinv(a, ind=ind)
 
         # compare to NumPy output
         run_test((12, 3, 4), ind=1)
@@ -958,19 +947,11 @@ class TestLinalg(TestCase):
         run_test((1, 2, 3, 2, 3), ind=3)
         run_test((3, 2, 1, 2, 12), ind=4)
 
-        # test for invalid shape
-        check_shape((2, 3, 4), ind=1)
-        check_shape((1, 2, 3, 4), ind=3)
-
-        # test for invalid ind
-        check_ind((12, 3, 4), ind=-1)
-        check_ind((18, 3, 3, 2), ind=0)
-
     # TODO: once "solve_inverse" supports complex dtypes, they shall be added to above test
     @unittest.expectedFailure
     @onlyCUDA
     @skipCUDAIfNoMagma
-    @dtypes(torch.cfloat, torch.cdouble)
+    @dtypes(torch.complex64, torch.complex128)
     def test_tensorinv_xfailed(self, device, dtype):
         a_shape = (2, 3, 6)
         a = torch.rand(a_shape, dtype=dtype, device=device)
@@ -978,6 +959,33 @@ class TestLinalg(TestCase):
         result = torch.linalg.tensorinv(a, ind=ind)
         expected = torch.linalg.tensorinv(a_numpy, ind=ind)
         self.assertEqual(result, expected)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float32, torch.float64)
+    @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
+    def test_tensorinv_errors(self, device, dtype):
+
+        def check_shape(a_shape, ind):
+            # tensorinv requires the input to be a 'square' tensor
+            # such that prod(a.shape[ind:]) == prod(a.shape[:ind])
+            a = torch.rand(a_shape)
+            with self.assertRaisesRegex(RuntimeError, "be a 'square' tensor such that"):
+                torch.linalg.tensorinv(a, ind=ind)
+
+        def check_ind(a_shape, ind):
+            a = torch.rand(a_shape)
+            with self.assertRaisesRegex(RuntimeError, "Expected a strictly positive integer"):
+                torch.linalg.tensorinv(a, ind=ind)
+
+        # test for invalid shape
+        check_shape((2, 3, 4), ind=1)
+        check_shape((1, 2, 3, 4), ind=3)
+
+        # test for invalid ind
+        check_ind((12, 3, 4), ind=-1)
+        check_ind((18, 3, 3, 2), ind=0)
 
 instantiate_device_type_tests(TestLinalg, globals())
 
