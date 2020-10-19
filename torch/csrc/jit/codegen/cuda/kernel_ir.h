@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/jit/codegen/cuda/type.h>
@@ -19,6 +18,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 namespace kir {
 
 class IrBuilder;
@@ -39,7 +39,7 @@ class TORCH_CUDA_API NamedScalar : public Val {
   NamedScalar(Passkey, std::string name, DataType dtype)
       : Val(ValType::KirNamedScalar, dtype, true, true), name_(name) {}
 
-  explicit NamedScalar(Passkey, const fuser::NamedScalar* node)
+  explicit NamedScalar(Passkey, const fuser::cuda::NamedScalar* node)
       : Val(node), name_(node->name()) {}
 
   const std::string& name() const {
@@ -70,7 +70,7 @@ class TORCH_CUDA_API Bool : public Val {
       : Val(ValType::KirScalar, DataType::Bool, true, true),
         maybe_value_(value) {}
 
-  explicit Bool(Passkey, const fuser::Bool* node)
+  explicit Bool(Passkey, const fuser::cuda::Bool* node)
       : Val(node), maybe_value_(node->value()) {}
 
   bool isSymbolic() const {
@@ -95,7 +95,7 @@ class TORCH_CUDA_API Float : public Val {
       : Val(ValType::KirScalar, DataType::Float, true, true),
         maybe_value_(value) {}
 
-  explicit Float(Passkey, const fuser::Float* node)
+  explicit Float(Passkey, const fuser::cuda::Float* node)
       : Val(node), maybe_value_(node->value()) {}
 
   bool isSymbolic() const {
@@ -118,7 +118,7 @@ class TORCH_CUDA_API Half : public Val {
       : Val(ValType::KirScalar, DataType::Half, true, true),
         maybe_value_(value) {}
 
-  explicit Half(Passkey, const fuser::Half* node)
+  explicit Half(Passkey, const fuser::cuda::Half* node)
       : Val(node), maybe_value_(node->value()) {}
 
   bool isSymbolic() const {
@@ -143,7 +143,10 @@ class TORCH_CUDA_API Int : public Val {
       : Val(ValType::KirScalar, DataType::Int, true, true),
         maybe_value_(value) {}
 
-  explicit Int(Passkey, const fuser::Int* node, bool /*avoid_zero_ambiguity*/)
+  explicit Int(
+      Passkey,
+      const fuser::cuda::Int* node,
+      bool /*avoid_zero_ambiguity*/)
       : Val(node), maybe_value_(node->value()) {}
 
   bool isSymbolic() const {
@@ -164,7 +167,7 @@ class TORCH_CUDA_API IterDomain : public Val {
  public:
   IterDomain(Passkey, Val* start, Val* extent);
 
-  explicit IterDomain(Passkey, const fuser::IterDomain* iter_domain);
+  explicit IterDomain(Passkey, const fuser::cuda::IterDomain* iter_domain);
 
   bool isReduction() const {
     return getIterType() == IterType::Reduction;
@@ -218,6 +221,10 @@ class TORCH_CUDA_API IterDomain : public Val {
 
   Val* extent() const;
 
+  Val* rawExtent() const {
+    return extent_;
+  }
+
  private:
   Val* const start_ = nullptr;
   Val* const extent_ = nullptr;
@@ -230,7 +237,9 @@ class TORCH_CUDA_API TensorDomain : public Val {
  public:
   explicit TensorDomain(Passkey, std::vector<IterDomain*> domain);
 
-  explicit TensorDomain(Passkey, const fuser::TensorDomain* tensor_domain);
+  explicit TensorDomain(
+      Passkey,
+      const fuser::cuda::TensorDomain* tensor_domain);
 
   std::vector<IterDomain*>::size_type nDims() const {
     return domain_.size();
@@ -297,7 +306,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
 
 class TORCH_CUDA_API TensorView : public Val {
  public:
-  explicit TensorView(Passkey, const fuser::TensorView* tv);
+  explicit TensorView(Passkey, const fuser::cuda::TensorView* tv);
 
   TensorDomain* domain() const {
     return domain_;
@@ -307,7 +316,7 @@ class TORCH_CUDA_API TensorView : public Val {
     return memory_type_;
   }
 
-  const fuser::TensorView* fuserTv() const {
+  const fuser::cuda::TensorView* fuserTv() const {
     TORCH_INTERNAL_ASSERT(fuser_tv_ != nullptr);
     return fuser_tv_;
   }
@@ -317,7 +326,7 @@ class TORCH_CUDA_API TensorView : public Val {
   MemoryType memory_type_ = MemoryType::Local;
 
   // TODO(kir): remove temporary hack
-  const fuser::TensorView* fuser_tv_ = nullptr;
+  const fuser::cuda::TensorView* fuser_tv_ = nullptr;
 };
 
 class TORCH_CUDA_API UnaryOp : public Expr {
@@ -455,7 +464,7 @@ class TORCH_CUDA_API TensorIndex : public Val {
  public:
   TensorIndex(
       Passkey,
-      const fuser::TensorView* view,
+      const fuser::cuda::TensorView* view,
       std::vector<Val*> indices);
 
   std::vector<Val*>::size_type nDims() const {
@@ -530,11 +539,24 @@ class TORCH_CUDA_API Allocate : public Expr {
     return buffer_->getDataType().value();
   }
 
+  Allocate* alias() const {
+    return alias_;
+  }
+
+  void setAlias(Allocate* alias) {
+    TORCH_INTERNAL_ASSERT(alias->getMemoryType() == memory_type_);
+    alias_ = alias;
+  }
+
  private:
   Val* buffer_ = nullptr;
   MemoryType memory_type_ = MemoryType::Local;
   Val* size_ = nullptr;
   bool zero_init_ = false;
+
+  // This alias tracks the next Allocate node in a linked chain of aliases
+  // If the alias is nullptr, then the Allocate node uses memory in the kernel
+  Allocate* alias_ = nullptr;
 };
 
 // Sync represents __syncthreads barrier for block level coordination.
@@ -723,7 +745,7 @@ class TORCH_CUDA_API GridReduction : public Expr {
   }
 
   static std::string getPredicateFlagName(const TensorView* val);
-  static std::string getPredicateFlagName(const fuser::TensorView* val);
+  static std::string getPredicateFlagName(const fuser::cuda::TensorView* val);
 
  private:
   ReductionOp* reduction_op_ = nullptr;
@@ -733,6 +755,7 @@ class TORCH_CUDA_API GridReduction : public Expr {
 };
 
 } // namespace kir
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch
