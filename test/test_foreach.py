@@ -21,20 +21,6 @@ class TestForeach(TestCase):
         torch._foreach_div_,
     ]
 
-    foreach_bin_ops_sl = [
-        torch._foreach_add_scalar_list,
-        torch._foreach_sub_scalar_list,
-        torch._foreach_mul_scalar_list,
-        torch._foreach_div_scalar_list,
-    ]
-
-    foreach_bin_ops_sl_ = [
-        torch._foreach_add_scalar_list_,
-        torch._foreach_sub_scalar_list_,
-        torch._foreach_mul_scalar_list_,
-        torch._foreach_div_scalar_list_,
-    ]
-
     torch_bin_ops = [
         torch.add,
         torch.sub,
@@ -320,8 +306,8 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_int_scalarlist(self, device, dtype):
         for N in N_values:
-            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops_sl,
-                                                                     self.foreach_bin_ops_sl_,
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
+                                                                     self.foreach_bin_ops_,
                                                                      self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [1 for _ in range(N)]
@@ -408,8 +394,8 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_float_scalarlist(self, device, dtype):
         for N in N_values:
-            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops_sl,
-                                                                     self.foreach_bin_ops_sl_,
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
+                                                                     self.foreach_bin_ops_,
                                                                      self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [1.1 for _ in range(N)]
@@ -506,8 +492,8 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_complex_scalarlist(self, device, dtype):
         for N in N_values:
-            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops_sl,
-                                                                     self.foreach_bin_ops_sl_,
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
+                                                                     self.foreach_bin_ops_,
                                                                      self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [3 + 5j for _ in range(N)]
@@ -581,8 +567,8 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_bool_scalarlist(self, device, dtype):
         for N in N_values:
-            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops_sl,
-                                                                     self.foreach_bin_ops_sl_,
+            for foreach_bin_op, foreach_bin_op_, torch_bin_op in zip(self.foreach_bin_ops,
+                                                                     self.foreach_bin_ops_,
                                                                      self.torch_bin_ops):
                 tensors = self._get_test_data(device, dtype, N)
                 scalars = [True for _ in range(N)]
@@ -596,7 +582,7 @@ class TestForeach(TestCase):
                             foreach_bin_op_(tensors, scalars)
                         return
                     else:
-                        if foreach_bin_op == torch._foreach_sub_scalar_list:
+                        if foreach_bin_op == torch._foreach_sub:
                             with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
                                 foreach_bin_op_(tensors, scalars)
 
@@ -619,7 +605,7 @@ class TestForeach(TestCase):
                             foreach_bin_op(tensors, scalars)
                         return
 
-                    if foreach_bin_op == torch._foreach_sub_scalar_list:
+                    if foreach_bin_op == torch._foreach_sub:
                         if self.device_type == "cpu":
                             # see TODO[Fix scalar list]
                             res = foreach_bin_op(tensors, scalars)
@@ -716,16 +702,16 @@ class TestForeach(TestCase):
         tensors2 = []
 
         # Empty lists
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
             torch._foreach_add(tensors1, tensors2)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
             torch._foreach_add_(tensors1, tensors2)
 
         # One empty list
         tensors1.append(torch.tensor([1], device=device))
-        with self.assertRaisesRegex(RuntimeError, "Tensor list must have at least one tensor."):
+        with self.assertRaisesRegex(RuntimeError, "Scalars list must have at least one value."):
             torch._foreach_add(tensors1, tensors2)
-        with self.assertRaisesRegex(RuntimeError, "Tensor list must have at least one tensor."):
+        with self.assertRaisesRegex(RuntimeError, "Scalars list must have at least one value."):
             torch._foreach_add_(tensors1, tensors2)
 
         # Lists have different amount of tensors
