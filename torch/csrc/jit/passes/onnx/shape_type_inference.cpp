@@ -1,10 +1,10 @@
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/onnx.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/jit/python/python_arg_flatten.h>
 
 #include <aten/src/ATen/InitialTensorOptions.h>
 #include <onnx/shape_inference/implementation.h>
@@ -434,34 +434,31 @@ void ONNXSetDynamicInputShape(
 }
 
 bool SequenceTypeOutput(Node* node) {
-   if (node->kind() == ::c10::onnx::SplitToSequence ||
-       node->kind() == ::c10::onnx::SequenceInsert ||
-       node->kind() == ::c10::onnx::SequenceEmpty ||
-       node->kind() == ::c10::onnx::SequenceConstruct)
-     return true;
-   return false;
+  if (node->kind() == ::c10::onnx::SplitToSequence ||
+      node->kind() == ::c10::onnx::SequenceInsert ||
+      node->kind() == ::c10::onnx::SequenceEmpty ||
+      node->kind() == ::c10::onnx::SequenceConstruct)
+    return true;
+  return false;
 }
 
 void ONNXInferOutputShapeType(
-     Value* graph_output,
-     at::Tensor output,
-     bool onnx_shape_inference) {
-
+    Value* graph_output,
+    at::Tensor output,
+    bool onnx_shape_inference) {
   if (onnx_shape_inference) {
-    graph_output->setType(MergeInferredType(
-      TensorType::create(output), graph_output->type()));
+    graph_output->setType(
+        MergeInferredType(TensorType::create(output), graph_output->type()));
   } else {
     graph_output->inferTypeFrom(output);
   }
 }
-
 
 void ONNXAssignOutputShape(
     std::shared_ptr<Graph>& graph,
     at::ArrayRef<at::Tensor> outputs,
     const python::IODescriptor& desc,
     bool onnx_shape_inference) {
-
   auto vars_it = outputs.begin();
   auto vars_it_end = outputs.end();
   auto desc_it = desc.structure.begin();
@@ -469,53 +466,68 @@ void ONNXAssignOutputShape(
   auto str_end = desc.strings.end();
 
   char type = *desc_it;
-	size_t graph_output_index = 0;
-	size_t graph_outputs_size = graph->outputs().size();
-	size_t outputs_index = 0;
+  size_t graph_output_index = 0;
+  size_t graph_outputs_size = graph->outputs().size();
+  size_t outputs_index = 0;
 
-	while (outputs_index < outputs.size() && graph_output_index < graph_outputs_size) {
-	  bool sequence_type_output = SequenceTypeOutput(graph->outputs()[graph_output_index]->node())
-	  if (sequence_type_output) {
-	    // "Outputs" is a flattened list of tensors, but
+  while (outputs_index < outputs.size() &&
+         graph_output_index < graph_outputs_size) {
+    bool sequence_type_output =
+        SequenceTypeOutput(graph->outputs()[graph_output_index]->node());
+    if (sequence_type_output) {
+      // "Outputs" is a flattened list of tensors, but
       //  graph outputs are not flattened. Unflatten
       // "outputs" to assign shape for the corresponding item.
-		  if (type == D::TupleOpen) {
-		    desc_it++;
-		    while (*desc_it++ != D::TupleClose){
-	        TORCH_INTERNAL_ASSERT(*desc_it == D::Variable);
-	        ONNXInferOutputShapeType(graph->outputs()[graph_output_index], outputs[outputs_index], onnx_shape_inference);
-		      desc_it++;
-		      outputs_index++;
-		    }
-	      graph_output_index++;
-		  } else if (type == D::ListOpen) {
-		    desc_it++;
-		    while (*desc_it != D::ListClose) {
-		      TORCH_INTERNAL_ASSERT(*desc_it == D::Variable);
-		      ONNXInferOutputShapeType(graph->outputs()[graph_output_index], outputs[outputs_index], onnx_shape_inference);
-		      desc_it++;
-		      outputs_index++;
-		    }
-	      graph_output_index++;
-		  } else {
-		    TORCH_INTERNAL_ASSERT(type == D::Variable, "Only tensors and sequences of tensors are supported as ONNX graph outputs. Dictionaries or Strings are not supported.");
-		    ONNXInferOutputShapeType(graph->outputs()[graph_output_index], outputs[outputs_index], onnx_shape_inference);
-		    graph_output_index++;
-		    desc_it++;
+      if (type == D::TupleOpen) {
+        desc_it++;
+        while (*desc_it++ != D::TupleClose) {
+          TORCH_INTERNAL_ASSERT(*desc_it == D::Variable);
+          ONNXInferOutputShapeType(
+              graph->outputs()[graph_output_index],
+              outputs[outputs_index],
+              onnx_shape_inference);
+          desc_it++;
+          outputs_index++;
+        }
+        graph_output_index++;
+      } else if (type == D::ListOpen) {
+        desc_it++;
+        while (*desc_it != D::ListClose) {
+          TORCH_INTERNAL_ASSERT(*desc_it == D::Variable);
+          ONNXInferOutputShapeType(
+              graph->outputs()[graph_output_index],
+              outputs[outputs_index],
+              onnx_shape_inference);
+          desc_it++;
+          outputs_index++;
+        }
+        graph_output_index++;
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            type == D::Variable,
+            "Only tensors and sequences of tensors are supported as ONNX graph outputs. Dictionaries or Strings are not supported.");
+        ONNXInferOutputShapeType(
+            graph->outputs()[graph_output_index],
+            outputs[outputs_index],
+            onnx_shape_inference);
+        graph_output_index++;
+        desc_it++;
         outputs_index++;
-		  }
-	  }
-	  else {
-	    ONNXInferOutputShapeType(graph->outputs()[graph_output_index], outputs[outputs_index], onnx_shape_inference);
-	    graph_output_index++;
-	    outputs_index++;
-	  }
+      }
+    } else {
+      ONNXInferOutputShapeType(
+          graph->outputs()[graph_output_index],
+          outputs[outputs_index],
+          onnx_shape_inference);
+      graph_output_index++;
+      outputs_index++;
+    }
   }
 
-	TORCH_INTERNAL_ASSERT(graph_output_index == graph_outputs_size, "Incorrect number of elements provided as example outputs.");
-
+  TORCH_INTERNAL_ASSERT(
+      graph_output_index == graph_outputs_size,
+      "Incorrect number of elements provided as example outputs.");
 }
-
 
 void ONNXShapeTypeInference(std::shared_ptr<Graph>& graph, int opset_version) {
   for (auto n : graph->nodes()) {
