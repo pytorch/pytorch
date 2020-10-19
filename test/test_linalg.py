@@ -960,6 +960,8 @@ class TestLinalg(TestCase):
         out = torch.empty_like(A)
         ans = torch.linalg.cholesky(A, out=out)
         self.assertEqual(ans, out)
+        expected = torch.linalg.cholesky(A)
+        self.assertEqual(expected, out)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
