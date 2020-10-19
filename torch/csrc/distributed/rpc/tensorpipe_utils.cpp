@@ -4,7 +4,9 @@
 
 #include <torch/csrc/distributed/rpc/utils.h>
 
+#ifdef USE_CUDA
 #include <tensorpipe/common/cuda_buffer.h>
+#endif
 
 #include <tensorpipe/core/message.h>
 
