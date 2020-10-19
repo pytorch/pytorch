@@ -32,6 +32,10 @@ inline Tensor tensorinv(const Tensor& self, int64_t ind) {
   return torch::linalg_tensorinv(self, ind);
 }
 
+inline Tensor& tensorinv_out(Tensor& result,const Tensor& self, int64_t ind) {
+  return torch::linalg_tensorinv_out(result, self, ind);
+}
+
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
@@ -69,6 +73,10 @@ inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string o
 /// ```
 inline Tensor tensorinv(const Tensor& self, int64_t ind) {
   return detail::tensorinv(self, ind);
+}
+
+inline Tensor& tensorinv_out(Tensor& result, const Tensor& self, int64_t ind) {
+  return detail::tensorinv_out(result, self, ind);
 }
 
 }} // torch::linalg

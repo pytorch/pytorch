@@ -936,6 +936,12 @@ class TestLinalg(TestCase):
             expected = np.linalg.tensorinv(a_numpy, ind=ind)
             self.assertEqual(result, expected)
 
+            # check the out= variant
+            out = torch.empty_like(result)
+            ans = torch.linalg.tensorinv(a, ind=ind, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
+
         # compare to NumPy output
         run_test((12, 3, 4), ind=1)
         run_test((3, 8, 24), ind=2)
@@ -1030,6 +1036,13 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected a strictly positive integer"):
                 torch.linalg.tensorinv(a, ind=ind)
 
+        def check_out(a_shape, ind):
+            # out tensor should have the correct resulting shape
+            a = torch.randn(a_shape)
+            out = torch.empty_like(a)
+            with self.assertRaisesRegex(RuntimeError, r'Expected result tensor to have size of'):
+                torch.linalg.tensorinv(a, ind=ind, out=out)
+
         # test for invalid shape
         check_shape((2, 3, 4), ind=1)
         check_shape((1, 2, 3, 4), ind=3)
@@ -1037,6 +1050,10 @@ class TestLinalg(TestCase):
         # test for invalid ind
         check_ind((12, 3, 4), ind=-1)
         check_ind((18, 3, 3, 2), ind=0)
+
+        # test for invalid out tensor
+        check_out((12, 3, 4), ind=1)
+        check_out((3, 8, 24), ind=2)
 
     @skipCPUIfNoLapack
     @onlyCPU

@@ -142,7 +142,7 @@ Using the :attr:`dim` argument to compute matrix norms::
 """)
 
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
-linalg.tensorinv(input, ind=2) -> Tensor
+linalg.tensorinv(input, ind=2, *, out=None) -> Tensor
 
 Computes a tensor ``x`` such that ``tensordot(tensorinv(input), input, ind) == I``,
 where ``I`` denotes the identity tensor.
@@ -158,6 +158,9 @@ Args:
     input (Tensor): The tensor to invert. Its shape must satisfy ``prod(input.shape[:ind]) == prod(input.shape[ind:])``.
     ind (int): The positive integer representing how many first indices are involved in the inverse contraction.
                This number affects the result's shape and the 'squareness' requirement. Default: 2.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
 
 Example::
 
