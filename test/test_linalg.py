@@ -931,8 +931,11 @@ class TestLinalg(TestCase):
     def test_cholesky(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
-        def run_test(shape, batch):
+        def run_test(shape, batch, contiguous):
             A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
+            if A.numel() > 0 and not contiguous:
+                A = A.transpose(-2, -1)
+                self.assertFalse(A.is_contiguous())
             expected_L = np.linalg.cholesky(A.cpu().numpy())
             actual_L = torch.linalg.cholesky(A)
             matrices_are_equal = np.allclose(actual_L.cpu().numpy(), expected_L)
@@ -951,9 +954,9 @@ class TestLinalg(TestCase):
 
         shapes = (0, 3, 5)
         batches = ((), (3, ), (2, 2))
-        larger_input_case = [(100, (5, ))]
-        for shape, batch in list(itertools.product(shapes, batches)) + larger_input_case:
-            run_test(shape, batch)
+        larger_input_case = [(100, (5, ), True)]
+        for shape, batch, contiguous in list(itertools.product(shapes, batches, (True, False))) + larger_input_case:
+            run_test(shape, batch, contiguous)
 
         # check the out= variant
         A = random_hermitian_pd_matrix(3, 3, dtype=dtype, device=device)
