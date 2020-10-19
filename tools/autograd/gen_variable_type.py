@@ -101,17 +101,17 @@ DONT_PROFILE = {
     'size', 'storage_offset', 'stride',
 }
 
-# Note [Manual catchAll kernels]
-# For these ops, we want to manually register to dispatch key catchAll and
-# skip codegen-ed registeration to all keys before catchAll.
+# Note [Manual Backend kernels]
+# For these ops, we want to manually register to dispatch key Backend and
+# skip codegen-ed registeration to all keys before Backend.
 # For codegen this means:
 #   - op set below must match ops with manual_kernel_registration=True in native_functions.yaml
-#     where we skip codegen catchall kernels
+#     where we skip codegen backend kernels
 #   - all ops below are part of MANUAL_AUTOGRAD to skip codegen Autograd kernel registration
 #   - all ops below are part of MANUAL_TRACER to skip codegen Tracer kernel registration
 # Note: we still register to dispatch key Profiler for these ops, keeping it untouched for now.
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_CATCHALL = set([
+MANUAL_BACKEND = set([
     'options', 'data', 'set_data', 'is_leaf', 'output_nr', '_version', 'retain_grad',
     'backward', 'requires_grad_',
 ])
@@ -123,9 +123,9 @@ MANUAL_AUTOGRAD_AND_TRACER = set([
 ])
 
 # Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
-#   union(MANUAL_CATCHALL, MANUAL_AUTOGRAD_AND_TRACER)
+#   union(MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER)
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_AUTOGRAD = MANUAL_TRACER = MANUAL_CATCHALL | MANUAL_AUTOGRAD_AND_TRACER
+MANUAL_AUTOGRAD = MANUAL_TRACER = MANUAL_BACKEND | MANUAL_AUTOGRAD_AND_TRACER
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
@@ -718,8 +718,8 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                     declaration, class_type='VariableType'))
 
-        # See Note [Manual catchAll kernels]
-        assert (declaration['name'] in MANUAL_CATCHALL) == declaration['manual_kernel_registration']
+        # See Note [Manual Backend kernels]
+        assert (declaration['name'] in MANUAL_BACKEND) == declaration['manual_kernel_registration']
         # If you want to register a kernel to Autograd, you must make the op abstract.
         # In other words, this op must have dispatch section in native_functions.yaml.
         if declaration['name'] in MANUAL_AUTOGRAD_AND_TRACER or declaration['derivative']:

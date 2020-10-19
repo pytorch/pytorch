@@ -14,8 +14,8 @@ void addFormattedArg(
     const IValue& ival,
     std::stringstream& ss,
     int precision = defaultPrecision) {
-  std::streamsize original_precision = ss.precision();
   // TODO: Implement precison-based formatting
+  std::stringstream tmp;
   switch (key) {
     case 'd':
     case 'i':
@@ -39,19 +39,16 @@ void addFormattedArg(
           key,
           " requires a number for formatting, but got ",
           ival.tagKind());
-      ss << std::setprecision(precision) << std::scientific;
+      tmp << std::setprecision(precision) << std::scientific;
       if (key == 'E') {
-        ss << std::uppercase;
+        tmp << std::uppercase;
       }
       if (ival.isInt()) {
-        ss << static_cast<float>(ival.toInt());
+        tmp << static_cast<float>(ival.toInt());
       } else {
-        ss << static_cast<float>(ival.toDouble());
+        tmp << static_cast<float>(ival.toDouble());
       }
-      if (key == 'E') {
-        ss << std::nouppercase;
-      }
-      ss << std::setprecision(original_precision) << std::defaultfloat;
+      ss << tmp.str();
       break;
     case 'f':
     case 'F':
@@ -61,13 +58,13 @@ void addFormattedArg(
           key,
           " requires a number for formatting, but got ",
           ival.tagKind());
-      ss << std::setprecision(precision) << std::fixed;
+      tmp << std::setprecision(precision) << std::fixed;
       if (ival.isInt()) {
-        ss << static_cast<float>(ival.toInt());
+        tmp << static_cast<float>(ival.toInt());
       } else {
-        ss << static_cast<float>(ival.toDouble());
+        tmp << static_cast<float>(ival.toDouble());
       }
-      ss << std::setprecision(original_precision) << std::defaultfloat;
+      ss << tmp.str();
       break;
     case 'c':
       TORCH_CHECK(
