@@ -177,6 +177,23 @@ Resource::Image::Sampler::Factory::operator()(
   };
 }
 
+VkFence Resource::Fence::handle(const bool add_to_waitlist) const {
+  if (!pool) {
+    return VK_NULL_HANDLE;
+  }
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      id < pool->fence_.pool.size(),
+      "Invalid Vulkan fence!");
+
+  const VkFence fence = pool->fence_.pool[id].get();
+  if (add_to_waitlist) {
+    pool->fence_.waitlist.push_back(fence);
+  }
+
+  return fence;
+}
+
 void Resource::Fence::wait(const uint64_t timeout_nanoseconds) {
   const VkFence fence = handle(/* add_to_waitlist = */ false);
 

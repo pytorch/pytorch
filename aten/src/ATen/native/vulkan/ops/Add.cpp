@@ -21,33 +21,33 @@ Tensor add(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
 
-  api::Descriptor::Set descriptor_set = context->load(
-      command_buffer,
-      {
-        {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        },
-      },
-      {
-        add_glsl,
-      },
-      {
-        8, 8, 1,
-      });
-
-  descriptor_set.
-      bind(0u, v_output.image(command_buffer, vTensor::Access::Write)).
-      bind(1u, v_self.image(command_buffer)).
-      bind(2u, v_other.image(command_buffer));
+  const struct {
+    uint32_t W;
+    uint32_t H;
+    uint32_t C;
+    float alpha;
+  } block {
+  };
 
   context->dispatch(
       command_buffer,
-      descriptor_set,
       {
-      });
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      },
+      VK_KERNEL(add),
+      {
+        8, 8, 1,
+      },
+      {
+        1, 1, 1,
+      },
+      v_output.image(command_buffer, vTensor::Access::Write),
+      v_self.image(command_buffer),
+      v_other.image(command_buffer),
+      context->resource().pool.uniform(block).object);
 
   command_buffer.end();
   command_buffer.submit(context->gpu().queue);

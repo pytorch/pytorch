@@ -437,6 +437,8 @@ api::Command::Buffer& vTensor::View::CMD::command_buffer() {
 }
 
 void vTensor::View::CMD::barrier(State::Transition transition) {
+  // Buffer and Staging are just an alias for the same memory location on UMA.
+
   if (view_.state_.is_uma()) {
     transition.first.buffer.stage |= transition.first.staging.stage;
     transition.first.buffer.access |= transition.first.staging.access;
@@ -544,6 +546,8 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
     }
   }
 
+  // If we are left with anything meaningful, insert a barrier.
+
   if (barrier) {
     if (0u == barrier.stage.src) {
       barrier.stage.src = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
@@ -636,66 +640,31 @@ void vTensor::View::CMD::copy_buffer_to_image(
           },
         }));
 
-  struct Uniform final {
+  const struct {
     uint32_t width;
     uint32_t height;
+  } block {
   };
 
-  api::Resource::Buffer uniform =
-      view_.context_->resource().pool.buffer({
-        sizeof(Uniform),
-        {
-          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-          {
-            VMA_MEMORY_USAGE_CPU_TO_GPU,
-            0u,
-            0u,
-          },
-        },
-      });
-
-  // Uniform* ptr = uniform.memory.map<Uniform>();
-
   view_.context_->dispatch(
-    command_buffer(),
-    {
-      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-    },
-    VK_KERNEL(nchw_to_image),
-    {
-      8, 8, 1,
-    },
-    {
-      10, 10, 10,
-    },
-    image,
-    buffer);
-
-  // api::Descriptor::Set descriptor_set = view_.context_->load(
-  //     command_buffer(),
-  //     {
-  //       {
-  //         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-  //         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-  //         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-  //       },
-  //     },
-  //     VK_KERNEL(nchw_to_image),
-  //     {
-  //       8, 8, 1,
-  //     });
-
-  // descriptor_set.
-  //     bind(0u, image).
-  //     bind(1u, buffer).
-  //     bind(2u, uniform.object);
-
-  // view_.context_->dispatch(
-  //     command_buffer(),
-  //     descriptor_set,
-  //     {});
+      command_buffer(),
+      {
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      },
+      VK_KERNEL(nchw_to_image),
+      {
+        8, 8, 1,
+      },
+      {
+        1, 1, 1,
+      },
+      image,
+      buffer,
+      // Object lifetime is managed by the resource pool.
+      // It is OK not to keep track of the handle.
+      view_.context_->resource().pool.uniform(block).object);
 }
 
 void vTensor::View::CMD::copy_image_to_buffer(
@@ -723,28 +692,31 @@ void vTensor::View::CMD::copy_image_to_buffer(
           },
         }));
 
-  // api::Descriptor::Set descriptor_set = view_.context_->load(
-  //     command_buffer(),
-  //     {
-  //       {
-  //         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-  //         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-  //         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-  //       },
-  //     },
-  //     VK_KERNEL(image_to_nchw),
-  //     {
-  //       8, 8, 1,
-  //     });
+  const struct {
+    uint32_t width;
+    uint32_t height;
+  } block {
+  };
 
-  // descriptor_set.
-  //     bind(0u, image).
-  //     bind(1u, buffer);
-
-  // view_.context_->dispatch(
-  //     command_buffer(),
-  //     descriptor_set,
-  //     {});
+  view_.context_->dispatch(
+      command_buffer(),
+      {
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      },
+      VK_KERNEL(image_to_nchw),
+      {
+        8, 8, 1,
+      },
+      {
+        1, 1, 1,
+      },
+      image,
+      buffer,
+      // Object lifetime is managed by the resource pool.
+      // It is OK not to keep track of the handle.
+      view_.context_->resource().pool.uniform(block).object);
 }
 
 void vTensor::View::CMD::submit(const api::Resource::Fence fence) {
@@ -1040,12 +1012,15 @@ vTensor::View::State::transition(const Bundle bundle) {
     to.image = bundle.image;
   }
 
+#ifdef DEBUG
+  // Forward declaration
   std::ostream& operator<<(
       std::ostream&,
       const View::State::Bundle&);
 
-  // std::cout << "From:" << std::endl << from << std::endl;
-  // std::cout << "To:" << std::endl << to << std::endl;
+  std::cout << "From:" << std::endl << from << std::endl;
+  std::cout << "To:" << std::endl << to << std::endl;
+#endif /* DEBUG */
 
   return Transition{
     from,
@@ -1077,7 +1052,7 @@ void verify(const TensorOptions& options) {
 
 namespace {
 
-// Considering that VkAccessFlags is a weak typedef to a built-in data type, we
+// Considering that VkAccessFlags is a weak typedef of a built-in data type, we
 // need to introduce a new type to allow overload resolution distinguish between
 // the two.
 
@@ -1129,7 +1104,7 @@ std::ostream& operator<<(
   return stream;
 }
 
-// Considering that VkImageLayout is a weak typedef to a built-in data type,
+// Considering that VkImageLayout is a weak typedef of a built-in data type,
 // we need to introduce a new type to allow overload resolution distinguish
 // between the two.
 
@@ -1163,7 +1138,7 @@ std::ostream& operator<<(
   return stream;
 }
 
-// Considering that VkPipelineStageFlags is a weak typedef to a built-in data
+// Considering that VkPipelineStageFlags is a weak typedef of a built-in data
 // type, we need to introduce a new type to allow overload resolution distinguish
 // between the two.
 

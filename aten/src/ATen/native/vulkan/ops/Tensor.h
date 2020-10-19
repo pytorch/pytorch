@@ -111,7 +111,7 @@ class vTensor final {
     Future& operator=(Future<T, A>&&) && = delete;
     ~Future();
 
-    typedef Memory::Data<
+    typedef Memory::Handle<
         Access::Pointer<
             Type,
             kAccess>> Payload;
