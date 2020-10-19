@@ -392,11 +392,10 @@ static inline float calc_polygamma(int64_t n, float x) {
  */
 
 /*
- * The implementation of incomplete gamma function as well as the helper
- * functions are derived from the implementation of gammainc from SciPy
- * that also uses part of code from Cephes's igam and igamc as well as
- * Boost's lanczos approximations.
- * For further information about the licenses, please see NOTICE.
+ * This implementation of the regularized incomplete gamma functions and
+ * their helper functions are derived from the implementation of SciPy's
+ * gammainc, Cephes's igam and igamc, and Boost's Lanczos approximations.
+ * See NOTICE for the licenses.
  */
 template <typename scalar_t>
 static scalar_t ratevl(scalar_t x, const scalar_t num[], int64_t M,

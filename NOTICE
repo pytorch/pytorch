@@ -285,10 +285,8 @@ Apache License Version 2.0:
 Cephes's 3-Clause BSD License
 =======================================================================
 
-   Code derived from implementations in the Cephes Math Library should
-   mention its derivation and reference this note (ex. 'This function is
-   derived from the implementation of X in the Cephes Math Library. See note
-   [3-Clause BSD License for the Cephes Math Library]. The license is:
+Code derived from implementations in the Cephes Math Library should mention
+its derivation and reference the following license:
 
    3-Clause BSD License for the Cephes Math Library
    Copyright (c) 2018, Steven Moshier
@@ -324,8 +322,8 @@ Cephes's 3-Clause BSD License
 SciPy's 3-Clause BSD License
 =======================================================================
 
-This repo contains SciPy code, which is licensed under 3-Clause BSD
-License:
+Code derived from implementations in SciPy should mention its derivation
+and reference the following license:
 
    Copyright (c) 2001-2002 Enthought, Inc.  2003-2019, SciPy Developers.
    All rights reserved.
@@ -362,7 +360,8 @@ License:
 Boost's 1.0 Software License
 =======================================================================
 
-This repo contains Boost 1.0 code, with the following license:
+Code derived from implementations in Boost 1.0 should mention its
+derivation and reference the following license:
 
    Boost Software License - Version 1.0 - August 17th, 2003
 

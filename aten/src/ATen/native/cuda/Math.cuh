@@ -175,11 +175,10 @@ static inline __host__ __device__ scalar_t calc_polygamma(int n, scalar_t x) {
 }
 
 /*
- * The implementation of incomplete gamma function as well as the helper
- * functions are derived from the implementation of gammainc from SciPy
- * that also uses part of code from Cephes's igam and igamc as well as
- * Boost's lanczos approximations.
- * For further information about the licenses, please see NOTICE.
+ * This implementation of the regularized incomplete gamma functions and
+ * their helper functions are derived from the implementation of SciPy's
+ * gammainc, Cephes's igam and igamc, and Boost's Lanczos approximations.
+ * See NOTICE for the licenses.
  */
 // regularized lower & upper incomplete gamma
 template <typename scalar_t>

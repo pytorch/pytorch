@@ -17385,6 +17385,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             (vec1, vec1),  # for large number, it should approach 0.5
             (vec1, 0.5 * vec1),  # test for considerable ratio
             (vec1, 2.0 * vec1),
+            (vec1[::2,:], vec1[::2,:]),  # contiguous/discontiguous tests
+            (vec1[::2,:], vec1[:vec1.shape[0]//2,:]),
+            (vec1[:vec1.shape[0]//2,:], vec1[::2,:]),
         ]
         half_prec = dtype in [torch.bfloat16, torch.float16]
         for input0, input1 in inputs:
@@ -17396,7 +17399,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             expected = torch.from_numpy(expected).to(dtype)
             self.assertEqual(actual, expected)
 
-    @skipCUDAIfRocm
+    @skipCUDAIfRocm  # see issue https://github.com/pytorch/pytorch/issues/46531
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
