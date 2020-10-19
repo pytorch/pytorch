@@ -32,21 +32,21 @@ python -m tools.pyi.gen_pyi \
   --out "$OUT"/pyi
 
 # autograd codegen (called by torch codegen but can run independently)
-python -m tools.autograd.gen_autograd \
-  "$OUT"/torch/share/ATen/Declarations.yaml \
-  "$OUT"/autograd \
-  tools/autograd
+# python -m tools.autograd.gen_autograd \
+#   "$OUT"/torch/share/ATen/Declarations.yaml \
+#   "$OUT"/autograd \
+#   tools/autograd
 
 # unboxing_wrappers codegen (called by torch codegen but can run independently)
-mkdir -p "$OUT"/unboxing_wrappers
-python -m tools.jit.gen_unboxing_wrappers \
-  "$OUT"/torch/share/ATen/Declarations.yaml \
-  "$OUT"/unboxing_wrappers \
-  tools/jit/templates
+# mkdir -p "$OUT"/unboxing_wrappers
+# python -m tools.jit.gen_unboxing_wrappers \
+#   "$OUT"/torch/share/ATen/Declarations.yaml \
+#   "$OUT"/unboxing_wrappers \
+#   tools/jit/templates
 
 # annotated_fn_args codegen (called by torch codegen but can run independently)
-mkdir -p "$OUT"/annotated_fn_args
-python -m tools.autograd.gen_annotated_fn_args \
-  "$OUT"/torch/share/ATen/Declarations.yaml \
-  "$OUT"/annotated_fn_args \
-  tools/autograd
+# mkdir -p "$OUT"/annotated_fn_args
+# python -m tools.autograd.gen_annotated_fn_args \
+#   "$OUT"/torch/share/ATen/Declarations.yaml \
+#   "$OUT"/annotated_fn_args \
+#   tools/autograd
