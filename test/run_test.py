@@ -2,6 +2,7 @@
 
 import argparse
 from datetime import datetime
+import importlib
 import modulefinder
 import os
 import shutil
@@ -19,6 +20,7 @@ from typing import Dict, Optional
 
 TESTS = [
     'test_autograd',
+    'benchmark_utils/test_benchmark_utils',
     'test_bundled_inputs',
     'test_complex',
     'test_cpp_api_parity',
@@ -36,7 +38,8 @@ TESTS = [
     'distributed/test_data_parallel',
     'distributed/test_distributed_fork',
     'distributed/test_distributed_spawn',
-    'test_distributions',
+    'distributions/test_constraints',
+    'distributions/test_distributions',
     'test_expecttest',
     'test_foreach',
     'test_indexing',
@@ -90,6 +93,7 @@ TESTS = [
     'test_determination',
     'test_futures',
     'test_fx',
+    'test_fx_experimental',
     'test_functional_autograd_benchmark',
     'test_package',
 ]
@@ -128,9 +132,16 @@ RUN_PARALLEL_BLOCKLIST = [
     'test_cuda_primary_ctx',
 ] + [test for test in TESTS if test.startswith('distributed/')]
 
+# These tests use some specific pytest feature like parameterized testing or
+# fixtures that cannot be run by unittest
+PYTEST_TESTS = [
+    'distributions/test_constraints'
+]
+
 # These tests are slow enough that it's worth calculating whether the patch
 # touched any related files first.
 SLOW_TESTS = [
+    'distributions/test_distributions',
     'test_nn',
     'test_autograd',
     'test_cpp_extensions_jit',
@@ -151,7 +162,6 @@ SLOW_TESTS = [
     'test_cpp_extensions_aot_ninja',
     'test_cpp_extensions_aot_no_ninja',
     'test_serialization',
-    'test_distributions',
     'test_optim',
     'test_utils',
     'test_multiprocessing',
@@ -550,6 +560,9 @@ def get_selected_tests(options):
         options.exclude.extend(JIT_EXECUTOR_TESTS)
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
+    # exclude PYTEST_TESTS if pytest not installed.
+    if importlib.util.find_spec('pytest') is None:
+        selected_tests = exclude_tests(PYTEST_TESTS, selected_tests, 'PyTest not found.')
 
     if sys.platform == 'win32' and not options.ignore_win_blocklist:
         target_arch = os.environ.get('VSCMD_ARG_TGT_ARCH')

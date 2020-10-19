@@ -13,13 +13,7 @@ echo "Testing pytorch"
 
 if [ -n "${IN_CIRCLECI}" ]; then
   # TODO move this to docker
-  pip_install unittest-xml-reporting coverage
-
-  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
-    # TODO: move this to Docker
-    sudo apt-get -qq update
-    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
-  fi
+  pip_install unittest-xml-reporting coverage pytest
 
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-cudnn7-py3* ]]; then
     # TODO: move this to Docker
