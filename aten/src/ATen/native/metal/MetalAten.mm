@@ -247,7 +247,7 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
 
 struct MetalImpl : public at::metal::MetalInterface {
   bool is_metal_available() const override {
-#if defined(USE_METAL)
+#if defined(USE_PYTORCH_METAL)
     return [[MPSCNNContext sharedInstance] available];
 #else
     return false;
@@ -260,7 +260,7 @@ struct MetalImpl : public at::metal::MetalInterface {
     return native::metal::metal_copy_impl_(input, src);
   }
 };
-#if defined(USE_METAL)
+#if defined(USE_PYTORCH_METAL)
 static at::metal::MetalImplRegistrar g_metal_impl(new MetalImpl());
 #endif
 
