@@ -1,5 +1,7 @@
 #pragma once
 
+#include <any>
+#include <functional>
 #include <memory>
 
 #include <ATen/ATen.h>
@@ -73,8 +75,28 @@ class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
  private:
   // Only needed for stateful communication.
   py::object state_;
-  // Indicates an asynchrounous communication of gradients.
   py::object hook_;
+};
+
+class TORCH_API CppCommHook : public CommHookInterface {
+ public:
+  explicit CppCommHook(
+      std::function<c10::intrusive_ptr<
+          torch::jit::Future>(const GradBucket&, std::any*)>& hook,
+      std::unique_ptr<std::any> state = nullptr)
+      : state_(std::move(state)), hook_(std::move(hook)) {}
+
+  c10::intrusive_ptr<torch::jit::Future> runHook(
+      const GradBucket& bucket) override {
+    return hook_(bucket, state_.get());
+  }
+
+ private:
+  std::unique_ptr<std::any> state_;
+  std::function<c10::intrusive_ptr<torch::jit::Future>(
+      const GradBucket&,
+      std::any* state)>
+      hook_;
 };
 
 } // namespace c10d
