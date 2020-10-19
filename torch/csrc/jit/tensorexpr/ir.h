@@ -612,40 +612,56 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
   CompareSelectOperation compare_op_;
 };
 
+#define TENSOREXPR_FOR_ALL_INTRINSICS(_) \
+  _(Sin)                                 \
+  _(Cos)                                 \
+  _(Tan)                                 \
+  _(Asin)                                \
+  _(Acos)                                \
+  _(Atan)                                \
+  _(Atan2)                               \
+  _(Sinh)                                \
+  _(Cosh)                                \
+  _(Tanh)                                \
+  _(Sigmoid)                             \
+  _(Exp)                                 \
+  _(Expm1)                               \
+  _(Fabs)                                \
+  _(Log)                                 \
+  _(Log2)                                \
+  _(Log10)                               \
+  _(Log1p)                               \
+  _(Erf)                                 \
+  _(Erfc)                                \
+  _(Sqrt)                                \
+  _(Rsqrt)                               \
+  _(Pow)                                 \
+  _(Ceil)                                \
+  _(Floor)                               \
+  _(Round)                               \
+  _(Trunc)                               \
+  _(Fmod)                                \
+  _(Remainder)                           \
+  _(Lgamma)                              \
+  _(Frac)                                \
+  _(Rand)
+
+// We need more discussions on Rand. Should we consider stateful?
+
 enum IntrinsicsOp {
-  kSin,
-  kCos,
-  kTan,
-  kAsin,
-  kAcos,
-  kAtan,
-  kAtan2,
-  kSinh,
-  kCosh,
-  kTanh,
-  kSigmoid,
-  kExp,
-  kExpm1,
-  kFabs,
-  kLog,
-  kLog2,
-  kLog10,
-  kLog1p,
-  kErf,
-  kErfc,
-  kSqrt,
-  kRsqrt,
-  kPow,
-  kCeil,
-  kFloor,
-  kRound,
-  kTrunc,
-  kFmod,
-  kRemainder,
-  kLgamma,
-  kFrac,
-  kRand, // We need more discussions on this. Should we consider stateful?
+#define DEFINE_ENUM(name) k##name,
+  TENSOREXPR_FOR_ALL_INTRINSICS(DEFINE_ENUM)
+#undef DEFINE_ENUM
 };
+
+static inline IntrinsicsOp stringToIntrinsics(const std::string& in_op) {
+#define DEFINE_CASE(name) \
+  if (in_op == #name) {   \
+    return k##name;       \
+  }
+  TENSOREXPR_FOR_ALL_INTRINSICS(DEFINE_CASE)
+  throw std::runtime_error("invalid op type: " + in_op);
+}
 
 class Intrinsics : public CallNode<Intrinsics> {
  public:
@@ -679,76 +695,15 @@ class Intrinsics : public CallNode<Intrinsics> {
   }
 
   std::string func_name() const override {
-    switch (op_type()) {
-      case kSin:
-        return "sin";
-      case kCos:
-        return "cos";
-      case kTan:
-        return "tan";
-      case kAsin:
-        return "asin";
-      case kAcos:
-        return "acos";
-      case kAtan:
-        return "atan";
-      case kAtan2:
-        return "atan2";
-      case kSinh:
-        return "sinh";
-      case kCosh:
-        return "cosh";
-      case kTanh:
-        return "tanh";
-      case kSigmoid:
-        return "sigmoid";
-      case kExp:
-        return "exp";
-      case kFabs:
-        return "fabs";
-      case kLog:
-        return "log";
-      case kLog2:
-        return "log2";
-      case kLog10:
-        return "log10";
-      case kLog1p:
-        return "log1p";
-      case kErf:
-        return "erf";
-      case kSqrt:
-        return "sqrt";
-      case kRsqrt:
-        return "rsqrt";
-      case kPow:
-        return "pow";
-      case kCeil:
-        return "ceil";
-      case kFloor:
-        return "floor";
-      case kRound:
-        return "round";
-      case kTrunc:
-        return "trunc";
-      case kRand:
-        return "rand";
-      case kFmod:
-        return "fmod";
-      case kRemainder:
-        return "remainder";
-      case kLgamma:
-        return "lgamma";
-      case kExpm1:
-        return "expm1";
-      case kErfc:
-        return "erfc";
-      case kFrac:
-        return "frac";
-      default:
-        throw std::runtime_error(
-            "invalid op_type: " + c10::to_string(op_type()));
-    }
+#define DEFINE_INTRINSIC_CASE(name) \
+  case k##name:                     \
+    return #name;
+
+    switch (op_type()) { TENSOREXPR_FOR_ALL_INTRINSICS(DEFINE_INTRINSIC_CASE) }
+#undef DEFINE_INTRINSIC_CASE
+    throw std::runtime_error("invalid op type: " + c10::to_string(op_type()));
   }
+
   using BaseClass = CallNode<Intrinsics>;
 
   Intrinsics(IntrinsicsOp op_type, Dtype dtype)

@@ -31,6 +31,40 @@ enum class ScalarType : int8_t {
   NumOptions
 };
 
+static inline const char* toString(ScalarType t) {
+#define DEFINE_CASE(_, name) \
+  case ScalarType::name:     \
+    return #name;
+
+  switch (t) {
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CASE)
+    DEFINE_CASE(_, Undefined)
+    DEFINE_CASE(_, Handle)
+    DEFINE_CASE(_, Uninitialized)
+    DEFINE_CASE(_, None)
+    DEFINE_CASE(_, NumOptions)
+    default:
+      return "UNKNOWN_SCALAR";
+  }
+#undef DEFINE_CASE
+}
+
+static inline ScalarType toDtype(const std::string& s) {
+#define DEFINE_CASE(_, name) \
+  if (s == #name) {          \
+    return ScalarType::name; \
+  }
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CASE)
+  DEFINE_CASE(_, Undefined)
+  DEFINE_CASE(, Handle)
+  DEFINE_CASE(_, Uninitialized)
+  DEFINE_CASE(_, None)
+  DEFINE_CASE(_, NumOptions)
+
+  assert(false);
+#undef DEFINE_CASE
+}
+
 TORCH_API std::ostream& operator<<(
     std::ostream& stream,
     const ScalarType& dtype);
