@@ -65,7 +65,7 @@ DEFAULT_QAT_MODULE_MAPPINGS = {
 }
 
 # Default map for swapping dynamic modules
-DYNAMIC_QUANT_MODULE_MAPPINGS = {
+DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS = {
     nn.GRUCell: nnqd.GRUCell,
     nn.Linear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,

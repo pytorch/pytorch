@@ -79,6 +79,13 @@ class TestDataParallel(TestCase):
             self.assertTrue(p1.allclose(p2))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_data_parallel_lazy_linear(self):
+
+        with self.assertRaisesRegex(RuntimeError, 'Modules with uninitialized parameters'):
+            model_dp = torch.nn.DataParallel(torch.nn.LazyLinear(10).to(0))
+            model_dp(torch.rand(10, 10).to(0))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parallel_apply(self):
         l1 = nn.Linear(10, 5).to("cuda:0", torch.float)
         l2 = nn.Linear(10, 5).to("cuda:1", torch.float)
