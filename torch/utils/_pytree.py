@@ -1,4 +1,4 @@
-from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Optional
+from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, Optional
 
 """
 Contains utility functions for working with nested python data structures.
@@ -25,17 +25,17 @@ To improve the performance we can move parts of the implementation to C++.
 #   (returned by flatten_fn). It returns the collection by reconstructing
 #   it from the list and the context.
 Context = Any
-pytree_t = Any
-flatten_fn_t = Callable[[pytree_t], Tuple[List, Context]]
-unflatten_fn_t = Callable[[List, Context], pytree_t]
-NodeDef = NamedTuple('NodeDef', [
-    ('flatten_fn', flatten_fn_t),
-    ('unflatten_fn', unflatten_fn_t),
-])
+PyTree = Any
+FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
+UnflattenFunc = Callable[[List, Context], PyTree]
 
-SUPPORTED_NODES: Dict[Any, NodeDef] = {}
+class NodeDef(NamedTuple):
+    flatten_fn: FlattenFunc
+    unflatten_fn: UnflattenFunc
 
-def _register_pytree_node(typ: Any, flatten_fn: flatten_fn_t, unflatten_fn: unflatten_fn_t):
+SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
+
+def _register_pytree_node(typ: Any, flatten_fn: FlattenFunc, unflatten_fn: UnflattenFunc):
     SUPPORTED_NODES[typ] = NodeDef(flatten_fn, unflatten_fn)
 
 def _dict_flatten(d):
@@ -62,7 +62,7 @@ _register_pytree_node(tuple, _tuple_flatten, _tuple_unflatten)
 
 
 # A leaf is defined as anything that is not a Node.
-def _is_leaf(pytree: pytree_t) -> bool:
+def _is_leaf(pytree: PyTree) -> bool:
     return type(pytree) not in SUPPORTED_NODES.keys()
 
 
@@ -99,7 +99,7 @@ class LeafSpec(TreeSpec):
         return '*'
 
 
-def tree_flatten(pytree: pytree_t) -> Tuple[List, TreeSpec]:
+def tree_flatten(pytree: PyTree) -> Tuple[List, TreeSpec]:
     """Flattens a pytree into a list of values and a TreeSpec that can be used
     to reconstruct the pytree.
     """
@@ -120,7 +120,7 @@ def tree_flatten(pytree: pytree_t) -> Tuple[List, TreeSpec]:
     return result, TreeSpec(type(pytree), context, children_specs)
 
 
-def tree_unflatten(values: List, spec: TreeSpec) -> pytree_t:
+def tree_unflatten(values: List, spec: TreeSpec) -> PyTree:
     """Given a list of values and a TreeSpec, builds a pytree.
     This is the inverse operation of `tree_flatten`.
     """
@@ -158,7 +158,7 @@ def tree_unflatten(values: List, spec: TreeSpec) -> pytree_t:
 # a user can pass in vmap(fn, in_dims)(*inputs). `in_dims` should be
 # broadcastable to the tree structure of `inputs` and we use
 # _broadcast_to_and_flatten to check this.
-def _broadcast_to_and_flatten(pytree: pytree_t, spec: TreeSpec) -> Optional[List]:
+def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List]:
     assert isinstance(spec, TreeSpec)
 
     if _is_leaf(pytree):

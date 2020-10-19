@@ -99,6 +99,13 @@ class TestPytree(TestCase):
         for case in cases:
             run_test(case)
 
+    def test_treespec_repr(self):
+        # Check that it looks sane
+        pytree = (0, [0, 0, 0])
+        _, spec = tree_flatten(pytree)
+        self.assertEqual(
+            repr(spec), 'TreeSpec(tuple, None, [*, TreeSpec(list, None, [*, *, *])])')
+
     def test_broadcast_to_and_flatten(self):
         cases = [
             (1, (), []),
