@@ -559,6 +559,7 @@ void print(const Expr* expr) {
   } else {
     std::cout << "(null expr)";
   }
+  std::cout << "\n";
 }
 
 void print(const Stmt* stmt) {
