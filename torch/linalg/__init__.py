@@ -144,15 +144,17 @@ Using the :attr:`dim` argument to compute matrix norms::
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
 linalg.tensorinv(input, ind=2, *, out=None) -> Tensor
 
-Computes a tensor ``x`` such that ``tensordot(tensorinv(input), input, ind) == I``,
-where ``I`` denotes the identity tensor.
-The resulting tensor ``x`` has the shape equal to ``input.shape[ind:] + input.shape[:ind]``.
+Computes a tensor ``input_inv`` such that ``tensordot(input_inv, input, ind) == I_n``,
+where ``I_n`` is the n-dimensional identity tensor and ``n`` is equal to ``input.ndim``.
+The resulting tensor ``input_inv`` has the shape equal to ``input.shape[ind:] + input.shape[:ind]``.
 
 Supports real and, only on the CPU, complex inputs.
 
 .. note:: If :attr:`input` is not a 'square' tensor, meaning it does not satisfy the requirement
           ``prod(input.shape[ind:]) == prod(input.shape[:ind])`` or if :attr:`input` is not invertible,
           then a RuntimeError will be thrown.
+
+.. note:: If :attr:`input` is a 2-dimensional tensor and ``ind=1``, then this function computes matrix inverse.
 
 Args:
     input (Tensor): The tensor to invert. Its shape must satisfy ``prod(input.shape[:ind]) == prod(input.shape[ind:])``.
@@ -162,7 +164,7 @@ Args:
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
 
-Example::
+Examples::
 
     >>> a = torch.eye(4 * 6).reshape((4, 6, 8, 3))
     >>> ainv = torch.linalg.tensorinv(a, ind=2)
@@ -170,5 +172,11 @@ Example::
     torch.Size([8, 3, 4, 6])
     >>> b = torch.randn(4, 6)
     >>> torch.allclose(torch.tensordot(ainv, b), torch.linalg.tensorsolve(a, b))
+    True
+
+    >>> a = torch.randn(4, 4)
+    >>> a_tensorinv = torch.linalg.tensorinv(a, ind=1)
+    >>> a_inv = torch.inverse(a)
+    >>> torch.allclose(a_tensorinv, a_inv)
     True
 """)
