@@ -35,6 +35,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"MemoryFormat", ParameterType::MEMORY_FORMAT},
   {"QScheme", ParameterType::QSCHEME},
   {"Device", ParameterType::DEVICE},
+  {"Stream", ParameterType::STREAM},
   {"std::string", ParameterType::STRING},
   {"Dimname", ParameterType::DIMNAME},
   {"DimnameList", ParameterType::DIMNAME_LIST},
@@ -431,6 +432,8 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     case ParameterType::QSCHEME: return THPQScheme_Check(obj);
     case ParameterType::DEVICE:
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
+    case ParameterType::STREAM:
+      return THPStream_Check(obj);
     case ParameterType::STRING: return THPUtils_checkString(obj);
     default: throw std::runtime_error("unknown parameter type");
   }
@@ -612,6 +615,10 @@ void FunctionParameter::set_default_str(const std::string& str) {
   } else if (type_ == ParameterType::DEVICE) {
     if (str != "None") {
       throw std::runtime_error("invalid device: " + str);
+    }
+  } else if (type_ == ParameterType::STREAM) {
+    if (str != "None") {
+      throw std::runtime_error("invalid stream: " + str);
     }
   } else if (type_ == ParameterType::STRING) {
     if (str != "None") {
