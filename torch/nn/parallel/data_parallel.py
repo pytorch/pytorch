@@ -148,6 +148,11 @@ class DataParallel(Module):
         if not self.device_ids:
             return self.module(*inputs, **kwargs)
 
+        # DataParallel needs at least one input in forward function, it uses the number of input
+        # to decide how many device replica to produce, zero input is not valid
+        if len(inputs) == 0:
+            raise RuntimeError("Forward function must have at least one input, bot got zero")
+
         for t in chain(self.module.parameters(), self.module.buffers()):
             if t.device != self.src_device_obj:
                 raise RuntimeError("module must have its parameters and buffers "

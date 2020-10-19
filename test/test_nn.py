@@ -5684,6 +5684,22 @@ class TestNN(NNTestCase):
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
         torch.testing.assert_allclose(result, ref_output)
 
+    def test_zero_input_data_parallel(self):
+        class A(torch.nn.Module):
+            def forward(self):
+                pass
+
+        model = A()
+        # allow zero input if device id is not specified (no device distributed, no parallel)
+        pmodel = torch.nn.DataParallel(model)
+        pmodel.device_ids = None
+        pmodel()
+
+        # error out if device id is set but no input
+        pmodel = torch.nn.DataParallel(model, device_ids=[0, 1])
+        with self.assertRaisesRegex(RuntimeError,
+            "Forward function must have at least one input"):
+            pmodel()
 
     @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
     def test_cudnn_rnn_dropout_states_device(self):
