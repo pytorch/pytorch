@@ -408,7 +408,10 @@ vTensor::Future<Type, kAccess>::operator=(
 
 template<typename Type, vTensor::Access::Flags kAccess>
 inline vTensor::Future<Type, kAccess>::~Future() {
+#if VULKAN_SYNC_TENSORS_EAGERLY
   // Sync eagerly in an effort to hide latency.
+  // Upside: Kick off the async transfer to keep the GPU busy.
+  // Downside: An extra CPU command submission.
   if (tensor_ && (Access::Write & kAccess)) {
     if (tensor_->has_image()) {
       tensor_->image();
@@ -417,6 +420,7 @@ inline vTensor::Future<Type, kAccess>::~Future() {
       tensor_->buffer();
     }
   }
+#endif
 }
 
 template<typename Type, vTensor::Access::Flags kAccess>
