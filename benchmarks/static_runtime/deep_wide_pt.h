@@ -90,13 +90,15 @@ struct DeepAndWideFast : torch::nn::Module {
 
       // Potential optimization: original tensor could be pre-transposed.
       // prealloc_tensors[3] = at::native::transpose(user_emb, 1, 2);
-      auto sizes = user_emb.sizes();
-      auto strides = user_emb.strides();
-      prealloc_tensors[3].set_(
-          user_emb.storage(),
-          0,
-          {sizes[0], sizes[2], sizes[1]},
-          {strides[0], strides[2], strides[1]});
+      if (prealloc_tensors[3].data_ptr() != user_emb.data_ptr()) {
+        auto sizes = user_emb.sizes();
+        auto strides = user_emb.strides();
+        prealloc_tensors[3].set_(
+            user_emb.storage(),
+            0,
+            {sizes[0], sizes[2], sizes[1]},
+            {strides[0], strides[2], strides[1]});
+      }
 
       // Potential optimization: call MKLDNN directly.
       at::native::bmm_out_cpu(
