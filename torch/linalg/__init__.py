@@ -182,8 +182,9 @@ Examples::
     >>> x = torch.linalg.tensorsolve(a, b, dims=(0, 2))
     >>> x.shape
     torch.Size([6, 4])
-    >>> a.permute(1, 3, 4, 0, 2).shape[b.ndim:]
+    >>> a = a.permute(1, 3, 4, 0, 2)
+    >>> a.shape[b.ndim:]
     torch.Size([6, 4])
-    >>> torch.allclose(torch.tensordot(a, x, dims=((0, 2), (0, 1))), b, atol=1e-6)
+    >>> torch.allclose(torch.tensordot(a, x, dims=x.ndim), b, atol=1e-6)
     True
 """)
