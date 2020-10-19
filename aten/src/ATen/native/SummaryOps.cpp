@@ -233,8 +233,6 @@ std::tuple<Tensor, Tensor> histogram(
       "custom bin edges must be represented as a one dimensional tensor, but got a tensor with dimension ",
       bins.dim());
 
-  // TODO: Throw an error if weights scalar type is complex, because bincount casts them to double.
-
   // Skip the input check for CUDA to avoid device synchronization.
   if (self.device().type() == kCPU) {
     TORCH_CHECK(
@@ -249,6 +247,13 @@ std::tuple<Tensor, Tensor> histogram(
     TORCH_CHECK(
         weights.sizes() == self.sizes(),
         "histogram only supports input and weights of the same shape");
+    // Throw an error if weights scalar type is complex, as bincount casts them
+    // to double.
+    TORCH_CHECK(
+        !isComplexType(weights.scalar_type()),
+        "Scalar type ",
+        weights.scalar_type(),
+        " not supported for weights");
     flattened_weights = weights.flatten(0).contiguous();
   }
 
@@ -270,7 +275,7 @@ std::tuple<Tensor, Tensor> histogram(
     // This is a hack for integral types of weights, as bincount casts them to double when computing the histogram
     // and disabling that would be a bc-breaking change
     if (weights.defined())
-      hist = hist.to(weights.dtype());
+      hist = hist.to(weights.scalar_type());
   }
 
   return std::make_tuple(hist, bins);
