@@ -1,8 +1,6 @@
 #pragma once
 
-#include <any>
 #include <functional>
-#include <memory>
 
 #include <ATen/ATen.h>
 #include <c10d/ProcessGroup.hpp>
@@ -81,21 +79,22 @@ class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
 class TORCH_API CppCommHook : public CommHookInterface {
  public:
   explicit CppCommHook(
-      std::function<c10::intrusive_ptr<
-          torch::jit::Future>(const GradBucket&, std::any*)>& hook,
-      std::unique_ptr<std::any> state = nullptr)
-      : state_(std::move(state)), hook_(std::move(hook)) {}
+      std::function<c10::intrusive_ptr<torch::jit::Future>(
+          const GradBucket&, ProcessGroup*)>& hook,
+      ProcessGroup* process_group = nullptr)
+      : process_group_(process_group), hook_(std::move(hook)) {}
 
   c10::intrusive_ptr<torch::jit::Future> runHook(
       const GradBucket& bucket) override {
-    return hook_(bucket, state_.get());
+    return hook_(bucket, process_group_);
   }
 
  private:
-  std::unique_ptr<std::any> state_;
+  // This can be a more generic state if needed.
+  ProcessGroup* process_group_;  // Not owned.
   std::function<c10::intrusive_ptr<torch::jit::Future>(
       const GradBucket&,
-      std::any* state)>
+      ProcessGroup* process_group)>
       hook_;
 };
 
