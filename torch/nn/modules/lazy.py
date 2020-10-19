@@ -161,25 +161,6 @@ class LazyModuleMixin:
 
     Note, however, that lazy modules cannot validate that the shape of parameters they load is correct.
 
-
-    .. note:: A `LazyModule`, or a module containing a `LazyModule` requires an explicit
-        dummy forward call in the following scenarios.
-
-        Access an :class:`UnitializedParameter` data or properties
-        >>> lazy_module.weight.shape
-
-        Use an Optimizer that accesses Parameters data in their constructor 
-        >>> optim = torch.optim.AdaGrad(lazy_module.parameters())
-
-        Use :class:`torch.nn.DataParallel` or :class:`torch.nn.DistributedDataParallel`
-        >>> module_dp = torch.nn.DataParallel(lazy_module)
-
-        Module reparametrization using :func:`torch.nn.utils.weight_norm` or :func:`torch.nn.utils.spectral_norm`
-        >>> torch.nn.utils.weight_norm(lazy_module)
-
-        When dealing with non-default module initialization
-        >>> torch.nn.init.uniform_(lazy_module.weight)
-
     """
 
     # modules inheriting from this will change their __class__ to the specified

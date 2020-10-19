@@ -2404,6 +2404,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self._test_arbitrary_forward_return_value(gradient_as_bucket_view=True)
 
     @requires_nccl()
+    @skip_if_not_multigpu
+    @skip_if_rocm
     def test_ddp_with_lazy_parameters(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
