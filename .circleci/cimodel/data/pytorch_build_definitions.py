@@ -315,7 +315,6 @@ def instantiate_configs():
         if profile:
             parms_list_ignored_for_docker_image.append("profile")
             python_version = fc.find_prop("pyver")
-            restrict_phases = ["build"]
 
         if is_onnx:
             parms_list.append("onnx")

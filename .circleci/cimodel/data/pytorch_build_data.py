@@ -84,11 +84,7 @@ CONFIG_TREE_DATA = [
         ("gcc", [
             ("9", [
                 ("3.8", [
-                    ("profile", [
-                        (True, [
-                            ('build_only', [XImportant(True)]),
-                        ]),
-                    ]),
+                    ("profile", [XImportant(True)]),
                     ("coverage", [XImportant(True)]),
                 ]),
             ]),
