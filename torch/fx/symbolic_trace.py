@@ -125,13 +125,13 @@ class Tracer(TracerBase):
             return forward(*args, **kwargs)
         return self.create_proxy('call_module', module_qualified_name, args, kwargs)
 
-    def create_args_for_root(self, root_fn):
+    def create_args_for_root(self, root_fn, is_module):
         co = root_fn.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
         names_iter = iter(co.co_varnames)
         args : List[Any] = []
         skip_arg_idx = 0
-        if isinstance(self.root, torch.nn.Module):
+        if is_module:
             skip_arg_idx = 1
             next(names_iter)  # skip self
             args.append(self.root)
@@ -153,7 +153,8 @@ class Tracer(TracerBase):
         return root_fn, args
 
     def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
-        if isinstance(root, torch.nn.Module):
+        is_module = isinstance(root, torch.nn.Module)
+        if is_module:
             self.root = root
             fn = type(root).forward
         else:
@@ -163,7 +164,7 @@ class Tracer(TracerBase):
 
         assert isinstance(fn, FunctionType)
 
-        fn, args = self.create_args_for_root(fn)
+        fn, args = self.create_args_for_root(fn, is_module)
 
         orig_call = torch.nn.Module.__call__
 
