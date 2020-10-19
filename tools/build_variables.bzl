@@ -235,6 +235,7 @@ core_sources_full = [
     "torch/csrc/jit/tensorexpr/ir_mutator.cpp",
     "torch/csrc/jit/tensorexpr/ir_printer.cpp",
     "torch/csrc/jit/tensorexpr/ir_serializer.cpp",
+    "torch/csrc/jit/tensorexpr/ir_deserializer.cpp",
     "torch/csrc/jit/tensorexpr/ir_simplifier.cpp",
     "torch/csrc/jit/tensorexpr/ir_visitor.cpp",
     "torch/csrc/jit/tensorexpr/kernel.cpp",
