@@ -1,3 +1,4 @@
+#include <c10/cuda/CUDAMathCompact.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -112,7 +113,7 @@ template<typename scalar_t, typename accscalar_t>
 struct CopySignScalarFunctor {
     CopySignScalarFunctor(accscalar_t b_): b(b_) {}
     __device__ scalar_t operator() (scalar_t a) const {
-      return ::copysign(a, b);
+      return c10::cuda::compat::copysign(a, b);
     }
   private:
     accscalar_t b;
@@ -121,7 +122,7 @@ struct CopySignScalarFunctor {
 template<typename scalar_t>
 struct CopySignFunctor {
   __device__ scalar_t operator() (scalar_t a, scalar_t b) const {
-    return ::copysign(a, b);
+    return c10::cuda::compat::copysign(a, b);
   }
 };
 
