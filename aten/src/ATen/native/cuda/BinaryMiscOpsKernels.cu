@@ -1,4 +1,4 @@
-#include <c10/cuda/CUDAMathCompact.h>
+#include <c10/cuda/CUDAMathCompat.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
