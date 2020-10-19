@@ -911,6 +911,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return torch.jit._recursive.create_script_module(
             obj, torch.jit._recursive.infer_methods_to_compile
         )
+
     qualified_name = _qualified_name(obj)
     if inspect.isclass(obj):
         # If this type is a `nn.Module` subclass, they probably meant to pass
