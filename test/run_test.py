@@ -122,7 +122,7 @@ TESTS = [
 ]
 
 # Tests need to be run with pytest.
-USE_PYTEST_LIST= [
+USE_PYTEST_LIST = [
     'distributed/_pipeline/sync/skip/test_api',
     'distributed/_pipeline/sync/skip/test_gpipe',
     'distributed/_pipeline/sync/skip/test_inspect_skip_layout',
