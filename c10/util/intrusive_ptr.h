@@ -219,8 +219,7 @@ class intrusive_ptr final {
   // it uses intrusive_ptr(TTarget*) to initialize and take ownership of the object.
   // For details, see
   // https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#custom-smart-pointers
-  template <typename type_, typename... options>
-  friend class pybind11::class_;
+  template <typename, typename...> friend class pybind11::class_;
 
   // This constructor will not increase the ref counter for you.
   // This is not public because we shouldn't make intrusive_ptr out of raw
