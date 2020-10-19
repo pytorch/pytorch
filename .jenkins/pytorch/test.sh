@@ -391,20 +391,29 @@ elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4
 else
   install_torchvision
   test_python_shard1
-  test_python_shard2
-  test_aten
-  test_vec256
-  test_libtorch
-  test_custom_script_ops
-  test_custom_backend
-  test_torch_function_benchmark
-  test_distributed
-  test_benchmarks
-  test_rpc
+  # test_python_shard2 # MAKING TESTING GO FASTER, for experiment only
+  # test_aten
+  # test_vec256
+  # test_libtorch
+  # test_custom_script_ops
+  # test_custom_backend
+  # test_torch_function_benchmark
+  # test_distributed
+  # test_benchmarks
+  # test_rpc
   if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
     pushd test
     echo "Generating XML coverage report"
     time python -mcoverage xml
+    popd
+  fi
+  if [[ "$BUILD_ENVIRONMENT" = *profile* ]]; then
+    pushd build
+    echo "Generating lcov coverage report for C++ sources"
+    lcov --version
+    export PATH=/usr/local/bin/lcov:$PATH
+    lcov --version
+    time lcov --capture --directory . --output-file coverage.info
     popd
   fi
 fi

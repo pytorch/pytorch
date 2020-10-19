@@ -272,6 +272,7 @@ def instantiate_configs():
         compiler_version = fc.find_prop("compiler_version")
         is_xla = fc.find_prop("is_xla") or False
         is_asan = fc.find_prop("is_asan") or False
+        profile = fc.find_prop("profile") or False
         is_onnx = fc.find_prop("is_onnx") or False
         is_pure_torch = fc.find_prop("is_pure_torch") or False
         is_vulkan = fc.find_prop("is_vulkan") or False
@@ -310,6 +311,10 @@ def instantiate_configs():
             parms_list.append("asan")
             python_version = fc.find_prop("pyver")
             parms_list[0] = fc.find_prop("abbreviated_pyver")
+
+        if profile:
+            parms_list_ignored_for_docker_image.append("profile")
+            python_version = fc.find_prop("pyver")
 
         if is_onnx:
             parms_list.append("onnx")

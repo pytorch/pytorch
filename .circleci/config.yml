@@ -655,9 +655,15 @@ jobs:
           echo "Retrieving test reports"
           docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
           if [[ ${BUILD_ENVIRONMENT} == *"coverage"* ]]; then
-              echo "Retrieving coverage report"
+              echo "Retrieving Python coverage report"
               docker cp $id:/var/lib/jenkins/workspace/test/.coverage ./test
               docker cp $id:/var/lib/jenkins/workspace/test/coverage.xml ./test
+              python3 -mpip install codecov
+              python3 -mcodecov
+          fi
+          if [[ ${BUILD_ENVIRONMENT} == *"profile"* ]]; then
+              echo "Retrieving C++ coverage report"
+              docker cp $id:/var/lib/jenkins/workspace/build/coverage.info ./test
               python3 -mpip install codecov
               python3 -mcodecov
           fi
@@ -6875,6 +6881,19 @@ workflows:
             - pytorch_vulkan_linux_bionic_py3_6_clang9_build
           build_environment: "pytorch-vulkan-linux-bionic-py3.6-clang9-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9"
+          resource_class: large
+      - pytorch_linux_build:
+          name: pytorch_linux_bionic_py3_8_gcc9_profile_build
+          requires:
+            - "docker-pytorch-linux-bionic-py3.8-gcc9"
+          build_environment: "pytorch-linux-bionic-py3.8-gcc9-profile-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.8-gcc9"
+      - pytorch_linux_test:
+          name: pytorch_linux_bionic_py3_8_gcc9_profile_test
+          requires:
+            - pytorch_linux_bionic_py3_8_gcc9_profile_build
+          build_environment: "pytorch-linux-bionic-py3.8-gcc9-profile-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.8-gcc9"
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_bionic_py3_8_gcc9_build
