@@ -131,6 +131,18 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
                 "use a dictionary type's key-value pair itmes or ",
                 "a pytorch class (class Foo(torch.nn.Module))'s attributes.'");
           }
+        } else if (
+            input_type->kind() == TypeKind::ListType ||
+            input_type->kind() == TypeKind::DictType) {
+          for (const TypePtr& element_type : input_type->containedTypes()) {
+            TORCH_CHECK(
+                element_type->kind() != TypeKind::ClassType,
+                "Returining a list or dictionary with pytorch class type ",
+                "is not supported in mobile module "
+                "(List[Foo] or Dict[int, Foo] for class Foo(torch.nn.Module)). "
+                "Workaround: instead of using pytorch class as their element type, ",
+                "use a combination of list, dictionary, and single types.");
+          }
         }
       }
     } else {
