@@ -43,8 +43,8 @@ class Context final {
   template<typename... Arguments>
   void dispatch(
       Command::Buffer& command_buffer,
-      const Shader::Descriptor& shader_descriptor,
       const Shader::Layout::Signature& shader_layout_signature,
+      const Shader::Descriptor& shader_descriptor,
       const Shader::WorkGroup& local_work_group,
       const Shader::WorkGroup& global_work_group,
       Arguments&&... arguments);
@@ -121,20 +121,19 @@ namespace detail {
 template<
     size_t...Indices,
     typename ...Arguments>
-inline void bind_arguments(
+inline void bind(
     Descriptor::Set& descriptor_set,
     const std::index_sequence<Indices...>,
     Arguments&&...arguments) {
-  const auto expander{
+  C10_UNUSED const int _[]{
     (descriptor_set.bind(Indices, arguments), 0)...,
   };
-  (void)(expander);
 }
 
 } // namespace detail
 
 template<typename... Arguments>
-inline void dispatch(
+inline void Context::dispatch(
     Command::Buffer& command_buffer,
     const Shader::Layout::Signature& shader_layout_signature,
     const Shader::Descriptor& shader_descriptor,
@@ -155,7 +154,7 @@ inline void dispatch(
       shader_descriptor,
       local_work_group);
 
-  detail::bind_arguments(
+  detail::bind(
       descriptor_set,
       std::index_sequence_for<Arguments...>{},
       std::forward<Arguments>(arguments)...);
