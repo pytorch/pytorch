@@ -13,27 +13,28 @@ linalg.cholesky(input, *, out=None) -> Tensor
 
 Computes the Cholesky decomposition of a Hermitian (or symmetric for real-valued matrices)
 positive-definite matrix or the Cholesky decompositions for a batch of such matrices.
-The returned matrix ``L`` is lower-triangular, and
-the decomposition has the form:
+Each decomposition has the form:
 
 .. math::
 
     \text{input} = LL^H
 
-where :math:`L^H` is the conjugate transpose of :math:`L`, which is just a transpose for the case
-of real-valued input matrices.
+where :math:`L` is a lower-triangular matrix and :math:`L^H` is the conjugate transpose of :math:`L`,
+which is just a transpose for the case of real-valued input matrices.
 In code it translates to ``input = L @ L.t()` if :attr:`input` is real-valued and
 ``input = L @ L.conj().t()`` if :attr:`input` is complex-valued.
+The batch of :math:`L` matrices is returned.
 
 Supports real and complex inputs. Backpropagation for complex inputs is only supported on the CPU.
 
 .. note:: If :attr:`input` is not a Hermitian positive-definite matrix, or if it's a batch of matrices
           and one or more of them is not a Hermitian positive-definite matrix, then a RuntimeError will be thrown.
-          The error message tells the index of the first problematic matrix in the batch.
+          If :attr:`input` is a batch of matrices, then the error message will include the batch index
+          of the first matrix that is not Hermitian positive-definite.
 
 Args:
-    input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
-                batch dimensions consisting of Hermitian positive-definite matrices.
+    input (Tensor): the input tensor of size :math:`(*, n, n)` consisting of Hermitian positive-definite
+                    :math:`n \times n` matrices, where `*` is zero or more batch dimensions.
 
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
@@ -41,7 +42,7 @@ Keyword args:
 Examples::
 
     >>> a = torch.randn(2, 2, dtype=torch.complex128)
-    >>> a = torch.mm(a, a.t().conj())  # makes a Hermitian positive-definite matrix
+    >>> a = torch.mm(a, a.t().conj())  # creates a Hermitian positive-definite matrix
     >>> l = torch.linalg.cholesky(a)
     >>> a
     tensor([[2.5266+0.0000j, 1.9586-2.0626j],
@@ -54,7 +55,7 @@ Examples::
             [1.9586+2.0626j, 9.4160+0.0000j]], dtype=torch.complex128)
 
     >>> a = torch.randn(3, 2, 2, dtype=torch.float64)
-    >>> a = torch.matmul(a, a.transpose(-2, -1))  # makes a symmetric positive-definite matrix
+    >>> a = torch.matmul(a, a.transpose(-2, -1))  # creates a symmetric positive-definite matrix
     >>> l = torch.linalg.cholesky(a)
     >>> a
     tensor([[[ 1.1629,  2.0237],
