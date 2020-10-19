@@ -9,6 +9,8 @@ from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
 from torch.fx.experimental.subgraph_creation_example import split_module
+from torch.fx.immutable_collections import immutable_dict, immutable_list
+from copy import deepcopy
 
 from torch.fx.proxy import TraceError
 
@@ -596,7 +598,7 @@ class TestFX(JitTestCase):
                 return self.sa(*x)
 
         ul = UnpacksList()
-        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be unpacked as function argument'):
+        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be iterated.'):
             symbolic_trace(ul)
 
     def test_unpack_dict_better_error(self):
@@ -613,7 +615,7 @@ class TestFX(JitTestCase):
                 return self.sk(**x)
 
         ud = UnpacksDict()
-        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be unpacked as function argument'):
+        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be iterated.'):
             symbolic_trace(ud)
 
     def test_torch_custom_ops(self):
@@ -842,7 +844,7 @@ class TestFX(JitTestCase):
         to_erase = []
         for node in rn18_traced.graph.nodes:
             if node.op == 'call_function' and node.target in [torch.relu, torch.nn.functional.relu]:
-                kwargs = node.kwargs
+                kwargs = node.kwargs.copy()
                 # Neg doesn't have in-place
                 kwargs.pop('inplace')
                 with rn18_traced.graph.inserting_before(node):
@@ -896,6 +898,13 @@ class TestFX(JitTestCase):
             if node.target in [operator.add, torch.relu]:
                 with self.assertRaisesRegex(RuntimeError, 'but it still had .* users in the graph'):
                     traced.graph.erase_node(node)
+
+    def test_copy_it(self):
+        d = immutable_dict([(3, 4), (5, 6)])
+        l = immutable_list([(3, 4), (5, 6)])
+
+        self.assertEqual(d, deepcopy(d))
+        self.assertEqual(l, deepcopy(l))
 
     def test_find_uses(self):
         graph = torch.fx.Graph()

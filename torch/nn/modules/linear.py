@@ -2,10 +2,11 @@ import math
 
 import torch
 from torch import Tensor
-from torch.nn.parameter import Parameter
+from torch.nn.parameter import Parameter, UninitializedParameter
 from .. import functional as F
 from .. import init
 from .module import Module
+from .lazy import LazyModuleMixin
 
 
 class Identity(Module):
@@ -178,4 +179,49 @@ class Bilinear(Module):
             self.in1_features, self.in2_features, self.out_features, self.bias is not None
         )
 
+
+class LazyLinear(LazyModuleMixin, Linear):
+    r"""A :class:`torch.nn.Linear` module with lazy initialization.
+
+    In this module, the `weight` and `bias` are of :class:`torch.nn.UninitializedParameter`
+    class. They will be initialized  after the first call to ``forward`` is done and the 
+    module will become a regular :class:`torch.nn.Linear` module.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+    Args:
+        out_features: size of each output sample
+        bias: If set to ``False``, the layer will not learn an additive bias.
+            Default: ``True``
+
+    Attributes:
+        weight: the learnable weights of the module of shape
+            :math:`(\text{out\_features}, \text{in\_features})`. The values are
+            initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
+            :math:`k = \frac{1}{\text{in\_features}}`
+        bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`.
+                If :attr:`bias` is ``True``, the values are initialized from
+                :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                :math:`k = \frac{1}{\text{in\_features}}`
+
+
+    """
+
+    cls_to_become = Linear
+
+    def __init__(self, out_features: int, bias: bool = True) -> None:
+        super().__init__(0, out_features, bias)
+        self.weight = UninitializedParameter()    
+
+    def reset_parameters(self) -> None:
+        if not self.has_uninitialized_params() and self.in_features != 0:
+            super().reset_parameters()
+
+    def initialize_parameters(self, input) -> None:
+        if self.has_uninitialized_params():
+            with torch.no_grad():
+                self.in_features = input.shape[-1]
+                self.weight.materialize((self.out_features, self.in_features))
+                self.reset_parameters()
 # TODO: PartialLinear - maybe in sparse?
