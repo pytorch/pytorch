@@ -6,10 +6,10 @@
 To run this, you will need to have Caffe2 installed as well.
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import itertools
 import logging
@@ -57,7 +57,7 @@ class Caffe2Frontend(object):
     }
 
     # caffe2 arguments that are completely removed in onnx
-    _blacklist_caffe2_args = {
+    _blocklist_caffe2_args = {
         'order': {b'NCHW'},
         'cudnn_exhaustive_search': {0, 1},
         'exhaustive_search': {0, 1},
@@ -107,8 +107,8 @@ class Caffe2Frontend(object):
         else:
             raise ValueError('Could not find data field in arg: {}'.format(arg))
 
-        if name in cls._blacklist_caffe2_args:
-            assert value in cls._blacklist_caffe2_args[arg.name]
+        if name in cls._blocklist_caffe2_args:
+            assert value in cls._blocklist_caffe2_args[arg.name]
             return None
 
         return helper.make_attribute(name, value)

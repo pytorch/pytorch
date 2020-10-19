@@ -13,7 +13,7 @@
 #include <algorithm>
 #include <string>
 
-torch::jit::class_<LinearPackedParamsBase> register_linear_params();
+torch::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 template <bool ReluFused>
@@ -455,13 +455,13 @@ class QLinearDynamicFp16 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl("linear_dynamic", TORCH_FN(QLinearDynamicInt8<false>::run));
-  m.impl("linear_relu_dynamic", TORCH_FN(QLinearDynamicInt8<true>::run));
-  m.impl("linear_dynamic_fp16", TORCH_FN(QLinearDynamicFp16<false>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_dynamic"), TORCH_FN(QLinearDynamicInt8<false>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu_dynamic"), TORCH_FN(QLinearDynamicInt8<true>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_dynamic_fp16"), TORCH_FN(QLinearDynamicFp16<false>::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
-  m.impl("linear_dynamic", TORCH_FN(QLinearDynamicInt8<false>::run));
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_dynamic"), TORCH_FN(QLinearDynamicInt8<false>::run));
 }
 
 } // namespace

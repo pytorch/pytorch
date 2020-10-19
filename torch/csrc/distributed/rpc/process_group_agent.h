@@ -2,6 +2,7 @@
 
 #include <c10/core/thread_pool.h>
 #include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/rpc/request_callback.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 #include <atomic>
@@ -56,13 +57,14 @@ struct RecvWork {
   torch::Tensor payload_;
 };
 
-class ProcessGroupAgent : public RpcAgent {
+class TORCH_API ProcessGroupAgent : public RpcAgent {
  public:
   ProcessGroupAgent(
       std::string workerName,
       std::shared_ptr<c10d::ProcessGroup> pg,
       int numSendRecvThreads,
-      std::chrono::milliseconds rpcTimeout);
+      std::chrono::milliseconds rpcTimeout,
+      std::unique_ptr<RequestCallback> cb);
 
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
 

@@ -113,8 +113,7 @@ struct TORCH_API EmbeddingBagOptions {
   /// The learnable weights of the module of shape (num_embeddings, embedding_dim)
   TORCH_ARG(torch::Tensor, _weight) = Tensor();
   /// If ``true``, `offsets` has one additional element, where the last element
-  /// is equivalent to the size of `indices`. This matches the CSR format. Note:
-  /// this option is currently only supported when ``mode="sum"``.
+  /// is equivalent to the size of `indices`. This matches the CSR format.
   TORCH_ARG(bool, include_last_offset) = false;
 };
 

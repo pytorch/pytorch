@@ -1093,10 +1093,19 @@ struct Vec256QuantizedConverter {
       Vec256<float> scale_zp_premul) const {
     float_vec_return_type rv;
     for (int i = 0; i < float_num_vecs(); ++i) {
+      float tmp_vals[8];
       for (int j = 0; j < 8; ++j) {
-        rv[i][j] = at::native::dequantize_val<T>(
+        tmp_vals[j] = at::native::dequantize_val<T>(
             scale[j], zero_point[j], T(vals[8 * i + j]));
       }
+      rv[i] = Vec256<float>(tmp_vals[0],
+          tmp_vals[1],
+          tmp_vals[2],
+          tmp_vals[3],
+          tmp_vals[4],
+          tmp_vals[5],
+          tmp_vals[6],
+          tmp_vals[7]);
     }
     return rv;
   }

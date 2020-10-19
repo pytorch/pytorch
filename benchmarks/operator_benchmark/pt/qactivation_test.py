@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import torch
 import torch.nn.quantized as nnq
 
@@ -52,6 +47,7 @@ qactivation_ops = op_bench.op_list(
         ('functional.hardtanh', nnq.functional.hardtanh),
         ('functional.hardswish', nnq.functional.hardswish),
         ('functional.elu', nnq.functional.elu),
+        ('functional.celu', nnq.functional.celu),
         ('functional.hardsigmoid', nnq.functional.hardsigmoid),
         ('functional.leaky_relu', nnq.functional.leaky_relu),
         ('functional.sigmoid', torch.nn.functional.sigmoid),
@@ -83,7 +79,8 @@ class QActivationBenchmarkBase(op_bench.TorchBenchmarkBase):
         self.qop = op_func
 
     def forward(self):
-        if self.qop == nnq.functional.hardswish:
+        if self.qop in (nnq.functional.hardswish, nnq.functional.elu,
+                        nnq.functional.celu):
             return self.qop(self.q_input, scale=self.scale, zero_point=self.zero_point)
         return self.qop(self.q_input)
 

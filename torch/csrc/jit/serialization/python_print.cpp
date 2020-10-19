@@ -87,6 +87,27 @@ const static std::unordered_set<std::string> reserved_names = {
     "unchecked_cast",
 };
 
+// Helper to avoid duplicating class types
+void PrintDepsTable::add(const c10::NamedTypePtr& type) {
+  // Despite doing the linear search below, we don't want to do
+  // wasteful work and only try to insert each instance once.
+  if (!non_unique_.insert(type).second) {
+    return;
+  }
+  // Need to do actual equality comparison, not a pointer equality. This is
+  // because for some types (e.g. FunctionType), we may have multiple
+  // TypePtr's that represent the same underlying thing.
+  // TODO: this should be really swapped for something more efficient
+  auto it = std::find_if(
+      table_.cbegin(), table_.cend(), [&](const c10::NamedTypePtr& dep) {
+        return *dep == *type;
+      });
+
+  if (it == table_.cend()) {
+    table_.push_back(type);
+  }
+}
+
 struct PythonPrintImpl {
   using SourceRangeStack = std::vector<SourceRange>;
   SourceRangeStack source_range_stack_ = {SourceRange()};
@@ -169,21 +190,6 @@ struct PythonPrintImpl {
     const SourceRangeStack* srs_;
   };
 
-  // Helper to avoid duplicating class types
-  void registerDependency(const c10::NamedTypePtr& type) {
-    // Need to do actual equality comparison, not a pointer equality. This is
-    // because for some types (e.g. FunctionType), we may have multiple
-    // TypePtr's that represent the same underlying thing.
-    auto it = std::find_if(
-        deps_table_.cbegin(),
-        deps_table_.cend(),
-        [&](const c10::NamedTypePtr& dep) { return *dep == *type; });
-
-    if (it == deps_table_.cend()) {
-      deps_table_.push_back(type);
-    }
-  }
-
   // scanValue, scanNode, scanBlock:
   // decide if it is safe to omit the output of a temporary variable,
   // and inline the expression into its use
@@ -230,7 +236,9 @@ struct PythonPrintImpl {
       return false;
 
     // subgraph may use this more than once, so disable inlining
-    if (use.user->kind() == prim::fork || use.user->kind() == prim::rpc_async)
+    if (use.user->kind() == prim::fork || use.user->kind() == prim::rpc_async ||
+        use.user->kind() == prim::rpc_sync ||
+        use.user->kind() == prim::rpc_remote)
       return false;
 
     // isinstance appearing in an if expression
@@ -295,19 +303,25 @@ struct PythonPrintImpl {
     }
   }
 
-  size_t getOrAddTensorConstant(at::Tensor t) {
+  size_t getOrAddConstant(at::IValue val) {
     // XXX - N^2 warning. This code does the exact same thing as
     // ConstantPool, which is also N^2 in the size of the constants,
     // because it doesn't hash any information about the tensors.
     // We will probably need to optimize this at some point using hashing.
-    for (size_t i = 0; i < tensor_table_.size(); ++i) {
-      if (t.options().type_equal(tensor_table_[i].options()) &&
-          t.equal(tensor_table_[i])) {
-        return i;
+    if (val.isTensor()) {
+      auto t = val.toTensor();
+      for (size_t i = 0; i < constant_table_.size(); ++i) {
+        if (!constant_table_[i].isTensor()) {
+          continue;
+        }
+        auto t2 = constant_table_[i].toTensor();
+        if (t.options().type_equal(t2.options()) && t.equal(t2)) {
+          return i;
+        }
       }
     }
-    tensor_table_.emplace_back(std::move(t));
-    return tensor_table_.size() - 1;
+    constant_table_.emplace_back(std::move(val));
+    return constant_table_.size() - 1;
   }
 
   std::unordered_set<Node*> seen_constants;
@@ -659,13 +673,15 @@ struct PythonPrintImpl {
   // Recursively check contained types for any class dependencies
   void registerClassDependencies(const TypePtr& type) {
     if (const auto classType = type->cast<ClassType>()) {
-      registerDependency(classType);
+      deps_table_.add(classType);
     } else if (const auto tupleType = type->cast<TupleType>()) {
       if (tupleType->name()) {
-        registerDependency(tupleType);
+        deps_table_.add(tupleType);
       }
     } else if (const auto interfaceType = type->cast<InterfaceType>()) {
-      registerDependency(interfaceType);
+      deps_table_.add(interfaceType);
+    } else if (const auto enumType = type->cast<EnumType>()) {
+      deps_table_.add(enumType);
     }
     for (const auto& containedType : type->containedTypes()) {
       registerClassDependencies(containedType);
@@ -827,12 +843,32 @@ struct PythonPrintImpl {
     }
   }
 
+  static bool containsNonASCIIString(const IValue& val) {
+    bool hasNonASCII = false;
+    auto checkSubvalue = [&hasNonASCII](const IValue& val) {
+      if (val.isString()) {
+        const auto maxASCII = 0x7fu;
+        for (auto& c : val.toStringRef()) {
+          if (c > maxASCII) {
+            hasNonASCII = true;
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    val.visit(checkSubvalue);
+    return hasNonASCII;
+  }
+
   void printConstant(TaggedStringStream& stmt, const IValue& v) {
     const auto customFormatter = [&](std::ostream& ss, const IValue& v) {
-      if (v.isTensor()) {
-        ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
+      if (v.isTensor() || containsNonASCIIString(v)) {
+        ss << "CONSTANTS.c" << getOrAddConstant(v);
         return true;
       }
+
       if (v.isTuple() && v.type()->expect<TupleType>()->schema()) {
         // print the namedtuple constructor and let rest of tuple printing
         // continue
@@ -878,7 +914,7 @@ struct PythonPrintImpl {
           throw ErrorReport(node->sourceRange())
               << "Could not export Python function call '" << value->name()
               << "'. Remove calls to Python functions before export. "
-              << "Did you forget add @script or @script_method annotation? "
+              << "Did you forget to add @script or @script_method annotation? "
               << "If this is a nn.ModuleList, add it to __constants__";
         }
         std::stringstream scalars_stream;
@@ -895,7 +931,7 @@ struct PythonPrintImpl {
         if (node->outputs().size() == 1 &&
             node->output()->type()->kind() == TypeKind::FunctionType) {
           auto fn = node->output()->type()->expect<FunctionType>();
-          registerDependency(fn);
+          deps_table_.add(fn);
           stmt << fn->annotation_str(type_printer_);
         } else if (!node->mustBeNone()) {
           IValue v = toIValue(node->output()).value();
@@ -1025,13 +1061,13 @@ struct PythonPrintImpl {
         stmt << ")";
 
         if (auto selfClass = self->type()->cast<ClassType>()) {
-          registerDependency(selfClass);
+          deps_table_.add(selfClass);
           const Function& method = selfClass->getMethod(node->s(attr::name));
           TORCH_INTERNAL_ASSERT(
               method.qualname() ==
               QualifiedName(selfClass->name()->qualifiedName(), methodName));
         } else if (auto selfInterface = self->type()->cast<InterfaceType>()) {
-          registerDependency(selfInterface);
+          deps_table_.add(selfInterface);
         } else {
           TORCH_INTERNAL_ASSERT(
               false, "method call to unhandled type in serialization");
@@ -1090,6 +1126,16 @@ struct PythonPrintImpl {
         stmt << useOf(node->input(0)) << ".tolist()"
              << ")";
       } break;
+      case prim::EnumValue:
+        // Note: This CAN NOT be printed as raw operator ops.prim.EnumValue
+        // because its return type depends on type of enum and must be further
+        // resolved, but ops.prim.EnumValue construction does not provide such
+        // functionality.
+        stmt << "(" << useOf(node->input()) << ").value";
+        break;
+      case prim::EnumName:
+        stmt << "(" << useOf(node->input()) << ").name";
+        break;
       default: {
         printOpName(stmt, node->kind());
         const FunctionSchema& schema = node->schema();
@@ -1229,14 +1275,14 @@ struct PythonPrintImpl {
   }
 
   PythonPrintImpl(
-      std::vector<at::Tensor>& tensor_table,
-      std::vector<c10::NamedTypePtr>& deps_table,
+      std::vector<at::IValue>& constant_table,
+      PrintDepsTable& deps_table,
       c10::TypePrinter type_printer,
       bool enforce_importable)
       : body_(&source_range_stack_),
-        tensor_table_(tensor_table),
+        constant_table_(constant_table),
         deps_table_(deps_table),
-        type_printer_(type_printer),
+        type_printer_(std::move(type_printer)),
         enforce_importable_(enforce_importable) {}
 
   void printClass(const ClassTypePtr& classType) {
@@ -1387,6 +1433,22 @@ struct PythonPrintImpl {
           body_ << "  pass\n";
         }
       }
+    } else if (auto enumType = type->cast<EnumType>()) {
+      body_ << "class " << enumType->qualifiedClassName().name() << "(Enum):\n";
+
+      std::string value_wrapper = "";
+      if (enumType->getValueType() == StringType::get()) {
+        value_wrapper = "\"";
+      }
+
+      {
+        auto guard = WithIndented();
+        for (const auto& name_value : enumType->enumNamesValues()) {
+          indent();
+          body_ << name_value.first << " = " << value_wrapper
+                << name_value.second << value_wrapper << "\n";
+        }
+      }
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unhandled NamedType");
     }
@@ -1411,11 +1473,11 @@ struct PythonPrintImpl {
 
   // constants are written to this table, and given then named CONSTANTS.cN
   // where N is the index into this table.
-  std::vector<at::Tensor>& tensor_table_;
+  std::vector<at::IValue>& constant_table_;
 
   // Any NamedTypes (classes, functions, NamedTuples) used are written to this
   // table.
-  std::vector<c10::NamedTypePtr>& deps_table_;
+  PrintDepsTable& deps_table_;
 
   // A function that, given a named type, returns us the correct string to print
   // for it.
@@ -1430,14 +1492,14 @@ struct PythonPrintImpl {
 };
 
 PythonPrint::PythonPrint(
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
+    std::vector<at::IValue>& constant_table,
+    PrintDepsTable& deps_table,
     c10::TypePrinter type_printer,
     bool enforce_importable)
     : pImpl(std::make_shared<PythonPrintImpl>(
-          tensor_table,
+          constant_table,
           deps_table,
-          type_printer,
+          std::move(type_printer),
           enforce_importable)) {}
 
 void PythonPrint::printNamedType(const c10::NamedTypePtr& type) {

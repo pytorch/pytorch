@@ -36,23 +36,21 @@ container_abcs = collections.abc
 PY3 = sys.version_info[0] == 3
 PY37 = sys.version_info[0] == 3 and sys.version_info[1] >= 7
 
-def with_metaclass(meta, *bases):
+def with_metaclass(meta: type, *bases) -> type:
     """Create a base class with a metaclass."""
     # This requires a bit of explanation: the basic idea is to make a dummy
     # metaclass for one level of class instantiation that replaces itself with
     # the actual metaclass.
-    class metaclass(meta):
+    class metaclass(meta):  # type: ignore[misc, valid-type]
 
         def __new__(cls, name, this_bases, d):
             return meta(name, bases, d)
+
+        @classmethod
+        def __prepare__(cls, name, this_bases):
+            return meta.__prepare__(name, bases)
+
     return type.__new__(metaclass, 'temporary_class', (), {})
-
-
-def raise_from(value, from_value):
-    try:
-        raise value from from_value
-    finally:
-        value = None
 
 
 # Gets a function from the name of a method on a type
@@ -66,7 +64,7 @@ def get_function_from_type(cls, name):
 # Copyright(c) PyTorch contributors
 #
 
-def istuple(obj):
+def istuple(obj) -> bool:
     # Usually instances of PyStructSequence is also an instance of tuple
     # but in some py2 environment it is not, so we have to manually check
     # the name of the type to determine if it is a namedtupled returned

@@ -217,10 +217,17 @@ C10_EXPORT bool ReadProtoFromTextFile(const char* filename, Message* proto) {
 
 C10_EXPORT void WriteProtoToTextFile(
     const Message& proto,
-    const char* filename) {
+    const char* filename,
+    bool throwIfError) {
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   FileOutputStream* output = new FileOutputStream(fd);
-  CAFFE_ENFORCE(google::protobuf::TextFormat::Print(proto, output));
+  if(!google::protobuf::TextFormat::Print(proto, output)) {
+     if (throwIfError) {
+       CAFFE_THROW("Cannot write proto to text file: ", filename);
+     } else {
+       LOG(ERROR) << "Cannot write proto to text file: " << filename;
+     }
+  }
   delete output;
   close(fd);
 }
@@ -441,6 +448,14 @@ CAFFE2_MAKE_SINGULAR_ARGUMENT(int, i)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(int64_t, i)
 CAFFE2_MAKE_SINGULAR_ARGUMENT(string, s)
 #undef CAFFE2_MAKE_SINGULAR_ARGUMENT
+
+template <>
+C10_EXPORT Argument MakeArgument(const string& name, const NetDef& value) {
+  Argument arg;
+  arg.set_name(name);
+  *arg.mutable_n() = value;
+  return arg;
+}
 
 template <>
 C10_EXPORT bool ArgumentHelper::RemoveArgument(OperatorDef& def, int index);

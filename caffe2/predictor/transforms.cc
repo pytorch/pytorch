@@ -1,5 +1,6 @@
 #include "caffe2/caffe2/fb/predictor/Transforms.h"
 #include "caffe2/onnx/onnx_exporter.h"
+#include "caffe2/utils/proto_utils.h"
 
 #include <unordered_set>
 
@@ -24,6 +25,26 @@ bool HasOutput(const string& blob, const OperatorDef& op) {
   return false;
 }
 
+void RewriteSubnetsForIfOp(
+    const string& from,
+    const string& to,
+    OperatorDef* op) {
+  ArgumentHelper helper(*op);
+  Argument *then_arg = nullptr, *else_arg = nullptr;
+
+  std::map<std::string, std::string> oldname_to_newname;
+  oldname_to_newname[from] = to;
+
+  if (helper.HasSingleArgumentOfType<NetDef>("then_net")) {
+    then_arg = GetMutableArgument("then_net", false, op);
+    onnx::rewriteSubnet(then_arg, oldname_to_newname);
+  }
+  if (helper.HasSingleArgumentOfType<NetDef>("else_net")) {
+    else_arg = GetMutableArgument("else_net", false, op);
+    onnx::rewriteSubnet(else_arg, oldname_to_newname);
+  }
+}
+
 void RenameInputs(
     const string& from,
     const string& to,
@@ -38,6 +59,10 @@ void RenameInputs(
       children[from].erase(op_idx);
       children[to].insert(op_idx);
     }
+  }
+  // Rename inputs in the subnets of If/AsyncIf op
+  if (def->type() == "If" || def->type() == "AsyncIf") {
+    RewriteSubnetsForIfOp(from, to, def);
   }
 }
 
@@ -56,12 +81,16 @@ void RenameOutputs(
       parents[to].insert(op_idx);
     }
   }
+  // Rename outputs in the subnets of If/AsyncIf op
+  if (def->type() == "If" || def->type() == "AsyncIf") {
+    RewriteSubnetsForIfOp(from, to, def);
+  }
 }
 
 void RenameInputsInChildren(
     const string& from,
     const string& to,
-    std::shared_ptr<caffe2::NetDef> net,
+    caffe2::NetDef* net,
     std::unordered_map<std::string, std::unordered_set<int>>& children) {
   VLOG(2) << "RenameInputsInChildren (from=" << from << ", to=" << to << ")";
   if (children.count(from) == 0) {
@@ -77,7 +106,7 @@ void RenameInputsInChildren(
 void RenameOutputInParents(
     const std::string& from,
     const std::string& to,
-    std::shared_ptr<caffe2::NetDef> net,
+    caffe2::NetDef* net,
     std::unordered_map<std::string, std::unordered_set<int>>& parents) {
   VLOG(2) << "RenameOutputInParents (from=" << from << ", to=" << to << ")";
   if (parents.count(from) == 0) {
@@ -196,7 +225,13 @@ bool FoundOpCandidate(
 // extra complexity is handled in FoundOpCandidate.
 void RemoveOpsByType(InferenceGraph& graph, const std::string& op_type) {
   int num_removed = 0;
-  std::shared_ptr<NetDef> net = graph.predict_net_def;
+  NetDef* net = graph.predict_net_def.get();
+  for (auto& op : net->op()) {
+    if (op.type() == "RecurrentNetwork") {
+      LOG(INFO) << "RemoveOpsByType does not support RecurrentNetwork yet";
+      return;
+    }
+  }
 
   std::unordered_set<std::string> inputs(
       graph.input_names.begin(), graph.input_names.end());
@@ -210,7 +245,7 @@ void RemoveOpsByType(InferenceGraph& graph, const std::string& op_type) {
     for (const auto& o : graph.output_names) {
       net->add_external_output(o);
     }
-    onnx::SsaRewrite(nullptr, net.get());
+    onnx::SsaRewrite(nullptr, net);
     // clear external_outputs
     net->mutable_external_output()->Clear();
     graph.predictor_net_ssa_rewritten = true;

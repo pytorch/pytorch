@@ -136,7 +136,7 @@ void PropagateRequiresGrad(Node* node) {
       PropagateRequiresGrad(body);
       new_body_outputs_require =
           fmap(body->return_node()->inputs().slice(1), getRequiresGrad);
-    } while (new_body_inputs_require != body_inputs_require &&
+    } while (new_body_inputs_require != body_inputs_require ||
              new_body_outputs_require != body_outputs_require);
 
     setRequiresGrad(node, bitwiseOr(body_outputs_require, loop_inputs_require));

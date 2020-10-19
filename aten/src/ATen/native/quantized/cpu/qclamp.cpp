@@ -15,6 +15,8 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(qclamp_stub);
+DEFINE_DISPATCH(qclamp_min_stub);
+DEFINE_DISPATCH(qclamp_max_stub);
 
 namespace {
 
@@ -84,21 +86,33 @@ Tensor quantized_clamp_impl(
   Tensor qy;
   if (min && max) {
 #ifdef USE_PYTORCH_QNNPACK
-    if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8) {
+    if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
+        qx.scalar_type() == kQUInt8) {
       return qnnpack_clamp(qx, *min, *max);
     }
 #endif
     qclamp_stub(qx.device().type(), qx, *min, *max, qy);
   } else {
-    TORCH_CHECK(
-        false, "Both min and max should be specified for quantized clamp!");
+#ifdef USE_PYTORCH_QNNPACK
+    if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+      TORCH_CHECK(
+          false, "Both min and max should be specified for quantized clamp!");
+    }
+#endif
+    if (max) {
+      qclamp_max_stub(qx.device().type(), qx, *max, qy);
+    } else if (min) {
+      qclamp_min_stub(qx.device().type(), qx, *min, qy);
+    } else {
+      TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
+    }
   }
   return qy;
 }
 } // namespace
 
 // at::native functions for the native_functions.yaml
-Tensor quantized_clamp(
+Tensor clamp_quantized_cpu(
     const Tensor& qx,
     optional<Scalar> min,
     optional<Scalar> max) {
@@ -110,7 +124,7 @@ Tensor quantized_clamp(
 }
 
 // hardtanh is clamp with default min==-1.0f and default max==1.0f
-Tensor quantized_hardtanh(
+Tensor hardtanh_quantized_cpu(
     const Tensor& qx,
     Scalar min,
     Scalar max) {
@@ -119,7 +133,7 @@ Tensor quantized_hardtanh(
   return qy;
 }
 
-Tensor& quantized_hardtanh_out(
+Tensor& hardtanh_out_quantized_cpu(
     Tensor& result,
     const Tensor& qx,
     Scalar min,
@@ -128,7 +142,7 @@ Tensor& quantized_hardtanh_out(
   return result;
 }
 
-Tensor& quantized_hardtanh_(
+Tensor& hardtanh_quantized_cpu_(
     Tensor& self,
     Scalar min,
     Scalar max) {
@@ -140,7 +154,7 @@ Tensor& quantized_hardtanh_(
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("clamp", TORCH_FN(quantized_clamp));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::clamp"), TORCH_FN(clamp_quantized_cpu));
 }
 
 } // namespace native

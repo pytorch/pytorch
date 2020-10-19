@@ -191,9 +191,9 @@ void IRParser::parseAttr(Node* n) {
   if (L.cur().kind == '[') {
     // list
     AttributeKind k = AttributeKind::ts;
-    std::vector<int64_t> is;
-    std::vector<std::string> ss;
-    std::vector<double> fs;
+    c10::List<int64_t> is;
+    c10::List<std::string> ss;
+    c10::List<double> fs;
     int elem_num = 0;
     parseList('[', ',', ']', [&] {
       ParsedLiteral r = parseScalarLiteral(n);
@@ -219,16 +219,16 @@ void IRParser::parseAttr(Node* n) {
     });
     switch (k) {
       case AttributeKind::ts:
-        n->ts_(Symbol::attr(attrname), {});
+        n->ival_(Symbol::attr(attrname), IValue());
         break;
       case AttributeKind::ss:
-        n->ss_(Symbol::attr(attrname), ss);
+        n->ival_(Symbol::attr(attrname), IValue(ss));
         break;
       case AttributeKind::fs:
-        n->fs_(Symbol::attr(attrname), fs);
+        n->ival_(Symbol::attr(attrname), IValue(fs));
         break;
       case AttributeKind::is:
-        n->is_(Symbol::attr(attrname), is);
+        n->ival_(Symbol::attr(attrname), IValue(is));
         break;
       default:
         throw ErrorReport(L.cur().range) << "Unexpected attr type";

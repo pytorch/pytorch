@@ -674,16 +674,6 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegistered_th
   expectCallsConcatUnboxed(DispatchKey::CPU);
 }
 
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegisteredUnboxedOnly_thenCanBeCalledUnboxed) {
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", RegisterOperators::options().impl_unboxedOnlyKernel<decltype(concatKernel), &concatKernel>(DispatchKey::CPU));
-  expectCallsConcatUnboxed(DispatchKey::CPU);
-}
-
-TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernel_whenRegisteredUnboxedOnly_thenCannotBeCalledBoxed) {
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", RegisterOperators::options().impl_unboxedOnlyKernel<decltype(concatKernel), &concatKernel>(DispatchKey::CPU));
-  expectCannotCallConcatBoxed(DispatchKey::CPU);
-}
-
 std::tuple<int64_t, Tensor> kernelForSchemaInference(Tensor arg1, int64_t arg2, const c10::List<Tensor>& arg3) {
   return {};
 }

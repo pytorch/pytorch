@@ -100,7 +100,9 @@ Operator createOperatorFromC10_withTracingHandledHere(
           } else if (elem_type->kind() == TypeKind::IntType) {
             AT_ASSERT(iter->isIntList());
             tracer::addInputs(
-                node, args[i].name().c_str(), iter->toIntVector());
+                node,
+                args[i].name().c_str(),
+                c10::IntArrayRef(iter->toIntVector()));
           } else if (elem_type->kind() == TypeKind::BoolType) {
             AT_ASSERT(iter->isBoolList());
             tracer::addInputs(
@@ -120,14 +122,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
       jit::tracer::setTracingState(nullptr);
     }
 
-#ifdef USE_STATIC_DISPATCH
-    {
-      at::AutoNonVariableTypeMode non_var_type_mode(true);
-      op.callBoxed(stack);
-    }
-#else
     op.callBoxed(stack);
-#endif // USE_STATIC_DISPATCH
 
     if (tracer_state) {
       jit::tracer::setTracingState(std::move(tracer_state));

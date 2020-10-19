@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import functools
 import os
 import unittest
@@ -55,11 +50,31 @@ def skipIfUnsupportedMinOpsetVersion(min_opset_version):
         return wrapper
     return skip_dec
 
+# skips tests for all versions above min_opset_version.
+def skipIfUnsupportedMaxOpsetVersion(min_opset_version):
+    def skip_dec(func):
+        def wrapper(self):
+            if self.opset_version > min_opset_version:
+                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
+            return func(self)
+        return wrapper
+    return skip_dec
+
 # Enables tests for scripting, instead of only tracing the model.
 def enableScriptTest():
     def script_dec(func):
         def wrapper(self):
             self.is_script_test_enabled = True
+            return func(self)
+        return wrapper
+    return script_dec
+
+
+# Disable tests for scripting.
+def disableScriptTest():
+    def script_dec(func):
+        def wrapper(self):
+            self.is_script_test_enabled = False
             return func(self)
         return wrapper
     return script_dec
@@ -71,6 +86,15 @@ def skipIfUnsupportedOpsetVersion(unsupported_opset_versions):
     def skip_dec(func):
         def wrapper(self):
             if self.opset_version in unsupported_opset_versions:
+                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
+            return func(self)
+        return wrapper
+    return skip_dec
+
+def skipIfONNXShapeInference(onnx_shape_inference):
+    def skip_dec(func):
+        def wrapper(self):
+            if self.onnx_shape_inference is onnx_shape_inference:
                 raise unittest.SkipTest("Skip verify test for unsupported opset_version")
             return func(self)
         return wrapper

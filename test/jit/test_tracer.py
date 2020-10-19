@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import suppress_warnings, \
     IS_SANDCASTLE, IS_WINDOWS
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, \
     _tmp_donotuse_dont_inline_everything, _trace, RUN_CUDA, RUN_CUDA_MULTI_GPU
+from torch.testing._internal.common_cuda import with_tf32_off
 from typing import List, Tuple
 from torch import Tensor
 
@@ -398,6 +399,18 @@ class TestTracer(JitTestCase):
         self.assertEqual(ge(y).shape, y.shape)
         self.assertEqual(ge(x).shape, x.shape)
 
+    # Test that the trace of setitem doesn't store shapes as constants
+    # Fix https://github.com/pytorch/pytorch/issues/43548
+    def test_trace_slice_setitem_dynamic_shape(self):
+        def slice_setitem(x, y):
+            x[:, 2] = y + 1
+            return x
+
+        x = torch.randn(3, 4)
+        traced = torch.jit.trace(slice_setitem, (x, x[:, 0]))
+        x = torch.randn(10, 5)
+        self.assertEqual(traced(x.clone(), x[:, 0]), slice_setitem(x.clone(), x[:, 0]))
+
     # Suppression: we are intentionally slicing a tensor, we don't care that it
     # will be constantified
     @suppress_warnings
@@ -755,7 +768,7 @@ class TestTracer(JitTestCase):
         x = torch.randn(4, 4, requires_grad=True)
 
         def f(x):
-            out = Variable(torch.zeros(x.size()))
+            out = torch.zeros(x.size())
             out.copy_(x)
             return out
 
@@ -764,6 +777,22 @@ class TestTracer(JitTestCase):
         m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
         self.assertExportImport(g, (x,))
+
+    def test_inplace_copy_force_outplace(self):
+        x = torch.randn(4, 4, requires_grad=True)
+
+        def f(x):
+            out = torch.zeros(x.size())
+            out.copy_(x)
+            return out
+
+        g, outputs, inputs = torch.jit._get_trace_graph(
+            f, (x, ), return_inputs=True, _force_outplace=True)
+        self.run_pass('dce', g)
+        m = self.createFunctionFromGraph(g)
+        self.assertEqual(outputs, m(*inputs))
+        self.assertExportImport(g, (x,))
+        FileCheck().check("expand_as").run(str(g))
 
     def test_shared_param(self):
         class MyModule(torch.nn.Module):
@@ -884,6 +913,9 @@ class TestTracer(JitTestCase):
         self.assertEqual(foo(x), x + x + x)
 
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")
+    # By default, on Ampere or later GPUs, nn.Linear computes float tensors at TF32 precision.
+    # We want float tensors to be computed at full precision in order to use the default precision
+    @with_tf32_off
     def test_traced_module_cuda(self):
         class Model(nn.Module):
             def __init__(self, num_features, num_layers):
@@ -1015,6 +1047,19 @@ class TestTracer(JitTestCase):
         self.assertFalse(traced_result.requires_grad)
         self.assertIsNone(traced_result.grad_fn)
 
+    def test_trace_detach_redispatch(self):
+        def foo(x, w):
+            y = torch.matmul(x, w)
+            assert y.requires_grad
+            y = y.detach()
+            # Make sure trace kernel redispatches to the right lower kernel.
+            assert not y.requires_grad
+            return y
+
+        x, w = torch.rand(3, 4), torch.rand(4, 5, requires_grad=True)
+        # With `check_trace=True` it will run with `@torch.no_grad()` and break assert.
+        torch.jit.trace(foo, (x, w), check_trace=False)
+
     def test_trace_detach_inplace(self):
         def foo(x, w):
             y = torch.matmul(x, w)
@@ -1024,11 +1069,24 @@ class TestTracer(JitTestCase):
         traced = torch.jit.trace(foo, (torch.rand(3, 4), torch.rand(4, 5)))
 
         FileCheck().check("matmul").check("detach(").run(str(traced.graph))
-        x, w = torch.rand(3, 4), torch.rand(4, 5)
+        x, w = torch.rand(3, 4), torch.rand(4, 5, requires_grad=True)
         traced_result = traced(x, w)
         self.assertEqual(foo(x, w), traced_result)
         self.assertFalse(traced_result.requires_grad)
         self.assertIsNone(traced_result.grad_fn)
+
+    def test_trace_detach_inplace_redispatch(self):
+        def foo(x, w):
+            y = torch.matmul(x, w)
+            assert y.requires_grad
+            y.detach_()
+            # Make sure trace kernel redispatches to the right lower kernel.
+            assert not y.requires_grad
+            return y
+
+        x, w = torch.rand(3, 4), torch.rand(4, 5, requires_grad=True)
+        # With `check_trace=True` it will run with `@torch.no_grad()` and break assert.
+        torch.jit.trace(foo, (x, w), check_trace=False)
 
     def test_trace_detach_onnx_erase(self):
         class Mod(torch.nn.Module):
@@ -1146,6 +1204,17 @@ class TestTracer(JitTestCase):
             torch.tensor([15])
         )
 
+        @torch.jit.script
+        def use_device(x):
+            return torch.zeros_like(x, device=x.device)
+
+        def foo(x):
+            return use_device(x)
+
+        traced_tensor_size = torch.jit.trace(foo, torch.rand(7,))
+        self.run_pass('inline', traced_tensor_size.graph)
+        FileCheck().check("prim::device").run(traced_tensor_size.graph)
+
     @unittest.skipIf(IS_WINDOWS, "temp file name on windows")
     def test_trace_save(self):
         def fn(x):
@@ -1256,6 +1325,39 @@ class TestTracer(JitTestCase):
 
         imported = self.getExportImportCopy(traced)
         check(imported.foo)
+
+        # Note that Bar's forward can only be traced, but not scripted
+        class Bar(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch.jit.export
+            def addTwo(self, x):
+                return x + 2
+
+            def forward(self, input):
+                return (lambda a: a + 1)(input)
+
+        # When tracing Bar as a submodule, we only want to script the
+        # exported methods, and we want to keep the forwards still
+        # being traced.
+        class WrapperExports(torch.nn.Module):
+            def __init__(self):
+                super(WrapperExports, self).__init__()
+                self.bar = Bar()
+
+            @torch.jit.export
+            def addOne(self, x):
+                return x + 1
+
+            def forward(self, x):
+                return self.bar(x)
+
+        f = WrapperExports()
+
+        traced = torch.jit.trace(f, (torch.rand(3, 4),))
+        expected_names = ['addOne']
+        check(traced)
 
     def test_trace_autograd_function(self):
         class TestFunc(torch.autograd.Function):
@@ -1436,7 +1538,7 @@ class TestTracer(JitTestCase):
                 x[i, :] = torch.zeros(4)
             return x
 
-        self.checkTrace(foo, (torch.rand(3, 4),))
+        self.checkTrace(foo, (torch.rand(3, 4),), inputs_require_grads=False)
 
     def test_trace_checker_inplace_on_view(self):
         def foo(x):
