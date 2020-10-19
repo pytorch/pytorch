@@ -855,11 +855,8 @@ std::unordered_map<kir::ForLoop*, Val*> indexMapFromTV(
   std::unordered_map<kir::ForLoop*, Val*> loop_to_ind_map;
 
   for (auto loop : loops) {
-    if (!within_alloc) {
-      loop_to_ind_map[loop] = zero;
-    } else if (loop->iter_domain()->isBlockDim() && is_shared) {
-      loop_to_ind_map[loop] = zero;
-    } else if (loop->iter_domain()->isThread() && is_local) {
+    if (!within_alloc || (loop->iter_domain()->isBlockDim() && is_shared) ||
+        (loop->iter_domain()->isThread() && is_local)) {
       loop_to_ind_map[loop] = zero;
     } else {
       loop_to_ind_map[loop] = loop->index();

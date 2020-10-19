@@ -111,11 +111,9 @@ kir::Bool* PredicateCompute::getInlinePredicate(
       continue;
     }
     auto inp_tv = inp->as<TensorView>();
-    if (inp_tv->domain()->hasRFactor()) {
-      continue;
-    } else if (
-        inp_tv->getMemoryType() == MemoryType::Shared ||
-        inp_tv->getMemoryType() == MemoryType::Local) {
+    if (inp_tv->domain()->hasRFactor() ||
+        (inp_tv->getMemoryType() == MemoryType::Shared ||
+         inp_tv->getMemoryType() == MemoryType::Local)) {
       continue;
     } else {
       pred_contiguity = IndexCompute::contiguityAnd(
@@ -225,11 +223,9 @@ void UnrollPredicate::predicateOn(Expr* tv_expr) {
       continue;
     }
     auto inp_tv = inp->as<TensorView>();
-    if (inp_tv->domain()->hasRFactor()) {
-      continue;
-    } else if (
-        inp_tv->getMemoryType() == MemoryType::Shared ||
-        inp_tv->getMemoryType() == MemoryType::Local) {
+    if (inp_tv->domain()->hasRFactor() ||
+        (inp_tv->getMemoryType() == MemoryType::Shared ||
+         inp_tv->getMemoryType() == MemoryType::Local)) {
       continue;
     } else {
       pred_contiguity = IndexCompute::contiguityAnd(

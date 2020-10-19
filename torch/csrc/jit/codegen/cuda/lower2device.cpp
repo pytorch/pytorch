@@ -15,6 +15,7 @@ namespace jit {
 namespace fuser {
 
 // TODO(kir): revisit this
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local GpuLower* active_gpu_lower = nullptr;
 
 void GpuLower::replaceSymbolicSizes() {
@@ -52,14 +53,12 @@ void GpuLower::replaceSymbolicSizes() {
       const Val* orig_size = id->extent();
 
       // Output sizes could have reduction axes, which isn't what gets output.
-      if (id->isReduction()) {
+      if (id->isReduction() ||
+          (id->getIterType() == IterType::BroadcastWithoutStride)) {
         continue;
-      } else if (id->getIterType() == IterType::BroadcastWithoutStride) {
-        continue;
-      } else if (id->getIterType() == IterType::BroadcastWithStride) {
-        dim++;
-        continue;
-      } else if (orig_size->isConstScalar()) {
+      } else if (
+          id->getIterType() == IterType::BroadcastWithStride ||
+          orig_size->isConstScalar()) {
         dim++;
         continue;
       }

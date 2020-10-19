@@ -164,7 +164,7 @@ void LoopNestGenerator::initReduction(
   // Work through the iter domains that we need to initialize on, outside to
   // inside, to construct the loop nest for the initialization.
   for (auto id : ids) {
-    kir::ForLoop* new_fl;
+    kir::ForLoop* new_fl = nullptr;
 
     if (id->isThread()) {
       // If based on a thread, make sure we get the named Int right
@@ -404,21 +404,19 @@ TensorView* findOutputTensor(Expr* expr) {
   return out->as<TensorView>();
 }
 
-void findTargetTensor(Expr* expr, TensorView*& target, unsigned& score) {
+unsigned findTargetTensor(Expr* expr, TensorView*& target) {
   TORCH_INTERNAL_ASSERT(expr->outputs().size() <= 1);
 
   TensorView* out_tv = findOutputTensor(expr);
   if (out_tv == nullptr) {
     target = nullptr;
-    score = 0;
-    return;
+    return 0;
   }
 
   if (!out_tv->hasComputeAt()) {
     target = out_tv;
     // No computeAt, so this should come last.
-    score = std::numeric_limits<unsigned>::max();
-    return;
+    return std::numeric_limits<unsigned>::max();
   }
 
   auto axis = out_tv->getRelativeComputeAtAxis();
@@ -431,7 +429,7 @@ void findTargetTensor(Expr* expr, TensorView*& target, unsigned& score) {
     target = target->getComputeAtView();
   }
 
-  score = axis;
+  return axis;
 }
 
 // Type definitions for brevity
@@ -471,9 +469,7 @@ void groupExpressions(
     TargetGroupMapT& computed_at_exprs,
     ExprScoreMapT& scores) {
   TensorView* target_tensor = nullptr;
-  ScoreT score;
-  findTargetTensor(expr, target_tensor, score);
-  scores.emplace(expr, score);
+  scores.emplace(expr, findTargetTensor(expr, target_tensor));
   if (target_tensor == nullptr) {
     reordered_exprs.push_back(expr);
   } else {

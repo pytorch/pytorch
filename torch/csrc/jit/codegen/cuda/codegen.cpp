@@ -16,7 +16,7 @@ namespace codegen {
 namespace {
 
 class CudaKernelGenerator : private OptInConstDispatch {
-  static constexpr char* kTab = "  ";
+  static constexpr const char* kTab = "  ";
 
  public:
   static std::string generateKernelDefinition(
@@ -179,7 +179,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
   std::string genInline(const Statement* stmt) {
     const bool saved_inline = print_inline_;
     print_inline_ = true;
-    const auto result = gen(stmt);
+    auto result = gen(stmt);
     print_inline_ = saved_inline;
     return result;
   }
