@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.quantization import prepare
+from typing import Dict
 
 from .quantization_mappings import (
     get_compare_output_module_list,
@@ -66,7 +67,7 @@ def compare_weights(float_dict, quantized_dict):
         a dictionary with two keys 'float' and 'quantized', containing the float and
         quantized weights
     """
-    weight_dict = {}
+    weight_dict: Dict[str, Dict] = {}
     for key in quantized_dict:
         match_key = _find_match(float_dict, key, "weight")
         if match_key is not None:
@@ -142,7 +143,7 @@ def get_logger_dict(mod, prefix=""):
         target_dict: the dictionary used to save all logger stats
     """
 
-    target_dict = {}
+    target_dict: Dict[str, Dict] = {}
     _get_logger_dict_helper(mod, target_dict, prefix)
     return target_dict
 
@@ -379,7 +380,7 @@ def get_matching_activations(float_module, q_module):
     """
     float_dict = get_logger_dict(float_module)
     quantized_dict = get_logger_dict(q_module)
-    act_dict = {}
+    act_dict: Dict[str, Dict] = {}
     for key in quantized_dict:
         match_key = _find_match(sorted(float_dict, reverse=True), key, "stats")
         if match_key is not None:

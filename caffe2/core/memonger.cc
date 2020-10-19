@@ -24,6 +24,25 @@ NetDef optimize_inference_net(
       LOG(INFO) << "Memonger does not support RecurrentNetwork yet";
       return net;
     }
+
+    // Check for in-place ops
+    auto* schema = OpSchemaRegistry::Schema(op.type());
+    if (schema) {
+      // Memonger modifies the graph. Do an early schema check here to make sure
+      // the operators are valid
+      CAFFE_ENFORCE(
+          schema->Verify(op),
+          "Operator def did not pass schema checking: ",
+          ProtoDebugString(op));
+      for (int in_idx = 0; in_idx < op.input_size(); in_idx++) {
+        for (int out_idx = 0; out_idx < op.output_size(); out_idx++) {
+          if (schema->inplace_enforced(in_idx, out_idx)) {
+            LOG(INFO) << "Memonger does not support in-place ops yet";
+            return net;
+          }
+        }
+      }
+    }
     ops.push_back(op);
   }
 
