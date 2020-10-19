@@ -1414,6 +1414,7 @@ def method_tests():
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
+        ('linalg.tensorinv', (2, S, M), (), '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
     ]
 
 def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
@@ -1707,5 +1708,7 @@ def exclude_tensor_method(name, test_name):
     if not is_inplace and name in exclude_outplace_tensor_method:
         return True
     if 'fft.' in name:
+        return True
+    if 'linalg.' in name:
         return True
     return False
