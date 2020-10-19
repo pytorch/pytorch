@@ -522,17 +522,43 @@ Tensor clamp_backward(const Tensor & grad, const Tensor &self, const optional<Sc
   }
 }
 
-Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, const Tensor & mat1, const Scalar & alpha) {
-  // if input was column-major, return grad as column-order for efficiency
-  if (mat1.is_sparse()) {
-    throw std::runtime_error("calculating the gradient of a sparse Tensor argument to mm is not supported.");
-  }
-  at::IntArrayRef sizes = mat1.sizes();
-  at::IntArrayRef strides = mat1.strides();
-  if (strides[0] == 1 && strides[1] == sizes[0]) {
-    return maybe_multiply(mat2.mm(grad.t()).t(), alpha);
+// This function is used by load_derivatives.py to replace tensor.strides()
+// calls that appear in derivative formulas. If the tensor has requires_grad
+// set, this function returns its strides or throws an error if the tensor
+// is sparse. If requires_grad is not set, an empty array is returned since
+// there will be no backward pass.
+//
+// This function only supports the case where `input` is the tensor whose
+// single derivative is being calculated.
+//
+// This function does not support `self` derivatives for inplace functions.
+//
+// Args:
+//  input              Tensor to call .strides() on
+//  input_name         Name of `input` tensor, from derivative formula
+at::IntArrayRef strides_or_error(const Tensor & input, c10::string_view const & input_name) {
+  // TODO: Ideally, this function would never be called if requires_grad is
+  // not set. Once codegen is updated to avoid the call, we can remove this
+  // check.
+  if (input.requires_grad()) {
+    TORCH_CHECK(
+      !input.is_sparse(),
+      "The backward pass for this operation requires the '", input_name,
+      "' tensor to be strided, but a sparse tensor was given instead. ",
+      "Please either use a strided tensor or set requires_grad=False for '",
+      input_name, "'");
+    return input.strides();
   } else {
-    return maybe_multiply(grad.mm(mat2.t()), alpha);
+    return IntArrayRef({});
+  }
+}
+
+Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, at::IntArrayRef mat1_sizes, at::IntArrayRef mat1_strides, const Scalar & alpha) {
+  // if input was column-major, return grad as column-order for efficiency
+  if (mat1_strides[0] == 1 && mat1_strides[1] == mat1_sizes[0]) {
+    return maybe_multiply(mat2.conj().mm(grad.t()).t(), alpha);
+  } else {
+    return maybe_multiply(grad.mm(mat2.t().conj()), alpha);
   }
 }
 
@@ -550,9 +576,9 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntArrayRef si
       at::addmm_out(r, t, mat1.t(), grad, alpha, 1);
       return r;
     }
-    return maybe_multiply(grad.t().mm(mat1).t(), alpha);
+    return maybe_multiply(grad.t().mm(mat1.conj()).t(), alpha);
   } else {
-    return maybe_multiply(mat1.t().mm(grad), alpha);
+    return maybe_multiply(mat1.t().conj().mm(grad), alpha);
   }
 }
 
@@ -2123,9 +2149,9 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
   Tensor grad_b, grad_a;
   if (grad_x.defined() || grad_m.defined()) {
     if (grad_x.defined()) {
-      grad_b = std::get<0>(grad_x.triangular_solve(a, upper, !transpose, unitriangular));
+      grad_b = std::get<0>(grad_x.triangular_solve(a.conj(), upper, !transpose, unitriangular));
       if (output_mask[1]) {
-        grad_a = transpose ? -x.matmul(grad_b.transpose(-1, -2)) : -grad_b.matmul(x.transpose(-1, -2));
+        grad_a = transpose ? -x.conj().matmul(grad_b.transpose(-1, -2)) : -grad_b.matmul(x.transpose(-1, -2).conj());
         if (upper) {
           grad_a = grad_a.triu((int) unitriangular);
         } else {
