@@ -1612,7 +1612,7 @@ Tensor linalg_tensorinv(const Tensor& self, optional<int64_t> ind) {
   Step 4. reshape the result.
   */
   int64_t ind_value = ind.has_value() ? ind.value() : 2;
-  TORCH_CHECK(ind_value > 0, "'ind' must be a positive integer");
+  TORCH_CHECK(ind_value > 0, "Expected a strictly positive integer for 'ind', but got ", ind_value);
 
   // self[ind:]
   std::vector<int64_t> shape_ind_end = self.sizes().slice(ind_value).vec();
