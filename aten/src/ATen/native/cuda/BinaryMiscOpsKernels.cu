@@ -110,7 +110,7 @@ void heaviside_kernel_cuda(TensorIterator& iter) {
 
 template<typename scalar_t, typename accscalar_t>
 struct CopySignScalarFunctor {
-    MulScalarFunctor(accscalar_t b_): b(b_) {}
+    CopySignScalarFunctor(accscalar_t b_): b(b_) {}
     __device__ scalar_t operator() (scalar_t a) const {
       return ::copysign(a, b);
     }
