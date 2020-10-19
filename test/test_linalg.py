@@ -924,7 +924,6 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     @dtypesIfCPU(torch.float, torch.double, torch.cfloat, torch.cdouble)
     @dtypesIfCUDA(torch.float, torch.double)
@@ -969,7 +968,6 @@ class TestLinalg(TestCase):
 
     # TODO: once "solve_inverse" supports complex dtypes, they shall be added to above test
     @unittest.expectedFailure
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @onlyCUDA
     @skipCUDAIfNoMagma
     @dtypes(torch.cfloat, torch.cdouble)
