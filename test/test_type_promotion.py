@@ -725,9 +725,8 @@ class TestTypePromotion(TestCase):
                 e, d1, s1, d2, s2 = [x.clone() for x in test_tensors]
             dense_sparse = op(d1, s2)
             self.assertEqual(e, dense_sparse, atol=precision, rtol=rtol, msg=err)
-        else:
+        elif op_name == 'div':
             # sparse division only supports division by a scalar
-            # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'
             self.assertRaises(RuntimeError, lambda: op(d1, s2))
 
         # Test op(sparse, dense) not supported for any ops:

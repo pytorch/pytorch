@@ -662,9 +662,16 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
 // --------------------------------------------------------------------
 
 Tensor mul_sparse(const Tensor& self, const Tensor& other) {
-  auto commonDtype = at::result_type(self, other);
-  Tensor result = at::empty({0}, self.options().dtype(commonDtype));
-  return at::mul_out(result, self, other);  // redispatch!
+  Tensor temp_self;
+  
+  if (false == self.is_sparse()) {
+    temp_self = self.expand(other.sizes()).sparse_mask(other.coalesce());
+  } else {
+    temp_self = self;
+  }
+  auto commonDtype = at::result_type(temp_self, other);
+  Tensor result = at::empty({0}, temp_self.options().dtype(commonDtype));
+  return at::mul_out(result, temp_self, other);  // redispatch!
 }
 
 Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
