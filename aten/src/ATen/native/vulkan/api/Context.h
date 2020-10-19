@@ -157,15 +157,15 @@ inline void dispatch(
       local_work_group);
 
   detail::bind_arguments(
-    descriptor_set,
-    std::index_sequence_for<Arguments...>{},
-    std::forward<Arguments>(arguments)...);
+      descriptor_set,
+      std::index_sequence_for<Arguments...>{},
+      std::forward<Arguments>(arguments)...);
 
   // Forward declaration
   void dispatch_epilogue(
-    Command::Buffer&,
-    const Descriptor::Set&,
-    const Shader::WorkGroup&);
+      Command::Buffer&,
+      const Descriptor::Set&,
+      const Shader::WorkGroup&);
 
   // Factor out template parameter independent code to minimize code bloat.
   dispatch_epilogue(
