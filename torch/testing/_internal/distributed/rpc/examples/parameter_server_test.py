@@ -2,18 +2,21 @@
 
 import threading
 from datetime import datetime
+from time import perf_counter
 
 import torch
 import torch.distributed.rpc as rpc
 import torch.nn as nn
 from torch import optim
 
+from torch.testing._internal.dist_utils import dist_init
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
+
 batch_size = 20
-image_w = 64
-image_h = 64
-num_classes = 30
+in_features = 100
+out_features = 30
 batch_update_size = 3
-num_batches = 6
+num_batches = 4
 
 
 def timed_log(text):
@@ -23,7 +26,7 @@ def timed_log(text):
 class BatchUpdateParameterServer(object):
 
     def __init__(self, batch_update_size=batch_update_size):
-        self.model = nn.Linear(100, num_classes)
+        self.model = nn.Linear(in_features, out_features)
         self.lock = threading.Lock()
         self.future_model = torch.futures.Future()
         self.batch_update_size = batch_update_size
@@ -39,10 +42,10 @@ class BatchUpdateParameterServer(object):
     @rpc.functions.async_execution
     def update_and_fetch_model(ps_rref, grads):
         self = ps_rref.local_value()
-        timed_log(f"PS got {self.curr_update_size}/{batch_update_size} updates")
         for p, g in zip(self.model.parameters(), grads):
             p.grad += g
         with self.lock:
+            timed_log(f"PS got {self.curr_update_size}/{batch_update_size} updates")
             self.curr_update_size += 1
             fut = self.future_model
 
@@ -63,16 +66,12 @@ class Trainer(object):
 
     def __init__(self, ps_rref):
         self.ps_rref = ps_rref
-        self.loss_fn = nn.MSELoss()
-        self.one_hot_indices = torch.LongTensor(batch_size) \
-                                    .random_(0, num_classes) \
-                                    .view(batch_size, 1)
+        self.loss_fn = nn.L1Loss()
 
     def get_next_batch(self):
         for _ in range(num_batches):
-            inputs = torch.randn(batch_size, 100)
-            labels = torch.zeros(batch_size, num_classes) \
-                          .scatter_(1, self.one_hot_indices, 1)
+            inputs = torch.randn(batch_size, in_features)
+            labels = torch.zeros(batch_size, out_features)
             yield inputs, labels
 
     def train(self):
@@ -97,6 +96,7 @@ def run_trainer(ps_rref):
 
 def run_ps(trainers):
     timed_log("Start training")
+    start = perf_counter()
     ps_rref = rpc.RRef(BatchUpdateParameterServer())
     futs = []
     for trainer in trainers:
@@ -105,4 +105,31 @@ def run_ps(trainers):
         )
 
     torch.futures.wait_all(futs)
+    stop = perf_counter()
     timed_log("Finish training")
+    timed_log(f"Time spent training: {stop-start}s")
+
+class ParameterServerTest(RpcAgentTestFixture):
+
+    @dist_init(setup_rpc=False)
+    def test_batch_updating_parameter_server(self):
+
+        if self.rank != 0:
+            rpc.init_rpc(
+                f"trainer{self.rank}",
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+        else:
+            rpc.init_rpc(
+                "ps",
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+            run_ps([f"trainer{r}" for r in range(1, self.world_size)])
+
+        rpc.shutdown()
