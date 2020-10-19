@@ -57,7 +57,7 @@ inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string o
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-/// Solves of the tensor equation `a x = b`
+/// Solves the tensor equation `a x = b`
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.tensorsolve
 ///
