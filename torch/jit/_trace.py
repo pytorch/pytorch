@@ -1083,16 +1083,6 @@ class TopLevelTracedModule(TracedModule):
 
 
 def _script_if_tracing(fn):
-    """
-    Compiles ``fn`` when it is first called during tracing. ``torch.jit.script``
-    has a non-negligible start up time when it is first called due to
-    lazy-initializations of many compiler builtins. Therefore you should not use
-    it in library code. However, you may want to have parts of your library work
-    in tracing even if they use control flow. In these cases, you should use
-    ``@torch.jit._script_if_tracing`` to substitute for
-    ``torch.jit.script``.
-    """
-
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if not is_tracing():

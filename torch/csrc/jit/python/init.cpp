@@ -29,6 +29,7 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/metal_rewrite.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
@@ -678,6 +679,30 @@ void initJITBindings(PyObject* module) {
           [](script::Module& module,
              std::vector<std::string>& preserved_methods) {
             return vulkanOptimizeForMobile(module, preserved_methods);
+          })
+      .def(
+          "_jit_pass_metal_insert_prepacked_ops",
+          [](std::shared_ptr<Graph>& graph) {
+            return metalInsertPrePackedOps(graph);
+          })
+      .def(
+          "_jit_pass_metal_insert_prepacked_ops",
+          [](script::Module& module) {
+            return metalInsertPrePackedOps(module);
+          })
+      .def(
+          "_jit_pass_metal_fuse_clamp_w_prepacked_conv",
+          [](script::Module& module) {
+            return metalFusePrePackedConvWithClamp(module);
+          })
+      .def(
+          "_jit_pass_metal_fold_prepacking_ops",
+          [](script::Module& module) { return metalFoldPrePackingOps(module); })
+      .def(
+          "_jit_pass_metal_optimize_for_mobile",
+          [](script::Module& module,
+             std::vector<std::string>& preserved_methods) {
+            return metalOptimizeForMobile(module, preserved_methods);
           })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",

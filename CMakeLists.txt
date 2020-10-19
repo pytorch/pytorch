@@ -548,6 +548,10 @@ if(USE_VULKAN_RELAXED_PRECISION)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
 endif()
 
+if(USE_PYTORCH_METAL)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_METAL")
+endif()
+
 # ---[ Allowlist file if allowlist is specified
 include(cmake/Allowlist.cmake)
 
