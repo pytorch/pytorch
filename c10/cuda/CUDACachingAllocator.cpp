@@ -966,8 +966,8 @@ std::mutex* getFreeMutex()
 }
 
 static inline void assertValidDevice(int device) {
-  int device_num = device_count();
-  AT_ASSERTM(0 <= device && device < device_num, "Invalid device argument.");
+  int device_num = caching_allocator.device_allocator.size();
+  TORCH_CHECK(0 <= device && device < device_num, "Invalid device argument.");
 }
 
 DeviceStats getDeviceStats(int device) {
