@@ -15656,7 +15656,8 @@ def add_autograd_test(
                 if is_inplace:
                     self_variable.requires_grad = False
                 # need to record this because methods can change the size (e.g. unsqueeze)
-                args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
+                args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs,
+                                                              match_scalar_dtype=match_scalar_dtype)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
 
