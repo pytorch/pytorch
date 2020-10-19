@@ -1602,6 +1602,15 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, opt
 }
 
 Tensor linalg_tensorinv(const Tensor& self, optional<int64_t> ind) {
+  /*
+  The idea is to reduce the problem to 2D square matrix inversion.
+  Step 1. calculate the shape of the result and the shape of the intermediate 2D matrix.
+  Step 2. reshape `self` to 2D matrix.
+  Step 3. invert the 2D matrix self.to_2D()
+          there is no quick way to find out whether the matrix is invertible,
+          so at this stage an error from at::inverse can be thrown
+  Step 4. reshape the result.
+  */
   int64_t ind_value = ind.has_value() ? ind.value() : 2;
   TORCH_CHECK(ind_value > 0, "'ind' must be a positive integer");
 
