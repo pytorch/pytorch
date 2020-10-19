@@ -3635,6 +3635,35 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_backend_options=rpc_backend_options,
             )
 
+    @dist_init
+    def test_local_rref_backward(self):
+        t = torch.rand(10, 10, requires_grad=True)
+        rref = rpc.RRef(t.sum())
+        rref.backward()
+        self.assertEqual(torch.ones_like(t), t.grad)
+
+        with dist_autograd.context() as context_id:
+            rref.backward(context_id)
+            self.assertEqual(torch.ones_like(t), dist_autograd.get_gradients(context_id)[t])
+
+        # Double backward.
+        with dist_autograd.context() as context_id:
+            rref.backward(context_id, retain_graph=True)
+            rref.backward(context_id)
+            self.assertEqual(torch.ones_like(t) * 2, dist_autograd.get_gradients(context_id)[t])
+
+        # Test errors.
+        with self.assertRaisesRegex(RuntimeError, "requires_grad not set on RRef's value"):
+            rpc.RRef(torch.rand(10)).backward()
+
+        with self.assertRaisesRegex(RuntimeError, "RRef does not contain a scalar, all roots need to be scalar"):
+            rpc.RRef(torch.rand(10, requires_grad=True)).backward()
+
+        with self.assertRaisesRegex(RuntimeError, "Could not find autograd context with id: 100"):
+            rpc.RRef(torch.rand(10, requires_grad=True).sum()).backward(100)
+
+        with self.assertRaisesRegex(RuntimeError, "RRef should contain a tensor for .backward()"):
+            rpc.RRef("foo").backward()
 
 class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 

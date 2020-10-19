@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/rpc/py_rref.h>
 
+#include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
@@ -281,6 +283,34 @@ c10::IValue PyRRef::toIValue() const {
   // cast to RRefInterface to hold it into IValue
   auto rrefPtr = c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref_);
   return IValue(rrefPtr);
+}
+
+void PyRRef::backward(int64_t dist_autograd_ctx_id, bool retain_graph) {
+  if (rref_->isOwner()) {
+    auto value =
+        c10::static_intrusive_pointer_cast<const OwnerRRef>(rref_)->getValue();
+    TORCH_CHECK(
+        value.isTensor(), "RRef should contain a tensor for .backward()");
+    auto root = value.toTensor();
+    TORCH_CHECK(root.requires_grad(), "requires_grad not set on RRef's value");
+    TORCH_CHECK(
+        root.numel() == 1,
+        "RRef does not contain a scalar, all roots need to be scalar");
+    TORCH_CHECK(
+        root.grad_fn(), "RRef does not have a valid gradient function.");
+
+    if (dist_autograd_ctx_id == -1) {
+      auto rootEdge = torch::autograd::impl::gradient_edge(root);
+      auto grad = at::ones_like(root, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      torch::autograd::Engine::get_default_engine().execute(
+          {rootEdge}, {grad}, retain_graph, false);
+    } else {
+      autograd::DistEngine::getInstance().execute(
+          dist_autograd_ctx_id, {root}, retain_graph);
+    }
+  } else {
+    // TODO
+  }
 }
 
 } // namespace rpc
