@@ -404,6 +404,7 @@ def init_process_group(backend,
     global _backend
     global _default_pg
     global _default_pg_init_method
+    global _group_count
 
     if not isinstance(timeout, timedelta):
         raise RuntimeError("Expected timeout argument to be of type"
@@ -457,6 +458,9 @@ def init_process_group(backend,
             group_name=group_name,
             timeout=timeout)
 
+    if not group_name:
+        _group_count += 1
+
     _pg_group_ranks[_default_pg] = {i: i for i in range(_default_pg.size())}
     _backend = _pg_map[_default_pg][0]
     _default_pg_init_method = init_method
@@ -488,7 +492,6 @@ def _new_process_group_helper(world_size,
 
     if not group_name:
         group_name = str(_group_count)
-        _group_count += 1
 
     if group_name in _pg_names.values():
         raise RuntimeError("The specified group name has already been "
