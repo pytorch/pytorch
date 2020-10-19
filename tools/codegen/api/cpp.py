@@ -45,7 +45,7 @@ def valuetype_type(t: Type) -> Optional[str]:
         elif t.name in [BaseTy.bool, BaseTy.QScheme, BaseTy.Scalar,
                         BaseTy.ScalarType, BaseTy.Generator, BaseTy.Storage,
                         BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat,
-                        BaseTy.Dimname, BaseTy.ConstQuantizerPtr]:
+                        BaseTy.Dimname, BaseTy.Stream, BaseTy.ConstQuantizerPtr]:
             # These C++ names line up with their schema names
             return t.name.name
         else:
