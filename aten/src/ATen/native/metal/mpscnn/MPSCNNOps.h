@@ -1,4 +1,5 @@
 #import <ATen/native/metal/MetalConvolution.h>
+#import <ATen/native/metal/MetalPrepackOpContext.h>
 
 #include <torch/script.h>
 
