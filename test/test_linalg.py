@@ -1024,9 +1024,10 @@ class TestLinalg(TestCase):
         actual_L = torch.linalg.cholesky(A)
         self.assertEqual(actual_L, expected_L)
 
-    @onlyCPU
+    @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.float64, torch.complex128)
+    @dtypesIfCPU(torch.float64, torch.complex128)
+    @dtypes(torch.float64)
     def test_cholesky_autograd(self, device, dtype):
         def func(root):
             x = 0.5 * (root + root.transpose(-1, -2).conj())
