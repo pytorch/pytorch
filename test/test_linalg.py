@@ -964,6 +964,47 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @dtypesIfCUDA(torch.float32, torch.float64)
+    @precisionOverride({torch.float: 1e-3, torch.cfloat: 1e-3})
+    def test_tensorinv_non_contiguous(self, device, dtype):
+
+        def run_test(a_shape, ind):
+            # check for permuted (transposed) case
+            a = torch.randn(a_shape, dtype=dtype, device=device)
+            permutation = list(range(0, a.ndim))
+            a = a.permute(permutation[ind:] + permutation[:ind])
+            self.assertFalse(a.is_contiguous())
+            a_numpy = a.cpu().numpy()
+            result = torch.linalg.tensorinv(a, ind=a.ndim - ind)
+            expected = np.linalg.tensorinv(a_numpy, ind=a.ndim - ind)
+            self.assertEqual(result, expected)
+
+        def run_test_skipped_elements(a_shape, ind):
+            # check for input with skipped elements
+            a = torch.randn(a_shape, dtype=dtype, device=device)
+            a = a[::2]
+            self.assertFalse(a.is_contiguous())
+            a_numpy = a.cpu().numpy()
+            result = torch.linalg.tensorinv(a, ind=ind)
+            expected = np.linalg.tensorinv(a_numpy, ind=ind)
+            self.assertEqual(result, expected)
+
+        run_test((12, 3, 4), ind=1)
+        run_test((3, 8, 24), ind=2)
+        run_test((18, 3, 3, 2), ind=1)
+        run_test((1, 4, 2, 2), ind=2)
+        run_test((2, 3, 5, 30), ind=3)
+        run_test((24, 2, 2, 3, 2), ind=1)
+        run_test((3, 4, 2, 3, 2), ind=2)
+        run_test((1, 2, 3, 2, 3), ind=3)
+        run_test((3, 2, 1, 2, 12), ind=4)
+
+        run_test_skipped_elements((12, 3, 2), ind=1)
+        run_test_skipped_elements((18, 3, 3, 1), ind=1)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float32, torch.float64)
     def test_tensorinv_empty(self, device, dtype):
         for ind in range(1, 4):
             # Check for empty inputs. NumPy does not work for these cases.
