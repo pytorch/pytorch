@@ -215,7 +215,7 @@ def prepare(model, inplace=False, allow_list=None,
     qconfig_propagation_list = allow_list
     if qconfig_propagation_list is None:
         qconfig_propagation_list = get_qconfig_propagation_list()
-        propagate_qconfig_(model, qconfig_dict=None)
+    propagate_qconfig_(model, qconfig_dict=None)
 
     # sanity check common API misusage
     if not any(hasattr(m, 'qconfig') and m.qconfig for m in model.modules()):
