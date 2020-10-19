@@ -944,7 +944,7 @@ class TestLinalg(TestCase):
 
         def check_ind(a_shape, ind):
             a = torch.rand(a_shape)
-            with self.assertRaisesRegex(RuntimeError, "must be a positive integer"):
+            with self.assertRaisesRegex(RuntimeError, "Expected a strictly positive integer"):
                 torch.linalg.tensorinv(a, ind=ind)
 
         # compare to NumPy output
