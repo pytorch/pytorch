@@ -144,21 +144,22 @@ Using the :attr:`dim` argument to compute matrix norms::
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
 linalg.tensorinv(input, ind=2) -> Tensor
 
-Returns the inverse of a given tensor.
-
-This function computes a tensor such that ``tensordot(tensorinv(input), input, ind) == I``,
+Computes a tensor ``x`` such that ``tensordot(tensorinv(input), input, ind) == I``,
 where ``I`` denotes the identity tensor.
+The resulting tensor ``x`` has the shape equal to ``input.shape[ind:] + input.shape[:ind]``.
+
+Supports real and, only on the CPU, complex inputs.
 
 .. note:: If :attr:`input` is not a 'square' tensor, meaning it does not satisfy the requirement
-          ``prod(input.shape[ind:]) == prod(input.shape[:ind])``, then a RuntimeError will be thrown.
+          ``prod(input.shape[ind:]) == prod(input.shape[:ind])`` or if :attr:`input` is not invertible,
+          then a RuntimeError will be thrown.
 
 Args:
-    input (Tensor): The tensor to invert. Its shape must satidsfy ``prod(input.shape[:ind]) == prod(input.shape[ind:])``.
+    input (Tensor): The tensor to invert. Its shape must satisfy ``prod(input.shape[:ind]) == prod(input.shape[ind:])``.
+    ind (int): The positive integer representing how many first indices are involved in the inverse contraction.
+               This number affects the result's shape and the 'squareness' requirement. Default: 2.
 
-    ind (int): The positive number used in ``dims`` option of ``tensordot``.
-
-Returns:
-    (Tensor): the inverse of ``input`` with shape ``input.shape[ind:] + input.shape[:ind]``.
+Example::
 
     >>> a = torch.eye(4 * 6).reshape((4, 6, 8, 3))
     >>> ainv = torch.linalg.tensorinv(a, ind=2)
