@@ -385,25 +385,30 @@ void leaky_relu_backward_kernel(TensorIterator& iter, Scalar negval_) {
 
 void hardswish_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardswish_cuda", [&]() {
-    const scalar_t zero(0.0f);
-    const scalar_t one_sixth(1.0f / 6.0f);
-    const scalar_t three(3.0f);
-    const scalar_t six(6.0f);
+    using T_ACC = acc_type<scalar_t, true>;
+    const T_ACC zero(0.0f);
+    const T_ACC one_sixth(1.0f / 6.0f);
+    const T_ACC three(3.0f);
+    const T_ACC six(6.0f);
     gpu_kernel(iter, [zero, one_sixth, three, six]GPU_LAMBDA(scalar_t self_val) -> scalar_t {
-      return self_val * std::min(std::max(self_val + three, zero), six) * one_sixth;
+      T_ACC x = static_cast<T_ACC>(self_val);
+      return x * std::min(std::max(x + three, zero), six) * one_sixth;
     });
   });
 }
 
 void hardswish_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardswish_backward_cuda", [&]() {
-    const scalar_t zero(0.0f);
-    const scalar_t three(3.0f);
-    const scalar_t neg_three(-3.0f);
-    const scalar_t one_half(0.5f);
+    using T_ACC = acc_type<scalar_t, true>;
+    const T_ACC zero(0.0f);
+    const T_ACC three(3.0f);
+    const T_ACC neg_three(-3.0f);
+    const T_ACC one_half(0.5f);
     gpu_kernel(
       iter, 
-      [zero, three, neg_three, one_half]GPU_LAMBDA(scalar_t grad_val, scalar_t self_val) -> scalar_t {
+      [zero, three, neg_three, one_half]GPU_LAMBDA(scalar_t grad_val_, scalar_t self_val_) -> scalar_t {
+        T_ACC grad_val = static_cast<T_ACC>(grad_val_);
+        T_ACC self_val = static_cast<T_ACC>(self_val_);
         if (self_val < neg_three) {
           return zero;
         } else if (self_val <= three) {
@@ -417,25 +422,30 @@ void hardswish_backward_kernel(TensorIterator& iter) {
 
 void hardsigmoid_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardsigmoid_cuda", [&]() {
-    const scalar_t zero(0.0f);
-    const scalar_t one_sixth(1.0f / 6.0f);
-    const scalar_t three(3.0f);
-    const scalar_t six(6.0f);
+    using T_ACC = acc_type<scalar_t, true>;
+    const T_ACC zero(0.0f);
+    const T_ACC one_sixth(1.0f / 6.0f);
+    const T_ACC three(3.0f);
+    const T_ACC six(6.0f);
     gpu_kernel(iter, [zero, one_sixth, three, six]GPU_LAMBDA(scalar_t self_val) -> scalar_t {
-      return std::min(std::max(self_val + three, zero), six) * one_sixth;
+      T_ACC x = static_cast<T_ACC>(self_val);
+      return std::min(std::max(x + three, zero), six) * one_sixth;
     });
   });
 }
 
 void hardsigmoid_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "hardsigmoid_backward_cuda", [&]() {
-    const scalar_t zero(0.0f);
-    const scalar_t three(3.0f);
-    const scalar_t neg_three(-3.0f);
-    const scalar_t one_sixth(1.0f / 6.0f);
+    using T_ACC = acc_type<scalar_t, true>;
+    const T_ACC zero(0.0f);
+    const T_ACC three(3.0f);
+    const T_ACC neg_three(-3.0f);
+    const T_ACC one_sixth(1.0f / 6.0f);
     gpu_kernel(
       iter, 
-      [zero, three, neg_three, one_sixth]GPU_LAMBDA(scalar_t grad_val, scalar_t self_val) -> scalar_t {
+      [zero, three, neg_three, one_sixth]GPU_LAMBDA(scalar_t grad_val_, scalar_t self_val_) -> scalar_t {
+        T_ACC grad_val = static_cast<T_ACC>(grad_val_);
+        T_ACC self_val = static_cast<T_ACC>(self_val_);
         return (self_val >= neg_three && self_val <= three)
           ? grad_val * one_sixth
           : zero;
