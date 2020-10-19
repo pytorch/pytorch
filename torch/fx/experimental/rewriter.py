@@ -1,5 +1,4 @@
 import ast
-import astor
 import inspect
 import textwrap
 import copy
@@ -18,45 +17,57 @@ class AST_Rewriter(ast.NodeTransformer):
 
     def rewrite(self, fn: FunctionType):
 
-        # Get the source string, align everything with the `def`, then
-        # remote unnecessary indentation
-        source_str = inspect.getsource(fn)
-        whitespace_prefix = source_str.split("def")[0]
-        split_source = source_str.split('\n')
-        aligned_source = [whitespace_prefix + s for s in split_source[1:]]
-        aligned_source.insert(0, split_source[0])
-        aligned_str = '\n'.join(aligned_source)
-        normalized_str = textwrap.dedent(aligned_str)
+        def remove_prefix(text, prefix):
+            return text[text.startswith(prefix) and len(prefix):]
+
+        # Get the source string
+        sourcelines, _ = inspect.getsourcelines(fn)
+
+        # Find the line and line number containing the function definition
+        for i, l in enumerate(sourcelines):
+            if l.lstrip()[:3] == "def":
+                idx = i
+                break
+        fn_def = sourcelines[idx]
+
+        # Get a string representing the amount of leading whitespace
+        whitespace = fn_def.split("def")[0]
+
+        # Add this leading whitespace to all lines before and after the `def`
+        aligned_prefix = [whitespace + remove_prefix(s, whitespace) for s in sourcelines[:idx]]
+        aligned_suffix = [whitespace + remove_prefix(s, whitespace) for s in sourcelines[idx + 1:]]
+
+        # Put it together again
+        aligned_prefix.append(fn_def)
+        aligned_source = aligned_prefix + aligned_suffix
+
+        # Remove common leading whitespace
+        source = ''.join(aligned_source)
+        normalized_str = textwrap.dedent(source)
 
         # Rewrite the original AST
         source_ast = ast.parse(normalized_str)
         dest_ast = ast.fix_missing_locations(self.visit(source_ast))
-        dest_str = astor.to_source(dest_ast)
 
         # Pull out the compiled fucntion from the newly-created Module
         code = compile(dest_ast, "", "exec")
-        globals_dict = {}
         globals_dict = copy.copy(fn.__globals__)
+        keys_before = set(globals_dict.keys())
         exec(code, globals_dict)
-        fn_compiled = globals_dict["forward"]
+        new_keys = list(set(globals_dict.keys()) - keys_before)
+        assert len(new_keys) == 1
+        fn_compiled = globals_dict[new_keys[0]]
 
         # Return the correct FunctionType object
         return fn_compiled
 
     def visit_Assert(self, node):
         # Create the Call node
-        call_node_args = [node.test]
-        if node.msg:
-            call_node_args.append(node.msg)
-        else:
-            call_node_args.append(ast.Constant(value="", kind=None))
-        call_node = ast.Call(
-            func=ast.Attribute(value=ast.Name(id="torch", ctx=ast.Load()),
-                               attr="Assert", ctx=ast.Load()),
-            args=call_node_args,
-            keywords=[])
+        call_node = ast.parse('torch.Assert()', mode='eval').body
+        msg = node.msg if node.msg else ast.Constant(value="", kind=None)
+        call_node.args = [node.test, msg]
 
-        # Workaround for astor
+        # Ensure that the new node conforms to the Python AST grammar
         expr_wrapper = ast.Expr(value=call_node)
 
         # Return the new Call node to signify that we want to use it as

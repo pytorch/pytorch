@@ -2,6 +2,7 @@ import torch
 from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental.Partitioner import Partitioner, Device
+from torch.fx.node import get_target_name
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -90,6 +91,99 @@ class TestFXExperimental(JitTestCase):
         module_with_submodules = ret.module_with_submodules
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
         assert len(module_with_submodules.graph.nodes) == 5
+
+    def test_assert_no_msg(self):
+
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                assert a == b
+                return a + b
+        m = M()
+        traced = symbolic_trace(m)
+
+        # Make sure the graph is well-formed
+        traced.graph.lint(traced)
+
+        # Check the IR to make sure there's a call_function node with target == "Assert"
+        self.assertTrue(any(node.op == 'call_function' and get_target_name(node.target) == "Assert" for node in traced.graph.nodes))
+
+        # Ensure that the assert throws when it's supposed to and doesn't throw when it's not supposed to
+        traced(3, 3)
+        with self.assertRaisesRegex(AssertionError, ""):
+            traced(3, 5)
+
+    def test_call_to_assert_with_msg(self):
+
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                assert a == b, "test message"
+                return a + b
+        m = M()
+        traced = symbolic_trace(m)
+
+        # Make sure the graph is well-formed
+        traced.graph.lint(traced)
+
+        # Check the IR to make sure there's a call_function node with target == "Assert"
+        self.assertTrue(any(node.op == 'call_function' and get_target_name(node.target) == "Assert" for node in traced.graph.nodes))
+
+        # Ensure that the assert throws when it's supposed to and doesn't throw when it's not supposed to
+        traced(3, 3)
+        with self.assertRaisesRegex(AssertionError, "test message"):
+            traced(3, 5)
+
+    def test_call_to_assert_with_empty_msg(self):
+
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                assert a == b, ""
+                return a + b
+        m = M()
+        traced = symbolic_trace(m)
+
+        # Make sure the graph is well-formed
+        traced.graph.lint(traced)
+
+        # Check the IR to make sure there's a call_function node with target == "Assert"
+        self.assertTrue(any(node.op == 'call_function' and get_target_name(node.target) == "Assert" for node in traced.graph.nodes))
+
+        # Ensure that the assert throws when it's supposed to and doesn't throw when it's not supposed to
+        traced(3, 3)
+        with self.assertRaisesRegex(AssertionError, ""):
+            traced(3, 5)
+
+    def test_call_to_assert_with_multiline_message(self):
+
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                error_msg = """
+An error message with
+terrible spacing
+                """
+                assert a == b, error_msg
+                return a + b
+        m = M()
+        traced = symbolic_trace(m)
+
+        # Make sure the graph is well-formed
+        traced.graph.lint(traced)
+
+        # Check the IR to make sure there's a call_function node with target == "Assert"
+        self.assertTrue(any(node.op == 'call_function' and get_target_name(node.target) == "Assert" for node in traced.graph.nodes))
+
+        # Ensure that the assert throws when it's supposed to and doesn't throw when it's not supposed to
+        error_msg = """
+An error message with
+terrible spacing
+    """
+        traced(3, 3)
+        with self.assertRaisesRegex(AssertionError, error_msg):
+            traced(3, 5)
+
+    def test_traceable_function_with_nonstandard_name(self):
+        def foo(x):
+            return torch.relu(x)
+        traced = symbolic_trace(foo)
 
 if __name__ == '__main__':
     run_tests()

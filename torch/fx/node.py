@@ -20,6 +20,13 @@ Argument = Optional[Union[
     BaseArgumentTypes
 ]]
 
+
+def get_target_name(target: Target) -> str:
+    if callable(target):
+        return target.__name__
+    return target
+
+
 class Node:
     def __init__(self, graph: 'Graph', name: str, op: str, target: Target,
                  args: Tuple[Argument, ...], kwargs: Dict[str, Argument],

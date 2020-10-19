@@ -44,6 +44,21 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     # so we can't call this function normally, otherwise it would try to unpack them
     # instead, let's make python think that args and kwargs are normay variables
 
+def _rewrite(fn : Union[torch.nn.Module, Callable]) -> Union[torch.nn.Module, Callable]:
+  if isinstance(fn, torch.nn.Module):
+    # Rewrite this module's forward() and all of its recursive children's
+    # forward. Return the new rewritten module hierarchy.
+    def rewrite_module(m : torch.nn.Module):
+      new_m = copy.copy(m)
+      for name, child in new_m.named_children():
+          new_m[name] = rewrite_module(child)
+      new_m.forward = AST_Rewriter().rewrite(new_m.forward)
+      return new_m
+    return rewrite_module(fn)
+  else:
+    # Rewrite this single free function
+    return AST_Rewriter().rewrite(fn)
+
 class Tracer(TracerBase):
     def __init__(self):
         super().__init__()
@@ -120,7 +135,7 @@ class Tracer(TracerBase):
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
-    def trace(self, root: Union[torch.nn.Module, Callable], rewrite: bool = True) -> Graph:
+    def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
         if isinstance(root, torch.nn.Module):
             self.root = root
             fn = type(root).forward
@@ -131,9 +146,7 @@ class Tracer(TracerBase):
         self.graph = Graph()
 
         assert isinstance(fn, FunctionType)
-        # experimental
-        if rewrite:
-            fn = AST_Rewriter().rewrite(fn)
+        fn = _rewrite(fn)
         co = fn.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
         names_iter = iter(co.co_varnames)
@@ -166,6 +179,7 @@ class Tracer(TracerBase):
             else:
                 return _create_proxy(self, 'call_module', module_qualified_name, args, kwargs)
         try:
+            torch.nn.Module.__call__ = module_call_wrapper
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
         finally:
@@ -174,6 +188,12 @@ class Tracer(TracerBase):
 
     def _proxy_placeholder(self, name: str, type_expr: Optional[Any] = None) -> Proxy:
         return Proxy(self.create_node('placeholder', name, (), {}, type_expr=type_expr), self)
+
+
+#class RewritingTracer(torch.fx.Tracer):
+#  def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
+#    return super().trace(torch.fx.experimental.rewriter.rewrite(root))
+
 
 # Symbolic tracing API
 #
