@@ -56,6 +56,8 @@ class JitBackendTestCase(JitTestCase):
         super().setUp()
         if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
+        if not torch._C._jit_has_cpp_tests():
+            raise unittest.SkipTest("Tests were not built, use BUILD_TEST=1")
         torch_root = Path(__file__).resolve().parent.parent.parent
         p = torch_root / 'build' / 'lib' / 'libjitbackend_test.so'
         torch.ops.load_library(str(p))
