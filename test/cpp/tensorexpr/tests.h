@@ -340,6 +340,13 @@ namespace jit {
   _(NormalizeOnNestedOuterLoop)                     \
   _(NormalizeOnNestedInnerLoop)                     \
   _(NormalizeAndSplitWithTail)                      \
+  _(FlattenSimpleLoopNest2D)                        \
+  _(FlattenSimpleLoopNest3D)                        \
+  _(FlattenLoopNestAfterNormalize)                  \
+  _(FlattenImperfectLoopNest)                       \
+  _(FlattenReductionLoopNest)                       \
+  _(FlattenReductionLoopNestFromTensor)             \
+  _(FlattenIncorrectLoopsAsInput)                   \
   _(DetectInlineRankMismatch)                       \
   _(CacheReadsSimple)                               \
   _(CacheReadsOuter)                                \
@@ -350,6 +357,7 @@ namespace jit {
   _(Kernel_2)                                       \
   _(Kernel_3)                                       \
   _(Kernel_4)                                       \
+  _(KernelCatInputTypesPromotion)                   \
   _(KernelSumAllAxes)                               \
   _(KernelSumOneAxis)                               \
   _(KernelSumMultipleAxes)                          \

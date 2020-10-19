@@ -713,14 +713,19 @@ class TestONNXRuntime(unittest.TestCase):
                     return torch.squeeze(x)
 
         x2 = [] if x2 is None else [x2]
-        self.run_test(Squeeze(d), x1, input_names=['input'], dynamic_axes={'input': {0: '0', 1: '1', 2: '2'}}, test_with_inputs=x2)
+        if len(x2) > 0:
+            self.run_test(Squeeze(d), x1,
+                          input_names=['input'], dynamic_axes={'input': {0: '0', 1: '1', 2: '2'}},
+                          test_with_inputs=x2)
+        else:
+            self.run_test(Squeeze(d), x1)
 
     def test_squeeze_without_no_op(self):
         x = torch.randn(2, 1, 4)
         self.squeeze_model_tests(1, x, None)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    def test_squeeze(self):
+    def test_squeeze_dynamic(self):
         x_squeeze = torch.randn(2, 1, 4)
         x_noop = torch.randn(2, 2, 3)
         self.squeeze_model_tests(1, x_squeeze, x_noop)
@@ -745,10 +750,6 @@ class TestONNXRuntime(unittest.TestCase):
         x_noop = torch.randn(2, 1, 4)
         x_squeeze = torch.randn(2, 2, 1)
         self.squeeze_model_tests(2, x_noop, x_squeeze)
-
-    def test_squeeze_no_op_without_additional_inputs(self):
-        x_noop = torch.randn(2, 1, 4)
-        self.squeeze_model_tests(2, x_noop, None)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_squeeze_runtime_dim(self):
@@ -3264,6 +3265,31 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(MaskedSelectModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_to_masked_fill(self):
+        class MaskedFillModel(torch.nn.Module):
+            def forward(self, input_mask, some_const):
+                mask = input_mask.clone()
+                mask[mask != some_const] = 1
+                mask[mask == some_const] = 0
+                return mask
+
+        mask = torch.randn(2, 2, 2, requires_grad=True)
+        constant = torch.tensor(5, dtype=torch.float)
+        self.run_test(MaskedFillModel(), (mask, constant))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_to_masked_scatter(self):
+        class MaskedScatterModel(torch.nn.Module):
+            def forward(self, input_mask, some_const):
+                mask = input_mask.clone()
+                mask[mask != some_const] = torch.ones(8)
+                return mask
+
+        mask = torch.randn(2, 2, 2, requires_grad=True)
+        constant = torch.tensor(5, dtype=torch.float)
+        self.run_test(MaskedScatterModel(), (mask, constant))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_pixel_shuffle(self):
         class PixelShuffle(torch.nn.Module):
@@ -4540,6 +4566,41 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerTensorModel(), (x))
+
+    def test_batchnorm_training(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.bn = torch.nn.BatchNorm2d(3, affine=True)
+
+            def forward(self, x):
+                bn = self.bn(x)
+                return bn
+
+        model = MyModule()
+        x = torch.randn(10, 3, 128, 128)
+
+        model.train()
+        out = model(x)
+
+        # state after 1 train epoch
+        running_mean = model.bn.running_mean
+        running_var = model.bn.running_var
+        saved_mean = x.mean((0, 2, 3))
+        saved_var = x.var((0, 2, 3))
+
+        pytorch_out = [out.detach().numpy(),
+                       running_mean.cpu().numpy(), running_var.cpu().numpy(),
+                       saved_mean.cpu().numpy(), saved_var.cpu().numpy()]
+
+        model_export = MyModule()
+        f = io.BytesIO()
+
+        ort_sess = convert_to_onnx(model_export, input=(x,), opset_version=self.opset_version,
+                                   training=torch.onnx.TrainingMode.TRAINING)
+        ort_outs = run_ort(ort_sess, input=(x,))
+
+        [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in zip(pytorch_out, ort_outs)]
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_dropout_training(self):
