@@ -1630,7 +1630,14 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   // self[ind:] + self[:ind]
   shape_ind_end.insert(shape_ind_end.end(), shape_start_ind.begin(), shape_start_ind.end());
 
-  Tensor result = at::inverse(self.reshape({prod_ind_end, prod_ind_end}));
+  // If the reshaped self is not invertible catch this error
+  Tensor result;
+  try {
+    result = at::inverse(self.reshape({prod_ind_end, prod_ind_end}));
+  } catch (...) {
+    TORCH_CHECK(false, "Failed to invert the input tensor, because it is singular.");
+  }
+
   return result.reshape(shape_ind_end);
 }
 

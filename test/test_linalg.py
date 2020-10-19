@@ -8,7 +8,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN, make_tensor)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, dtypesIfCPU, dtypesIfCUDA,
-     onlyCUDA, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
+     onlyCUDA, onlyCPU, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck
 
@@ -964,7 +964,6 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @dtypesIfCUDA(torch.float32, torch.float64)
-    @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     def test_tensorinv_errors(self, device, dtype):
 
         def check_shape(a_shape, ind):
@@ -986,6 +985,39 @@ class TestLinalg(TestCase):
         # test for invalid ind
         check_ind((12, 3, 4), ind=-1)
         check_ind((18, 3, 3, 2), ind=0)
+
+    @skipCPUIfNoLapack
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_tensorinv_singular_input(self, device, dtype):
+
+        def check_singular_input(a_shape, ind):
+            prod_ind_end = np.prod(a_shape[ind:])
+            a = torch.eye(prod_ind_end, dtype=dtype, device=device)
+            a[-1, -1] = 0   # Now `a` is singular
+            a = a.reshape(a_shape)
+            with self.assertRaisesRegex(RuntimeError, "Failed to invert the input tensor, because it is singular"):
+                torch.linalg.tensorinv(a, ind=ind)
+
+        # test for non-invertible input
+        check_singular_input((12, 3, 4), ind=1)
+        check_singular_input((3, 6, 18), ind=2)
+
+    # TODO: torch.inverse on CUDA for single matrices does not raise the error
+    # see issue https://github.com/pytorch/pytorch/issues/46557
+    @unittest.expectedFailure
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.float32, torch.float64)
+    def test_tensorinv_singular_input_xfailed(self, device, dtype):
+        a_shape = (12, 3, 4)
+        ind = 1
+        prod_ind_end = np.prod(a_shape[ind:])
+        a = torch.eye(prod_ind_end, dtype=dtype, device=device)
+        a[-1, -1] = 0   # Now `a` is singular
+        a = a.reshape(a_shape)
+        with self.assertRaisesRegex(RuntimeError, "Failed to invert the input tensor, because it is singular"):
+            torch.linalg.tensorinv(a, ind=ind)
 
 instantiate_device_type_tests(TestLinalg, globals())
 
