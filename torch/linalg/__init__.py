@@ -149,6 +149,9 @@ Returns the inverse of a given tensor.
 This function computes a tensor such that ``tensordot(tensorinv(input), input, ind) == I``,
 where ``I`` denotes the identity tensor.
 
+.. note:: If :attr:`input` is not a 'square' tensor, meaning it does not satisfy the requirement
+          ``prod(input.shape[ind:]) == prod(input.shape[:ind])``, then a RuntimeError will be thrown.
+
 Args:
     input (Tensor): The tensor to invert. Its shape must satidsfy ``prod(input.shape[:ind]) == prod(input.shape[ind:])``.
 
