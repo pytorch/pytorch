@@ -917,8 +917,8 @@ def emit_single_dispatch(ps: PythonSignature, decl: Dict[str, Any], method: bool
 
         # from arg parser outputs to dispatch lambda arguments
         parser_outputs = arg_parser_output_exprs(ps, f, method=method)
-        binding_init_exprs, lambda_arg_exprs = dispatch_lambda_exprs(ps, f, method=method)
-        inits = '\n'.join(binding_init_exprs.exprs)
+        lambda_arg_exprs = dispatch_lambda_exprs(ps, f, method=method)
+        inits = '\n'.join(lambda_arg_exprs.inits)
         lambda_args = ', '.join(lambda_arg_exprs.exprs)
 
         # scatter fields

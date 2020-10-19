@@ -1,5 +1,5 @@
-import tools.codegen.api.cpp as cpp
 from tools.codegen.api.types import *
+import tools.codegen.api.cpp as cpp
 from tools.codegen.gen import pythonify_default
 from tools.codegen.model import *
 
@@ -386,7 +386,6 @@ class PythonArgParserOutputExpr:
 
     # In some special cases we need create different expr, e.g.:
     # '_r.isNone(1)' instead of '_r.tensor(1)'.
-    # TODO: maybe directly create 'isNone' form expr?
     index: int
 
     # The python argument it maps to.
@@ -412,13 +411,12 @@ class DispatchLambdaArgumentExprs:
     # It has 1-1 mapping with DispatchLambdaArgument.
     exprs: Sequence[str]
 
-@dataclass(frozen=True)
-class LocalInitExprs:
-    # The exprs for special local inits, e.g.:
+    # Special local inits, which might introduce new variables that
+    # the 'exprs' above reference, e.g.:
     #
     #   'auto out = _r.tensorlist_n<2>(2);'
     #
-    exprs: Sequence[str]
+    inits: Sequence[str]
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -471,6 +469,7 @@ def argument(cpp_arg: CppArgument) -> PythonArgument:
         name=a.name,
         type=a.type,
         cpp_type_str=cpp_arg.type,
+        # TODO: directly translate a.default to python default
         default=str(pythonify_default(cpp.default_expr(a.default, a.type)))
         if a.default is not None else None,
         default_init=None,
@@ -751,6 +750,8 @@ def cpp_dispatch_exprs(f: NativeFunction, method: bool, *,
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
+# TODO: should emit these unpack methods directly from Type to avoid
+# indirect translation via cpp_type_str.
 UNPACK_METHODS = {
     'const Tensor &': 'tensor',
     'Tensor &': 'tensor',
@@ -880,10 +881,7 @@ TENSOR_OPTIONS_FIELDS = {
 # bind arg parser outputs (python args) with dispatch lambda arguments (c++ args).
 def dispatch_lambda_exprs(
     ps: PythonSignature, f: NativeFunction, *, method: bool
-) -> Tuple[
-    LocalInitExprs,
-    DispatchLambdaArgumentExprs,
-]:
+) -> DispatchLambdaArgumentExprs:
     # This method is to bind 'arg_parser_outputs' and 'lambda_args' by producing
     # 'inits' and 'lambda_args_exprs' for each lambda argument using arg parser
     # outputs.
@@ -979,9 +977,7 @@ check_out_type_matches({arg_parser_outputs['out'].expr}, {arg_parser_outputs['dt
             raise RuntimeError(
                 f'{f.func}: expected "requires_grad" in tensor_options_args absent, but found [{tensor_options_args_names}]')
 
-    return (
-        LocalInitExprs(exprs=inits),
-        DispatchLambdaArgumentExprs(
-            exprs=tuple(map(lambda a: lambda_args_exprs[a.name], lambda_args)),
-        ),
+    return DispatchLambdaArgumentExprs(
+        exprs=tuple(map(lambda a: lambda_args_exprs[a.name], lambda_args)),
+        inits=inits,
     )
