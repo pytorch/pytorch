@@ -3264,26 +3264,29 @@ class TestCudaComm(TestCase):
         input = torch.rand((size,), device="cuda", dtype=torch.float)
         alloc = torch.empty((size,), device="cuda", dtype=torch.float)
 
-        # Ops to test with tuples of args to use.
-        torch_with_args = (# ("bernoulli",),
-                           # ("multinomial",),
-                           # ("normal",),
-                           ("poisson", (input.clone(),)),
-                           # ("rand",),
-                           # ("randint",),
-                           # ("randn",)
+        # Torch ops to test with sample args (tuple) and kwargs (dict)
+        torch_with_args = (("bernoulli", (input.clone(),), {}),
+                           ("multinomial", (input.clone(), size, True), {}),
+                           ("multinomial", (input.clone(), size // 2, False), {}),
+                           ("normal", (input.clone() + 1, input.clone()), {}),
+                           ("poisson", (input.clone(),), {}),
+                           ("rand", (size,), {"device": "cuda", "dtype": torch.float}),
+                           ("randint", (0, 3, (size,)), {"device": "cuda", "dtype": torch.float}),
+                           ("randn", (size,), {"device": "cuda", "dtype": torch.float}),
                            )
-        tensor_with_args = (("bernoulli_", (input.clone(),)),
-                            # ("cauchy_",),
-                            # ("exponential_",),
-                            # ("geometric_",),
-                            # ("log_normal_",),
-                            # ("normal_",),
-                            # ("random_",),
-                            # ("uniform_",)
+
+        # Tensor methods to test with sample args (tuple) and kwargs (dict)
+        tensor_with_args = (("bernoulli_", (input.clone(),), {}),
+                            ("cauchy_", (), {}),
+                            ("exponential_", (), {}),
+                            ("geometric_", (0.3,), {}),
+                            ("log_normal_", (), {}),
+                            ("normal_", (), {}),
+                            ("random_", (), {}),
+                            ("uniform_", (), {}),
                             )
 
-        def run(module, op, args):
+        def run(module, op, args, kwargs):
             gen_host_state = torch.Generator(device="cuda")
             torch.backends.cuda._stateful_ops.state_on_device = True
             gen_dev_state = torch.Generator(device="cuda")
@@ -3292,28 +3295,37 @@ class TestCudaComm(TestCase):
             gen_dev_state.manual_seed(5)
 
             if (module == "torch"):
-                control1 = getattr(torch, op)(*args, generator=gen_host_state)
-                control2 = getattr(torch, op)(*args, generator=gen_host_state)
-                t1 = getattr(torch, op)(*args, generator=gen_dev_state)
-                t2 = getattr(torch, op)(*args, generator=gen_dev_state)
+                kwargs["generator"] = gen_host_state
+                control1 = getattr(torch, op)(*args, **kwargs)
+                control2 = getattr(torch, op)(*args, **kwargs)
+                kwargs["generator"] = gen_dev_state
+                t1 = getattr(torch, op)(*args, **kwargs)
+                t2 = getattr(torch, op)(*args, **kwargs)
             else:
                 control1 = alloc.clone()
                 control2 = alloc.clone()
-                getattr(control1, op)(*args, generator=gen_host_state)
-                getattr(control2, op)(*args, generator=gen_host_state)
+                kwargs["generator"] = gen_host_state
+                getattr(control1, op)(*args, **kwargs)
+                getattr(control2, op)(*args, **kwargs)
                 t1 = alloc.clone()
                 t2 = alloc.clone()
-                getattr(t1, op)(*args, generator=gen_dev_state)
-                getattr(t2, op)(*args, generator=gen_dev_state)
+                kwargs["generator"] = gen_dev_state
+                getattr(t1, op)(*args, **kwargs)
+                getattr(t2, op)(*args, **kwargs)
 
-            self.assertEqual(control1, t1)
-            self.assertEqual(control2, t2)
+            try:
+                self.assertEqual(control1, t1)
+                self.assertEqual(control2, t2)
+            except Exception as e:
+                # A "msg=..." kwarg to assertEqual replaces its usual detailed "Tensors failed to compare..." message.
+                # The following adds my message without replacing the usual detailed message from assertEqual.
+                raise RuntimeError("Failed on " + module + "." + op) from e
 
         for op_with_args in torch_with_args:
             run("torch", *op_with_args)
 
-        for op_with_args in tensor_with_args:
-            run("tensor", *op_with_args)
+        for meth_with_args in tensor_with_args:
+            run("Tensor", *meth_with_args)
 
 
 if __name__ == '__main__':
