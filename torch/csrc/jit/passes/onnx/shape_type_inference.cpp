@@ -465,7 +465,6 @@ void ONNXAssignOutputShape(
   auto str_it = desc.strings.begin();
   auto str_end = desc.strings.end();
 
-  char type = *desc_it;
   size_t graph_output_index = 0;
   size_t graph_outputs_size = graph->outputs().size();
   size_t outputs_index = 0;
@@ -478,41 +477,32 @@ void ONNXAssignOutputShape(
       // "Outputs" is a flattened list of tensors, but
       //  graph outputs are not flattened. Unflatten
       // "outputs" to assign shape for the corresponding item.
-      if (type == D::TupleOpen) {
+      if (*desc_it == D::TupleOpen || *desc_it == D::TupleClose) {
         desc_it++;
-        while (*desc_it++ != D::TupleClose) {
-          TORCH_INTERNAL_ASSERT(*desc_it == D::Variable);
-          ONNXInferOutputShapeType(
-              graph->outputs()[graph_output_index],
-              outputs[outputs_index],
-              onnx_shape_inference);
-          desc_it++;
-          outputs_index++;
-        }
-        graph_output_index++;
-      } else if (type == D::ListOpen) {
+      } else if (*desc_it == D::ListOpen) {
         desc_it++;
+        auto elem_type = TensorType::create(outputs[outputs_index]);
         while (*desc_it != D::ListClose) {
           TORCH_INTERNAL_ASSERT(*desc_it == D::Variable);
-          ONNXInferOutputShapeType(
-              graph->outputs()[graph_output_index],
-              outputs[outputs_index],
-              onnx_shape_inference);
+          TORCH_INTERNAL_ASSERT(
+              elem_type->scalarType() ==
+              TensorType::create(outputs[outputs_index])->scalarType());
           desc_it++;
           outputs_index++;
         }
+        desc_it++;
+        graph->outputs()[graph_output_index]->setType(
+            ListType::create(elem_type));
         graph_output_index++;
       } else {
         TORCH_INTERNAL_ASSERT(
-            type == D::Variable,
+            *desc_it == D::Variable,
             "Only tensors and sequences of tensors are supported as ONNX graph outputs. Dictionaries or Strings are not supported.");
-        ONNXInferOutputShapeType(
-            graph->outputs()[graph_output_index],
-            outputs[outputs_index],
-            onnx_shape_inference);
+        auto type = TensorType::create(outputs[outputs_index]);
+        graph->outputs()[graph_output_index]->setType(ListType::create(type));
         graph_output_index++;
-        desc_it++;
         outputs_index++;
+        desc_it++;
       }
     } else {
       ONNXInferOutputShapeType(

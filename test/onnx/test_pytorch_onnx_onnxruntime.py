@@ -20,11 +20,13 @@ import model_defs.word_language_model as word_language_model
 import torchvision
 import onnx
 
+
 def to_numpy(tensor):
     if tensor.requires_grad:
         return tensor.detach().cpu().numpy()
     else:
         return tensor.cpu().numpy()
+
 
 def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
                     do_constant_folding=True, keep_initializers_as_inputs=True,
@@ -46,9 +48,14 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
                        onnx_shape_inference=onnx_shape_inference,
                        use_new_jit_passes=use_new_jit_passes)
 
-    # compute onnxruntime output prediction
-    ort_sess = onnxruntime.InferenceSession(f.getvalue())
-    return ort_sess
+    return f
+
+
+def inline_flatten_list(inputs, res_list):
+    for i in inputs:
+        res_list.append(i) if not isinstance(i, (list, tuple)) else inline_flatten_list(i, res_list)
+    return res_list
+
 
 def run_ort(ort_sess, input):
     input_copy = copy.deepcopy(input)
@@ -58,7 +65,8 @@ def run_ort(ort_sess, input):
     ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
     ort_outs = ort_sess.run(None, ort_inputs)
 
-    return ort_outs
+    return inline_flatten_list(ort_outs, [])
+
 
 def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
     output, _ = torch.jit._flatten(output)
@@ -91,18 +99,18 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         output = model(*input_copy)
         if isinstance(output, torch.Tensor):
             output = (output,)
+        f = convert_to_onnx(model, input=input, opset_version=self.opset_version,
+                            example_outputs=output, do_constant_folding=do_constant_folding,
+                            keep_initializers_as_inputs=self.keep_initializers_as_inputs,
+                            dynamic_axes=dynamic_axes, input_names=input_names,
+                            output_names=output_names, fixed_batch_size=fixed_batch_size, training=None,
+                            onnx_shape_inference=self.onnx_shape_inference,
+                            use_new_jit_passes=self.use_new_jit_passes)
 
-        ort_sess = convert_to_onnx(model, input=input, opset_version=self.opset_version,
-                                   example_outputs=output, do_constant_folding=do_constant_folding,
-                                   keep_initializers_as_inputs=self.keep_initializers_as_inputs,
-                                   dynamic_axes=dynamic_axes, input_names=input_names,
-                                   output_names=output_names, fixed_batch_size=fixed_batch_size, training=None,
-                                   onnx_shape_inference=self.onnx_shape_inference,
-                                   use_new_jit_passes=self.use_new_jit_passes)
-
+        # compute onnxruntime output prediction
+        ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_outs = run_ort(ort_sess, input)
         ort_compare_with_pytorch(ort_outs, output, rtol, atol)
-
 
         # if additional test inputs are provided run the onnx
         # model with these inputs and check the outputs
@@ -143,6 +151,7 @@ class TestONNXRuntime(unittest.TestCase):
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
                                   fixed_batch_size=fixed_batch_size)
+
         if self.is_script_test_enabled and self.use_new_jit_passes:
             script_model = torch.jit.script(model)
             _run_test(script_model)
@@ -2839,24 +2848,22 @@ class TestONNXRuntime(unittest.TestCase):
     def test_split(self):
         class SplitModel(torch.nn.Module):
             def forward(self, input):
-                out1, out2, out3 = input.split([2, 1, 2])
-                return out1, out2, out3
+                return input.split([2, 1, 2]), input.split([3, 2])[0]
 
         x = torch.randn(5, 4, 3)
-        self.run_test(SplitModel(), x)
+        model = torch.jit.script(SplitModel())
+        self.run_test(model, x)
 
         class SplitModel2(torch.nn.Module):
             def forward(self, input):
-                out1, out2, out3 = input.split([2, 1, 1], -2)
-                return out1, out2, out3
+                return input.split([2, 1, 1], -2), input.split([2, 2], -2)[-1]
 
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
 
         class SplitModel3(torch.nn.Module):
             def forward(self, input):
-                out1, out2, out3 = input.split([2, 1, 2])
-                return out3, out1
+                return input.split([2, 1, 2])
 
         x = torch.randn(5, 4, 3)
         self.run_test(torch.jit.script(SplitModel3()), x)
@@ -2993,10 +3000,11 @@ class TestONNXRuntime(unittest.TestCase):
                     res2 += 1
                     res3 = res3 + [arr[i].sum(0, False)]
                     res4 += [arr[-1 - i].sum(0, False)]
-                return torch.stack(res), torch.stack(res1), res2, torch.stack(res3), torch.stack(res4)
+                return res, res1, res2, torch.stack(res3), torch.stack(res4)
 
         model = ListLoopModel()
         inputs = torch.randn(16)
+
         self.run_test(model, inputs)
 
     @skipIfONNXShapeInference(False)
@@ -4385,7 +4393,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.assertRaises(RuntimeError, check_proto)
 
-    @disableScriptTest()  # dtype mismatch
     def test_split_tensor_scalar(self):
         class SplitModel(torch.nn.Module):
             def forward(self, x):
