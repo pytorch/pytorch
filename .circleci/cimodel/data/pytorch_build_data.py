@@ -50,13 +50,21 @@ CONFIG_TREE_DATA = [
             ("10.2", [
                 ("3.6", [
                     ("shard_test", [XImportant(True)]),
-                    ("libtorch", [X(True)]),
+                    ("libtorch", [
+                        (True, [
+                            ('build_only', [X(True)]),
+                        ]),
+                    ]),
                 ]),
             ]),
             ("11.0", [
                 ("3.8", [
                     X(True),
-                    ("libtorch", [XImportant(True)]),
+                    ("libtorch", [
+                        (True, [
+                            ('build_only', [XImportant(True)]),
+                        ]),
+                    ]),
                 ]),
             ]),
         ]),
@@ -255,7 +263,7 @@ class LibTorchConfigNode(TreeConfigNode):
         self.props["is_libtorch"] = node_name
 
     def child_constructor(self):
-        return ImportantConfigNode
+        return ExperimentalFeatureConfigNode
 
 
 class CudaGccOverrideConfigNode(TreeConfigNode):

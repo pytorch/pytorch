@@ -139,8 +139,9 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
 // There are roughly three parts to compute einsum:
 // 1. Parse equation to extract the labels for each input operand and output
 // 2. Unsqueeze missing dimensions from input operands and permute to align them
-// 3. Compute result by multiplying input operands and summing contraction dimensions
-// We do the last part by reducing to bmm, there is room for optimization here.
+// 3. Compute result by multiplying input operands and summing contraction
+//    dimensions We do the last part by reducing to bmm, there is room for
+//    optimization here.
 Tensor einsum(std::string equation, TensorList operands) {
   TORCH_CHECK(!operands.empty(), "einsum() must provide at least one operand");
   checkDeviceType("einsum()", operands, operands[0].device().type());
@@ -206,7 +207,7 @@ Tensor einsum(std::string equation, TensorList operands) {
   // Labels must be within [a, z].
   constexpr int total_labels = 'z' - 'a' + 1;
   std::vector<int> label_count(total_labels, 0);
-  
+
   // This stores the maximum number of dimensions covered by ellipsis
   int64_t ell_num_dim = 0;
 
@@ -242,7 +243,7 @@ Tensor einsum(std::string equation, TensorList operands) {
   // mapping of label to index in the output/permuted tensors
   std::vector<int> label_out_index(total_labels, -1);
   int out_index = 0;
-  
+
   // start index of ellipsis in the output/permuted tensors
   int64_t ell_index = 0;
 
@@ -278,8 +279,8 @@ Tensor einsum(std::string equation, TensorList operands) {
           break;
 
         default:
-          // Ensure label appeared at least once for some input operand and at most
-          // once for the output
+          // Ensure label appeared at least once for some input operand and at
+          // most once for the output
           TORCH_CHECK(
               rhs[i] >= 'a' && rhs[i] <= 'z',
               "einsum() subscripts must be in range [a, z] but found ",
@@ -293,7 +294,7 @@ Tensor einsum(std::string equation, TensorList operands) {
                   ? " appears more than once in the output string"
                   : " does not appear in the equation for any input operand");
           label_out_index[rhs[i] - 'a'] = out_index++;
-          
+
           // Set to -1 to mark that this label already appeared in the output
           label_count[rhs[i] - 'a'] = -1;
       }
@@ -379,7 +380,8 @@ Tensor einsum(std::string equation, TensorList operands) {
         std::ostringstream msg;
         msg << "einsum() operands do not broadcast with remapped shapes [original->remapped]:";
         for (std::size_t j = 0; j < operands.size(); ++j) {
-          msg << " " << operands[j].sizes() << "->" << permuted_operands[j].sizes();
+          msg << " " << operands[j].sizes() << "->"
+              << permuted_operands[j].sizes();
         }
         TORCH_CHECK(false, msg.str());
       }

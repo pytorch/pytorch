@@ -37,7 +37,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA, expectedAlertNondeterministic
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, with_tf32_off, \
@@ -4452,6 +4452,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertEqual(output3, output1)
                     self.assertEqual(output3, output2)
 
+        @unittest.skipIf(True, "Skip due to catchAll -> Math")
         def test_empty_meta(self):
             x = torch.empty_meta(2 ** 20, 2 ** 20)
             y = torch.empty_meta(2 ** 20)
@@ -5397,8 +5398,8 @@ class TestTorchDeviceType(TestCase):
             return value
 
         try:
-            expected = torch.from_numpy(
-                np.power(to_np(base), to_np(np_exponent)))
+            np_res = np.power(to_np(base), to_np(np_exponent))
+            expected = torch.from_numpy(np_res) if isinstance(np_res, np.ndarray) else torch.tensor(np_res, dtype=base.dtype)
         except ValueError as e:
             err_msg = "Integers to negative integer powers are not allowed."
             self.assertEqual(str(e), err_msg)
@@ -13861,10 +13862,19 @@ class TestTorchDeviceType(TestCase):
     @onlyCUDA
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_cuda_tensor_pow_scalar_tensor(self, device):
-        cuda_tensor = torch.randn((3, 3), device=device)
-        scalar_tensors = [torch.tensor(5), torch.tensor(-3), torch.tensor(1)]
-        for exp in scalar_tensors:
-            self._test_pow(cuda_tensor, exp)
+        cuda_tensors = [torch.randn((3, 3), device=device), torch.tensor(3.0, device=device)]
+        scalar_tensors = [torch.tensor(5.0, device='cpu'), torch.tensor(-3), torch.tensor(1)]
+        for base, exp in product(cuda_tensors, scalar_tensors):
+            self._test_pow(base, exp)
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_cpu_tensor_pow_cuda_scalar_tensor(self, device):
+        cpu_tensors = [torch.randn((3, 3), device='cpu'), torch.tensor(3.0, device='cpu')]
+        cuda_tensors = [torch.tensor(5.0, device='cuda'), torch.tensor(-3, device='cuda')]
+        for base, exp in product(cpu_tensors, cuda_tensors):
+            regex = 'Expected all tensors to be on the same device, but found at least two devices, cuda.* and cpu!'
+            self.assertRaisesRegex(RuntimeError, regex, torch.pow, base, exp)
 
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
@@ -15489,7 +15499,8 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    def test_lu(self, device):
+    @dtypes(torch.double, torch.cfloat, torch.cdouble)
+    def test_lu(self, device, dtype):
         from torch.testing._internal.common_utils import random_matrix
 
         def run_test(device, pivot):
@@ -15499,7 +15510,7 @@ class TestTorchDeviceType(TestCase):
                 else:
                     rows, columns = matrix_size
                 if a is None:
-                    a = random_matrix(rows, columns, *batches, **dict(singular=singular)).to(device)
+                    a = random_matrix(rows, columns, *batches, **dict(singular=singular, dtype=dtype)).to(device)
                 a_LU_info, pivots_info, info_ = a.lu(pivot=pivot, get_infos=True)
                 self.assertEqual(a_LU_info.size(), torch.Size(batches + (rows, columns)))
                 self.assertEqual(pivots_info.size(), torch.Size(batches + (min(rows, columns),)))
@@ -15514,14 +15525,42 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(a_LU, a_LU_info)
                 self.assertEqual(pivots_info, pivots)
 
-                P, L, U = torch.lu_unpack(a_LU, pivots)
-                self.assertEqual(P.matmul(L.matmul(U)), a)
+
+                if (self.device_type == 'cpu') or (not dtype.is_complex):
+                    P, L, U = torch.lu_unpack(a_LU, pivots)
+
+                    self.assertEqual(P.matmul(L.matmul(U)), a)
+                else:
+                    # TODO(@nikitaved): remove this once bmm_out is avaiable on CUDA for complex types
+
+                    # squash batch dimensions for easier iteration
+                    a = a.view(-1, a.size(-2), a.size(-1))
+                    a_LU = a_LU.view(-1, a_LU.size(-2), a_LU.size(-1))
+                    pivots = pivots.view(-1, pivots.size(-1))
+
+                    P, L, U = torch.lu_unpack(a_LU, pivots)
+
+                    for i in range(a.size(0)):
+                        self.assertEqual(
+                            P.select(0, i) @ L.select(0, i) @ U.select(0, i),
+                            a.select(0, i)
+                        )
 
                 if self.device_type == 'cuda':
                     # lu without pivoting is implemented only for cuda device
                     a_LU_info_nopiv, nopiv, info_nopiv = a.lu(pivot=False, get_infos=True)
                     P_nopiv, L_nopiv, U_nopiv = torch.lu_unpack(a_LU_info_nopiv, nopiv)
-                    self.assertEqual(P_nopiv.matmul(L_nopiv.matmul(U_nopiv)), a)
+
+                    if (self.device_type == 'cpu') or (not dtype.is_complex):
+                        self.assertEqual(P_nopiv.matmul(L_nopiv.matmul(U_nopiv)), a)
+                    else:
+                        # TODO(@nikitaved): remove this once bmm_out is avaiable on CUDA for complex types
+                        for i in range(a.size(0)):
+                            self.assertEqual(
+                                P_nopiv.select(0, i) @ L_nopiv.select(0, i) @ U_nopiv.select(0, i),
+                                a.select(0, i)
+                            )
+
                     k = min(rows, columns)
                     self.assertEqual(nopiv, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(a.shape[:-2] + (k, )))
                     if not singular:
@@ -15531,7 +15570,10 @@ class TestTorchDeviceType(TestCase):
                         # with pivoting is. Therefore, we require the
                         # equality of info-s only for non-singular
                         # matrices.
-                        self.assertEqual(info_, info_nopiv)
+                        # NOTE: infor_ is reshaped because info_nopiv might have
+                        # squashed batch dimensions for complex types on CUDA,
+                        # see the TODOs above.
+                        self.assertEqual(info_.reshape(info_nopiv.shape), info_nopiv)
 
             for ms, batch in product([3, 5, 7, (4, 2), (3, 4)], [(), (2,), (3,), (3, 5)]):
                 run_subtest(ms, batch, device, pivot)
