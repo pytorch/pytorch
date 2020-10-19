@@ -2839,24 +2839,21 @@ class TestONNXRuntime(unittest.TestCase):
     def test_split(self):
         class SplitModel(torch.nn.Module):
             def forward(self, input):
-                out1, out2, out3 = input.split([2, 1, 2])
-                return out1, out2, out3
+                return input.split([2, 1, 2]), input.split([3, 2])[0]
 
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel(), x)
 
         class SplitModel2(torch.nn.Module):
             def forward(self, input):
-                out1, out2, out3 = input.split([2, 1, 1], -2)
-                return out1, out2, out3
+                return input.split([2, 1, 1], -2), input.split([2, 2], -2)[-1]
 
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
 
         class SplitModel3(torch.nn.Module):
             def forward(self, input):
-                out1, out2, out3 = input.split([2, 1, 2])
-                return out3, out1
+                return input.split([2, 1, 2])
 
         x = torch.randn(5, 4, 3)
         self.run_test(torch.jit.script(SplitModel3()), x)
