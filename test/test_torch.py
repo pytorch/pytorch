@@ -692,10 +692,6 @@ class AbstractTestCases:
             for i in range(4):
                 self.assertEqual(z[i], res)
 
-            x = torch.tensor([-1, 0, -0, 1] * 4, dtype=torch.float).reshape(1, 4, 4)
-            z = torch.copysign(x, y)
-            self.assertEqual(z, res.reshape(1, 4, 4))
-
             # RHS
             x = torch.tensor([-1, 0, -0, 1] * 4, dtype=torch.float).reshape(4, 4)
             y = torch.tensor([[-1] * 4, [-0] * 4, [0] * 4, [1] * 4], dtype=torch.float).reshape(4, 1, 4)
