@@ -339,7 +339,7 @@ void EncoderBase::EncodeValueInfo(
           shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
         } else {
           if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
-            symbol_dim_map_[sizes[i]] = name + "_" + std::to_string(i);
+            symbol_dim_map_[sizes[i]] = "dim_" + std::to_string(i);
           }
           shape->mutable_dim(i)->set_dim_param(symbol_dim_map_[sizes[i]]);
         }
