@@ -8761,6 +8761,22 @@
   use_c10_dispatcher: full
   variants: function
 
+- func: fft_fft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+  python_module: fft
+  variants: function
+
+- func: fft_ifft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+  python_module: fft
+  variants: function
+
+- func: fft_rfft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+  python_module: fft
+  variants: function
+
+- func: fft_irfft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+  python_module: fft
+  variants: function
+
 - func: fft_fftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor
   python_module: fft
   use_c10_dispatcher: full
