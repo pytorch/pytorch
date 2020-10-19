@@ -15320,7 +15320,10 @@ class TestTorchDeviceType(TestCase):
             return  # CPU does not have half support
         maxval = 2 if dtype == torch.bool else 4
         x = torch.randint(2, (8,), dtype=dtype, device=device)
-        exp_val, exp_indices, exp_inverse, exp_counts = np.unique(x.cpu().numpy(), return_index=True, return_inverse=True, return_counts=True)
+        exp_val, exp_indices, exp_inverse, exp_counts = np.unique(x.cpu().numpy(),
+                                                                  return_index=True,
+                                                                  return_inverse=True,
+                                                                  return_counts=True)
         for return_index, return_inverse, return_counts in product((True, False), repeat=3):
             out = x._uniq(return_index=return_index, return_inverse=return_inverse, return_counts=return_counts)
             self.assertEqual(exp_val, out.values)
