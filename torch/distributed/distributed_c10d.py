@@ -404,7 +404,6 @@ def init_process_group(backend,
     global _backend
     global _default_pg
     global _default_pg_init_method
-    global _group_count
 
     if not isinstance(timeout, timedelta):
         raise RuntimeError("Expected timeout argument to be of type"
