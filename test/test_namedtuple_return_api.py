@@ -12,7 +12,7 @@ aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.
 all_operators_with_namedtuple_return = {
     'max', 'min', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
     'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq',
-    'triangular_solve', 'cummax', 'cummin'
+    'triangular_solve', 'cummax', 'cummin', '_uniq'
 }
 
 
@@ -64,6 +64,7 @@ class TestNamedTupleAPI(unittest.TestCase):
             op(operators=['symeig', 'eig'], input=(True,), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['triangular_solve'], input=(a,), names=('solution', 'cloned_coefficient'), hasout=True),
             op(operators=['lstsq'], input=(a,), names=('solution', 'QR'), hasout=True),
+            op(operators=['_uniq'], input=(0,), names=('values', 'inverse', 'indices', 'counts'), hasout=False)
         ]
 
         for op in operators:
