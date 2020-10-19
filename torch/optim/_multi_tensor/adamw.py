@@ -129,17 +129,15 @@ class AdamW(Optimizer):
                 # Use the max. for normalizing running avg. of gradient
                 max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sq)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
-                torch._foreach_div_scalar_list_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
+                torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
                 denom = torch._foreach_add(max_exp_avg_sq_sqrt, group['eps'])
             else:
                 exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sq)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
-                torch._foreach_div_scalar_list_(exp_avg_sq_sqrt, bias_correction_sqrt)
+                torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
                 denom = torch._foreach_add(exp_avg_sq_sqrt, group['eps'])
 
-            step_size = [group['lr'] / bc for bc in bias_correction1]
-
-            for i in range(len(step_size)):
-                params_with_grad[i].addcdiv_(exp_avg[i], denom[i], value=-step_size[i])
+            step_size = [-1 * (group['lr'] / bc) for bc in bias_correction1]
+            torch._foreach_addcdiv_(params_with_grad, exp_avg, denom, step_size)
 
         return loss
