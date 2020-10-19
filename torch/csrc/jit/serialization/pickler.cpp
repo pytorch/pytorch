@@ -597,7 +597,8 @@ void Pickler::pushTuple(const IValue& ivalue) {
 }
 
 WriteableTensorData getWriteableTensorData(
-    const at::Tensor& tensor, bool toCpu) {
+    const at::Tensor& tensor,
+    bool toCpu) {
   WriteableTensorData result;
   result.tensor_ = tensor;
   result.size_ = tensor.storage().nbytes();
