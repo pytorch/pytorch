@@ -149,7 +149,7 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   module.def(
       "_register_comm_hook",
       &_register_comm_hook,
-      py::arg("ddp_model"),
+      py::arg("reducer"),
       py::arg("state"),
       py::arg("comm_hook"));
 
