@@ -953,7 +953,7 @@ class TestLinalg(TestCase):
     def test_tensorsolve_empty(self, device, dtype):
         # Check for empty inputs. NumPy does not work for these cases.
         a = torch.empty(0, 0, 1, 2, 3, 0, dtype=dtype, device=device)
-        b = torch.empty(a.shape[:2])
+        b = torch.empty(a.shape[:2], dtype=dtype, device=device)
         x = torch.linalg.tensorsolve(a, b)
         self.assertEqual(torch.tensordot(a, x, dims=len(x.shape)), b)
 
