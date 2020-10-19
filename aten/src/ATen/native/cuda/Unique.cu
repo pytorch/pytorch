@@ -306,19 +306,19 @@ unique_consecutive_cuda(const Tensor& self, const bool return_inverse, const boo
 }
 
 std::tuple<Tensor,Tensor,Tensor,Tensor>
-uniq_dim_cuda(const Tensor & self, int64_t dim, bool return_inverse, bool return_indices, bool return_counts){
+uniq_dim_cuda(const Tensor & self, int64_t dim, bool return_inverse, bool return_index, bool return_counts){
   return AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, self.scalar_type(), "unique_dim", [&] {
     Tensor output, inverse, counts, indices;
-    std::tie(output, inverse, counts, indices) = unique_dim_cuda_template<scalar_t>(self, dim, false, return_inverse, return_counts, return_indices);
+    std::tie(output, inverse, counts, indices) = unique_dim_cuda_template<scalar_t>(self, dim, false, return_inverse, return_counts, return_index);
     return std::make_tuple(output, inverse, indices, counts);
   });
 }
 
 std::tuple<Tensor,Tensor,Tensor,Tensor>
-uniq_cuda(const Tensor & self, bool return_inverse, bool return_indices, bool return_counts){
+uniq_cuda(const Tensor & self, bool return_inverse, bool return_index, bool return_counts){
   return AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, self.scalar_type(), "unique_dim", [&] {
     Tensor output, inverse, counts, indices;
-    std::tie(output, inverse, counts, indices) = unique_cuda_template<scalar_t>(self, false, return_inverse, return_counts, return_indices);
+    std::tie(output, inverse, counts, indices) = unique_cuda_template<scalar_t>(self, false, return_inverse, return_counts, return_index);
     return std::make_tuple(output, inverse, indices, counts);
   });
 }

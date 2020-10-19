@@ -1097,10 +1097,10 @@
 - name: _unique(Tensor self, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
   self: not_implemented("_unique")
 
-- name: _uniq(Tensor self, *, bool return_inverse=False, bool return_indices=False, bool return_counts=False) -> (Tensor values, Tensor inverse, Tensor indices, Tensor counts)
+- name: _uniq(Tensor self, *, bool return_inverse=False, bool return_index=False, bool return_counts=False) -> (Tensor values, Tensor inverse, Tensor indices, Tensor counts)
   self: not_implemented("unique_good")
 
-- name: _uniq.dim(Tensor self, int dim, *, bool return_inverse=False, bool return_indices=False, bool return_counts=False) -> (Tensor values, Tensor inverse, Tensor indices, Tensor counts)
+- name: _uniq.dim(Tensor self, int dim, *, bool return_inverse=False, bool return_index=False, bool return_counts=False) -> (Tensor values, Tensor inverse, Tensor indices, Tensor counts)
   self: not_implemented("unique_good.dim")
 
 - name: _unsafe_view(Tensor self, int[] size) -> Tensor

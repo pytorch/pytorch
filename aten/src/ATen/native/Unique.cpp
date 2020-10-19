@@ -41,15 +41,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> unique_cpu_template(
   }
 
   if (return_inverse || return_counts) {
-    inverse_indices.resize_(input.sizes());
-    int64_t* inverse_indices_data = inverse_indices.data_ptr<int64_t>();
-    std::unordered_map<scalar_t, int64_t> inverse_map;
-    inverse_map.reserve(output.numel());
-    for (int64_t i = 0; i < output.numel(); ++i) {
-      inverse_map[output_data[i]] = i;
-    }
-    for(int64_t i = 0; i < numel; ++i) {
-      inverse_indices_data[i] = inverse_map[input_data[i]];
+    if (return_inverse) {
+      inverse_indices.resize_(input.sizes());
+      int64_t* inverse_indices_data = inverse_indices.data_ptr<int64_t>();
+      std::unordered_map<scalar_t, int64_t> inverse_map;
+      inverse_map.reserve(output.numel());
+      for (int64_t i = 0; i < output.numel(); ++i) {
+        inverse_map[output_data[i]] = i;
+      }
+      for(int64_t i = 0; i < numel; ++i) {
+        inverse_indices_data[i] = inverse_map[input_data[i]];
+      }
     }
     if (return_counts) {
       std::unordered_map<scalar_t, int64_t> counts_map;
@@ -72,11 +74,15 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> unique_cpu_template(
     indices.resize_(output.sizes());
     std::unordered_set<scalar_t> indices_set;
     indices_set.reserve(output.numel());
-    int64_t ind = 0;
+    std::unordered_map<scalar_t, int64_t> unique_map;
+    unique_map.reserve(output.numel());
+    for (int64_t i = 0; i < output.numel(); ++i) {
+      unique_map[output_data[i]] = i;
+    }
     for (int64_t i = 0; i < numel; i++) {
       auto e = indices_set.insert(input_data[i]);
       if (e.second) {
-        indices[ind++] = i;
+        indices[unique_map[input_data[i]]] = i;
       }
     }
   }
@@ -145,13 +151,13 @@ ForwardIt _unique_dim_cpu_impl(ForwardIt first, ForwardIt last,
     // set first index, inverse index and count
     inverse_indices_vec[indices[0]] = 0;
     counts[0] += 1;
-    indices_res[0] = 0;
+    indices_res[0] = indices[0];
 
     ForwardIt result = first;
     while (++first != last) {
       if (!at::equal(*result, *first)) {
         indices_res[std::distance(begin, ++result)] =
-            std::distance(begin, first);
+            indices[std::distance(begin, first)];
         if (result != first) {
           *result = std::move(*first);
         }
@@ -239,8 +245,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _unique_dim_cpu_template(
   auto last = _unique_dim_cpu_impl(
     input_unbind.begin(), input_unbind.end(), indices, inverse_indices, counts, indices_res);
   input_unbind.erase(last, input_unbind.end());
-  counts = at::narrow(counts, 0, 0, input_unbind.size());
-  indices_res = at::narrow(indices_res, 0, 0, input_unbind.size());
+  if (!return_inverse)
+    inverse_indices = at::empty({0}, self.options().dtype(kLong));
+  counts = return_counts ? at::narrow(counts, 0, 0, input_unbind.size()) : at::empty({0}, self.options().dtype(kLong));
+  indices_res = return_indices ? at::narrow(indices_res, 0, 0, input_unbind.size()) : at::empty({0}, self.options().dtype(kLong));
 
   // reshape back
   auto output = at::stack(input_unbind, 0);
@@ -313,19 +321,19 @@ unique_consecutive_cpu(const Tensor& self, const bool return_inverse, const bool
 }
 
 std::tuple<Tensor,Tensor,Tensor,Tensor>
-uniq_dim_cpu(const Tensor & self, int64_t dim, bool return_inverse, bool return_indices, bool return_counts){
+uniq_dim_cpu(const Tensor & self, int64_t dim, bool return_inverse, bool return_index, bool return_counts){
   return AT_DISPATCH_ALL_TYPES_AND(kBool, self.scalar_type(), "unique_dim", [&] {
     Tensor output, inverse, counts, indices;
-    std::tie(output, inverse, counts, indices) = _unique_dim_cpu_template<scalar_t>(self, dim, false, return_inverse, return_counts, return_indices);
+    std::tie(output, inverse, counts, indices) = _unique_dim_cpu_template<scalar_t>(self, dim, /*consecutive=*/false, return_inverse, return_counts, return_index);
     return std::make_tuple(output, inverse, indices, counts);
   });
 }
 
 std::tuple<Tensor,Tensor,Tensor,Tensor>
-uniq_cpu(const Tensor & self, bool return_inverse, bool return_indices, bool return_counts){
+uniq_cpu(const Tensor & self, bool return_inverse, bool return_index, bool return_counts){
   return AT_DISPATCH_ALL_TYPES_AND(kBool, self.scalar_type(), "unique_dim", [&] {
     Tensor output, inverse, counts, indices;
-    std::tie(output, inverse, counts, indices) = unique_cpu_template<scalar_t>(self, false, return_inverse, return_counts, return_indices);
+    std::tie(output, inverse, counts, indices) = unique_cpu_template<scalar_t>(self, /*sorted=*/true, return_inverse, return_counts, return_index);
     return std::make_tuple(output, inverse, indices, counts);
   });
 }
