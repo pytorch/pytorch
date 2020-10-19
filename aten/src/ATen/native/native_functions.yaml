@@ -857,7 +857,7 @@
   use_c10_dispatcher: full
   variants: function
   dispatch:
-    DefaultBackend: copysign
+    CPU, CUDA: copysign
 
 - func: logical_not(Tensor self) -> Tensor
   use_c10_dispatcher: full
