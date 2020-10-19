@@ -598,7 +598,7 @@ class TestFX(JitTestCase):
                 return self.sa(*x)
 
         ul = UnpacksList()
-        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be unpacked as function argument'):
+        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be iterated.'):
             symbolic_trace(ul)
 
     def test_unpack_dict_better_error(self):
@@ -615,7 +615,7 @@ class TestFX(JitTestCase):
                 return self.sk(**x)
 
         ud = UnpacksDict()
-        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be unpacked as function argument'):
+        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be iterated.'):
             symbolic_trace(ud)
 
     def test_torch_custom_ops(self):
