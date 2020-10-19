@@ -66,7 +66,13 @@ run_tests() {
 run_tests && assert_git_not_dirty && echo "TEST PASSED"
 
 if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cuda10-cudnn7-py3" ]]; then
-  cd $TEST_DIR
+  pushd $TEST_DIR
+  echo "Generating XML coverage report"
+  time python -mcoverage xml
+  popd
+
+  pushd $PROJECT_DIR
   python -mpip install codecov
-  python -mcodecov --root "$PROJECT_DIR_WIN"
+  python -mcodecov
+  popd
 fi
