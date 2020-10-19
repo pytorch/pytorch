@@ -774,7 +774,7 @@ void heaviside_kernel(TensorIterator& iter) {
 }
 
 void copysign_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, iter.dtype(), "copysign_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "copysign_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
           return std::copysign(a, b);
         });

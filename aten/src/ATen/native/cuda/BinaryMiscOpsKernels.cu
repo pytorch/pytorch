@@ -127,7 +127,7 @@ struct CopySignFunctor {
 
 void copysign_kernel_cuda(TensorIterator& iter) {
   if (iter.is_cpu_scalar(1) || iter.is_cpu_scalar(2)) {
-    AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, iter.common_dtype(), "copysign_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "copysign_cuda", [&]() {
       using accscalar_t = at::acc_type<scalar_t, true>;
       int scalar_arg = iter.is_cpu_scalar(1) ? 1 : 2;
       auto b = iter.scalar_value<accscalar_t>(scalar_arg);
@@ -136,7 +136,7 @@ void copysign_kernel_cuda(TensorIterator& iter) {
       gpu_kernel(iter, f);
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, iter.common_dtype(), "copysign_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "copysign_cuda", [&]() {
       CopySignFunctor<scalar_t> f;
       gpu_kernel_with_scalars(iter, f);
     });
