@@ -975,14 +975,17 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, r'to have same size as tensor for argument'):
             torch.linalg.cholesky(A, out=out)
 
-        # cholesky requires the input to be a square matrix
+        # cholesky requires the input to be a square matrix or batch of square matrices
         A = torch.randn(2, 3, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
+            torch.linalg.cholesky(A)
+        A = torch.randn(2, 2, 3, device=device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
             torch.linalg.cholesky(A)
         with self.assertRaisesRegex(np.linalg.LinAlgError, r'Last 2 dimensions of the array must be square'):
             np.linalg.cholesky(A.cpu().numpy())
 
-        # cholesky requires the input to be a matrix
+        # cholesky requires the input to be at least 2 dimensional tensor
         A = torch.randn(2, device=device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, r'must have at least 2 dimensions'):
             torch.linalg.cholesky(A)
