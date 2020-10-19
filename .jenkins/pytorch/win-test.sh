@@ -67,5 +67,5 @@ run_tests && assert_git_not_dirty && echo "TEST PASSED"
 if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cuda10-cudnn7-py3" ]]; then
   cd $PROJECT_DIR
   python -mpip install codecov
-  python -mcodecov
+  python -mcodecov -v
 fi
