@@ -19,7 +19,11 @@ Tensor empty_memory_format(
       TensorOptions().memory_format(memory_format));
   verify(options);
 
-  return convert(vTensor(api::context(), sizes, options));
+  return convert(vTensor{
+      api::context(),
+      sizes,
+      options,
+    });
 }
 
 Tensor empty_strided(
