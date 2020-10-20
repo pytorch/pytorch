@@ -134,7 +134,7 @@ TEST(TestScalar, TestConj) {
   Scalar float_scalar = 3.0;
   Scalar complex_scalar = c10::complex<double>(2, 3);
 
-  ASSERT_TRUE(int_scalar.conj() == int_scalar);
-  ASSERT_TRUE(float_scalar.conj() == float_scalar);
-  ASSERT_TRUE(complex_scalar.conj() == c10::complex<double>(2, -3));
+  ASSERT_EQ(int_scalar.conj().toInt(), 257);
+  ASSERT_EQ(float_scalar.conj().toDouble(), 3.0);
+  ASSERT_EQ(complex_scalar.conj().toComplexDouble(), c10::complex<double>(2, -3));
 }
