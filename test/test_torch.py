@@ -2676,7 +2676,7 @@ class AbstractTestCases:
             orig = [1, 2, 3, 4, 5, 6, 7]
             perm = torch.randperm(7).tolist()
             x = torch.Tensor(*orig).fill_(0)
-            new = list(map(lambda x: x - 1, x.permute(*perm).size()))
+            new = [i - 1 for i in x.permute(*perm).size()]
             self.assertEqual(perm, new)
             self.assertEqual(x.size(), orig)
 
@@ -8553,7 +8553,7 @@ class TestTorchDeviceType(TestCase):
                 idx2_end = idx2_start + random.randrange(1, 10 - idx2_start + 1)
                 idx2_step = random.randrange(1, 8)
                 idx2 = slice(idx2_start, idx2_end, idx2_step)
-                lst_indexed = list(map(lambda l: l[idx2], lst[idx1]))
+                lst_indexed = [l[idx2] for l in lst[idx1]]
                 tensor_indexed = tensor[idx1, idx2]
             else:
                 lst_indexed = lst[idx1]
