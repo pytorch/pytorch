@@ -1,4 +1,4 @@
-from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast
+from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional
 
 """
 Contains utility functions for working with nested python data structures.
@@ -150,3 +150,39 @@ def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
         start = end
 
     return unflatten_fn(child_pytrees, spec.context)
+
+
+# Broadcasts a pytree to the provided TreeSpec and returns the flattened
+# values. If this is not possible, then this function returns None.
+#
+# For example, given pytree=0 and spec=TreeSpec(list, None, [LeafSpec(), LeafSpec()]),
+# would return [0, 0]. This is useful for part of the vmap implementation:
+# a user can pass in vmap(fn, in_dims)(*inputs). `in_dims` should be
+# broadcastable to the tree structure of `inputs` and we use
+# _broadcast_to_and_flatten to check this.
+def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[Any]]:
+    assert isinstance(spec, TreeSpec)
+
+    if _is_leaf(pytree):
+        return [pytree] * spec.num_leaves
+    if isinstance(spec, LeafSpec):
+        return None
+    if type(pytree) != spec.type:
+        return None
+
+    flatten_fn = SUPPORTED_NODES[type(pytree)].flatten_fn
+    child_pytrees, ctx = flatten_fn(pytree)
+
+    # Check if the Node is different from the spec
+    if len(child_pytrees) != len(spec.children_specs) or ctx != spec.context:
+        return None
+
+    # Recursively flatten the children
+    result = []
+    for child, child_spec in zip(child_pytrees, spec.children_specs):
+        flat = _broadcast_to_and_flatten(child, child_spec)
+        if flat is None:
+            return None
+        result += flat
+
+    return result
