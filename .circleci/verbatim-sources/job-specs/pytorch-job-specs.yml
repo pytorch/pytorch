@@ -52,7 +52,7 @@ jobs:
           if [ -z "${BUILD_ONLY}" ]; then
             # Note [Special build images]
             # The xla build uses the same docker image as
-            # pytorch-linux-trusty-py3.6-gcc5.4-build. In the push step, we have to
+            # pytorch_linux_bionic_py3_6_clang9_build. In the push step, we have to
             # distinguish between them so the test can pick up the correct image.
             output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
             if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
@@ -346,7 +346,7 @@ jobs:
           no_output_timeout: "30m"
           command: |
             set -e
-            export IN_CIRCLECI=1
+            export IN_CI=1
             set +x
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
