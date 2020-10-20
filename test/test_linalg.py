@@ -219,6 +219,16 @@ class TestLinalg(TestCase):
         for empty_shape in empty_shapes:
             run_test_case(empty_shape)
 
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_kron_errors(self, device, dtype):
+
+        # out tensor should have the correct resulting shape
+        a = torch.eye(3, dtype=dtype, device=device)
+        b = torch.ones((2, 2), dtype=dtype, device=device)
+        out = torch.empty_like(a)
+        with self.assertRaisesRegex(RuntimeError, r'Expected result tensor to have size of'):
+            ans = torch.kron(a, b, out=out)
+
     # This test confirms that torch.linalg.norm's dtype argument works
     # as expected, according to the function's documentation
     @skipCUDAIfNoMagma
