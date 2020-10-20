@@ -180,7 +180,6 @@ class TestLinalg(TestCase):
         with self.assertRaises(RuntimeError):
             op(t)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_kron(self, device, dtype):
 
@@ -189,12 +188,36 @@ class TestLinalg(TestCase):
             b = torch.rand(b_shape, dtype=dtype, device=device)
 
             expected = np.kron(a.cpu().numpy(), b.cpu().numpy())
-            actual = torch.kron(a, b)
-            self.assertEqual(actual, expected)
+            result = torch.kron(a, b)
+            self.assertEqual(result, expected)
+
+            # check the out= variant
+            out = torch.empty_like(result)
+            ans = torch.kron(a, b, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
 
         shapes = [(4,), (2, 2), (1, 2, 3), (1, 2, 3, 3)]
         for a_shape, b_shape in itertools.product(shapes, reversed(shapes)):
             run_test_case(a_shape, b_shape)
+
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_kron_empty(self, device, dtype):
+
+        def run_test_case(empty_shape):
+            a = torch.eye(3, dtype=dtype, device=device)
+            b = torch.empty(empty_shape, dtype=dtype, device=device)
+            result = torch.kron(a, b)
+            expected = np.kron(a.cpu().numpy(), b.cpu().numpy())
+            self.assertEqual(result, expected)
+
+            # NumPy doesn't work if the first argument is empty
+            result = torch.kron(b, a)
+            self.assertEqual(result.shape, expected.shape)
+
+        empty_shapes = [(0,), (2, 0), (1, 0, 3)]
+        for empty_shape in empty_shapes:
+            run_test_case(empty_shape)
 
     # This test confirms that torch.linalg.norm's dtype argument works
     # as expected, according to the function's documentation
