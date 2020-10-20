@@ -22,12 +22,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # (3) build with only MPI
 # (4) build with neither
 if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc5* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
-  # TODO: move this to Docker
-  sudo apt-get -qq update
   if [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
+    # TODO: move this to Docker
+    sudo apt-get -qq update
     sudo apt-get -qq install openmpi-bin libopenmpi-dev
-  else
-    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
   fi
   sudo mkdir -p /var/run/sshd
 fi
