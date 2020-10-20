@@ -1223,7 +1223,7 @@ tensor_split(input, indices_or_sections, dim=0) -> List of Tensors
 
 Splits a tensor into multiple sub-tensors, all of which are views of :attr:`input`,
 along dimension :attr:`dim` according to the indices or number of sections specified
-by :attr:`indices_or_sections. This function is based on NumPy's
+by :attr:`indices_or_sections`. This function is based on NumPy's
 :func:`numpy.array_split`.
 
 Args:
@@ -1239,11 +1239,8 @@ Args:
 
         If :attr:`indices_or_sections` is a list of ints, :attr:`input` is split along
         dimension :attr:`dim` at each of the indices in the list. For instance,
-        :code:`[2, 3]` and :code:`dim=0` would result in the following tensors:
-
-            - :code:`input[:2]`
-            - :code:`input[2:3]`
-            - :code:`input[3:]`
+        :code:`indices_or_sections=[2, 3]` and :code:`dim=0` would result in the tensors
+        :code:`input[:2]`, :code:`input[2:3]`, and :code:`input[3:]`.
 
     dim (int, optional): dimension along which to split the tensor. Default: ``0``
 
@@ -3732,9 +3729,9 @@ spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
 
 .. math::
     (\text{start},
-    \text{start} + \frac{\text{end} - \text{start}}{\text{steps}},
+    \text{start} + \frac{\text{end} - \text{start}}{\text{steps} - 1},
     \ldots,
-    \text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{\text{steps}},
+    \text{start} + (\text{steps} - 2) * \frac{\text{end} - \text{start}}{\text{steps} - 1},
     \text{end})
 """ + """
 
@@ -4057,9 +4054,9 @@ with base :attr:`base`. That is, the values are:
 
 .. math::
     (\text{base}^{\text{start}},
-    \text{base}^{(\text{start} + \frac{\text{end} - \text{start}}{ \text{steps}})},
+    \text{base}^{(\text{start} + \frac{\text{end} - \text{start}}{ \text{steps} - 1})},
     \ldots,
-    \text{base}^{(\text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{ \text{steps}})},
+    \text{base}^{(\text{start} + (\text{steps} - 2) * \frac{\text{end} - \text{start}}{ \text{steps} - 1})},
     \text{base}^{\text{end}})
 """ + """
 
@@ -6490,6 +6487,25 @@ Example::
     tensor([ 1.0000,  1.5000,  2.0000])
 """.format(**factory_common_args))
 
+add_docstr(torch.ravel,
+           r"""
+ravel(input) -> Tensor
+
+Return a contiguous flattened tensor. A copy is made only if needed.
+
+Args:
+    {input}
+
+Example::
+
+    >>> t = torch.tensor([[[1, 2],
+    ...                    [3, 4]],
+    ...                   [[5, 6],
+    ...                    [7, 8]]])
+    >>> torch.ravel(t)
+    tensor([1, 2, 3, 4, 5, 6, 7, 8])
+""".format(**common_args))
+
 add_docstr(torch.remainder,
            r"""
 remainder(input, other, *, out=None) -> Tensor
@@ -8697,6 +8713,10 @@ Please look at `Moore-Penrose inverse`_ for more details
     However, this method is backprop-able due to the implementation by using SVD results, and
     could be unstable. Double-backward will also be unstable due to the usage of SVD internally.
     See :meth:`~torch.svd` for more details.
+
+.. note::
+    Supports real and complex inputs.
+    Batched version for complex inputs is only supported on the CPU.
 
 Arguments:
     input (Tensor): The input tensor of size :math:`(*, m, n)` where :math:`*` is zero or more batch dimensions
