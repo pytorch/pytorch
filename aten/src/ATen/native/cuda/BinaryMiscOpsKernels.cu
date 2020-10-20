@@ -1,4 +1,12 @@
+#if defined(__CUDA_ARCH__)
 #include <c10/cuda/CUDAMathCompat.h>
+#define compat_copysign c10::cuda::compat::copysign
+#elif defined(__HIPCC__)
+#include <c10/hip/HIPMathCompat.h>
+#define compat_copysign c10::hip::compat::copysign
+#else
+#define compat_copysign std::copysign
+#endif
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -113,7 +121,7 @@ template<typename scalar_t, typename accscalar_t>
 struct CopySignScalarFunctor {
     CopySignScalarFunctor(accscalar_t b_): b(b_) {}
     __device__ scalar_t operator() (scalar_t a) const {
-      return c10::cuda::compat::copysign(a, b);
+      return compat_copysign(a, b);
     }
   private:
     accscalar_t b;
@@ -122,7 +130,7 @@ struct CopySignScalarFunctor {
 template<typename scalar_t>
 struct CopySignFunctor {
   __device__ scalar_t operator() (scalar_t a, scalar_t b) const {
-    return c10::cuda::compat::copysign(a, b);
+    return compat_copysign(a, b);
   }
 };
 
