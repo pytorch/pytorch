@@ -615,8 +615,8 @@ class Module:
                                 'dtypes, but got desired dtype={}'.format(dtype))
             if dtype.is_complex:
                 warnings.warn(
-                    "Complex modules are a new feature, and some modules might not work as expected "
-                    "when using complex tensors as parameters or buffers. "
+                    "Complex modules are a new feature under active development whose design may change, "
+                    "and some modules might not work as expected when using complex tensors as parameters or buffers. "
                     "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
                     "if a complex module does not work as expected.")
 
