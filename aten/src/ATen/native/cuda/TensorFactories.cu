@@ -43,7 +43,8 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
   return result;
 }
 
-Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
+Tensor empty_cuda(IntArrayRef size, const c10::optional<ScalarType>& dtype_opt, const c10::optional<Layout>& layout_opt,
+                  const c10::optional<Device>& device_opt, const c10::optional<bool>& pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
   AT_ASSERT(device_or_default(device_opt).type() == at::DeviceType::CUDA);
   TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
   check_size_nonnegative(size);
@@ -72,7 +73,8 @@ Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::op
   return tensor;
 }
 
-Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, const c10::optional<ScalarType>& dtype_opt, const c10::optional<Layout>& layout_opt,
+                          const c10::optional<Device>& device_opt, const c10::optional<bool>& pin_memory_opt) {
   auto t = at::native::empty_cuda({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   at::native::resize_impl_cuda_(t.unsafeGetTensorImpl(), size, stride);
   return t;
@@ -323,8 +325,8 @@ void tril_indices_kernel(scalar_t * tensor,
 // implementation, please enable them in test/test_cuda.py and make sure they
 // pass on your local server.
 Tensor tril_indices_cuda(
-    int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+    int64_t row, int64_t col, int64_t offset, const c10::optional<ScalarType>& dtype_opt,
+    const c10::optional<Layout>& layout_opt, const c10::optional<Device>& device_opt, const c10::optional<bool>& pin_memory_opt) {
   check_args(row, col, layout_opt);
 
   auto tril_size = get_tril_size(row, col, offset);

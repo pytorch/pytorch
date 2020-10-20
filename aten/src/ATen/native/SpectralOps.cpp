@@ -710,8 +710,8 @@ static Stream& write_opt(Stream& SS, const optional<T>& value) {
  */
 Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
             const optional<int64_t> win_lengthOpt, const Tensor& window,
-            const bool normalized, const optional<bool> onesidedOpt,
-            const optional<bool> return_complexOpt) {
+            const bool normalized, const optional<bool>& onesidedOpt,
+            const optional<bool>& return_complexOpt) {
   #define REPR(SS) \
     SS << "stft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
@@ -830,7 +830,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
  */
 Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
              const optional<int64_t> win_lengthOpt, const Tensor& window,
-             const bool center, const bool normalized, const c10::optional<bool> onesidedOpt,
+             const bool center, const bool normalized, const c10::optional<bool>& onesidedOpt,
              const optional<int64_t> lengthOpt, const bool return_complex) {
   #define REPR(SS) \
     SS << "istft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
@@ -978,7 +978,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 
 Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
             const optional<int64_t> win_lengthOpt, const Tensor& window,
-            const bool normalized, const optional<bool> onesidedOpt) {
+            const bool normalized, const optional<bool>& onesidedOpt) {
   return at::native::stft(
       self, n_fft, hop_lengthOpt, win_lengthOpt, window, normalized, onesidedOpt,
       /*return_complex=*/c10::nullopt);
@@ -986,7 +986,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
 
 Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
              const optional<int64_t> win_lengthOpt, const Tensor& window,
-             const bool center, const bool normalized, const optional<bool> onesidedOpt,
+             const bool center, const bool normalized, const optional<bool>& onesidedOpt,
              const optional<int64_t> lengthOpt) {
   return at::native::istft(
       self, n_fft, hop_lengthOpt, win_lengthOpt, window, center, normalized,

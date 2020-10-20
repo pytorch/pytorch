@@ -18,25 +18,23 @@
 
 namespace c10 {
 
-DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device);
-
-inline ScalarType dtype_or_default(c10::optional<ScalarType> dtype) {
+inline ScalarType dtype_or_default(const c10::optional<ScalarType>& dtype) {
   return dtype.value_or_else(&get_default_dtype_as_scalartype);
 }
 
-inline caffe2::TypeMeta dtype_or_default(c10::optional<caffe2::TypeMeta> dtype) {
+inline caffe2::TypeMeta dtype_or_default(const c10::optional<caffe2::TypeMeta>& dtype) {
   return dtype.value_or_else(&get_default_dtype);
 }
 
-inline Layout layout_or_default(c10::optional<Layout> layout) {
+inline Layout layout_or_default(const c10::optional<Layout>& layout) {
   return layout.value_or(kStrided);
 }
 
-inline Device device_or_default(c10::optional<Device> device) {
+inline Device device_or_default(const c10::optional<Device>& device) {
   return device.value_or_else([] {return Device(kCPU);});
 }
 
-inline bool pinned_memory_or_default(c10::optional<bool> pinned_memory) {
+inline bool pinned_memory_or_default(const c10::optional<bool>& pinned_memory) {
   return pinned_memory.has_value() ? *pinned_memory : false;
 }
 
@@ -120,7 +118,7 @@ inline bool pinned_memory_or_default(c10::optional<bool> pinned_memory) {
 /// To get around this, we templatize the `Device` constructor. Since overload
 /// resolution is done before template resolution, our problem is solved.
 
-DispatchKey computeDispatchKey(optional<ScalarType> dtype, optional<Layout> layout, optional<Device> device);
+DispatchKey computeDispatchKey(const optional<ScalarType>& dtype, const optional<Layout>& layout, const optional<Device>& device);
 
 
 struct C10_API TensorOptions {
@@ -578,7 +576,7 @@ inline std::string toString(const TensorOptions options) {
 
 // This is intended to be a centralized location by which we can determine
 // what an appropriate DispatchKey for a tensor is.
-inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device) {
+inline DispatchKey computeDispatchKey(const optional<ScalarType>& dtype, const optional<Layout>& layout, const optional<Device>& device) {
   const auto layout_ = layout_or_default(layout);
   const auto device_ = device_or_default(device);
   switch (layout_) {

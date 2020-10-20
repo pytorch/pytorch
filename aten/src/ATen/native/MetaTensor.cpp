@@ -7,10 +7,10 @@ namespace native {
 // Will be promoted to a public API later, but not now
 Tensor empty_meta(
   IntArrayRef size,
-  c10::optional<ScalarType> dtype,
-  c10::optional<Layout> layout,
-  c10::optional<Device> device,
-  c10::optional<bool> pin_memory,
+  const c10::optional<ScalarType>& dtype,
+  const c10::optional<Layout>& layout,
+  const c10::optional<Device>& device,
+  const c10::optional<bool>& pin_memory,
   c10::optional<c10::MemoryFormat> memory_format
 ) {
   // TODO: deduplicate this logic with empty_cpu

@@ -80,7 +80,7 @@ Tensor& mean_out_quantized_cpu(
     const Tensor& self,
     IntArrayRef dim,
     bool keepdim,
-    c10::optional<ScalarType> opt_dtype) {
+    const c10::optional<ScalarType>& opt_dtype) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       self.scalar_type() == kQUInt8 &&
@@ -106,7 +106,7 @@ Tensor& mean_out_quantized_cpu(
   return result;
 }
 
-Tensor mean_quantized_cpu(const Tensor& self, optional<ScalarType> dtype) {
+Tensor mean_quantized_cpu(const Tensor& self, const optional<ScalarType>& dtype) {
   Tensor result;
   mean_out_quantized_cpu(result, self, IntArrayRef{}, false, dtype);
   return result;
@@ -116,7 +116,7 @@ Tensor mean_quantized_cpu(
     const Tensor& self,
     IntArrayRef dim,
     bool keepdim,
-    optional<ScalarType> dtype) {
+    const optional<ScalarType>& dtype) {
   Tensor result;
   mean_out_quantized_cpu(result, self, dim, keepdim, dtype);
   return result;
@@ -126,7 +126,7 @@ Tensor mean_quantized_cpu(
     const Tensor& self,
     DimnameList dim,
     bool keepdim,
-    optional<ScalarType> dtype) {
+    const optional<ScalarType>& dtype) {
   return mean_quantized_cpu(
       self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
@@ -136,7 +136,7 @@ Tensor& mean_out_quantized_cpu(
     const Tensor& self,
     DimnameList dim,
     bool keepdim,
-    c10::optional<ScalarType> opt_dtype) {
+    const c10::optional<ScalarType>& opt_dtype) {
   return mean_out_quantized_cpu(
       result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }

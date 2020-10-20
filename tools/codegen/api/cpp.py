@@ -54,7 +54,10 @@ def valuetype_type(t: Type) -> Optional[str]:
         elem = valuetype_type(t.elem)
         if elem is None:
             return None
-        return f"c10::optional<{elem}>"
+        if isinstance(t.elem, BaseType) and t.elem.name in [BaseTy.ScalarType, BaseTy.Layout, BaseTy.Device, BaseTy.bool]:
+            return f"const c10::optional<{elem}>&"
+        else:
+            return f"c10::optional<{elem}>"
     elif isinstance(t, ListType):
         if str(t.elem) == 'bool':
             assert t.size is not None

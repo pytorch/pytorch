@@ -538,7 +538,7 @@ def signature(f: NativeFunction, *, method: bool = False) -> PythonSignature:
     if is_factory_function or is_like_or_new_function_with_options:
         tensor_options_args.append(PythonArgument(
             name='layout',
-            cpp_type_str='c10::optional<Layout>',
+            cpp_type_str='const c10::optional<Layout>&',
             type=BaseType(BaseTy.Layout),
             default='torch.strided',
             default_init='layout_from_backend(self.options().backend())'
@@ -764,13 +764,13 @@ UNPACK_METHODS = {
     'const ScalarType &': 'scalartype',
     'const Device &': 'device',
     'c10::optional<DimnameList>': 'toDimnameListOptional',
-    'c10::optional<ScalarType>': 'scalartypeOptional',
-    'c10::optional<Layout>': 'layoutOptional',
+    'const c10::optional<ScalarType>&': 'scalartypeOptional',
+    'const c10::optional<Layout>&': 'layoutOptional',
     'c10::optional<MemoryFormat>': 'memoryformatOptional',
     'c10::optional<Scalar>': 'scalarOptional',
     'c10::optional<IntArrayRef>': 'intlistOptional',
     'c10::optional<int64_t>': 'toInt64Optional',
-    'c10::optional<bool>': 'toBoolOptional',
+    'const c10::optional<bool>&': 'toBoolOptional',
     'c10::optional<double>': 'toDoubleOptional',
     'c10::optional<ArrayRef<double>>': 'doublelistOptional',
     'ArrayRef<double>': 'doublelist',
@@ -797,6 +797,7 @@ UNPACK_WITH_SIZE_METHODS = {
 UNPACK_WITH_DEFAULT_METHODS = {
     'const ScalarType &': 'scalartypeWithDefault',
     'const Device &': 'deviceWithDefault',
+    'const c10::optional<Layout>&': 'layoutWithDefault',
     'c10::optional<Layout>': 'layoutWithDefault',
 }
 

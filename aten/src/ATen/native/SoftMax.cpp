@@ -240,7 +240,7 @@ Tensor softmax(const Tensor& input_, const int64_t dim_) {
   return result;
 }
 
-Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
+Tensor softmax(const Tensor& input_, const int64_t dim_, const c10::optional<ScalarType>& dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
     if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
@@ -263,7 +263,7 @@ Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
   return result;
 }
 
-Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
+Tensor log_softmax(const Tensor& input_, const int64_t dim_, const c10::optional<ScalarType>& dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
     if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
@@ -282,11 +282,11 @@ DEFINE_DISPATCH(log_softmax_lastdim_kernel);
 DEFINE_DISPATCH(softmax_backward_lastdim_kernel);
 DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
 
-Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
+Tensor softmax(const Tensor& self, Dimname dim, const optional<ScalarType>& dtype) {
   return at::softmax(self, dimname_to_position(self, dim), dtype);
 }
 
-Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
+Tensor log_softmax(const Tensor& self, Dimname dim, const optional<ScalarType>& dtype) {
   return at::log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 

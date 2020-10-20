@@ -78,25 +78,25 @@ def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Sequen
             assert local.use_c10_dispatcher() == UseC10Dispatcher.full
             return [
                 NativeArgument(
-                    type='c10::optional<ScalarType>',
+                    type='const c10::optional<ScalarType>&',
                     name='dtype',
                     default='{}',
                     argument=a,
                 ),
                 NativeArgument(
-                    type='c10::optional<Layout>',
+                    type='const c10::optional<Layout>&',
                     name='layout',
                     default='{}',
                     argument=a,
                 ),
                 NativeArgument(
-                    type='c10::optional<Device>',
+                    type='const c10::optional<Device>&',
                     name='device',
                     default='{}',
                     argument=a,
                 ),
                 NativeArgument(
-                    type='c10::optional<bool>',
+                    type='const c10::optional<bool>&',
                     name='pin_memory',
                     default='{}',
                     argument=a,

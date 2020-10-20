@@ -97,10 +97,10 @@ template<class FuncPtr, class... ParametersBeforeTensorOptions, class... Paramet
 struct with_scattered_tensor_options_impl_<FuncPtr, guts::typelist::typelist<ParametersBeforeTensorOptions...>, guts::typelist::typelist<ParametersAfterTensorOptions...>> final {
     static decltype(auto) wrapper(
                 ParametersBeforeTensorOptions... parameters_before,
-                optional<ScalarType> scalar_type,
-                optional<Layout> layout,
-                optional<Device> device,
-                optional<bool> pin_memory,
+                const optional<ScalarType>& scalar_type,
+                const optional<Layout>& layout,
+                const optional<Device>& device,
+                const optional<bool>& pin_memory,
                 ParametersAfterTensorOptions... parameters_after) {
         return (*FuncPtr::func_ptr())(
             std::forward<ParametersBeforeTensorOptions>(parameters_before)...,

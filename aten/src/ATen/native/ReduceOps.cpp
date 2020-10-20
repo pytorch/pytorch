@@ -80,7 +80,7 @@ Tensor& _cumsum_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
   return result;
 }
 
-Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+Tensor cumsum(const Tensor& self, int64_t dim, const c10::optional<ScalarType>& dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
     return at::_cumsum(integer_upcast(self, dtype), dim);
@@ -89,7 +89,7 @@ Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) 
   return result;
 }
 
-Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, const c10::optional<ScalarType>& dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   TORCH_CHECK(
       !dtype.has_value() || (result.scalar_type() == dtype.value()),
@@ -117,7 +117,7 @@ Tensor& _cumprod_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
   return result;
 }
 
-Tensor cumprod(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+Tensor cumprod(const Tensor& self, int64_t dim, const c10::optional<ScalarType>& dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
     return at::_cumprod(integer_upcast(self, dtype), dim);
@@ -126,7 +126,7 @@ Tensor cumprod(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype)
   return result;
 }
 
-Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, const c10::optional<ScalarType>& dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   TORCH_CHECK(
       !dtype.has_value() || (result.scalar_type() == dtype.value()),
@@ -391,7 +391,7 @@ Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor&
 
 // ALL REDUCE #################################################################
 
-static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarType> dtype,
+static ScalarType get_dtype(Tensor& result, const Tensor& self, const optional<ScalarType>& dtype,
                             bool promote_integers=false) {
   if (dtype.has_value()) {
     return dtype.value();
@@ -406,7 +406,7 @@ static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarT
 }
 
 Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
-                       bool keepdim, optional<ScalarType> opt_dtype) {
+                       bool keepdim, const optional<ScalarType>& opt_dtype) {
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
   auto iter = make_reduction("sum", result, self, dim, keepdim, dtype);
   if (iter.numel() == 0) {
@@ -417,24 +417,24 @@ Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
   return result;
 }
 
-Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
+Tensor sum(const Tensor &self, const c10::optional<ScalarType>& dtype) {
   return at::native::sum(self, std::vector<int64_t>{}, false, dtype);
 }
-Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, const c10::optional<ScalarType>& dtype) {
   Tensor result;
   return at::native::sum_out(result, self, dim, keepdim, dtype);
 }
-Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, const c10::optional<ScalarType>& dtype) {
   return at::sum(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
 Tensor& sum_out(Tensor& result, const Tensor& self, DimnameList dim,
-                bool keepdim, optional<ScalarType> opt_dtype) {
+                bool keepdim, const optional<ScalarType>& opt_dtype) {
   return at::sum_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 
 Tensor& nansum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
-                       bool keepdim, optional<ScalarType> opt_dtype) {
+                       bool keepdim, const optional<ScalarType>& opt_dtype) {
   TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
   // For integral types, use existing sum as
   // integral types don't have `Nan`.
@@ -452,17 +452,17 @@ Tensor& nansum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
   return result;
 }
 
-Tensor nansum(const Tensor &self, c10::optional<ScalarType> dtype) {
+Tensor nansum(const Tensor &self, const c10::optional<ScalarType>& dtype) {
   return at::native::nansum(self, std::vector<int64_t>{}, false, dtype);
 }
 
-Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, const c10::optional<ScalarType>& dtype) {
   Tensor result;
   return at::native::nansum_out(result, self, dim, keepdim, dtype);
 }
 
 static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim,
-                        bool keepdim, c10::optional<ScalarType> opt_dtype) {
+                        bool keepdim, const c10::optional<ScalarType>& opt_dtype) {
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
   auto iter = make_reduction("prod", result, self, dim, keepdim, dtype);
   if (iter.numel() == 0) {
@@ -473,32 +473,32 @@ static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim
   return result;
 }
 
-Tensor prod(const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor prod(const Tensor& self, int64_t dim, bool keepdim, const c10::optional<ScalarType>& dtype) {
   Tensor result;
   native::prod_out_impl(result, self, dim, keepdim, dtype);
   return result;
 }
 
-Tensor prod(const Tensor &self, c10::optional<ScalarType> dtype) {
+Tensor prod(const Tensor &self, const c10::optional<ScalarType>& dtype) {
   Tensor result;
   return at::native::prod_out_impl(result, self, {}, false, dtype);
 }
 
-Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, const c10::optional<ScalarType>& dtype) {
   return at::native::prod_out_impl(result, self, dim, keepdim, dtype);
 }
 
-Tensor prod(const Tensor& self, Dimname dim, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor prod(const Tensor& self, Dimname dim, bool keepdim, const c10::optional<ScalarType>& dtype) {
   return at::prod(self, dimname_to_position(self, dim), keepdim, dtype);
 }
 
 Tensor& prod_out(Tensor& result, const Tensor& self, Dimname dim,
-                 bool keepdim, optional<ScalarType> opt_dtype) {
+                 bool keepdim, const optional<ScalarType>& opt_dtype) {
   return at::prod_out(result, self, dimname_to_position(self, dim), keepdim, opt_dtype);
 }
 
 Tensor &mean_out_cpu_gpu(Tensor &result, const Tensor &self, IntArrayRef dim,
-                 bool keepdim, c10::optional<ScalarType> opt_dtype) {
+                 bool keepdim, const c10::optional<ScalarType>& opt_dtype) {
   ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
       at::isFloatingType(scalarType) || at::isComplexType(scalarType),
@@ -532,21 +532,21 @@ Tensor &mean_out_cpu_gpu(Tensor &result, const Tensor &self, IntArrayRef dim,
   return result;
 }
 
-Tensor mean_cpu_gpu(const Tensor &self, optional<ScalarType> dtype) {
+Tensor mean_cpu_gpu(const Tensor &self, const optional<ScalarType>& dtype) {
   return at::native::mean_cpu_gpu(self, IntArrayRef{}, false, dtype);
 }
 
-Tensor mean_cpu_gpu(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+Tensor mean_cpu_gpu(const Tensor& self, IntArrayRef dim, bool keepdim, const optional<ScalarType>& dtype) {
   Tensor result;
   return at::native::mean_out_cpu_gpu(result, self, dim, keepdim, dtype);
 }
 
-Tensor mean(const Tensor& self, DimnameList dim, bool keepdim, optional<ScalarType> dtype) {
+Tensor mean(const Tensor& self, DimnameList dim, bool keepdim, const optional<ScalarType>& dtype) {
   return at::mean(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
 Tensor& mean_out(Tensor& result, const Tensor& self, DimnameList dim,
-                 bool keepdim, c10::optional<ScalarType> opt_dtype) {
+                 bool keepdim, const c10::optional<ScalarType>& opt_dtype) {
   return at::mean_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 
@@ -600,7 +600,7 @@ Tensor& logsumexp_out(Tensor& result, const Tensor& self, DimnameList dims, bool
 }
 
 static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
-                               IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
+                               IntArrayRef dim, bool keepdim, const optional<ScalarType>& opt_dtype) {
   auto p = opt_p.value_or(2.0);
   TORCH_CHECK(!(p.toDouble() == 2 && self.is_complex()), "norm with p=2 not supported for complex tensors");
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
@@ -1008,8 +1008,8 @@ Tensor var(const Tensor& self, bool unbiased) {
     return trivial_return.value();
   }
 
-  // NOTE: CPU performance significantly regressed when attempting to port to ATen, 
-  //   so this dispatches differently based on device type. 
+  // NOTE: CPU performance significantly regressed when attempting to port to ATen,
+  //   so this dispatches differently based on device type.
   //   See https://github.com/pytorch/pytorch/pull/43858.
   if (self.device().type() == kCPU) {
     return at::_var(self, unbiased);
@@ -1040,8 +1040,8 @@ Tensor std(const Tensor& self, bool unbiased) {
     return trivial_return.value();
   }
 
-  // NOTE: CPU performance significantly regressed when attempting to port to ATen, 
-  //   so this dispatches differently based on device type. 
+  // NOTE: CPU performance significantly regressed when attempting to port to ATen,
+  //   so this dispatches differently based on device type.
   //   See https://github.com/pytorch/pytorch/pull/43858.
   if (self.device().type() == kCPU) {
     return at::_std(self, unbiased);
@@ -1118,16 +1118,16 @@ Tensor logcumsumexp(const Tensor& self, Dimname dim) {
 Tensor& logcumsumexp_out(Tensor& result, const Tensor& self, Dimname dim) {
   return at::logcumsumexp_out(result, self, dimname_to_position(self, dim));
 }
-Tensor cumsum(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+Tensor cumsum(const Tensor& self, Dimname dim, const c10::optional<ScalarType>& dtype) {
   return at::cumsum(self, dimname_to_position(self, dim), dtype);
 }
-Tensor& cumsum_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+Tensor& cumsum_out(Tensor& result, const Tensor& self, Dimname dim, const c10::optional<ScalarType>& dtype) {
   return at::cumsum_out(result, self, dimname_to_position(self, dim), dtype);
 }
-Tensor cumprod(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+Tensor cumprod(const Tensor& self, Dimname dim, const c10::optional<ScalarType>& dtype) {
   return at::cumprod(self, dimname_to_position(self, dim), dtype);
 }
-Tensor& cumprod_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+Tensor& cumprod_out(Tensor& result, const Tensor& self, Dimname dim, const c10::optional<ScalarType>& dtype) {
   return at::cumprod_out(result, self, dimname_to_position(self, dim), dtype);
 }
 std::tuple<Tensor, Tensor> cummax(const Tensor& self, Dimname dim) {

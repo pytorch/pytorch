@@ -70,7 +70,7 @@ Tensor values_sparse(const Tensor& self) {
 
 /*** Helper methods ***/
 
-SparseTensor new_sparse(c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
+SparseTensor new_sparse(const c10::optional<ScalarType>& dtype, const c10::optional<Layout>& layout, const c10::optional<Device>& device, const c10::optional<bool>& pin_memory) {
   AT_ASSERT(layout.has_value() && *layout == kSparse);
   DispatchKey dispatch_key;
   if (device_or_default(device).is_cuda()) {
@@ -84,8 +84,8 @@ SparseTensor new_sparse(c10::optional<ScalarType> dtype, c10::optional<Layout> l
 
 /** Actual dispatched creation methods ***/
 
-SparseTensor new_with_dims_sparse(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size, c10::optional<ScalarType> dtype,
-                                  c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
+SparseTensor new_with_dims_sparse(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size, const c10::optional<ScalarType>& dtype,
+                                  const c10::optional<Layout>& layout, const c10::optional<Device>& device, const c10::optional<bool>& pin_memory) {
   SparseTensor self = new_sparse(dtype, layout, device, pin_memory);
   get_sparse_impl(self)->resize_and_clear_(sparse_dim, dense_dim, size);
   return self;
@@ -97,10 +97,10 @@ SparseTensor new_with_dims_and_tensor_sparse(
     ArrayRef<int64_t> size,
     const LongTensor& indices,
     const Tensor& values,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    const c10::optional<ScalarType>& dtype,
+    const c10::optional<Layout>& layout,
+    const c10::optional<Device>& device,
+    const c10::optional<bool>& pin_memory) {
   SparseTensor self = new_sparse(dtype, layout, device, pin_memory);
   get_sparse_impl(self)->resize_(sparse_dim, dense_dim, size);
   // NOTE: There is no guarantee that `indices` and `values` don't contain AutogradMeta. However,
@@ -119,7 +119,7 @@ SparseTensor new_with_dims_and_tensor_sparse(
 /** Public creation API that dispatch to methods above **/
 
 /** Empty init **/
-Tensor empty_sparse(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> optional_memory_format) {
+Tensor empty_sparse(IntArrayRef size, const c10::optional<ScalarType>& dtype, const c10::optional<Layout>& layout, const c10::optional<Device>& device, const c10::optional<bool>& pin_memory, c10::optional<MemoryFormat> optional_memory_format) {
   TORCH_CHECK(!pin_memory.has_value() || !*pin_memory, "Only dense CPU tensors can be pinned");
   return new_with_dims_sparse(size.size(), 0, size, dtype, layout, device, pin_memory);
 }
