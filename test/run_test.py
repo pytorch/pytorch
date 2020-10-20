@@ -31,8 +31,6 @@ TESTS = [
     'distributed/test_c10d_spawn',
     'test_cuda',
     'test_jit_cuda_fuser',
-    'test_jit_cuda_fuser_legacy',
-    'test_jit_cuda_fuser_profiling',
     'test_cuda_primary_ctx',
     'test_dataloader',
     'distributed/test_data_parallel',
@@ -211,8 +209,7 @@ or `conda install ninja`. Alternatively, disable said tests with
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 
 JIT_EXECUTOR_TESTS = [
-    'test_jit_cuda_fuser_profiling',
-    'test_jit_cuda_fuser_legacy',
+    'test_jit_cuda_fuser',
     'test_jit_profiling',
     'test_jit_legacy',
     'test_jit_fuser_legacy',
