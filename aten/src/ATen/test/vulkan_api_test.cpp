@@ -38,7 +38,6 @@ TEST(VulkanAPITest, copy) {
   ASSERT_TRUE(exactlyEqual(cpu, cpu.vulkan().cpu()));
 }
 
-
 TEST(VulkanAPITest, empty) {
   if (!at::native::vulkan::api::available()) {
     return;
