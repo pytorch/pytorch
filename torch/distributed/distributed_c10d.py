@@ -486,6 +486,7 @@ def _new_process_group_helper(world_size,
     global _group_count
     global _pg_names
 
+    group_name_ = group_name
     if not group_name:
         group_name = str(_group_count)
 
@@ -512,7 +513,6 @@ def _new_process_group_helper(world_size,
             return GroupMember.NON_GROUP_MEMBER
         _pg_map[pg] = (Backend.MPI, None)
         _pg_names[pg] = group_name
-        _group_count += 1
     else:
         # If this is a subgroup (which means group_ranks is specified),
         # we check if the current process is a member of the new group.
@@ -533,7 +533,6 @@ def _new_process_group_helper(world_size,
                 timeout=timeout)
             _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
-            _group_count += 1
         elif backend == Backend.NCCL:
             if not is_nccl_available():
                 raise RuntimeError("Distributed package doesn't have NCCL "
@@ -545,7 +544,6 @@ def _new_process_group_helper(world_size,
                 timeout)
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
-            _group_count += 1
         else:
             pg = getattr(Backend, backend.upper())(
                 prefix_store,
@@ -554,7 +552,9 @@ def _new_process_group_helper(world_size,
                 timeout)
             _pg_map[pg] = (backend, store)
             _pg_names[pg] = group_name
-            _group_count += 1
+
+    if not group_name_:
+        _group_count += 1
 
     return pg
 
