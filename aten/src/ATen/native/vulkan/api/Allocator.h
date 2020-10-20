@@ -7,7 +7,7 @@
     do {                              \
       printf(format, ##__VA_ARGS__);  \
       printf("\n");                   \
-    } while(false)
+    } while (false)
 #endif /* DEBUG */
 
 #ifdef __clang__
