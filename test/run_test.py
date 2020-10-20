@@ -53,6 +53,7 @@ TESTS = [
     'test_numba_integration',
     'test_ops',
     'test_optim',
+    'test_pytree',
     'test_mobile_optimizer',
     'test_xnnpack_integration',
     'test_vulkan',
