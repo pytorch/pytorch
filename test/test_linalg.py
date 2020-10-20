@@ -972,6 +972,46 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypesIfCUDA(torch.float, torch.double)
+    @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
+    def test_tensorsolve_non_contiguous(self, device, dtype):
+        def run_test_permuted(a_shape, dims):
+            # check for permuted / transposed inputs
+            a = torch.randn(a_shape, dtype=dtype, device=device)
+            a = a.movedim((0, 2), (-2, -1))
+            self.assertFalse(a.is_contiguous())
+            b = torch.randn(a.shape[:2], dtype=dtype, device=device)
+            b = b.t()
+            self.assertFalse(b.is_contiguous())
+            result = torch.linalg.tensorsolve(a, b, dims=dims)
+            expected = np.linalg.tensorsolve(a.cpu().numpy(), b.cpu().numpy(), axes=dims)
+            self.assertEqual(result, expected)
+
+        def run_test_skipped_elements(a_shape, dims):
+            # check for inputs with skipped elements
+            a = torch.randn(a_shape, dtype=dtype, device=device)
+            a = a[::2]
+            self.assertFalse(a.is_contiguous())
+            b = torch.randn(a_shape[:2], dtype=dtype, device=device)
+            b = b[::2]
+            self.assertFalse(b.is_contiguous())
+            result = torch.linalg.tensorsolve(a, b, dims=dims)
+            expected = np.linalg.tensorsolve(a.cpu().numpy(), b.cpu().numpy(), axes=dims)
+            self.assertEqual(result, expected)
+
+        a_shapes = [(2, 3, 6), (3, 4, 4, 3)]
+        dims = [None, (0, 2)]
+        for a_shape, d in itertools.product(a_shapes, dims):
+            run_test_permuted(a_shape, d)
+
+        a_shapes = [(4, 3, 6), (6, 4, 4, 3)]
+        dims = [None, (0, 2)]
+        for a_shape, d in itertools.product(a_shapes, dims):
+            run_test_skipped_elements(a_shape, d)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @dtypes(torch.float32)
     def test_tensorsolve_errors(self, device, dtype):
         # tensorsolve expects the input that can be reshaped to a square matrix
