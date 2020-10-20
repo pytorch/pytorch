@@ -24,7 +24,7 @@ from contextlib import contextmanager
 from functools import reduce
 from itertools import chain
 from torch._six import StringIO
-from typing import Any, Dict
+from collections import defaultdict
 
 import inspect
 import io
@@ -34,6 +34,7 @@ import pickle
 import sys
 import tempfile
 import textwrap
+from typing import Any, Dict, List
 
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
@@ -55,6 +56,7 @@ def do_input_map(fn, input):
 def clear_class_registry():
     torch._C._jit_clear_class_registry()
     torch.jit._recursive.concrete_type_store = torch.jit._recursive.ConcreteTypeStore()
+    torch.jit._state._script_classes.clear()
 
 def get_execution_plan(graph_executor_state):
     execution_plans = list(graph_executor_state.execution_plans.values())
@@ -89,6 +91,7 @@ class _AssertRaisesRegexWithHighlightContext(object):
 
         return True
 
+FUSION_GROUP = "prim::TensorExprGroup"
 
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
@@ -131,6 +134,35 @@ class JitTestCase(TestCase):
         # the callback gets destucted
         self.clearHooks()
         clear_class_registry()
+
+    def assertAllFused(self, graph, except_for=()):
+
+        # note this helper collects nodes on 'fast path' only
+        # i.e. the true blocks of specialized checks
+        def get_nodes_and_parents_recursively(block, kind, acc):
+            for node in block.nodes():
+                if node.kind() == kind:
+                    acc[block].append(node)
+                elif node.kind() == 'prim::DifferentiableGraph':
+                    get_nodes_and_parents_recursively(node.g('Subgraph'), kind, acc)
+                elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or
+                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck'):
+                    get_nodes_and_parents_recursively(node.blocks().__next__(), kind, acc)
+                else:
+                    for inner_block in node.blocks():
+                        get_nodes_and_parents_recursively(inner_block, kind, acc)
+
+        allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
+                         'prim::TupleConstruct', 'prim::If', 'prim::TypeCheck'} | set(except_for)
+
+        fusion_groups : Dict[torch._C.Block, List[torch._C.Node]] = defaultdict(list)
+        get_nodes_and_parents_recursively(graph, FUSION_GROUP, fusion_groups)
+        self.assertTrue(len(fusion_groups) == 1, 'got {}'.format(graph))
+        (graph, fusion_nodes) = list(fusion_groups.items())[0]
+        # the block contains one FUSION_GROUP and the rest of nodes are `allowed_nodes`
+        self.assertTrue(len(fusion_nodes) == 1, 'got {}'.format(graph))
+        self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
+                        'got {}'.format(graph))
 
     def _isHookExceptionOk(self, e):
         se = str(e)
