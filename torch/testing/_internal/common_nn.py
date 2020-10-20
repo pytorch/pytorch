@@ -1,5 +1,4 @@
 import math
-import sys
 import tempfile
 import unittest
 
@@ -25,11 +24,6 @@ from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
-# tarfile module tries to obtain a file object name in python 3.3
-if sys.version_info[:2] == (3, 3):
-    TemporaryFile = tempfile.NamedTemporaryFile
-else:
-    TemporaryFile = tempfile.TemporaryFile
 PRECISION = 1e-5
 
 
@@ -4828,7 +4822,7 @@ class ModuleTest(TestBase):
 
         if self.should_test_pickle:
             # TODO: do this with in-memory files as soon as torch.save will support it
-            with TemporaryFile() as f:
+            with tempfile.TemporaryFile() as f:
                 test_case._forward(module, input)
                 torch.save(module, f)
                 f.seek(0)

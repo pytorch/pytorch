@@ -3,6 +3,7 @@ import sys
 import errno
 import os
 import ctypes
+import faulthandler
 import torch
 import gc
 import time
@@ -29,18 +30,6 @@ except ImportError:
     HAS_PSUTIL = False
     err_msg = ("psutil not found. Some critical data loader tests relying on it "
                "(e.g., TestDataLoader.test_proper_exit) will not run.")
-    if IS_PYTORCH_CI:
-        raise ImportError(err_msg) from None
-    else:
-        warnings.warn(err_msg)
-
-try:
-    import faulthandler
-    HAS_FAULTHANDLER = True
-except ImportError:
-    HAS_FAULTHANDLER = False
-    err_msg = ("faulthandler not found. Some data loader tests use it for error "
-               "reporting (e.g., TestDataLoader.test_proper_exit).")
     if IS_PYTORCH_CI:
         raise ImportError(err_msg) from None
     else:
@@ -312,29 +301,25 @@ class TestConcatDataset(TestCase):
 
 # takes in dummy var so this can also be used as a `worker_init_fn`
 def set_faulthander_if_available(_=None):
-    if HAS_FAULTHANDLER:
-        faulthandler.enable(sys.__stderr__)
-        if not IS_WINDOWS:
-            # windows does not have faulthandler.register
-            # chain=False prevents the default behavior of killing the process
-            faulthandler.register(signal.SIGUSR1, file=sys.__stderr__, chain=False)
+    faulthandler.enable(sys.__stderr__)
+    if not IS_WINDOWS:
+        # windows does not have faulthandler.register
+        # chain=False prevents the default behavior of killing the process
+        faulthandler.register(signal.SIGUSR1, file=sys.__stderr__, chain=False)
 
 
 set_faulthander_if_available()
 
 # Process `pid` must have called `set_faulthander_if_available`
 def print_traces_of_all_threads(pid):
-    if HAS_FAULTHANDLER:
-        if not IS_WINDOWS:
-            # use the custom signal if available
-            os.kill(pid, signal.SIGUSR1)
-        else:
-            # otherwise we can still use the handler given by faulthandler.enable()
-            # at the cost of killing the process.
-            os.kill(pid, signal.SIGSEGV)
+    if not IS_WINDOWS:
+        # use the custom signal if available
+        os.kill(pid, signal.SIGUSR1)
     else:
-        # if there is no faulthandler, use SIGINT otherwise and hope for the best
-        os.kill(pid, signal.SIGINT)
+        # otherwise we can still use the handler given by faulthandler.enable()
+        # at the cost of killing the process.
+        os.kill(pid, signal.SIGSEGV)
+
     # wait in parent process to give subprocess some time to print
     time.sleep(5)
 
