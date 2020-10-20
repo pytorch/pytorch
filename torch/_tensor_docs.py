@@ -912,6 +912,19 @@ conj() -> Tensor
 See :func:`torch.conj`
 """)
 
+add_docstr_all('copysign',
+               r"""
+add(other) -> Tensor
+
+Add a scalar or tensor to :attr:`self` tensor.
+
+When :attr:`other` is a tensor, the shape of :attr:`other` must be
+:ref:`broadcastable <broadcasting-semantics>` with the shape of the underlying
+tensor
+
+See :func:`torch.copysign`
+""")
+
 add_docstr_all('cos',
                r"""
 cos() -> Tensor

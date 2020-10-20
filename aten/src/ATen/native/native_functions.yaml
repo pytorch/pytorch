@@ -845,7 +845,7 @@
 
 - func: copysign.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
-  variants: function
+  variants: function, method
   dispatch:
     CPU, CUDA: copysign
 
@@ -855,7 +855,7 @@
 
 - func: copysign.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
-  variants: function
+  variants: function, method
   dispatch:
     CPU, CUDA: copysign
 
