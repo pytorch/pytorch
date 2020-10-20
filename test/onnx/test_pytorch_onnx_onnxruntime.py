@@ -2851,8 +2851,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return input.split([2, 1, 2]), input.split([3, 2])[0]
 
         x = torch.randn(5, 4, 3)
-        model = torch.jit.script(SplitModel())
-        self.run_test(model, x)
+        self.run_test(SplitModel(), x)
 
         class SplitModel2(torch.nn.Module):
             def forward(self, input):

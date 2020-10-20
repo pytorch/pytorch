@@ -465,13 +465,15 @@ void ONNXAssignOutputShape(
         outputs_index++;
         for (size_t j = 1; j < list_len; ++j) {
           PyObject* list_elem = PyList_GET_ITEM(elem, j);
-          auto& var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
+          auto& new_var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
           TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
-          TORCH_INTERNAL_ASSERT(var.scalar_type() == var.scalar_type());
+          TORCH_INTERNAL_ASSERT(var.scalar_type() == new_var.scalar_type());
           outputs_index++;
         }
         graph->outputs()[i]->setType(ListType::create(
             TensorType::create(var.scalar_type(), at::kCPU, {}, {})));
+        ONNXUpdateTypeFromTensor(
+            graph->outputs()[i], var, onnx_shape_inference);
       }
     } else {
       at::Tensor var;

@@ -321,7 +321,7 @@ void EncoderBase::EncodeValueInfo(
         std::unordered_map<int64_t, std::string>>& dynamic_axes) {
   std::string name = n->debugName();
   v->set_name(name);
-  auto tensorTypeToONNXType = [&dynamic_axes, &name, this](
+  auto tensorTypeToONNXType = [&dynamic_axes, &name, n, this](
                                   TensorTypePtr t,
                                   onnx::TypeProto_Tensor* tensor_type) {
     if (t->dim()) {
@@ -339,7 +339,13 @@ void EncoderBase::EncodeValueInfo(
           shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
         } else {
           if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
-            symbol_dim_map_[sizes[i]] = "dim_" + std::to_string(i);
+            if (n->node()->kind() == prim::Param) {
+              symbol_dim_map_[sizes[i]] = name + "_dim_" + std::to_string(i);
+            } else {
+              std::string op_type = n->node()->kind().toQualString();
+              symbol_dim_map_[sizes[i]] =
+                  op_type.erase(0, 6) + name + "_dim_" + std::to_string(i);
+            }
           }
           shape->mutable_dim(i)->set_dim_param(symbol_dim_map_[sizes[i]]);
         }

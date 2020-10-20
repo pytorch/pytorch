@@ -422,11 +422,9 @@ def _model_to_graph(model, args, verbose=False,
                                             "ScriptFunction."
 
         if (isinstance(example_outputs, list)):
-            example_outputs = tuple([example_outputs])
-        else:
-            example_outputs = tuple(example_outputs)
+            example_outputs = [example_outputs]
 
-        out_vars, out_desc = torch.jit._flatten(example_outputs)
+        out_vars, out_desc = torch.jit._flatten(tuple(example_outputs))
         torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, out_desc, _onnx_shape_inference)
 
     # NB: ONNX requires complete information about output types, which might be
