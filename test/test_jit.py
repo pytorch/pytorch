@@ -15618,6 +15618,11 @@ def add_autograd_test(
     if 'complex' in variant_name or name in ['view_as_complex', 'complex']:
         return
 
+    # Disable tests for lu from common_methods_invocations.py
+    # TODO(@nikitaved) Envable jit tests once autograd.Function does support scripting
+    if 'square' in variant_name and name in ['lu']:
+        return
+
     # Skips aliases, which are tested in test_op_aliases.py
     if name in EXCLUDE_ALIAS:
         return
