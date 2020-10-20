@@ -75,9 +75,7 @@ if not NO_MULTIPROCESSING_SPAWN:
 JOIN_TIMEOUT = 60.0  # seconds
 
 
-supported_multiprocessing_contexts = [None]
-if torch.multiprocessing._supports_context:
-    supported_multiprocessing_contexts += list(torch.multiprocessing.get_all_start_methods())
+supported_multiprocessing_contexts = [None] + list(torch.multiprocessing.get_all_start_methods())
 
 
 @unittest.skipIf(
@@ -975,17 +973,13 @@ except RuntimeError as e:
                                     "batch_size=None option disables auto-batching and is mutually exclusive"):
             self._get_data_loader(self.dataset, batch_size=None, drop_last=True)
 
-        if torch.multiprocessing._supports_context:
-            valid_ctx = list(torch.multiprocessing.get_all_start_methods())[-1]
-            with self.assertRaisesRegex(ValueError, r"multi-process loading \(num_workers > 0\), but got"):
-                self._get_data_loader(self.dataset, num_workers=0, multiprocessing_context=valid_ctx)
-            with self.assertRaisesRegex(ValueError, "should specify a valid start method in"):
-                self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context='bad')
-            with self.assertRaisesRegex(TypeError, "multiprocessing_context option should be a valid context "):
-                self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context=object())
-        else:
-            with self.assertRaisesRegex(ValueError, "multiprocessing_context relies on Python >= 3.4"):
-                self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context='fork')
+        valid_ctx = list(torch.multiprocessing.get_all_start_methods())[-1]
+        with self.assertRaisesRegex(ValueError, r"multi-process loading \(num_workers > 0\), but got"):
+            self._get_data_loader(self.dataset, num_workers=0, multiprocessing_context=valid_ctx)
+        with self.assertRaisesRegex(ValueError, "should specify a valid start method in"):
+            self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context='bad')
+        with self.assertRaisesRegex(TypeError, "multiprocessing_context option should be a valid context "):
+            self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context=object())
 
         # map-style
         sampler = torch.utils.data.SequentialSampler(self.dataset)
@@ -1433,7 +1427,7 @@ except RuntimeError as e:
     def test_sampler(self):
         self._test_sampler()
         self._test_sampler(num_workers=4)
-        if not NO_MULTIPROCESSING_SPAWN and torch.multiprocessing._supports_context:
+        if not NO_MULTIPROCESSING_SPAWN:
             self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
 
     def _test_batch_sampler(self, **kwargs):
@@ -1458,7 +1452,7 @@ except RuntimeError as e:
     def test_batch_sampler(self):
         self._test_batch_sampler()
         self._test_batch_sampler(num_workers=4)
-        if not NO_MULTIPROCESSING_SPAWN and torch.multiprocessing._supports_context:
+        if not NO_MULTIPROCESSING_SPAWN:
             self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
