@@ -12,7 +12,7 @@ else
     exit 1
 fi
 
-cudnn_installer_link="http://fremont.ipv6.ai/${cudnn_installer_name}.zip"
+cudnn_installer_link="https://ossci-windows.s3.amazonaws.com/${cudnn_installer_name}.zip"
 
 curl --retry 3 -O $cudnn_installer_link
 7z x ${cudnn_installer_name}.zip -ocudnn
