@@ -531,6 +531,10 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
       barrier.stage.dst |= to.stage;
 
       if (Barrier::Memory == category) {
+        TORCH_INTERNAL_ASSERT(
+            from.layout == view_.image().object.layout,
+            "Invalid image layout!");
+
         barrier.images.push_back({
           view_.image().object,
           {
@@ -542,6 +546,8 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
             to.layout,
           },
         });
+
+        view_.image().object.layout = to.layout;
       }
     }
   }
