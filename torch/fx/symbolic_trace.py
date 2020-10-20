@@ -153,8 +153,7 @@ class Tracer(TracerBase):
         return root_fn, args
 
     def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
-        is_module = isinstance(root, torch.nn.Module)
-        if is_module:
+        if isinstance(root, torch.nn.Module):
             self.root = root
             fn = type(root).forward
         else:
@@ -164,7 +163,7 @@ class Tracer(TracerBase):
 
         assert isinstance(fn, FunctionType)
 
-        fn, args = self.create_args_for_root(fn, is_module)
+        fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module))
 
         orig_call = torch.nn.Module.__call__
 
