@@ -156,7 +156,7 @@ TEST(InterpreterTest, runAsyncBasicTest) {
   demo = DemoModule()
   torch.jit.save(torch.jit.script(demo), 'test_interpreter_async.pth')
   */
-  auto filePath = std::string(__FILE__);
+  std::string filePath(__FILE__);
   auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
   testModelFile.append("test_interpreter_async.pth");
   auto model = load(testModelFile);
