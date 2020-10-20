@@ -6,10 +6,11 @@ from itertools import product
 import itertools
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, _assertGradAndGradgradChecks)
+    (TestCase, run_tests, TEST_WITH_SLOW, TEST_NUMPY, TEST_LIBROSA, slowAwareTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA, precisionOverride,
      skipCPUIfNoMkl, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA)
+from torch.autograd.gradcheck import gradgradcheck
 
 from distutils.version import LooseVersion
 from typing import Optional, List
@@ -307,6 +308,28 @@ class TestFFT(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Unsupported dtype "):
                 fn(x)
 
+
+    def _fft_grad_check_helper(self, fname, input, args):
+        torch_fn = getattr(torch.fft, fname)
+        # Workaround for gradcheck's poor support for complex input
+        # Use real input instead and put view_as_complex into the graph
+        if input.dtype.is_complex:
+            def test_fn(x):
+                out = torch_fn(torch.view_as_complex(x), *args)
+                return torch.view_as_real(out) if out.is_complex() else out
+            inputs = (torch.view_as_real(input).detach().requires_grad_(),)
+        else:
+            def test_fn(x):
+                out = torch_fn(x, *args)
+                return torch.view_as_real(out) if out.is_complex() else out
+            inputs = (input.detach().requires_grad_(),)
+
+        self.assertTrue(torch.autograd.gradcheck(test_fn, inputs))
+        if TEST_WITH_SLOW:
+            self.assertTrue(gradgradcheck(test_fn, inputs))
+
+
+    @slowAwareTest
     @skipCPUIfNoMkl
     @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
@@ -321,7 +344,7 @@ class TestFFT(TestCase):
             # dim
             (-1, 0),
             # norm
-            (None, "forward", "backward", "ortho")
+            (None, "forward", "backward", "ortho") if TEST_WITH_SLOW else (None,)
         ))
 
         fft_functions = ['fft', 'ifft', 'hfft', 'irfft']
@@ -330,27 +353,11 @@ class TestFFT(TestCase):
             fft_functions += ['rfft', 'ihfft']
 
         for fname in fft_functions:
-            torch_fn = getattr(torch.fft, fname)
-
             for iargs in test_args:
                 args = list(iargs)
                 input = args[0]
                 args = args[1:]
-
-                # Workaround for gradcheck's poor support for complex input
-                # Use real input instead and put view_as_complex into the graph
-                if dtype.is_complex:
-                    def test_fn(x):
-                        out = torch_fn(torch.view_as_complex(x), *args)
-                        return torch.view_as_real(out) if out.is_complex() else out
-                    inputs = (torch.view_as_real(input).detach().requires_grad_(),)
-                else:
-                    def test_fn(x):
-                        out = torch_fn(x, *args)
-                        return torch.view_as_real(out) if out.is_complex() else out
-                    inputs = (input.detach().requires_grad_(),)
-
-                _assertGradAndGradgradChecks(self, test_fn, inputs)
+                self._fft_grad_check_helper(fname, input, args)
 
     # nd-fft tests
 
@@ -441,6 +448,7 @@ class TestFFT(TestCase):
                 self.assertEqual(x, y, exact_dtype=(
                     forward != torch.fft.fftn or x.is_complex()))
 
+    @slowAwareTest
     @skipCPUIfNoMkl
     @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
@@ -457,7 +465,9 @@ class TestFFT(TestCase):
             (1, None, (0,)),
             (1, (11,), (0,)),
         ]
-        norm_modes = (None, "forward", "backward", "ortho")
+        if not TEST_WITH_SLOW:
+            transform_desc = [desc for desc in transform_desc if desc[0] < 3]
+        norm_modes = (None, "forward", "backward", "ortho") if TEST_WITH_SLOW else (None, )
 
         fft_functions = ['fftn', 'ifftn', 'irfftn']
         # Real-only functions
@@ -469,22 +479,7 @@ class TestFFT(TestCase):
             input = torch.randn(*shape, device=device, dtype=dtype)
 
             for fname, norm in product(fft_functions, norm_modes):
-                torch_fn = getattr(torch.fft, fname)
-
-                # Workaround for gradcheck's poor support for complex input
-                # Use real input instead and put view_as_complex into the graph
-                if dtype.is_complex:
-                    def test_fn(x):
-                        out = torch_fn(torch.view_as_complex(x), s, dim, norm)
-                        return torch.view_as_real(out) if out.is_complex() else out
-                    inputs = (torch.view_as_real(input).detach().requires_grad_(),)
-                else:
-                    def test_fn(x):
-                        out = torch_fn(x, s, dim, norm)
-                        return torch.view_as_real(out) if out.is_complex() else out
-                    inputs = (input.detach().requires_grad_(),)
-
-                _assertGradAndGradgradChecks(self, test_fn, inputs)
+                self._fft_grad_check_helper(fname, input, (s, dim, norm))
 
     @skipCUDAIfRocm
     @skipCPUIfNoMkl

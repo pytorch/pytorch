@@ -1,11 +1,9 @@
-#if defined(__CUDA_ARCH__)
-#include <c10/cuda/CUDAMathCompat.h>
-#define compat_copysign c10::cuda::compat::copysign
-#elif defined(__HIPCC__)
+#ifdef __HIPCC__
 #include <c10/hip/HIPMathCompat.h>
 #define compat_copysign c10::hip::compat::copysign
 #else
-#define compat_copysign std::copysign
+#include <c10/cuda/CUDAMathCompat.h>
+#define compat_copysign c10::cuda::compat::copysign
 #endif
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
