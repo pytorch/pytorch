@@ -404,7 +404,13 @@ class DistributedDataParallel(Module):
             )
             pass
 
-        # used for intra-node param sync and inter-node sync as well
+        # Check that a module does not have Uninitialized parameters
+        for param in module.parameters():
+            if isinstance(param, torch.nn.parameter.UninitializedParameter):
+                raise RuntimeError(
+                    'Modules with uninitialized parameters can\'t be used with `DistributedDataParallel`. '
+                    'Run a dummy forward pass to correctly initialize the modules')
+        # used for intra-node param sync and inter-node sync as wel
         self.broadcast_bucket_size = int(250 * 1024 * 1024)
 
         # reduction bucket size
