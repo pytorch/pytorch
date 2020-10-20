@@ -75,6 +75,18 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
   return native::add_out(self, self, other, alpha);
 }
 
+Tensor copysign(const Tensor& self, const Tensor& other) {
+  return self;
+}
+
+Tensor copysign(const Tensor& self, Scalar other) {
+  return self;
+}
+
+Tensor& copysign_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return result;
+}
+
 Tensor& add_relu_impl(
     Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other);
