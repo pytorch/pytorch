@@ -1,6 +1,6 @@
-
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 
@@ -9,42 +9,63 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
-void EvaluationContext::bind(const Val* value, Int::ScalarType concrete_value) {
-  TORCH_INTERNAL_ASSERT(
-      value->isAnInt(),
-      "Expressoin Evaluation does not support values other than integers at this time.");
+void StatefulExpressionEvaluator::safeBind(
+    Val* value,
+    Int::ScalarType concrete_value,
+    GpuLower* lower) {
+  auto already_concrete_val = getValue(value);
 
-  if (value->isConstScalar()) {
-    auto const_value = value->as<Int>()->value().value();
+  if (already_concrete_val.has_value()) {
     TORCH_INTERNAL_ASSERT(
-        concrete_value == const_value,
+        concrete_value == already_concrete_val.value(),
         "Tried to bind ",
-        concrete_value,
+        value,
         " to ",
-        value,
-        " however ",
-        value,
-        " is set to a constant ",
-        const_value);
+        " concrete value, but it's already set to ",
+        already_concrete_val.value());
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        value->getOrigin() == nullptr,
+        "Tried to bind to a value that is computed in the fusion IR. ",
+        "Can only bind to symbolic values to the fusion that do not have an origin expr.");
+
+    bindings_[value] = concrete_value;
   }
 
-  TORCH_INTERNAL_ASSERT(
-      fusion_->origin(value) == nullptr,
-      "Tried to bind to a value that is computed in the fusion IR. ",
-      "Can only bind to symbolic values to the fusion that do not have an origin expr.");
+  if (lower != nullptr) {
+    // TODO(kir): we should not need to lower (or mutate the IR in any way)
+    //  during expression evaluation
+    auto lowered_val = lower->getLowerValue(value);
+    already_concrete_val = getValue(lowered_val);
 
-  bindings_[value] = concrete_value;
+    if (already_concrete_val.has_value()) {
+      TORCH_INTERNAL_ASSERT(
+          concrete_value == already_concrete_val.value(),
+          "Tried to bind ",
+          lowered_val,
+          " to ",
+          " concrete value, but it's already set to ",
+          already_concrete_val.value());
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          lowered_val->getOrigin() == nullptr,
+          "Tried to bind to a value that is computed in the fusion IR. ",
+          "Can only bind to symbolic values to the fusion that do not have an origin expr.");
+
+      bindings_[lowered_val] = concrete_value;
+    }
+  }
 }
 
-c10::optional<Int::ScalarType> EvaluationContext::concreteValue(
-    const Val* value) const {
-  const auto it = bindings_.find(value);
-  return (it != bindings_.end()) ? c10::optional<Int::ScalarType>(it->second)
-                                 : c10::nullopt;
+c10::optional<Int::ScalarType> StatefulExpressionEvaluator::inferValue(
+    Val* value) {
+  FUSER_PERF_SCOPE("inferValue");
+  return maybeHandle(value);
 }
 
-void EvaluationContext::print() const {
+void StatefulExpressionEvaluator::print() const {
   std::cout << "\nEvaluation context\n";
   std::cout << "--------------------\n";
   for (const auto& kv : bindings_) {
@@ -53,61 +74,59 @@ void EvaluationContext::print() const {
       std::cout << " ; original value = "
                 << kv.first->as<Int>()->value().value();
     }
-    std::cout << "\n";
+    std::cout << " ; " << *kv.first->getValType() << "\n";
   }
   std::cout << "--------------------\n\n";
 }
 
-c10::optional<Int::ScalarType> ExpressionEvaluator::evaluate(
-    Val* val,
-    const EvaluationContext* context) {
-  TORCH_CHECK(context != nullptr);
-  ExpressionEvaluator evaluator(context);
-  evaluator.traverseFrom(context->fusion(), {val}, false);
-  return evaluator.value(val);
-}
+c10::optional<Int::ScalarType> StatefulExpressionEvaluator::getValue(
+    Val* value) {
+  TORCH_INTERNAL_ASSERT(
+      value->isAnInt(),
+      "Expression Evaluation does not support values other than integers at this time.");
 
-c10::optional<Int::ScalarType> ExpressionEvaluator::value(
-    const Statement* stmt) const {
-  const auto it = values_.find(stmt);
-  return (it != values_.end()) ? c10::optional<Int::ScalarType>(it->second)
+  switch (value->getValType().value()) {
+    case ValType::Scalar:
+      if (value->as<Int>()->value().has_value()) {
+        return value->as<Int>()->value();
+      }
+      break;
+    case ValType::KirScalar:
+      if (value->as<kir::Int>()->value().has_value()) {
+        return value->as<kir::Int>()->value();
+      }
+      break;
+    default:
+      break;
+  }
+
+  const auto it = bindings_.find(value);
+  return it != bindings_.end() ? c10::optional<Int::ScalarType>(it->second)
                                : c10::nullopt;
 }
 
-void ExpressionEvaluator::handle(NamedScalar* i) {
-  if (i->isAnInt()) {
-    const auto& bound_value = context_->concreteValue(i);
-    if (bound_value.has_value()) {
-      values_[i] = *bound_value;
+c10::optional<Int::ScalarType> StatefulExpressionEvaluator::maybeHandle(
+    Val* val) {
+  auto maybe_concrete_value = getValue(val);
+  if (!maybe_concrete_value.has_value()) {
+    auto origin = val->getOrigin();
+    if (origin != nullptr) {
+      handle(origin);
+      maybe_concrete_value = getValue(val);
     }
   }
+  return maybe_concrete_value;
 }
 
-void ExpressionEvaluator::handle(Int* i) {
-  if (i->value().has_value()) {
-    values_[i] = *i->value();
-  } else if (const auto* def = context_->fusion()->origin(i)) {
-    const auto& def_result = value(def);
-    if (def_result.has_value()) {
-      values_[i] = *def_result;
-    }
-  } else {
-    const auto& bound_value = context_->concreteValue(i);
-    if (bound_value.has_value()) {
-      values_[i] = *bound_value;
-    }
-  }
-}
-
-void ExpressionEvaluator::handle(UnaryOp* uop) {
-  const auto in = value(uop->in());
+void StatefulExpressionEvaluator::handle(UnaryOp* uop) {
+  const auto in = maybeHandle(uop->in());
   if (in.has_value()) {
     switch (uop->getUnaryOpType()) {
       case UnaryOpType::Neg:
-        values_[uop] = -*in;
+        bindings_[uop->out()] = -*in;
         break;
       case UnaryOpType::Cast:
-        values_[uop] = *in;
+        bindings_[uop->out()] = *in;
         break;
       default:
         TORCH_CHECK(!"Unexpected operator type");
@@ -115,34 +134,34 @@ void ExpressionEvaluator::handle(UnaryOp* uop) {
   }
 }
 
-void ExpressionEvaluator::handle(BinaryOp* bop) {
-  const auto lhs = value(bop->lhs());
-  const auto rhs = value(bop->rhs());
+void StatefulExpressionEvaluator::handle(BinaryOp* bop) {
+  const auto lhs = maybeHandle(bop->lhs());
+  const auto rhs = maybeHandle(bop->rhs());
   if (lhs.has_value() && rhs.has_value()) {
     switch (bop->getBinaryOpType()) {
       case BinaryOpType::Add:
-        values_[bop] = *lhs + *rhs;
+        bindings_[bop->out()] = *lhs + *rhs;
         break;
       case BinaryOpType::Sub:
-        values_[bop] = *lhs - *rhs;
+        bindings_[bop->out()] = *lhs - *rhs;
         break;
       case BinaryOpType::Mul:
-        values_[bop] = *lhs * *rhs;
+        bindings_[bop->out()] = *lhs * *rhs;
         break;
       case BinaryOpType::Div:
         TORCH_CHECK(*rhs != 0);
-        values_[bop] = *lhs / *rhs;
+        bindings_[bop->out()] = *lhs / *rhs;
         break;
       case BinaryOpType::Mod:
         TORCH_CHECK(*rhs != 0);
-        values_[bop] = *lhs % *rhs;
+        bindings_[bop->out()] = *lhs % *rhs;
         break;
       case BinaryOpType::CeilDiv:
         TORCH_CHECK(*rhs != 0);
-        values_[bop] = (*lhs + *rhs - 1) / *rhs;
+        bindings_[bop->out()] = (*lhs + *rhs - 1) / *rhs;
         break;
       case BinaryOpType::And:
-        values_[bop] = Int::ScalarType(*lhs && *rhs);
+        bindings_[bop->out()] = Int::ScalarType(*lhs && *rhs);
         break;
       default:
         TORCH_CHECK(!"Unexpected operator type");
@@ -150,40 +169,15 @@ void ExpressionEvaluator::handle(BinaryOp* bop) {
   }
 }
 
-void ExpressionEvaluator::handle(kir::NamedScalar* i) {
-  if (i->isAnInt()) {
-    const auto& bound_value = context_->concreteValue(i);
-    if (bound_value.has_value()) {
-      values_[i] = *bound_value;
-    }
-  }
-}
-
-void ExpressionEvaluator::handle(kir::Int* i) {
-  if (i->value().has_value()) {
-    values_[i] = *i->value();
-  } else if (const auto* def = context_->fusion()->origin(i)) {
-    const auto& def_result = value(def);
-    if (def_result.has_value()) {
-      values_[i] = *def_result;
-    }
-  } else {
-    const auto& bound_value = context_->concreteValue(i);
-    if (bound_value.has_value()) {
-      values_[i] = *bound_value;
-    }
-  }
-}
-
-void ExpressionEvaluator::handle(kir::UnaryOp* uop) {
-  const auto in = value(uop->in());
+void StatefulExpressionEvaluator::handle(kir::UnaryOp* uop) {
+  const auto in = maybeHandle(uop->in());
   if (in.has_value()) {
     switch (uop->getUnaryOpType()) {
       case UnaryOpType::Neg:
-        values_[uop] = -*in;
+        bindings_[uop->out()] = -*in;
         break;
       case UnaryOpType::Cast:
-        values_[uop] = *in;
+        bindings_[uop->out()] = *in;
         break;
       default:
         TORCH_CHECK(!"Unexpected operator type");
@@ -191,34 +185,34 @@ void ExpressionEvaluator::handle(kir::UnaryOp* uop) {
   }
 }
 
-void ExpressionEvaluator::handle(kir::BinaryOp* bop) {
-  const auto lhs = value(bop->lhs());
-  const auto rhs = value(bop->rhs());
+void StatefulExpressionEvaluator::handle(kir::BinaryOp* bop) {
+  const auto lhs = maybeHandle(bop->lhs());
+  const auto rhs = maybeHandle(bop->rhs());
   if (lhs.has_value() && rhs.has_value()) {
     switch (bop->getBinaryOpType()) {
       case BinaryOpType::Add:
-        values_[bop] = *lhs + *rhs;
+        bindings_[bop->out()] = *lhs + *rhs;
         break;
       case BinaryOpType::Sub:
-        values_[bop] = *lhs - *rhs;
+        bindings_[bop->out()] = *lhs - *rhs;
         break;
       case BinaryOpType::Mul:
-        values_[bop] = *lhs * *rhs;
+        bindings_[bop->out()] = *lhs * *rhs;
         break;
       case BinaryOpType::Div:
         TORCH_CHECK(*rhs != 0);
-        values_[bop] = *lhs / *rhs;
+        bindings_[bop->out()] = *lhs / *rhs;
         break;
       case BinaryOpType::Mod:
         TORCH_CHECK(*rhs != 0);
-        values_[bop] = *lhs % *rhs;
+        bindings_[bop->out()] = *lhs % *rhs;
         break;
       case BinaryOpType::CeilDiv:
         TORCH_CHECK(*rhs != 0);
-        values_[bop] = (*lhs + *rhs - 1) / *rhs;
+        bindings_[bop->out()] = (*lhs + *rhs - 1) / *rhs;
         break;
       case BinaryOpType::And:
-        values_[bop] = Int::ScalarType(*lhs && *rhs);
+        bindings_[bop->out()] = Int::ScalarType(*lhs && *rhs);
         break;
       default:
         TORCH_CHECK(!"Unexpected operator type");
@@ -226,6 +220,7 @@ void ExpressionEvaluator::handle(kir::BinaryOp* bop) {
   }
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

@@ -7,7 +7,7 @@ commands:
           name: "Calculate docker image hash"
           command: |
             DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
-            echo "export DOCKER_TAG=${DOCKER_TAG}" >> ${BASH_ENV}
+            echo "DOCKER_TAG=${DOCKER_TAG}" >> "${BASH_ENV}"
 
   designate_upload_channel:
     description: "inserts the correct upload channel into ${BASH_ENV}"
@@ -103,7 +103,7 @@ commands:
           name: (Optional) Merge target branch
           no_output_timeout: "10m"
           command: |
-            if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+            if [[ -n "$CIRCLE_PULL_REQUEST" && "$CIRCLE_BRANCH" != "nightly" ]]; then
               PR_NUM=$(basename $CIRCLE_PULL_REQUEST)
               CIRCLE_PR_BASE_BRANCH=$(curl -s https://api.github.com/repos/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/pulls/$PR_NUM | jq -r '.base.ref')
               if [[ "${BUILD_ENVIRONMENT}" == *"xla"* || "${BUILD_ENVIRONMENT}" == *"gcc5"* ]] ; then
@@ -143,10 +143,6 @@ commands:
         type: string
         default: ""
     steps:
-      - run:
-          name: "Binary Size - Set Python Version"
-          no_output_timeout: "1m"
-          command: pyenv global 3.7.0
       - run:
           name: "Binary Size - Install Dependencies"
           no_output_timeout: "5m"

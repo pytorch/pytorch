@@ -27,12 +27,11 @@ namespace rpc {
 namespace {
 
 constexpr std::chrono::milliseconds kDeleteAllUsersTimeout(100000);
-constexpr float kSecToMsConversion = 1000;
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-PyObject* rpc_init(PyObject* /* unused */) {
+PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   auto rpc_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
   if (!rpc_module) {
@@ -50,6 +49,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
             :meth:`~torch.distributed.rpc.init_rpc` in order to initialize RPC
             with specific configurations, such as the RPC timeout and
             ``init_method`` to be used. )")
+          .def(py::init<>())
+          .def(
+              py::init<float, std::string>(),
+              py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
+              py::arg("init_method") = kDefaultInitMethod)
           .def_readwrite(
               "rpc_timeout",
               &RpcBackendOptions::rpcTimeoutSeconds,
@@ -77,7 +81,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
             be constructed directly, rather, an instance can be retrieved
             through :meth:`~torch.distributed.rpc.get_worker_info` and the
             result can be passed in to functions such as
-            :meth:`~torch.distributed.rpc.rpc_sync`, :class:`~torch.distributed.rpc.rpc_async`,
+            :meth:`~torch.distributed.rpc.rpc_sync`, :meth:`~torch.distributed.rpc.rpc_async`,
             :meth:`~torch.distributed.rpc.remote` to avoid copying a string on
             every invocation.)")
           .def(
@@ -95,7 +99,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           // unqualified "hash" function call. However the
           // argument-dependent lookup for the function "hash" doesn't get
           // triggered in this context because it conflicts with the struct
-          // torch::hash, so  we need to use the qualified name
+          // c10::hash, so  we need to use the qualified name
           // py::detail::hash, which unfortunately is in a detail namespace.
           .def(py::detail::hash(py::self)) // NOLINT
           .def("__repr__", [](const WorkerInfo& workerInfo) {
@@ -342,6 +346,19 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &PyRRef::unpickle,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "_get_type",
+              // Intentionally not releasing GIL, as most accesses just
+              // retrieve cached type py::object
+              &PyRRef::getRRefType,
+              R"(
+                  Returns the type of the data object referenced by this
+                  ``RRef``. On the owner, this is same as
+                  ``type(rref.local_value())``. On a user, this will trigger an
+                  RPC to fetch the ``type`` object from the owner. After this
+                  function is run once, the ``type`` object is cached by the
+                  ``RRef``, and subsequent invocations no longer trigger RPC.
+              )")
+          .def(
               "_get_future",
               [](const PyRRef& self) {
                 return std::make_shared<jit::PythonFutureWrapper>(
@@ -438,6 +455,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
               ProcessGroupAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "get_worker_info",
+          (const WorkerInfo& (ProcessGroupAgent::*)(worker_id_t id) const) &
+              ProcessGroupAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "get_worker_infos",
           (std::vector<WorkerInfo>(ProcessGroupAgent::*)() const) &
               ProcessGroupAgent::getWorkerInfos,
@@ -531,6 +553,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def(
           "get_worker_info",
           (const WorkerInfo& (TensorPipeAgent::*)(const std::string&)const) &
+              TensorPipeAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_info",
+          (const WorkerInfo& (TensorPipeAgent::*)(worker_id_t id) const) &
               TensorPipeAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -760,7 +787,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 } // namespace
 
 static PyMethodDef methods[] = { // NOLINT
-    {"_rpc_init", (PyCFunction)rpc_init, METH_NOARGS, nullptr},
+    {"_rpc_init", rpc_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {

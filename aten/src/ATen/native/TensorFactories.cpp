@@ -127,7 +127,6 @@ void complex_check_dtype(
 Tensor& complex_out(Tensor& result, const Tensor& real, const Tensor& imag) {
   complex_check_dtype(result, real, imag);
   auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(real)
       .add_input(imag)
@@ -148,7 +147,6 @@ Tensor complex(const Tensor& real, const Tensor& imag) {
 Tensor& polar_out(Tensor& result, const Tensor& abs, const Tensor& angle) {
   complex_check_dtype(result, abs, angle);
   auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(abs)
       .add_input(angle)
@@ -176,7 +174,6 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
   TensorOptions options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
 
   AT_ASSERT(options.device().type() == DeviceType::CPU);
-  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   check_size_nonnegative(size);
 
   c10::Allocator* allocator;
@@ -481,10 +478,11 @@ Tensor new_full(
 Tensor linspace(
     Scalar start,
     Scalar end,
-    int64_t steps,
+    c10::optional<int64_t> steps,
     const TensorOptions& options) {
-  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
-  Tensor result = at::empty({steps}, options);
+  const auto steps_ = steps.value_or(100);
+  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
+  Tensor result = at::empty({steps_}, options);
   return at::linspace_out(result, start, end, steps);
 }
 
@@ -493,10 +491,12 @@ Tensor linspace(
 Tensor logspace(
     Scalar start,
     Scalar end,
-    int64_t steps,
+    c10::optional<int64_t> steps,
     double base,
     const TensorOptions& options) {
-  Tensor result = at::empty({steps}, options);
+  const auto steps_ = steps.value_or(100);
+  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
+  Tensor result = at::empty({steps_}, options);
   return at::logspace_out(result, start, end, steps, base);
 }
 
@@ -859,6 +859,9 @@ Tensor zeros_like(
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   if (options.layout() == kSparse && self.is_sparse()) {
+    TORCH_CHECK(
+        !(optional_memory_format.has_value()),
+        "memory format option is only supported by strided tensors");
     auto res = at::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(
         self.sizes(), self.sparse_dim(), self.dense_dim());
@@ -913,6 +916,9 @@ Tensor blackman_window(
     bool periodic,
     const TensorOptions& options) {
   window_function_checks("blackman_window", options, window_length);
+  if (window_length == 0) {
+    return at::empty({0}, options);
+  }
   if (window_length == 1) {
     return native::ones({1}, options);
   }
@@ -982,6 +988,38 @@ Tensor hann_window(
   window_function_checks("hann_window", options, window_length);
   return native::hamming_window(
       window_length, periodic, /*alpha=*/0.5, /*beta=*/0.5, options);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ kaiser_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor kaiser_window(int64_t window_length, const TensorOptions& options) {
+  return native::kaiser_window(window_length, /*periodic=*/true, /*beta=*/12.0, options);
+}
+
+Tensor kaiser_window(int64_t window_length, bool periodic, const TensorOptions& options) {
+  return native::kaiser_window(window_length, periodic, /*beta=*/12.0, options);
+}
+
+Tensor kaiser_window(
+    int64_t window_length,
+    bool periodic,
+    double beta,
+    const TensorOptions& options) {
+  window_function_checks("kaiser_window", options, window_length);
+  if (window_length == 0) {
+    return at::empty({0}, options);
+  }
+  if (window_length == 1) {
+    return at::ones({1}, options);
+  }
+  if (periodic) {
+    window_length += 1;
+  }
+  auto initial = at::arange(window_length, options);
+  auto window = at::empty(window_length, options);
+  auto iter = TensorIterator::unary_op(window, initial);
+  kaiser_window_stub(iter.device_type(), iter, window_length, beta);
+  return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~ vandermonde_matrix ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1174,6 +1212,8 @@ Tensor rand(
   return result.uniform_(0, 1, generator);
 }
 
+
+DEFINE_DISPATCH(kaiser_window_stub);
 
 } // namespace native
 } // namespace at

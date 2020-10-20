@@ -33,19 +33,22 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
  private:
   friend HybridBase;
   torch::jit::mobile::Module module_;
+  c10::DeviceType deviceType_;
 
  public:
   constexpr static auto kJavaDescriptor = "Lorg/pytorch/LiteNativePeer;";
 
   static facebook::jni::local_ref<jhybriddata> initHybrid(
       facebook::jni::alias_ref<jclass>,
-      facebook::jni::alias_ref<jstring> modelPath) {
-    return makeCxxInstance(modelPath);
+      facebook::jni::alias_ref<jstring> modelPath,
+      jint device) {
+    return makeCxxInstance(modelPath, device);
   }
 
-  PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
+  PytorchJni(facebook::jni::alias_ref<jstring> modelPath, jint device) {
     LiteJITCallGuard guard;
     module_ = torch::jit::_load_for_mobile(std::move(modelPath->toStdString()));
+    deviceType_ = deviceJniCodeToDeviceType(device);
   }
 
   static void registerNatives() {
@@ -65,7 +68,14 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     inputs.reserve(n);
     for (size_t i = 0; i < n; i++) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      inputs.push_back(std::move(atIValue));
+      if (at::kVulkan == deviceType_) {
+        inputs.push_back(
+            atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
+                                : std::move(atIValue));
+      } else {
+        TORCH_CHECK(at::kCPU == deviceType_);
+        inputs.push_back(std::move(atIValue));
+      }
     }
 
     auto output = [&]() {
@@ -87,12 +97,19 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     inputs.reserve(n);
     for (size_t i = 0; i < n; i++) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      inputs.push_back(std::move(atIValue));
+      if (at::kVulkan == deviceType_) {
+        inputs.push_back(
+            atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
+                                : std::move(atIValue));
+      } else {
+        TORCH_CHECK(at::kCPU == deviceType_);
+        inputs.push_back(std::move(atIValue));
+      }
     }
     if (auto method = module_.find_method(methodName)) {
       auto output = [&]() {
         LiteJITCallGuard guard;
-        return module_.run_method(methodName, inputs);
+        return module_.get_method(methodName)(inputs);
       }();
       return JIValue::newJIValueFromAtIValue(output);
     }

@@ -16,14 +16,16 @@ class LintCode(Enum):
 def optimize_for_mobile(
         script_module,
         optimization_blocklist: Set[MobileOptimizerType] = None,
-        preserved_methods: List[AnyStr] = None):
+        preserved_methods: List[AnyStr] = None,
+        backend: str = 'CPU'):
     """
     Args:
         script_module: An instance of torch script module with type of ScriptModule.
         optimization_blocklist: A set with type of MobileOptimizerType. When set is not passed,
             optimization method will run all the optimizer pass; otherwise, optimizer
             method will run the optimization pass that is not included inside optimization_blocklist.
-        perserved_methods: A list of methods that needed to be preserved when freeze_module pass is invoked.
+        perserved_methods: A list of methods that needed to be preserved when freeze_module pass is invoked
+        backend: Device type to use for running the result model ('CPU'(default), 'Vulkan' or 'Metal').
     Returns:
         A new optimized torch script module
     """
@@ -37,7 +39,16 @@ def optimize_for_mobile(
     if preserved_methods is None:
         preserved_methods = []
 
-    optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(script_module._c, optimization_blocklist, preserved_methods)
+    backend = backend.lower()
+    if backend == 'cpu':
+        optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(script_module._c, optimization_blocklist, preserved_methods)
+    elif backend == 'vulkan':
+        optimized_cpp_module = torch._C._jit_pass_vulkan_optimize_for_mobile(script_module._c, preserved_methods)
+    elif backend == 'metal':
+        optimized_cpp_module = torch._C._jit_pass_metal_optimize_for_mobile(script_module._c, preserved_methods)
+    else:
+        raise TypeError("Unknown backend, must be one of 'CPU', 'Vulkan' or 'Metal'")
+
     return torch.jit._recursive.wrap_cpp_module(optimized_cpp_module)
 
 

@@ -15,7 +15,6 @@ import traceback
 import warnings
 import threading
 from typing import List, Optional, Tuple, Union
-from torch._six import raise_from
 from ._utils import _get_device_index, _dummy_type
 from .streams import Stream, Event
 from .. import device as _device
@@ -97,11 +96,11 @@ If you want to use the {} GPU with PyTorch, please check the instructions at htt
     supported_sm = [int(arch.split('_')[1]) for arch in arch_list if 'sm_' in arch]
     for idx in range(device_count()):
         cap_major, cap_minor = get_device_capability(idx)
-        capability = cap_major * 10 + cap_minor
-        # NVIDIA GPU compute architectures are backward compatible within 5 minor revisions versions
-        supported = any([capability >= sm and capability - (sm // 5) * 5 < 5 for sm in supported_sm])
+        # NVIDIA GPU compute architectures are backward compatible within major version
+        supported = any([sm // 10 == cap_major for sm in supported_sm])
         if not supported:
             device_name = get_device_name(idx)
+            capability = cap_major * 10 + cap_minor
             warnings.warn(incompatible_device_warn.format(device_name, capability, " ".join(arch_list), device_name))
 
 
@@ -180,9 +179,9 @@ def _lazy_init():
                 try:
                     queued_call()
                 except Exception as e:
-                    msg = ("CUDA call failed lazily at initialization with error: {}\n\n"
-                           "CUDA call was originally invoked at:\n\n{}").format(str(e), orig_traceback)
-                    raise_from(DeferredCudaCallError(msg), e)
+                    msg = (f"CUDA call failed lazily at initialization with error: {str(e)}\n\n"
+                           f"CUDA call was originally invoked at:\n\n{orig_traceback}")
+                    raise DeferredCudaCallError(msg) from e
         finally:
             delattr(_tls, 'is_initializing')
         _initialized = True

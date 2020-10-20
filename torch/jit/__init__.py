@@ -9,6 +9,7 @@ from torch._jit_internal import (
     _overload,
     _overload_method,
     ignore,
+    is_scripting,
     export,
     unused,
 )
@@ -16,7 +17,6 @@ from torch.jit._script import (
     script,
     Attribute,
     ScriptModule,
-    is_scripting,
     script_method,
     RecursiveScriptModule,
     ScriptWarning,
@@ -68,6 +68,27 @@ Error.__qualname__ = "Error"
 def annotate(the_type, the_value):
     # noop in python
     return the_value
+
+
+def script_if_tracing(fn):
+    """
+    Compiles ``fn`` when it is first called during tracing. ``torch.jit.script``
+    has a non-negligible start up time when it is first called due to
+    lazy-initializations of many compiler builtins. Therefore you should not use
+    it in library code. However, you may want to have parts of your library work
+    in tracing even if they use control flow. In these cases, you should use
+    ``@torch.jit.script_if_tracing`` to substitute for
+    ``torch.jit.script``.
+
+    Arguments:
+        fn: A function to compile.
+
+    Returns:
+        If called during tracing, a :class:`ScriptFunction` created by `torch.jit.script` is returned.
+        Otherwise, the original function `fn` is returned.
+    """
+
+    return _script_if_tracing(fn)
 
 
 if not torch._C._jit_init():

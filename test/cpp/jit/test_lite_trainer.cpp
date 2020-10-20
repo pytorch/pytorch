@@ -1,5 +1,6 @@
+#include <gtest/gtest.h>
+
 #include <c10/core/TensorOptions.h>
-#include <test/cpp/jit/test_base.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/mobile/export_data.h>
@@ -7,14 +8,16 @@
 #include <torch/csrc/jit/mobile/import_data.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/optim/sgd.h>
+#include <torch/csrc/jit/mobile/sequential.h>
 #include <torch/csrc/jit/serialization/import.h>
+#include <torch/data/dataloader.h>
 #include <torch/torch.h>
 
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
 
-void testLiteInterpreterParams() {
+TEST(LiteTrainerTest, Params) {
   Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
   m.define(R"(
@@ -72,7 +75,7 @@ void testLiteInterpreterParams() {
   AT_ASSERT(parameters[0].item<float>() == bc_parameters[0].item<float>());
 }
 
-void testMobileNamedParameters() {
+TEST(MobileTest, NamedParameters) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
@@ -97,7 +100,7 @@ void testMobileNamedParameters() {
   }
 }
 
-void testMobileSaveLoadData() {
+TEST(MobileTest, SaveLoadData) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
@@ -125,7 +128,7 @@ void testMobileSaveLoadData() {
   }
 }
 
-void testMobileSaveLoadParameters() {
+TEST(MobileTest, SaveLoadParameters) {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
@@ -155,7 +158,7 @@ void testMobileSaveLoadParameters() {
   }
 }
 
-void testMobileSaveLoadParametersEmpty() {
+TEST(MobileTest, SaveLoadParametersEmpty) {
   Module m("m");
   m.define(R"(
     def add_it(self, x):
@@ -178,7 +181,7 @@ void testMobileSaveLoadParametersEmpty() {
   AT_ASSERT(mobile_params.size() == 0);
 }
 
-void testLiteSGD() {
+TEST(LiteTrainerTest, SGD) {
   Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
   m.define(R"(
@@ -234,6 +237,36 @@ void testLiteSGD() {
     }
   }
   AT_ASSERT(parameters[0].item<float>() == bc_parameters[0].item<float>());
+}
+
+namespace {
+struct DummyDataset : torch::data::datasets::Dataset<DummyDataset, int> {
+  explicit DummyDataset(size_t size = 100) : size_(size) {}
+
+  int get(size_t index) override {
+    return 1 + index;
+  }
+  torch::optional<size_t> size() const override {
+    return size_;
+  }
+
+  size_t size_;
+};
+} // namespace
+
+TEST(LiteTrainerTest, SequentialSampler) {
+  // test that sampler can be used with dataloader
+  const int kBatchSize = 10;
+  auto data_loader =
+      torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
+          DummyDataset(25), kBatchSize);
+  int i = 1;
+  for (const auto& batch : *data_loader) {
+    for (const auto& example : batch) {
+      AT_ASSERT(i == example);
+      i++;
+    }
+  }
 }
 
 } // namespace jit

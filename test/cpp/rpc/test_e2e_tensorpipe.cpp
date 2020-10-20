@@ -11,7 +11,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-using namespace torch::distributed::autograd;
 
 #ifdef USE_TENSORPIPE
 

@@ -186,12 +186,21 @@ message TensorBoundShape {
   }
   repeated DimType dim_type = 2;  // dim_type.size() == shape.dims.size()
   optional string name = 3;
+  // a flag to indicate whether the shape is final and cannot be changed
+  // eg: input/output of in-place ops
+  optional bool shape_is_final = 4;
 }
 
 message TensorBoundShapes {
   repeated TensorBoundShape shapes = 1;
   optional int64 max_batch_size = 2;
   optional int64 max_feature_len = 3;
+}
+
+message AOTConfig{
+  required int64 max_batch_size = 1;
+  required int64 max_seq_size = 2;
+  required bool in_batch_broadcast = 3;
 }
 
 // A named argument containing either singular float, integer and string

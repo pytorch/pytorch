@@ -35,6 +35,11 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
   return func;
 }
 
+ExportModuleMobileInfoConverter& GetMobileInfoConverter() {
+  static ExportModuleMobileInfoConverter func = nullptr;
+  return func;
+}
+
 static IValue Tup(std::vector<IValue> ivalues) {
   return c10::ivalue::Tuple::create(std::move(ivalues));
 }
@@ -111,6 +116,22 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
       } else {
         TORCH_INTERNAL_ASSERT(
             false, "Unsupported node kind on CALL opcode for mobile");
+      }
+    } else if (ins.op == RET) {
+      auto node = code.instructions_source()[i];
+      for (const auto& input : node->inputs()) {
+        const auto& input_type = input->type();
+        if (input_type->kind() == TypeKind::TupleType) {
+          if (const auto& name_typed_input =
+                  input_type->cast<at::NamedType>()) {
+            TORCH_CHECK(
+                !name_typed_input->name(),
+                "A named tuple type is not supported in mobile module. ",
+                "Workaround: instead of using a named tuple type's fields, ",
+                "use a dictionary type's key-value pair itmes or ",
+                "a pytorch class (class Foo(torch.nn.Module))'s attributes.'");
+          }
+        }
       }
     } else {
       TORCH_CHECK(
@@ -242,6 +263,11 @@ void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
   GetExtraFilesHook() = hook;
 }
 
+void SetExportModuleMobileInfoConverter(
+    ExportModuleMobileInfoConverter converter) {
+  GetMobileInfoConverter() = converter;
+}
+
 class ScriptModuleSerializer {
  public:
   explicit ScriptModuleSerializer(const std::string& filename)
@@ -269,6 +295,7 @@ class ScriptModuleSerializer {
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
       writeByteCode(module, save_mobile_debug_info);
+      writeMobileMetadata(module, extra_files);
     }
 
     // Acquires and sets minimum (dynamic) version
@@ -337,8 +364,28 @@ class ScriptModuleSerializer {
     }
   }
 
+  void writeMobileMetadata(
+      const Module& module,
+      const ExtraFilesMap& extra_files) {
+    auto hook = GetExtraFilesHook();
+    auto converter = GetMobileInfoConverter();
+    if (!converter) {
+      return;
+    }
+    ExtraFilesMap files_to_write = extra_files;
+    // merge hook files and extra files
+    if (hook) {
+      ExtraFilesMap hook_files = hook(module);
+      files_to_write.insert(hook_files.begin(), hook_files.end());
+    }
+    auto content_to_write = converter(module, files_to_write);
+    if (!content_to_write.empty()) {
+      writeArchive("metadata", content_to_write);
+    }
+  }
+
   void writeCode(const at::NamedTypePtr& root_type) {
-    class_deps_.push_back(root_type);
+    class_deps_.add(root_type);
     for (size_t i = 0; i < class_deps_.size(); ++i) {
       // note: convertNameType may extend class_deps_, so re-checking
       // .size() is necessary
@@ -428,7 +475,7 @@ class ScriptModuleSerializer {
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::IValue> constant_table_;
   std::unordered_set<c10::NamedTypePtr> converted_types_;
-  std::vector<c10::NamedTypePtr> class_deps_;
+  PrintDepsTable class_deps_;
   TypeNameUniquer type_name_uniquer_;
 
   // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be

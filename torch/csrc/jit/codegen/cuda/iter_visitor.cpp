@@ -7,34 +7,9 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 /* ITER VISITOR */
-
-std::vector<Statement*> IterVisitor::next(Statement* stmt) {
-  if (stmt->isVal()) {
-    return next(stmt->as<Val>());
-  } else if (stmt->isExpr()) {
-    return next(stmt->as<Expr>());
-  } else {
-    TORCH_INTERNAL_ASSERT(
-        false, "IterVisitor could not detect type in next_dispatch.");
-  }
-}
-
-std::vector<Statement*> IterVisitor::next(Val* v) {
-  FusionGuard::getCurFusion()->assertInFusion(v, "Cannot traverse val, ");
-  if (FusionGuard::getCurFusion()->origin(v) != nullptr) {
-    return {FusionGuard::getCurFusion()->origin(v)};
-  }
-  return {};
-}
-
-std::vector<Statement*> IterVisitor::next(Expr* expr) {
-  FusionGuard::getCurFusion()->assertInFusion(expr, "Cannot traverse expr, ");
-  std::vector<Statement*> next_stmts{expr->inputs().begin(),
-                                     expr->inputs().end()};
-  return next_stmts;
-}
 
 namespace {
 
@@ -349,7 +324,7 @@ namespace {
 // them.
 struct Dependencies : public IterVisitor {
   std::unordered_set<Val*> dependencies_;
-  std::unordered_set<Val*> vals;
+  std::unordered_set<Val*> vals_;
 
   std::vector<Statement*> next(Val* v) override {
     if (dependencies_.find(v) != dependencies_.end())
@@ -358,7 +333,7 @@ struct Dependencies : public IterVisitor {
   }
 
   void handle(Val* val) override {
-    vals.emplace(val);
+    vals_.emplace(val);
   }
 
   Dependencies(
@@ -377,11 +352,43 @@ struct Dependencies : public IterVisitor {
     }
 
     Dependencies deps(dependencies, of);
-    return deps.vals;
+    return deps.vals_;
   }
 };
 
-// Looks for and returns
+// Looks for and returns all output values with dependencies on `of`.
+struct FindOutputs : public IterVisitor {
+  const std::unordered_set<Val*>& of_;
+  std::unordered_set<Val*> outs_;
+
+  void handle(Val* val) override {
+    if (of_.find(val) != of_.end()) {
+      Statement* out_stmt = stmt_stack.front().back();
+      if (out_stmt->isVal()) {
+        auto out_val = out_stmt->as<Val>();
+        if (of_.find(out_val) == of_.end()) {
+          outs_.emplace(out_val);
+        }
+      }
+    }
+  }
+
+  FindOutputs(const std::unordered_set<Val*>& _of) : of_(_of) {
+    auto fusion = (*of_.begin())->fusion();
+    traverseFrom(fusion, fusion->outputs(), false);
+  };
+
+  static std::unordered_set<Val*> getAllOutputsOf(
+      const std::unordered_set<Val*>& of) {
+    if (of.empty()) {
+      return std::unordered_set<Val*>();
+    }
+
+    FindOutputs finder(of);
+    return finder.outs_;
+  }
+};
+
 class DependencyChains : public IterVisitor {
  public:
   std::deque<std::deque<Val*>> dep_chains;
@@ -496,6 +503,45 @@ std::unordered_set<Val*> DependencyCheck::getAllValsBetween(
   return Dependencies::getAllVals(dependencies, of);
 }
 
+std::unordered_set<Val*> DependencyCheck::getAllOutputsOf(
+    const std::unordered_set<Val*>& of) {
+  if (of.empty()) {
+    return std::unordered_set<Val*>();
+  }
+  FusionGuard fg((*of.begin())->fusion());
+  return FindOutputs::getAllOutputsOf(of);
+}
+
+void ExprSort::handle(Expr* expr) {
+  exprs.push_back(expr);
+}
+
+std::vector<Expr*> ExprSort::getExprs(Fusion* fusion, bool from_outputs_only) {
+  ExprSort es;
+  es.traverse(fusion, from_outputs_only);
+  return es.exprs;
+}
+
+std::vector<Expr*> ExprSort::getExprs(
+    Fusion* fusion,
+    const std::vector<Val*>& from) {
+  ExprSort es;
+  es.traverseFrom(fusion, from, false);
+  return es.exprs;
+}
+
+void InputsOf::handle(Val* v) {
+  if (FusionGuard::getCurFusion()->origin(v) == nullptr)
+    inputs.emplace(v);
+}
+
+std::unordered_set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
+  InputsOf io;
+  io.traverseFrom(FusionGuard::getCurFusion(), {output_}, false);
+  return io.inputs;
+}
+
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

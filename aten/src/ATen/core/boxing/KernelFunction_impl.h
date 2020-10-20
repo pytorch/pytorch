@@ -83,6 +83,14 @@ inline KernelFunction KernelFunction::makeFallthrough() {
     );
 }
 
+inline KernelFunction KernelFunction::makeAmbiguousAutogradOther() {
+    return KernelFunction(
+        nullptr,  // no functor_ object
+        &ambiguous_autogradother_kernel,
+        nullptr  // no unboxed function pointer
+    );
+}
+
 inline KernelFunction KernelFunction::makeNamedNotSupported() {
     return KernelFunction(
         nullptr,  // no functor_ object
@@ -119,27 +127,41 @@ inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunctor(std::unique_ptr
 }
 
 template<class FuncPtr, bool AllowLegacyTypes>
-inline KernelFunction KernelFunction::makeFromUnboxedFunction(FuncPtr) {
+inline KernelFunction KernelFunction::makeFromUnboxedFunction(FuncPtr func_ptr) {
     static_assert(is_compile_time_function_pointer<FuncPtr>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with an invalid parameter. It must be a function pointer created with TORCH_FN.");
     static_assert(!std::is_same<typename FuncPtr::FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
     static_assert(FuncPtr::func_ptr() != nullptr, "Kernel function cannot be nullptr");
 
+#if !defined(C10_MOBILE)
     return makeFromUnboxedFunctor<AllowLegacyTypes, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>(
         guts::make_unique_base<OperatorKernel, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>()
     );
+#else
+    // On mobile, we rather want to optimize for binary size than for performance,
+    // so let's not inline the kernel into the wrapper but use makeFromUnboxedRuntimeFunction
+    // instead.
+    return makeFromUnboxedRuntimeFunction(func_ptr.func_ptr());
+#endif
 }
 
 template<class FuncPtr>
-inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunction(FuncPtr) {
+inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunction(FuncPtr func_ptr) {
     // TODO We want to get rid of kernels that have only an unboxed function pointer.
     //      All kernels should have a boxed pointer.
     static_assert(is_compile_time_function_pointer<FuncPtr>::value, "Tried to call KernelFunction::makeFromUnboxedOnlyFunction with an invalid parameter. It must be a function pointer created with TORCH_FN.");
     static_assert(!std::is_same<typename FuncPtr::FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedOnlyFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
     static_assert(FuncPtr::func_ptr() != nullptr, "Kernel function cannot be nullptr");
 
+#if !defined(C10_MOBILE)
     return makeFromUnboxedOnlyFunctor<typename impl::WrapFunctionIntoFunctor<FuncPtr>::type> (
         guts::make_unique_base<OperatorKernel, typename impl::WrapFunctionIntoFunctor<FuncPtr>::type>()
     );
+#else
+    // On mobile, we rather want to optimize for binary size than for performance,
+    // so let's not inline the kernel into the wrapper but use makeFromUnboxedOnlyRuntimeFunction
+    // instead.
+    return makeFromUnboxedOnlyRuntimeFunction(func_ptr.func_ptr());
+#endif
 }
 
 template<bool AllowLegacyTypes, class FuncType>

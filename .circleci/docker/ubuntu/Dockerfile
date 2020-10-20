@@ -44,6 +44,10 @@ ARG GCC_VERSION
 ADD ./common/install_gcc.sh install_gcc.sh
 RUN bash ./install_gcc.sh && rm install_gcc.sh
 
+# Install lcov for C++ code coverage
+ADD ./common/install_lcov.sh install_lcov.sh
+RUN  bash ./install_lcov.sh && rm install_lcov.sh
+
 # Install non-standard Python versions (via Travis binaries)
 ARG TRAVIS_PYTHON_VERSION
 ARG TRAVIS_DL_URL_PREFIX
@@ -84,6 +88,18 @@ RUN rm install_android.sh
 RUN rm AndroidManifest.xml
 RUN rm build.gradle
 ENV INSTALLED_ANDROID ${ANDROID}
+
+# (optional) Install Vulkan SDK
+ARG VULKAN_SDK_VERSION
+ADD ./common/install_vulkan_sdk.sh install_vulkan_sdk.sh
+RUN if [ -n "${VULKAN_SDK_VERSION}" ]; then bash ./install_vulkan_sdk.sh; fi
+RUN rm install_vulkan_sdk.sh
+
+# (optional) Install swiftshader
+ARG SWIFTSHADER
+ADD ./common/install_swiftshader.sh install_swiftshader.sh
+RUN if [ -n "${SWIFTSHADER}" ]; then bash ./install_swiftshader.sh; fi
+RUN rm install_swiftshader.sh
 
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION

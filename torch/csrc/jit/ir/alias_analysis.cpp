@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/memory.h>
 
@@ -298,15 +299,10 @@ void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) const {
     auto it = elementMap_.find(input);
     if (it != elementMap_.end()) {
       auto el = it->second;
-      // Add all memory locations this element may alias.
-      ret |= memoryDAG_->getMemoryLocations(el);
 
-      // We also consider memory locations of contained values to be "read".
-      for (const auto& type : input->type()->containedTypes()) {
-        if (auto wildcard = getWildcard(type)) {
-          ret |= memoryDAG_->getMemoryLocations(wildcard);
-        }
-      }
+      // Add all memory locations this element may alias and their contained
+      // elements
+      memoryDAG_->collectAllContainedMemoryLocations(el, ret);
     }
   }
 
@@ -476,15 +472,20 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::CudaFusionGroup:
     case prim::FunctionalGraph:
     case prim::DifferentiableGraph:
+    case prim::FallbackGraph:
       return analyzeSubgraph(node);
     case prim::fork:
       return analyzeFork(node);
     case aten::wait:
       return analyzeWait(node);
     case prim::rpc_async:
+    case prim::rpc_sync:
+    case prim::rpc_remote:
       return analyzeRpcAsync(node);
     case prim::GradOf:
       return analyzeGradOf(node);
+    // TODO: think more about TensorExpr alias correctness
+    case prim::TensorExprGroup:
     case prim::Constant:
     case prim::AutogradZero:
     case prim::AutogradAdd:
@@ -507,9 +508,12 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
-      if (isFrozen_ && node->kind() == prim::GetAttr &&
-          node->input()->type()->expect<ClassType>()->is_module())
-        return analyzeCreator(node);
+      if (isFrozen_ && node->kind() == prim::GetAttr) {
+        auto& ty = node->input()->type();
+        if (ty->expect<ClassType>()->is_module()) {
+          return analyzeCreator(node);
+        }
+      }
       return analyzeExtractor(node);
     case prim::unchecked_cast:
       return makePointerTo(node->output(), node->input());
@@ -519,11 +523,17 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeBroadcastingChunk(node);
     case prim::SetAttr:
       return analyzeSetAttr(node);
+    case prim::profile_optional:
     case prim::profile:
-      if (node->inputs().size() > 0) {
-        makePointerTo(node->output(), node->inputs().at(0));
+      makePointerTo(node->output(), node->inputs().at(0));
+      return;
+    case prim::TypeCheck: {
+      auto num_inputs = node->inputs().size();
+      for (size_t i = 0; i < num_inputs; i++) {
+        makePointerTo(node->outputs().at(i), node->inputs().at(i));
       }
       return;
+    }
     case prim::BailOut:
       TORCH_INTERNAL_ASSERT(
           node->inputs().at(0)->node()->kind() == prim::BailoutTemplate);
@@ -864,6 +874,44 @@ void AliasDb::analyzeConservative(Node* node) {
   }
 }
 
+bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
+  Node* n = use.user;
+  size_t offset = use.offset;
+  Value* container = n->inputs().at(offset);
+
+  // only consider aten op uses of lists
+  if (!container->type()->cast<ListType>()) {
+    return false;
+  }
+
+  /*
+  in the general case, we consider any Value that enters another container as
+  entering the heap, and thus aliasing all other heap values of the same type.
+  the advantage of this approach are:
+  - there are many composite list/container ops that would be tricky to
+  schematize if we did something more complicated
+  - limits the size of the AliasDb, because a container of size 10 only contains
+  1 memory dag element instead of 10
+  - we do not need to worry about adding contained elements to the wildcard set
+  when a container escapes the graph.
+  The downside of this approach is we are unable to handle the common case of a
+  list constructed and passed into an aten op. Here, optimize for a set of
+  common ops where the output does not alias the list or the list elements
+  */
+
+  switch (use.user->kind()) {
+    case aten::cat:
+    case aten::broadcast_tensors:
+    case aten::stack:
+    case aten::vstack:
+    case aten::hstack:
+    case aten::dstack:
+      return true;
+  }
+
+  return false;
+}
+
 // List or dict or tuple: construct: create an aliasing element for the actual
 // container, then mark all inputs as wildcards, since they've gone inside the
 // container. Then, add the wildcard sets of appropriate type to the contained
@@ -881,6 +929,20 @@ void AliasDb::analyzeContainerConstruct(Node* node) {
 
   TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
   auto container = node->output();
+
+  // optimization:
+  // if a list is only used once in an aten op, and the op output
+  // doesn't alias the input, then we can add all inputs to the list's
+  // contained elements instead of the wildcard set.
+  if (container->uses().size() == 1 &&
+      functionalNonEscapingListUse(container->uses().at(0))) {
+    giveFreshAlias(container, false);
+    for (Value* v : node->inputs()) {
+      addToContainedElements(v, container);
+    }
+    return;
+  }
+
   giveFreshAlias(container);
   auto container_elem = elementMap_.at(container);
   for (auto input : node->inputs()) {
@@ -1054,7 +1116,9 @@ void AliasDb::createValue(const Value* value) {
   elementMap_[value] = new_elem;
 }
 
-void AliasDb::giveFreshAlias(const Value* value) {
+void AliasDb::giveFreshAlias(
+    const Value* value,
+    bool add_wildcard_to_contained_elems) {
   auto maybe_mut_type = getMutableTypePtr(value->type());
   if (!maybe_mut_type) {
     return;
@@ -1068,7 +1132,9 @@ void AliasDb::giveFreshAlias(const Value* value) {
 
   auto new_elem = memoryDAGBuilder_->makeFreshValue(value);
   elementMap_[value] = new_elem;
-  addContainedTypesToFreshElement(new_elem, *maybe_mut_type);
+  if (add_wildcard_to_contained_elems) {
+    addContainedTypesToFreshElement(new_elem, *maybe_mut_type);
+  }
 }
 
 Element* AliasDb::getOrCreateElement(const Value* value) {
