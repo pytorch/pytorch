@@ -6,7 +6,7 @@
 #include <stdexcept>
 
 namespace pybind11 {
-  template <typename type_, typename... options>
+  template <typename, typename...>
   class class_;
 }
 
