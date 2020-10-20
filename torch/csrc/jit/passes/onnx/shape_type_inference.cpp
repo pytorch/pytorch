@@ -430,7 +430,7 @@ bool HasSequenceTypeOutput(Node* node) {
   return false;
 }
 
-void ONNXInferOutputShapeType(
+void ONNXUpdateTypeFromTensor(
     Value* graph_output,
     at::Tensor output,
     bool onnx_shape_inference) {
@@ -484,7 +484,7 @@ void ONNXAssignOutputShape(
         var = reinterpret_cast<THPVariable*>(elem)->cdata;
         outputs_index++;
       }
-      ONNXInferOutputShapeType(graph->outputs()[i], var, onnx_shape_inference);
+      ONNXUpdateTypeFromTensor(graph->outputs()[i], var, onnx_shape_inference);
     }
   }
 
