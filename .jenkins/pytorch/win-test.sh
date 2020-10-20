@@ -55,7 +55,7 @@ run_tests() {
             $SCRIPT_HELPERS_DIR/test_custom_backend.bat && \
             $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat
         elif [[ "${JOB_BASE_NAME}" == *-test3 ]]; then
-            export CAFFE2_DIR = "$(dirname "$SCRIPT_PARENT_DIR")"/caffe2
+            export CAFFE2_DIR="$(dirname "$SCRIPT_PARENT_DIR")"/caffe2
             $CAFFE2_DIR/win_test_ops.bat
         fi
     fi
