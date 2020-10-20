@@ -100,7 +100,13 @@ Context::~Context() {
   try {
     flush();
   }
+  catch (const std::exception& e) {
+    LOG(WARNING)
+        << "Vulkan: Context destructor raised an exception!  Error: "
+        << e.what();
+  }
   catch (...) {
+    LOG(WARNING) << "Vulkan: Context destructor raised an unknown exception!";
   }
 }
 
