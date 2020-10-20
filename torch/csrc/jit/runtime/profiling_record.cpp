@@ -117,7 +117,7 @@ c10::SymbolicShape ProfilingRecord::mergeSymbolicShapes(
   return c10::SymbolicShape(new_symbols);
 }
 
-void ProfilingRecord::profileOptionalValue(const Use& use) {
+void ProfilingRecord::profileOptionalValue(Value* none_output) {
   c10::List<int64_t> elems{0, 0};
   // elems.push_back(0);
   // elems.push_back(0);
@@ -129,21 +129,22 @@ void ProfilingRecord::profileOptionalValue(const Use& use) {
     noneCounts.set(index, noneCounts.get(0) + 1);
     return IValue{noneCounts};
   };
-  insertProfileIValueOp(use, combine, init_val, "none_counts");
+  insertProfileIValueOp(none_output, combine, init_val, "none_counts");
 }
 
 void ProfilingRecord::insertProfileIValueOp(
-    const Use& use,
+    Value* none_output,
     std::function<IValue(const IValue& acc, const IValue& val)> combine,
     const IValue& init,
-    const std::string attr_name) {
-  Value* i = use.user->input(use.offset);
-  auto pn = new ProfileIValueOp(use.user->owningGraph(), {nullptr});
-  pn->addInput(i);
+    const std::string& attr_name) {
+  auto pn = new ProfileIValueOp(none_output->node()->owningGraph(), {nullptr});
+  pn->addInput(none_output);
   auto pno = pn->addOutput();
+  pn->insertAfter(none_output->node());
+  none_output->replaceAllUsesAfterNodeWith(pn, pno);
   pn->ival_(Symbol::attr(attr_name), init);
-  pno->setType(i->type());
-  //
+  pno->setType(none_output->type());
+
   std::function<void(Stack&)> wrapper =
       [this, pn, combine, attr_name](Stack& stack) {
         int64_t frame_id = 0;
@@ -154,6 +155,13 @@ void ProfilingRecord::insertProfileIValueOp(
         auto old_val = pn->ival(Symbol::attr(attr_name));
         auto new_val = combine(old_val, val);
         pn->ival_(Symbol::attr(attr_name), new_val);
+        GRAPH_DEBUG(
+            "old_val = ",
+            old_val,
+            " val = ",
+            val,
+            "Combined value = ",
+            new_val);
         push(stack, val);
       };
 
@@ -284,7 +292,7 @@ void ProfilingRecord::instrumentBlock(Block* block) {
         // here we are profile the definition instead of the use,
         // because we are only optimizing in the case of a None value which is
         // immutable
-        profileOptionalValue({n, offset});
+        profileOptionalValue(i);
       }
     }
 

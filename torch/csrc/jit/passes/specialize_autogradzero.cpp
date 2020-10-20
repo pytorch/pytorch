@@ -93,7 +93,8 @@ struct AutogradZeroSpecializer {
   void removeProfiledOptionalUses(Value* v) {
     std::vector<Node*> profiled_opt_uses;
     for (const Use& use : v->uses()) {
-      if (use.user->kind() == prim::profile_optional) {
+      if (use.user->kind() == prim::profile_ivalue &&
+          use.user->hasAttribute(Symbol::attr("none_counts"))) {
         profiled_opt_uses.push_back(use.user);
       }
     }
