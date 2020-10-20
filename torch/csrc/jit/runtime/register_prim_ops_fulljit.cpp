@@ -19,8 +19,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include "ATen/core/interned_strings.h"
-#include "jit/ir/ir.h"
 
 namespace torch {
 namespace jit {
@@ -100,22 +98,17 @@ RegisterOperators reg(
          "prim::BailoutTemplate() -> int",
          [](Stack* stack) {
            // TODO: today, we put a single bailout template at the front to
-           // carry the un-optimized graph for bailout nodes to use.
-           // Ideally
-           // this should never run, but we haven't written the code to
-           // remove
+           // carry the un-optimized graph for bailout nodes to use. Ideally
+           // this should never run, but we haven't written the code to remove
            // it yet.
            // TORCH_INTERNAL_ASSERT(false);
 
-           // Returns an int so that we have an easy way to do graph
-           // traversal
+           // Returns an int so that we have an easy way to do graph traversal
            push(stack, 1);
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? "
-         "grad_outputs=None, bool? retain_graph=None, bool create_graph=False, "
-         "bool allow_unused=False) -> Tensor?[]",
+         "aten::grad(Tensor[] outputs, Tensor[] inputs, Tensor?[]? grad_outputs=None, bool? retain_graph=None, bool create_graph=False, bool allow_unused=False) -> Tensor?[]",
          [](Stack* stack) {
            bool allow_unused = pop(stack).toBool();
            bool create_graph = pop(stack).toBool();
@@ -155,9 +148,7 @@ RegisterOperators reg(
      // the whole gradients in every tensor of the Autograd graph with
      // create_graph=True so we use aliasAnalysisConservative for these two OPs
      Operator(
-         "aten::backward.TensorList(Tensor[] tensors, Tensor?[]? "
-         "grad_tensors=None, bool? retain_graph=None, bool "
-         "create_graph=False) -> ()",
+         "aten::backward.TensorList(Tensor[] tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
          [](Stack* stack) {
            bool create_graph = pop(stack).toBool();
            auto retain_graph = pop(stack).toOptional<bool>();
@@ -232,8 +223,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::to.prim_other(Tensor(a) self, bool non_blocking=False, "
-         "bool copy=False) -> Tensor(a|b)",
+         "aten::to.prim_other(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
          [](Stack* stack) {
            at::Tensor self;
            bool non_blocking;
@@ -517,8 +507,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::_size_if_not_equal(int[] self_size, int[] other_size) -> "
-         "int[]?",
+         "aten::_size_if_not_equal(int[] self_size, int[] other_size) -> int[]?",
          [](Stack* stack) {
            IValue self_size, other_size;
            pop(stack, self_size, other_size);
