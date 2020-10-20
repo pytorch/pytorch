@@ -9,13 +9,17 @@ namespace ops {
 namespace {
 
 Tensor add(
-    const Tensor& self,
-    const Tensor& other,
+    const Tensor& self_,
+    const Tensor& other_,
     const Scalar alpha) {
   api::Context* const context = api::context();
 
-  const vTensor& v_self = convert(self.is_vulkan() ? self : self.vulkan());
-  const vTensor& v_other = convert(other.is_vulkan() ? other : self.vulkan());
+  const Tensor self = self_.is_vulkan() ? self_ : self_.vulkan();
+  const vTensor& v_self = convert(self);
+
+  const Tensor other = other_.is_vulkan() ? other_ : other_.vulkan();
+  const vTensor& v_other = convert(other);
+
   vTensor v_output(context, self.sizes().vec(), self.options());
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
