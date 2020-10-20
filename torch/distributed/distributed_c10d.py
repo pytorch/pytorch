@@ -486,7 +486,7 @@ def _new_process_group_helper(world_size,
     global _group_count
     global _pg_names
 
-    group_name_=group_name
+    group_name_ = group_name
     if not group_name:
         group_name = str(_group_count)
 
