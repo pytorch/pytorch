@@ -166,7 +166,6 @@ class SpawnContext(ProcessContext):
 # Currently we only add this API first, we can consider adding it to documentation as
 # needed in the future.
 def start_processes(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
-    _python_version_check()
     mp = multiprocessing.get_context(start_method)
     error_queues = []
     processes = []
