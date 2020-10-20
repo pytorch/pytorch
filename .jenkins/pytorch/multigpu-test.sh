@@ -10,7 +10,7 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch (distributed only)"
-if [ -n "${OUTPUT_XUNIT}" ]; then
+if [ -n "${IN_CI}" ]; then
   # TODO move this to docker
   pip_install unittest-xml-reporting
 
