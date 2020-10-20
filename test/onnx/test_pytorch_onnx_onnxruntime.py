@@ -2950,8 +2950,14 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(ViewModel(), (x, y))
 
     def test_weight_norm(self):
+        # addmm for 3-d inputs converts to onnx::MatMul
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=1)
         x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(model, x)
+
+        # addmm for 2-d inputs converts to onnx::Gemm
+        model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=1)
+        x = torch.randn(4, 5, requires_grad=True)
         self.run_test(model, x)
 
         model = torch.nn.utils.weight_norm(torch.nn.Conv1d(1, 1, 3))
@@ -2967,8 +2973,14 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, x)
 
     def test_weight_norm_nodim(self):
+        # addmm for 3-d inputs converts to onnx::MatMul
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=None)
         x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(model, x)
+
+        # addmm for 2-d inputs converts to onnx::Gemm
+        model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=None)
+        x = torch.randn(4, 5, requires_grad=True)
         self.run_test(model, x)
 
     def test_flatten(self):

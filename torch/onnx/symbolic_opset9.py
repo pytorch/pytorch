@@ -220,7 +220,13 @@ def addmm(g, self, mat1, mat2, beta, alpha):
     elif mat2_dtype is not None:
         dtype = mat2_dtype
 
-    if dtype is not None:
+    mat1_rank = mat1.type().dim()
+    mat2_rank = mat2.type().dim()
+
+    def isNotNoneAnd(v, u):
+        return v is not None and v != u
+
+    if dtype is not None and (isNotNoneAnd(mat1_rank, 2) or isNotNoneAnd(mat2_rank, 2)):
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
         dtype = sym_help.scalar_type_to_pytorch_type[dtype]
 
