@@ -465,18 +465,22 @@ void InferShapeTypeForUninitializedOutput(
     Value* other_output) {
   auto output_type = other_output->type()->expect<TensorType>();
   auto elem_type = at::initialTensorOptions().dtype(output_type->scalarType());
-  Node* const_node = graph->create(::c10::onnx::Constant, 1);
-
   if (output_type->sizes().concrete_sizes().has_value()) {
+    Node* const_node = graph->create(::c10::onnx::Constant, 1);
     auto size = output_type->sizes().concrete_sizes().value();
     const_node->t_(attr::value, at::zeros(size, elem_type));
+    const_node->output()->setType(TensorType::create(*(output_type->scalarType()), at::kCPU, {}, {}));
+    const_node->insertBefore(block->return_node());
+    const_node->output()->copyMetadata(other_output);
+    uninitialized_output->replaceAllUsesWith(const_node->output());
   } else {
-    const_node->t_(attr::value, at::zeros({}, elem_type));
+    Node* const_node = graph->create(::c10::onnx::RandomNormal, 1);
+    const_node->t_(attr::shape, at::zeros({}, elem_type));
+    const_node->output()->setType(TensorType::create(*(output_type->scalarType()), at::kCPU, {}, {}));
+    const_node->insertBefore(block->return_node());
+    const_node->output()->copyMetadata(other_output);
+    uninitialized_output->replaceAllUsesWith(const_node->output());
   }
-  const_node->insertBefore(block->return_node());
-  const_node->output()->copyMetadata(other_output);
-  uninitialized_output->replaceAllUsesWith(const_node->output());
-  const_node->output()->setType(other_output->type());
   uninitialized_output->node()->destroy();
 }
 
@@ -541,7 +545,7 @@ void ONNXIfShapeTypeInference(Node* node) {
     TORCH_INTERNAL_ASSERT(
         !(IsUninitializedBlockOutput(then_block_output->node()) &&
           IsUninitializedBlockOutput(else_block_output->node())),
-        "Error trying to infer shape and type for ONNX If with uninitialized output.");
+        "Cannot infer shape and type for ONNX If with uninitialized output in both subblocks. Please check the model graph.");
 
     if (IsUninitializedBlockOutput(then_block_output->node())) {
       InferShapeTypeForUninitializedOutput(
