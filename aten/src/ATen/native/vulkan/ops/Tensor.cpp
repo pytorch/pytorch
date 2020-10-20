@@ -563,6 +563,8 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
       barrier.stage.src = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     }
 
+    // Optimization opportunity: delay and batch.
+
     command_buffer().barrier(barrier);
   }
 }

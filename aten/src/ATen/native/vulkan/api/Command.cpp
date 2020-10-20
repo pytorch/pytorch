@@ -117,19 +117,28 @@ void Command::Buffer::barrier(
       "Potential reason: This command buffer is moved from.");
 
   c10::SmallVector<VkMemoryBarrier, 1u> global_memory_barriers;
-  c10::SmallVector<VkImageMemoryBarrier, 1u> image_memory_barriers;
+  c10::SmallVector<VkImageMemoryBarrier, 4u> image_memory_barriers;
 
-  for (const Resource::Buffer::Barrier& barrier : barrier.buffers) {
+  if (!barrier.buffers.empty()) {
     // Using global memory barriers instead of buffer memory barriers for
     // buffers.  The consensus seems to be that there is no advantage in
-    // using the latter.
+    // using the latter in favor of the former.
 
-    global_memory_barriers.push_back({
-          VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-          nullptr,
-          barrier.memory.src,
-          barrier.memory.dst,
-        });
+    VkMemoryBarrier global_memory_barrier{
+      VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+      nullptr,
+      0u,
+      0u,
+    };
+
+    // Coalesce all buffer memory barriers into one global memory barrier.
+
+    for (const Resource::Buffer::Barrier& barrier : barrier.buffers) {
+      global_memory_barrier.srcAccessMask |= barrier.memory.src;
+      global_memory_barrier.dstAccessMask |= barrier.memory.dst;
+    }
+
+    global_memory_barriers.push_back(global_memory_barrier);
   }
 
   for (const Resource::Image::Barrier& barrier : barrier.images) {
