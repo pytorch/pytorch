@@ -25,33 +25,36 @@ Tensor add(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
 
-  const struct {
-    uint32_t W;
-    uint32_t H;
-    uint32_t C;
-    float alpha;
-  } block {
-  };
+  if (v_output.has_image() && v_self.has_image() && v_other.has_image()) {
+    const struct {
+      uint32_t W;
+      uint32_t H;
+      uint32_t C;
+      float alpha;
+    } block {
+    };
 
-  context->dispatch(
-      command_buffer,
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
-      VK_KERNEL(add),
-      {
-        8, 8, 1,
-      },
-      {
-        1, 1, 1,
-      },
-      v_output.image(command_buffer, vTensor::Access::Write),
-      v_self.image(command_buffer),
-      v_other.image(command_buffer),
-      context->resource().pool.uniform(block).object);
+    context->dispatch(
+        command_buffer,
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        VK_KERNEL(add),
+        {
+          8, 8, 1,
+        },
+        v_output.extents(),
+        v_output.image(command_buffer, vTensor::Access::Write),
+        v_self.image(command_buffer),
+        v_other.image(command_buffer),
+        context->resource().pool.uniform(block).object);
+  }
+  else {
+    // TODO: Convert all to buffer and dispatch a buffer-only kernel.
+  }
 
   command_buffer.end();
   command_buffer.submit(context->gpu().queue);

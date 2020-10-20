@@ -34,9 +34,9 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
       Future::Payload v_self_payload = v_self_future.wait();
 
       memcpy(
-        v_self_payload.get(),
-        src.contiguous().data_ptr<float>(),
-        std::min(src.nbytes(), self.nbytes()));
+          v_self_payload.get(),
+          src.contiguous().data_ptr<float>(),
+          std::min(src.nbytes(), self.nbytes()));
     }
     // Vulkan -> Vulkan
     else if (at::kVulkan == src.device().type()) {
@@ -89,9 +89,9 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
         const Future::Payload v_src_payload = v_src_future.wait();
 
         memcpy(
-          self.data_ptr<float>(),
-          v_src_payload.get(),
-          std::min(src.nbytes(), self.nbytes()));
+            self.data_ptr<float>(),
+            v_src_payload.get(),
+            std::min(src.nbytes(), self.nbytes()));
       }
       else {
         TORCH_INTERNAL_ASSERT(false, "Unsupported!");
@@ -102,7 +102,7 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
     // WARNING
     //
 
-    // This is bad practice.  We almost never want to flush the GPU pipeline as
+    // This is not great.  We almost never want to flush the GPU pipeline as
     // that has far reaching consequences, especially if PyTorch is not the only
     // process accessing the GPU.  If we have done our job properly, above
     // synchronization mechanisms should be enough to ensure correctness at a more
@@ -111,8 +111,8 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
     // tensor to finish.
     //
     // Having said that, we still do need to release all pool resources at one
-    // point per inference run or otherwise we will run out of memory. There is
-    // no perfect answer to this problem that checks all boxes, which leavs us
+    // point per inference run or we will run out of memory otherwise. There is
+    // no perfect answer to this problem that checks all boxes, which leaves us
     // with one of several design decisions:
     //
     // 1) Use graph mode to gain an understanding of the computation graph,
@@ -120,12 +120,15 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
     //    for performance and memory consumption.  Not without its downsides if
     //    flexibility is a top priority.
     // 2) If on eager mode, and hence are seeing operations one at a time, expose
-    //    this release of resources to the user as a Python / C++ function.
+    //    this release of resources to the user as a Python / C++ function.  This
+    //    makes for suboptimal user experience but is efficient in terms of
+    //    performance.
     // 3) If on eager mode, and interested in keeping this bookkeeping transparent
     //    to the user, release all resources somewhere ... like here.  This is
     //    not ideal since it requires a pipeline flush to make sure these objects
-    //    are not already in use but cannot do much better within the constraints
-    //    of this approach.
+    //    are not already in use by a workload in flight.  Cannot do much better
+    //    within the constraints of this approach.  Good for user experience,
+    //    suboptimal for performance.
     // 4) If on eager mode, and interested in keeping this bookkeeping transparent
     //    to the user, and performance does not matter, make CPU and GPU run in
     //    lockstep.  Obviously this is just bad.  Mentioned for the sake of

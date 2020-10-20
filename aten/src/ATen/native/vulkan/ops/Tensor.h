@@ -186,6 +186,7 @@ class vTensor final {
     Metadata
   */
 
+  const VkExtent3D& extents() const;
   const TensorOptions& options() const;
   IntArrayRef sizes() const;
   IntArrayRef strides() const;
@@ -244,6 +245,7 @@ class vTensor final {
     Buffer& staging(api::Command::Buffer&, Access::Flags) const;
     vTensor::Memory& wait() const;
 
+    const VkExtent3D& extents() const;
     const TensorOptions& options() const;
     IntArrayRef sizes() const;
     IntArrayRef strides() const;
@@ -334,9 +336,10 @@ class vTensor final {
     mutable State state_;
 
     // Metadata
+    VkExtent3D extents_;
+    TensorOptions options_;
     c10::SmallVector<int64_t, 6u> sizes_;
     c10::SmallVector<int64_t, 6u> strides_;
-    TensorOptions options_;
 
    private:
     // Debug
@@ -448,6 +451,10 @@ inline bool vTensor::has_image() const {
   return view_.has_image();
 }
 
+inline const VkExtent3D& vTensor::extents() const {
+  return view_.extents();
+}
+
 inline const TensorOptions& vTensor::options() const {
   return view_.options();
 }
@@ -462,6 +469,10 @@ inline IntArrayRef vTensor::strides() const {
 
 inline bool vTensor::View::has_image() const {
   return state_.is_available(View::Component::Image);
+}
+
+inline const VkExtent3D& vTensor::View::extents() const {
+  return extents_;
 }
 
 inline const TensorOptions& vTensor::View::options() const {
