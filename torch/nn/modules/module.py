@@ -349,7 +349,7 @@ class Module:
         elif hasattr(self, name) and name not in self._modules:
             raise KeyError("attribute '{}' already exists".format(name))
         elif '.' in name:
-            raise KeyError("module name can't contain \".\"")
+            raise KeyError("module name can't contain \".\", got: {}".format(name))
         elif name == '':
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
@@ -965,18 +965,20 @@ class Module:
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
-
+                # This is used to avoid copying uninitialized parameters into
+                # non-lazy modules, since they dont have the hook to do the checks
+                # in such case, it will error when accessing the .shape attribute.
+                is_param_lazy = isinstance(param, torch.nn.parameter.UninitializedParameter)
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
-                if len(param.shape) == 0 and len(input_param.shape) == 1:
+                if not is_param_lazy and len(param.shape) == 0 and len(input_param.shape) == 1:
                     input_param = input_param[0]
 
-                if input_param.shape != param.shape:
+                if not is_param_lazy and input_param.shape != param.shape:
                     # local shape should match the one in checkpoint
                     error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
                                       'the shape in current model is {}.'
                                       .format(key, input_param.shape, param.shape))
                     continue
-
                 try:
                     with torch.no_grad():
                         param.copy_(input_param)

@@ -579,7 +579,7 @@ void testExprSplitWithMask01() {
   Placeholder b_buf("b", kFloat, {M, N});
   Tensor* tensor = Compute(
       "f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
-        return a_buf(m, n) + b_buf(m, n) + 1.0f;
+        return a_buf.load(m, n) + b_buf.load(m, n) + 1.0f;
       });
   For* n_outer;
   For* n_inner;
@@ -615,7 +615,7 @@ void testExprSplitWithMaskRepeatedNoMask() {
   Placeholder a_buf("a", kFloat, {M});
   Placeholder b_buf("b", kFloat, {M});
   Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
-    return a_buf(m) + b_buf(m) + 1.0f;
+    return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
 
   LoopNest l({tensor});
@@ -647,7 +647,7 @@ void testSplitWithTailWithLoopOptions() {
   Placeholder a_buf("a", kFloat, {M});
   Placeholder b_buf("b", kFloat, {M});
   Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
-    return a_buf(m) + b_buf(m) + 1.0f;
+    return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
   For *outer, *inner, *tail;
 
@@ -677,7 +677,7 @@ void testSplitWithMaskWithLoopOptions() {
   Placeholder a_buf("a", kFloat, {M});
   Placeholder b_buf("b", kFloat, {M});
   Tensor* tensor = Compute("f", {{M, "m"}}, [&](const ExprHandle& m) {
-    return a_buf(m) + b_buf(m) + 1.0f;
+    return a_buf.load(m) + b_buf.load(m) + 1.0f;
   });
   For *outer, *inner;
 
@@ -705,7 +705,7 @@ void testScheduleBroadcastAddBuffer() {
       "broadcast_add",
       {{M, "m"}, {N, "n"}, {K, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf(m, n) + b_buf(n, k);
+        return a_buf.load(m, n) + b_buf.load(n, k);
       });
   LoopNest l({c});
   Stmt* stmt = l.root_stmt();
@@ -754,7 +754,7 @@ void testScheduleFunctionCall01() {
       "broadcast_add",
       {{M, "m"}, {N, "n"}, {K, "k"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf(m, n) + b_buf(n, k);
+        return a_buf.load(m, n) + b_buf.load(n, k);
       });
   Tensor* d = Compute(
       "d",
@@ -814,13 +814,13 @@ void testScheduleInlineSimple() {
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf(m, n) * b_buf(n, k);
+        return a_buf.load(m, n) * b_buf.load(n, k);
       });
   Tensor* y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c_buf(m, n) * d_buf(m, k) + x->call(m, n, k);
+        return c_buf.load(m, n) * d_buf.load(m, k) + x->call(m, n, k);
       });
 
   LoopNest l1({y});
@@ -895,13 +895,13 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf(m, n) * b_buf(n, k);
+        return a_buf.load(m, n) * b_buf.load(n, k);
       });
   Tensor* y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c_buf(m, n) * d_buf(m, k) + x->call(m, n, k);
+        return c_buf.load(m, n) * d_buf.load(m, k) + x->call(m, n, k);
       });
   Tensor* z = Compute(
       "z",
@@ -974,8 +974,9 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
         "z",
         {{M, "m3"}, {N, "n3"}, {K, "k3"}},
         [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-          return a_buf(m, n) * b_buf(n, k) +
-              (c_buf(m, n) * d_buf(m, k) + a_buf(m, n) * b_buf(n, k));
+          return a_buf.load(m, n) * b_buf.load(n, k) +
+              (c_buf.load(m, n) * d_buf.load(m, k) +
+               a_buf.load(m, n) * b_buf.load(n, k));
         });
     LoopNest l2({z2});
     l2.prepareForCodegen();
@@ -1129,7 +1130,7 @@ void testScheduleInlineIntrinsics() {
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf(m, n) * b_buf(n, k);
+        return a_buf.load(m, n) * b_buf.load(n, k);
       });
   Tensor* y = Compute(
       "y",
@@ -1491,7 +1492,7 @@ void testScheduleFuserStyle() {
 
   Tensor* b = Compute(
       "f", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
-        return a_buf(axes[0]) + 11.0f;
+        return a_buf.load(axes[0]) + 11.0f;
       });
 
   Tensor* c = Compute(
@@ -1526,13 +1527,13 @@ void testScheduleFuserThreeArg() {
   Placeholder d(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
 
   Tensor* e = Compute("e", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
-    return a(i) + b(i);
+    return a.load(i) + b.load(i);
   });
   Tensor* f = Compute("f", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
-    return (*e)(i) + c(i);
+    return e->call(i) + c.load(i);
   });
   Tensor* g = Compute("g", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
-    return (*f)(i) + d(i);
+    return f->call(i) + d.load(i);
   });
 
   LoopNest l({g});
@@ -1562,7 +1563,7 @@ void testScheduleDynamicShape2D() {
     Placeholder b(BufHandle("b", {m, n}, kFloat));
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
-          return a(i, j) + b(i, j);
+          return a.load(i, j) + b.load(i, j);
         });
     LoopNest l({c});
     Stmt* s = l.root_stmt();
@@ -2088,10 +2089,13 @@ void testLoopNestReorderExtraStatements() {
 
   VarHandle i = VarHandle(loops[0]->var());
 
-  Stmt* store_1 = Store::make(extra, {i, 0}, ExprHandle(1.f), 1);
-  Stmt* store_2 = Store::make(extra, {i, 1}, ExprHandle(2.f), 1);
+  Stmt* store_1 =
+      Store::make(BufHandle(extra.data()), {i, 0}, ExprHandle(1.f), 1);
+  Stmt* store_2 =
+      Store::make(BufHandle(extra.data()), {i, 1}, ExprHandle(2.f), 1);
   // stmt 3 is the Function body.
-  Stmt* store_3 = Store::make(extra, {i, 2}, ExprHandle(4.f), 1);
+  Stmt* store_3 =
+      Store::make(BufHandle(extra.data()), {i, 2}, ExprHandle(4.f), 1);
 
   loops[0]->body()->prepend_stmt(store_1);
   loops[1]->body()->prepend_stmt(store_2);
@@ -2229,9 +2233,9 @@ void LoopNestReorderTestHelper(
   for (auto* l : loops) {
     // Add an increment at each layer of the loop which counts the number of
     // times the loop executes.
-    Load* load = new Load(extra, {new IntImm(j)}, new IntImm(1));
+    Load* load = new Load(extra.data(), {new IntImm(j)}, new IntImm(1));
     Add* add = new Add(load, new IntImm(1));
-    Stmt* store = Store::make(extra, {j}, ExprHandle(add), 1);
+    Stmt* store = new Store(extra.data(), {new IntImm(j)}, add, new IntImm(1));
     if (prepend) {
       l->body()->prepend_stmt(store);
     }
@@ -2342,13 +2346,13 @@ void testLoopNestReorderInternalLoopNest() {
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf(m, n) * b_buf(n, k);
+        return a_buf.load(m, n) * b_buf.load(n, k);
       });
   Tensor* y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c_buf(m, n) * d_buf(m, k) + x->call(m, n, k);
+        return c_buf.load(m, n) * d_buf.load(m, k) + x->call(m, n, k);
       });
   Tensor* z = Compute(
       "z",
@@ -2858,7 +2862,7 @@ void testNormalizeAndSplitWithTail() {
   ExprHandle n(100);
   Placeholder a(BufHandle("a", {n}, kFloat));
   Tensor* b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
+      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
 
   // Input IR:
@@ -2900,13 +2904,304 @@ void testNormalizeAndSplitWithTail() {
   torch::jit::testing::FileCheck().run(expected_tail_ir, oss_tail.str());
 }
 
+void testFlattenSimpleLoopNest2D() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 10; i++) {
+  //     for (int j = 0; j < 5; j++) {
+  //       A[i,j] = i * j;
+  //     }
+  //   }
+  BufHandle a_buf("A", {10, 5}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
+  auto inner_for = For::make(j, 0, 5, for_body);
+  auto outer_for = For::make(i, 0, 10, inner_for);
+  Block::make({outer_for});
+
+  std::vector<For*> loops = {outer_for, inner_for};
+  For* flattened = nullptr;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_TRUE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int i_flat = 0; i_flat < 50; i_flat++) {
+        # CHECK:   A[i_flat / 5, i_flat % 5] =
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  {
+    SimpleIREvaluator eval1(loops[0], a_buf);
+    PaddedBuffer<int> inp1(10, 5);
+    eval1(inp1);
+    SimpleIREvaluator eval2(flattened, a_buf);
+    PaddedBuffer<int> inp2(10, 5);
+    eval2(inp2);
+    ExpectAllNear(inp1, inp2, 1e-5);
+  }
+}
+
+void testFlattenSimpleLoopNest3D() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 10; i++) {
+  //     for (int j = 0; j < 5; j++) {
+  //       for (int k = 0; k < 7; k++) {
+  //         A[i,j,k] = i + j * k;
+  //       }
+  //     }
+  //   }
+  BufHandle a_buf("A", {10, 5, 7}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i, j, k}, i + j * k, 1)});
+  auto for1 = For::make(k, 0, 7, for_body);
+  auto for2 = For::make(j, 0, 5, for1);
+  auto for3 = For::make(i, 0, 10, for2);
+  Block::make({for3});
+
+  std::vector<For*> loops = {for3, for2, for1};
+  For* flattened = nullptr;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_TRUE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int i_flat = 0; i_flat < 350; i_flat++) {
+        # CHECK:   A[i_flat / 35, (i_flat / 7) % 5, i_flat % 7] =
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  {
+    SimpleIREvaluator eval1(loops[0], a_buf);
+    PaddedBuffer<int> inp1(10, 5, 7);
+    eval1(inp1);
+    SimpleIREvaluator eval2(flattened, a_buf);
+    PaddedBuffer<int> inp2(10, 5, 7);
+    eval2(inp2);
+    ExpectAllNear(inp1, inp2, 1e-5);
+  }
+}
+
+void testFlattenLoopNestAfterNormalize() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 2; i < 10; i++) {
+  //     for (int j = 3; j < 15; j++) {
+  //       A[i - 2,j - 3] = i * j;
+  //     }
+  //   }
+  BufHandle a_buf("A", {8, 12}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i - 2, j - 3}, i * j, 1)});
+  auto inner_for = For::make(j, 3, 15, for_body);
+  auto outer_for = For::make(i, 2, 10, inner_for);
+  Block::make({outer_for});
+
+  std::vector<For*> loops = {outer_for, inner_for};
+  For* flattened = nullptr;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_TRUE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int i_flat = 0; i_flat < 96; i_flat++) {
+        # CHECK:   A[i_flat / 12, i_flat % 12] =
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  {
+    SimpleIREvaluator eval1(loops[0], a_buf);
+    PaddedBuffer<int> inp1(8, 12);
+    eval1(inp1);
+    SimpleIREvaluator eval2(flattened, a_buf);
+    PaddedBuffer<int> inp2(8, 12);
+    eval2(inp2);
+    ExpectAllNear(inp1, inp2, 1e-5);
+  }
+}
+
+void testFlattenImperfectLoopNest() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 10; i++) {
+  //     A[i, i] = 0;
+  //     for (int j = 0; j < 15; j++) {
+  //       A[i,j] = i * j;
+  //     }
+  //   }
+  // Do not flatten.
+
+  BufHandle a_buf("A", {10, 15}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
+  auto inner_for = For::make(j, 0, 15, for_body);
+  auto outer_for = For::make(
+      i, 0, 10, Block::make({Store::make(a_buf, {i, i}, 0, 1), inner_for}));
+  Block::make({outer_for});
+
+  std::vector<For*> loops = {outer_for, inner_for};
+  For* flattened = nullptr;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_FALSE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int i = 0; i < 10; i++) {
+        # CHECK-NEXT:   A[i, i] =
+        # CHECK-NEXT:   for (int j = 0; j < 15; j++) {
+        # CHECK-NEXT:     A[i, j] =
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testFlattenReductionLoopNest() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 10; i++) {
+  //     S[i] = 0;
+  //     for (int j = 0; j < 15; j++) {
+  //       S[i] = S[i] + A[i,j];
+  //     }
+  //   }
+  // Do not flatten.
+
+  BufHandle a_buf("A", {10, 15}, kInt);
+  BufHandle s_buf("S", {10}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(
+      s_buf,
+      {i},
+      Load::make(s_buf, {i}, 1) + Load::make(a_buf, {i, j}, 1),
+      1)});
+  auto inner_for = For::make(j, 0, 15, for_body);
+  auto outer_for = For::make(
+      i, 0, 10, Block::make({Store::make(s_buf, {i}, 0, 1), inner_for}));
+  Block::make({outer_for});
+
+  std::vector<For*> loops = {outer_for, inner_for};
+  For* flattened = nullptr;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_FALSE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int i = 0; i < 10; i++) {
+        # CHECK-NEXT:   S[i] =
+        # CHECK-NEXT:   for (int j = 0; j < 15; j++) {
+        # CHECK-NEXT:     S[i] = (S[i]) + (A[i, j])
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testFlattenReductionLoopNestFromTensor() {
+  KernelScope kernel_scope;
+  const int M = 3;
+  const int N = 7;
+  VarHandle m("m", kInt);
+  VarHandle n("n", kInt);
+  Placeholder b(BufHandle("b", {m, n}, kFloat));
+  Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}});
+  LoopNest loop({c});
+  auto loops = loop.getLoopStmtsFor(c);
+  For* flattened;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_FALSE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int m = 0; m < 3; m++) {
+        # CHECK-NEXT:   sum[m] =
+        # CHECK-NEXT:   for (int n = 0; n < 7; n++) {
+        # CHECK-NEXT:     sum[m] =
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testFlattenIncorrectLoopsAsInput() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 10; i++) {
+  //     for (int j = 0; j < 5; j++) {
+  //       A[i,j] = i * j;
+  //     }
+  //   }
+  //   for (int x = 0; x < 10; x++) {
+  //     for (int y = 0; y < 5; y++) {
+  //       A[x,y] = A[x,y] + x + y;
+  //     }
+  //   }
+  // Flatten({For_i, For_y}) => should not succeed
+
+  BufHandle a_buf("A", {10, 5}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
+  auto inner_for1 = For::make(j, 0, 5, for_body1);
+  auto outer_for1 = For::make(i, 0, 10, inner_for1);
+  auto for_body2 = Block::make(
+      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}, 1) + x + y, 1)});
+  auto inner_for2 = For::make(y, 0, 5, for_body2);
+  auto outer_for2 = For::make(x, 0, 10, inner_for2);
+  Block::make({outer_for1, outer_for2});
+
+  std::vector<For*> loops = {outer_for1, inner_for2};
+  For* flattened = nullptr;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_FALSE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int i = 0; i < 10; i++) {
+        # CHECK-NEXT:   for (int j = 0; j < 5; j++) {
+        # CHECK-NEXT:     A[i, j] = i * j
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
 void testDetectInlineRankMismatch() {
   KernelScope kernel_scope;
   const int kTotalSize = 8;
 
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
-  Tensor* a = Compute(
-      "a", {{kTotalSize, "i"}}, [&](const VarHandle& i) { return a_buf(i); });
+  Tensor* a = Compute("a", {{kTotalSize, "i"}}, [&](const VarHandle& i) {
+    return a_buf.load(i);
+  });
   Tensor* reshape = Compute(
       "reshape",
       {{kTotalSize / 2, "i"}, {2, "j"}},
@@ -2915,6 +3210,290 @@ void testDetectInlineRankMismatch() {
   ASSERT_THROWS_WITH(
       l.computeInline(l.getLoopBodyFor(a)),
       "Placeholder indexed access is inconsistent with its rank");
+}
+
+void testCacheReadsSimple() {
+  KernelScope kernel_scope;
+
+  Tensor* A = Compute(
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
+  Tensor* B = Compute(
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 30, j + 3);
+      });
+  Tensor* C = Compute(
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+      });
+
+  LoopNest l({B, C});
+  Stmt* j_loop = l.getLoopStmtsFor(B)[1];
+  l.cacheAccesses(A->buf(), "A_local", j_loop);
+
+  l.prepareForCodegen();
+  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+
+  std::ostringstream oss;
+  oss << *result;
+
+  // just this once: verify the whole thing.
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: Allocate(A, int, {64, 64});
+#CHECK: for (int i
+#CHECK:  for (int j
+#CHECK:   A[
+#CHECK:  }
+#CHECK: }
+#CHECK: for (int i_1
+#CHECK:  Allocate(A_local, int, {1, 10});
+#CHECK:  for (int j_1
+#CHECK:   A_local[j_1] = A[
+#CHECK:  }
+#CHECK:  for (int j_2
+#CHECK:   B[10 * i_1 + j_2] = A_local[j_2];
+#CHECK:  }
+#CHECK:  Free(A_local);
+#CHECK: }
+#CHECK: for (int i_2
+#CHECK:  for (int j_3
+#CHECK:   C[
+#CHECK:  }
+#CHECK: }
+#CHECK: Free(A);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  std::vector<int> b_data(200, 0);
+  std::vector<int> c_data(200, 0);
+  SimpleIREvaluator cg(l.root_stmt(), {B, C});
+  cg.call({b_data, c_data});
+
+  std::vector<int> b_ref(200, 0);
+  std::vector<int> c_ref(200, 0);
+
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < 10; ++j) {
+      b_ref[i * 10 + j] = (i + 30) * (j + 3);
+      c_ref[i * 10 + j] = (i + 10) * (j + 20) + (i + 30) * (j + 40);
+    }
+  }
+
+  assertAllEqual(b_data, b_ref);
+  assertAllEqual(c_data, c_ref);
+}
+
+void testCacheReadsOuter() {
+  KernelScope kernel_scope;
+
+  Tensor* A = Compute(
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
+  Tensor* B = Compute(
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 30, j + 40) + A->call(i + 31, j + 41);
+      });
+  Tensor* C = Compute(
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+      });
+
+  LoopNest l({B, C});
+  Stmt* i_loop = l.getLoopStmtsFor(B)[0];
+  l.cacheAccesses(A->buf(), "A_local", i_loop);
+
+  l.prepareForCodegen();
+  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: Allocate(A_local, int, {21, 11});
+#CHECK: A_local[j_1 + 11 * i_1] =
+#CHECK: B[10 * i_2 + j_2] = (A_local[(j_2 + 11 * i_2) + 12]) + (A_local[j_2 + 11 * i_2]);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  std::vector<int> b_data(200, 0);
+  std::vector<int> c_data(200, 0);
+  SimpleIREvaluator cg(l.root_stmt(), {B, C});
+  cg.call({b_data, c_data});
+
+  std::vector<int> b_ref(200, 0);
+  std::vector<int> c_ref(200, 0);
+
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < 10; ++j) {
+      b_ref[i * 10 + j] = (i + 30) * (j + 40) + (i + 31) * (j + 41);
+      c_ref[i * 10 + j] = (i + 10) * (j + 20) + (i + 30) * (j + 40);
+    }
+  }
+
+  assertAllEqual(b_data, b_ref);
+  assertAllEqual(c_data, c_ref);
+}
+
+void testCacheReadsInternal() {
+  KernelScope kernel_scope;
+
+  Tensor* A = Compute(
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
+  Tensor* B = Compute(
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 30, j + 40) + A->call(i + 31, j + 41);
+      });
+  Tensor* C = Compute(
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+      });
+
+  LoopNest l({B, C});
+  Stmt* j_loop = l.getLoopStmtsFor(B)[1];
+  l.cacheAccesses(A->buf(), "A_local", j_loop);
+  l.prepareForCodegen();
+  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: Allocate(A_local, int, {2, 11});
+#CHECK: A_local[j_1 + 11 * i_2] =
+#CHECK: B[10 * i_1 + j_2] = (A_local[j_2]) + (A_local[j_2 + 12]);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  std::vector<int> b_data(200, 0);
+  std::vector<int> c_data(200, 0);
+  SimpleIREvaluator cg(l.root_stmt(), {B, C});
+  cg.call({b_data, c_data});
+
+  std::vector<int> b_ref(200, 0);
+  std::vector<int> c_ref(200, 0);
+
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < 10; ++j) {
+      b_ref[i * 10 + j] = (i + 30) * (j + 40) + (i + 31) * (j + 41);
+      c_ref[i * 10 + j] = (i + 10) * (j + 20) + (i + 30) * (j + 40);
+    }
+  }
+
+  assertAllEqual(b_data, b_ref);
+  assertAllEqual(c_data, c_ref);
+}
+
+void testCacheReadsInner() {
+  KernelScope kernel_scope;
+
+  Tensor* A = Compute(
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
+  // note im changing the offset of the first arg of the first call to A.
+  Tensor* B = Compute(
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 34, j + 40) + A->call(i + 30, j + 41);
+      });
+  Tensor* C = Compute(
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+      });
+
+  LoopNest l({B, C});
+  Stmt* body = l.getLoopBodyFor(B);
+  l.cacheAccesses(A->buf(), "A_local", body);
+  l.prepareForCodegen();
+  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: Allocate(A_local, int, {5, 2});
+#CHECK: A_local[2 * i_2 + j_2] =
+#CHECK: B[10 * i_1 + j_1] = (A_local[8]) + (A_local[1]);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  std::vector<int> b_data(200, 0);
+  std::vector<int> c_data(200, 0);
+  SimpleIREvaluator cg(l.root_stmt(), {B, C});
+  cg.call({b_data, c_data});
+
+  std::vector<int> b_ref(200, 0);
+  std::vector<int> c_ref(200, 0);
+
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < 10; ++j) {
+      b_ref[i * 10 + j] = (i + 34) * (j + 40) + (i + 30) * (j + 41);
+      c_ref[i * 10 + j] = (i + 10) * (j + 20) + (i + 30) * (j + 40);
+    }
+  }
+
+  assertAllEqual(b_data, b_ref);
+  assertAllEqual(c_data, c_ref);
+}
+
+void testCacheWritesSimple() {
+  KernelScope kernel_scope;
+
+  Tensor* A = Compute(
+      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
+        return i * j;
+      });
+  Tensor* B = Compute(
+      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 30, j + 40) + A->call(i + 31, j + 41);
+      });
+  Tensor* C = Compute(
+      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        return A->call(i + 10, j + 20) + A->call(i + 30, j + 40);
+      });
+
+  LoopNest l({B, C});
+  Stmt* a_loop = l.getLoopStmtsFor(A)[1];
+  l.cacheAccesses(A->buf(), "A_local", a_loop);
+
+  l.prepareForCodegen();
+  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: Allocate(A_local, int, {1, 64});
+#CHECK: for (int j = 0; j < 64
+#CHECK:   A_local[j] = i * j;
+#CHECK: for (int j_1 = 0; j_1 < 64
+#CHECK:   A[64 * i + j_1] = A_local[
+#CHECK: Free(A_local);
+#CHECK-NOT: A_local
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  std::vector<int> b_data(200, 0);
+  std::vector<int> c_data(200, 0);
+  SimpleIREvaluator cg(l.root_stmt(), {B, C});
+  cg.call({b_data, c_data});
+
+  std::vector<int> b_ref(200, 0);
+  std::vector<int> c_ref(200, 0);
+
+  for (int i = 0; i < 20; ++i) {
+    for (int j = 0; j < 10; ++j) {
+      b_ref[i * 10 + j] = (i + 30) * (j + 40) + (i + 31) * (j + 41);
+      c_ref[i * 10 + j] = (i + 10) * (j + 20) + (i + 30) * (j + 40);
+    }
+  }
+
+  assertAllEqual(b_data, b_ref);
+  assertAllEqual(c_data, c_ref);
 }
 
 } // namespace jit
