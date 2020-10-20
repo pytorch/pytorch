@@ -5,6 +5,7 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/python/module_python.h>
+#include <climits>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -404,7 +405,7 @@ std::shared_ptr<SugaredValue> SugaredDict::attr(
   TORCH_INTERNAL_ASSERT(false);
 }
 
-std::shared_ptr<SugaredEnumClass> SugaredEnumClass::create(
+std::shared_ptr<SugaredEnumClass> createSugaredEnumClassFromObj(
     const py::object& obj,
     Function& m,
     const SourceRange& loc) {
@@ -413,43 +414,7 @@ std::shared_ptr<SugaredEnumClass> SugaredEnumClass::create(
   TORCH_INTERNAL_ASSERT(!annotation_type.is_none());
   auto type = py::cast<TypePtr>(annotation_type);
   auto enum_type = type->expect<EnumType>();
-
-  std::map<std::string, SugaredValuePtr> enum_values;
-  auto enum_values_list = py::cast<py::list>(obj);
-
-  auto enum_value_ivalues = c10::impl::GenericList(enum_type);
-  for (auto enum_value : enum_values_list) {
-    auto enum_name = enum_value.attr("name").cast<std::string>();
-    auto enum_sugared_value =
-        toSugaredValue(py::reinterpret_steal<py::object>(enum_value), m, loc);
-    enum_values.insert(std::make_pair(enum_name, enum_sugared_value));
-    enum_value_ivalues.push_back(toIValue(enum_value, enum_type));
-  }
-
-  IValue enum_value_list_ivalues(enum_value_ivalues);
-  auto enum_values_list_constant = std::make_shared<SimpleValue>(
-      m.graph()->insertConstant(enum_value_list_ivalues, loc));
-
-  return std::make_shared<SugaredEnumClass>(
-      enum_values, enum_values_list_constant, enum_type);
-}
-
-std::shared_ptr<SugaredValue> SugaredEnumClass::attr(
-    const SourceRange& loc,
-    Function& /*m*/,
-    const std::string& field) {
-  auto it = enum_values_.find(field);
-  if (it == enum_values_.end()) {
-    throw ErrorReport(loc) << enum_type_->repr_str() << "'"
-                           << " has no attribute '" << field << "'";
-  }
-  return it->second;
-}
-
-SugaredValuePtr SugaredEnumClass::iter(
-    const SourceRange& /*loc*/,
-    Function& /*m*/) {
-  return enum_values_list_constant_;
+  return std::make_shared<SugaredEnumClass>(enum_type);
 }
 
 // helper function for instantiating a SugaredValue from an IValue
@@ -487,10 +452,15 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
   if (selfType->hasAttribute(field) &&
       selfType->getAttribute(field)->is_module()) {
     // ...if it's a submodule, return it as a new ModuleValue.
-    const auto submoduleConcreteType =
-        concreteType_->findSubmoduleConcreteType(field);
+    if (const auto submoduleConcreteType =
+            concreteType_->findSubmoduleConcreteType(field)) {
+      return std::make_shared<ModuleValue>(
+          m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
+    }
+
     return std::make_shared<ModuleValue>(
-        m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
+        m.graph()->insertGetAttr(self_, field),
+        ConcreteModuleType::fromJitType(selfType->getAttribute(field)));
   } else if (selfType->hasAttribute(field) || selfType->findMethod(field)) {
     // ...otherwise, methods, parameters, attributes, and buffers are all
     // first class so they get returned as SimpleValues
@@ -535,21 +505,26 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
   // 5. Check if it's an attribute of the original Python class that this
   // ScriptModule was derived from. The only class attributes we handle are
   // methods.
+  const auto maybePyClass = concreteType_->getPyClass();
+  if (!maybePyClass) {
+    // ConcreteType doesn't always have an originating Python class, e.g. if it
+    // was derived from a serialized ScriptModule. In this case, we've exhausted
+    // our options for attr lookup.
+    return nullptr;
+  }
   py::object unboundMethod = py::getattr(
-      concreteType_->getPyClass(),
-      field.c_str(),
-      pybind11::cast<pybind11::none>(Py_None));
+      *maybePyClass, field.c_str(), pybind11::cast<pybind11::none>(Py_None));
 
   if (py::isinstance<py::function>(unboundMethod)) {
-    bool isStaticFn = py::cast<bool>(
-        py::module::import("torch._jit_internal")
-            .attr("is_static_fn")(concreteType_->getPyClass(), field.c_str()));
+    bool isStaticFn =
+        py::cast<bool>(py::module::import("torch._jit_internal")
+                           .attr("is_static_fn")(*maybePyClass, field.c_str()));
     if (isStaticFn) {
       // Functions within the module annotated with @staticmethod do not need
       // binding.
-      py::object staticFn = py::module::import("torch._jit_internal")
-                                .attr("get_static_fn")(
-                                    concreteType_->getPyClass(), field.c_str());
+      py::object staticFn =
+          py::module::import("torch._jit_internal")
+              .attr("get_static_fn")(*maybePyClass, field.c_str());
       return toSugaredValue(staticFn, m, loc);
     }
     // For Python methods that we're trying to call directly, we need to bind
@@ -599,10 +574,20 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return attr;
   }
 
+  // Check if it's a property.
+  auto prop =
+      concreteType_->getJitType()->expect<ClassType>()->getProperty(field);
+  if (prop) {
+    return MethodValue(self_, prop->getter->name())
+        .call(loc, m, {}, {}, /*n_binders=*/1);
+  }
+
   // We don't define this attr. Bailout with a hint to the user.
   std::string hint;
   if (auto failureReason = concreteType_->findFailedAttribute(field)) {
     hint = *failureReason;
+  } else if (concreteType_->isIgnoredAttribute(field)) {
+    hint = "attribute was ignored during compilation";
   }
 
   throw ErrorReport(loc)
@@ -738,8 +723,12 @@ std::shared_ptr<SugaredValue> PythonExceptionValue::call(
 
 bool isNamedTupleClass(const py::object& obj) {
   auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
-  return PyObject_IsSubclass(obj.ptr(), tuple_type) &&
-      py::hasattr(obj, "_fields");
+  int is_tuple_class = PyObject_IsSubclass(obj.ptr(), tuple_type);
+  if (is_tuple_class == -1) {
+    PyErr_Clear();
+    return false;
+  }
+  return is_tuple_class == 1 && py::hasattr(obj, "_fields");
 }
 
 TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
@@ -788,14 +777,13 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
 }
 
 bool isEnumClass(py::object obj) {
-  py::bool_ is_class = py::module::import("inspect").attr("isclass")(obj);
-  if (!py::cast<bool>(is_class)) {
-    return false;
-  }
-
   auto enum_type_obj =
       py::cast<py::object>(py::module::import("enum").attr("Enum"));
   int ret = PyObject_IsSubclass(obj.ptr(), enum_type_obj.ptr());
+  if (ret == -1) {
+    PyErr_Clear();
+    return false;
+  }
   return ret == 1;
 }
 
@@ -809,6 +797,56 @@ std::shared_ptr<SugaredValue> createSimpleEnumValue(
                             .attr("try_ann_to_type")(enum_class, loc));
   auto enum_ivalue = toIValue(obj, enum_type);
   return toSimple(m.graph()->insertConstant(enum_ivalue, loc));
+}
+
+std::shared_ptr<SugaredValue> PythonSliceClass::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t /*n_binders*/) {
+  if (!attributes.empty()) {
+    throw ErrorReport(loc) << "Slice does not accept any keyword arguments";
+  }
+
+  static constexpr int64_t default_start = 0;
+  static constexpr int64_t default_stop = std::numeric_limits<int64_t>::max();
+  static constexpr int64_t default_step = 1;
+  Graph& graph = *(caller.graph());
+
+  auto ValOr = [&](Value* given, int64_t default_val) {
+    if (!given || given->type()->isSubtypeOf(NoneType::get())) {
+      return graph.insertConstant(default_val, loc);
+    }
+    return given;
+  };
+
+  Value* start;
+  Value* stop;
+  Value* step;
+  size_t n = inputs.size();
+  // Slice's constructor signature is Slice(start=None, stop, step=None)
+  if (n == 1) {
+    // Case where only `stop` is specified.
+    start = ValOr(nullptr, default_start);
+    stop = ValOr(inputs[0].value(graph), default_stop);
+    step = ValOr(nullptr, default_step);
+  } else if (n == 2) {
+    // Case where `start` and `stop` are specified.
+    start = ValOr(inputs[0].value(graph), default_start);
+    stop = ValOr(inputs[1].value(graph), default_stop);
+    step = ValOr(nullptr, default_step);
+  } else if (n == 3) {
+    // Case where `start`, `stop` and `step` are all specified.
+    start = ValOr(inputs[0].value(graph), default_start);
+    stop = ValOr(inputs[1].value(graph), default_stop);
+    step = ValOr(inputs[2].value(graph), default_step);
+  } else {
+    throw ErrorReport(loc) << "slice accepts exactly 1, 2 or 3 arguments, got: "
+                           << n;
+  }
+
+  return std::make_shared<SliceValue>(start, stop, step);
 }
 
 std::shared_ptr<SugaredValue> toSugaredValue(
@@ -880,12 +918,21 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return SpecialFormValue::create(prim::annotate);
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
+    // RPC module is only avaialble when build flag "USE_DISTRIBUTED" is on.
   } else if (
-      // RPC module is only avaialble  when build flag "USE_DISTRIBUTED" is on.
       obj.ptr() ==
       py::module::import("torch.distributed.rpc").attr("rpc_async").ptr()) {
     return SpecialFormValue::create(prim::rpc_async);
+  } else if (
+      obj.ptr() ==
+      py::module::import("torch.distributed.rpc").attr("rpc_sync").ptr()) {
+    return SpecialFormValue::create(prim::rpc_sync);
+  } else if (
+      // RPC module is only avaialble  when build flag "USE_DISTRIBUTED" is on.
+      obj.ptr() ==
+      py::module::import("torch.distributed.rpc").attr("remote").ptr()) {
+    return SpecialFormValue::create(prim::rpc_remote);
 #endif
   } else if (auto callee = as_module(obj)) {
     throw ErrorReport(loc) << "Cannot call a ScriptModule that is not"
@@ -929,7 +976,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 
   if (isEnumClass(obj)) {
-    return SugaredEnumClass::create(obj, m, loc);
+    return createSugaredEnumClassFromObj(obj, m, loc);
   }
 
   auto enum_type = py::module::import("enum").attr("Enum");
@@ -996,6 +1043,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto rcb = py::module::import("torch._jit_internal")
                    .attr("createResolutionCallbackFromClosure")(obj);
     return std::make_shared<PythonValue>(obj, rcb);
+  }
+
+  if (obj.is(py::module::import("builtins").attr("slice"))) {
+    return std::make_shared<PythonSliceClass>();
   }
 
   return std::make_shared<PythonValue>(obj);

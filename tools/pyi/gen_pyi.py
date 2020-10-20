@@ -1,4 +1,4 @@
-from __future__ import print_function
+
 import os
 import collections
 from pprint import pformat
@@ -74,11 +74,7 @@ blocklist = [
     # Somehow, these are defined in both _C and in functional. Ick!
     'broadcast_tensors',
     # Manually define named tensor type stubs in __init__.pyi.in
-    'rename',
-    'refine_names',
-    'align_to',
     'align_tensors',
-    'unflatten',
     'meshgrid',
     'cartesian_prod',
     'block_diag',
@@ -87,7 +83,6 @@ blocklist = [
     'stft',
     'istft',
     'tensordot',
-    'norm',
     'split',
     'unique_consecutive',
     'atleast_1d',
@@ -151,6 +146,8 @@ def type_to_python(typename, size=None):
         'Dimname': 'Union[str, ellipsis, None]',
         'DimnameList': 'Sequence[Union[str, ellipsis, None]]',
         'QScheme': '_qscheme',
+        'ArrayRef<double>' : 'Sequence[float]',
+        'Stream': 'Stream',
     }[typename]
 
     return typename
@@ -202,7 +199,7 @@ binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'tru
               )
 comparison_ops = ('eq', 'ne', 'ge', 'gt', 'lt', 'le')
 unary_ops = ('neg', 'abs', 'invert')
-to_py_type_ops = ('bool', 'float', 'long', 'index', 'int', 'nonzero')
+to_py_type_ops = ('bool', 'float', 'complex', 'long', 'index', 'int', 'nonzero')
 all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
 
 
@@ -224,13 +221,13 @@ def sig_for_ops(opname):
     elif name in unary_ops:
         return ['def {}(self) -> Tensor: ...'.format(opname)]
     elif name in to_py_type_ops:
-        if name in {'bool', 'float'}:
+        if name in {'bool', 'float', 'complex'}:
             tname = name
         elif name == 'nonzero':
             tname = 'bool'
         else:
             tname = 'int'
-        if tname in {'float', 'int', 'bool'}:
+        if tname in {'float', 'int', 'bool', 'complex'}:
             tname = 'builtins.' + tname
         return ['def {}(self) -> {}: ...'.format(opname, tname)]
     else:
@@ -404,6 +401,14 @@ def gen_nn_functional(out):
     }
     write(out, 'torch/nn/functional.pyi', stubs, env)
 
+    # functional.pyi already contains the definitions for those functions
+    # so, we don't export then to it
+    from_c.extend(['hardtanh', 'leaky_relu', 'hardsigmoid'])
+    dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
+    env = {
+        'imported_hints': import_code,
+        'dispatched_hints': dispatch_code
+    }
     stubs = CodeTemplate.from_file(os.path.join('torch', '_C', '_nn.pyi.in'))
     write(out, 'torch/_C/_nn.pyi', stubs, env)
 
@@ -470,10 +475,12 @@ def gen_pyi(declarations_path, out):
                     ' generator: Optional[Generator]=None, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS)],
         'full': ['def full(size: _size, fill_value: Number, *,'
-                 ' out: Optional[Tensor]=None, {}) -> Tensor: ...'
+                 ' out: Optional[Tensor]=None,'
+                 ' layout: _layout=strided, {}) -> Tensor: ...'
                  .format(FACTORY_PARAMS),
                  'def full(size: _size, fill_value: Number, *,'
-                 ' names: List[Union[str, None]], {}) -> Tensor: ...'
+                 ' names: List[Union[str, None]],'
+                 ' layout: _layout=strided, {}) -> Tensor: ...'
                  .format(FACTORY_PARAMS)],
         'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...'],
         'nonzero': ['def nonzero(input: Tensor, *, out: Optional[Tensor]=None) -> Tensor: ...',
@@ -536,6 +543,7 @@ def gen_pyi(declarations_path, out):
                      'def __init__(self, other: Tensor) -> None: ...',
                      'def __init__(self, size: {}, *, {}) -> None: ...'.format(type_to_python('IntArrayRef'), DEVICE_PARAM),
                      ],
+        'as_subclass': ["def as_subclass(self, cls: Tensor) -> Tensor: ..."],
         # clamp has no default values in the Declarations
         'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
                   " *, out: Optional[Tensor]=None) -> Tensor: ..."],
@@ -546,6 +554,7 @@ def gen_pyi(declarations_path, out):
         'tolist': ['def tolist(self) -> List: ...'],
         'requires_grad_': ['def requires_grad_(self, mode: _bool=True) -> Tensor: ...'],
         'element_size': ['def element_size(self) -> _int: ...'],
+        'data_ptr': ['def data_ptr(self) -> _int: ...'],
         'dim': ['def dim(self) -> _int: ...'],
         'nonzero': ['def nonzero(self, *, as_tuple: _bool=...) -> Tensor: ...'],
         'numel': ['def numel(self) -> _int: ...'],
@@ -560,8 +569,8 @@ def gen_pyi(declarations_path, out):
                  'def type(self, dtype: Union[str, _dtype], non_blocking: _bool=False) -> Tensor: ...',
                  ],
         'get_device': ['def get_device(self) -> _int: ...'],
-        'contiguous': ['def contiguous(self) -> Tensor: ...'],
-        'is_contiguous': ['def is_contiguous(self) -> _bool: ...'],
+        'contiguous': ['def contiguous(self, memory_format=torch.contiguous_format) -> Tensor: ...'],
+        'is_contiguous': ['def is_contiguous(self, memory_format=torch.contiguous_format) -> _bool: ...'],
         'is_cuda': ['is_cuda: _bool'],
         'is_leaf': ['is_leaf: _bool'],
         'is_sparse': ['is_sparse: _bool'],
@@ -576,6 +585,10 @@ def gen_pyi(declarations_path, out):
                ],
         'item': ["def item(self) -> Number: ..."],
         'copy_': ["def copy_(self, src: Tensor, non_blocking: _bool=False) -> Tensor: ..."],
+        'set_': ['def set_(self, storage: Storage, offset: _int, size: _size, stride: _size) -> Tensor: ...',
+                 'def set_(self, storage: Storage) -> Tensor: ...'],
+        'split': ['def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...',
+                  'def split(self, split_size: Tuple[_int, ...], dim: _int=0) -> Sequence[Tensor]: ...'],
     })
     for binop in ['mul', 'div', 'true_divide', 'floor_divide']:
         for inplace in [False, True]:
@@ -632,7 +645,7 @@ def gen_pyi(declarations_path, out):
     for c in ('Double', 'Float', 'Long', 'Int',
               'Short', 'Char', 'Byte', 'Bool',
               'Half', 'BFloat16', 'ComplexDouble',
-              'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32'):
+              'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32', 'QUInt4x2'):
         legacy_storage_base_hints.append('class {}StorageBase(object): ...'.format(c))
 
     legacy_class_hints = []
@@ -650,7 +663,7 @@ def gen_pyi(declarations_path, out):
                          ['float32', 'float', 'float64', 'double', 'float16', 'bfloat16', 'half',
                           'uint8', 'int8', 'int16', 'short', 'int32', 'int', 'int64', 'long',
                           'complex32', 'complex64', 'cfloat', 'complex128', 'cdouble',
-                          'quint8', 'qint8', 'qint32', 'bool']]
+                          'quint8', 'qint8', 'qint32', 'bool', 'quint4x2']]
 
     # Generate __all__ directive
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -680,6 +693,7 @@ def gen_pyi(declarations_path, out):
 
     write(out, 'torch/_C/__init__.pyi', TORCH_C_TYPE_STUBS, env)
     write(out, 'torch/_C/_VariableFunctions.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
+    write(out, 'torch/_VF.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
     gen_nn_pyi(out)
 
 

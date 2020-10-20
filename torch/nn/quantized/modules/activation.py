@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import torch
 import torch.nn.quantized.functional
 
@@ -129,3 +124,49 @@ class ELU(torch.nn.ELU):
     def from_float(mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return ELU(float(scale), int(zero_point), mod.alpha)
+
+class LeakyReLU(torch.nn.LeakyReLU):
+    r"""This is the quantized equivalent of :class:`~torch.nn.LeakyReLU`.
+
+    Args:
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
+        negative_slope: Controls the angle of the negative slope. Default: 1e-2
+    """
+    def __init__(self, scale: float, zero_point: int, negative_slope: float = 1e-2, inplace: bool = False):
+        super().__init__(negative_slope, inplace)
+        self.scale = scale
+        self.zero_point = zero_point
+
+    def forward(self, input):
+        return torch.ops.quantized.leaky_relu(
+            input, self.negative_slope, self.inplace, self.scale, self.zero_point)
+
+    def _get_name(self):
+        return 'QuantizedLeakyReLU'
+
+    @classmethod
+    def from_float(cls, mod):
+        scale, zero_point = mod.activation_post_process.calculate_qparams()
+        return cls(float(scale), int(zero_point), mod.negative_slope, mod.inplace)
+
+class Sigmoid(torch.nn.Sigmoid):
+    r"""This is the quantized equivalent of :class:`~torch.nn.LeakyReLU`.
+
+    Args:
+        scale: quantization scale of the output tensor
+        zero_point: quantization zero point of the output tensor
+    """
+
+    def __init__(self, output_scale: float, output_zero_point: int):
+        super().__init__()
+        self.output_scale = output_scale
+        self.output_zero_point = output_zero_point
+
+    def forward(self, input):
+        return torch.ops.quantized.sigmoid(input, self.output_scale, self.output_zero_point)
+
+    @classmethod
+    def from_float(cls, mod):
+        output_scale, output_zero_point = mod.activation_post_process.calculate_qparams()
+        return cls(float(output_scale), int(output_zero_point))

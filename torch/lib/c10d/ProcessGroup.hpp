@@ -11,9 +11,42 @@
 
 #include <c10d/Types.hpp>
 
+// *************************************************************************
+// PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
+// versions 1.7 and 1.8.
+// PLEASE DO NOT ADD ANY DEPENDENCIES.
+// SEE RFC: https://github.com/pytorch/pytorch/issues/39662
+// *************************************************************************
+
 constexpr auto kNoTimeout = std::chrono::milliseconds(0);
 
 namespace c10d {
+
+enum class OpType : std::uint8_t {
+  BROADCAST = 0,
+  ALLREDUCE = 1,
+  ALLREDUCE_COALESCED = 2,
+  REDUCE = 3,
+  ALLGATHER = 4,
+  ALLGATHER_BASE = 5,
+  ALLGATHER_COALESCED = 6,
+  GATHER = 7,
+  SCATTER = 8,
+  REDUCE_SCATTER = 9,
+  ALLTOALL_BASE = 10,
+  ALLTOALL = 11,
+  SEND = 12,
+  RECV = 13,
+  RECVANYSOURCE = 14,
+  BARRIER = 15,
+  UNKNOWN = 100,
+};
+
+// Converts OpType to human readable string.
+std::string opTypeToString(OpType opType);
+
+// Whether or not an OP is an p2p op (SEND, RECV, RECVANYSOURCE)
+bool isP2POp(OpType opType);
 
 // ProcessGroup is a base class that captures collective and point to
 // point communication in a fixed set of processes.
@@ -37,8 +70,17 @@ namespace c10d {
 //
 class ProcessGroup {
  public:
+
+  // Please do not use ProcessGroup::Work API, it is going away, to be
+  // replaced by ivalue::Future.
+  // Python binding for this class might change, please do not assume
+  // this will be bound using pybind.
   class Work {
    public:
+    Work();
+
+    Work(int rank, OpType opType);
+
     virtual ~Work();
 
     // Checks if request has completed. Non-blocking operation.
@@ -55,7 +97,7 @@ class ProcessGroup {
     virtual int sourceRank() const;
 
     // Returns result tensors, if applicable.
-    virtual std::vector<at::Tensor> result() const;
+    virtual std::vector<at::Tensor> result();
 
     // Ensures that operations on the output tensors that are invoked
     // after this function returns are correctly sequenced after the
@@ -93,6 +135,8 @@ class ProcessGroup {
     // work. Only NCCL backend is currently supported.
     virtual c10::intrusive_ptr<c10::ivalue::Future> getFuture();
 
+    OpType retrieveOpType();
+
    protected:
     // Completes the work object and optionally sets the exception in a
     // thread-safe manner. Notifies all waiting condition variables as well.
@@ -106,6 +150,12 @@ class ProcessGroup {
     std::condition_variable cv_;
     bool completed_ = false;
     std::exception_ptr exception_;
+
+    // Current rank of the node.
+    const int rank_;
+
+    // Operation type that this work object refers to.
+    OpType opType_;
   };
 
   explicit ProcessGroup(int rank, int size);

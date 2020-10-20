@@ -4,7 +4,7 @@
           type: string
           default: ""
       machine:
-        image: ubuntu-1604:201903-01
+        image: ubuntu-1604:202007-01
       resource_class: large
       environment:
         IMAGE_NAME: << parameters.image_name >>
@@ -53,7 +53,7 @@
               cd .circleci/docker && ./build_docker.sh
   docker_for_ecr_gc_build_job:
       machine:
-        image: ubuntu-1604:201903-01
+        image: ubuntu-1604:202007-01
       steps:
         - checkout
         - run:

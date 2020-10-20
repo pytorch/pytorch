@@ -27,7 +27,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << "Tensor";
     }
     if (auto ndim = value->sizes().size()) {
-      bool has_valid_strides_info =
+      bool has_valid_strides_info = *ndim > 0 &&
           value->strides().isComplete() && value->strides().size() == ndim;
 
       out << "(";
@@ -41,10 +41,17 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         } else {
           out << "*";
         }
-        if (has_valid_strides_info &&
-            type_verbosity() >= TypeVerbosity::TypeAndStride) {
-          out << ":" << *value->strides()[i];
+      }
+      if (has_valid_strides_info &&
+          type_verbosity() >= TypeVerbosity::TypeAndStride) {
+        out << ", strides=[";
+        for (size_t i = 0; i < *ndim; ++i) {
+          if (i > 0) {
+            out << ", ";
+          }
+          out << *value->strides()[i];
         }
+        out << "]";
       }
       if (type_verbosity() >= TypeVerbosity::Full) {
         if (value->requiresGrad()) {
@@ -151,6 +158,10 @@ DeviceObjTypePtr DeviceObjType::get() {
   static auto value = DeviceObjType::create();
   return value;
 }
+StreamObjTypePtr StreamObjType::get() {
+  static auto value = StreamObjType::create();
+  return value;
+}
 ScalarTypeTypePtr ScalarTypeType::get() {
 static auto value = ScalarTypeType::create();
 return value;
@@ -212,7 +223,7 @@ AnyEnumTypePtr AnyEnumType::get() {
   return value;
 }
 
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
+c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
   // check direct subtyping relation
   if (t1->isSubtypeOf(t2)) {
     return t2;
@@ -285,6 +296,16 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   }
 
   return c10::nullopt;
+}
+
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_any) {
+  auto unified = unifyTypesImpl(t1, t2);
+
+  if (default_to_any && !unified) {
+    return AnyType::get();
+  }
+
+  return unified;
 }
 
 c10::optional<TypePtr> unifyTypeList(
@@ -706,6 +727,9 @@ TupleType::TupleType(
       schema_(std::move(schema)) {
   has_free_variables_ =
       std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
+        if (!v) {
+          throw std::runtime_error("Can not create tuple with None type");
+        }
         return v->hasFreeVariables();
       });
   if (schema_) {
@@ -930,17 +954,22 @@ TensorTypePtr TensorType::create(
     const VaryingShape<int64_t>& strides,
     c10::optional<bool> requires_grad,
     c10::optional<bool> undefined, bool tensor_contiguity) {
-  TORCH_INTERNAL_ASSERT(sizes.concrete_sizes().has_value());
-  TORCH_INTERNAL_ASSERT(
-      !strides.concrete_sizes().has_value() ||
-      sizes.concrete_sizes()->size() == strides.concrete_sizes()->size());
-  auto sprops = strides.concrete_sizes().has_value()
+  if(strides.concrete_sizes() && strides.concrete_sizes().has_value()){
+    // handles case where strides are set
+    TORCH_INTERNAL_ASSERT(sizes.concrete_sizes()->size() == strides.concrete_sizes()->size());
+    auto sprops = strides.concrete_sizes().has_value()
       ? computeStrideProps(*sizes.concrete_sizes(), *strides.concrete_sizes(), tensor_contiguity)
       : VaryingShape<Stride>();
-
-  auto symbol_sizes = SymbolicShape(*sizes.concrete_sizes());
-  return TensorType::create(
+    auto symbol_sizes = SymbolicShape(*sizes.concrete_sizes());
+    return TensorType::create(
       scalar_type, device, symbol_sizes, sprops, requires_grad, undefined);
+  } else {
+    // strides are all null, but still have number of strides equal to number of ranks
+    TORCH_INTERNAL_ASSERT(sizes.sizes() && sizes.size());
+    auto symbol_sizes = SymbolicShape(*sizes.sizes());
+    return TensorType::create(
+      scalar_type, device, symbol_sizes, VaryingShape<Stride>(*sizes.size()), requires_grad, undefined);
+  }
 }
 
 TensorTypePtr TensorType::create(

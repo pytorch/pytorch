@@ -349,7 +349,7 @@ class Module:
         elif hasattr(self, name) and name not in self._modules:
             raise KeyError("attribute '{}' already exists".format(name))
         elif '.' in name:
-            raise KeyError("module name can't contain \".\"")
+            raise KeyError("module name can't contain \".\", got: {}".format(name))
         elif name == '':
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
@@ -965,18 +965,20 @@ class Module:
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
-
+                # This is used to avoid copying uninitialized parameters into
+                # non-lazy modules, since they dont have the hook to do the checks
+                # in such case, it will error when accessing the .shape attribute.
+                is_param_lazy = isinstance(param, torch.nn.parameter.UninitializedParameter)
                 # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
-                if len(param.shape) == 0 and len(input_param.shape) == 1:
+                if not is_param_lazy and len(param.shape) == 0 and len(input_param.shape) == 1:
                     input_param = input_param[0]
 
-                if input_param.shape != param.shape:
+                if not is_param_lazy and input_param.shape != param.shape:
                     # local shape should match the one in checkpoint
                     error_msgs.append('size mismatch for {}: copying a param with shape {} from checkpoint, '
                                       'the shape in current model is {}.'
                                       .format(key, input_param.shape, param.shape))
                     continue
-
                 try:
                     with torch.no_grad():
                         param.copy_(input_param)
@@ -1313,8 +1315,14 @@ class Module:
             p.requires_grad_(requires_grad)
         return self
 
-    def zero_grad(self) -> None:
-        r"""Sets gradients of all model parameters to zero."""
+    def zero_grad(self, set_to_none: bool = False) -> None:
+        r"""Sets gradients of all model parameters to zero. See similar function
+        under :class:`torch.optim.Optimizer` for more context.
+
+        Arguments:
+            set_to_none (bool): instead of setting to zero, set the grads to None.
+                See :meth:`torch.optim.Optimizer.zero_grad` for details.
+        """
         if getattr(self, '_is_replica', False):
             warnings.warn(
                 "Calling .zero_grad() from a module created with nn.DataParallel() has no effect. "
@@ -1324,11 +1332,14 @@ class Module:
 
         for p in self.parameters():
             if p.grad is not None:
-                if p.grad.grad_fn is not None:
-                    p.grad.detach_()
+                if set_to_none:
+                    p.grad = None
                 else:
-                    p.grad.requires_grad_(False)
-                p.grad.zero_()
+                    if p.grad.grad_fn is not None:
+                        p.grad.detach_()
+                    else:
+                        p.grad.requires_grad_(False)
+                    p.grad.zero_()
 
     def share_memory(self: T) -> T:
         return self._apply(lambda t: t.share_memory_())

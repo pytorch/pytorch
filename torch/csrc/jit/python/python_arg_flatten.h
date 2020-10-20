@@ -1,8 +1,8 @@
 #pragma once
 
+#include <c10/util/hash.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/python/pybind.h>
-#include <torch/csrc/utils/hash.h>
 
 #include <ATen/ATen.h>
 #include <functional>
@@ -27,7 +27,7 @@ struct IODescriptor {
     }
 
     static size_t hash(const VariableMetadata& m) {
-      return get_hash(m.sizes, m.device, m.requires_grad, m.type);
+      return c10::get_hash(m.sizes, m.device, m.requires_grad, m.type);
     }
 
     std::vector<int64_t> sizes;
@@ -42,7 +42,7 @@ struct IODescriptor {
   }
 
   static size_t hash(const IODescriptor& o) {
-    return get_hash(o.structure, o.metadata, o.grad_enabled);
+    return c10::get_hash(o.structure, o.metadata, o.grad_enabled);
   }
 
   void extend(const autograd::variable_list& list) {
