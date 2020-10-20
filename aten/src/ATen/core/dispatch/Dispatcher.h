@@ -221,13 +221,15 @@ public:
   /**
    * For testing purposes.
    * Returns a list of all operators that were created through calls to registerImpl(),
-   * without any corresponding calls to registerDef(). This is almost certainly a bug,
-   * as the created OperatorHandle won't have any schema associated with it and users
-   * calling the op through the dispatcher won't be able to access it
+   * without any corresponding calls to registerDef(). After static initialization
+   * is done this is almost certainly a bug, as the created OperatorHandle won't have
+   * any schema associated with it and users calling the op through the dispatcher
+   * won't be able to access it
    *
-   *
-   * This function should be called after static initialization is finished, so that
-   * all registrations with the dispatcher have been finalized.
+   * Note that we cannot enforce this invariant "as we go" during static initialization,
+   * due to undefined static initialization order- we have no guarantees over the order
+   * in which .def() and .impl() calls are registered in the dispatcher at static
+   * initialization time. So this function should only be called after static initialization.
    */
   std::vector<OperatorHandle> findDanglingImpls() const;
 
