@@ -777,14 +777,13 @@ jobs:
           no_output_timeout: 30m
           command: |
             cd .circleci/scripts
-            azure_vm_2gpu_test.bat > ../../tmp.log
-            cd ../../
+            azure_vm_2gpu_test.bat > tmp.log
+            set
           shell: cmd.exe
       - run:
           name: Show log
           no_output_timeout: 3m
           command: |
-            cat t1.log
             cat tmp.log
 
   pytorch_windows_test:
