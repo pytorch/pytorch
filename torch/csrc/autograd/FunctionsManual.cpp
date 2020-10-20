@@ -49,6 +49,11 @@ void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
   std::copy(t.begin(), t.end(), out.begin() + range.first);
 }
 
+Tensor copysign_tensor_self_backward(const Tensor & grad, const Tensor & self, const Tensor & other) {
+  auto result = grad * self.sign() * (other.ge(0) * 2 - 1);
+  return result;
+}
+
 Tensor not_implemented(const char* name) {
   throw std::runtime_error(
       std::string("the derivative for '") + name + "' is not implemented");

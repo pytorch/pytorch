@@ -6803,6 +6803,15 @@ class TestAutogradDeviceType(TestCase):
             z = x.to(torch.bfloat16)
             self.assertTrue(z.requires_grad)
 
+    def test_copysign(self, device):
+        x = torch.tensor([-1, 0, -0, 1] * 4, dtype=torch.float, device=device, requires_grad=True)
+        y = torch.tensor([[-1] * 4, [-0] * 4, [0] * 4, [1] * 4], dtype=torch.float, device=device).reshape(-1)
+        y.requires_grad_()
+        out = torch.copysign(x, y)
+        out.sum().backward()
+        self.assertEqual(x.grad.tolist(), [1., 0., 0., -1.] + [-1., 0., 0., 1.] * 3)
+        self.assertEqual(y.grad.tolist(), [0.] * 16)
+
     @onlyCUDA
     def test_simple_reentrant_cross_device(self, device):
         class ReentrantFunc(Function):
