@@ -122,21 +122,21 @@ Tensor& add_relu_(Tensor& self, const Tensor& other, Scalar alpha) {
   return add_relu_impl(self, self, other, alpha);
 }
 
-Tensor& copysign_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& notcopysign_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_float_op(result, self, other);
   copysign_stub(iter.device_type(), iter);
   return result;
 }
 
-Tensor copysign(const Tensor& self, const Tensor& other) {
+Tensor notcopysign(const Tensor& self, const Tensor& other) {
   Tensor result;
   auto iter = TensorIterator::binary_float_op(result, self, other);
   copysign_stub(iter.device_type(), iter);
   return iter.output();
 }
 
-Tensor copysign(const Tensor& self, Scalar other) {
-  return at::copysign(self, wrapped_scalar_tensor(other));
+Tensor notcopysign(const Tensor& self, Scalar other) {
+  return at::notcopysign(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
