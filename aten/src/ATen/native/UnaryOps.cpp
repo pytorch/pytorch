@@ -387,6 +387,41 @@ Tensor& logit_(Tensor& self, c10::optional<double> eps) {
   return at::logit_out(self, self, eps);
 }
 
+Tensor& nan_to_num_out(
+    Tensor& result,
+    const Tensor& self,
+    c10::optional<double> nan,
+    c10::optional<double> pos_inf,
+    c10::optional<double> neg_inf) {
+
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    result.resize_as_(self);
+    result.copy_(self);
+    return result;
+  }
+
+  auto iter = TensorIterator::unary_op(result, self);
+  nan_to_num_stub(iter.device_type(), iter, nan, pos_inf, neg_inf);
+  return result;
+}
+
+Tensor nan_to_num(
+    const Tensor& self,
+    c10::optional<double> nan,
+    c10::optional<double> pos_inf,
+    c10::optional<double> neg_inf) {
+  auto result = at::empty_like(self);
+  return at::nan_to_num_out(result, self, nan, pos_inf, neg_inf);
+}
+
+Tensor& nan_to_num_(
+    Tensor& self,
+    c10::optional<double> nan,
+    c10::optional<double> pos_inf,
+    c10::optional<double> neg_inf) {
+  return at::nan_to_num_out(self, self, nan, pos_inf, neg_inf);
+}
+
 Tensor& tanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, tanh_stub); }
 Tensor tanh(const Tensor& self) { return unary_op_impl(self, at::tanh_out); }
 Tensor& tanh_(Tensor& self) { return unary_op_impl_(self, at::tanh_out); }
@@ -466,7 +501,7 @@ Tensor signbit(const Tensor& self) {
 }
 
 Tensor& clamp_out(Tensor& result, const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
+  TORCH_CHECK(!self.is_complex(), "clamp does not support complex inputs.");
   if (min && max) {
     TORCH_CHECK(self.layout() == Layout::Strided,
                 "clamp only supports strided layout, got: ", self.layout());
@@ -477,7 +512,7 @@ Tensor& clamp_out(Tensor& result, const Tensor& self, optional<Scalar> min, opti
   } else if (min) {
     at::clamp_min_out(result, self, *min);
   } else {
-    AT_ERROR("At least one of 'min' or 'max' must not be None");
+    TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
   }
   return result;
 }
@@ -492,7 +527,7 @@ Tensor& clamp_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
 }
 
 Tensor& clamp_max_out(Tensor& result, const Tensor& self, Scalar max) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
+  TORCH_CHECK(!self.is_complex(), "clamp does not support complex inputs.");
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_max only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self);
@@ -510,7 +545,7 @@ Tensor& clamp_max_(Tensor& self, Scalar max) {
 }
 
 Tensor& clamp_min_out(Tensor& result, const Tensor& self, Scalar min) {
-  TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
+  TORCH_CHECK(!self.is_complex(), "clamp does not support complex inputs.");
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_min only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self);
@@ -645,6 +680,7 @@ DEFINE_DISPATCH(log1p_stub);
 DEFINE_DISPATCH(log2_stub);
 DEFINE_DISPATCH(logical_not_stub);
 DEFINE_DISPATCH(neg_stub);
+DEFINE_DISPATCH(nan_to_num_stub);
 DEFINE_DISPATCH(polygamma_stub);
 DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);
