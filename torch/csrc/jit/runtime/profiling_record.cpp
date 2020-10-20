@@ -118,15 +118,20 @@ c10::SymbolicShape ProfilingRecord::mergeSymbolicShapes(
 }
 
 void ProfilingRecord::profileOptionalValue(Value* none_output) {
-  c10::List<int64_t> elems{0, 0};
-  // elems.push_back(0);
-  // elems.push_back(0);
-  IValue init_val(elems);
+  c10::Dict<std::string, int64_t> noneCountsDict;
+  noneCountsDict.insert("num_none", 0);
+  noneCountsDict.insert("num_present", 0);
+  IValue init_val(noneCountsDict);
 
   auto combine = [](const IValue& acc, const IValue& val) {
-    auto noneCounts = acc.toIntList();
-    auto index = static_cast<int>(!val.isNone());
-    noneCounts.set(index, noneCounts.get(0) + 1);
+    auto noneCounts =
+        c10::impl::toTypedDict<std::string, int64_t>(acc.toGenericDict());
+    if (val.isNone()) {
+      noneCounts.insert_or_assign("num_none", noneCounts.at("num_none") + 1);
+    } else {
+      noneCounts.insert_or_assign(
+          "num_present", noneCounts.at("num_present") + 1);
+    }
     return IValue{noneCounts};
   };
   insertProfileIValueOp(none_output, combine, init_val, "none_counts");

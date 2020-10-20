@@ -125,11 +125,11 @@ struct AutogradZeroSpecializer {
     for (auto inp : graph_->inputs()) {
       if (auto profile_optional_node = getUse(inp, prim::profile_ivalue)) {
         if (profile_optional_node->hasAttribute(Symbol::attr("none_counts"))) {
-          auto none_counts =
+          auto none_counts = c10::impl::toTypedDict<std::string, int64_t>(
               profile_optional_node->ival(Symbol::attr("none_counts"))
-                  .toIntList();
-          auto num_none = none_counts.get(0);
-          auto num_present = none_counts.get(1);
+                  .toGenericDict());
+          auto num_none = none_counts.at("num_none");
+          auto num_present = none_counts.at("num_present");
           if (num_present == 0 && num_none != 0) {
             auto check = graph_->insert(aten::__is__, {inp, none_val})->node();
             checks.push_back(check->output());
