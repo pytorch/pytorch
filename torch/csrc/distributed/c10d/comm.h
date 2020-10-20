@@ -89,6 +89,8 @@ class TORCH_API CppCommHook : public CommHookInterface {
 
  private:
   // This can be a more generic state if needed.
+  // Note that std::optional<ProcessGroup> cannot be used, since ProcessGroup is
+  // an abstract class.
   ProcessGroup* process_group_; // Not owned.
   std::function<c10::intrusive_ptr<torch::jit::Future>(
       ProcessGroup* process_group,
