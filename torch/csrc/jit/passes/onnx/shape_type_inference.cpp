@@ -4,9 +4,7 @@
 #include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/onnx.h>
-#include <torch/csrc/utils/python_arg_parser.h>
 
-#include <aten/src/ATen/InitialTensorOptions.h>
 #include <onnx/shape_inference/implementation.h>
 
 namespace torch {
@@ -68,17 +66,6 @@ TypePtr MergeInferredType(TypePtr existing_type, TypePtr inferred_type) {
 }
 
 namespace {
-
-namespace D {
-static constexpr char DictOpen = '<';
-static constexpr char DictClose = '>';
-static constexpr char ListOpen = '[';
-static constexpr char ListClose = ']';
-static constexpr char TupleOpen = '(';
-static constexpr char TupleClose = ')';
-static constexpr char Variable = 'v';
-static constexpr char String = 's';
-} // namespace D
 
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
@@ -433,10 +420,11 @@ void ONNXSetDynamicInputShape(
   }
 }
 
-bool SequenceTypeOutput(Node* node) {
+bool HasSequenceTypeOutput(Node* node) {
   if (node->kind() == ::c10::onnx::SplitToSequence ||
       node->kind() == ::c10::onnx::SequenceInsert ||
       node->kind() == ::c10::onnx::SequenceEmpty ||
+      node->kind() == ::c10::onnx::SequenceErase ||
       node->kind() == ::c10::onnx::SequenceConstruct)
     return true;
   return false;
@@ -459,63 +447,49 @@ void ONNXAssignOutputShape(
     at::ArrayRef<at::Tensor> outputs,
     const python::IODescriptor& desc,
     bool onnx_shape_inference) {
-  auto vars_it = outputs.begin();
-  auto vars_it_end = outputs.end();
-  auto desc_it = desc.structure.begin();
-  auto str_it = desc.strings.begin();
-  auto str_end = desc.strings.end();
-
-  size_t graph_output_index = 0;
-  size_t graph_outputs_size = graph->outputs().size();
   size_t outputs_index = 0;
 
-  while (outputs_index < outputs.size() &&
-         graph_output_index < graph_outputs_size) {
-    bool sequence_type_output =
-        SequenceTypeOutput(graph->outputs()[graph_output_index]->node());
-    if (sequence_type_output) {
-      // "Outputs" is a flattened list of tensors, but
-      //  graph outputs are not flattened. Unflatten
-      // "outputs" to assign shape for the corresponding item.
-      if (*desc_it == D::TupleOpen || *desc_it == D::TupleClose) {
-        desc_it++;
-      } else if (*desc_it == D::ListOpen) {
-        desc_it++;
-        auto elem_type = TensorType::create(outputs[outputs_index]);
-        while (*desc_it != D::ListClose) {
-          TORCH_INTERNAL_ASSERT(*desc_it == D::Variable);
-          TORCH_INTERNAL_ASSERT(
-              elem_type->scalarType() ==
-              TensorType::create(outputs[outputs_index])->scalarType());
-          desc_it++;
+  auto py_obj = unflatten(outputs, desc);
+
+  TORCH_INTERNAL_ASSERT(PyTuple_Check(py_obj));
+
+  for (size_t i = 0; i < PyTuple_GET_SIZE(py_obj); ++i) {
+    PyObject* elem = PyTuple_GET_ITEM(py_obj, i);
+
+    if (PyList_Check(elem) &&
+        HasSequenceTypeOutput(graph->outputs()[i]->node())) {
+      size_t list_len = PyList_GET_SIZE(elem);
+      if (list_len > 0) {
+        auto& var =
+            reinterpret_cast<THPVariable*>(PyList_GET_ITEM(elem, 0))->cdata;
+        outputs_index++;
+        for (size_t j = 1; j < list_len; ++j) {
+          PyObject* list_elem = PyList_GET_ITEM(elem, j);
+          auto& var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
+          TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
+          TORCH_INTERNAL_ASSERT(var.scalar_type() == var.scalar_type());
           outputs_index++;
         }
-        desc_it++;
-        graph->outputs()[graph_output_index]->setType(
-            ListType::create(elem_type));
-        graph_output_index++;
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            *desc_it == D::Variable,
-            "Only tensors and sequences of tensors are supported as ONNX graph outputs. Dictionaries or Strings are not supported.");
-        auto type = TensorType::create(outputs[outputs_index]);
-        graph->outputs()[graph_output_index]->setType(ListType::create(type));
-        graph_output_index++;
-        outputs_index++;
-        desc_it++;
+        graph->outputs()[i]->setType(ListType::create(
+            TensorType::create(var.scalar_type(), at::kCPU, {}, {})));
       }
     } else {
-      ONNXInferOutputShapeType(
-          graph->outputs()[graph_output_index],
-          outputs[outputs_index],
-          onnx_shape_inference);
-      graph_output_index++;
-      outputs_index++;
+      at::Tensor var;
+      if (PyTuple_Check(elem)) {
+        size_t tuple_len = PyTuple_GET_SIZE(elem);
+        TORCH_INTERNAL_ASSERT(tuple_len > 0);
+        var = reinterpret_cast<THPVariable*>(PyTuple_GET_ITEM(elem, 0))->cdata;
+        outputs_index += tuple_len;
+      } else {
+        var = reinterpret_cast<THPVariable*>(elem)->cdata;
+        outputs_index++;
+      }
+      ONNXInferOutputShapeType(graph->outputs()[i], var, onnx_shape_inference);
     }
   }
 
   TORCH_INTERNAL_ASSERT(
-      graph_output_index == graph_outputs_size,
+      outputs_index == outputs.size(),
       "Incorrect number of elements provided as example outputs.");
 }
 
