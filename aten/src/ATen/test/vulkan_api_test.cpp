@@ -34,7 +34,6 @@ TEST(VulkanAPITest, copy) {
   }
 
   const auto cpu = at::rand({1, 3, 64, 64}, at::device(at::kCPU).dtype(at::kFloat));
-
   ASSERT_TRUE(exactlyEqual(cpu, cpu.vulkan().cpu()));
 }
 
