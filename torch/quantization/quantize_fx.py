@@ -1,11 +1,6 @@
 import torch
 from torch.fx import GraphModule  # type: ignore
-from torch.fx import symbolic_trace  # type: ignore
 from torch.fx.symbolic_trace import Tracer  # type: ignore
-from .custom_module_class_mappings import (
-    register_observed_custom_module_mapping,
-    register_quantized_custom_module_mapping,
-)
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
 from .fx.utils import graph_pretty_str  # noqa: F401
@@ -16,11 +11,6 @@ def _check_is_graph_module(model):
             'input model must be a GraphModule, ' +
             'Got type:' + str(type(model)) + ' Please make ' +
             'sure to follow the tutorials.')
-
-def _register_custom_module_class(custom_module_config):
-    for custom, observed, quantized in custom_module_config:
-        register_observed_custom_module_mapping(custom, observed)
-        register_quantized_custom_module_mapping(custom, quantized)
 
 def _fuse_fx(graph_module, inplace=False):
     r""" Internal helper function to fuse modules in preparation for quantization
@@ -33,16 +23,16 @@ def _fuse_fx(graph_module, inplace=False):
     return fuser.fuse(graph_module, inplace)
 
 class CustomTracer(Tracer):
-    def __init__(self, standalone_modules, custom_module_classes):
+    def __init__(self, skipped_module_names, skipped_module_classes):
         super().__init__()
-        self.standalone_modules = standalone_modules
-        self.custom_module_classes = custom_module_classes
+        self.skipped_module_names = skipped_module_names
+        self.skipped_module_classes = skipped_module_classes
 
     def is_leaf_module(self, m, module_qualified_name):
         return (m.__module__.startswith('torch.nn') and
                 not isinstance(m, torch.nn.Sequential)) or \
-            module_qualified_name in self.standalone_modules or \
-            type(m) in self.custom_module_classes
+            module_qualified_name in self.skipped_module_names or \
+            type(m) in self.skipped_module_classes
 
 
 def _prepare_fx(model, qconfig_dict, inplace, prepare_custom_config_dict=None, is_standalone_module=False):
@@ -59,20 +49,19 @@ forward graph of the parent module,
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
 
+    skipped_module_names = prepare_custom_config_dict.get("non_traceable_module_name", [])
+    skipped_module_classes = prepare_custom_config_dict.get("non_traceable_module_class", [])
+
     # symbolically trace the model
-    if is_standalone_module:
-        # standlone module is traced before quantizing standalone modules
-        graph_module = symbolic_trace(model)
-    else:
-        standalone_modules = prepare_custom_config_dict.get('standalone_module_name', [])
-        custom_module_config = qconfig_dict.get('custom_module_class', [])
-        custom_module_classes = [config[0] for config in custom_module_config]
-        # TODO: currently we are registering classes globally,
-        # we want to make custom module class mapping local
-        _register_custom_module_class(custom_module_config)
-        # skipping tracing standalone modules when tracing top level module
-        tracer = CustomTracer(standalone_modules, custom_module_classes)
-        graph_module = GraphModule(model, tracer.trace(model))
+    if not is_standalone_module:
+        # standalone module and custom module config are applied in top level module
+        standalone_module_names = prepare_custom_config_dict.get('standalone_module_name', [])
+        skipped_module_names += standalone_module_names
+        custom_module_config = prepare_custom_config_dict.get('float_to_observed_custom_module_class', {})
+        custom_module_classes = list(custom_module_config.keys())
+        skipped_module_classes += custom_module_classes
+    tracer = CustomTracer(skipped_module_names, skipped_module_classes)
+    graph_module = GraphModule(model, tracer.trace(model))
     graph_module = _fuse_fx(graph_module, inplace)
     quantizer = Quantizer()
     return quantizer.prepare(
@@ -152,12 +141,6 @@ def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=No
       # priority (in increasing order): global, object_type, module_name_regex, module_name
       # qconfig == None means fusion and quantization should be skipped for anything
       # matching the rule
-
-      # optional: specify the custom module class and provide the corresponding
-      # observed and quantized custom module classes
-      "custom_module_class": [
-         (CustomModuleClass, ObservedCustomModuleClass, QuantizedCustomModuleClass)
-      ]
       }
       `inplace`: flag for carry out model transformations in-place,
       the original module is mutated
@@ -168,6 +151,22 @@ def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=No
         # These modules are symbolically traced and quantized as one unit
         "standalone_module_name": [
            "submodule.standalone"
+        ],
+        # user will manually define the corresponding observed
+        # module class which has a from_float class method that converts
+        # float custom module to observed custom module
+        "float_to_observed_custom_module_class": {
+           CustomModule: ObservedCustomModule
+        },
+
+        # the qualified names for the submodule that are not symbolically traceable
+        "non_traceable_module_name": [
+           "non_traceable_module"
+        ],
+
+        # the module classes that are not symbolically traceable
+        "non_traceable_module_class": [
+           NonTraceableModule
         ]
       }
 
@@ -254,6 +253,12 @@ def convert_fx(graph_module, inplace=False, debug=False, convert_custom_config_d
         `debug`: flag for producing a debug friendly model (preserve weight attribute)
         `convert_custom_config_dict`: dictionary for custom configurations for convert function:
         convert_custom_config_dict = {
+          # user will manually define the corresponding quantized
+          # module class which has a from_observed class method that converts
+          # observed custom module to quantized custom module
+          "observed_to_quantized_custom_module_class": {
+             ObservedCustomModule: QuantizedCustomModule
+          }
         }
 
     Return:

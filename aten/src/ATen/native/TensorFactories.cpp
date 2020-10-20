@@ -170,7 +170,6 @@ Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::opt
   Device device = device_or_default(device_opt);
 
   TORCH_CHECK(device.type() == DeviceType::CPU);
-  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   check_size_nonnegative(size);
 
   bool pin_memory = pinned_memory_or_default(pin_memory_opt);

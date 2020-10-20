@@ -71,7 +71,6 @@ Tensor values_sparse(const Tensor& self) {
 /*** Helper methods ***/
 
 SparseTensor new_sparse(c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
-  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   AT_ASSERT(layout.has_value() && *layout == kSparse);
   DispatchKey dispatch_key;
   if (device_or_default(device).is_cuda()) {
