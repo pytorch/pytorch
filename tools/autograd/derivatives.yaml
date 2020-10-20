@@ -188,7 +188,7 @@
 
 - name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta)
-  mat1: mm_mat1_backward(grad, mat2, mat1, alpha)
+  mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
   mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
 
 - name: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
@@ -275,8 +275,8 @@
   self: zeros_like(grad)
 
 - name: bmm(Tensor self, Tensor mat2) -> Tensor
-  self: grad.bmm(mat2.transpose(1, 2))
-  mat2: self.transpose(1, 2).bmm(grad)
+  self: grad.bmm(mat2.transpose(1, 2).conj())
+  mat2: self.transpose(1, 2).conj().bmm(grad)
 
 - name: _bmm(Tensor self, Tensor mat2, *, bool deterministic=False) -> Tensor
   self: at::_bmm(grad, mat2.transpose(1, 2), deterministic)
@@ -498,8 +498,8 @@
   self: not_implemented("geqrf")
 
 - name: ger(Tensor self, Tensor vec2) -> Tensor
-  self: grad.mv(vec2)
-  vec2: grad.t().mv(self)
+  self: grad.mv(vec2.conj())
+  vec2: grad.t().mv(self.conj())
 
 - name: indices(Tensor(a) self) -> Tensor(a)
   output_differentiability: [False]
@@ -695,6 +695,9 @@
 - name: median(Tensor self) -> Tensor
   self: evenly_distribute_backward(grad, self, result)
 
+- name: nanmedian(Tensor self) -> Tensor
+  self: evenly_distribute_backward(grad, self, result)
+
 # This is in theory incorrect in the following case:
 #   sorted list: [..., a, b, b, ..., b, b, c, ...] with median = b and the value
 #                            |                     at middle position of the
@@ -710,6 +713,9 @@
 # The backward implementation is correct in the sense that it returns the
 # subgradient on one side.
 - name: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
+  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
+
+- name: nanmedian.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
@@ -729,7 +735,7 @@
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
 
 - name: mm(Tensor self, Tensor mat2) -> Tensor
-  self: mm_mat1_backward(grad, mat2, self, 1)
+  self: mm_mat1_backward(grad, mat2, self.sizes(), self.strides(), 1)
   mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), 1)
 
 - name: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
@@ -743,11 +749,14 @@
   self: mul_tensor_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
-  self: grad.ger(vec)
-  vec: self.t().mv(grad)
+  self: grad.ger(vec.conj())
+  vec: self.conj().t().mv(grad)
 
 - name: mvlgamma(Tensor self, int p) -> Tensor
   self: mvlgamma_backward(grad, self, p)
+
+- name: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
+  self: grad * at::isfinite(self)
 
 - name: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   input, weight, bias: "grad.defined() ? native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, eps, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
@@ -1589,7 +1598,7 @@
   grad_output: replication_pad3d(grad, padding)
   self: zeros_like(self)
 
-- name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta=1.0) -> Tensor
+- name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta) -> Tensor
   grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction, beta)
   self: smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction, beta)
   target: -smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction, beta)

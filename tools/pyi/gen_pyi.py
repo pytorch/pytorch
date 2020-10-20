@@ -146,7 +146,8 @@ def type_to_python(typename, size=None):
         'Dimname': 'Union[str, ellipsis, None]',
         'DimnameList': 'Sequence[Union[str, ellipsis, None]]',
         'QScheme': '_qscheme',
-        'ArrayRef<double>' : 'Sequence[float]'
+        'ArrayRef<double>' : 'Sequence[float]',
+        'Stream': 'Stream',
     }[typename]
 
     return typename
@@ -644,7 +645,7 @@ def gen_pyi(declarations_path, out):
     for c in ('Double', 'Float', 'Long', 'Int',
               'Short', 'Char', 'Byte', 'Bool',
               'Half', 'BFloat16', 'ComplexDouble',
-              'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32'):
+              'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32', 'QUInt4x2'):
         legacy_storage_base_hints.append('class {}StorageBase(object): ...'.format(c))
 
     legacy_class_hints = []
@@ -662,7 +663,7 @@ def gen_pyi(declarations_path, out):
                          ['float32', 'float', 'float64', 'double', 'float16', 'bfloat16', 'half',
                           'uint8', 'int8', 'int16', 'short', 'int32', 'int', 'int64', 'long',
                           'complex32', 'complex64', 'cfloat', 'complex128', 'cdouble',
-                          'quint8', 'qint8', 'qint32', 'bool']]
+                          'quint8', 'qint8', 'qint32', 'bool', 'quint4x2']]
 
     # Generate __all__ directive
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
