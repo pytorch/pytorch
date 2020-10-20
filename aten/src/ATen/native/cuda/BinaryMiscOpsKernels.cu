@@ -1,16 +1,12 @@
-#ifdef __HIPCC__
-#include <c10/hip/HIPMathCompat.h>
-#define compat_copysign c10::hip::compat::copysign
-#else
-#include <c10/cuda/CUDAMathCompat.h>
-#define compat_copysign c10::cuda::compat::copysign
-#endif
+#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+
+#include <c10/cuda/CUDAMathCompat.h>
 
 
 // NOTE: CUDA on Windows requires that the enclosing function
@@ -119,7 +115,7 @@ template<typename scalar_t, typename accscalar_t>
 struct CopySignScalarFunctor {
     CopySignScalarFunctor(accscalar_t b_): b(b_) {}
     __device__ scalar_t operator() (scalar_t a) const {
-      return compat_copysign(a, b);
+      return c10::cuda::compat::copysign(a, b);
     }
   private:
     accscalar_t b;
@@ -128,7 +124,7 @@ struct CopySignScalarFunctor {
 template<typename scalar_t>
 struct CopySignFunctor {
   __device__ scalar_t operator() (scalar_t a, scalar_t b) const {
-    return compat_copysign(a, b);
+    return c10::cuda::compat::copysign(a, b);
   }
 };
 
