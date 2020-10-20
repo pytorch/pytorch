@@ -22,7 +22,7 @@ class _LU(torch.autograd.Function):
         P is a permutation matrix, and is non-differentiable.
 
         Using B = L + U - I, A = P L U, we get
-        
+
         dB = dL + dU and     (*)
         P^T dA = dL U + L dU (**)
 

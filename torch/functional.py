@@ -1483,11 +1483,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
                     ' of floating types.'
                 )
 
-            LU, pivots, infos = _LU.apply(A, pivot, get_infos)
-            if get_infos:
-                return LU, pivots, infos
-            else:
-                return LU, pivots
+            return _LU.apply(A, pivot, get_infos)
     else:
         if A.requires_grad:
             raise RuntimeError(
