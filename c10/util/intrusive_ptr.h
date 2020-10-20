@@ -6,7 +6,7 @@
 #include <stdexcept>
 
 namespace pybind11 {
-  template <typename, typename...>
+  template <typename type_, typename... options>
   class class_;
 }
 
@@ -194,7 +194,10 @@ class intrusive_ptr final {
   // it uses intrusive_ptr(TTarget*) to initialize and take ownership of the object.
   // For details, see
   // https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#custom-smart-pointers
-  friend class pybind11::class_<TTarget, intrusive_ptr<TTarget>>;
+  // friend class pybind11::class_<TTarget, intrusive_ptr<TTarget>>;
+  template <typename type_, typename... options>
+  friend class pybind11::class_;
+  // friend class pybind11::class_<TTarget, intrusive_ptr<TTarget>>;
 
   void retain_() {
     if (target_ != NullType::singleton()) {
