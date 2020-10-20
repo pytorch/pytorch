@@ -104,6 +104,8 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         concrete_type_builder.set_module_list()
 
     class_annotations = getattr(nn_module, '__annotations__', {})
+    if isinstance(nn_module, (torch.quantization.QuantWrapper)):
+        class_annotations = {}
 
     # Get user-annotated ignored attributes.
     user_annotated_ignored_attributes = getattr(nn_module, "__jit_ignored_attributes__", list())
@@ -558,6 +560,13 @@ def check_module_initialized(mod):
     if not hasattr(mod, '_parameters'):
         raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
                            .format(torch.typename(type(mod))))
+
+    # This is to avoid importing torch.distributed.nn
+    if not hasattr(mod, 'remote_parameters'):
+        for name, param in mod._parameters.items():
+            if isinstance(param, torch.nn.parameter.UninitializedParameter):
+                raise RuntimeError("'{}' has uninitialized parameters {}. Did you forget to run a forward pass?"
+                                   .format(torch.typename(type(mod)), name))
 
 def infer_methods_to_compile(nn_module):
     """

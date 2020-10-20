@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -11,6 +10,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace {
 
@@ -278,6 +278,7 @@ kir::Bool* ThreadPredicateMap::getExpr(const TensorView* out_tv) const {
   return getPredicate(at(out_tv).first, at(out_tv).second);
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

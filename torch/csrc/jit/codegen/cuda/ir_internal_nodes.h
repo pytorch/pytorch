@@ -15,6 +15,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // Returns true if both v1 and v2 are scalars, are the same type of scalars, and
 // dispatches to the inherited Val type's `->sameAs` call. e.g. if both vals are
@@ -677,6 +678,7 @@ class TORCH_CUDA_API NamedScalar : public Val {
   std::string name_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch
