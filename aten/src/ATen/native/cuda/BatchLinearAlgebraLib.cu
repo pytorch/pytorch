@@ -60,8 +60,8 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
 
       auto dataPtr = allocator.allocate(sizeof(int) * n);
       _apply_single_inverse_helper<scalar_t>(
-        &self_data[i * self_mat_stride], &self_inv_data[i * self_inv_mat_stride],\
-          reinterpret_cast<int*>(dataPtr.get()), p_infos + i, n);
+        &self_data[i * self_mat_stride], &self_inv_data[i * self_inv_mat_stride],
+        reinterpret_cast<int*>(dataPtr.get()), p_infos + i, n);
 
       at::cuda::CUDAEvent finished;
       finished.record(stream);
