@@ -4,10 +4,10 @@ from .observer import MovingAverageMinMaxObserver, HistogramObserver, MovingAver
 import re
 from abc import ABC, abstractmethod
 
-def _is_per_channel(qscheme):
+def _is_per_channel(qscheme: 'torch.qscheme') -> bool:
     return qscheme in [torch.per_channel_symmetric, torch.per_channel_affine]
 
-def _is_per_tensor(qscheme):
+def _is_per_tensor(qscheme: 'torch.qscheme') -> bool:
     return qscheme in [torch.per_tensor_symmetric, torch.per_tensor_affine]
 
 class FakeQuantizeBase(ABC, Module):
@@ -107,6 +107,7 @@ class FakeQuantize(Module):
             _is_per_tensor(self.qscheme), \
             'Only per channel and per tensor quantization are supported in fake quantize' + \
             ' got qscheme: ' + str(self.qscheme)
+        self.is_per_channel = _is_per_channel(self.qscheme)
 
     @torch.jit.export
     def enable_fake_quant(self, enabled=True):
@@ -141,7 +142,7 @@ class FakeQuantize(Module):
             self.zero_point.copy_(_zero_point)
 
         if self.fake_quant_enabled[0] == 1:
-            if _is_per_channel(self.qscheme):
+            if self.is_per_channel:
                 X = torch.fake_quantize_per_channel_affine(X, self.scale, self.zero_point,
                                                            self.ch_axis, self.quant_min, self.quant_max)
             else:
