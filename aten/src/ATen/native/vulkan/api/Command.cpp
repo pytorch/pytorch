@@ -267,9 +267,15 @@ void Command::Buffer::dispatch(
 
   vkCmdDispatch(
       command_buffer_,
-      div_round_up(global_work_group.x, bound_.pipeline.local_work_group.x),
-      div_round_up(global_work_group.y, bound_.pipeline.local_work_group.y),
-      div_round_up(global_work_group.z, bound_.pipeline.local_work_group.z));
+      div_round_up(
+          global_work_group.width,
+          bound_.pipeline.local_work_group.width),
+      div_round_up(
+          global_work_group.height,
+          bound_.pipeline.local_work_group.height),
+      div_round_up(
+          global_work_group.depth,
+          bound_.pipeline.local_work_group.depth));
 }
 
 void Command::Buffer::submit(

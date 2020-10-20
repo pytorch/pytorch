@@ -104,12 +104,7 @@ bool requires_image(const IntArrayRef sizes) {
   return (1u <= sizes.size()) && (sizes.size() <= 4u);
 }
 
-vTensor::Image allocate_image(
-    api::Context* const context,
-    const IntArrayRef sizes,
-    const TensorOptions& options) {
-  verify(options);
-
+VkExtent3D image_extents(const IntArrayRef sizes) {
   int64_t width = 1;
   int64_t height = 1;
   int64_t depth = 1;
@@ -142,15 +137,24 @@ vTensor::Image allocate_image(
           "Only Tensors with 1 <= dim <= 4 can be represented as a Vulkan Image!");
   }
 
+  return {
+    width,
+    height,
+    depth,
+  };
+}
+
+vTensor::Image allocate_image(
+    api::Context* const context,
+    const VkExtent3D& extents,
+    const TensorOptions& options) {
+  verify(options);
+
   return context->resource().pool.image(
       vTensor::Image::Descriptor{
         VK_IMAGE_TYPE_3D,
         convert(options.dtype()),
-        {
-          width,
-          height,
-          depth,
-        },
+        extents,
         // Usage
         {
           VK_IMAGE_USAGE_SAMPLED_BIT |
@@ -315,7 +319,9 @@ vTensor::View::View()
     // Context
     context_(nullptr),
     // State
-    state_{} {
+    state_{},
+    // Metadata
+    extents_{} {
 }
 
 vTensor::View::View(
@@ -332,9 +338,10 @@ vTensor::View::View(
     // State
     state_(context, sizes),
     // Metadata
+    extents_(image_extents(sizes)),
+    options_(options),
     sizes_(sizes),
-    strides_(sizes.size()),
-    options_(options) {
+    strides_(sizes.size()) {
   ops::verify(options);
 }
 
@@ -652,6 +659,8 @@ void vTensor::View::CMD::copy_buffer_to_image(
     uint32_t width;
     uint32_t height;
   } block {
+    view_.extents().width,
+    view_.extents().height,
   };
 
   view_.context_->dispatch(
@@ -665,9 +674,7 @@ void vTensor::View::CMD::copy_buffer_to_image(
       {
         8, 8, 1,
       },
-      {
-        1, 1, 1,
-      },
+      view_.extents(),
       image,
       buffer,
       // Object lifetime is managed by the resource pool.
@@ -704,6 +711,8 @@ void vTensor::View::CMD::copy_image_to_buffer(
     uint32_t width;
     uint32_t height;
   } block {
+    view_.extents().width,
+    view_.extents().height,
   };
 
   view_.context_->dispatch(
@@ -717,9 +726,7 @@ void vTensor::View::CMD::copy_image_to_buffer(
       {
         8, 8, 1,
       },
-      {
-        1, 1, 1,
-      },
+      view_.extents(),
       image,
       buffer,
       // Object lifetime is managed by the resource pool.
@@ -738,8 +745,8 @@ vTensor::Buffer& vTensor::View::buffer() const {
   if (!buffer_) {
     buffer_ = allocate_buffer(
         context_,
-        sizes_,
-        options_);
+        sizes(),
+        options());
   }
 
   return buffer_;
@@ -822,8 +829,8 @@ vTensor::Image& vTensor::View::image() const {
   if (!image_ && state_.is_available(Component::Image)) {
     image_ = allocate_image(
         context_,
-        sizes_,
-        options_);
+        extents(),
+        options());
   }
 
   return image_;
@@ -904,8 +911,8 @@ vTensor::Buffer& vTensor::View::staging() const {
   if (!staging_) {
     staging_ = allocate_staging(
         context_,
-        sizes_,
-        options_);
+        sizes(),
+        options());
   }
 
   return staging_;
