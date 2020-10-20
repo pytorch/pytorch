@@ -1,6 +1,7 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec, LeafSpec
+from torch.utils._pytree import _broadcast_to_and_flatten
 
 class TestPytree(TestCase):
     def test_treespec_equality(self):
@@ -104,6 +105,50 @@ class TestPytree(TestCase):
         _, spec = tree_flatten(pytree)
         self.assertEqual(
             repr(spec), 'TreeSpec(tuple, None, [*, TreeSpec(list, None, [*, *, *])])')
+
+    def test_broadcast_to_and_flatten(self):
+        cases = [
+            (1, (), []),
+
+            # Same (flat) structures
+            ((1,), (0,), [1]),
+            ([1], [0], [1]),
+            ((1, 2, 3), (0, 0, 0), [1, 2, 3]),
+            ({'a': 1, 'b': 2}, {'a': 0, 'b': 0}, [1, 2]),
+
+            # Mismatched (flat) structures
+            ([1], (0,), None),
+            ([1], (0,), None),
+            ((1,), [0], None),
+            ((1, 2, 3), (0, 0), None),
+            ({'a': 1, 'b': 2}, {'a': 0}, None),
+            ({'a': 1, 'b': 2}, {'a': 0, 'c': 0}, None),
+            ({'a': 1, 'b': 2}, {'a': 0, 'b': 0, 'c': 0}, None),
+
+            # Same (nested) structures
+            ((1, [2, 3]), (0, [0, 0]), [1, 2, 3]),
+            ((1, [(2, 3), 4]), (0, [(0, 0), 0]), [1, 2, 3, 4]),
+
+            # Mismatched (nested) structures
+            ((1, [2, 3]), (0, (0, 0)), None),
+            ((1, [2, 3]), (0, [0, 0, 0]), None),
+
+            # Broadcasting single value
+            (1, (0, 0, 0), [1, 1, 1]),
+            (1, [0, 0, 0], [1, 1, 1]),
+            (1, {'a': 0, 'b': 0}, [1, 1]),
+            (1, (0, [0, [0]], 0), [1, 1, 1, 1]),
+            (1, (0, [0, [0, [], [[[0]]]]], 0), [1, 1, 1, 1, 1]),
+
+            # Broadcast multiple things
+            ((1, 2), ([0, 0, 0], [0, 0]), [1, 1, 1, 2, 2]),
+            ((1, 2), ([0, [0, 0], 0], [0, 0]), [1, 1, 1, 1, 2, 2]),
+            (([1, 2, 3], 4), ([0, [0, 0], 0], [0, 0]), [1, 2, 2, 3, 4, 4]),
+        ]
+        for pytree, to_pytree, expected in cases:
+            _, to_spec = tree_flatten(to_pytree)
+            result = _broadcast_to_and_flatten(pytree, to_spec)
+            self.assertEqual(result, expected, msg=str([pytree, to_spec, expected]))
 
 
 if __name__ == '__main__':
