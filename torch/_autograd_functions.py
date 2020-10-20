@@ -62,6 +62,9 @@ class _LU(torch.autograd.Function):
         LU, pivots = ctx.saved_tensors
         P, L, U = torch.lu_unpack(LU, pivots)
 
+        # To make sure MyPy infers types right
+        assert (L is not None) and (U is not None)
+
         I = LU_grad.new_zeros(LU_grad.shape)
         I.diagonal(dim1=-2, dim2=-1).fill_(1)
 
