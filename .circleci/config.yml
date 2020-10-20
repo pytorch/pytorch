@@ -771,6 +771,7 @@ jobs:
           no_output_timeout: 30m
           command: |
             start /wait msiexec /i azure-cli-2.13.0.msi /quiet /qn /norestart /log t1.log
+            set PATH=%PATH%;"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin"
             cd .circleci/scripts
             azure_vm_2gpu_test.bat > ../../tmp.log
             cd ../../
