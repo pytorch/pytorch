@@ -73,6 +73,7 @@ class Context final {
   Resource resource_;
 };
 
+bool available();
 Context* context();
 
 //
