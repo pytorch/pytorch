@@ -2959,9 +2959,9 @@ class TestCudaComm(TestCase):
         self.assertEqual(result.cpu(), x + y)
 
     def _test_reduce_add_coalesced(self, tensors, buffer_size):
-        dup_tensors = [tensors, list(map(lambda t: t.cuda(1), tensors))]
+        dup_tensors = [tensors, [t.cuda(1) for t in tensors]]
 
-        r_tensors = list(map(comm.reduce_add, zip(*dup_tensors)))
+        r_tensors = [comm.reduce_add(t) for t in zip(*dup_tensors)]
         for r, t in zip(r_tensors, tensors):
             self.assertEqualTypeString(r, t)
             self.assertEqual(r, t * 2)
