@@ -19,7 +19,7 @@ def _check_balance(device_ids):
     has less than 75% of the memory or cores of GPU {}. You can do so by setting
     the device_ids argument to DataParallel, or by setting the CUDA_VISIBLE_DEVICES
     environment variable."""
-    device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
+    device_ids = [_get_device_index(x, True) for x in device_ids]
     dev_props = _get_devices_properties(device_ids)
 
     def warn_imbalance(get_prop):
@@ -135,7 +135,7 @@ class DataParallel(Module):
 
         self.dim = dim
         self.module = module
-        self.device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
+        self.device_ids = [_get_device_index(x, True) for x in device_ids]
         self.output_device = _get_device_index(output_device, True)
         self.src_device_obj = torch.device(device_type, self.device_ids[0])
 
@@ -148,9 +148,14 @@ class DataParallel(Module):
         if not self.device_ids:
             return self.module(*inputs, **kwargs)
 
-        # DataParallel needs at least one input in forward function, it uses the number of input
-        # to decide how many device replica to produce, zero input is not valid
-        if len(inputs) == 0:
+        # DataParallel needs at least one input in forward function
+        # Note:
+        # The forward function's input can be either in 'inputs' list or in 'kwargs' dict.
+        # If 'inputs' list is empty and 'kwargs' dict has item, we have no way to identify
+        # whether 'kwargs' has an input for forward function, so we just check whether `kwargs`
+        # dict has item. Caller needs to make sure 'kwargs' dict has at least an input for
+        # forward function in this case.
+        if len(inputs) == 0 and len(kwargs) == 0:
             raise RuntimeError("Forward function must have at least one input, bot got zero")
 
         for t in chain(self.module.parameters(), self.module.buffers()):
@@ -205,7 +210,7 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
     if output_device is None:
         output_device = device_ids[0]
 
-    device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
+    device_ids = [_get_device_index(x, True) for x in device_ids]
     output_device = _get_device_index(output_device, True)
     src_device_obj = torch.device(device_type, device_ids[0])
 

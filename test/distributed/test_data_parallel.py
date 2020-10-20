@@ -514,6 +514,23 @@ class TestDataParallel(TestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out, expected_out, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_data_parallel_module_zero_inputs(self):
+        class TestModule(nn.Module):
+            def forward(self):
+                pass
+
+        model = TestModule()
+        # allow zero input if device id is not specified (no device distributed, no parallel)
+        pmodel = torch.nn.DataParallel(model)
+        pmodel.device_ids = None
+        pmodel()
+
+        # error out if device id is set but no input
+        pmodel = torch.nn.DataParallel(model, device_ids=[0])
+        with self.assertRaisesRegex(RuntimeError, "Forward function must have at least one input"):
+            pmodel()
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_device_args(self):
         cuda0 = torch.device('cuda:0')

@@ -112,7 +112,7 @@ class PackedSequenceTest(TestCase):
     def _padded_sequence(self, tensor_type):
         """Create Tensor of random padded sequences"""
         ordered = self._ordered_sequence(tensor_type)
-        lengths = list(map(len, ordered))
+        lengths = [len(i) for i in ordered]
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
 
@@ -5684,22 +5684,6 @@ class TestNN(NNTestCase):
               [2.42240309, 0.0354595, -0.60659063, -0.05378816]]]).to(device)
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
         torch.testing.assert_allclose(result, ref_output)
-
-    def test_zero_input_data_parallel(self):
-        class A(torch.nn.Module):
-            def forward(self):
-                pass
-
-        model = A()
-        # allow zero input if device id is not specified (no device distributed, no parallel)
-        pmodel = torch.nn.DataParallel(model)
-        pmodel.device_ids = None
-        pmodel()
-
-        # error out if device id is set but no input
-        pmodel = torch.nn.DataParallel(model, device_ids=[0, 1])
-        with self.assertRaisesRegex(RuntimeError, "Forward function must have at least one input"):
-            pmodel()
 
     @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
     def test_cudnn_rnn_dropout_states_device(self):
@@ -11350,7 +11334,7 @@ class TestNNDeviceType(NNTestCase):
     def _padded_sequence(self, device, dtype):
         """Create Tensor of random padded sequences"""
         ordered = self._ordered_sequence(device, dtype)
-        lengths = list(map(len, ordered))
+        lengths = [len(i) for i in ordered]
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
 
@@ -13141,7 +13125,7 @@ class TestLazyModules(TestCase):
         new_module = LazyModule()
         new_module.register_parameter('test_param', nn.Parameter(torch.ones(5, 5)))
         module.load_state_dict(new_module.state_dict())
-        self.assertEqual(module.test_param, torch.ones((5, 5))) 
+        self.assertEqual(module.test_param, torch.ones((5, 5)))
 
         # Uninitialized parameters are left unchanged
         module = LazyModule()
@@ -13200,9 +13184,9 @@ class TestLazyModules(TestCase):
     def test_linear_state(self):
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
-        lazy_module.load_state_dict(module.state_dict()) 
+        lazy_module.load_state_dict(module.state_dict())
         # Parameters have been initialized but the module won't become a full
-        # Linear one until the first iteration. This is due to 
+        # Linear one until the first iteration. This is due to
         # limitations on the state_dict loading logic
         self.assertFalse(lazy_module.has_uninitialized_params())
         self.assertTrue(lazy_module.weight.shape == (10, 5))
@@ -13210,7 +13194,7 @@ class TestLazyModules(TestCase):
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
-            module.load_state_dict(lazy_module.state_dict()) 
+            module.load_state_dict(lazy_module.state_dict())
 
     @suppress_warnings
     def test_materialize_dtype(self):
