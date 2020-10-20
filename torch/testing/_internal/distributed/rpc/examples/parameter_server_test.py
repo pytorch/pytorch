@@ -11,13 +11,15 @@ import torch.distributed.rpc as rpc
 import torch.nn as nn
 from torch import optim
 
-from torch.testing._internal.dist_utils import dist_init
+from torch.testing._internal.dist_utils import (
+    dist_init,
+    worker_name,
+)
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
 
 batch_size = 20
 in_features = 100
 out_features = 30
-batch_update_size = 3
 num_batches = 4
 
 
@@ -27,7 +29,7 @@ def timed_log(text):
 
 class BatchUpdateParameterServer(object):
 
-    def __init__(self, batch_update_size=batch_update_size):
+    def __init__(self, batch_update_size):
         self.model = nn.Linear(in_features, out_features)
         self.lock = threading.Lock()
         self.future_model = torch.futures.Future()
@@ -47,7 +49,7 @@ class BatchUpdateParameterServer(object):
         for p, g in zip(self.model.parameters(), grads):
             p.grad += g
         with self.lock:
-            timed_log(f"PS got {self.curr_update_size}/{batch_update_size} updates")
+            timed_log(f"PS got {self.curr_update_size}/{self.batch_update_size} updates")
             self.curr_update_size += 1
             fut = self.future_model
 
@@ -99,7 +101,7 @@ def run_trainer(ps_rref):
 def run_ps(trainers):
     timed_log("Start training")
     start = perf_counter()
-    ps_rref = rpc.RRef(BatchUpdateParameterServer())
+    ps_rref = rpc.RRef(BatchUpdateParameterServer(len(trainers)))
     futs = []
     for trainer in trainers:
         futs.append(
@@ -118,7 +120,7 @@ class ParameterServerTest(RpcAgentTestFixture):
 
         if self.rank != 0:
             rpc.init_rpc(
-                f"trainer{self.rank}",
+                name=worker_name(self.rank),
                 backend=self.rpc_backend,
                 rank=self.rank,
                 world_size=self.world_size,
@@ -126,12 +128,12 @@ class ParameterServerTest(RpcAgentTestFixture):
             )
         else:
             rpc.init_rpc(
-                "ps",
+                name=worker_name(self.rank),
                 backend=self.rpc_backend,
                 rank=self.rank,
                 world_size=self.world_size,
                 rpc_backend_options=self.rpc_backend_options,
             )
-            run_ps([f"trainer{r}" for r in range(1, self.world_size)])
+            run_ps([f"{worker_name(r)}" for r in range(1, self.world_size)])
 
         rpc.shutdown()
