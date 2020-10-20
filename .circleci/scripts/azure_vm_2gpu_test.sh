@@ -2,5 +2,5 @@ az login --service-principal -u 144f73e6-2a64-47bc-8cfd-f6cbf04d9a69 -p jTn5Cz_b
 az disk create -g PyTorchCiTestGroup -n pytorch-test-vm-os-disk --source pytorch-ci-test-base-image --location SouthCentralUS
 az vm create --name jozh-pytorch-test-vm-01 -g PyTorchCiTestGroup --attach-os-disk pytorch-test-vm-os-disk --location SouthCentralUS --os-type Windows
 az vm run-command invoke  --command-id RunPowerShellScript --name jozh-pytorch-test-vm-01 -g PyTorchCiTestGroup --scripts "@script.ps1"  -o json
-az vm delete --name jozh-pytorch-test-vm-01 -g PyTorchCiTestGroup --no-wait -y
-az disk delete --name pytorch-test-vm-os-disk -g PyTorchCiTestGroup --no-wait -y
+az vm delete --name jozh-pytorch-test-vm-01 -g PyTorchCiTestGroup -y
+az disk delete --name pytorch-test-vm-os-disk -g PyTorchCiTestGroup -y
