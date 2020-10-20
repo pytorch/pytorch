@@ -3,6 +3,7 @@
 
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_init.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
@@ -496,6 +497,13 @@ void initJITBindings(PyObject* module) {
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
       .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
+      .def(
+          "_jit_set_nvfuser_guard_mode",
+          [](bool profiling_flag) {
+            bool oldState = fuser::cuda::getCudaFusionGuardMode();
+            fuser::cuda::getCudaFusionGuardMode() = profiling_flag;
+            return oldState;
+          })
       .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
       .def(
           "_jit_set_profiling_mode",
