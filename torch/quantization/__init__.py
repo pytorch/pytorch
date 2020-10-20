@@ -9,7 +9,6 @@ from .quantize_jit import *
 from .quantize_fx import *
 from .quantization_mappings import *
 from .fuser_method_mappings import *
-from .custom_module_class_mappings import *
 
 def default_eval_fn(model, calib_data):
     r"""
@@ -41,12 +40,6 @@ _all__ = [
     'get_compare_output_module_list',
     'register_quantized_operator_mapping', 'get_quantized_operator',
     'register_fuser_method', 'get_fuser_method',
-    'register_observed_custom_module_mapping',
-    'get_observed_custom_module_class',
-    'register_quantized_custom_mdoule_mapping',
-    'get_quantized_custom_module_class',
-    'is_custom_module_class',
-    'is_observed_custom_module',
     # Sub functions for `prepare` and `swap_module`
     'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
     'default_eval_fn', 'get_observer_dict',
