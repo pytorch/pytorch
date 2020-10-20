@@ -12,7 +12,6 @@ if [[ ${JOB_NAME} == *"develop"* ]]; then
   export IMAGE_COMMIT_TAG=develop-${IMAGE_COMMIT_TAG}
 fi
 
-export PYTORCH_COLLECT_COVERAGE=1
 export TMP_DIR="${PWD}/build/win_tmp"
 export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 export PROJECT_DIR="${PWD}"
@@ -50,6 +49,7 @@ run_tests() {
         $SCRIPT_HELPERS_DIR/test_libtorch.bat
     else
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+            export PYTORCH_COLLECT_COVERAGE=1
             $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM" && \
             $SCRIPT_HELPERS_DIR/test_libtorch.bat
             if [[ "${USE_CUDA}" == "1" ]]; then
@@ -65,7 +65,7 @@ run_tests() {
 
 run_tests && assert_git_not_dirty && echo "TEST PASSED"
 
-if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cuda10-cudnn7-py3" ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cuda10-cudnn7-py3" ]] && [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
   pushd $TEST_DIR
   python -mpip install coverage
   echo "Generating XML coverage report"

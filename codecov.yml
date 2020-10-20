@@ -3,12 +3,16 @@ coverage:
     project:
       default:
         threshold: 1%
+codecov:
+  notify:
+    after_n_builds: 2
 comment:
   layout: "diff"
   behavior: once
   require_changes: true
   require_base: yes
   require_head: yes
+  after_n_builds: 2
   branches:
     - "master"
 fixes:
