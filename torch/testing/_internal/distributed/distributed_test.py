@@ -1534,7 +1534,7 @@ class DistributedTest:
                     for dtype, val in zip(dtypes, curr_values)
                 ]
                 if cuda:
-                    tensors = list(map(tensors, lambda t: t.cuda(rank_to_GPU[rank][0])))
+                    tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
                 dist.all_reduce_coalesced(tensors, op, group_id)
                 expected_tensors = [
                     _build_tensor(src + 1, expected_value, dtype=dtype)
@@ -2663,7 +2663,7 @@ class DistributedTest:
             self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
 
             # test device_ids
-            gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
+            gpus = [torch.device('cuda:' + str(i)) for i in gpus]
             self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
@@ -2681,7 +2681,7 @@ class DistributedTest:
                 gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
 
             # test device_ids
-            gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
+            gpus = [torch.device('cuda:' + str(i)) for i in gpus]
             self._test_DistributedDataParallel(
                 gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'), gradient_as_bucket_view=True)
 
@@ -2766,7 +2766,7 @@ class DistributedTest:
                 output_device=torch.device('cuda'))
 
             # test device_ids
-            gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
+            gpus = [torch.device('cuda:' + str(i)) for i in gpus]
             self._test_DistributedDataParallel_SyncBatchNorm(
                 gpu_subset=gpus,
                 rank=rank,
@@ -3069,8 +3069,14 @@ class DistributedTest:
         def test_DistributedSampler_padding(self):
             # Tests padding of distributed sampler.
             world_size = dist.get_world_size()
+
+            # Simulates the 'casual' dataset size
             dataset_size = 100 + world_size + 1
             dataset = [torch.ones(1).to(self.rank) * i for i in range(dataset_size)]
+
+            # Simulates the 'tiny' dataset size
+            dataset_tiny_size = max(world_size // 2 - 1, 1)
+            dataset_tiny = [torch.ones(1).to(self.rank) * i for i in range(dataset_tiny_size)]
 
             # Specifying drop_last=True will cause the tail of the data to be dropped.
             dist_sampler = DistributedSampler(dataset=dataset, drop_last=True)
@@ -3120,6 +3126,22 @@ class DistributedTest:
 
             # Ensure that each rank processes the same number of samples.
             validate_global_samples(local_num_samples)
+
+            # Ensure additional samples are padded even when
+            # the extremely small dataset is given.
+            dist_sampler_added_samples_tiny = DistributedSampler(dataset=dataset_tiny)
+            local_num_samples, local_dataset_size = (
+                dist_sampler_added_samples_tiny.num_samples,
+                dist_sampler_added_samples_tiny.total_size,
+            )
+            self.assertEqual(
+                local_num_samples, math.ceil(dataset_tiny_size / world_size)
+            )
+            self.assertEqual(local_dataset_size, local_num_samples * world_size)
+            indices_list = list(iter(dist_sampler_added_samples_tiny))
+            self.assertEqual(len(indices_list), local_num_samples)
+            validate_global_samples(local_num_samples)
+
 
         @require_backend({"nccl", "gloo"})
         @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
