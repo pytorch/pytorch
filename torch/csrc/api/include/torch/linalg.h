@@ -32,6 +32,10 @@ inline Tensor tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
   return torch::linalg_tensorsolve(self, other, dims);
 }
 
+inline Tensor& tensorsolve_out(Tensor& result, const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
+  return torch::linalg_tensorsolve_out(result, self, other, dims);
+}
+
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
@@ -69,6 +73,10 @@ inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string o
 /// ```
 inline Tensor tensorsolve(const Tensor& input, const Tensor& other, optional<IntArrayRef> dims) {
   return detail::tensorsolve(input, other, dims);
+}
+
+inline Tensor& tensorsolve_out(Tensor& result, const Tensor& input, const Tensor& other, optional<IntArrayRef> dims) {
+  return detail::tensorsolve_out(result, input, other, dims);
 }
 
 }} // torch::linalg
