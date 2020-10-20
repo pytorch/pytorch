@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
@@ -100,3 +102,5 @@ inline Command::Buffer::operator bool() const {
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN_API */

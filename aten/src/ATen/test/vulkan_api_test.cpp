@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#ifdef USE_VULKAN_API
+#include <ATen/ATen.h>
 
-#include <ATen/native/vulkan/api/api.h>
+#ifdef USE_VULKAN_API
 
 // TODO: These functions should move to a common place.
 
@@ -29,19 +29,11 @@ bool exactlyEqual(const at::Tensor& a, const at::Tensor& b) {
 namespace {
 
 TEST(VulkanAPITest, copy) {
-  if (!at::native::vulkan::api::available()) {
-    return;
-  }
-
   const auto cpu = at::rand({1, 3, 64, 64}, at::device(at::kCPU).dtype(at::kFloat));
   ASSERT_TRUE(exactlyEqual(cpu, cpu.vulkan().cpu()));
 }
 
 TEST(VulkanAPITest, empty) {
-  if (!at::native::vulkan::api::available()) {
-    return;
-  }
-
   ASSERT_NO_THROW(at::empty({1, 3, 64, 64}, at::device(at::kVulkan).dtype(at::kFloat)));
 }
 
