@@ -1,4 +1,4 @@
-#include <bits/stdint-intn.h>
+#include <pybind11/detail/common.h>
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
@@ -864,6 +864,26 @@ Arguments:
 #ifdef USE_C10D_GLOO
   auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
       module, "ProcessGroupGloo", processGroup);
+
+
+ struct MyTestClass : torch::CustomClassHolder {
+  MyTestClass(): my_int(0) {}
+  MyTestClass(int arg_int): my_int(arg_int) {}
+
+  private:
+  int my_int;
+ };
+
+  py::class_<MyTestClass, c10::intrusive_ptr<MyTestClass>>(module, "MyTestClass")
+    .def(py::init<>());
+  module.def("test_intrusive_refcounting",
+  [](){
+     c10::intrusive_ptr<MyTestClass> test_cls = c10::make_intrusive<MyTestClass>(); 
+     LOG(ERROR) << "refcount: " << test_cls.use_count();
+     py::object o2 = py::cast(test_cls, py::return_value_policy::reference);
+     LOG(ERROR) << "refcount: " << test_cls.use_count();
+
+  });
 
   shared_ptr_class_<::gloo::transport::Device>(processGroupGloo, "Device");
 

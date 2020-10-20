@@ -293,9 +293,6 @@ ProcessedNode::ProcessedNode(
     TORCH_CHECK(op.hasOperation());
     op_ = op.getOperation(node);
   }
-  if (canRunOutOfPlace(node)) {
-    fn_ = getOutOfPlaceOperation(node);
-  }
 }
 
 void ProcessedNode::run(std::vector<IValue>& reg) const {
