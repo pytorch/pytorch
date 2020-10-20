@@ -1689,51 +1689,51 @@ Tensor chain_matmul(TensorList matrices) {
 /*
 Calculates the Kronecker product between two Tensors.
 */
-Tensor kron(const Tensor& a, const Tensor& b) {
+Tensor kron(const Tensor& self, const Tensor& other) {
   /*
   We can obtain the kron result using tensordot or einsum.
-  In einsum notation suppose we have `a` with dim 4 and `b` with dim 2
+  In einsum notation suppose we have `self` with dim 4 and `other` with dim 2
   the result of below tensordot is in einsum 0123, 45 -> 012345.
   To obtain the correct kron we need to permute and reshape the array.
   The permutation rule is the following: going from right to left
   take axes in turn to form the permutation
   with our example the correct permutation is 012435 and
-  the kron shape is (shape_a[0], shape_a[1], shape_a[3]*shape_b[0],
-  shape_a[4]*shape_b[1])
+  the kron shape is (shape_self[0], shape_self[1], shape_self[3]*shape_other[0],
+  shape_self[4]*shape_other[1])
   */
-  std::vector<int64_t> a_sizes = a.sizes().vec();
-  std::vector<int64_t> b_sizes = b.sizes().vec();
-  int64_t a_ndim = a.dim();
-  int64_t b_ndim = b.dim();
-  int64_t min_ndim = std::min(a_ndim, b_ndim);
-  int64_t ndim_diff = std::abs(a_ndim - b_ndim);
+  std::vector<int64_t> self_sizes = self.sizes().vec();
+  std::vector<int64_t> other_sizes = other.sizes().vec();
+  int64_t self_ndim = self.dim();
+  int64_t other_ndim = other.dim();
+  int64_t min_ndim = std::min(self_ndim, other_ndim);
+  int64_t ndim_diff = std::abs(self_ndim - other_ndim);
 
-  std::vector<int64_t> a_axes(a_ndim);
-  std::vector<int64_t> b_axes(b_ndim);
+  std::vector<int64_t> a_axes(self_ndim);
+  std::vector<int64_t> b_axes(other_ndim);
   std::iota(a_axes.begin(), a_axes.end(), 0);
-  std::iota(b_axes.begin(), b_axes.end(), 0 + a_ndim);
+  std::iota(b_axes.begin(), b_axes.end(), 0 + self_ndim);
 
-  bool is_a_larger = a_ndim >= b_ndim;
-  std::vector<int64_t> kron_permutation(a_ndim + b_ndim);
+  bool is_a_larger = self_ndim >= other_ndim;
+  std::vector<int64_t> kron_permutation(self_ndim + other_ndim);
   for (int64_t i = 0; i < ndim_diff; i++) {
     kron_permutation[i] = is_a_larger ? a_axes[i] : b_axes[i];
   }
   for (int64_t i = 0, j = 0; i < min_ndim; i++, j += 2) {
-    kron_permutation[a_ndim + b_ndim - 1 - j] = b_axes[b_ndim - 1 - i];
-    kron_permutation[a_ndim + b_ndim - 1 - j - 1] = a_axes[a_ndim - 1 - i];
+    kron_permutation[self_ndim + other_ndim - 1 - j] = b_axes[other_ndim - 1 - i];
+    kron_permutation[self_ndim + other_ndim - 1 - j - 1] = a_axes[self_ndim - 1 - i];
   }
 
-  std::vector<int64_t> result_shape(std::max(a_ndim, b_ndim));
+  std::vector<int64_t> result_shape(std::max(self_ndim, other_ndim));
   for (int64_t i = 0; i < ndim_diff; i++) {
-    result_shape[i] = is_a_larger ? a_sizes[i] : b_sizes[i];
+    result_shape[i] = is_a_larger ? self_sizes[i] : other_sizes[i];
   }
   for (int64_t i = 0; i < min_ndim; i++) {
     result_shape[ndim_diff + i] = is_a_larger
-        ? a_sizes[ndim_diff + i] * b_sizes[i]
-        : b_sizes[ndim_diff + i] * a_sizes[i];
+        ? self_sizes[ndim_diff + i] * other_sizes[i]
+        : other_sizes[ndim_diff + i] * self_sizes[i];
   }
 
-  Tensor result = at::tensordot(a, b, {}, {});
+  Tensor result = at::tensordot(self, other, {}, {});
   // Step 2: now permute result
   result = result.permute(kron_permutation);
   // Step 3: reshape
