@@ -544,6 +544,11 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   void ncclCommWatchdogInternal();
 
+  // This function iterates through the list of WorkNCCL objects in the
+  // workList_ corresponding to incomplete collectives and then aborts NCCL
+  // communicators associated with timed out collectives.
+  void abortTimedOutCollectives(std::unordered_set<std::string>& abortedCommIds);
+
   void workCleanupLoop();
 
  protected:
