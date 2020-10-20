@@ -757,7 +757,7 @@ class TestTensorCreation(TestCase):
     def test_logspace_steps_warning(self, device, dtype):
         self._linspace_logspace_warning_helper(torch.logspace, device, dtype)
 
-    @onlyCUDA
+    @slowTest
     @largeTensorTest('16GB')
     def test_range_factories_64bit_indexing(self, device):
         bigint = 2 ** 31 + 1
