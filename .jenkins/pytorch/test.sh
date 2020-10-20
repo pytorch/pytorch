@@ -15,12 +15,6 @@ if [ -n "${IN_CIRCLECI}" ]; then
   # TODO move this to docker
   pip_install unittest-xml-reporting coverage pytest
 
-  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-cudnn7-py3* ]]; then
-    # TODO: move this to Docker
-    sudo apt-get -qq update
-    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
-  fi
-
   if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
     export PYTORCH_TEST_WITH_SLOW=1
     export PYTORCH_TEST_SKIP_FAST=1

@@ -13,12 +13,6 @@ echo "Testing pytorch (distributed only)"
 if [ -n "${IN_CIRCLECI}" ]; then
   # TODO move this to docker
   pip_install unittest-xml-reporting
-
-  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-cudnn7-py3* ]]; then
-    # TODO: move this to Docker
-    sudo apt-get update
-    sudo apt-get install -y --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
-  fi
 fi
 
 python tools/download_mnist.py --quiet -d test/cpp/api/mnist
