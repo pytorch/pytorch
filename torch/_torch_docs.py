@@ -3502,16 +3502,21 @@ Examples::
 
 add_docstr(torch.kron,
            r"""
-kron(input, other) -> Tensor
+kron(input, other, *, out=None) -> Tensor
 
 Computes the Kronecker product of :attr:`input` and :attr:`other`.
 
 If :attr:`input` is a :math:`(n \times m)` tensor, :attr:`other` is a
 :math:`(k \times l)` tensor, the result will be a :math:`(n*k \times m*l)` tensor.
 
+Supports real and complex inputs.
+
 Arguments:
     input (Tensor): the first tensor to be multiplied
     other (Tensor): the second tensor to be multiplied
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
 
 Returns:
     Tensor: A tensor made of blocks of the second tensor scaled by the first.
