@@ -13,7 +13,10 @@ template <int kSpatialDim>
 std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
     kSpatialDim>::unpack() {
   auto* packed_weights_p = w.get();
-
+  TORCH_CHECK(
+      !(kSpatialDim != 2 && transpose()),
+      "FBGEMM does not support 3d unpack right "
+      "now.");
   // output channels
   const int output_channels = packed_weights_p->outputChannels();
   const int input_channels = packed_weights_p->inputChannels();
@@ -82,7 +85,11 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
   int8_t* unpacked_weights_p =
       reinterpret_cast<int8_t*>(unpacked_weights.data_ptr<c10::qint8>());
   packed_weights_p->unpack(unpacked_weights_p);
-
+  if(transpose()){
+    unpacked_weights =
+        at::native::fbgemm_utils::TransposeConvTensorUnpackConversion<
+            2>(unpacked_weights, groups);
+  }
   return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
       unpacked_weights, bias);
 }
