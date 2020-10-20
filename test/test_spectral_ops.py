@@ -514,6 +514,118 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected a real input"):
             torch.fft.rfftn(c)
 
+    # 2d-fft tests
+
+    # NOTE: 2d transforms are only thin wrappers over n-dim transforms,
+    # so don't require exhaustive testing.
+
+    @skipCPUIfNoMkl
+    @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.double, torch.complex128)
+    def test_fft2_numpy(self, device, dtype):
+        norm_modes = ((None, "forward", "backward", "ortho")
+                      if LooseVersion(np.__version__) >= '1.20.0'
+                      else (None, "ortho"))
+
+        # input_ndim, s
+        transform_desc = [
+            *product(range(2, 5), (None, (4, 10))),
+        ]
+
+        fft_functions = ['fft2', 'ifft2', 'irfft2']
+        if dtype.is_floating_point:
+            fft_functions += ['rfft2']
+
+        for input_ndim, s in transform_desc:
+            shape = itertools.islice(itertools.cycle(range(4, 9)), input_ndim)
+            input = torch.randn(*shape, device=device, dtype=dtype)
+            for fname, norm in product(fft_functions, norm_modes):
+                torch_fn = getattr(torch.fft, fname)
+                numpy_fn = getattr(np.fft, fname)
+
+                def fn(t: torch.Tensor, s: Optional[List[int]], dim: List[int] = (-2, -1), norm: Optional[str] = None):
+                    return torch_fn(t, s, dim, norm)
+
+                torch_fns = (torch_fn, torch.jit.script(fn))
+
+                # Once with dim defaulted
+                input_np = input.cpu().numpy()
+                expected = numpy_fn(input_np, s, norm=norm)
+                for fn in torch_fns:
+                    actual = fn(input, s, norm=norm)
+                    self.assertEqual(actual, expected)
+
+                # Once with explicit dims
+                dim = (1, 0)
+                expected = numpy_fn(input.cpu(), s, dim, norm)
+                for fn in torch_fns:
+                    actual = fn(input, s, dim, norm)
+                    self.assertEqual(actual, expected)
+
+    @skipCUDAIfRocm
+    @skipCPUIfNoMkl
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.complex64)
+    def test_fft2_fftn_equivalence(self, device, dtype):
+        norm_modes = (None, "forward", "backward", "ortho")
+
+        # input_ndim, s, dim
+        transform_desc = [
+            *product(range(2, 5), (None, (4, 10)), (None, (1, 0))),
+            (3, None, (0, 2)),
+        ]
+
+        fft_functions = ['fft', 'ifft', 'irfft']
+        # Real-only functions
+        if dtype.is_floating_point:
+            fft_functions += ['rfft']
+
+        for input_ndim, s, dim in transform_desc:
+            shape = itertools.islice(itertools.cycle(range(4, 9)), input_ndim)
+            x = torch.randn(*shape, device=device, dtype=dtype)
+
+            for func, norm in product(fft_functions, norm_modes):
+                f2d = getattr(torch.fft, func + '2')
+                fnd = getattr(torch.fft, func + 'n')
+
+                kwargs = {'s': s, 'norm': norm}
+
+                if dim is not None:
+                    kwargs['dim'] = dim
+                    expect = fnd(x, **kwargs)
+                else:
+                    expect = fnd(x, dim=(-2, -1), **kwargs)
+
+                actual = f2d(x, **kwargs)
+
+                self.assertEqual(actual, expect)
+
+    @skipCUDAIfRocm
+    @skipCPUIfNoMkl
+    @onlyOnCPUAndCUDA
+    def test_fft2_invalid(self, device):
+        a = torch.rand(10, 10, 10, device=device)
+        fft_funcs = (torch.fft.fft2, torch.fft.ifft2,
+                     torch.fft.rfft2, torch.fft.irfft2)
+
+        for func in fft_funcs:
+            with self.assertRaisesRegex(RuntimeError, "FFT dims must be unique"):
+                func(a, dim=(0, 0))
+
+            with self.assertRaisesRegex(RuntimeError, "FFT dims must be unique"):
+                func(a, dim=(2, -1))
+
+            with self.assertRaisesRegex(RuntimeError, "dim and shape .* same length"):
+                func(a, s=(1,))
+
+            with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+                func(a, dim=(2, 3))
+
+        c = torch.complex(a, a)
+        with self.assertRaisesRegex(RuntimeError, "Expected a real input"):
+            torch.fft.rfft2(c)
+
     # Helper functions
 
     @skipCPUIfNoMkl

@@ -72,7 +72,7 @@ struct InterpreterState {
       const Code& code,
       TaskLauncher taskLauncher = at::launch);
   TORCH_API void run(Stack& stack);
-  c10::intrusive_ptr<Future> runAsync(Stack& stack);
+  TORCH_API c10::intrusive_ptr<Future> runAsync(Stack& stack);
   c10::intrusive_ptr<Future> getFuture();
   TORCH_API ~InterpreterState();
 
