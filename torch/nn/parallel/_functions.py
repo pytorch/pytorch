@@ -13,7 +13,7 @@ class Broadcast(Function):
         assert all(map(lambda i: i.device.type != 'cpu', inputs)), (
             'Broadcast function not implemented for CPU tensors'
         )
-        target_gpus = list(map(lambda x: _get_device_index(x, True), target_gpus))
+        target_gpus = [_get_device_index(x, True) for x in target_gpus]
         ctx.target_gpus = target_gpus
         if len(inputs) == 0:
             return tuple()
@@ -82,7 +82,7 @@ class Scatter(Function):
 
     @staticmethod
     def forward(ctx, target_gpus, chunk_sizes, dim, input):
-        target_gpus = list(map(lambda x: _get_device_index(x, True), target_gpus))
+        target_gpus = [_get_device_index(x, True) for x in target_gpus]
         ctx.dim = dim
         ctx.input_device = input.get_device() if input.device.type != "cpu" else -1
         streams = None

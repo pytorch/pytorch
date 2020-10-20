@@ -761,6 +761,59 @@ class TestQuantizeFx(QuantizationTestCase):
             ref_res = ref_m(data)
             self.assertEqual(res, ref_res)
 
+    @skipIfNoFBGEMM
+    def test_non_traceable_module(self):
+        class NonTraceable(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                for k in x.keys():
+                    print(x[k])
+                return x
+
+        class NonTraceable2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                # data dependent control flow is not traceable
+                for i in x:
+                    print(i)
+                return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = NonTraceable()
+                self.m2 = NonTraceable2()
+
+            def forward(self, x):
+                x = self.m1(x)
+                x = self.m2(x)
+                return x
+
+        m = M().eval()
+        qconfig_dict = {"": default_qconfig}
+        prepare_custom_config_dict = {
+            "non_traceable_module_name": [
+                "m1"
+            ],
+            "non_traceable_module_class": [
+                NonTraceable2
+            ]
+        }
+        m = prepare_fx(
+            m, qconfig_dict,
+            prepare_custom_config_dict=prepare_custom_config_dict)
+
+        node_occurrence = {
+            ns.call_module(NonTraceable) : 1,
+            ns.call_module(NonTraceable2) : 1,
+        }
+        # make sure these modules are not traced
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
     """
