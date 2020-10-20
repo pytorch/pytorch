@@ -929,8 +929,8 @@ class TestLinalg(TestCase):
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     def test_tensorsolve(self, device, dtype):
         def run_test(a_shape, dims):
-            a = torch.rand(a_shape, dtype=dtype, device=device)
-            b = torch.rand(a_shape[:2], dtype=dtype, device=device)
+            a = torch.randn(a_shape, dtype=dtype, device=device)
+            b = torch.randn(a_shape[:2], dtype=dtype, device=device)
             result = torch.linalg.tensorsolve(a, b, dims=dims)
             expected = np.linalg.tensorsolve(a.cpu().numpy(), b.cpu().numpy(), axes=dims)
             self.assertEqual(result, expected)
@@ -964,8 +964,8 @@ class TestLinalg(TestCase):
     @dtypes(torch.cfloat, torch.cdouble)
     def test_tensorsolve_xfailed(self, device, dtype):
         a_shape = (2, 3, 6)
-        a = torch.rand(a_shape, dtype=dtype, device=device)
-        b = torch.rand(a_shape[:2], dtype=dtype, device=device)
+        a = torch.randn(a_shape, dtype=dtype, device=device)
+        b = torch.randn(a_shape[:2], dtype=dtype, device=device)
         result = torch.linalg.tensorsolve(a, b)
         expected = np.linalg.tensorsolve(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(result, expected)
