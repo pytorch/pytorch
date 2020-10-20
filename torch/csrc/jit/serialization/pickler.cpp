@@ -598,12 +598,12 @@ void Pickler::pushTuple(const IValue& ivalue) {
 
 WriteableTensorData getWriteableTensorData(
     const at::Tensor& tensor,
-    bool toCpu) {
+    bool to_cpu) {
   WriteableTensorData result;
   result.tensor_ = tensor;
   result.size_ = tensor.storage().nbytes();
   // TODO HIP support
-  if (tensor.storage().device_type() == DeviceType::CUDA && toCpu) {
+  if (tensor.storage().device_type() == DeviceType::CUDA && to_cpu) {
     // NB: This new tensor is created to support cuda tensors.
     // Storages can be mutated when converting tensors from cuda to cpu,
     // and we need a cpu tensor to copy data from.
