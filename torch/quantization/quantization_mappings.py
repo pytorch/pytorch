@@ -105,7 +105,7 @@ def get_static_quant_module_class(float_module_class, additional_static_quant_ma
     all_mappings = dict(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS, **additional_static_quant_mapping)
     static_quant_module_class = all_mappings.get(float_module_class, None)
     assert static_quant_module_class is not None, \
-        "Floating point module class {}".format(float_module_class) + \
+        "Floating point module class {}".format(str(float_module_class)) + \
         " does not have a corresponding quantized module class"
     return static_quant_module_class
 
@@ -153,5 +153,5 @@ def get_quantized_operator(float_op):
     '''
     quantized_op = DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS.get(float_op, None)
     assert quantized_op is not None, \
-        'Operator {} does not have corresponding quantized op'.format(float_op)
+        'Operator {} does not have corresponding quantized op'.format(str(faloat_op))
     return quantized_op

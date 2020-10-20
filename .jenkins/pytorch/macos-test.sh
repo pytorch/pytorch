@@ -14,7 +14,7 @@ if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1"
   pip install -q faulthandler
 fi
 
-if [ -z "${IN_CIRCLECI}" ]; then
+if [ -z "${IN_CI}" ]; then
   rm -rf ${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 fi
 
@@ -23,7 +23,7 @@ git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
 
 # Test PyTorch
-if [ -z "${IN_CIRCLECI}" ]; then
+if [ -z "${IN_CI}" ]; then
   if [[ "${BUILD_ENVIRONMENT}" == *cuda9.2* ]]; then
     # Eigen gives "explicit specialization of class must precede its first use" error
     # when compiling with Xcode 9.1 toolchain, so we have to use Xcode 8.2 toolchain instead.
@@ -34,7 +34,7 @@ if [ -z "${IN_CIRCLECI}" ]; then
 fi
 
 # Download torch binaries in the test jobs
-if [ -z "${IN_CIRCLECI}" ]; then
+if [ -z "${IN_CI}" ]; then
   rm -rf ${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages/torch*
   aws s3 cp s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z ${IMAGE_COMMIT_TAG}.7z
   7z x ${IMAGE_COMMIT_TAG}.7z -o"${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages"
