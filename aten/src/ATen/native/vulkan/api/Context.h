@@ -49,9 +49,9 @@ class Context final {
       const Shader::WorkGroup& global_work_group,
       Arguments&&... arguments);
 
-  // This function is expensive and its use bad for performance. Only use this
-  // function for debugging or as a short term hack on way to a more performant
-  // solution.
+  // This function is expensive and its use consequential for performance. Only
+  // use this function for debugging or as a short term hack on way to a more
+  // performant solution.
 
   void flush();
 
