@@ -1709,7 +1709,9 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   auto gsigma = grads[1];
 
   auto u = raw_u;
-  auto v = raw_v;
+  // TODO: remove .conj()
+  // once https://github.com/pytorch/pytorch/issues/45821 is resolved
+  auto v = raw_v.conj();
   auto gu = grads[0];
   auto gv = grads[2];
 
@@ -1718,7 +1720,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     // each other, e.g., both -v and +v are valid base for a dimension.
     // Don't assume behavior of any particular implementation of svd.
     u = raw_u.narrow(-1, 0, k);
-    v = raw_v.narrow(-1, 0, k);
+    v = raw_v.narrow(-1, 0, k).conj();  // TODO: remove .conj()
     if (gu.defined()) {
       gu = gu.narrow(-1, 0, k);
     }
@@ -1726,11 +1728,14 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
       gv = gv.narrow(-1, 0, k);
     }
   }
-  auto vt = v.transpose(-2, -1);
+  auto vh = v.conj().transpose(-2, -1);
 
   Tensor sigma_term;
   if (gsigma.defined()) {
-    sigma_term = at::matmul(u, at::matmul(gsigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1), vt));
+    gsigma = gsigma.to(self.dtype());
+    // computes u @ diag(gsigma) @ vh
+    sigma_term = at::matmul(u * gsigma.unsqueeze(-2), vh);
+    // sigma_term = at::matmul(u, at::matmul(gsigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1), vh));
   } else {
     sigma_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
@@ -1740,11 +1745,11 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     return sigma_term;
   }
 
-  auto ut = u.transpose(-2, -1);
+  auto uh = u.conj().transpose(-2, -1);
   auto im = at::eye(m, self.options());
   auto in = at::eye(n, self.options());
-  auto sigma_mat = sigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
-  auto sigma_mat_inv = sigma.pow(-1).diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+  auto sigma_mat = sigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).to(self.dtype());
+  auto sigma_mat_inv = sigma.pow(-1).diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).to(self.dtype());
   auto sigma_sq = sigma.pow(2);
   auto F = sigma_sq.unsqueeze(-2) - sigma_sq.unsqueeze(-1);
   // The following two lines invert values of F, and fills the diagonal with 0s.
@@ -1756,20 +1761,21 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   Tensor u_term, v_term;
 
   if (gu.defined()) {
-    u_term = at::matmul(u, at::matmul(F.mul(at::matmul(ut, gu) - at::matmul(gu.transpose(-2, -1), u)), sigma_mat));
+    auto guh = gu.conj().transpose(-2, -1);
+    u_term = at::matmul(u, at::matmul(F.mul(at::matmul(uh, gu) - at::matmul(guh, u)), sigma_mat));
     if (m > k) {
-      u_term = u_term + at::matmul(im - at::matmul(u, ut), at::matmul(gu, sigma_mat_inv));
+      u_term = u_term + at::matmul(im - at::matmul(u, uh), at::matmul(gu, sigma_mat_inv));
     }
-    u_term = at::matmul(u_term, vt);
+    u_term = at::matmul(u_term, vh);
   } else {
     u_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (gv.defined()) {
-    auto gvt = gv.transpose(-2, -1);
-    v_term = at::matmul(sigma_mat, at::matmul(F.mul(at::matmul(vt, gv) - at::matmul(gvt, v)), vt));
+    auto gvh = gv.conj().transpose(-2, -1);
+    v_term = at::matmul(sigma_mat, at::matmul(F.mul(at::matmul(vh, gv) - at::matmul(gvh, v)), vh));
     if (n > k) {
-      v_term = v_term + at::matmul(sigma_mat_inv, at::matmul(gvt, in - at::matmul(v, vt)));
+      v_term = v_term + at::matmul(sigma_mat_inv, at::matmul(gvh, in - at::matmul(v, vh)));
     }
     v_term = at::matmul(u, v_term);
   } else {
