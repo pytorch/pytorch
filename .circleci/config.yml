@@ -776,8 +776,7 @@ jobs:
           name: Create Test Box
           no_output_timeout: 30m
           command: |
-            cd .circleci/scripts
-            azure_vm_2gpu_test.bat > tmp.log
+            az
             set
           shell: cmd.exe
       - run:
