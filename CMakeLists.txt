@@ -165,7 +165,8 @@ option(USE_GLOG "Use GLOG" OFF)
 option(USE_LEVELDB "Use LEVELDB" OFF)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_LMDB "Use LMDB" OFF)
-option(USE_METAL "Use Metal for iOS build" ON)
+option(USE_METAL "Use Metal for Caffe2 iOS build" ON)
+option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(
     USE_NCCL "Use NCCL" ON
@@ -198,6 +199,9 @@ option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
     "Use system Eigen instead of the one under third_party" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
+cmake_dependent_option(
+    USE_VALGRIND "Use Valgrind. Only available on Linux." ON
+    "LINUX" OFF)
 option(USE_VULKAN "Use Vulkan GPU backend" OFF)
 option(USE_VULKAN_WRAPPER "Use Vulkan wrapper" ON)
 option(USE_VULKAN_SHADERC_RUNTIME "Use Vulkan Shader compilation runtime(Needs shaderc lib)" OFF)
@@ -227,9 +231,29 @@ option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
+# On Windows platform, if user does not install libuv in build conda env and
+# does not set libuv_ROOT environment variable. Set USE_DISTRIBUTED to OFF.
 if(WIN32)
   set(USE_TENSORPIPE OFF)
   message(WARNING "TensorPipe cannot be used on Windows. Set it to OFF")
+
+  if(USE_DISTRIBUTED AND NOT DEFINED ENV{libuv_ROOT})
+    find_library(
+      libuv_tmp_LIBRARY
+      NAMES uv libuv
+      HINTS $ENV{CONDA_PREFIX}\\Library
+      PATH_SUFFIXES lib
+      REQUIRED
+      NO_DEFAULT_PATH)
+    if(NOT EXISTS ${libuv_tmp_LIBRARY})
+      set(USE_DISTRIBUTED OFF)
+      set(USE_GLOO OFF)
+      message(
+        WARNING "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF.")
+    else()
+      set(ENV{libuv_ROOT} $ENV{CONDA_PREFIX}\\Library)
+    endif()
+  endif()
 endif()
 
 # Linux distributions do not want too many embedded sources, in that sense we
@@ -522,6 +546,10 @@ endif()
 
 if(USE_VULKAN_RELAXED_PRECISION)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
+endif()
+
+if(USE_PYTORCH_METAL)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_METAL")
 endif()
 
 # ---[ Allowlist file if allowlist is specified
