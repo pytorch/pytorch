@@ -200,9 +200,9 @@ inline size_t Pipeline::Factory::Hasher::operator()(
   return c10::get_hash(
       descriptor.pipeline_layout,
       descriptor.shader_module,
-      descriptor.local_work_group.x,
-      descriptor.local_work_group.y,
-      descriptor.local_work_group.z);
+      descriptor.local_work_group.width,
+      descriptor.local_work_group.height,
+      descriptor.local_work_group.depth);
 }
 
 inline Pipeline::Object::operator bool() const {
