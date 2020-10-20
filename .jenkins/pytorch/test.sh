@@ -11,7 +11,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
-if [ -n "${IN_CIRCLECI}" ]; then
+if [ -n "${IN_CI}" ]; then
   # TODO move this to docker
   pip_install unittest-xml-reporting coverage pytest
 
