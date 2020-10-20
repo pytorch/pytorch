@@ -606,9 +606,6 @@ class ConvTranspose2d(_ConvTransposeNd):
     For details on input arguments, parameters, and implementation see
     :class:`~torch.nn.ConvTranspose2d`.
 
-    .. note:: Currently only the QNNPACK engine is implemented.
-        Please, set the `torch.backends.quantized.engine = 'qnnpack'`
-
     For special notes, please, see :class:`~torch.nn.quantized.Conv2d`
 
     Attributes:
@@ -620,6 +617,7 @@ class ConvTranspose2d(_ConvTransposeNd):
 
     Examples::
 
+        >>> # QNNPACK or FBGEMM as backend
         >>> torch.backends.quantized.engine = 'qnnpack'
         >>> # With square kernels and equal stride
         >>> m = nnq.ConvTranspose2d(16, 33, 3, stride=2)
@@ -683,4 +681,89 @@ class ConvTranspose2d(_ConvTransposeNd):
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
         return ops.quantized.conv_transpose2d(
+            input, self._packed_params, self.scale, self.zero_point)
+
+class ConvTranspose3d(_ConvTransposeNd):
+    r"""Applies a 3D transposed convolution operator over an input image
+    composed of several input planes.
+    For details on input arguments, parameters, and implementation see
+    :class:`~torch.nn.ConvTranspose3d`.
+
+    .. note:: Currently only the FBGEMM engine is implemented.
+        Please, set the `torch.backends.quantized.engine = 'fbgemm'`
+
+    For special notes, please, see :class:`~torch.nn.quantized.Conv3d`
+
+    Attributes:
+        weight (Tensor):     packed tensor derived from the learnable weight
+                             parameter.
+        scale (Tensor):      scalar for the output scale
+        zero_point (Tensor): scalar for the output zero point
+    See :class:`~torch.nn.ConvTranspose3d` for other attributes.
+
+    Examples::
+
+        >>> torch.backends.quantized.engine = 'fbgemm'
+        >>> # With cubic kernels and equal stride
+        >>> m = nnq.ConvTranspose3d(16, 33, 3, stride=2)
+        >>> # non-cubic kernels and unequal stride and with padding
+        >>> m = nnq.ConvTranspose3d(16, 33, (3, 3, 5), stride=(2, 1), padding=(4, 2))
+        >>> input = torch.randn(20, 16, 50, 100, 100)
+        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.quint8)
+        >>> output = m(q_input)
+        >>> # exact output size can be also specified as an argument
+        >>> input = torch.randn(1, 16, 12, 12, 12)
+        >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.quint8)
+        >>> downsample = nnq.Conv3d(16, 16, 3, stride=2, padding=1)
+        >>> upsample = nnq.ConvTranspose3d(16, 16, 3, stride=2, padding=1)
+        >>> h = downsample(q_input)
+        >>> h.size()
+        torch.Size([1, 16, 6, 6, 6])
+        >>> output = upsample(h, output_size=input.size())
+        >>> output.size()
+        torch.Size([1, 16, 12, 12, 12])
+    """
+
+    _FLOAT_MODULE = nn.ConvTranspose3d
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, output_padding=0, groups=1, bias=True,
+                 dilation=1, padding_mode='zeros'):
+        kernel_size = _pair(kernel_size)
+        stride = _pair(stride)
+        padding = _pair(padding)
+        dilation = _pair(dilation)
+        output_padding = _pair(output_padding)
+
+        super(ConvTranspose3d, self).__init__(
+            in_channels, out_channels, kernel_size, stride, padding, dilation,
+            True, output_padding, groups, bias, padding_mode)
+
+    def _get_name(self):
+        return 'QuantizedConvTranpose3d'
+
+    def set_weight_bias(self, w, b):
+        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+        self._packed_params = torch.ops.quantized.conv_transpose3d_prepack(
+            w, b, self.stride, self.padding, self.output_padding, self.dilation,
+            self.groups)
+
+    def _weight_bias(self):
+        w, b = torch.ops.quantized.conv3d_unpack(self._packed_params)
+        return w, b
+
+    def weight(self):
+        (w, _) = self._weight_bias()
+        return w
+
+    def bias(self):
+        (_, b) = self._weight_bias()
+        return b
+
+    def forward(self, input):
+        # Temporarily using len(shape) instead of ndim due to JIT issue
+        # https://github.com/pytorch/pytorch/issues/23890
+        if len(input.shape) != 5:
+            raise ValueError("Input shape must be `(N, C, T, H, W)`!")
+        return ops.quantized.conv_transpose3d(
             input, self._packed_params, self.scale, self.zero_point)

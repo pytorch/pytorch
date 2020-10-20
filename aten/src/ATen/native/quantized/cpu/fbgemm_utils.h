@@ -295,6 +295,11 @@ Tensor TransposeConvTensorUnpackConversion(
     const Tensor& src,
     int groups);
 
+template <int kSpatialDim>
+Tensor ConvertConvWeightsToChannelLastTensor(
+    const at::Tensor& src,
+    int groups,
+    bool transpose);
 } // namespace fbgemm_utils
 } // namespace native
 } // namespace at
