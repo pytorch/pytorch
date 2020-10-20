@@ -247,6 +247,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: contiguous
    .. automethod:: copy_
    .. automethod:: conj
+   .. automethod:: copysign
    .. automethod:: cos
    .. automethod:: cos_
    .. automethod:: cosh

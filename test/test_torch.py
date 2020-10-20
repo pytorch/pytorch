@@ -660,6 +660,62 @@ class AbstractTestCases:
             self.assertEqual(y[:, 0], range(100))
             self.assertEqual(y[:, 40], range(4000, 4100))
 
+        def test_copysign(self):
+            # Float or Integral promoted to Float
+            res = torch.tensor([-1, -0, -0, -1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1], dtype=torch.float)
+            types = [torch.short, torch.int, torch.long, torch.float]
+            for t in types:
+                x = torch.tensor([-1, 0, -0, 1] * 4, dtype=t)
+                y = torch.tensor([[-1] * 4, [-0] * 4, [0] * 4, [1] * 4], dtype=t).reshape(-1)
+                z = torch.copysign(x, y)
+                self.assertEqual(z, res)
+
+            # Half
+            x = torch.tensor([-1, 0, -0, 1] * 4, dtype=torch.half)
+            y = torch.tensor([[-1] * 4, [-0] * 4, [0] * 4, [1] * 4], dtype=torch.half).reshape(-1)
+            res = torch.tensor([-1, -0, -0, -1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1], dtype=torch.half)
+            self.assertEqual(torch.copysign(x, y), res)
+
+            # Bool
+            x = torch.tensor([-1, 0, -0, 1] * 4, dtype=torch.bool)
+            y = torch.tensor([[-1] * 4, [-0] * 4, [0] * 4, [1] * 4], dtype=torch.bool).reshape(-1)
+            res = torch.tensor([1, 0, 0, 1] * 4, dtype=torch.float).reshape(-1)
+            self.assertEqual(torch.copysign(x, y), res)
+
+            # Broadcast
+            res = torch.tensor([[-1, -0, -0, -1], [1, 0, 0, 1], [1, 0, 0, 1], [1, 0, 0, 1]], dtype=torch.float)
+
+            # LHS
+            x = torch.tensor([-1, 0, -0, 1] * 4, dtype=torch.float).reshape(4, 1, 4)
+            y = torch.tensor([[-1] * 4, [-0] * 4, [0] * 4, [1] * 4], dtype=torch.float)
+            z = torch.copysign(x, y)
+            for i in range(4):
+                self.assertEqual(z[i], res)
+
+            # RHS
+            x = torch.tensor([-1, 0, -0, 1] * 4, dtype=torch.float).reshape(4, 4)
+            y = torch.tensor([[-1] * 4, [-0] * 4, [0] * 4, [1] * 4], dtype=torch.float).reshape(4, 1, 4)
+            z = torch.copysign(x, y)
+            for i in range(4):
+                for j in range(4):
+                    self.assertEqual(z[i][j], res[i])
+
+            # Scalar
+            x = torch.tensor([-1, 0, -0, 1], dtype=torch.float)
+            y = torch.tensor(-1.)
+            res = torch.tensor([-1, -0, -0, -1], dtype=torch.float)
+            self.assertEqual(torch.copysign(x, y), res)
+
+            x = torch.tensor(-1.)
+            y = torch.tensor([-1, 0, -0, 1], dtype=torch.float)
+            res = torch.tensor([-1, 1, 1, 1], dtype=torch.float)
+            self.assertEqual(torch.copysign(x, y), res)
+
+            # Constant
+            x = torch.tensor([-1, 0, -0, 1], dtype=torch.float)
+            res = torch.tensor([-1, -0, -0, -1], dtype=torch.float)
+            self.assertEqual(torch.copysign(x, -1.), res)
+
         def test_device(self):
             cpu = torch.device('cpu')
             self.assertEqual('cpu', str(cpu))

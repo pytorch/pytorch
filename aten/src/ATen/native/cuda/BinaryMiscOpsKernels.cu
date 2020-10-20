@@ -1,9 +1,12 @@
+#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+
+#include <c10/cuda/CUDAMathCompat.h>
 
 
 // NOTE: CUDA on Windows requires that the enclosing function
@@ -108,6 +111,41 @@ void heaviside_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+template<typename scalar_t, typename accscalar_t>
+struct CopySignScalarFunctor {
+    CopySignScalarFunctor(accscalar_t b_): b(b_) {}
+    __device__ scalar_t operator() (scalar_t a) const {
+      return c10::cuda::compat::copysign(a, b);
+    }
+  private:
+    accscalar_t b;
+};
+
+template<typename scalar_t>
+struct CopySignFunctor {
+  __device__ scalar_t operator() (scalar_t a, scalar_t b) const {
+    return c10::cuda::compat::copysign(a, b);
+  }
+};
+
+void copysign_kernel_cuda(TensorIterator& iter) {
+  if (iter.is_cpu_scalar(1) || iter.is_cpu_scalar(2)) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "copysign_cuda", [&]() {
+      using accscalar_t = at::acc_type<scalar_t, true>;
+      int scalar_arg = iter.is_cpu_scalar(1) ? 1 : 2;
+      auto b = iter.scalar_value<accscalar_t>(scalar_arg);
+      iter.remove_operand(scalar_arg);
+      CopySignScalarFunctor<scalar_t, decltype(b)> f(b);
+      gpu_kernel(iter, f);
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "copysign_cuda", [&]() {
+      CopySignFunctor<scalar_t> f;
+      gpu_kernel_with_scalars(iter, f);
+    });
+  }
+}
+
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel_cuda);
 REGISTER_DISPATCH(mse_stub, &mse_kernel_cuda);
@@ -118,5 +156,6 @@ REGISTER_DISPATCH(lcm_stub, &lcm_kernel_cuda);
 REGISTER_DISPATCH(hypot_stub, &hypot_kernel_cuda);
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel_cuda);
 REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel_cuda);
+REGISTER_DISPATCH(copysign_stub, &copysign_kernel_cuda);
 
 }} // namespace at::native
