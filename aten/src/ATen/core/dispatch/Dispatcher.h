@@ -326,12 +326,12 @@ public:
 
   Return call(Args... args) const {
     detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-	auto dispatchKey = operatorIterator_->op.dispatchKeyExtractor()
-	.template getDispatchKeyUnboxed<Args...>(
-		DispatchKeySet::FULL,
-		args...
-	);
-	return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, args...);
+    auto dispatchKey = operatorIterator_->op.dispatchKeyExtractor()
+    .template getDispatchKeyUnboxed<Args...>(
+        DispatchKeySet::FULL,
+        args...
+    );
+    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, args...);
   }
 
   Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
