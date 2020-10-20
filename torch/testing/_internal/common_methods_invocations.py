@@ -1383,8 +1383,6 @@ def method_tests():
         ('sort', (), NO_ARGS, 'scalar'),
         ('sort', (), (0,), 'dim_scalar'),
         ('sort', (), (0, True), 'dim_desc_scalar'),
-        ('linalg.tensorsolve', (2, S, M), ((2, S),),
-         '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('topk', (S, M, S), (3,)),
         ('topk', (S, M, S), (3, 1), 'dim', (), [1]),
         ('topk', (S, M, S), (3, 1, True), 'dim_desc', (), [1]),
@@ -1417,6 +1415,8 @@ def method_tests():
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
+        ('linalg.tensorsolve', (2, S, M), ((2, S),),
+         '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
     ]
 
 def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
