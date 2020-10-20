@@ -3669,7 +3669,7 @@ class TestQuantizedConv(TestCase):
             use_bias):
         if qengine_is_qnnpack():
             return  # QNNPACK doesn't support this
-        assume(o_pad_t < stride_h or o_pad_t < dilation)
+        assume(o_pad_t < stride_t or o_pad_t < dilation)
         assume(o_pad_h < stride_h or o_pad_h < dilation)
         assume(o_pad_w < stride_w or o_pad_w < dilation)
 
@@ -3988,8 +3988,8 @@ class TestQuantizedConv(TestCase):
             return  # QNNPACK doesn't support this
         transposed = inputs[-1]
         if transposed:
-            qconv_prepack = torch.ops.quantized.conv_transpose2d_prepack
-            qconv_unpack = torch.ops.quantized.conv_transpose2d_unpack
+            qconv_prepack = torch.ops.quantized.conv_transpose3d_prepack
+            qconv_unpack = torch.ops.quantized.conv_transpose3d_unpack
         else:
             qconv_prepack = torch.ops.quantized.conv3d_prepack
             qconv_unpack = torch.ops.quantized.conv3d_unpack
