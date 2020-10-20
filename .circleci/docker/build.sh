@@ -40,9 +40,7 @@ function extract_all_from_image_name() {
   done
 }
 
-if [[ "$image" == *-trusty* ]]; then
-  UBUNTU_VERSION=14.04
-elif [[ "$image" == *-xenial* ]]; then
+if [[ "$image" == *-xenial* ]]; then
   UBUNTU_VERSION=16.04
 elif [[ "$image" == *-artful* ]]; then
   UBUNTU_VERSION=17.10
