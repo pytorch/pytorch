@@ -13,13 +13,7 @@ echo "Testing pytorch"
 
 if [ -n "${IN_CIRCLECI}" ]; then
   # TODO move this to docker
-  pip_install unittest-xml-reporting coverage
-
-  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
-    # TODO: move this to Docker
-    sudo apt-get -qq update
-    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
-  fi
+  pip_install unittest-xml-reporting coverage pytest
 
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-cudnn7-py3* ]]; then
     # TODO: move this to Docker
@@ -127,7 +121,7 @@ if ([ -n "$CIRCLE_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]); 
 fi
 
 test_python_legacy_jit() {
-  time python test/run_test.py --include test_jit_cuda_fuser_legacy test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -376,7 +370,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   install_torchvision
   test_xla
-elif [[ "${BUILD_ENVIRONMENT}" == *legacy_jit* || "${JOB_BASE_NAME}" == *legacy_jit* ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test ]]; then
   test_python_legacy_jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests

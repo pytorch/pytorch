@@ -103,8 +103,9 @@ Tensor pinverse(const Tensor& self, double rcond) {
   Tensor U, S, V;
   std::tie(U, S, V) = self.svd();
   Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);
-  Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, self.options()));
-  return at::matmul(V, at::matmul(S_pseudoinv.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1), U.transpose(-2, -1)));
+  Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, S.options())).to(self.dtype());
+  // computes V.conj() @ diag(S_pseudoinv) @ U.T.conj()
+  return at::matmul(V.conj() * S_pseudoinv.unsqueeze(-2), U.transpose(-2, -1).conj());
 }
 
 static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
