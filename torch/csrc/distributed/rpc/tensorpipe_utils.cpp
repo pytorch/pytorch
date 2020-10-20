@@ -135,12 +135,14 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
         };
         tpMessage.tensors.push_back(tensorpipe::Message::Tensor{std::move(buf), std::move(metadata)});
         */
+        std::cout << "=== before adding cudaBuffer\n" << std::flush;
         tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
             tensorpipe::CudaBuffer{
                 tensorPtr,
                 tensorData.sizeInBytes(),
                 ctx.streams()[tensorDataVec[i].device().index()].stream()},
             std::move(metadata)});
+        std::cout << "=== after adding cudaBuffer\n" << std::flush;
 #endif
       }
     }
@@ -194,6 +196,7 @@ TensorpipeReadBuffers tensorpipeAllocate(
       tensor.buffer.cpu.ptr = buffers.tensors.back().get();
 #ifdef USE_CUDA
     } else if (tensor.buffer.type == tensorpipe::DeviceType::kCuda) {
+      std::cout << "==== allocating CUDA tensor\n" << std::flush;
       auto deviceIndex = std::stoi(tensor.metadata);
       DeviceGuard guard(indexToDevice(deviceIndex));
       buffers.tensors.emplace_back(

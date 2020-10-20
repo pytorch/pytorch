@@ -373,11 +373,14 @@ void TensorPipeAgent::pipeRead(
     DevicesContext ctx(reverseDeviceMaps_.empty() && opts_.deviceMaps.empty());
 
     if (error) {
+      std::cout << "=== got error in pipeRead\n" << std::flush;
       fn(error, Message(), std::move(ctx));
       return;
     }
 
+    std::cout << "=== before allocate\n" << std::flush;
     TensorpipeReadBuffers tpBuffers = tensorpipeAllocate(tpMessage, ctx);
+    std::cout << "=== after allocate\n" << std::flush;
 
     pipe->read(
         std::move(tpMessage),
@@ -415,6 +418,7 @@ void TensorPipeAgent::pipeWrite(
   std::tie(tpMessage, tpBuffers) = tensorpipeSerialize(
       std::move(rpcMessage), std::move(devices), ctx);
 
+  std::cout << "before pipe write\n" << std::flush;
   pipe->write(
       std::move(tpMessage),
       [tpBuffers{
@@ -422,8 +426,10 @@ void TensorPipeAgent::pipeWrite(
        fn{std::move(fn)},
        ctx{std::move(ctx)}](
           const tensorpipe::Error& error, tensorpipe::Message /* unused */) {
+        std::cout << "=== in pipeWrite cb\n" << std::flush;
         fn(error);
       });
+  std::cout << "after pipe write\n" << std::flush;
 }
 
 void TensorPipeAgent::sendCompletedResponseMessage(
