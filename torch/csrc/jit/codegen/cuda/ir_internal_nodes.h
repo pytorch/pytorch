@@ -15,6 +15,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // Returns true if both v1 and v2 are scalars, are the same type of scalars, and
 // dispatches to the inherited Val type's `->sameAs` call. e.g. if both vals are
@@ -257,6 +258,12 @@ class TORCH_CUDA_API IterDomain : public Val {
   // directly, users should not be able to use this call
   static std::pair<IterDomain*, IterDomain*> split(IterDomain* in, Val* factor);
 
+  // Run concretization pass and return the concretized domain of broadcast id
+  static const IterDomain* concretizeDomain(IterDomain* bcast_dom);
+
+  // Attempt to prove 2 IterDomains are equal in start and rawExtent
+  static bool proveEquivalent(IterDomain* a, IterDomain* b);
+
   bool isReduction() const {
     return getIterType() == IterType::Reduction;
   }
@@ -384,6 +391,11 @@ class TORCH_CUDA_API TensorDomain : public Val {
 
   TensorDomain(const TensorDomain* src, IrCloner* ir_cloner);
 
+  bool operator==(const TensorDomain& other) const;
+  bool operator!=(const TensorDomain& other) const {
+    return !(*this == other);
+  }
+
   std::vector<IterDomain*>::size_type nDims() const {
     return domain_.size();
   }
@@ -413,6 +425,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
   bool hasReduction() const;
   bool hasBlockReduction() const;
   bool hasGridReduction() const;
+  bool hasBlockBroadcast() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
 
@@ -665,6 +678,7 @@ class TORCH_CUDA_API NamedScalar : public Val {
   std::string name_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import torch
 from sys import version_info
+from io import StringIO
 
 try:
     from torchvision.models import resnet18
@@ -182,6 +183,11 @@ b = resources.load_binary('main', 'main_binary')
             # this will also save all the code files references by
             # the objects in the pickle
             e.save_pickle('model', 'model.pkl', resnet)
+
+            # check th debug graph has something reasonable:
+            buf = StringIO()
+            debug_graph = e._write_dep_graph(failing_module='torch')
+            self.assertIn('torchvision.models.resnet', debug_graph)
 
         # we can now load the saved model
         i = PackageImporter(f1)

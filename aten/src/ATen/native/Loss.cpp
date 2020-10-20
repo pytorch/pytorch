@@ -97,16 +97,15 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto grad_expand = grad.expand_as(input);
   if (!log_target) {
+    auto iter = TensorIteratorConfig()
+      .add_output(grad_input)
+      .add_input(target)
+      .add_input(grad_expand)
+      .build();
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "kl_div_backward_cpu", [&]() {
-      at::CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
-          grad_input,
-          target,
-          grad_expand,
-          [] (scalar_t& grad_input_val, const scalar_t& target_val, const scalar_t& grad_val) {
-            if (target_val > 0) {
-              grad_input_val = -target_val * grad_val;
-            }
-          });
+      cpu_serial_kernel(iter, [](scalar_t target_val, scalar_t grad_val) -> scalar_t{
+        return target_val > 0 ? -target_val * grad_val : 0;
+      });
     });
   }
   else {
@@ -295,24 +294,41 @@ Tensor soft_margin_loss(
   return output;
 }
 
-Tensor smooth_l1_loss(const Tensor& input, const Tensor& target, const int64_t reduction) {
+Tensor smooth_l1_loss(const Tensor& input, const Tensor& target, const int64_t reduction, double beta) {
+  TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.")
+  if (beta == 0) {
+      return at::native::l1_loss(input, target, reduction);
+  }
   Tensor loss;
   auto iter = TensorIterator::binary_op(loss, input, target);
-  smooth_l1_stub(iter.device_type(), iter);
+  smooth_l1_stub(iter.device_type(), iter, beta);
   return apply_loss_reduction(iter.output(), reduction);
 }
 
-Tensor& smooth_l1_loss_out(Tensor& result, const Tensor& input, const Tensor& target, int64_t reduction) {
+Tensor& smooth_l1_loss_out(Tensor& result, const Tensor& input, const Tensor& target, int64_t reduction, double beta) {
+  TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.")
+  if (beta == 0) {
+      return at::native::l1_loss_out(result, input, target, reduction);
+  }
   if (reduction != Reduction::None) {
-    result = at::smooth_l1_loss(input, target, reduction);
+    Tensor loss;
+    auto iter = TensorIterator::binary_op(loss, input, target);
+    smooth_l1_stub(iter.device_type(), iter, beta);
+    if (reduction == Reduction::Mean) {
+      at::mean_out(result, iter.output(), 0);
+    } else {
+      at::sum_out(result, iter.output(), 0);
+    }
   } else {
     auto iter = TensorIterator::binary_op(result, input, target);
-    smooth_l1_stub(iter.device_type(), iter);
+    smooth_l1_stub(iter.device_type(), iter, beta);
   }
   return result;
 }
 
-Tensor& smooth_l1_loss_backward_out(Tensor& grad_input, const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+Tensor& smooth_l1_loss_backward_out(Tensor& grad_input, const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta) {
+  if (beta <= 0)
+      return at::native::l1_loss_backward_out(grad_input, grad_output, input, target, reduction);
   auto norm = reduction == Reduction::Mean ? 1. / input.numel() : 1.;
   auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)
@@ -320,13 +336,15 @@ Tensor& smooth_l1_loss_backward_out(Tensor& grad_input, const Tensor& grad_outpu
     .add_input(target)
     .add_input(grad_output)
     .build();
-  smooth_l1_backward_stub(iter.device_type(), iter, norm);
+  smooth_l1_backward_stub(iter.device_type(), iter, norm, beta);
   return grad_input;
 }
 
-Tensor smooth_l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+Tensor smooth_l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta) {
+  if (beta <= 0)
+      return at::native::l1_loss_backward(grad_output, input, target, reduction);
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  return at::smooth_l1_loss_backward_out(grad_input, grad_output, input, target, reduction);
+  return at::smooth_l1_loss_backward_out(grad_input, grad_output, input, target, reduction, beta);
 }
 
 Tensor mse_loss(const Tensor& input, const Tensor& target, int64_t reduction) {

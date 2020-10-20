@@ -9,7 +9,6 @@ from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
-import warnings
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -399,9 +398,14 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
          return_complex: Optional[bool] = None) -> Tensor:
     r"""Short-time Fourier transform (STFT).
 
+    .. warning::
+        Setting :attr:`return_complex` explicitly will be required in a future
+        PyTorch release. Set it to False to preserve the current behavior or
+        True to return a complex output.
+
     The STFT computes the Fourier transform of short overlapping windows of the
     input. This giving frequency components of the signal as they change over
-    time. The interface of this function is modeled after librosa_.
+    time. The interface of this function is modeled after the librosa_ stft function.
 
     .. _librosa: https://librosa.org/doc/latest/generated/librosa.stft.html
 
@@ -457,10 +461,6 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
       the output is a ``input.dim() + 2`` dimensional real tensor where the last
       dimension represents the real and imaginary components.
 
-      .. warning::
-         From pytorch 1.8.0, :attr:`return_complex` will default to ``True``
-         for all input types.
-
     Returns either a complex tensor of size :math:`(* \times N \times T)` if
     :attr:`return_complex` is true, or a real tensor of size :math:`(* \times N
     \times T \times 2)`. Where :math:`*` is the optional batch size of
@@ -510,7 +510,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         signal_dim = input.dim()
         extended_shape = [1] * (3 - signal_dim) + list(input.size())
         pad = int(n_fft // 2)
-        input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
+        input = F.pad(input.view(extended_shape), [pad, pad], pad_mode)
         input = input.view(input.shape[-signal_dim:])
     return _VF.stft(input, n_fft, hop_length, win_length, window,  # type: ignore
                     normalized, onesided, return_complex)
@@ -884,7 +884,7 @@ def tensordot(a, b, dims=2):
     Args:
       a (Tensor): Left tensor to contract
       b (Tensor): Right tensor to contract
-      dims (int or tuple of two lists of integers): number of dimensions to
+      dims (int or Tuple[List[int]] containing two lists): number of dimensions to
          contract or explicit lists of dimensions for :attr:`a` and
          :attr:`b` respectively
 
@@ -919,6 +919,12 @@ def tensordot(a, b, dims=2):
                 [ 3.3161,  0.0704,  5.0187, -0.4079, -4.3126,  4.8744],
                 [ 0.8223,  3.9445,  3.2168, -0.2400,  3.4117,  1.7780]])
 
+        >>> a = torch.randn(3, 5, 4, 6)
+        >>> b = torch.randn(6, 4, 5, 3)
+        >>> torch.tensordot(a, b, dims=([2, 1, 3], [1, 2, 0]))
+        tensor([[  7.7193,  -2.4867, -10.3204],
+                [  1.5513, -14.4737,  -6.5113],
+                [ -0.2850,   4.2573,  -3.5997]])
     """
     if not torch.jit.is_scripting():
         if (type(a) is not Tensor or type(b) is not Tensor) and has_torch_function((a, b)):
@@ -1214,29 +1220,40 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
     .. warning::
 
         torch.norm is deprecated and may be removed in a future PyTorch release.
-        Use :func:`torch.linalg.norm` instead.
+        Use :func:`torch.linalg.norm` instead, but note that :func:`torch.linalg.norm`
+        has a different signature and slightly different behavior that is
+        more consistent with NumPy's numpy.linalg.norm.
 
     Args:
         input (Tensor): the input tensor
         p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
             The following norms can be calculated:
 
-            =====  ============================  ==========================
-            ord    matrix norm                   vector norm
-            =====  ============================  ==========================
-            None   Frobenius norm                2-norm
-            'fro'  Frobenius norm                --
-            'nuc'  nuclear norm                  --
-            Other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
-            =====  ============================  ==========================
+            ======  ==============  ==========================
+            ord     matrix norm     vector norm
+            ======  ==============  ==========================
+            'fro'   Frobenius norm  --
+            'nuc'   nuclear norm    --
+            Number  --              sum(abs(x)**ord)**(1./ord)
+            ======  ==============  ==========================
 
-        dim (int, 2-tuple of ints, 2-list of ints, optional): If it is an int,
-            vector norm will be calculated, if it is 2-tuple of ints, matrix norm
-            will be calculated. If the value is None, matrix norm will be calculated
-            when the input tensor only has two dimensions, vector norm will be
-            calculated when the input tensor only has one dimension. If the input
-            tensor has more than two dimensions, the vector norm will be applied to
-            last dimension.
+            The vector norm can be calculated across any number of dimensions.
+            The corresponding dimensions of :attr:`input` are flattened into
+            one dimension, and the norm is calculated on the flattened
+            dimension.
+
+            Frobenius norm produces the same result as ``p=2`` in all cases
+            except when :attr:`dim` is a list of three or more dims, in which
+            case Frobenius norm throws an error.
+
+            Nuclear norm can only be calculated across exactly two dimensions.
+
+        dim (int, tuple of ints, list of ints, optional):
+            Specifies which dimension or dimensions of :attr:`input` to
+            calculate the norm across. If :attr:`dim` is ``None``, the norm will
+            be calculated across all dimensions of :attr:`input`. If the norm
+            type indicated by :attr:`p` does not support the specified number of
+            dimensions, an error will occur.
         keepdim (bool, optional): whether the output tensors have :attr:`dim`
             retained or not. Ignored if :attr:`dim` = ``None`` and
             :attr:`out` = ``None``. Default: ``False``
@@ -1246,6 +1263,12 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             returned tensor. If specified, the input tensor is casted to
             :attr:'dtype' while performing the operation. Default: None.
 
+    .. note::
+        Even though ``p='fro'`` supports any number of dimensions, the true
+        mathematical definition of Frobenius norm only applies to tensors with
+        exactly two dimensions. :func:`torch.linalg.norm` with ``ord='fro'`` aligns
+        with the mathematical definition, since it can only be applied across
+        exactly two dimensions.
 
     Example::
 
@@ -1273,9 +1296,6 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         (tensor(3.7417), tensor(11.2250))
     """
-    warnings.warn((
-        "torch.norm is deprecated and may be removed in a future PyTorch release. "
-        "Use torch.linalg.norm instead."))
 
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):

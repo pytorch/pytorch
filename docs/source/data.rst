@@ -331,6 +331,8 @@ are compatible with Windows while using multi-process data loading:
   ``__main__`` check. This ensures that they are available in worker processes.
   (this is needed since functions are pickled as references only, not ``bytecode``.)
 
+.. _data-loading-randomness:
+
 Randomness in multi-process data loading
 """"""""""""""""""""""""""""""""""""""""""
 
@@ -403,6 +405,7 @@ Example::
 .. autoclass:: TensorDataset
 .. autoclass:: ConcatDataset
 .. autoclass:: ChainDataset
+.. autoclass:: BufferedShuffleDataset
 .. autoclass:: Subset
 .. autofunction:: torch.utils.data.get_worker_info
 .. autofunction:: torch.utils.data.random_split

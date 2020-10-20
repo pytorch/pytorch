@@ -6,6 +6,7 @@ import unittest
 import torch
 import torch.nn as nn
 from torch.testing import FileCheck
+from typing import Any
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -444,6 +445,39 @@ class TestClassType(JitTestCase):
             class Derived(Base):
                 def two(self, x):
                     return x + self.b + 2
+
+
+    def test_class_inheritance_implicit(self):
+        """
+        Test that inheritance is detected in
+        implicit scripting codepaths (e.g. try_ann_to_type).
+        """
+        class A:
+            def __init__(self, t):
+                self.t = t
+
+            @staticmethod
+            def f(a: torch.Tensor):
+                return A(a + 1)
+
+        class B(A):
+            def __init__(self, t):
+                self.t = t + 10
+
+            @staticmethod
+            def f(a: torch.Tensor):
+                return A(a + 1)
+
+        x = A(torch.tensor([3]))
+
+        def fun(x: Any):
+            if isinstance(x, A):
+                return A.f(x.t)
+            else:
+                return B.f(x.t)
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to access nonexistent attribute or method"):
+            sc = torch.jit.script(fun)
 
     @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
     def test_imported_classes(self):
@@ -1167,12 +1201,27 @@ class TestClassType(JitTestCase):
 
         @torch.jit.script
         class Properties(object):
+            __jit_unused_properties__ = ["unsupported"]
+
             def __init__(self, a: int):
                 self.a = a
 
             @property
             def attr(self) -> int:
                 return self.a - 1
+
+            @property
+            def unsupported(self) -> int:
+                return sum([self.a])
+
+            @torch.jit.unused
+            @property
+            def unsupported_2(self) -> int:
+                return sum([self.a])
+
+            @unsupported_2.setter
+            def unsupported_2(self, value):
+                self.a = sum([self.a])
 
             @attr.setter
             def attr(self, value: int):

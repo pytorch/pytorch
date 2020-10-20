@@ -262,12 +262,12 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
       ret.shape[i] = input_sizes[ret.dim[i]];
     }
   }
-  
+
   for (int64_t i = 0; i < ret.shape.size(); ++i) {
     TORCH_CHECK(ret.shape[i] > 0,
                 "Invalid number of data points (", ret.shape[i], ") specified");
   }
-  
+
   return ret;
 }
 
@@ -318,14 +318,14 @@ Tensor fftn_c2c(
 // torch.fft.fft, analogous to NumPy's numpy.fft.fft
 Tensor fft_fft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
                c10::optional<std::string> norm) {
-  return self.is_complex() ? 
+  return self.is_complex() ?
     fft_c2c(self, n, dim, norm, /*forward=*/true) :
     fft_r2c(self, n, dim, norm, /*forward=*/true, /*onesided=*/false);
 }
 
 Tensor fft_ifft(const Tensor& self, c10::optional<int64_t> n, int64_t dim,
                 c10::optional<std::string> norm) {
-  return self.is_complex() ? 
+  return self.is_complex() ?
     fft_c2c(self, n, dim, norm, /*forward=*/false) :
     fft_r2c(self, n, dim, norm, /*forward=*/false, /*onesided=*/false);
 }
@@ -408,6 +408,90 @@ Tensor fft_irfftn(const Tensor& self, c10::optional<IntArrayRef> s,
   // Then 1d irfft on last dim to get real output
   return native::fft_irfft(x, last_shape, last_dim, norm);
 }
+
+Tensor fft_fft2(const Tensor& self, c10::optional<IntArrayRef> s,
+                IntArrayRef dim, c10::optional<std::string> norm) {
+  return native::fft_fftn(self, s, dim, std::move(norm));
+}
+
+Tensor fft_ifft2(const Tensor& self, c10::optional<IntArrayRef> s,
+                IntArrayRef dim, c10::optional<std::string> norm) {
+  return native::fft_ifftn(self, s, dim, std::move(norm));
+}
+
+Tensor fft_rfft2(const Tensor& self, c10::optional<IntArrayRef> s,
+                IntArrayRef dim, c10::optional<std::string> norm) {
+  return native::fft_rfftn(self, s, dim, std::move(norm));
+}
+
+Tensor fft_irfft2(const Tensor& self, c10::optional<IntArrayRef> s,
+                  IntArrayRef dim, c10::optional<std::string> norm) {
+  return native::fft_irfftn(self, s, dim, std::move(norm));
+}
+
+Tensor fft_fftfreq(int64_t n, double d, const TensorOptions& options) {
+  ScalarType dtype = typeMetaToScalarType(options.dtype());
+  TORCH_CHECK(at::isFloatingType(dtype) || at::isComplexType(dtype),
+              "fftfreq requires a floating point or complex dtype");
+  // TODO: arange doesn't have complex support
+  Tensor result = native::arange(n, options);
+  auto right_slice = result.slice(0, (n + 1) / 2, 0);
+  at::arange_out(right_slice, -(n/2), 0, 1);
+  result.mul_(1.0 / (n * d));  // Slightly faster than div_(n*d)
+  return result;
+}
+
+Tensor fft_rfftfreq(int64_t n, double d, const TensorOptions& options) {
+  ScalarType dtype = typeMetaToScalarType(options.dtype());
+  TORCH_CHECK(at::isFloatingType(dtype) || at::isComplexType(dtype),
+              "rfftfreq requires a floating point or complex dtype");
+  // TODO: arange doesn't have complex support
+  Tensor result = native::arange(n/2 + 1, options);
+  result.mul_(1.0 / (n * d));  // Slightly faster than div_(n*d)
+  return result;
+}
+
+// If an array dim is specified, wraps them according to self.dim().
+// Otherwise returns a vector of all dims.
+DimVector default_alldims(const Tensor& self, c10::optional<IntArrayRef> dim_opt) {
+  DimVector dim;
+  if (dim_opt) {
+    IntArrayRef dim_unwrapped = *dim_opt;
+    dim.resize(dim_unwrapped.size());
+    for (int64_t i = 0; i < dim.size(); ++i) {
+      dim[i] = maybe_wrap_dim(dim_unwrapped[i], self.dim());
+    }
+  } else {
+    dim.resize(self.dim());
+    std::iota(dim.begin(), dim.end(), 0);
+  }
+  return dim;
+}
+
+Tensor fft_fftshift(const Tensor& x, c10::optional<IntArrayRef> dim_opt) {
+  auto dim = default_alldims(x, dim_opt);
+
+  IntArrayRef x_sizes = x.sizes();
+  DimVector shift(dim.size());
+  for (int64_t i = 0; i < dim.size(); ++i) {
+    shift[i] = x_sizes[dim[i]] / 2;
+  }
+
+  return at::roll(x, shift, dim);
+}
+
+Tensor fft_ifftshift(const Tensor& x, c10::optional<IntArrayRef> dim_opt) {
+  auto dim = default_alldims(x, dim_opt);
+
+  IntArrayRef x_sizes = x.sizes();
+  DimVector shift(dim.size());
+  for (int64_t i = 0; i < dim.size(); ++i) {
+    shift[i] = (x_sizes[dim[i]] + 1) / 2;
+  }
+
+  return at::roll(x, shift, dim);
+}
+
 
 // This is a pass-through wrapper function that does the size check and
 // inferences. The actual forward implementation function is called
@@ -647,8 +731,10 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   const bool return_complex = return_complexOpt.value_or(
       self.is_complex() || (window.defined() && window.is_complex()));
   if (!return_complexOpt && !return_complex) {
-    TORCH_WARN("stft will return complex tensors by default in future, use"
-               " return_complex=False to preserve the current output format.");
+    TORCH_WARN_ONCE("stft will require the return_complex parameter be explicitly "
+                    " specified in a future PyTorch release. Use return_complex=False "
+                    " to preserve the current behavior or return_complex=True to return "
+                    " a complex output.");
   }
 
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {

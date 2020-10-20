@@ -19,12 +19,9 @@ endif()
 
 # Build the cpp gtest binary containing the cpp-only tests.
 set(JIT_TEST_SRCS
-  ${JIT_TEST_ROOT}/gtest.cpp
   ${JIT_TEST_ROOT}/test_alias_analysis.cpp
   ${JIT_TEST_ROOT}/test_argument_spec.cpp
   ${JIT_TEST_ROOT}/test_autodiff.cpp
-  ${JIT_TEST_ROOT}/test_base.cpp
-  ${JIT_TEST_ROOT}/test_base.h
   ${JIT_TEST_ROOT}/test_class_import.cpp
   ${JIT_TEST_ROOT}/test_class_parser.cpp
   ${JIT_TEST_ROOT}/test_class_type.cpp
@@ -99,8 +96,6 @@ elseif(USE_ROCM)
     ${ROCM_HIPRTC_LIB}
     ${PYTORCH_HIP_HCC_LIBRARIES}
     ${TORCH_CUDA_LIBRARIES})
-
-  target_link_libraries(test_jit PRIVATE caffe2_gpu)
 
   target_compile_definitions(test_jit PRIVATE USE_ROCM)
 endif()

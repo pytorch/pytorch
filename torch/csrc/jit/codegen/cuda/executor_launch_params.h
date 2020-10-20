@@ -24,9 +24,14 @@ class TORCH_CUDA_API LaunchParams {
         bdimy_(bdimy),
         bdimz_(bdimz) {}
 
+  void setSmem(int64_t smem) {
+    smem_ = smem;
+  }
+
   int64_t smem() const {
     return smem_;
   }
+
   int64_t nBlocks() const {
     return gdimx_ * gdimy_ * gdimz_;
   }
@@ -67,6 +72,8 @@ class TORCH_CUDA_API LaunchParams {
         class_val == UNINITIALIZED_VAL || incoming_val == class_val,
         "Tried to set ",
         val,
+        " from ",
+        class_val,
         " to ",
         incoming_val,
         ", but it was already set and new value does not match.",

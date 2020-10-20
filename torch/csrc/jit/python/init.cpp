@@ -3,6 +3,7 @@
 
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_init.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
@@ -29,6 +30,7 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/metal_rewrite.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
@@ -139,6 +141,13 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_remove_print", RemovePrintOps)
       .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
+      .def(
+          "_jit_pass_onnx_assign_output_shape",
+          [](std::shared_ptr<Graph>& graph,
+             const std::vector<at::Tensor>& tensors,
+             bool onnx_shape_inference = false) {
+            ONNXAssignOutputShape(graph, tensors, onnx_shape_inference);
+          })
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def(
@@ -188,7 +197,17 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_prepare_inplace_ops_for_onnx",
           PrepareInplaceOpsForONNX)
-      .def("_jit_pass_onnx_node_shape_type_inference", ONNXShapeTypeInference)
+      .def(
+          "_jit_pass_onnx_node_shape_type_inference",
+          [](Node* n, int opset_version) {
+            ONNXShapeTypeInference(n, opset_version);
+          })
+      .def(
+          "_jit_pass_onnx_graph_shape_type_inference",
+          [](std::shared_ptr<Graph>& graph, int opset_version) {
+            ONNXShapeTypeInference(graph, opset_version);
+          })
+      .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -452,6 +471,7 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def("_jit_pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode)
+      .def("_jit_pass_fixup_onnx_loop_node_inputs", FixupONNXLoopNodeInputs)
       .def("_jit_pass_canonicalize_graph_fuser_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
@@ -477,6 +497,13 @@ void initJITBindings(PyObject* module) {
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
       .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
+      .def(
+          "_jit_set_nvfuser_guard_mode",
+          [](bool profiling_flag) {
+            bool oldState = fuser::cuda::getCudaFusionGuardMode();
+            fuser::cuda::getCudaFusionGuardMode() = profiling_flag;
+            return oldState;
+          })
       .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
       .def(
           "_jit_set_profiling_mode",
@@ -498,6 +525,13 @@ void initJITBindings(PyObject* module) {
             size_t old_num = getNumProfiledRuns();
             getNumProfiledRuns() = num;
             return old_num;
+          })
+      .def(
+          "_jit_get_num_profiled_runs",
+          [] {
+            // pybind can't automatically bind to atomic size_t
+            size_t num_runs = getNumProfiledRuns();
+            return num_runs;
           })
       .def(
           "_jit_set_bailout_depth",
@@ -653,6 +687,30 @@ void initJITBindings(PyObject* module) {
           [](script::Module& module,
              std::vector<std::string>& preserved_methods) {
             return vulkanOptimizeForMobile(module, preserved_methods);
+          })
+      .def(
+          "_jit_pass_metal_insert_prepacked_ops",
+          [](std::shared_ptr<Graph>& graph) {
+            return metalInsertPrePackedOps(graph);
+          })
+      .def(
+          "_jit_pass_metal_insert_prepacked_ops",
+          [](script::Module& module) {
+            return metalInsertPrePackedOps(module);
+          })
+      .def(
+          "_jit_pass_metal_fuse_clamp_w_prepacked_conv",
+          [](script::Module& module) {
+            return metalFusePrePackedConvWithClamp(module);
+          })
+      .def(
+          "_jit_pass_metal_fold_prepacking_ops",
+          [](script::Module& module) { return metalFoldPrePackingOps(module); })
+      .def(
+          "_jit_pass_metal_optimize_for_mobile",
+          [](script::Module& module,
+             std::vector<std::string>& preserved_methods) {
+            return metalOptimizeForMobile(module, preserved_methods);
           })
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
@@ -1080,6 +1138,10 @@ void initJITBindings(PyObject* module) {
       .def(
           "then",
           &PythonFutureWrapper::then,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "add_done_callback",
+          &PythonFutureWrapper::add_done_callback,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "set_result",

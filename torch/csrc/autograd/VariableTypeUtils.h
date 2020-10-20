@@ -47,6 +47,10 @@ inline void check_inplace(const Tensor& tensor) {
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
       // This can throw or warn
       handle_view_on_rebase(diff_view_meta);
+      if (tensor._base().is_leaf()) {
+          AT_ERROR(
+            "a view of a leaf Variable that requires grad is being used in an in-place operation.");
+      }
     }
     if (var.is_leaf()) {
       AT_ERROR(
@@ -65,6 +69,19 @@ inline void throw_error_out_requires_grad(const char* name) {
   AT_ERROR(
       name, "(): functions with out=... arguments don't support automatic differentiation, "
       "but one of the arguments requires grad.");
+}
+
+inline void throw_error_for_complex_autograd(const Tensor& tensor, const char* name) {
+  if (tensor.requires_grad()) {
+    TORCH_CHECK(!tensor.is_complex(), name,
+                " does not support automatic differentiation for outputs with complex dtype.");
+  }
+}
+
+inline void throw_error_for_complex_autograd(const TensorList& tensorlist, const char* name) {
+  for (auto tensor: tensorlist) {
+    throw_error_for_complex_autograd(tensor, name);
+  }
 }
 
 // TODO: Blegh, bare references

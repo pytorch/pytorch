@@ -399,6 +399,18 @@ class TestTracer(JitTestCase):
         self.assertEqual(ge(y).shape, y.shape)
         self.assertEqual(ge(x).shape, x.shape)
 
+    # Test that the trace of setitem doesn't store shapes as constants
+    # Fix https://github.com/pytorch/pytorch/issues/43548
+    def test_trace_slice_setitem_dynamic_shape(self):
+        def slice_setitem(x, y):
+            x[:, 2] = y + 1
+            return x
+
+        x = torch.randn(3, 4)
+        traced = torch.jit.trace(slice_setitem, (x, x[:, 0]))
+        x = torch.randn(10, 5)
+        self.assertEqual(traced(x.clone(), x[:, 0]), slice_setitem(x.clone(), x[:, 0]))
+
     # Suppression: we are intentionally slicing a tensor, we don't care that it
     # will be constantified
     @suppress_warnings
@@ -1526,7 +1538,7 @@ class TestTracer(JitTestCase):
                 x[i, :] = torch.zeros(4)
             return x
 
-        self.checkTrace(foo, (torch.rand(3, 4),))
+        self.checkTrace(foo, (torch.rand(3, 4),), inputs_require_grads=False)
 
     def test_trace_checker_inplace_on_view(self):
         def foo(x):

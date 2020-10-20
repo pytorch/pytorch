@@ -55,7 +55,7 @@ class Reducer {
     return backward_stats_;
   }
 
-  // Registeres a hook to the reducer. The hook is `CommHookInterface`
+  // Registers a hook to the reducer. The hook is `CommHookInterface`
   // type to allow both Python and CPP hooks. This function can only
   // be called once before calling backward.
   void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
@@ -104,6 +104,13 @@ class Reducer {
   struct VariableIndex {
     size_t replica_index;
     size_t variable_index;
+
+    VariableIndex() = default;
+
+    VariableIndex(size_t replica_index_, size_t variable_index_) {
+      replica_index = replica_index_;
+      variable_index = variable_index_;
+    }
   };
 
   void push_rebuilt_params(const VariableIndex& index);
@@ -115,7 +122,8 @@ class Reducer {
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
       grad_accumulators_;
-  std::unordered_map<torch::autograd::Node*, VariableIndex> func_;
+  std::unordered_map<torch::autograd::Node*, VariableIndex>
+      gradAccToVariableMap_;
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
       hooks_;
 
@@ -162,6 +170,10 @@ class Reducer {
   void finalize_bucket_dense(Bucket& replica);
 
   void finalize_backward();
+
+  // Asserts that the reduction for the previous iteration has finished before
+  // rebuilding buckets or kicking off the next one.
+  void ensure_prior_reduction_finished();
 
   // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
   // the buckets
@@ -281,6 +293,13 @@ class Reducer {
     size_t bucket_index;
     // Index of parameter in single bucket replica.
     size_t intra_bucket_index;
+
+    VariableLocator() = default;
+
+    VariableLocator(size_t bucket_index_, size_t intra_bucket_index_) {
+      bucket_index = bucket_index_;
+      intra_bucket_index = intra_bucket_index_;
+    }
   };
 
   // Map the index of a variable to its location in the bucket structure.

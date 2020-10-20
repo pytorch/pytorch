@@ -89,10 +89,7 @@ Reducer::Reducer(
       for (size_t variable_index = 0; variable_index < variable_count;
            variable_index++) {
         auto& variable = replicas_[replica_index][variable_index];
-        const auto index = VariableIndex{
-            .replica_index = replica_index,
-            .variable_index = variable_index,
-        };
+        const auto index = VariableIndex(replica_index, variable_index);
 
         // The gradient accumulator function is lazily initialized once.
         // Therefore we can use its presence in the autograd graph as
@@ -100,15 +97,19 @@ Reducer::Reducer(
         auto grad_accumulator =
             torch::autograd::impl::grad_accumulator(variable);
 
+#ifndef _WIN32
         using torch::distributed::autograd::ThreadLocalDistAutogradContext;
+#endif
         // Hook to execute after the gradient accumulator has executed.
         hooks_.emplace_back(
             grad_accumulator->add_post_hook(
                 torch::make_unique<torch::autograd::utils::LambdaPostHook>(
                     [=](const torch::autograd::variable_list& outputs,
                         const torch::autograd::variable_list& /* unused */) {
+#ifndef _WIN32
                       this->rpc_context_.set(
                           ThreadLocalDistAutogradContext::getContextPtr());
+#endif
                       this->autograd_hook(index);
                       return outputs;
                     })),
@@ -116,8 +117,11 @@ Reducer::Reducer(
 
         // Map raw function pointer to replica index and parameter index.
         // This is used later on when the autograd graph is traversed
-        // to check for parameters for which no gradient is computed.
-        func_[grad_accumulator.get()] = index;
+        // to check for parameters for which no gradient is computed, if
+        // find_unused_parameters=True.
+        if (find_unused_parameters_) {
+          gradAccToVariableMap_[grad_accumulator.get()] = index;
+        }
 
         // The gradient accumulator is stored as weak_ptr in the autograd
         // metadata of the variable, so we have to keep it alive here for
@@ -477,10 +481,7 @@ void Reducer::push_rebuilt_params_for_all_indices() {
     const auto variable_count = replicas_[replica_index].size();
     for (size_t variable_index = 0; variable_index < variable_count;
          ++variable_index) {
-      const auto index = VariableIndex{
-          .replica_index = replica_index,
-          .variable_index = variable_index,
-      };
+      const auto index = VariableIndex(replica_index, variable_index);
       push_rebuilt_params(index);
     }
   }
@@ -712,8 +713,10 @@ void Reducer::initialize_buckets(
   // bucket_view, then it needs to check rpc context ptr is nullptr or not,
   // If rpc context ptr is nullptr, mutate variable.grad(); otherwise,
   // mutate grad in rpc context.
+#ifndef _WIN32
   using torch::distributed::autograd::ThreadLocalDistAutogradContext;
   this->rpc_context_.set(ThreadLocalDistAutogradContext::getContextPtr());
+#endif
 
   // This shouldn't be called if we're expecting autograd hooks to fire.
   TORCH_CHECK(
@@ -850,10 +853,8 @@ void Reducer::initialize_buckets(
       TORCH_CHECK(
           variable_index < variable_locators_.size(),
           "Out of range variable index specified.");
-      variable_locators_[variable_index] = VariableLocator{
-          .bucket_index = bucket_index,
-          .intra_bucket_index = intra_bucket_index++,
-      };
+      variable_locators_[variable_index] = VariableLocator(
+        bucket_index, intra_bucket_index++);
     }
     bucket.variable_indices = std::move(bucket_indices[bucket_index]);
 
@@ -948,31 +949,6 @@ void Reducer::prepare_for_backward(
   std::unordered_set<torch::autograd::Node*> seen;
   std::vector<torch::autograd::Node*> queue;
 
-  // Check that any prior reduction has finished.
-  // The variable `require_finalize_` is true until all gradients
-  // have been computed and reduction of all buckets has been kicked off.
-  if (require_finalize_) {
-    TORCH_CHECK(
-        false,
-        "Expected to have finished reduction in the prior iteration before ",
-        "starting a new one. ",
-        "",
-        "This error indicates that your module has parameters that were ",
-        "not used in producing loss. ",
-        "",
-        "You can enable unused parameter detection by (1) passing the keyword "
-        "argument `find_unused_parameters=True` to ",
-        "`torch.nn.parallel.DistributedDataParallel`; (2) making sure all ",
-        "`forward` function outputs participate in calculating loss. "
-        "",
-        "If you already have done the above two steps, then the distributed ",
-        "data parallel module wasn't able to locate the output tensors in the ",
-        "return value of your module's `forward` function. ",
-        "Please include the loss function and the structure of the return ",
-        "value of `forward` of your module when reporting this issue (e.g. ",
-        "list, dict, iterable).");
-  }
-
   // Reset accounting.
   expect_autograd_hooks_ = true;
   next_bucket_ = 0;
@@ -1018,7 +994,7 @@ void Reducer::prepare_for_backward(
   }
 
   // Find accumulator functions that don't show up in this graph.
-  for (const auto& it : func_) {
+  for (const auto& it : gradAccToVariableMap_) {
     // If the accumulator function is present in the graph, we know
     // a gradient will be computed for the corresponding parameter.
     if (seen.count(it.first) > 0) {
@@ -1235,7 +1211,9 @@ void Reducer::runGradCallbackForVariable(
     cb(variable.mutable_grad());
   } else {
     // Under distributed autograd
+#ifndef _WIN32
     context_ptr->runGradCallbackForVariable(variable, std::move(cb));
+#endif
   }
 }
 
@@ -1325,6 +1303,11 @@ void Reducer::sync_bucket_indices(
 }
 
 bool Reducer::rebuild_buckets() {
+  // Ensure reduction for previous backwards pass is finished. If user's model
+  // has unused parameters for example, this will raise an error recommending to
+  // run with find_unused_parameters=True, instead of the size mismatch
+  // exception below.
+  ensure_prior_reduction_finished();
   std::lock_guard<std::mutex> lock(mutex_);
   if (!should_rebuild_buckets() || rebuilt_params_.empty()) {
     return false;
@@ -1341,8 +1324,9 @@ bool Reducer::rebuild_buckets() {
       replicas_[0].size() == rebuilt_param_indices_.size(),
       c10::str(
           "rebuilt parameter indices size is not same as original model parameters size.",
+          "Original model param size is: ",
           replicas_[0].size(),
-          " versus ",
+          " versus rebuilt params size of: ",
           rebuilt_param_indices_.size()));
   std::vector<std::vector<size_t>> rebuilt_bucket_indices;
   std::vector<size_t> bucket_size_limits;
@@ -1378,6 +1362,34 @@ void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
       "Communication hook does not support single-process multiple-device mode.");
 
   comm_hook_ = std::move(iface);
+}
+
+void Reducer::ensure_prior_reduction_finished() {
+  // Check that any prior reduction has finished.
+  // The variable `require_finalize_` is true until all gradients
+  // have been computed and reduction of all buckets has been kicked off.
+  if (require_finalize_) {
+    TORCH_CHECK(
+        false,
+        "Expected to have finished reduction in the prior iteration before ",
+        "starting a new one. ",
+        "",
+        "This error indicates that your module has parameters that were ",
+        "not used in producing loss. ",
+        "",
+        "You can enable unused parameter detection by (1) passing the keyword "
+        "argument `find_unused_parameters=True` to ",
+        "`torch.nn.parallel.DistributedDataParallel`; (2) making sure all ",
+        "`forward` function outputs participate in calculating loss. "
+        "",
+        "If you already have done the above two steps, then the distributed ",
+        "data parallel module wasn't able to locate the output tensors in the ",
+        "return value of your module's `forward` function. ",
+        "Please include the loss function and the structure of the return ",
+        "value of `forward` of your module when reporting this issue (e.g. ",
+        "list, dict, iterable).");
+  }
+
 }
 
 namespace {

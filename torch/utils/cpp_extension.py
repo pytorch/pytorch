@@ -152,6 +152,7 @@ MSVC_IGNORE_CUDAFE_WARNINGS = [
 COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
     '-D__CUDA_NO_HALF_CONVERSIONS__',
+    '-D__CUDA_NO_BFLOAT16_CONVERSIONS__',
     '-D__CUDA_NO_HALF2_OPERATORS__',
     '--expt-relaxed-constexpr'
 ]
@@ -347,6 +348,18 @@ class BuildExtension(build_ext, object):
     def build_extensions(self) -> None:
         self._check_abi()
         for extension in self.extensions:
+            # Ensure at least an empty list of flags for 'cxx' and 'nvcc' when
+            # extra_compile_args is a dict. Otherwise, default torch flags do
+            # not get passed. Necessary when only one of 'cxx' and 'nvcc' is
+            # passed to extra_compile_args in CUDAExtension, i.e.
+            #   CUDAExtension(..., extra_compile_args={'cxx': [...]})
+            # or
+            #   CUDAExtension(..., extra_compile_args={'nvcc': [...]})
+            if isinstance(extension.extra_compile_args, dict):
+                for ext in ['cxx', 'nvcc']:
+                    if ext not in extension.extra_compile_args:
+                        extension.extra_compile_args[ext] = []
+
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
@@ -1389,11 +1402,11 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Pascal', '6.0;6.1+PTX'),
         ('Volta', '7.0+PTX'),
         ('Turing', '7.5+PTX'),
-        ('Ampere', '8.0+PTX'),
+        ('Ampere', '8.0;8.6+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5', '8.0']
+                        '7.0', '7.2', '7.5', '8.0', '8.6']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
@@ -1628,7 +1641,7 @@ def _write_ninja_file_to_build_library(path,
             target = '{}.o'.format(file_name)
         return target
 
-    objects = list(map(object_file_path, sources))
+    objects = [object_file_path(src) for src in sources]
 
     if IS_WINDOWS:
         ldflags = ['/DLL'] + extra_ldflags
