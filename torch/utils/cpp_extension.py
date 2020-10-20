@@ -1641,7 +1641,7 @@ def _write_ninja_file_to_build_library(path,
             target = '{}.o'.format(file_name)
         return target
 
-    objects = list(map(object_file_path, sources))
+    objects = [object_file_path(src) for src in sources]
 
     if IS_WINDOWS:
         ldflags = ['/DLL'] + extra_ldflags
