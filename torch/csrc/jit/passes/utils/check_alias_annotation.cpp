@@ -61,19 +61,11 @@ Stack deepCopy(const Stack& stack) {
 }
 
 bool deepEquals(const IValue& lhs, const IValue& rhs) {
-  if (lhs.isInt() && rhs.isInt()) {
-    return lhs.toInt() == rhs.toInt();
-  } else if (lhs.isDouble() && rhs.isDouble()) {
-    return lhs.toDouble() == rhs.toDouble();
-  } else if (lhs.isNone() && rhs.isNone()) {
-    return true;
-  } else if (lhs.isIntList() && rhs.isIntList()) {
-    return lhs.toIntVector() == rhs.toIntVector();
-  } else if (lhs.isTensor() && rhs.isTensor()) {
+  if (lhs.isTensor() && rhs.isTensor()) {
     return lhs.toTensor().equal(rhs.toTensor());
   }
 
-  throw std::runtime_error("Deep equals not implemented for type");
+  return lhs == rhs;
 }
 
 struct AliasAndIValue {
