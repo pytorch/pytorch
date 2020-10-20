@@ -232,11 +232,11 @@ def addmm(g, self, mat1, mat2, beta, alpha):
 
         if alpha != 1:
             alpha = g.op("Constant",
-                    value_t=torch.tensor(alpha, dtype=dtype))
+                         value_t=torch.tensor(alpha, dtype=dtype))
             res1 = g.op("Mul", res1, alpha)
         if beta != 1:
             beta = g.op("Constant",
-                    value_t=torch.tensor(sym_help._scalar(beta), dtype=dtype))
+                        value_t=torch.tensor(sym_help._scalar(beta), dtype=dtype))
             res2 = g.op("Mul", res2, beta)
 
         return g.op("Add", res1, res2)
