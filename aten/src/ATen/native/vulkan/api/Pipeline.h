@@ -41,8 +41,8 @@ struct Pipeline final {
       VkPipelineStageFlags dst;
     } stage;
 
-    c10::SmallVector<Resource::Buffer::Barrier, 1u> buffers;
-    c10::SmallVector<Resource::Image::Barrier, 1u> images;
+    c10::SmallVector<Resource::Buffer::Barrier, 4u> buffers;
+    c10::SmallVector<Resource::Image::Barrier, 4u> images;
 
     operator bool() const;
   };
