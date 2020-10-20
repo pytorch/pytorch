@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
 
@@ -49,7 +51,7 @@ namespace ops {
 //    data is write accessed as a buffer (image) and read accessed as an
 //    image (buffer).
 //
-// 3) When an if a synchronization is unavoidable, place as much distance
+// 3) When and if a synchronization is unavoidable, place as much distance
 //    between the synchronization is triggered and the data is accessed since
 //    all synchronizations this class provides are async.
 //
@@ -413,7 +415,7 @@ template<typename Type, vTensor::Access::Flags kAccess>
 inline vTensor::Future<Type, kAccess>::~Future() {
 #if VULKAN_SYNC_TENSORS_EAGERLY
   // Sync eagerly in an effort to hide latency.
-  // Upside: Kick off the async transfer to keep the GPU busy.
+  // Upside: Kick off the async transfer early on to keep the GPU busy.
   // Downside: An extra CPU command submission.
   if (tensor_ && (Access::Write & kAccess)) {
     if (tensor_->has_image()) {
@@ -567,3 +569,5 @@ inline Tensor convert(const vTensor& tensor) {
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN_API */
