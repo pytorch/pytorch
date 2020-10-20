@@ -117,6 +117,13 @@ std::ostream& operator<<(std::ostream& str, DispatchKey rhs) {
   return str << toString(rhs);
 }
 
+// for a given backend key, return the associated autograd key.
+// for non-backend keys, return AutogradOther as a default.
+// Note: it's convenient and fast to return a default here rather than (say)
+// returning an optional<DispatchKey>, or throwing. But it makes callers
+// responsible for either a) enforcing the invariant that only backend keys
+// be passed as arguments, or b) interpreting our return value carefully.
+//
 DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
   switch (t) {
     case DispatchKey::CPU:

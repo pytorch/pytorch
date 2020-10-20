@@ -7,7 +7,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
-
+namespace cuda {
 namespace ir_utils {
 
 template <typename FilterType, typename Iterator>
@@ -110,6 +110,7 @@ auto filterByType(const ContainerType& inputs) {
 }
 
 } // namespace ir_utils
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

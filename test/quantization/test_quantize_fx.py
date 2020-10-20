@@ -310,7 +310,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m = convert_fx(m)
         m(dict_input)
 
-    def test_standalone_module_class(self):
+    def test_standalone_module(self):
         class StandaloneModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -350,9 +350,11 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.conv2.weight = torch.nn.Parameter(original_m.standalone.conv.weight.detach())
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.standalone.conv.bias.detach())
 
-        qconfig_dict = {'': default_qconfig, 'standalone_module_name': ['standalone']}
+        qconfig_dict = {"": default_qconfig}
+        prepare_custom_config_dict = {"standalone_module_name": ["standalone"]}
         # check prepared model
-        m = prepare_fx(original_m, qconfig_dict)
+        m = prepare_fx(
+            original_m, qconfig_dict, prepare_custom_config_dict=prepare_custom_config_dict)
         # calibration
         m(data)
         # input and output of first conv, observer for standalone module
@@ -715,11 +717,23 @@ class TestQuantizeFx(QuantizationTestCase):
         # TODO: add other quant types after mixed mode support
         for quant_type in [QuantType.STATIC]:
             qconfig_dict = {
-                '': default_qconfig,
-                'custom_module_class':
-                [(CustomModule, ObservedCustomModule, QuantizedCustomModule)]}
+                "": default_qconfig,
+            }
+            prepare_custom_config_dict = {
+                "float_to_observed_custom_module_class": {
+                    CustomModule: ObservedCustomModule
+                }
+            }
+            convert_custom_config_dict = {
+                "observed_to_quantized_custom_module_class": {
+                    ObservedCustomModule: QuantizedCustomModule
+                }
+            }
             # check prepared model
-            m = prepare_fx(original_m, qconfig_dict)
+            m = prepare_fx(
+                original_m,
+                qconfig_dict,
+                prepare_custom_config_dict=prepare_custom_config_dict)
             # calibration
             m(data)
             # all activation observers are inserted in the top level module
@@ -729,7 +743,9 @@ class TestQuantizeFx(QuantizationTestCase):
             self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)
 
             # check converted/quantized model
-            m = convert_fx(m)
+            m = convert_fx(
+                m,
+                convert_custom_config_dict=convert_custom_config_dict)
             count_check = {
                 ns.call_function(torch.quantize_per_tensor) : 1,
                 ns.call_module(nnq.Conv2d) : 1,
@@ -744,6 +760,59 @@ class TestQuantizeFx(QuantizationTestCase):
             ref_m = convert_fx(ref_m)
             ref_res = ref_m(data)
             self.assertEqual(res, ref_res)
+
+    @skipIfNoFBGEMM
+    def test_non_traceable_module(self):
+        class NonTraceable(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                for k in x.keys():
+                    print(x[k])
+                return x
+
+        class NonTraceable2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                # data dependent control flow is not traceable
+                for i in x:
+                    print(i)
+                return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = NonTraceable()
+                self.m2 = NonTraceable2()
+
+            def forward(self, x):
+                x = self.m1(x)
+                x = self.m2(x)
+                return x
+
+        m = M().eval()
+        qconfig_dict = {"": default_qconfig}
+        prepare_custom_config_dict = {
+            "non_traceable_module_name": [
+                "m1"
+            ],
+            "non_traceable_module_class": [
+                NonTraceable2
+            ]
+        }
+        m = prepare_fx(
+            m, qconfig_dict,
+            prepare_custom_config_dict=prepare_custom_config_dict)
+
+        node_occurrence = {
+            ns.call_module(NonTraceable) : 1,
+            ns.call_module(NonTraceable2) : 1,
+        }
+        # make sure these modules are not traced
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
