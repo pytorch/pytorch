@@ -776,9 +776,8 @@ jobs:
           name: Create Test Box
           no_output_timeout: 30m
           command: |
-            az
-            set
-          shell: cmd.exe
+            az --version
+            az account show
       - run:
           name: Show log
           no_output_timeout: 3m
