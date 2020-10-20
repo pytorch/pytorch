@@ -53,7 +53,7 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
 def run_ort(ort_sess, input):
     input_copy = copy.deepcopy(input)
     input, _ = torch.jit._flatten(input_copy)
-    inputs = list(map(to_numpy, input))
+    inputs = [to_numpy(inp) for inp in input]
 
     ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
     ort_outs = ort_sess.run(None, ort_inputs)
@@ -62,7 +62,7 @@ def run_ort(ort_sess, input):
 
 def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
     output, _ = torch.jit._flatten(output)
-    outputs = list(map(to_numpy, output))
+    outputs = [to_numpy(outp) for outp in output]
 
     # compare onnxruntime and PyTorch results
     assert len(outputs) == len(ort_outs), "number of outputs differ"
@@ -713,14 +713,19 @@ class TestONNXRuntime(unittest.TestCase):
                     return torch.squeeze(x)
 
         x2 = [] if x2 is None else [x2]
-        self.run_test(Squeeze(d), x1, input_names=['input'], dynamic_axes={'input': {0: '0', 1: '1', 2: '2'}}, test_with_inputs=x2)
+        if len(x2) > 0:
+            self.run_test(Squeeze(d), x1,
+                          input_names=['input'], dynamic_axes={'input': {0: '0', 1: '1', 2: '2'}},
+                          test_with_inputs=x2)
+        else:
+            self.run_test(Squeeze(d), x1)
 
     def test_squeeze_without_no_op(self):
         x = torch.randn(2, 1, 4)
         self.squeeze_model_tests(1, x, None)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    def test_squeeze(self):
+    def test_squeeze_dynamic(self):
         x_squeeze = torch.randn(2, 1, 4)
         x_noop = torch.randn(2, 2, 3)
         self.squeeze_model_tests(1, x_squeeze, x_noop)
@@ -745,10 +750,6 @@ class TestONNXRuntime(unittest.TestCase):
         x_noop = torch.randn(2, 1, 4)
         x_squeeze = torch.randn(2, 2, 1)
         self.squeeze_model_tests(2, x_noop, x_squeeze)
-
-    def test_squeeze_no_op_without_additional_inputs(self):
-        x_noop = torch.randn(2, 1, 4)
-        self.squeeze_model_tests(2, x_noop, None)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_squeeze_runtime_dim(self):
@@ -4565,6 +4566,41 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerTensorModel(), (x))
+
+    def test_batchnorm_training(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.bn = torch.nn.BatchNorm2d(3, affine=True)
+
+            def forward(self, x):
+                bn = self.bn(x)
+                return bn
+
+        model = MyModule()
+        x = torch.randn(10, 3, 128, 128)
+
+        model.train()
+        out = model(x)
+
+        # state after 1 train epoch
+        running_mean = model.bn.running_mean
+        running_var = model.bn.running_var
+        saved_mean = x.mean((0, 2, 3))
+        saved_var = x.var((0, 2, 3))
+
+        pytorch_out = [out.detach().numpy(),
+                       running_mean.cpu().numpy(), running_var.cpu().numpy(),
+                       saved_mean.cpu().numpy(), saved_var.cpu().numpy()]
+
+        model_export = MyModule()
+        f = io.BytesIO()
+
+        ort_sess = convert_to_onnx(model_export, input=(x,), opset_version=self.opset_version,
+                                   training=torch.onnx.TrainingMode.TRAINING)
+        ort_outs = run_ort(ort_sess, input=(x,))
+
+        [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in zip(pytorch_out, ort_outs)]
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_dropout_training(self):

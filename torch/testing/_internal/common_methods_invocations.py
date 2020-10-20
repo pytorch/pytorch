@@ -395,7 +395,7 @@ op_db = [
                    dtypesIfCUDA=None),
     UnaryUfuncInfo('nan_to_num',
                    ref=np.nan_to_num,
-                   dtypes=all_types_and(torch.half),
+                   dtypes=all_types_and(torch.half, torch.bool),
                    dtypesIfCPU=None,
                    dtypesIfCUDA=None)
 ]
