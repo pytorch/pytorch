@@ -26,9 +26,9 @@ class Context final {
  public:
   explicit Context(const Adapter& adapter);
   Context(const Context&) = delete;
-  Context(Context&&) = delete;
+  Context(Context&&) = default;
   Context& operator=(const Context&) = delete;
-  Context& operator=(Context&&) = delete;
+  Context& operator=(Context&&) = default;
   ~Context();
 
   GPU gpu();
