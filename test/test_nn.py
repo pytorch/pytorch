@@ -4142,6 +4142,19 @@ class TestNN(NNTestCase):
             output = deconv(inputs)
             output.mean().backward()
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @repeat_test_for_types([torch.half, torch.float])
+    def test_ConvTranspose2d_large_output_padding(self, dtype=torch.half):
+        net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1).to(device='cuda', dtype=dtype)
+        net2 = torch.nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1).to(device='cuda', dtype=dtype)
+        net3 = torch.nn.ConvTranspose2d(32, 3, kernel_size=3, stride=2, padding=1, output_padding=1).to(device='cuda', dtype=dtype)
+        x = torch.rand(1, 128, 6, 6, device='cuda', dtype=dtype, requires_grad=True)
+        x = net1(x)
+        x = net2(x)
+        x = net3(x)
+        x.backward(torch.randn_like(x))
+        torch.cuda.synchronize()
+
     # For https://github.com/pytorch/pytorch/pull/1273
     # Almost identical to the above `test_Conv2d_naive_groups`
     def test_Conv2d_groups_nobias(self):
