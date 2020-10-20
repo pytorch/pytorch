@@ -1525,7 +1525,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
       }
       C10D_NCCL_CHECK(ncclGroupEnd());
       return ncclSuccess;
-    });
+    },
+    OpType::ALLTOALL);
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
