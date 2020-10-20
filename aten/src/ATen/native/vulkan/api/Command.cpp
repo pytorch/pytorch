@@ -248,7 +248,7 @@ void Command::Buffer::dispatch(
       "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
-  const auto div_round_up = [](const uint32_t n, const uint32_t d) {
+  static const auto div_round_up = [](const uint32_t n, const uint32_t d) {
     return (n + d - 1u) / d;
   };
 
