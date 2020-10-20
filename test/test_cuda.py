@@ -3221,43 +3221,56 @@ class TestCudaComm(TestCase):
             self.assertEqual(expected_a, x.a)
             self.assertEqual(expected_b, x.b)
 
-    def test_state_on_device_dropout(self):
-        a = torch.randn((10000,), device="cuda", dtype=torch.float)
+    def test_state_on_device_rng_functional(self):
+        size = 10
+        a = torch.randn((size,), device="cuda", dtype=torch.float)
 
-        def run(input):
-            out = torch.nn.functional.dropout(input, p=0.1)
-            return torch.nn.functional.dropout(input, p=0.1)
+        ops_with_kwargs = (("dropout", {"p": 0.1}),
+                           ("rrelu", {"training": True}),)
 
-        torch.cuda.manual_seed(5)
+        def run(op, kwargs):
+            def op_twice(input):
+                out = getattr(torch.nn.functional, op)(input, **kwargs)
+                return getattr(torch.nn.functional, op)(out, **kwargs)
 
-        # Control
-        out_hoststate = run(run(a))
+            torch.cuda.manual_seed(5)
 
-        torch.backends.cuda._stateful_ops.state_on_device = True
-        # Seeds DevState generator
-        gen_devstate = torch._C._cuda_getCurrentGeneratorTestingOnly()
-        gen_devstate.manual_seed(5)
+            # Control
+            out_hoststate = op_twice(op_twice(a))
 
-        stream = torch.cuda.Stream()
-        stream.wait_stream(torch.cuda.current_stream())
+            torch.backends.cuda._stateful_ops.state_on_device = True
+            # Seeds DevState generator
+            gen_devstate = torch._C._cuda_getCurrentGeneratorTestingOnly()
+            gen_devstate.manual_seed(5)
 
-        # Pushes a long kernel to main stream so if side stream's update
-        # transactions race with main stream updates for some reason,
-        # main stream probably picks up the error
-        torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
 
-        # Creates output on main stream, weaves in dropout on side stream
-        # to make sure side stream offset updates don't interfere with main stream
-        out_devstate = run(a)
-        with torch.cuda.stream(stream):
-            out_devstate_sidestream = run(a)
-        out_devstate = run(out_devstate)
-        with torch.cuda.stream(stream):
-            out_devstate_sidestream = run(out_devstate_sidestream)
-        torch.backends.cuda._stateful_ops.state_on_device = False
+            # Pushes a long kernel to main stream so if side stream's update
+            # transactions race with main stream updates for some reason,
+            # main stream probably picks up the error
+            torch.cuda._sleep(int(50 * get_cycles_per_ms()))
 
-        self.assertEqual(out_hoststate, out_devstate)
-        self.assertNotEqual(out_devstate, out_devstate_sidestream)
+            # Creates output on main stream, weaves in dropout on side stream
+            # to make sure side stream offset updates don't interfere with main stream
+            out_devstate = op_twice(a)
+            with torch.cuda.stream(stream):
+                out_devstate_sidestream = op_twice(a)
+            out_devstate = op_twice(out_devstate)
+            with torch.cuda.stream(stream):
+                out_devstate_sidestream = op_twice(out_devstate_sidestream)
+            torch.backends.cuda._stateful_ops.state_on_device = False
+
+            try:
+                self.assertEqual(out_hoststate, out_devstate)
+                self.assertNotEqual(out_devstate, out_devstate_sidestream)
+            except Exception as e:
+                # A "msg=..." kwarg to assertEqual replaces its usual detailed "Tensors failed to compare..." message.
+                # The following adds my message without replacing the usual detailed message from assertEqual.
+                raise RuntimeError("Failed on torch.nn.functional." + op) from e
+
+        for op, kwargs in ops_with_kwargs:
+            run(op, kwargs)
 
     def test_state_on_device_distributions(self):
         size = 10000
@@ -3272,8 +3285,7 @@ class TestCudaComm(TestCase):
                            ("poisson", (input.clone(),), {}),
                            ("rand", (size,), {"device": "cuda", "dtype": torch.float}),
                            ("randint", (0, 3, (size,)), {"device": "cuda", "dtype": torch.float}),
-                           ("randn", (size,), {"device": "cuda", "dtype": torch.float}),
-                           )
+                           ("randn", (size,), {"device": "cuda", "dtype": torch.float}),)
 
         # Tensor methods to test with sample args (tuple) and kwargs (dict)
         tensor_with_args = (("bernoulli_", (input.clone(),), {}),
@@ -3283,8 +3295,7 @@ class TestCudaComm(TestCase):
                             ("log_normal_", (), {}),
                             ("normal_", (), {}),
                             ("random_", (), {}),
-                            ("uniform_", (), {}),
-                            )
+                            ("uniform_", (), {}),)
 
         def run(module, op, args, kwargs):
             gen_host_state = torch.Generator(device="cuda")
