@@ -166,7 +166,7 @@ _pg_group_ranks = {}
 _default_pg = None
 _default_pg_init_method = None
 
-# Process group count for default naming
+# Process group counter for default naming
 _group_count = 0
 
 
