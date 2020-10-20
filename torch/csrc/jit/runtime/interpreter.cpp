@@ -433,7 +433,9 @@ Ttarget safe_narrow_cast(Tsource v) {
   Ttarget res = static_cast<Ttarget>(v);
   // Casting it back to check whether it overflew.
   if (static_cast<Tsource>(res) != v) {
-    throw std::runtime_error("safe_narrow_cast<>() failed due to overflow");
+    TORCH_WARN(
+        "ATTENTION: your model computation is overflowing, safe_narrow_cast<>() failed");
+    return v;
   }
   return res;
 }
@@ -548,7 +550,7 @@ struct CodeImpl {
     instructions_.emplace_back(
         op,
         safe_narrow_cast<int32_t, int64_t>(X),
-        safe_narrow_cast<int16_t, int64_t>(N));
+        safe_narrow_cast<uint16_t, uint64_t>(N));
     instructions_source_.emplace_back(current_node_);
 
     // check that we didn't accidentally emit nodes out of topological order
