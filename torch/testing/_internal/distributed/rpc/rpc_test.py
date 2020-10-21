@@ -313,7 +313,7 @@ def my_script_func(tensor):
     return torch.add(tensor, tensor)
 
 
-expected_err =  "Expected error"
+expected_err = "Expected error"
 def raise_func():
     raise ValueError(expected_err)
 
@@ -853,6 +853,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_add(self):
+        print("Running test add")
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync(
@@ -998,7 +999,8 @@ class RpcTest(RpcAgentTestFixture):
             ):
                 rpc.api._all_gather(SlowPickleClass(0.5))
         else:
-            with self.assertRaisesRegex(RuntimeError, "timeout.*100 ms"):
+            expected_error = self.get_timeout_error_regex()
+            with self.assertRaisesRegex(RuntimeError, expected_error):
                 rpc.api._all_gather(SlowPickleClass(0.5))
 
     @dist_init
@@ -1961,9 +1963,15 @@ class RpcTest(RpcAgentTestFixture):
             fut = rpc.rpc_async(worker_name(dst_rank), raise_func)
             with self.assertRaisesRegex(ValueError, expected_err):
                 fut.wait()
-            lines = err.getvalue()
 
-        self.assertTrue(expected_err in lines)
+        stderr_lines = err.getvalue()
+        # This passes for all agents
+        if self.rank in [0, 1]:
+            self.assertTrue(expected_err in stderr_lines)
+        # The following should actually be true for all ranks. But on TP agent,
+        # it fails for ranks 2 and 3, but succeeds for ranks 0 and 1.
+        if self.rank in [2, 3]:
+            self.assertTrue(expected_err in stderr_lines)
 
     @dist_init
     def test_nested_rpc(self):

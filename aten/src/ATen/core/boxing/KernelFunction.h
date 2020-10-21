@@ -205,7 +205,9 @@ public:
    * >      [] (Tensor a, bool b) -> Tensor {...});
    */
   template<bool AllowLegacyTypes = false, class Lambda>
-  static KernelFunction makeFromUnboxedLambda(Lambda&& lambda);
+  static std::enable_if_t<guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda(Lambda&& lambda);
+  template<bool AllowLegacyTypes = false, class Lambda>
+  static std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda(Lambda&& lambda);
 
   std::string dumpState() const;
   // For testing internal invariants only
