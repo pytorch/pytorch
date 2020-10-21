@@ -254,6 +254,8 @@ Indexing
 
 Tensor indexing in PyTorch is very flexible and complicated.
 There are two categories of indexing. Both are largely supported in exporting today.
+If you are experiencing issues exporting indexing that belongs to the supported patterns below,
+please double check that you are exporting with the latest opset (opset_version=12).
 
 Getter
 ~~~~~~
@@ -296,7 +298,11 @@ Below is the list of supported patterns for RHS indexing. ::
   data[torch.tensor([[1, 2], [2, 3]]), torch.tensor([2, 3])]
   data[torch.tensor([2, 3]), :, torch.tensor([1, 2])]
 
-  # Ellipsis (not supported in scripting)
+  # Ellipsis
+  # Not supported in scripting
+  # i.e. torch.jit.script(model) will fail if model contains this pattern.
+  # Export is supported under tracing
+  # i.e. torch.onnx.export(model)
   data[...]
 
   # The combination of above
@@ -354,7 +360,11 @@ Below is the list of supported patterns for LHS indexing. ::
   data[torch.tensor([[1, 2], [2, 3]])] = new_data
   data[torch.tensor([2, 3]), torch.tensor([1, 2])] = new_data
 
-  # Ellipsis (not supported to export in script modules)
+  # Ellipsis
+  # Not supported to export in script modules
+  # i.e. torch.onnx.export(torch.jit.script(model)) will fail if model contains this pattern.
+  # Export is supported under tracing
+  # i.e. torch.onnx.export(model)
   data[...] = new_data
 
   # The combination of above
