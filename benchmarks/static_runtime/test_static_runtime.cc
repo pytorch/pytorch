@@ -28,7 +28,7 @@ TEST(StaticRuntime, DeepWide) {
   torch::jit::StaticRuntime runtime(g);
 
   for (int batch_size : {1, 8, 32}) {
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 2; ++i) {
       auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
       auto user_emb = torch::randn({batch_size, 1, embedding_size});
       auto wide = torch::randn({batch_size, num_features});
@@ -52,7 +52,7 @@ TEST(StaticRuntime, KWargsAPI_1) {
   torch::jit::StaticRuntime runtime(module);
 
   for (int batch_size : {1, 8, 32}) {
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 2; ++i) {
       auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
       auto user_emb = torch::randn({batch_size, 1, embedding_size});
       auto wide = torch::randn({batch_size, num_features});
@@ -76,7 +76,7 @@ TEST(StaticRuntime, KWargsAPI_2) {
   torch::jit::StaticRuntime runtime(module);
 
   for (int batch_size : {1, 8, 32}) {
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 2; ++i) {
       auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
       auto user_emb = torch::randn({batch_size, 1, embedding_size});
       auto wide = torch::randn({batch_size, num_features});
