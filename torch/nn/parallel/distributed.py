@@ -492,7 +492,9 @@ class DistributedDataParallel(Module):
             for m in self._module_copies
         ]
 
-        # add buffers from SyncBN to parameters_to_ignore
+        # Add buffers from SyncBN to parameters_to_ignore. These buffers can
+        # be ignored in _sync_params() as the SyncBN layers have already
+        # synchronized them.
         for m in self._module_copies:
             for m_name, m_layer in m.named_modules():
                 if isinstance(m_layer, torch.nn.SyncBatchNorm):

@@ -2695,6 +2695,7 @@ class DistributedTest:
             def buffer_size(buffers):
                 return sum([b.numel() for b in buffers])
 
+            # calculate total buffer size from all SyncBN layers
             syncbn_buffer_size = 0
             for m_name, m_layer in BN_NET.named_modules():
                 if isinstance(m_layer, nn.SyncBatchNorm):
@@ -2711,9 +2712,12 @@ class DistributedTest:
                 model_DDP, device_ids=gpu_subset
             )
 
+            # verify that DDP has excluded buffers from SyncBN layers
+            ddp_buffer_size = buffer_size(model_DDP.modules_buffers)
+            self.assertTrue(ddp_buffer_size % len(gpu_subset) == 0)
             self.assertEqual(
                 syncbn_buffer_size,
-                buffer_size(model.buffers()) - buffer_size(model_DDP.modules_buffers)
+                buffer_size(model.buffers()) - ddp_buffer_size / len(gpu_subset)
             )
 
             # test serializable/unserializable
