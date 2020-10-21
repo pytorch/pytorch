@@ -15497,6 +15497,14 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(RuntimeError, error_regex):
                 torch.orgqr(a, tau)
 
+    @onlyCPU
+    @skipCPUIfNoLapack
+    def test_orgqr_leading_dim(self, device):
+        input1 = torch.randn(2, 2, dtype=torch.double, device=device)
+        input2 = torch.randn(2, 0, dtype=torch.double, device=device)
+
+        torch.orgqr(input1, input2)
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double, torch.cfloat, torch.cdouble)

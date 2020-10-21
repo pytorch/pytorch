@@ -1047,6 +1047,7 @@ Tensor _th_orgqr(const Tensor & self, const Tensor & input2) {
         case ScalarType::Double: {
             auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_orgqr", false, DeviceType::CPU, dispatch_scalar_type);
             auto input2_ = checked_dense_tensor_unwrap(input2, "input2", 2, "_th_orgqr", false, DeviceType::CPU, dispatch_scalar_type);
+            std::cout << ">?>>>>>>> _th_orgqr\n";
             THDoubleTensor_orgqr(result_, self_, input2_);
             break;
         }
