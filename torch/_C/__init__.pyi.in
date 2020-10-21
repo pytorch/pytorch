@@ -295,6 +295,7 @@ class Node:
 # Defined in torch/csrc/jit/python/init.cpp
 class Argument:
     name: str
+    type: JitType
     default_value: Optional[Any]
     def has_default_value(self) -> _bool: ...
     ...
