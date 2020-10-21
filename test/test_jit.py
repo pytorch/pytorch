@@ -30,9 +30,11 @@ from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_onnx_export import TestONNXExport  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
 from jit.test_enum import TestEnum  # noqa: F401
+from jit.test_string_formatting import TestStringFormatting  # noqa: F401
 from jit.test_profiler import TestProfiler  # noqa: F401
 from jit.test_slice import TestSlice  # noqa: F401
 from jit.test_warn import TestWarn  # noqa: F401
+from jit.test_isinstance import TestIsinstance  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -8030,7 +8032,7 @@ dedent """
                 return len(node.findAllNodes("prim::If")) * 2 + len(node.findAllNodes("prim::Loop"))
             for node in ifs + loops:
                 outs = list(node.outputs())
-                out_name = list(map(lambda x: x.debugName(), outs))
+                out_name = [x.debugName() for x in outs]
                 if len(out_name) == 0:
                     continue
                 fc = FileCheck()
