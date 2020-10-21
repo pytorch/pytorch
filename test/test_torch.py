@@ -19260,6 +19260,57 @@ else:
                 with self.assertRaisesRegex(RuntimeError, e_msg):
                     op(x, dim=dim)
 
+    # Note: This test failed on XLA since its test cases are created by empty_strided which
+    #       doesn't support overlapping sizes/strides in XLA impl
+    @onlyOnCPUAndCUDA
+    def test_like_fn_stride_proparation_vs_tensoriterator_unary_op(self, device):
+        # Test like functions against tensoriterator based unary operator (exp) to
+        # make sure the returned tensor from like function follows the same stride propergation
+        # rule as what tensoriterator does for unary operator. The like function's  output strides
+        # is computed on CPU side always, no need to test GPU here.
+
+        def compare_helper_(like_fn, t):
+            te = torch.exp(t)
+            tl = like_fn(t)
+            self.assertEqual(te.stride(), tl.stride())
+            self.assertEqual(te.size(), tl.size())
+
+        like_fns = [
+            lambda t, **kwargs: torch.zeros_like(t, **kwargs),
+            lambda t, **kwargs: torch.ones_like(t, **kwargs),
+            lambda t, **kwargs: torch.randint_like(t, 10, 100, **kwargs),
+            lambda t, **kwargs: torch.randint_like(t, 100, **kwargs),
+            lambda t, **kwargs: torch.randn_like(t, **kwargs),
+            lambda t, **kwargs: torch.rand_like(t, **kwargs),
+            lambda t, **kwargs: torch.full_like(t, 7, **kwargs),
+            lambda t, **kwargs: torch.empty_like(t, **kwargs)]
+
+        # dense non-overlapping tensor,
+        # non-dense non-overlapping sliced tensor
+        # non-dense non-overlapping gapped tensor
+        # non-dense non-overlapping 0 strided tensor
+        # non-dense overlapping general tensor
+        # non-dense overlapping sliced tensor
+        # non-dense overlapping gapped tensor
+        # non-dense overlapping 0 strided tensor
+        # non-dense overlapping equal strides
+        tset = (
+            torch.randn(4, 3, 2, device=device),
+            torch.randn(4, 3, 2, device=device)[:, :, ::2],
+            torch.empty_strided((4, 3, 2), (10, 3, 1), device=device).fill_(1.0),
+            torch.empty_strided((4, 3, 2), (10, 0, 3), device=device).fill_(1.0),
+            torch.empty_strided((4, 3, 2), (10, 1, 2), device=device).fill_(1.0),
+            torch.empty_strided((4, 3, 2), (4, 2, 1), device=device)[:, :, ::2].fill_(1.0),
+            torch.empty_strided((4, 3, 2), (10, 1, 1), device=device).fill_(1.0),
+            torch.empty_strided((4, 1, 1, 2), (10, 0, 0, 2), device=device).fill_(1.0),
+            torch.empty_strided((4, 2, 3), (10, 3, 3), device=device).fill_(1.0))
+
+        for like_fn in like_fns:
+            for t in tset:
+                for p in permutations(range(t.dim())):
+                    tp = t.permute(p)
+                    compare_helper_(like_fn, tp)
+
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
     exact_dtype = True
@@ -19697,6 +19748,17 @@ class TestViewOps(TestCase):
         else:
             self.assertRaises(RuntimeError, lambda: self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([2]))
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_view_tensor_split(self, device, dtype):
+        a = make_tensor((40, 30), device, dtype, low=-9, high=9)
+        a_split_dim0 = a.tensor_split(7, 0)
+        for a_split_dim0_tensor in a_split_dim0:
+            self.assertTrue(self.is_view_of(a, a_split_dim0_tensor))
+        a_split_dim1 = a.tensor_split(7, 1)
+        for a_split_dim1_tensor in a_split_dim1:
+            self.assertTrue(self.is_view_of(a, a_split_dim1_tensor))
 
     @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
