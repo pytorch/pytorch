@@ -6504,12 +6504,12 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    DefaultBackend: igamma
+    CPU, CUDA: igamma
 
 - func: igamma_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: igamma_
+    CPU, CUDA: igamma_
 
 - func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
