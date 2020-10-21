@@ -16,13 +16,13 @@ if [[ "${BUILD_ENVIRONMENT}" == *cuda9.2* ]]; then
   export CUDA_HOME=/Developer/NVIDIA/CUDA-${CUDA_VERSION}
   export USE_CUDA=1
 
-  if [ -z "${IN_CIRCLECI}" ]; then
+  if [ -z "${IN_CI}" ]; then
     # Eigen gives "explicit specialization of class must precede its first use" error
     # when compiling with Xcode 9.1 toolchain, so we have to use Xcode 8.2 toolchain instead.
     export DEVELOPER_DIR=/Library/Developer/CommandLineTools
   fi
 else
-  if [ -z "${IN_CIRCLECI}" ]; then
+  if [ -z "${IN_CI}" ]; then
     export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
   fi
 fi
@@ -49,7 +49,7 @@ MAX_JOBS=2 USE_DISTRIBUTED=1 python setup.py install
 assert_git_not_dirty
 
 # Upload torch binaries when the build job is finished
-if [ -z "${IN_CIRCLECI}" ]; then
+if [ -z "${IN_CI}" ]; then
   7z a ${IMAGE_COMMIT_TAG}.7z ${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages/torch*
   aws s3 cp ${IMAGE_COMMIT_TAG}.7z s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z --acl public-read
 fi
