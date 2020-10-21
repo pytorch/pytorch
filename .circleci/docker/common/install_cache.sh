@@ -2,6 +2,28 @@
 
 set -ex
 
+install_ubuntu() {
+  echo "Preparing to build sccache from source"
+  apt-get update
+  apt-get install cargo pkg-config libssl-dev
+  echo "Checking out sccache repo"
+  git clone https://github.com/pytorch/sccache
+  cd sccache
+  echo "Building sccache"
+  cargo build --release
+  cp target/release/sccache /opt/cache/bin
+  echo "Cleaning up"
+  cd ..
+  rm -rf sccache
+  apt-get remove cargo
+  apt-get autoclean && apt-get clean
+}
+
+install_binary() {
+  echo "Downloading sccache binary from S3 repo"
+  curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache
+}
+
 mkdir -p /opt/cache/bin
 mkdir -p /opt/cache/lib
 sed -e 's|PATH="\(.*\)"|PATH="/opt/cache/bin:\1"|g' -i /etc/environment
@@ -11,7 +33,17 @@ export PATH="/opt/cache/bin:$PATH"
 if [ -n "$ROCM_VERSION" ]; then
   curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
 else
-  curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache
+  ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
+  case "$ID" in
+    ubuntu)
+      install_ubuntu
+      ;;
+    *)
+      install_binary
+      ;;
+  esac
+  install_binary
+  apt-get install cargo pkg-config libssl-dev
 fi
 chmod a+x /opt/cache/bin/sccache
 
