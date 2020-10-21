@@ -196,34 +196,6 @@ void magmaLu<float>(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template <>
-void magmaLu<c10::complex<double>>(
-    magma_int_t m,
-    magma_int_t n,
-    c10::complex<double>* dA,
-    magma_int_t ldda,
-    magma_int_t* ipiv,
-    magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_zgetrf_gpu(
-      m, n, reinterpret_cast<magmaDoubleComplex*>(dA), ldda, ipiv, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template <>
-void magmaLu<c10::complex<float>>(
-    magma_int_t m,
-    magma_int_t n,
-    c10::complex<float>* dA,
-    magma_int_t ldda,
-    magma_int_t* ipiv,
-    magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_cgetrf_gpu(
-      m, n, reinterpret_cast<magmaFloatComplex*>(dA), ldda, ipiv, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
 template<>
 void magmaLu<c10::complex<double>>(
     magma_int_t m, magma_int_t n, c10::complex<double>* dA, magma_int_t ldda,
@@ -257,50 +229,6 @@ void magmaLuBatched<float>(
     magma_int_t** ipiv_array, magma_int_t* info_array, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
   magma_sgetrf_batched(m, n, dA_array, ldda, ipiv_array, info_array, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template <>
-void magmaLuBatched<c10::complex<double>>(
-    magma_int_t m,
-    magma_int_t n,
-    c10::complex<double>** dA_array,
-    magma_int_t ldda,
-    magma_int_t** ipiv_array,
-    magma_int_t* info_array,
-    magma_int_t batchsize,
-    const MAGMAQueue& magma_queue) {
-  magma_zgetrf_batched(
-      m,
-      n,
-      reinterpret_cast<magmaDoubleComplex**>(dA_array),
-      ldda,
-      ipiv_array,
-      info_array,
-      batchsize,
-      magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template <>
-void magmaLuBatched<c10::complex<float>>(
-    magma_int_t m,
-    magma_int_t n,
-    c10::complex<float>** dA_array,
-    magma_int_t ldda,
-    magma_int_t** ipiv_array,
-    magma_int_t* info_array,
-    magma_int_t batchsize,
-    const MAGMAQueue& magma_queue) {
-  magma_cgetrf_batched(
-      m,
-      n,
-      reinterpret_cast<magmaFloatComplex**>(dA_array),
-      ldda,
-      ipiv_array,
-      info_array,
-      batchsize,
-      magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
