@@ -1196,6 +1196,14 @@ struct to_ir {
               return emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
             }
           }
+          auto sv = emitSugaredExpr(apply.callee(), 1);
+          auto loc = apply.callee().range();
+          if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
+            if (special_form->form() == prim::isinstance) {
+              checkApplyNumInputs(apply, 2);
+              return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+            }
+          }
         }
         auto expr_out = emitToBool(expr.range(), emitExpr(expr));
         c10::optional<bool> static_if = c10::nullopt;
