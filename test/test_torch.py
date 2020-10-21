@@ -8092,9 +8092,9 @@ class TestTorchDeviceType(TestCase):
             self.compare_with_numpy(torch_fn, np_fn, data)
 
     @onlyOnCPUAndCUDA
-    @precisionOverride({torch.bfloat16: 5e-2})
+    @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.long)
+    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
     @dtypesIfCPU(torch.float, torch.double, torch.long)
     def test_signal_window_functions(self, device, dtype):
 
