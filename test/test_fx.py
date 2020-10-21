@@ -850,7 +850,6 @@ class TestFX(JitTestCase):
             orig_users_equiv = set(val_map[u] for u in orig_users)
             new_users = set(new_node.users.keys())
             self.assertEqual(orig_users_equiv, new_users)
-            val_map[orig_node] = new_node
 
     @skipIfNoTorchVision
     def test_replace_uses(self):
