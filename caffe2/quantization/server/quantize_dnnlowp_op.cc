@@ -1,10 +1,6 @@
 #include "quantize_dnnlowp_op.h"
 #include "dnnlowp_op.h"
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
-
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/quantization/server/int8_gen_quant_params.h"
 #include "caffe2_dnnlowp_utils.h"
@@ -67,16 +63,7 @@ bool QuantizeDNNLowPOp<T>::RunOnDevice() {
   const float* in_data = Input(0).template data<float>();
   T* out_data = output->t.template mutable_data<T>();
 
-#ifdef _OPENMP
-#pragma omp parallel
-#endif
-  {
-    int i_begin, i_end;
-    tie(i_begin, i_end) = Get1DPartition(
-        Input(0).numel(), dnnlowp_get_num_threads(), dnnlowp_get_thread_num());
-    fbgemm::Quantize<T>(
-        in_data + i_begin, out_data + i_begin, i_end - i_begin, in_qparams);
-  }
+  fbgemm::Quantize<T>(in_data, out_data, Input(0).numel(), in_qparams);
 
   PropagateOutputTensorQuantizationParams(this, 0, in_qparams);
 
