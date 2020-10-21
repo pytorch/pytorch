@@ -425,7 +425,7 @@ PyObject *THPVariable_get_names(PyObject *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_names(PyObject *self, PyObject *names) {
+int THPVariable_set_names(PyObject *self, PyObject *names, void *unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
     return handle_torch_function_setter((THPVariable*)self, "names", names);
