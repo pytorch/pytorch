@@ -77,8 +77,9 @@ pool2d_shape_check(
       "4D (batch mode) tensor expected for input with channels_last layout");
   } else {
     TORCH_CHECK((input.ndimension() == 3 && valid_dims) ||
-                (input.ndimension() == 4 && valid_dims && input.size(3) != 0),
-      "3D or 4D (batch mode) tensor expected for input");
+      (input.ndimension() == 4 && valid_dims && input.size(3) != 0),
+      "Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got:",
+      input.sizes());
   }
   
   TORCH_CHECK(kW/2 >= padW && kH/2 >= padH,
