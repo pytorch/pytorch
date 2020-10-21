@@ -72,7 +72,7 @@ def fuse_conv_bn_relu(conv, bn, relu):
         else:
             raise NotImplementedError("Cannot fuse eval modules: {}".format((conv, bn, relu)))
 
-OP_LIST_TO_FUSER_METHOD : Dict[Tuple, Union[nn.Sequential, Callable]] = {
+DEFAULT_OP_LIST_TO_FUSER_METHOD : Dict[Tuple, Union[nn.Sequential, Callable]] = {
     (nn.Conv1d, nn.BatchNorm1d): fuse_conv_bn,
     (nn.Conv1d, nn.BatchNorm1d, nn.ReLU): fuse_conv_bn_relu,
     (nn.Conv2d, nn.BatchNorm2d): fuse_conv_bn,
@@ -87,15 +87,9 @@ OP_LIST_TO_FUSER_METHOD : Dict[Tuple, Union[nn.Sequential, Callable]] = {
     (nn.BatchNorm3d, nn.ReLU): nni.BNReLU3d,
 }
 
-def register_fuser_method(op_list, fuser_method):
-    ''' Register a fuser method for a tuple of ops, will be called
-    during fusion step
-    '''
-    assert isinstance(op_list, tuple), 'op list must be a tuple'
-    OP_LIST_TO_FUSER_METHOD[op_list] = fuser_method
-
+# TODO: remove
 def get_fuser_method(op_list):
     ''' Get fuser method for the given list of module types,
     return None if fuser method does not exist
     '''
-    return OP_LIST_TO_FUSER_METHOD.get(op_list, None)
+    return DEFAULT_OP_LIST_TO_FUSER_METHOD.get(op_list, None)

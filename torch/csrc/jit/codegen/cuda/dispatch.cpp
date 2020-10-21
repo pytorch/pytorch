@@ -7,6 +7,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 template <typename T>
 T* ptr(T& obj) {
@@ -545,6 +546,7 @@ Statement* OptOutMutator::mutate(Val* v) {
   return Val::mutatorDispatch(this, v);
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch
