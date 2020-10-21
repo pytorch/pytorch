@@ -222,11 +222,11 @@ else
     # ppc64le build fails when WERROR=1
     # set only when building other architectures
     # only use for "python setup.py install" line
-    if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
-      WERROR=1 python setup.py bdist_wheel
+    if [[ "$BUILD_ENVIRONMENT" == *profile* ]]; then
+      CC=/usr/bin/gcc WERROR=1 python setup.py bdist_wheel
       python -mpip install dist/*.whl
-    elif [[ "$BUILD_ENVIRONMENT" == *profile* ]]; then
-      CC=/usr/bin/gcc python setup.py bdist_wheel
+    elif [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+      WERROR=1 python setup.py bdist_wheel
       python -mpip install dist/*.whl
     else
       python setup.py bdist_wheel
