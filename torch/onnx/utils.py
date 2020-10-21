@@ -403,6 +403,9 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(args, torch.Tensor):
         args = (args, )
 
+    if isinstance(example_outputs, torch.Tensor):
+        example_outputs = (example_outputs,)
+
     graph, params, torch_out = _create_jit_graph(model, args,
                                                  _retain_param_name,
                                                  use_new_jit_passes)
@@ -421,17 +424,22 @@ def _model_to_graph(model, args, verbose=False,
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule or " \
                                             "ScriptFunction."
 
-        if (isinstance(example_outputs, list)):
-            example_outputs = [example_outputs]
+        if isinstance(example_outputs, list):
+             example_outputs = [example_outputs]
 
-        out_vars, out_desc = torch.jit._flatten(tuple(example_outputs))
-        torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, out_desc, _onnx_shape_inference)
+        out_vars, desc = torch.jit._flatten(tuple(example_outputs))
+        torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, desc, _onnx_shape_inference)
 
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
     if torch_out is not None:
         output_tensors, out_desc = torch._C._jit_flatten(torch_out)
         torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
+
+        if isinstance(torch_out, list):
+            torch_out = tuple(torch_out)
+        elif not isinstance(torch_out, tuple):
+            torch_out = tuple([torch_out])
 
     _set_input_and_output_names(graph, input_names, output_names)
 
