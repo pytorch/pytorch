@@ -34,6 +34,7 @@ namespace c10 {
   _(prim, Expand) /* onnx */         \
   _(prim, FusionGroup)               \
   _(prim, CudaFusionGroup)           \
+  _(prim, CudaFusionGuard)           \
   _(prim, FunctionalGraph)           \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
@@ -185,6 +186,7 @@ namespace c10 {
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
+  _(aten, percentFormat)             \
   _(aten, __not__)                   \
   _(aten, __is__)                    \
   _(aten, __isnot__)                 \
