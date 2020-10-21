@@ -1605,11 +1605,12 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, opt
 Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   /*
   The idea is to reduce the problem to 2D square matrix inversion.
-  Step 1. calculate the shape of the result and the shape of the intermediate 2D matrix.
-  Step 2. reshape `self` to 2D matrix.
-  Step 3. invert the 2D matrix self.to_2D()
-          there is no quick way to find out whether the matrix is invertible,
-          so at this stage an error from at::inverse can be thrown
+  Step 1. Calculate the shape of the result and the shape of the intermediate 2D matrix.
+  Step 2. Reshape `self` to 2D matrix.
+  Step 3. Invert the 2D matrix self.to_2D()
+          There is no quick way to find out whether the matrix is invertible,
+          so at this stage an error from at::inverse can be thrown.
+          Note that for CUDA this causes cross-device memory synchronization that can be slow.
   Step 4. reshape the result.
   */
   TORCH_CHECK(ind > 0, "Expected a strictly positive integer for 'ind', but got ", ind);
