@@ -6073,14 +6073,14 @@ class TestTorchDeviceType(TestCase):
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
 
-    @precisionOverride({torch.float32: 2e-3, torch.float64: 1e-8,
-                        torch.complex64: 2e-3, torch.complex128: 1e-8})
     @skipCUDAIf(
         _get_torch_cuda_version() < [10, 0] and not TEST_MAGMA,
         "On cuda 9.2, torch.inverse relies on magma"
     )
     @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float32, torch.float64)
+    @precisionOverride({torch.float32: 2e-3, torch.complex64: 2e-3})
     def test_inverse(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
@@ -6155,11 +6155,11 @@ class TestTorchDeviceType(TestCase):
 
     # TODO: once there is more support for complex dtype, they shall be added to above test
     @unittest.expectedFailure
+    @onlyCUDA
     @skipCUDAIf(
         _get_torch_cuda_version() < [10, 0] and not TEST_MAGMA,
         "On cuda 9.2, torch.inverse relies on magma"
     )
-    @skipCPUIfNoLapack
     @dtypes(torch.complex64, torch.complex128)
     def test_inverse_complex_xfailed(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
@@ -6182,6 +6182,32 @@ class TestTorchDeviceType(TestCase):
         n = 5
         _matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
         test_inverse_helper(_matrices, batches, n)
+
+    @onlyCUDA
+    @skipCUDAIf(
+        _get_torch_cuda_version() < [10, 0] and not TEST_MAGMA,
+        "On cuda 9.2, torch.inverse relies on magma"
+    )
+    @dtypes(torch.complex64, torch.complex128)
+    @precisionOverride({torch.complex64: 1e-4})
+    def test_inverse_complex_single_matrix(self, device, dtype):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+        for n in [5, 256]:
+            matrix = random_fullrank_matrix_distinct_singular_value(n, dtype=dtype).to(device)
+            identity = torch.eye(n, dtype=dtype, device=device)
+
+            # correctness test, check matrix*matrix_inverse == identity
+            matrix_inverse = torch.inverse(matrix)
+
+            self.assertEqual(identity, torch.matmul(matrix, matrix_inverse))
+            self.assertEqual(identity, torch.matmul(matrix_inverse, matrix))
+
+            # torch.inverse with out
+            matrix_inverse_out = torch.empty(n, n, dtype=dtype, device=device)
+            ans = torch.inverse(matrix, out=matrix_inverse_out)
+            self.assertEqual(ans, matrix_inverse_out)
+            self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
