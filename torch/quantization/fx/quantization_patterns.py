@@ -379,44 +379,29 @@ class BatchNorm(QuantizeHandler):
             load_arg(quantized=False)(self.bn_node.kwargs))
 
 @register_quant_pattern(torch.nn.Embedding)
+@register_quant_pattern(torch.nn.EmbeddingBag)
 class Embedding(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
-        assert node.op == 'call_module'
-        self.emb_node = node
-        self.emb = quantizer.modules[self.emb_node.target]
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
+        assert node.op == 'call_module'
+        emb_node = node
+        emb = quantizer.modules[emb_node.target]
         qconfig = quantizer.qconfig_map[node.name]
         assert not activation_is_statically_quantized(qconfig)
-        qemb = nnq.Embedding
-        quantized = qemb.from_float(self.emb)
-        parent_name, name = _parent_name(self.emb_node.target)
+        if type(emb) == torch.nn.Embedding:
+            qemb = nnq.Embedding
+        else:
+            qemb = nnq.EmbeddingBag
+        quantized = qemb.from_float(emb)
+        parent_name, name = _parent_name(emb_node.target)
         setattr(quantizer.modules[parent_name], name, quantized)
         return quantizer.quantized_graph.create_node(
             'call_module',
-            self.emb_node.target,
-            (load_arg(quantized=False)(self.emb_node.args[0]),), {})
-
-@register_quant_pattern(torch.nn.EmbeddingBag)
-class EmbeddingBag(QuantizeHandler):
-    def __init__(self, quantizer, node):
-        super().__init__(quantizer, node)
-        assert node.op == 'call_module'
-        self.embbag_node = node
-        self.embbag = quantizer.modules[self.embbag_node.target]
-
-    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
-        qconfig = quantizer.qconfig_map[node.name]
-        assert not activation_is_statically_quantized(qconfig)
-        qemb = nnq.EmbeddingBag
-        quantized = qemb.from_float(self.embbag)
-        parent_name, name = _parent_name(self.embbag_node.target)
-        setattr(quantizer.modules[parent_name], name, quantized)
-        return quantizer.quantized_graph.create_node(
-            'call_module',
-            self.embbag_node.target,
-            (load_arg(quantized=False)(self.embbag_node.args[0]), load_arg(quantized=False)(self.embbag_node.args[1])), {})
+            emb_node.target,
+            load_arg(quantized=False)(emb_node.args),
+            load_arg(quantized=False)(emb_node.kwargs))
 
 
 ARGS_TO_SKIP = {

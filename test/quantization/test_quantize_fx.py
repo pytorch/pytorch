@@ -1507,7 +1507,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             [[indices]],
             QuantType.DYNAMIC,
             quantized_node,
-            qconfig_input=float_qparams_dynamic_qconfig
+            custom_qconfig=float_qparams_dynamic_qconfig
         )
 
     def test_qembedding_bag_module(self):
@@ -1536,7 +1536,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 inputs,
                 QuantType.DYNAMIC,
                 quantized_node,
-                qconfig_input=float_qparams_qconfig
+                custom_qconfig=float_qparams_qconfig
             )
 
 

@@ -605,7 +605,7 @@ class QuantizationTestCase(TestCase):
                            expected_node_list=None,
                            debug=False,
                            print_debug_info=False,
-                           qconfig_input=None):
+                           custom_qconfig=None):
         """ Quantizes model with graph mode quantization on fx and check if the
         quantized model contains the quantized_node
 
@@ -628,7 +628,7 @@ class QuantizationTestCase(TestCase):
         # TODO: make img_data a single example instead of a list
         if type(inputs) == list:
             inputs = inputs[0]
-        if qconfig_input is None:
+        if custom_qconfig is None:
             if quant_type == QuantType.QAT:
                 qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
             elif quant_type == QuantType.STATIC:
@@ -636,7 +636,7 @@ class QuantizationTestCase(TestCase):
             else:
                 qconfig = default_dynamic_qconfig
         else:
-            qconfig = qconfig_input
+            qconfig = custom_qconfig
 
         if quant_type == QuantType.QAT:
             model.train()
