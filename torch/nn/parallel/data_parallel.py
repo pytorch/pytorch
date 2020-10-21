@@ -148,16 +148,6 @@ class DataParallel(Module):
         if not self.device_ids:
             return self.module(*inputs, **kwargs)
 
-        # DataParallel needs at least one input in forward function
-        # Note:
-        # The forward function's input can be either in 'inputs' list or in 'kwargs' dict.
-        # If 'inputs' list is empty and 'kwargs' dict has item, we have no way to identify
-        # whether 'kwargs' has an input for forward function, so we just check whether `kwargs`
-        # dict has item. Caller needs to make sure 'kwargs' dict has at least an input for
-        # forward function in this case.
-        if len(inputs) == 0 and len(kwargs) == 0:
-            raise RuntimeError("Forward function must have at least one input, bot got zero")
-
         for t in chain(self.module.parameters(), self.module.buffers()):
             if t.device != self.src_device_obj:
                 raise RuntimeError("module must have its parameters and buffers "
@@ -165,8 +155,15 @@ class DataParallel(Module):
                                    "them on device: {}".format(self.src_device_obj, t.device))
 
         inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
+        # for forward function without any inputs, empty list and dict will be created
+        # so the module can be executed on one device which is the first one in device_ids
+        if not inputs and not kwargs:
+            inputs = ((),)
+            kwargs = ({},)
+
         if len(self.device_ids) == 1:
             return self.module(*inputs[0], **kwargs[0])
+
         replicas = self.replicate(self.module, self.device_ids[:len(inputs)])
         outputs = self.parallel_apply(replicas, inputs, kwargs)
         return self.gather(outputs, self.output_device)

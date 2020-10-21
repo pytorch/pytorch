@@ -518,18 +518,21 @@ class TestDataParallel(TestCase):
     def test_data_parallel_module_zero_inputs(self):
         class TestModule(nn.Module):
             def forward(self):
-                pass
+                t = torch.eye(2,3,device='cuda:0')
+                return t + (1 - t)
+
+        expected = torch.ones(2,3,device='cuda:0')
 
         model = TestModule()
-        # allow zero input if device id is not specified (no device distributed, no parallel)
-        pmodel = torch.nn.DataParallel(model)
-        pmodel.device_ids = None
-        pmodel()
+        pmodel = torch.nn.DataParallel(model, [0])
+        out = pmodel()
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out, expected)
 
-        # error out if device id is set but no input
-        pmodel = torch.nn.DataParallel(model, device_ids=[0])
-        with self.assertRaisesRegex(RuntimeError, "Forward function must have at least one input"):
-            pmodel()
+        pmodel = torch.nn.DataParallel(model, [0, 1])
+        out = pmodel()
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out, expected)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_device_args(self):
