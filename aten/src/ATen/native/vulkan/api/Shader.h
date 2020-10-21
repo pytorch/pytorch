@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Cache.h>
 #include <c10/util/hash.h>
@@ -293,3 +295,5 @@ inline bool operator==(
          (_1.stageFlags == _2.stageFlags) &&
          (_1.pImmutableSamplers == _2.pImmutableSamplers);
 }
+
+#endif /* USE_VULKAN_API */
