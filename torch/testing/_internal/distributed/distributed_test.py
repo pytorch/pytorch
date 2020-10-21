@@ -2095,6 +2095,7 @@ class DistributedTest:
             self._test_all_to_all_helper(group, group_id, rank)
 
         @unittest.skipIf(BACKEND != "nccl", "Only NCCL supports CUDA all_to_all")
+        @skip_if_rocm
         def test_all_to_all_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -2160,6 +2161,7 @@ class DistributedTest:
             BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
         )
         @skip_if_small_worldsize
+        @skip_if_rocm
         def test_all_to_all_group_cuda(self):
             group, group_id, rank = self._init_group_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -2222,6 +2224,7 @@ class DistributedTest:
             self._test_all_to_all_helper(group, group_id, rank)
 
         @unittest.skipIf(BACKEND != "nccl", "Only NCCL supports CUDA all_to_all")
+        @skip_if_rocm
         def test_all_to_all_full_group_cuda(self):
             group, group_id, rank = self._init_full_group_test()
             rank_to_GPU = self._init_multigpu_helper()
