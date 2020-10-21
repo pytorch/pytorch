@@ -8,7 +8,7 @@ namespace jit {
 bool canRunOutOfPlace(Node* n) {
   static std::unordered_set<std::string> out_of_place_nodes{"aten::add",
                                                             "aten::mul",
-                                                            "aten::addmm"
+                                                            "aten::addmm",
                                                             "aten::bmm",
                                                             "aten::sigmoid",
                                                             "aten::cat",

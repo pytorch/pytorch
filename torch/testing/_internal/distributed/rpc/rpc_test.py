@@ -997,7 +997,8 @@ class RpcTest(RpcAgentTestFixture):
             ):
                 rpc.api._all_gather(SlowPickleClass(0.5))
         else:
-            with self.assertRaisesRegex(RuntimeError, "timeout.*100 ms"):
+            expected_error = self.get_timeout_error_regex()
+            with self.assertRaisesRegex(RuntimeError, expected_error):
                 rpc.api._all_gather(SlowPickleClass(0.5))
 
     @dist_init
