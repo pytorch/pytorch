@@ -398,6 +398,26 @@ class Embedding(QuantizeHandler):
             self.emb_node.target,
             (load_arg(quantized=False)(self.emb_node.args[0]),), {})
 
+@register_quant_pattern(torch.nn.EmbeddingBag)
+class EmbeddingBag(QuantizeHandler):
+    def __init__(self, quantizer, node):
+        super().__init__(quantizer, node)
+        assert node.op == 'call_module'
+        self.embbag_node = node
+        self.embbag = quantizer.modules[self.embbag_node.target]
+
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
+        qconfig = quantizer.qconfig_map[node.name]
+        assert not activation_is_statically_quantized(qconfig)
+        qemb = nnq.EmbeddingBag
+        quantized = qemb.from_float(self.embbag)
+        parent_name, name = _parent_name(self.embbag_node.target)
+        setattr(quantizer.modules[parent_name], name, quantized)
+        return quantizer.quantized_graph.create_node(
+            'call_module',
+            self.embbag_node.target,
+            (load_arg(quantized=False)(self.embbag_node.args[0]), load_arg(quantized=False)(self.embbag_node.args[1])), {})
+
 
 ARGS_TO_SKIP = {
     torch._ops.ops.quantized.hardswish: ['inplace'],
