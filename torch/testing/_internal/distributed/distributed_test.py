@@ -2692,6 +2692,14 @@ class DistributedTest:
             # cpu training setup
             model = BN_NET
 
+            def buffer_size(buffers):
+                return sum([b.numel() for b in buffers])
+
+            syncbn_buffer_size = 0
+            for m_name, m_layer in BN_NET.named_modules():
+                if isinstance(m_layer, nn.SyncBatchNorm):
+                    syncbn_buffer_size += buffer_size(m_layer.buffers())
+
             # single gpu training setup
             model_gpu = copy.deepcopy(model)
             model_gpu.cuda(gpu_subset[0])
@@ -2701,6 +2709,11 @@ class DistributedTest:
             model_DDP.cuda(gpu_subset[0])
             model_DDP = nn.parallel.DistributedDataParallel(
                 model_DDP, device_ids=gpu_subset
+            )
+
+            self.assertEqual(
+                syncbn_buffer_size,
+                buffer_size(model.buffers()) - buffer_size(model_DDP.modules_buffers)
             )
 
             # test serializable/unserializable
@@ -3667,6 +3680,15 @@ class DistributedTest:
             # We need a barrier since otherwise non-participating processes exit too early
             # and cause a timeout.
             self._barrier(timeout=60)
+
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_ddp_ignore_sync_batch_norm_buffers(self):
+            syncbn_net = nn.SyncBatchNorm.convert_sync_batchnorm(BN_NET)
+            ddp = nn.parallel.DistributedDataParallel(
+                syncbn_net.cuda(self.rank),
+                device_ids=[self.rank]
+            )
 
         @require_backend({"nccl", "gloo"})
         @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
