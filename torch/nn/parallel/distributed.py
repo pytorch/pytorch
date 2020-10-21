@@ -703,13 +703,13 @@ class DistributedDataParallel(Module):
             if isinstance(obj, torch.Tensor):
                 return (obj.to(target_gpu), )
             if is_namedtuple(obj):
-                return list(type(obj)(*args) for args in zip(*map(to_map, obj)))
+                return [type(obj)(*args) for args in zip(*map(to_map, obj))]
             if isinstance(obj, tuple) and len(obj) > 0:
                 return list(zip(*map(to_map, obj)))
             if isinstance(obj, list) and len(obj) > 0:
-                return list(map(list, zip(*map(to_map, obj))))
+                return [list(i) for i in zip(*map(to_map, obj))]
             if isinstance(obj, dict) and len(obj) > 0:
-                return list(map(type(obj), zip(*map(to_map, obj.items()))))
+                return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
             return [obj]
 
         # Avoid reference cycle
