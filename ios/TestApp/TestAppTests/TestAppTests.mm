@@ -61,8 +61,6 @@
       XCTAssert(test_adaptive_avg_pool2d(), @"Test adaptive_avg_pool2d failed!");
       XCTAssert(test_hardtanh_(), @"Test hardtanh failed!");
       XCTAssert(test_reshape(), @"Test reshape failed!");
-    } else {
-      FBLogInfo(@"Metal is not available!");
     }
   }
 #endif
