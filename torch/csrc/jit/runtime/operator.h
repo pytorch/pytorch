@@ -73,7 +73,11 @@ struct TORCH_API Operator {
  public:
   Operator(c10::OperatorHandle opHandle, Operation operation)
       : op_(c10::make_left<C10Operator, JitOnlyOperator>(
-            C10Operator{std::move(opHandle), std::move(operation)})) {}
+            C10Operator{std::move(opHandle),
+                        ([operation = std::move(operation), opHandle](Stack* stack) {
+                          std::cout << "Calling opHandle " << opHandle.schema() << std::endl;
+                          operation(stack);
+                        })})) {}
 
   Operator(
       std::string schema,
@@ -83,9 +87,10 @@ struct TORCH_API Operator {
             c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
                 UnparsedFunctionSchema{schema, alias_analysis}),
             c10::make_left<Operation, OperationCreator>([op = std::move(op), schema](Stack* stack) {
-              std::cout << "Calling " << schema << std::endl;
+              std::cout << "Calling op " << schema << std::endl;
               op(stack);
-            })})) {}
+            })
+        })) {}
 
   C10_DEPRECATED_MESSAGE(
       "Please define your operator as taking a `Stack*` argument instead of `Stack&` and as returning `void` instead of `int`.")
@@ -96,7 +101,7 @@ struct TORCH_API Operator {
       : Operator(
             std::move(schema),
             [op = std::move(op), schema](Stack* stack) {
-              std::cout << "Calling " << schema << std::endl;
+              std::cout << "Calling &op" << schema << std::endl;
               op(*stack);
             },
             alias_analysis) {}

@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
 #include <aten/src/ATen/quantized/Quantizer.h>
@@ -130,7 +130,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
            "this class.";
     AT_ERROR(err.str());
   } else if (ivalue.isRRef()) {
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
     TORCH_CHECK(
         torch::distributed::rpc::getAllowJitRRefPickle() == true,
         "RRef jit pickling is only allowed inside RPC calls.");
@@ -166,7 +166,7 @@ void Pickler::pushDevice(const IValue& ivalue) {
   }
 }
 
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
 void Pickler::pushRRef(const IValue& ivalue) {
   // It is the same as how rref is pickled in python, see PyRRef::pickle
   auto rrefInterface = ivalue.toRRef();
@@ -393,11 +393,9 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
         break;
       case at::kPerChannelAffineFloatQParams:
       case at::kPerChannelAffine: {
-        const auto* quantizer = static_cast<at::PerChannelAffineQuantizer*>(
-            tensor.quantizer().get());
-        pushTensor(quantizer->scales());
-        pushTensor(quantizer->zero_points());
-        pushInt(quantizer->axis());
+        pushTensor(tensor.q_per_channel_scales());
+        pushTensor(tensor.q_per_channel_zero_points());
+        pushInt(tensor.q_per_channel_axis());
       } break;
       default:
         TORCH_CHECK(

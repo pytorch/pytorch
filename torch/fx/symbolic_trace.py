@@ -1,12 +1,12 @@
 import inspect
 from types import CodeType, FunctionType
-from typing import Any, Optional, List
+from typing import Any, Optional, List, Callable, Union
 import torch
 
 from .node import Argument
 from .graph import Graph
 from .graph_module import GraphModule
-from .proxy import Proxy, _create_proxy, TracerBase
+from .proxy import TracerBase
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -119,50 +119,69 @@ class Tracer(TracerBase):
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
-    def trace(self, root: torch.nn.Module) -> GraphModule:
-        self.root = root
+    def call_module(self, m: torch.nn.Module, module_qualified_name: str, forward: Callable[..., Any], args, kwargs):
+        if not self.is_leaf_module(m, module_qualified_name):
+            return forward(*args, **kwargs)
+        return self.create_proxy('call_module', module_qualified_name, args, kwargs)
+
+    def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
+        if isinstance(root, torch.nn.Module):
+            self.root = root
+            fn = type(root).forward
+        else:
+            self.root = torch.nn.Module()
+            fn = root
         self.graph = Graph()
 
-        fn = type(root).forward
         assert isinstance(fn, FunctionType)
         co = fn.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
         names_iter = iter(co.co_varnames)
-        next(names_iter)  # skip self
-        args : List[Any] = [root]
-        args.extend(self._proxy_placeholder(next(names_iter)) for name in range(1, total_args))
+        args : List[Any] = []
+        skip_arg_idx = 0
+        if isinstance(root, torch.nn.Module):
+            skip_arg_idx = 1
+            next(names_iter)  # skip self
+            args.append(root)
+
+        def proxy_placeholder(name: str):
+            return self.create_proxy('placeholder', name, (), {},
+                                     type_expr=fn.__annotations__.get(name, None))
+
+        args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
 
         if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
+            # TODO: type annotations for *args and **kwargs
             if co.co_flags & inspect.CO_VARARGS:
-                args.append(self._proxy_placeholder('*' + next(names_iter)))
+                args.append(proxy_placeholder('*' + next(names_iter)))
             if co.co_flags & inspect.CO_VARKEYWORDS:
-                args.append(self._proxy_placeholder('**' + next(names_iter)))
+                args.append(proxy_placeholder('**' + next(names_iter)))
             fn = _patch_function(fn, len(args))
 
         orig_call = torch.nn.Module.__call__
 
         def module_call_wrapper(mod, *args, **kwargs):
-            module_qualified_name = _find_module(root, mod)
-            if not self.is_leaf_module(mod, module_qualified_name):
+            module_qualified_name = _find_module(self.root, mod)
+
+            def forward(*args, **kwargs):
                 return orig_call(mod, *args, **kwargs)
-            else:
-                return _create_proxy(self, 'call_module', module_qualified_name, args, kwargs)
+
+            return self.call_module(mod, module_qualified_name, forward, args, kwargs)
+
         try:
             torch.nn.Module.__call__ = module_call_wrapper
-            self.graph.output(self.create_arg(fn(*args)))
+            self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
+                             type_expr=fn.__annotations__.get('return', None))
         finally:
             torch.nn.Module.__call__ = orig_call
-        return GraphModule(root, self.graph)
-
-    def _proxy_placeholder(self, name: str) -> Proxy:
-        return Proxy(self.create_node('placeholder', name, (), {}), self)
+        return self.graph
 
 # Symbolic tracing API
 #
-# Given an `nn.Module` instance `root`, this function will return a `GraphModule`
+# Given an `nn.Module` or function instance `root`, this function will return a `GraphModule`
 # constructed by recording operations seen while tracing through `root`.
 #
 # Args:
 #   - root - the `nn.Module` instance to trace
-def symbolic_trace(root : torch.nn.Module) -> GraphModule:
-    return Tracer().trace(root)
+def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
+    return GraphModule(root if isinstance(root, torch.nn.Module) else torch.nn.Module(), Tracer().trace(root))
