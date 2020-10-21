@@ -323,10 +323,6 @@ Runtime* initialize() {
   return runtime.get();
 }
 
-bool available() {
-  return initialize();
-}
-
 Runtime* runtime() {
   Runtime* const runtime = initialize();
   TORCH_CHECK(

@@ -99,7 +99,7 @@ struct Pipeline final {
   struct Descriptor final {
     VkPipelineLayout pipeline_layout;
     VkShaderModule shader_module;
-    Shader::WorkGroup work_group;
+    Shader::WorkGroup local_work_group;
   };
 
   /*
@@ -132,6 +132,7 @@ struct Pipeline final {
   struct Object final {
     VkPipeline handle;
     VkPipelineLayout layout;
+    Shader::WorkGroup local_work_group;
 
     operator bool() const;
   };
@@ -182,7 +183,7 @@ inline bool operator==(
     const Pipeline::Descriptor& _2) {
   return (_1.pipeline_layout == _2.pipeline_layout) &&
          (_1.shader_module == _2.shader_module) &&
-         (_1.work_group == _2.work_group);
+         (_1.local_work_group == _2.local_work_group);
 }
 
 inline size_t Pipeline::Factory::Hasher::operator()(
@@ -190,9 +191,14 @@ inline size_t Pipeline::Factory::Hasher::operator()(
   return c10::get_hash(
       descriptor.pipeline_layout,
       descriptor.shader_module,
-      descriptor.work_group.x,
-      descriptor.work_group.y,
-      descriptor.work_group.z);
+      descriptor.local_work_group.x,
+      descriptor.local_work_group.y,
+      descriptor.local_work_group.z);
+}
+
+inline Pipeline::Object::operator bool() const {
+  return (VK_NULL_HANDLE != handle) &&
+         (VK_NULL_HANDLE != layout);
 }
 
 inline Pipeline::Object Pipeline::Cache::retrieve(
@@ -200,16 +206,12 @@ inline Pipeline::Object Pipeline::Cache::retrieve(
   return {
     cache_.retrieve(descriptor),
     descriptor.pipeline_layout,
+    descriptor.local_work_group,
   };
 }
 
 inline void Pipeline::Cache::purge() {
   cache_.purge();
-}
-
-inline Pipeline::Object::operator bool() const {
-  return (VK_NULL_HANDLE != handle) &&
-         (VK_NULL_HANDLE != layout);
 }
 
 } // namespace api

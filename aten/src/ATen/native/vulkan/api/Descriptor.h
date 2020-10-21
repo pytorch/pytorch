@@ -2,6 +2,7 @@
 
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Resource.h>
+#include <ATen/native/vulkan/api/Shader.h>
 
 namespace at {
 namespace native {
@@ -58,7 +59,7 @@ struct Descriptor final {
     Set(
         VkDevice device,
         VkDescriptorPool descriptor_pool,
-        VkDescriptorSetLayout descriptor_set_layout);
+        const Shader::Layout::Object& shader_layout);
     Set(const Set&) = delete;
     Set& operator=(const Set&) = delete;
     Set(Set&&);
@@ -67,12 +68,10 @@ struct Descriptor final {
 
     Set& bind(
         uint32_t binding,
-        VkDescriptorType type,
         const Resource::Buffer::Object& buffer);
 
     Set& bind(
         uint32_t binding,
-        VkDescriptorType type,
         const Resource::Image::Object& image);
 
     VkDescriptorSet handle() const;
@@ -92,6 +91,7 @@ struct Descriptor final {
    private:
     VkDevice device_;
     VkDescriptorSet descriptor_set_;
+    Shader::Layout::Signature shader_layout_signature_;
 
     struct {
       c10::SmallVector<Item, 8u> items;
@@ -112,7 +112,7 @@ struct Descriptor final {
     Pool& operator=(Pool&&);
     ~Pool() = default;
 
-    Set allocate(VkDescriptorSetLayout descriptor_set_layout);
+    Set allocate(const Shader::Layout::Object& shader_layout);
     void purge();
 
    private:
