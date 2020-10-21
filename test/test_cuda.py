@@ -3222,7 +3222,7 @@ class TestCudaComm(TestCase):
             self.assertEqual(expected_b, x.b)
 
     def test_state_on_device_rng_functional(self):
-        size = 10
+        size = 10000
         a = torch.randn((size,), device="cuda", dtype=torch.float)
 
         ops_with_kwargs = (("dropout", {"p": 0.1}),
@@ -3244,26 +3244,24 @@ class TestCudaComm(TestCase):
             gen_devstate.manual_seed(5)
 
             stream = torch.cuda.Stream()
-            stream.wait_stream(torch.cuda.current_stream())
 
-            # Pushes a long kernel to main stream so if side stream's update
-            # transactions race with main stream updates for some reason,
-            # main stream probably picks up the error
+            # Pushes default stream ops past side stream ops to catch possible race conditions.
+            torch.cuda.synchronize()
             torch.cuda._sleep(int(50 * get_cycles_per_ms()))
 
             # Creates output on main stream, weaves in dropout on side stream
             # to make sure side stream offset updates don't interfere with main stream
             out_devstate = op_twice(a)
             with torch.cuda.stream(stream):
-                out_devstate_sidestream = op_twice(a)
+                out_devstate_sidestream = op_twice(op_twice(a))
             out_devstate = op_twice(out_devstate)
-            with torch.cuda.stream(stream):
-                out_devstate_sidestream = op_twice(out_devstate_sidestream)
             torch.backends.cuda._stateful_ops.state_on_device = False
 
             try:
                 self.assertEqual(out_hoststate, out_devstate)
+                torch.cuda.current_stream().wait_stream(stream)
                 self.assertNotEqual(out_devstate, out_devstate_sidestream)
+                torch.cuda.synchronize()
             except Exception as e:
                 # A "msg=..." kwarg to assertEqual replaces its usual detailed "Tensors failed to compare..." message.
                 # The following adds my message without replacing the usual detailed message from assertEqual.
@@ -3305,12 +3303,22 @@ class TestCudaComm(TestCase):
             gen_host_state.manual_seed(5)
             gen_dev_state.manual_seed(5)
 
+            stream = torch.cuda.Stream()
+
             if (module == "torch"):
                 kwargs["generator"] = gen_host_state
                 control1 = getattr(torch, op)(*args, **kwargs)
                 control2 = getattr(torch, op)(*args, **kwargs)
                 kwargs["generator"] = gen_dev_state
+                # Runs the op on the default stream, and weaves in ops on a side stream
+                # to make sure side stream ops don't interfere.
+                torch.cuda.synchronize()
+                # Pushes default stream ops past side stream ops to catch possible race conditions.
+                torch.cuda._sleep(int(50 * get_cycles_per_ms()))
                 t1 = getattr(torch, op)(*args, **kwargs)
+                with torch.cuda.stream(stream):
+                    t1_sidestream = getattr(torch, op)(*args, **kwargs)
+                    t2_sidestream = getattr(torch, op)(*args, **kwargs)
                 t2 = getattr(torch, op)(*args, **kwargs)
             else:
                 control1 = alloc.clone()
@@ -3321,12 +3329,23 @@ class TestCudaComm(TestCase):
                 t1 = alloc.clone()
                 t2 = alloc.clone()
                 kwargs["generator"] = gen_dev_state
+                torch.cuda.synchronize()
+                torch.cuda._sleep(int(50 * get_cycles_per_ms()))
                 getattr(t1, op)(*args, **kwargs)
+                with torch.cuda.stream(stream):
+                    t1_sidestream = alloc.clone()
+                    t2_sidestream = alloc.clone()
+                    t1_sidestream = getattr(t1_sidestream, op)(*args, **kwargs)
+                    t2_sidestream = getattr(t1_sidestream, op)(*args, **kwargs)
                 getattr(t2, op)(*args, **kwargs)
 
             try:
                 self.assertEqual(control1, t1)
                 self.assertEqual(control2, t2)
+                torch.cuda.current_stream().wait_stream(stream)
+                self.assertNotEqual(t1, t1_sidestream)
+                self.assertNotEqual(t2, t2_sidestream)
+                torch.cuda.synchronize()
             except Exception as e:
                 # A "msg=..." kwarg to assertEqual replaces its usual detailed "Tensors failed to compare..." message.
                 # The following adds my message without replacing the usual detailed message from assertEqual.
