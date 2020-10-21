@@ -225,7 +225,7 @@ std::tuple<double, int64_t> _choose_qparams_per_tensor(
       /*min=*/x_min,
       /*max=*/x_max,
       /*qmin=*/0,
-      /*qmax=*/255,
+      /*qmax=*/reduce_range ? 127 : 255,
       /*preserve_sparsity=*/false,
       /*force_scale_power_of_two=*/false);
 
