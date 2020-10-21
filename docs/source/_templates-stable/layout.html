@@ -1,9 +1,42 @@
 {% extends "!layout.html" %}
 <link rel="canonical" href="{{ theme_canonical_url }}{{ pagename }}.html" />
 
+{% block extrahead %}
+       <!-- Early load javascript files -->
+       <script type="text/javascript" id="documentation_options" data-url_root="{{ pathto('', 1) }}" src="{{ pathto('_static/documentation_options.js', 1) }}"></script>
+       {%- for scriptfile in script_files %}
+         {{ js_tag(scriptfile) }}
+       {%- endfor %}
+       <script type="text/javascript" data-url_root="{{ pathto('', 1) }}" src="{{ pathto('_static/docversions.js', 1) }}"></script>
+{{ super() }}
+{% endblock %}
+
 {% block menu %}
 
 {{ super() }}
+{% endblock %}
+
+{% block sidebartitle %}
+            {% include "searchbox.html" %}
+            {% if theme_display_version %}
+              {%- set nav_version = version %}
+              {% if READTHEDOCS and current_version %}
+                {%- set nav_version = current_version %}
+              {% endif %}
+              {% if nav_version %}
+                <button onclick="versiontoggle()">{{ nav_version }} &#x25BC;</button>
+                <ul id="versionList" style="display: none;">
+                <script type="text/javascript">
+                    document.addEventListener("DOMContentLoaded", insert_version_links());
+                </script>
+                </ul>
+                <script type="text/javascript">
+                  function versiontoggle() {
+                    $("#versionList").toggle()
+                  };
+                </script>
+              {% endif %}
+            {% endif %}
 {% endblock %}
 
 {% block footer %}

@@ -57,7 +57,7 @@ pushd docs
 # Build the docs
 pip -q install -r requirements.txt
 if [ "$is_master_doc" = true ]; then
-  make html
+  make html 
   make coverage
   # Now we have the coverage report, we need to make sure it is empty.
   # Count the number of lines in the file and turn that number into a variable
@@ -79,6 +79,7 @@ if [ "$is_master_doc" = true ]; then
   fi
 else
   # Don't fail the build on coverage problems
+  VERSION=$version
   make html-stable
 fi
 
@@ -87,14 +88,6 @@ popd
 popd
 git rm -rf "$install_path" || true
 mv "$pt_checkout/docs/build/html" "$install_path"
-
-# Add the version handler by search and replace.
-# XXX: Consider moving this to the docs Makefile or site build
-if [ "$is_master_doc" = true ]; then
-  find "$install_path" -name "*.html" -print0 | xargs -0 perl -pi -w -e "s@master\s+\((\d\.\d\.[A-Fa-f0-9]+\+[A-Fa-f0-9]+)\s+\)@<a href='http://pytorch.org/docs/versions.html'>\1 \&#x25BC</a>@g"
-else
-  find "$install_path" -name "*.html" -print0 | xargs -0 perl -pi -w -e "s@master\s+\((\d\.\d\.[A-Fa-f0-9]+\+[A-Fa-f0-9]+)\s+\)@<a href='http://pytorch.org/docs/versions.html'>$version \&#x25BC</a>@g"
-fi
 
 # Prevent Google from indexing $install_path/_modules. This folder contains
 # generated source files.

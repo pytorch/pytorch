@@ -31,6 +31,7 @@ except ImportError:
     warnings.warn('unable to load "torchvision" package')
 
 RELEASE = os.environ.get('RELEASE', False)
+VERSION = os.environ.get('VERSION', False)
 
 import pytorch_sphinx_theme
 
@@ -155,8 +156,12 @@ author = 'Torch Contributors'
 # built documents.
 #
 # The short X.Y version.
-# TODO: change to [:2] at v1.0
-version = 'master (' + torch.__version__ + ' )'
+
+if VERSION:
+    # For tagged builds, like v1.7.0 or v1.7.0rc1. Will show up in left navmenu
+    version = VERSION
+else:
+    version = 'master (' + torch.__version__ + ' )'
 # The full version, including alpha/beta/rc tags.
 # TODO: verify this works as expected
 release = 'master'
