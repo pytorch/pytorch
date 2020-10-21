@@ -322,3 +322,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   popd
   assert_git_not_dirty
 fi
+
+if [[ "$BUILD_ENVIRONMENT" == *profile* ]]; then
+  CC=/usr/bin/gcc python setup.py install
+fi
