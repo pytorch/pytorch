@@ -43,6 +43,7 @@ def test_blockpartition_short_sequence():
 
 
 @pytest.mark.parametrize("device", devices)
+@pytest.mark.skip(reason="Flaky due to time.sleep()")
 def test_balance_by_time(device):
     class Delay(nn.Module):
         def __init__(self, seconds):
