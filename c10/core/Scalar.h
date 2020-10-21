@@ -31,14 +31,11 @@ class C10_API Scalar {
 
   AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, DEFINE_IMPLICIT_CTOR)
   AT_FORALL_COMPLEX_TYPES(DEFINE_IMPLICIT_CTOR)
-  // TODO: remove the std::complex below
-  DEFINE_IMPLICIT_CTOR(std::complex<float>, x)
-  DEFINE_IMPLICIT_CTOR(std::complex<double>, x)
 
 #undef DEFINE_IMPLICIT_CTOR
 
   // Value* is both implicitly convertible to SymbolicVariable and bool which
-  // causes ambiguosity error. Specialized constructor for bool resolves this
+  // causes ambiguity error. Specialized constructor for bool resolves this
   // problem.
   template <
       typename T,
@@ -114,14 +111,14 @@ class C10_API Scalar {
     }
 
     template<typename T,
-             typename std::enable_if<!std::is_integral<T>::value && !c10::is_complex_t<T>::value, bool>::type* =
+             typename std::enable_if<!std::is_integral<T>::value && !c10::is_complex<T>::value, bool>::type* =
                  nullptr>
     Scalar(T vv, bool) : tag(Tag::HAS_d) {
       v.d = convert<decltype(v.d), T>(vv);
     }
 
     template<typename T,
-             typename std::enable_if<c10::is_complex_t<T>::value, bool>::type* =
+             typename std::enable_if<c10::is_complex<T>::value, bool>::type* =
                  nullptr>
     Scalar(T vv, bool) : tag(Tag::HAS_z) {
       v.z = convert<decltype(v.z), T>(vv);
@@ -153,18 +150,5 @@ inline T Scalar::to() const {
   }
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO)
 #undef DEFINE_TO
-
-// TODO(@zasdfgbnm): Remove this!
-// This is needed only when the migration of std::complex to c10::complex
-// is not done. This should be removed once the migration is done.
-template <>
-inline std::complex<float> Scalar::to() const {
-  return static_cast<std::complex<float>>(toComplexFloat());
-}
-template <>
-inline std::complex<double> Scalar::to() const {
-  return static_cast<std::complex<double>>(toComplexDouble());
-}
-// end TODO
 
 } // namespace c10

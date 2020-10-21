@@ -9,6 +9,8 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <gtest/gtest.h>
+
 using namespace c10d::test;
 
 using at::cuda::CUDAStream;
@@ -76,9 +78,11 @@ class NCCLTest : public NCCLTestBase {
     }
   }
 
-  void wait(std::shared_ptr<ProcessGroup::Work>& work) {
+  void wait(
+      std::shared_ptr<ProcessGroup::Work>& work,
+      std::chrono::milliseconds timeout = kNoTimeout) {
     at::cuda::CUDAMultiStreamGuard guard(streams_);
-    work->wait();
+    work->wait(timeout);
   }
 
   std::vector<at::Tensor> getTensors() {
@@ -129,6 +133,24 @@ class NCCLTest : public NCCLTestBase {
   }
 
  protected:
+  // Launches sleep on every CUDA device
+  void launchDeviceSleep() {
+    at::cuda::OptionalCUDAGuard deviceGuard;
+    for (auto i = 0; i < numDevices_; i++) {
+      deviceGuard.set_index(i);
+      cudaSleep(streams_[i], 2000 * 1000 * 1000);
+    }
+  }
+
+  // Launches value initialization for every tensor
+  void valueInitialization() {
+    at::cuda::OptionalCUDAGuard deviceGuard;
+    for (auto i = 0; i < numDevices_; i++) {
+      deviceGuard.set_index(i);
+      tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
+    }
+  }
+
   const int numDevices_;
   THCState* state_;
   int worldSize_;
@@ -147,18 +169,8 @@ class AllreduceNCCLTest : public NCCLTest {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
-    // Launch sleep on every device
-    at::cuda::OptionalCUDAGuard deviceGuard;
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      cudaSleep(streams_[i], 2000 * 1000 * 1000);
-    }
-
-    // Launch value initialization for every tensor
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
-    }
+    launchDeviceSleep();
+    valueInitialization();
 
     return pg_->allreduce(tensors_);
   }
@@ -173,18 +185,8 @@ class BroadcastNCCLTest : public NCCLTest {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
-    // Launch sleep on every device
-    at::cuda::OptionalCUDAGuard deviceGuard;
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      cudaSleep(streams_[i], 2000 * 1000 * 1000);
-    }
-
-    // Launch value initialization for every tensor
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
-    }
+    launchDeviceSleep();
+    valueInitialization();
 
     ::c10d::BroadcastOptions options;
     options.rootRank = rootRank;
@@ -202,18 +204,8 @@ class ReduceNCCLTest : public NCCLTest {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
-    // Launch sleep on every device
-    at::cuda::OptionalCUDAGuard deviceGuard;
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      cudaSleep(streams_[i], 2000 * 1000 * 1000);
-    }
-
-    // Launch value initialization for every tensor
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
-    }
+    launchDeviceSleep();
+    valueInitialization();
 
     ::c10d::ReduceOptions options;
     options.rootRank = rootRank;
@@ -231,18 +223,8 @@ class AllgatherNCCLTest : public NCCLTest {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
-    // Launch sleep on every device
-    at::cuda::OptionalCUDAGuard deviceGuard;
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      cudaSleep(streams_[i], 2000 * 1000 * 1000);
-    }
-
-    // Launch value initialization for every tensor
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      tensors_[i].fill_(pg_->getRank() * numDevices_ + i);
-    }
+    launchDeviceSleep();
+    valueInitialization();
 
     return pg_->allgather(outputs_, tensors_);
   }
@@ -256,12 +238,8 @@ struct ReduceScatterNCCLTest : NCCLTest {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
-    // Launch sleep on every device
     at::cuda::OptionalCUDAGuard deviceGuard;
-    for (auto i = 0; i < numDevices_; i++) {
-      deviceGuard.set_index(i);
-      cudaSleep(streams_[i], 2000 * 1000 * 1000);
-    }
+    launchDeviceSleep();
 
     // Launch value initialization for every tensor
     for (auto i = 0; i < numDevices_; i++) {
@@ -291,12 +269,10 @@ void testAllreduce(const std::string& path, int rank, int size) {
     auto& tensor = tensors[j];
     auto data = tensor.data_ptr<float>();
     for (auto k = 0; k < tensor.numel(); k++) {
-      if (data[k] != expected) {
-        throw std::runtime_error("BOOM!");
-      }
+      EXPECT_EQ(data[k], expected)
+          << "Allreduce ouputs do not match expected outputs";
     }
   }
-  std::cout << "Allreduce test successful" << std::endl;
 }
 
 void testBroadcast(const std::string& path, int rank, int size) {
@@ -319,14 +295,12 @@ void testBroadcast(const std::string& path, int rank, int size) {
         auto& tensor = tensors[j];
         auto data = tensor.data_ptr<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
-          if (data[k] != expected) {
-            throw std::runtime_error("BOOM!");
-          }
+          EXPECT_EQ(data[k], expected)
+              << "Broadcast outputs do not match expected outputs";
         }
       }
     }
   }
-  std::cout << "Broadcast test successful" << std::endl;
 }
 
 void testReduce(const std::string& path, int rank, int size) {
@@ -350,14 +324,12 @@ void testReduce(const std::string& path, int rank, int size) {
         auto& tensor = tensors[rootTensor];
         auto data = tensor.data_ptr<float>();
         for (auto k = 0; k < tensor.numel(); k++) {
-          if (data[k] != expected) {
-            throw std::runtime_error("BOOM!");
-          }
+          EXPECT_EQ(data[k], expected)
+              << "Reduce outputs do not match expected outputs";
         }
       }
     }
   }
-  std::cout << "Reduce test successful" << std::endl;
 }
 
 void testAllgather(const std::string& path, int rank, int size) {
@@ -377,13 +349,11 @@ void testAllgather(const std::string& path, int rank, int size) {
       auto& tensor = tensors[i][j];
       auto data = tensor.data_ptr<float>();
       for (auto k = 0; k < tensor.numel(); k++) {
-        if (data[k] != expected) {
-          throw std::runtime_error("BOOM!");
-        }
+        EXPECT_EQ(data[k], expected)
+            << "Allgather outputs do not match expected outputs";
       }
     }
   }
-  std::cout << "Allgather test successful" << std::endl;
 }
 
 void testReduceScatter(const std::string& path, int rank, int size) {
@@ -405,41 +375,90 @@ void testReduceScatter(const std::string& path, int rank, int size) {
     auto& tensor = tensors[i];
     auto data = tensor.data_ptr<float>();
     for (auto j = 0; j < tensor.numel(); j++) {
-      if (data[j] != expected) {
-        throw std::runtime_error("BOOM!");
-      }
+      EXPECT_EQ(data[j], expected) << "ReduceScatter outputs do not match expected outputs!";
     }
   }
-  std::cout << "Reduce-scatter test successful" << std::endl;
 }
 
-int main(int argc, char** argv) {
-  if (!at::cuda::is_available()) {
-    LOG(INFO) << "CUDA not available, skipping test";
-    return EXIT_SUCCESS;
+class ProcessGroupNCCLTest: public ::testing::Test {
+ protected:
+  void SetUp() override {
+    // Use WORLD_SIZE and RANK environmental variables to do multi-node
+    // distributed testing
+    auto sizeEnv = std::getenv("WORLD_SIZE");
+    auto rankEnv = std::getenv("RANK");
+
+    if (sizeEnv && rankEnv) {
+      size_ = std::stoi(std::string(sizeEnv));
+      rank_ = std::stoi(std::string(rankEnv));
+    }
+    LOG(INFO) << "Multi-node world size: " << size_ << " rank: " << rank_;
   }
-  // Use WORLD_SIZE and RANK environmental variables to do multi-node
-  // distributed testing
-  auto sizeEnv = std::getenv("WORLD_SIZE");
-  auto rankEnv = std::getenv("RANK");
 
-  int size = 1;
-  int rank = 0;
-
-  if (sizeEnv && rankEnv) {
-    size = std::stoi(std::string(sizeEnv));
-    rank = std::stoi(std::string(rankEnv));
-    std::cout << "Multi-node world size: " << size << " rank: " << rank
-              << std::endl;
+  void TearDown() override {
+    // Reset NCCL_BLOCKING_WAIT environment variable after each run.
+    ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "0", 1) == 0);
   }
-  // TemporaryFile file;
-  TemporaryFile file;
 
-  testAllreduce(file.path, rank, size);
-  testBroadcast(file.path, rank, size);
-  testReduce(file.path, rank, size);
-  testAllgather(file.path, rank, size);
-  testReduceScatter(file.path, rank, size);
+  bool skipTest() {
+    // Skip tests if CUDA is not available.
+    if (!at::cuda::is_available()) {
+      LOG(INFO) << "CUDA not available, skipping test";
+      return true;
+    }
+    return false;
+  }
 
-  return EXIT_SUCCESS;
+  int size_{1};
+  int rank_{0};
+};
+
+TEST_F(ProcessGroupNCCLTest, testAllreduce) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    testAllreduce(file.path, rank_, size_);
+  }
+}
+
+TEST_F(ProcessGroupNCCLTest, testBroadcast) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    testBroadcast(file.path, rank_, size_);
+  }
+}
+
+TEST_F(ProcessGroupNCCLTest, testReduce) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    testReduce(file.path, rank_, size_);
+  }
+}
+
+TEST_F(ProcessGroupNCCLTest, testAllgather) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    testAllgather(file.path, rank_, size_);
+  }
+}
+
+TEST_F(ProcessGroupNCCLTest, testReduceScatter) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    testReduceScatter(file.path, rank_, size_);
+  }
 }

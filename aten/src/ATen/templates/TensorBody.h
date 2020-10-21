@@ -4,6 +4,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
+#include <c10/core/Stream.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Storage.h>
@@ -17,6 +18,7 @@
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
+#include <ATen/core/QuantizerBase.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace caffe2 {
@@ -48,12 +50,7 @@ namespace at {
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
 
-struct Quantizer;
-// This is temporary typedef to enable Quantizer in aten native function API
-// we'll remove them when we are actually exposing Quantizer class
-// to frontend
-using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
-using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
+using Stream = c10::Stream;
 
 namespace impl {
 inline bool variable_excluded_from_dispatch() {
@@ -61,7 +58,8 @@ inline bool variable_excluded_from_dispatch() {
   // Please read the comment in `VariableFallbackKernel.cpp` about the background of this change.
   return true;
 #else
-  return c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::Autograd);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::Autograd));
+  return c10::impl::tls_local_dispatch_key_set().excluded_.isSupersetOf(c10::autograd_dispatch_keyset);
 #endif
 }
 }
@@ -164,6 +162,16 @@ class CAFFE2_API Tensor {
   //    multiple versions of a defaulted special member functions are not allowed
   // Tensor& operator=(const Tensor&) & = default;
   // Tensor& operator=(Tensor&&) & = default;
+
+  // Also MSVC will wrongly issue the following warning with the aforementioned fix
+  //    warning C4522: 'at::Tensor': multiple assignment operators specified
+  // Let's just skip the warning.
+
+  #ifdef _MSC_VER
+  #pragma warning( push )
+  #pragma warning( disable : 4522 )
+  #endif
+
   Tensor& operator=(const Tensor& x) & {
     impl_ = x.impl_;
     return *this;
@@ -176,6 +184,10 @@ class CAFFE2_API Tensor {
   Tensor& operator=(Scalar v) &&;
   Tensor& operator=(const Tensor&) &&;
   Tensor& operator=(Tensor&&) &&;
+
+  #ifdef _MSC_VER
+  #pragma warning( pop )
+  #endif
 
   bool is_same(const Tensor& other) const noexcept {
     return impl_ == other.impl_;
@@ -320,6 +332,9 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` is vulkan tensor.
   bool is_vulkan() const;
 
+  /// Returns if a `Tensor` is metal tensor.
+  bool is_metal() const;
+
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
@@ -438,6 +453,7 @@ class CAFFE2_API Tensor {
   Tensor cuda() const;
   Tensor hip() const;
   Tensor vulkan() const;
+  Tensor metal() const;
 
   // ~~~~~ Autograd API ~~~~~
 
@@ -530,8 +546,10 @@ class CAFFE2_API Tensor {
 
   /// Return a mutable reference to the gradient. This is conventionally
   /// used as `t.grad() = x` to set a gradient to a completely new tensor.
-  Tensor& grad() {
-    return impl_->grad();
+  /// Note that this function work with a non-const Tensor and is not
+  /// thread safe.
+  Tensor& mutable_grad() {
+    return impl_->mutable_grad();
   }
 
   /// This function returns an undefined tensor by default and returns a defined tensor

@@ -5,10 +5,12 @@
 
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/dispatch/OperatorOptions.h>
+#include <ATen/core/op_registration/op_whitelist.h>
 #include <ATen/core/stack.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
+#include <torch/library.h>
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
@@ -81,6 +83,17 @@ struct TORCH_API Operator {
             c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
                 UnparsedFunctionSchema{std::move(schema), alias_analysis}),
             c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
+
+  C10_DEPRECATED_MESSAGE(
+      "Please define your operator as taking a `Stack*` argument instead of `Stack&` and as returning `void` instead of `int`.")
+  Operator(
+      std::string schema,
+      std::function<int(Stack&)> op,
+      c10::AliasAnalysisKind alias_analysis)
+      : Operator(
+            std::move(schema),
+            [op = std::move(op)](Stack* stack) { op(*stack); },
+            alias_analysis) {}
 
   Operator(
       std::string schema,
@@ -211,6 +224,27 @@ TORCH_API void ensure_c10_registerer_defined();
 
 // Used to assert that unschematized operators have an analysis method written
 TORCH_API bool aliasAnalysisHasSpecialCaseFor(c10::Symbol sym);
+
+// A factory function to generate an optional operator. It has two
+// instantiations depending on the template bool arg value. The arg can be a
+// compile-time function for the selective op registration based on schema
+// string.
+template <typename Func>
+c10::optional<Operator> OperatorGenerator(
+    torch::detail::SelectiveStr<true> schema_str,
+    Func&& op,
+    AliasAnalysisKind alias_analysis) {
+  return c10::optional<Operator>(Operator(
+      std::string(schema_str), std::forward<Func>(op), alias_analysis));
+}
+
+template <typename Func>
+c10::optional<Operator> OperatorGenerator(
+    torch::detail::SelectiveStr<false> schema_str,
+    Func&& op,
+    AliasAnalysisKind alias_analysis) {
+  return c10::nullopt;
+}
 
 } // namespace jit
 } // namespace torch

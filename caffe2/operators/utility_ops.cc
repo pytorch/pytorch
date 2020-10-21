@@ -522,8 +522,8 @@ Example:
         "LENGTHS",
         "1-D tensor of size N with lengths over gathered data"
         " for each row in a batch. sum(LENGTHS) == OUTPUT.size()")
-    .TensorInferenceFunction([](const OperatorDef& /* unused */,
-                                const vector<TensorShape>& in) {
+    .TensorInferenceFunction(OpSchema::NeedsAllInputShapes([](
+        const OperatorDef& /* unused */, const vector<TensorShape>& in) {
       std::vector<TensorShape> out(2);
 
       int total = 1;
@@ -535,7 +535,7 @@ Example:
       out[1].add_dims(in[1].dims(0));
       out[1].set_data_type(in[1].data_type());
       return out;
-    });
+    }));
 
 OPERATOR_SCHEMA(LengthsGather)
     .NumInputs(3)
@@ -1073,3 +1073,8 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     GatherRanges,
     "_caffe2::GatherRanges(Tensor data, Tensor ranges) -> (Tensor, Tensor)",
     caffe2::GatherRangesOp<caffe2::CPUContext>)
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    LengthsGather,
+    "_caffe2::LengthsGather(Tensor data, Tensor lengths, Tensor indices) -> (Tensor)",
+    caffe2::LengthsGatherOp<caffe2::CPUContext>)

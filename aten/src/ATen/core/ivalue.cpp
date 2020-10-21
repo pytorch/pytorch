@@ -3,6 +3,7 @@
 #include <ATen/core/Formatting.h>
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/stack.h>
 #include <c10/util/StringUtil.h>
 #include <cmath>
 
@@ -54,6 +55,18 @@ TupleTypePtr Tuple::type() const {
   return type_;
 }
 
+bool operator==(const ivalue::EnumHolder& lhs, const ivalue::EnumHolder& rhs) {
+  return lhs.name() == rhs.name() && *rhs.type() == *lhs.type();
+}
+
+const std::string ivalue::EnumHolder::qualifiedClassName() const {
+  return type_->qualifiedClassName().qualifiedName();
+}
+
+const std::string ivalue::EnumHolder::unqualifiedClassName() const {
+  return type_->qualifiedClassName().name();
+}
+
 } // namespace ivalue
 
 TypePtr IValue::type() const {
@@ -84,6 +97,8 @@ TypePtr IValue::type() const {
       return RRefType::create(toRRef()->type());
     case Tag::Device:
       return DeviceObjType::get();
+    case Tag::Stream:
+      return StreamObjType::get();
     case Tag::Object:
       return toObjectRef().type();
     case Tag::PyObject:
@@ -96,9 +111,53 @@ TypePtr IValue::type() const {
       return toTuple()->type();
     case Tag::Generator:
       return GeneratorType::get();
+    case Tag::Quantizer:
+      return QuantizerType::get();
+    case Tag::Enum:
+      return toEnumHolder()->type();
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
+}
+
+void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
+  if (visitor(*this)) {
+    // Short cut.
+    return;
+  }
+  switch (this->tag) {
+    case Tag::Tuple:
+    case Tag::GenericList: {
+      c10::ArrayRef<IValue> elems;
+      if (isTuple()) {
+        elems = this->toTuple()->elements();
+      } else {
+        elems = this->toListRef();
+      }
+      for (auto& elem : elems) {
+        elem.visit(visitor);
+      }
+      break;
+    }
+    case Tag::GenericDict:
+      for (const auto& pair : this->toGenericDict()) {
+        pair.value().visit(visitor);
+        pair.key().visit(visitor);
+      }
+      break;
+    case Tag::Object: {
+      auto obj_type = type()->expect<ClassType>();
+      auto obj_value = toObject();
+      auto attributes = obj_type->getAttributes();
+      for (const auto& attr: attributes) {
+        auto attribute = obj_value->getAttr(attr.getName());
+        attribute.visit(visitor);
+      }
+      break;
+    }
+    default:
+      break;
+ }
 }
 
 void IValue::getSubValues(HashAliasedIValues& subValues) const {
@@ -212,6 +271,8 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isGenericDict() && lhs.toGenericDict() == rhs.toGenericDict();
     case Tag::Tuple:
       return rhs.isTuple() && *lhs.toTuple() == *rhs.toTuple();
+    case Tag::Stream:
+      return rhs.isStream() && lhs.toStream() == lhs.toStream();
     case Tag::Device:
       return rhs.isDevice() && lhs.toDevice() == rhs.toDevice();
     case Tag::GenericList:
@@ -223,7 +284,10 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::PyObject:
     case Tag::Capsule:
     case Tag::Generator:
+    case Tag::Quantizer:
       return ptrEqual(lhs, rhs);
+    case Tag::Enum:
+      return lhs.toEnumHolder()->is(*rhs.toEnumHolder());
     case Tag::Uninitialized:
       // Unitialized ivalues show up in no-ops when the compiler can prove a
       // value will never be used. Just return false on any equality comparison.
@@ -360,7 +424,7 @@ std::ostream& IValue::repr(
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
-      if (c == FP_NORMAL || c == FP_ZERO) {
+      if ((c == FP_NORMAL || c == FP_ZERO ) && std::abs(d) < 1e10) {
         int64_t i = int64_t(d);
         if (double(i) == d) {
           return out << i << ".";
@@ -394,9 +458,136 @@ std::ostream& IValue::repr(
     }
     case IValue::Tag::GenericDict:
       return printMaybeAnnotatedDict(out, v, formatter);
+    case IValue::Tag::Enum: {
+      auto enum_holder = v.toEnumHolder();
+      return out << enum_holder->qualifiedClassName() << "." <<
+          enum_holder->name();
+    }
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
   }
+}
+
+bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
+  return arg.type() == type && !arg.kwarg_only() && !arg.default_value();
+}
+
+torch::jit::Function* checkObjectSortSchema(const c10::ClassTypePtr& t, std::stringstream& why_not) {
+  if (auto method = t->findMethod("__lt__")) {
+      const auto& lt_schema = method->getSchema();
+      const auto& schema_args = lt_schema.arguments();
+      bool error =
+          (schema_args.size() != 2 ||
+           !simpleClassTypeArg(schema_args[0], t) ||
+           !simpleClassTypeArg(schema_args[1], t) ||
+           lt_schema.returns().size() != 1 ||
+           lt_schema.returns()[0].type() != BoolType::get());
+      if (!error) {
+        return method;
+      }
+    }
+
+    why_not << "To sort a list of " << t->repr_str()
+            << " it must define a "
+            << "__lt__ method with two inputs of type "
+            << t->repr_str() << " that "
+            << "returns a bool";
+    return nullptr;
+}
+
+IValueComparator getLessThanComparator(const IValue& v) {
+  if (v.isTensor()) {
+      return [](const IValue& a, const IValue& b) {
+        return a.toTensor().lt(b.toTensor()).is_nonzero();
+      };
+  }
+
+  if (v.isDouble()) {
+      return [](const IValue& a, const IValue& b) {
+        return a.toDouble() < b.toDouble();
+      };
+  }
+
+  if (v.isInt()) {
+      return [](const IValue& a, const IValue& b) {
+        return a.toInt() < b.toInt();
+      };
+  }
+
+  if (v.isBool()) {
+      return [](const IValue& a, const IValue& b) {
+        return a.toBool() == false && b.toBool() == true;
+      };
+  }
+
+  if (v.isString()) {
+      return [](const IValue& a, const IValue& b) {
+       return a.toString()->string() < b.toString()->string();
+      };
+  }
+
+  if (v.isTuple()) {
+      const auto& elements = v.toTuple()->elements();
+      size_t n = elements.size();
+
+      std::vector<IValueComparator> elements_lts;
+      elements_lts.reserve(n);
+      for (size_t i = 0; i < n; ++i) {
+        elements_lts.push_back(getLessThanComparator(elements[i]));
+      }
+
+      return [elements_lts=std::move(elements_lts), n](const IValue& a, const IValue& b) {
+        const auto& a_elements = a.toTuple()->elements();
+        const auto& b_elements = b.toTuple()->elements();
+
+        for (size_t i = 0; i < n; ++i) {
+          if (elements_lts[i](a_elements[i], b_elements[i])) {
+            return true;
+          }
+          if (a_elements[i] == b_elements[i]) {
+            continue;
+          }
+          return false;
+        }
+        // Reaching here means two tuples are equal.
+        return false;
+      };
+  }
+
+  if (v.isObject()) {
+    std::stringstream why_not;
+    torch::jit::Function* lt_func =
+        checkObjectSortSchema(v.type()->expect<ClassType>(), why_not);
+    if (!lt_func) {
+      AT_ERROR(why_not.str());
+    }
+
+    return [lt_func](const IValue& a, const IValue& b) {
+      // Quick pass to satisfy "strict weak ordering" requirement
+      if (a.is(b)) {
+        return false;
+      }
+      torch::jit::Stack sort_stack;
+      sort_stack.push_back(a);
+      sort_stack.push_back(b);
+      lt_func->run(sort_stack);
+      return torch::jit::pop(sort_stack).toBool();
+    };
+  }
+
+  AT_ERROR("IValues of type: ", v.tagKind(), " are not comparable");
+}
+
+IValueComparator getGreaterThanComparator(const IValue& v) {
+  auto lt = getLessThanComparator(v);
+  return [lt = std::move(lt)](const IValue& a, const IValue& b) {
+    return lt(b, a);  // gt(a, b) === lt(b, a)
+  };
+}
+
+std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
+  out << v.qualifiedClassName() << "." << v.name();
+  return out;
 }
 
 std::ostream& operator<<(std::ostream & out, const IValue & v) {
@@ -447,6 +638,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "Uninitialized";
     case IValue::Tag::Device:
       return out << v.toDevice();
+    case IValue::Tag::Stream:
+      return out << v.toStream();
     case IValue::Tag::GenericDict:
       return printDict(out, v.toGenericDict(), formatter);
     case IValue::Tag::PyObject: {
@@ -455,12 +648,20 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     }
     case IValue::Tag::Generator:
       return out << "Generator";
+    case IValue::Tag::Quantizer:
+      return out << "Quantizer";
     case IValue::Tag::Object: {
       // TODO we should attempt to call __str__ if the object defines it.
       auto obj = v.toObject();
       // print this out the way python would do it
       return out << "<" << obj->name() << " object at " << obj.get() << ">";
     }
+    case IValue::Tag::Enum: {
+      auto enum_holder = v.toEnumHolder();
+      return out << "Enum<" << enum_holder->unqualifiedClassName() << "." <<
+          enum_holder->name() << ">";
+    }
+
   }
   AT_ERROR("Tag not found: ", v.tagKind());
 }
@@ -618,8 +819,8 @@ StrongTypePtr::StrongTypePtr(
   TORCH_INTERNAL_ASSERT(type_);
 }
 
-std::unordered_map<std::string, c10::ClassTypePtr>& getCustomClassTypeMap() {
-    static std::unordered_map<std::string, c10::ClassTypePtr> tmap;
+ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTypeMap() {
+    static ska::flat_hash_map<std::type_index, c10::ClassTypePtr> tmap;
     return tmap;
 }
 
@@ -693,7 +894,7 @@ CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
       ctx->srcFutures =
           List<intrusive_ptr<ivalue::Future>>(ctx->srcFutures.elementType());
       if (src->hasError()) {
-        dst->setError(*src->error());
+        dst->setError(src->exception_ptr());
       } else {
         dst->markCompleted(src->constValue());
       }

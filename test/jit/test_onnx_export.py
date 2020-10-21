@@ -289,7 +289,7 @@ class TestONNXExport(JitTestCase):
         self.assertEqual(result, reference)
         torch.onnx.export_to_pretty_string(
             mte, (torch.ones(2, 3),), None, verbose=False,
-            example_outputs=result, propagate=True)
+            example_outputs=result)
 
     def test_onnx_export_speculate(self):
 

@@ -2,14 +2,12 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <c10/util/hash.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/utils/hash.h>
 #include <iostream>
 #include <vector>
-
-#include <torch/csrc/utils/hash.h>
 
 namespace torch {
 namespace jit {
@@ -74,7 +72,8 @@ static_assert(
 
 struct ArgumentSpec {
   ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs) {
-    hash_code = hash_combine(num_flat_tensor_inputs, num_flat_optional_inputs);
+    hash_code =
+        c10::hash_combine(num_flat_tensor_inputs, num_flat_optional_inputs);
     tensor_args.reserve(num_flat_tensor_inputs);
     optional_presence.reserve(num_flat_optional_inputs);
   }
@@ -82,7 +81,7 @@ struct ArgumentSpec {
   void addOptional(const IValue& input) {
     bool is_present = !input.isNone();
     optional_presence.push_back(is_present);
-    hash_code = hash_combine(hash_code, is_present);
+    hash_code = c10::hash_combine(hash_code, is_present);
   }
 
   void addTensor(const IValue& input, bool with_grad) {
@@ -111,7 +110,7 @@ struct ArgumentSpec {
   void combineHash(const ArgumentInfo& arg) {
     ArgumentInfo::plain_data_type arg_data;
     std::memcpy(&arg_data, &arg, sizeof(ArgumentInfo));
-    hash_code = hash_combine(hash_code, arg_data);
+    hash_code = c10::hash_combine(hash_code, arg_data);
   }
 
   // equality is fast: check ninputs, and then check the raw array data,
@@ -272,9 +271,9 @@ struct CompleteArgumentSpec {
     }
     // we precompute the hash_code to minimize the time inside of hash
     // table operations where we may need to hold a compiler cache lock.
-    hash_code = hash_combine(0, ninputs);
+    hash_code = c10::hash_combine(0, ninputs);
     for (auto d : data) {
-      hash_code = hash_combine(hash_code, d);
+      hash_code = c10::hash_combine(hash_code, d);
     }
   }
 
@@ -309,7 +308,7 @@ struct CompleteArgumentSpec {
     return data.data() + ninputs;
   }
   size_t hash_code; // precomputed on construction
-  int32_t ninputs;
+  size_t ninputs;
   // layout is ninputs of TensorPOD (each 64-bit) followed by their size and
   // stride info for 3 tensors:
   // [t0POD][t1POD][t2POD]...
@@ -447,7 +446,7 @@ namespace std {
 template <typename T>
 struct hash<c10::VaryingShape<T>> {
   size_t operator()(const c10::VaryingShape<T>& vs) const {
-    return torch::get_hash(
+    return c10::get_hash(
         vs.size(),
         vs.size() ? vs.sizes().value() : std::vector<c10::optional<T>>());
   }
@@ -456,7 +455,7 @@ struct hash<c10::VaryingShape<T>> {
 template <>
 struct hash<c10::TensorType> {
   size_t operator()(const c10::TensorType& ptt) const {
-    return torch::get_hash<
+    return c10::get_hash<
         c10::optional<int8_t>,
         c10::VaryingShape<int64_t>,
         c10::VaryingShape<int64_t>,

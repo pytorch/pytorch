@@ -124,7 +124,7 @@ def update_bn(loader, model, device=None):
             containing data.
         model (torch.nn.Module): model for which we seek to update BatchNorm
             statistics.
-        device (torch.device, optional): If set, data will be trasferred to
+        device (torch.device, optional): If set, data will be transferred to
             :attr:`device` before being passed into :attr:`model`.
 
     Example:

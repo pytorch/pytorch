@@ -70,8 +70,8 @@ class TestBundledInputs(TestCase):
         # This tensor is random, but with 100,000 trials,
         # mean and std had ranges of (-0.0154, 0.0144) and (0.9907, 1.0105).
         self.assertEqual(inflated[5][0].shape, (1 << 16,))
-        self.assertAlmostEqual(inflated[5][0].mean().item(), 0, delta=0.025)
-        self.assertAlmostEqual(inflated[5][0].std().item(), 1, delta=0.02)
+        self.assertEqual(inflated[5][0].mean().item(), 0, atol=0.025, rtol=0)
+        self.assertEqual(inflated[5][0].std().item(), 1, atol=0.02, rtol=0)
 
 
     def test_large_tensor_with_inflation(self):

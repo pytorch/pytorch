@@ -230,36 +230,6 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
 #undef MAX_LEVELS
 #undef M_SMALL
 
-void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder)
-{
-  dimension = at::maybe_wrap_dim(dimension, t);
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "invalid dimension %d",
-      dimension);
-
-  THTensor_(resizeAs)(rt_, t);
-  at::Tensor rt__wrap = THTensor_wrap(rt_);
-  at::Tensor t_wrap = THTensor_wrap(t);
-  at::native::copy_(rt__wrap, t_wrap);
-  THLongTensor_resize(ri_, t->sizes(), {});
-
-  if(descendingOrder)
-  {
-    TH_TENSOR_DIM_APPLY2(scalar_t, rt_, int64_t, ri_, dimension,
-                         int64_t i;
-                         for(i = 0; i < ri__size; i++)
-                           ri__data[i*ri__stride] = i;
-                         THTensor_(quicksortdescend)(rt__data, ri__data, rt__size, rt__stride);)
-      }
-  else
-  {
-    TH_TENSOR_DIM_APPLY2(scalar_t, rt_, int64_t, ri_, dimension,
-                         int64_t i;
-                         for(i = 0; i < ri__size; i++)
-                           ri__data[i*ri__stride] = i;
-                         THTensor_(quicksortascend)(rt__data, ri__data, rt__size, rt__stride);)
-      }
-}
-
 #endif
 
 #if !defined(TH_REAL_IS_BFLOAT16) && !defined(TH_REAL_IS_HALF)
@@ -281,53 +251,6 @@ void THTensor_(preserveReduceDimSemantics)(
 }
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
-
-void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
-{
-  int64_t batch;
-
-  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch1) == 3, 1, "expected 3D tensor, got %dD", THTensor_(nDimensionLegacyNoScalars)(batch1));
-  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch2) == 3, 2, "expected 3D tensor, got %dD", THTensor_(nDimensionLegacyNoScalars)(batch2));
-  THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
-             "equal number of batches expected, got %d, %d",
-             THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));
-  THArgCheck(THTensor_(size)(batch1, 2) == THTensor_(size)(batch2, 1), 2,
-             "wrong matrix size, batch1: %dx%d, batch2: %dx%d",
-             THTensor_(size)(batch1, 1), THTensor_(size)(batch1, 2),
-             THTensor_(size)(batch2, 1), THTensor_(size)(batch2, 2));
-
-  int64_t bs = THTensor_(size)(batch1, 0);
-  int64_t dim1 = THTensor_(size)(batch1, 1);
-  int64_t dim2 = THTensor_(size)(batch2, 2);
-  THArgCheck(THTensor_(size)(t, 0) == bs, 1,   "output tensor of incorrect size");
-  THArgCheck(THTensor_(size)(t, 1) == dim1, 1, "output tensor of incorrect size");
-  THArgCheck(THTensor_(size)(t, 2) == dim2, 1, "output tensor of incorrect size");
-
-  if (t != result) {
-    THTensor_(resizeAs)(result, t);
-    if (beta != 0.0) {
-      at::Tensor result_wrap = THTensor_wrap(result);
-      at::Tensor t_wrap = THTensor_wrap(t);
-      at::native::copy_(result_wrap, t_wrap);
-    }
-  }
-
-  THTensor *matrix1 = THTensor_(new)();
-  THTensor *matrix2 = THTensor_(new)();
-  THTensor *result_matrix = THTensor_(new)();
-
-  for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
-    THTensor_(select)(matrix1, batch1, 0, batch);
-    THTensor_(select)(matrix2, batch2, 0, batch);
-    THTensor_(select)(result_matrix, result, 0, batch);
-
-    THTensor_(addmm)(result_matrix, result_matrix, matrix1, matrix2, beta, alpha);
-  }
-
-  c10::raw::intrusive_ptr::decref(matrix1);
-  c10::raw::intrusive_ptr::decref(matrix2);
-  c10::raw::intrusive_ptr::decref(result_matrix);
-}
 
 accreal THTensor_(trace)(THTensor *t)
 {

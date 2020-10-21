@@ -6,7 +6,6 @@
 
 namespace at {
 namespace native {
-namespace {
 
 Tensor& resize_cuda_(
     Tensor& self,
@@ -28,11 +27,5 @@ Tensor& resize_cuda_(
   }
   return self;
 }
-
-TORCH_LIBRARY_IMPL(aten, CUDA, m) {
-  m.impl_UNBOXED("resize_", resize_cuda_);
-}
-
-} // namespace
 } // namespace native
 } // namespace at

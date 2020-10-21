@@ -13,9 +13,7 @@ static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRA
 void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
   TORCH_CHECK(options.schemaOrName_.has_value(), "In operator registration: Tried to register an operator without specifying a schema or operator name.");
   if (options.schemaOrName_->is_right()) {
-    // schema was explicitly specified. Check it matches the inferred one and register the op.
-
-    const FunctionSchema& schema = options.schemaOrName_->right();
+    // schema was explicitly specified.
 
     checkNoDuplicateKernels_(options);
 

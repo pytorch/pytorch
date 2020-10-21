@@ -22,7 +22,7 @@ class ExpandOp final : public Operator<Context> {
   bool RunOnDevice() override {
     return DispatchHelper<InputTypes>::call(this, Input(0));
   }
- template <typename T>
+  template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
     const auto& Y_shape_tensor = Input(1);
@@ -64,7 +64,6 @@ class ExpandOp final : public Operator<Context> {
         &context_);
     return true;
   }
-
 };
 
 template <typename InputTypes, class Context>

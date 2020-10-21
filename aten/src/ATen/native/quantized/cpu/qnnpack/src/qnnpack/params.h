@@ -573,4 +573,12 @@ struct pytorch_qnnp_parameters {
   bool initialized;
 };
 
-extern PYTORCH_QNNP_INTERNAL struct pytorch_qnnp_parameters pytorch_qnnp_params;
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+extern struct pytorch_qnnp_parameters pytorch_qnnp_params;
+
+#ifdef __cplusplus
+}
+#endif

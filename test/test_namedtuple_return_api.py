@@ -10,7 +10,7 @@ from collections import namedtuple
 path = os.path.dirname(os.path.realpath(__file__))
 aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.yaml')
 all_operators_with_namedtuple_return = {
-    'max', 'min', 'median', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
+    'max', 'min', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
     'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq',
     'triangular_solve', 'cummax', 'cummin'
 }
@@ -39,7 +39,7 @@ class TestNamedTupleAPI(unittest.TestCase):
             for r in ret:
                 r = r.strip()
                 self.assertEqual(len(r.split()), 1,
-                                 'only whitelisted operators are allowed to have named return type, got ' + name)
+                                 'only allowlisted operators are allowed to have named return type, got ' + name)
         file.close()
         self.assertEqual(all_operators_with_namedtuple_return, operators_found, textwrap.dedent("""
         Some elements in the `all_operators_with_namedtuple_return` of test_namedtuple_return_api.py
@@ -52,7 +52,7 @@ class TestNamedTupleAPI(unittest.TestCase):
 
         op = namedtuple('op', ['operators', 'input', 'names', 'hasout'])
         operators = [
-            op(operators=['max', 'min', 'median', 'mode', 'sort', 'topk', 'cummax', 'cummin'], input=(0,),
+            op(operators=['max', 'min', 'median', 'nanmedian', 'mode', 'sort', 'topk', 'cummax', 'cummin'], input=(0,),
                names=('values', 'indices'), hasout=True),
             op(operators=['kthvalue'], input=(1, 0),
                names=('values', 'indices'), hasout=True),

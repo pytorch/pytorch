@@ -100,6 +100,12 @@ enum pytorch_qnnp_status qnnpackLinearDynamic(
       .ukernel = pytorch_qnnp_params.q8conv.gemm_dq,
   };
 
+  if (output_size == 0) {
+      // pthreadpool can tolerate a range of 0, but not a tile of 0.
+      // We use output_size as a tile size, so bail here if it's 0.
+      return pytorch_qnnp_status_success;
+  }
+
   pthreadpool_compute_4d_tiled(
       threadpool,
       (pthreadpool_function_4d_tiled_t)compute_q8gemm_dq,

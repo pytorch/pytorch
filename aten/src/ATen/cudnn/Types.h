@@ -5,6 +5,7 @@
 
 namespace at { namespace native {
 
+TORCH_CUDA_API cudnnDataType_t getCudnnDataTypeFromScalarType(const at::ScalarType dtype);
 cudnnDataType_t getCudnnDataType(const at::Tensor& tensor);
 
 int64_t cudnn_version();

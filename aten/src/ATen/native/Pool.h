@@ -40,6 +40,7 @@ static inline T pooling_output_shape_pad_lr(
 template<typename T>
 static inline T pooling_output_shape(
       T inputSize, T kernelSize, T pad, T stride, T dilation, bool ceil_mode) {
+    TORCH_CHECK(stride != 0, "stride should not be zero");
     return pooling_output_shape_pad_lr(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode);
 }
@@ -67,11 +68,18 @@ pool2d_shape_check(
               "dilation should be greater than zero, but got ",
               "dilationH: ", dilationH, " dilationW: ", dilationW);
 
+  const auto memory_format = input.suggest_memory_format();
+  
   bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
-  TORCH_CHECK(
-              (ndim == 3 && valid_dims) ||
-              (ndim == 4 && valid_dims && input.size(3) != 0),
-              "3D or 4D (batch mode) input tensor expected but got ndim: ", ndim);
+  if (memory_format == at::MemoryFormat::ChannelsLast){
+    // Expect tensor in NHWC format and allow 0-dim only for N.
+    TORCH_CHECK((input.ndimension() == 4 && valid_dims && input.size(3) != 0),
+      "4D (batch mode) tensor expected for input with channels_last layout");
+  } else {
+    TORCH_CHECK((input.ndimension() == 3 && valid_dims) ||
+                (input.ndimension() == 4 && valid_dims && input.size(3) != 0),
+      "3D or 4D (batch mode) tensor expected for input");
+  }
   
   TORCH_CHECK(kW/2 >= padW && kH/2 >= padH,
               "pad should be smaller than half of kernel size, but got ",
