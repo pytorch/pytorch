@@ -6966,7 +6966,7 @@
     CPU: foreach_tensor_div_list_kernel_slow_
     CUDA: foreach_tensor_div_list_kernel_cuda_
 
-- func: _foreach_add_scalar_list(Tensor[] tensors, float[] scalars) -> Tensor[]
+- func: _foreach_add.ScalarList(Tensor[] tensors, float[] scalars) -> Tensor[]
   use_c10_dispatcher: full
   device_guard: False
   variants: function
@@ -6974,7 +6974,7 @@
     CPU: foreach_tensor_add_scalarlist_kernel_slow
     CUDA: foreach_tensor_add_scalarlist_kernel_cuda
 
-- func: _foreach_add_scalar_list_(Tensor(a!)[] self, float[] scalars) -> ()
+- func: _foreach_add_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   use_c10_dispatcher: full
   device_guard: False
   variants: function
@@ -6982,7 +6982,7 @@
     CPU: foreach_tensor_add_scalarlist_kernel_slow_
     CUDA: foreach_tensor_add_scalarlist_kernel_cuda_
 
-- func: _foreach_sub_scalar_list(Tensor[] tensors, float[] scalars) -> Tensor[]
+- func: _foreach_sub.ScalarList(Tensor[] tensors, float[] scalars) -> Tensor[]
   use_c10_dispatcher: full
   device_guard: False
   variants: function
@@ -6990,7 +6990,7 @@
     CPU: foreach_tensor_sub_scalarlist_kernel_slow
     CUDA: foreach_tensor_sub_scalarlist_kernel_cuda
 
-- func: _foreach_sub_scalar_list_(Tensor(a!)[] self, float[] scalars) -> ()
+- func: _foreach_sub_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   use_c10_dispatcher: full
   device_guard: False
   variants: function
@@ -6998,7 +6998,7 @@
     CPU: foreach_tensor_sub_scalarlist_kernel_slow_
     CUDA: foreach_tensor_sub_scalarlist_kernel_cuda_
 
-- func: _foreach_div_scalar_list(Tensor[] tensors, float[] scalars) -> Tensor[]
+- func: _foreach_div.ScalarList(Tensor[] tensors, float[] scalars) -> Tensor[]
   use_c10_dispatcher: full
   device_guard: False
   variants: function
@@ -7006,7 +7006,7 @@
     CPU: foreach_tensor_div_scalarlist_kernel_slow
     CUDA: foreach_tensor_div_scalarlist_kernel_cuda
 
-- func: _foreach_div_scalar_list_(Tensor(a!)[] self, float[] scalars) -> ()
+- func: _foreach_div_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   use_c10_dispatcher: full
   device_guard: False
   variants: function
@@ -7014,7 +7014,7 @@
     CPU: foreach_tensor_div_scalarlist_kernel_slow_
     CUDA: foreach_tensor_div_scalarlist_kernel_cuda_
 
-- func: _foreach_mul_scalar_list(Tensor[] tensors, float[] scalars) -> Tensor[]
+- func: _foreach_mul.ScalarList(Tensor[] tensors, float[] scalars) -> Tensor[]
   use_c10_dispatcher: full
   device_guard: False
   variants: function
@@ -7022,7 +7022,7 @@
     CPU: foreach_tensor_mul_scalarlist_kernel_slow
     CUDA: foreach_tensor_mul_scalarlist_kernel_cuda
 
-- func: _foreach_mul_scalar_list_(Tensor(a!)[] self, float[] scalars) -> ()
+- func: _foreach_mul_.ScalarList(Tensor(a!)[] self, float[] scalars) -> ()
   use_c10_dispatcher: full
   device_guard: False
   variants: function
@@ -8774,6 +8774,22 @@
 - func: fft_ihfft(Tensor self, int? n=None, int dim=-1, str? norm=None) -> Tensor
   python_module: fft
   use_c10_dispatcher: full
+  variants: function
+
+- func: fft_fft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+  python_module: fft
+  variants: function
+
+- func: fft_ifft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+  python_module: fft
+  variants: function
+
+- func: fft_rfft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+  python_module: fft
+  variants: function
+
+- func: fft_irfft2(Tensor self, int[1]? s=None, int[1] dim=[-2,-1], str? norm=None) -> Tensor
+  python_module: fft
   variants: function
 
 - func: fft_fftn(Tensor self, int[1]? s=None, int[1]? dim=None, str? norm=None) -> Tensor

@@ -23,8 +23,6 @@ from torch.quantization import (
     per_channel_dynamic_qconfig,
     float16_dynamic_qconfig,
     float_qparams_dynamic_qconfig,
-    register_observed_custom_module_mapping,
-    register_quantized_custom_module_mapping,
     PerChannelMinMaxObserver,
     QConfigDynamic,
     default_dynamic_quant_observer
@@ -627,9 +625,6 @@ class TestPostTrainingStatic(QuantizationTestCase):
                 quantized = cls(nnq.Conv2d.from_float(observed_module.conv))
                 return quantized
 
-        register_observed_custom_module_mapping(CustomModule, ObservedCustomModule)
-        register_quantized_custom_module_mapping(CustomModule, QuantizedCustomModule)
-
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -670,14 +665,28 @@ class TestPostTrainingStatic(QuantizationTestCase):
         original_ref_m.conv2.bias = torch.nn.Parameter(original_m.custom.conv.bias.detach())
 
         original_m.qconfig = default_qconfig
-        m = prepare(original_m)
-        self.checkObservers(m)
+        prepare_custom_config_dict = {
+            "float_to_observed_custom_module_class": {
+                CustomModule: ObservedCustomModule
+            }
+        }
+        convert_custom_config_dict = {
+            "observed_to_quantized_custom_module_class": {
+                ObservedCustomModule: QuantizedCustomModule
+            }
+        }
+        m = prepare(
+            original_m,
+            prepare_custom_config_dict=prepare_custom_config_dict)
+        self.checkObservers(m, None, prepare_custom_config_dict)
         # calibration
         m(data)
         # all activation observers are inserted in the top level module
 
         # check converted/quantized model
-        m = convert(m)
+        m = convert(
+            m,
+            convert_custom_config_dict=convert_custom_config_dict)
         # check if the module is properly quantized
         self.assertEqual(type(m.quant), nnq.Quantize)
         self.assertEqual(type(m.conv), nnq.Conv2d)
