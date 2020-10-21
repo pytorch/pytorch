@@ -7,6 +7,9 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 import types
 
+
+FALLBACK_REGEX = r'falling back to slow \(for loop( and stack)?\) implementation'
+
 class TestVmapAPI(TestCase):
     def test_non_tensor_output_raises(self):
         with self.assertRaisesRegex(ValueError, "got type <class 'float'> as the return"):
@@ -24,6 +27,10 @@ class TestVmapAPI(TestCase):
         expected_msg = 'Expected all tensors to have the same size in the mapped dimension'
         with self.assertRaisesRegex(ValueError, expected_msg):
             vmap(torch.mul)(x, y)
+        with self.assertRaisesRegex(ValueError, expected_msg):
+            vmap(lambda z: z[0] + z[1], in_dims=((0, 0),))((x, y))
+        with self.assertRaisesRegex(ValueError, expected_msg):
+            vmap(lambda z: z['x'] + z['y'], in_dims=({'x': 0, 'y': 0},))({'x': x, 'y': y})
 
     def test_func_with_no_inputs(self):
         expected_msg = 'got no inputs'
@@ -124,11 +131,17 @@ class TestVmapAPI(TestCase):
         # Unsupported view op
         tensor = torch.randn(2, 3)
         msg = (
-            "Batching rule not implemented for aten::as_strided; the "
-            "fallback path doesn't work on in-place or view ops"
+            r"Batching rule not implemented for aten::.+; the "
+            r"fallback path doesn't work on out= or view ops"
         )
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(torch.as_strided, (0, None, None))(tensor, [2, 3], [0, 0])
+
+        def out_op(x, y):
+            return torch.abs(x, out=y)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(out_op)(tensor, tensor)
 
         # The fallback doesn't support TensorList
         with self.assertRaisesRegex(RuntimeError, 'Batching rule not implemented'):
@@ -138,15 +151,6 @@ class TestVmapAPI(TestCase):
         # functions that don't return tensors must be special cased
         with self.assertRaisesRegex(RuntimeError, 'Batching rule not implemented'):
             vmap(torch.Tensor.item)(tensor)
-
-    def test_unsupported_inplace_op_err_msg(self):
-        def foo(x):
-            return x.cos_()
-
-        x = torch.randn(3)
-        with self.assertRaisesRegex(
-                RuntimeError, 'Batching rule not implemented'):
-            vmap(foo)(x)
 
     def test_nonzero_out_dims(self):
         # Basic test
@@ -350,51 +354,68 @@ class TestVmapAPI(TestCase):
         result = vmap(vmap(foo, 1, 1), 1, 1)(x)
         self.assertEqual(result, x * 2)
 
+    def test_accepts_nested_inputs(self):
+        B0 = 2
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+
+        # Single layer of nesting
+        out = vmap(lambda z: z[0] + z[1])((x, y))
+        self.assertEqual(out, x + y)
+        out = vmap(lambda z: z[0] + z[1], in_dims=(0,))((x, y))
+        self.assertEqual(out, x + y)
+        out = vmap(lambda z: z[0] + z[1], in_dims=((0, 0),))((x, y))
+        self.assertEqual(out, x + y)
+
+        out = vmap(lambda z: z[0] + z[1])([x, y])
+        self.assertEqual(out, x + y)
+        out = vmap(lambda z: z[0] + z[1], in_dims=(0,))([x, y])
+        self.assertEqual(out, x + y)
+        out = vmap(lambda z: z[0] + z[1], in_dims=([0, 0],))([x, y])
+        self.assertEqual(out, x + y)
+
+        out = vmap(lambda z: z['x'] + z['y'])({'x': x, 'y': y})
+        self.assertEqual(out, x + y)
+        out = vmap(lambda z: z['x'] + z['y'], in_dims=(0,))({'x': x, 'y': y})
+        self.assertEqual(out, x + y)
+        out = vmap(lambda z: z['x'] + z['y'], in_dims=({'x': 0, 'y': 0},))({'x': x, 'y': y})
+        self.assertEqual(out, x + y)
+
+        # Multiple layers of nesting
+        out_fn = vmap(lambda z: z['x'][0] + z['x'][1][0] + z['y'][0] + z['y'][1])
+        out = out_fn({'x': [x, (x,)], 'y': [y, y]})
+        self.assertEqual(out, x + x + y + y)
+
     def test_in_dims_wrong_type_err_msg(self):
         x = torch.randn(3)
         y = torch.randn(3)
-        msg = 'expected `in_dims` to be int or tuple'
+        msg = r'expected `in_dims` to be int or a \(potentially nested\) tuple'
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, [0, 0])(x, y)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, set({0, 0}))(x, y)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, 'lol')(x, y)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda z: z[0] + z[1], in_dims=[0, 0])([x, y])
         # The following should not throw
         vmap(torch.mul, (0, 0))(x, y)
 
     def test_not_enough_in_dims_err_msg(self):
         x = torch.randn(3)
         y = torch.randn(3)
-        msg = r'expected one `in_dim` per input \(got \w+ inputs\)'
+        msg = r'in_dims is not compatible with the structure of `inputs`'
 
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, (0,))(x, y)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, (0, 0, 0))(x, y)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda z: z[0] + z[1], in_dims=([0],))([x, y])
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda z: z[0] + z[1], in_dims=((0, 0),))([x, y])
         # The following should not throw
         vmap(torch.mul, (0, 0))(x, y)
-
-    def test_in_dims_must_be_flat_tuple_err_msg(self):
-        msg = 'in_dims must be a flat tuple containing ints and/or Nones'
-
-        x = torch.randn(3)
-        y = torch.randn(3)
-        z = torch.randn(3)
-
-        def foo(xy):
-            return xy[0] * xy[1]
-
-        def bar(x, yz):
-            return x * yz[0] * yz[1]
-
-        # NB: jax supports all of the following, we don't yet.
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo, ((0, 0),))((x, y))
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(bar, (0, (0, 0)))(x, (y, z))
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo, ({0: 0, 1: 0},))({0: x, 1: y})
 
     def test_integer_in_dim_but_not_tensor_input_err_msg(self):
         def foo(xy):
@@ -406,26 +427,14 @@ class TestVmapAPI(TestCase):
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
 
-        # jax supports these, we too can in the future.
-        msg = 'Got in_dim=0 for input 0, but input 0 is not a Tensor'
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo)((x, y))
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo, (0,))((x, y))
-
-        # jax supports these as well, we too can in the future.
-        msg = 'Got in_dim=0 for input 1, but input 1 is not a Tensor'
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo)(x, (x, y))
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo, (0, 0))(x, (x, y))
-
         # the following are errors in jax (and will always be errors)
-        msg = 'Got in_dim=0 for input 1, but input 1 is not a Tensor'
+        msg = 'Got in_dim=0 for an input but the input is of type'
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.sum)(x, 0)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.sum, (0, 0))(x, 0)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda z: z[0] + z[1], in_dims=([0, 0],))([x, 1])
         # The following should not throw
         vmap(torch.sum, (0, None))(x, 0)
 
@@ -433,15 +442,20 @@ class TestVmapAPI(TestCase):
         def foo(x):
             return x * x
 
-        msg = r'Got in_dim=-?\w for input 0, but input 0 is a Tensor of dimensionality \w'
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+
+        msg = r'Got in_dim=-?\w for some input, but that input is a Tensor of dimensionality \w'
         with self.assertRaisesRegex(ValueError, msg):
             vmap(foo)(torch.randn([]))
         with self.assertRaisesRegex(ValueError, msg):
             vmap(foo, in_dims=(0,))(torch.randn([]))
         with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo, in_dims=(-1,))(torch.randn(2, 3))
+            vmap(foo, in_dims=(-1,))(x)
         with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo, in_dims=(2,))(torch.randn(2, 3))
+            vmap(foo, in_dims=(2,))(y)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda z: z[0] + z[1], in_dims=([3, 0],))([x, y])
         # the following should not throw
         vmap(foo, in_dims=(0,))(torch.randn(2, 3))
         vmap(foo, in_dims=(1,))(torch.randn(2, 3))
@@ -450,8 +464,7 @@ class TestVmapAPI(TestCase):
         with warnings.catch_warnings(record=True) as wa:
             result = vmap(*vmap_args)(*inputs)
             self.assertEqual(len(wa), 2)
-            self.assertRegex(str(wa[-1].message),
-                             r'falling back to slow \(for loop and stack\) implementation')
+            self.assertRegex(str(wa[-1].message), FALLBACK_REGEX)
 
     def test_fallback_atan2(self):
         # NB: One day we will implement a batching rule for torch.atan2.
@@ -464,13 +477,13 @@ class TestVmapAPI(TestCase):
 
         self._assert_uses_vmap_fallback((op,), (x, y))
 
-        # fallback on torch.sub
+        # fallback on torch.atan2
         x = torch.randn(7, 11, 5)
         y = torch.randn(5, 7, 11)
         result = vmap(op, (2, 0))(x, y)
         self.assertEqual(result, op(x.permute(2, 0, 1), y))
 
-        # fallback on torch.sub, nested vmap
+        # fallback on torch.atan2, nested vmap
         x = torch.randn(7, 11, 5)
         y = torch.randn(5, 7, 11)
         result = vmap(vmap(op), (2, 0))(x, y)
@@ -528,6 +541,128 @@ class TestVmapAPI(TestCase):
         result = vmap(vmap(vmap(torch.var_mean)))(tensor)
         expected = torch.var_mean(tensor, dim=3)
         self.assertEqual(result, expected)
+
+    def test_inplace_fallback_unary(self):
+        # Test the in-place fallback on an in-place method that takes no
+        # additional Tensor arguments. This is the simplest case of the fallback.
+        # NB: One day we will implement a batching rule for acos_.
+        # If/when we do, this test should be replaced to test the fallback
+        # path on another operator to avoid bitrot.
+        op = Tensor.acos_
+        B0, B1, B2 = 2, 3, 10000
+
+        x = torch.randn(B0, 5)
+        self._assert_uses_vmap_fallback((op,), (x,))
+
+        # Single vmap
+        x_orig = torch.rand(B0, 5)
+        x = x_orig.clone()
+        result = vmap(op)(x)
+        self.assertTrue(result is x)
+        self.assertEqual(result, x_orig.acos())
+
+        # Single vmap + different out_dim produces a view(!)
+        x_orig = torch.rand(B0, 5)
+        x = x_orig.clone()
+        result = vmap(op, out_dims=(1,))(x)
+        self.assertTrue(result._base is x)
+        self.assertEqual(result, x_orig.t().acos())
+
+        # Nested vmap
+        x_orig = torch.randn(B0, B1, 5)
+        x = x_orig.clone()
+        result = vmap(vmap(op))(x)
+        self.assertTrue(result is x)
+        self.assertEqual(result, x_orig.acos())
+
+        # Nested vmap, large batch size
+        x_orig = torch.randn(B0, B1, B2, 5)
+        x = x_orig.clone()
+        result = vmap(vmap(vmap(op)))(x)
+        self.assertTrue(result is x)
+        self.assertEqual(result, x_orig.acos())
+
+    def test_inplace_fallback_nary_same_levels(self):
+        # NB: One day we will implement a batching rule for atan2_
+        # If/when we do, this test should be replaced to test the fallback
+        # path on another operator to avoid bitrot.
+        op = Tensor.atan2_
+        outplace_op = torch.atan2
+
+        x = torch.randn(5, 7, 11)
+        y = torch.randn(5, 7, 11)
+        self._assert_uses_vmap_fallback((op,), (x, y))
+
+        # Single vmap
+        B0 = 5
+        x_orig = torch.randn(7, 11, B0)
+        x = x_orig.clone()
+        y = torch.randn(B0, 7, 11)
+        vmap(op, (2, 0))(x, y)
+        self.assertEqual(x, outplace_op(x_orig, y.movedim(0, 2)))
+
+        # Nested vmap
+        B0, B1 = 5, 7
+        x_orig = torch.randn(B1, 11, B0)
+        x = x_orig.clone()
+        y = torch.randn(B0, B1, 11)
+        vmap(vmap(op), (2, 0))(x, y)
+        self.assertEqual(x, outplace_op(x_orig, y.movedim([0, 1], [2, 0])))
+
+        # big batch size (total 10000)
+        B0, B1, B2 = 100, 10, 10
+        x_orig = torch.randn(B0, B1, B2, 5)
+        x = x_orig.clone()
+        y = torch.randn(B0, B1, B2)
+        result = vmap(vmap(vmap(op)))(x, y)
+        self.assertEqual(x, outplace_op(x_orig, y.view(B0, B1, B2, 1)))
+
+    def test_inplace_fallback_nary_different_levels(self):
+        # NB: One day we will implement a batching rule for atan2_
+        # If/when we do, this test should be replaced to test the fallback
+        # path on another operator to avoid bitrot.
+        op = Tensor.atan2_
+        outplace_op = torch.atan2
+        B0, B1, B2 = 2, 3, 5
+
+        x = torch.rand(B0, 7)
+        y = torch.rand(7)
+        self._assert_uses_vmap_fallback((op, (0, None)), (x, y))
+
+        # op(left, right): All of the levels in right are found in left
+        x_orig = torch.rand(B0, 7)
+        x = x_orig.clone()
+        y = torch.rand(7)
+        vmap(op, in_dims=(0, None))(x, y)
+        self.assertEqual(x, outplace_op(x_orig, y))
+
+        x_orig = torch.rand(B0, B1, 7)
+        x = x_orig.clone()
+        y = torch.rand(B0, 7)
+        vmap(vmap(op, in_dims=(0, None)))(x, y)
+        self.assertEqual(x, outplace_op(x_orig, y.view(B0, 1, 7)))
+
+        # op(left, right): Some of the levels in right are not found in left
+        msg = r'vmap: aten::atan2_\(self, \*extra_args\) is not possible'
+        x = torch.rand(7)
+        y = torch.rand(B0, 7)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, in_dims=(None, 0))(x, y)
+
+        x = torch.rand(B1, 7)
+        y = torch.rand(B0, 7)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(vmap(op, in_dims=(0, None)), in_dims=(None, 0))(x, y)
+
+        x = torch.rand(B1, 7)
+        y = torch.rand(7, B0)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(vmap(op, in_dims=(0, None)), in_dims=(None, 1))(x, y)
+
+        x = torch.rand(B0, 7)
+        y = torch.rand(B0, B1, 7)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(vmap(op, in_dims=(None, 0)))(x, y)
 
     def test_backward_unsupported_interaction(self):
         x = torch.randn(3, requires_grad=True)
@@ -722,12 +857,11 @@ class Namespace:
 
             @functools.wraps(method)
             def wrapper(self, *args, **kwargs):
-                regex = r'falling back to slow \(for loop and stack\) implementation'
                 with warnings.catch_warnings(record=True) as wa:
                     warnings.simplefilter('always')
                     method(*args, **kwargs)
                     for captured_warning in wa:
-                        self.assertNotRegex(str(captured_warning.message), regex, msg)
+                        self.assertNotRegex(str(captured_warning.message), FALLBACK_REGEX, msg)
             return types.MethodType(wrapper, self)
 
         @allowVmapFallbackUsage
