@@ -841,6 +841,17 @@ class TestFX(JitTestCase):
 
         copied_graph = copy.deepcopy(g)
 
+        val_map = {}
+        for orig_node, new_node in zip(g.nodes, copied_graph.nodes):
+            val_map[orig_node] = new_node
+
+        for orig_node, new_node in zip(g.nodes, copied_graph.nodes):
+            orig_users = set(orig_node.users.keys())
+            orig_users_equiv = set(val_map[u] for u in orig_users)
+            new_users = set(new_node.users.keys())
+            self.assertEqual(orig_users_equiv, new_users)
+            val_map[orig_node] = new_node
+
     @skipIfNoTorchVision
     def test_replace_uses(self):
         rn18 = resnet18()
