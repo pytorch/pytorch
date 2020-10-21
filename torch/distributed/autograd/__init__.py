@@ -14,6 +14,15 @@ if is_available():
     from torch._C._distributed_autograd import (
         get_gradients,
         backward,
+        _init,
+        _new_context,
+        _release_context,
+        _get_max_id,
+        _is_valid_context,
+        _retrieve_context,
+        _current_context,
+        _get_debug_info,
+        DistAutogradContext,
     )
 
 class context(object):
