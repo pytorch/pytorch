@@ -1,5 +1,6 @@
 
 import torch
+import sys
 
 
 def is_available():
@@ -25,3 +26,19 @@ if is_available():
     # this.
 
     from .distributed_c10d import _backend
+    from torch._C._distributed_c10d import (
+        FileStore,
+        _GradBucket,
+        Reducer,
+        _register_comm_hook,
+        _DEFAULT_FIRST_BUCKET_BYTES,
+        _broadcast_coalesced,
+        _compute_bucket_assignment_by_size,
+        _test_python_store,
+    )
+    if sys.platform != 'win32':
+        from torch._C._distributed_c10d import (
+            TCPStore,
+            HashStore,
+            _round_robin_process_groups,
+        )

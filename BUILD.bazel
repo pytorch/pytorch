@@ -213,9 +213,10 @@ genrule(
     name = "all_generated_code",
     srcs = [
         "aten/src/ATen/Declarations.yaml",
+        "aten/src/ATen/native/native_functions.yaml",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --nn-path aten/src",
+    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src",
     tools = [":generate_code"],
 )
 
