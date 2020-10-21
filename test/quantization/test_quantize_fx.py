@@ -1505,36 +1505,57 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 return x
 
         data = torch.rand(3, 3)
-        m = M()
-        m.eval()
-        qconfig_dict = {"": default_qconfig}
-        m = prepare_fx(m, qconfig_dict)
-        node_occurrence = {
-            ns.call_module(torch.quantization.MinMaxObserver): 5,
-            ns.call_module(torch.nn.quantized.FloatFunctional): 0
-        }
-        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
-        m(data)
-        node_list = [
-            ns.call_function(torch.quantize_per_tensor),
-            ns.call_function(torch.ops.quantized.add),
-            ns.call_function(torch.ops.quantized.add),
-            ns.call_function(torch.ops.quantized.mul),
-            ns.call_function(torch.ops.quantized.mul),
-            ns.call_function(torch.ops.quantized.add_relu),
-            ns.call_function(torch.ops.quantized.cat),
-            ns.call_method('dequantize')
-        ]
-        m = convert_fx(m)
-        self.checkGraphModuleNodes(m, expected_node_list=node_list)
+        # Note: QAT test succeeded by chance, to make it actually work
+        # we need to fix eager mode FloatFunctional by removing
+        # activation_post_process in add_scalar and mul_scalar
+        for quant_type in self.static_quant_types:
+            m = M()
+            ref_m = torch.quantization.QuantWrapper(M())
+            is_qat = quant_type == QuantType.QAT
+            if is_qat:
+                m.train()
+                ref_m.train()
+                qconfig = default_qat_qconfig
+                expected_act_post_process = torch.quantization.FakeQuantize
+            else:
+                m.eval()
+                ref_m.eval()
+                qconfig = default_qconfig
+                expected_act_post_process = torch.quantization.MinMaxObserver
 
-        # make sure numerics match with eager mode
-        ref_m = torch.quantization.QuantWrapper(M()).eval()
-        ref_m.qconfig = default_qconfig
-        ref_m = prepare(ref_m)
-        ref_m(data)
-        ref_m = convert(ref_m)
-        self.assertEqual(m(data), ref_m(data))
+            prepare_fx_function = prepare_qat_fx if is_qat else prepare_fx
+            qconfig_dict = {"": qconfig}
+            m = prepare_fx_function(m, qconfig_dict)
+            node_occurrence = {
+                ns.call_module(expected_act_post_process): 5,
+                ns.call_module(torch.nn.quantized.FloatFunctional): 0
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+            m(data)
+            print('observed:', m)
+            node_list = [
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_function(torch.ops.quantized.add),
+                ns.call_function(torch.ops.quantized.add),
+                ns.call_function(torch.ops.quantized.mul),
+                ns.call_function(torch.ops.quantized.mul),
+                ns.call_function(torch.ops.quantized.add_relu),
+                ns.call_function(torch.ops.quantized.cat),
+                ns.call_method('dequantize')
+            ]
+            m = convert_fx(m)
+            print('quantized:', m)
+            self.checkGraphModuleNodes(m, expected_node_list=node_list)
+
+            # make sure numerics match with eager mode
+            ref_m.qconfig = qconfig
+            prepare_function = prepare_qat if is_qat else prepare
+            ref_m = prepare_function(ref_m)
+            ref_m(data)
+            print('ref observed:', ref_m)
+            ref_m = convert(ref_m)
+            print('ref quantized:', ref_m)
+            self.assertEqual(m(data), ref_m(data))
 
 class TestQuantizeFxModels(QuantizationTestCase):
     def _test_model_impl(
