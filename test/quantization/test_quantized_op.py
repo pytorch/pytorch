@@ -3149,7 +3149,7 @@ class TestQuantizedConv(TestCase):
 
         if channelwise:
             if transposed:
-                output_channels = W.shape[1]
+                output_channels = W.shape[1] * groups
             else:
                 output_channels = W.shape[0]
             W_scale = torch.tensor([W_scale] * output_channels)
