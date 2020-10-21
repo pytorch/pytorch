@@ -63,6 +63,7 @@ class IOSJob:
 WORKFLOW_DATA = [
     IOSJob(XCODE_VERSION, ArchVariant("x86_64"), is_org_member_context=False),
     IOSJob(XCODE_VERSION, ArchVariant("arm64")),
+    IOSJob(XCODE_VERSION, ArchVariant("arm64"), extra_props={"use_metal": "ON"}),
     IOSJob(XCODE_VERSION, ArchVariant("arm64", True), extra_props={"op_list": "mobilenetv2.yaml"}),
 ]
 
