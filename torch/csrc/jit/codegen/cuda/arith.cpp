@@ -545,7 +545,7 @@ TensorView* broadcast(
   TensorView* out_tensor = new TensorView(
       new TensorDomain(out_domain, std::vector<bool>(out_domain.size(), true)),
       inp->getDataType().value());
-  new BroadcastOp(out_tensor, inp);
+  new BroadcastOp(out_tensor, inp, is_broadcast_dim);
   return out_tensor;
 }
 

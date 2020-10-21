@@ -188,8 +188,14 @@ bool TernaryOp::sameAs(const TernaryOp* other) const {
   return true;
 }
 
-BroadcastOp::BroadcastOp(Val* _out, Val* _in)
-    : Expr(ExprType::BroadcastOp), out_(_out), in_(_in) {
+BroadcastOp::BroadcastOp(
+    Val* _out,
+    Val* _in,
+    std::vector<bool> is_broadcast_dims)
+    : Expr(ExprType::BroadcastOp),
+      out_(_out),
+      in_(_in),
+      is_broadcast_dims_(std::move(is_broadcast_dims)) {
   auto out_type = _out->getValType().value();
   auto in_type = _in->getValType().value();
 
@@ -247,7 +253,8 @@ BroadcastOp::BroadcastOp(Val* _out, Val* _in)
 BroadcastOp::BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)) {}
+      in_(ir_cloner->clone(src->in_)),
+      is_broadcast_dims_(src->is_broadcast_dims_) {}
 
 bool BroadcastOp::sameAs(const BroadcastOp* const other) const {
   return other->in() == in() && other->out() == out();

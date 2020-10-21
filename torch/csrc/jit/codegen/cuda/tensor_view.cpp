@@ -597,7 +597,10 @@ struct CreateExprConsumer : public OptInDispatch {
   }
 
   void handle(BroadcastOp* broadcast_expr) final {
-    new BroadcastOp(consumer_, broadcast_expr->in());
+    new BroadcastOp(
+        consumer_,
+        broadcast_expr->in(),
+        broadcast_expr->getBroadcastDimFlags());
   }
 
  private:
@@ -674,7 +677,10 @@ struct CreateExprProducer : public OptInDispatch {
   }
 
   void handle(BroadcastOp* broadcast_expr) final {
-    new BroadcastOp(broadcast_expr->out(), producer_);
+    new BroadcastOp(
+        broadcast_expr->out(),
+        producer_,
+        broadcast_expr->getBroadcastDimFlags());
   }
 
  private:
