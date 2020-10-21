@@ -625,7 +625,7 @@ void all_gather(
 #endif
 }
 
-void all2all_single(at::Tensor& input,
+void all2all_single_equal_split(at::Tensor& input,
              at::Tensor& output,
              int size,
              ncclComm_t _comm,
@@ -649,6 +649,53 @@ void all2all_single(at::Tensor& input,
     if (count != 0) {
       NCCL_CHECK(ncclSend(sendbuff + r * rankdiff, count, type, r, comm, stream));
       NCCL_CHECK(ncclRecv(recvbuff + r * rankdiff, count, type, r, comm, stream));
+    }
+  }
+  NCCL_CHECK(ncclGroupEnd());
+#else
+  AT_ERROR("all2all is only supported for NCCL lib version >= 2.7.0");
+#endif
+#else
+  AT_ERROR("PyTorch built without NCCL support");
+#endif
+}
+
+ncclResult_t all2all_single_unequal_split(
+    void* sendbuff,
+    const size_t* sendcounts,
+    const size_t* senddispls,
+    void* recvbuff,
+    const size_t* recvcounts,
+    const size_t* recvdispls,
+    size_t size,
+    ncclDataType_t type,
+    ncclComm_t comm,
+    cudaStream_t stream) {
+#ifdef USE_NCCL
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
+  int numranks;
+  NCCL_CHECK(ncclCommCount(comm, &numranks));
+  NCCL_CHECK(ncclGroupStart());
+  for (int r = 0; r < numranks; r++) {
+    // NCCL uses 0 byte message for synchronization
+    // Avoid send/recv when message size is zero
+    if (sendcounts[r] != 0) {
+      NCCL_CHECK(ncclSend(
+          ((char*)sendbuff) + senddispls[r] * size,
+          sendcounts[r],
+          type,
+          r,
+          comm,
+          stream));
+    }
+    if (recvcounts[r] != 0) {
+      NCCL_CHECK(ncclRecv(
+          ((char*)recvbuff) + recvdispls[r] * size,
+          recvcounts[r],
+          type,
+          r,
+          comm,
+          stream));
     }
   }
   NCCL_CHECK(ncclGroupEnd());
