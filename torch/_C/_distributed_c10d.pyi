@@ -1,12 +1,10 @@
 from torch import Tensor
-from torch.nn import Parameter
 from enum import Enum
 from typing import Optional, List, Any, overload
 from datetime import timedelta
 
 # This module is defined in torch/csrc/distributed/c10d/init.cpp
 
-# Defined in torch/csrc/distributed/c10d/init.cpp
 def _register_comm_hook(reducer: Reducer, state: Any, comm_hook: Any): ...
 
 class _GradBucket:
@@ -16,12 +14,13 @@ class _GradBucket:
 class Reducer:
     def __init__(
         self,
-        replicas: List[List[Parameter]],
+        replicas: List[List[Tensor]],
         bucket_indices: List[List[int]],
         process_group: ProcessGroup,
         expect_sparse_gradients: List[List[bool]],
         bucket_bytes_cap: int,
         find_unused_parameters: bool,
+        gradient_as_bucket_view: bool,
     ): ...
     def initialize_buckets(self, bucket_indices: List[List[int]]): ...
     ...
@@ -46,8 +45,7 @@ class AllreduceOptions:
     timeout: timedelta
 
 class AllreduceCoalescedOptions(AllreduceOptions):
-    reduceOp: ReduceOp
-    timeout: timedelta
+    ...
 
 class ReduceOptions:
     reduceOp: ReduceOp
@@ -77,8 +75,8 @@ class AllToAllOptions:
     timeout: timedelta
 
 class Store:
+    # Added because it is used by TCPStore
     kDefaultTimeout: timedelta
-    kNoTimeout: timedelta
     def set(self, key: str, value: str): ...
     def get(self, key: str) -> bytes: ...
     def add(self, key: str, value: int) -> int: ...
@@ -103,11 +101,11 @@ class HashStore(Store):
 class TCPStore(Store):
     def __init__(
         self,
-        masterAddr: Optional[str],
-        masterPort: int,
-        numWorkers: int,
-        isServer: bool,
-        timeout: timedelta
+        host_name: str,
+        port: int,
+        world_size: int,
+        is_master: bool,
+        timeout: timedelta = kDefaultTimeout
     ): ...
 
 class PrefixStore(Store):
@@ -118,10 +116,12 @@ class PrefixStore(Store):
     ): ...
 
 class Work:
+    # Added because it is used by the wait() method
+    kNoTimeout: timedelta
     def is_completed(self) -> bool: ...
     def is_success(self) -> bool: ...
     def exception(self) -> Any: ...
-    def wait(self) -> bool: ...
+    def wait(self, timeout: timedelta = kNoTimeout) -> bool: ...
     def source_rank(self) -> int: ...
     def _source_rank(self) -> int: ...
     def result(self) -> List[Tensor]: ...
@@ -154,13 +154,13 @@ class ProcessGroup:
     def allreduce(
         self,
         tensors: List[Tensor],
-        opts = ReduceOp.SUM,
+        op = ReduceOp.SUM,
     ) -> Work: ...
     @overload
     def allreduce(
         self,
         tensor: Tensor,
-        opts = ReduceOp.SUM,
+        op = ReduceOp.SUM,
     ) -> Work: ...
     def allreduce_coalesced(
         self,
@@ -297,9 +297,9 @@ def _round_robin_process_groups(
     process_groups: List[ProcessGroup],
 ) -> ProcessGroupRoundRobin: ...
 
-class Device: ...
 
 class ProcessGroupGloo(ProcessGroup):
+    class Device: ...
     def __init__(
         self,
         store: Store,
@@ -309,6 +309,7 @@ class ProcessGroupGloo(ProcessGroup):
     ): ...
     @staticmethod
     def create_device(hostname = str(), interface = str()) -> Device: ...
+    ...
 
 class ProcessGroupNCCL(ProcessGroup):
     def __init__(
@@ -322,6 +323,7 @@ class ProcessGroupNCCL(ProcessGroup):
     def _group_start() -> None: ...
     @staticmethod
     def _group_end() -> None: ...
+    ...
 
 class ProcessGroupMPI(ProcessGroup):
     def __init__(
@@ -342,7 +344,7 @@ def _broadcast_coalesced(
     process_group: ProcessGroup,
     tensors: List[Tensor],
     buffer_size: int,
-    rank: int,
+    src: int,
 ): ...
 def _test_python_store(store: Store): ...
 
