@@ -119,12 +119,6 @@ void avg_pool2d_out_cpu_template(
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
-  bool valid_dims = input_.size(1) != 0 && input_.size(2) != 0;
-  TORCH_CHECK(
-      (input_.ndimension() == 3 && valid_dims) ||
-      (input_.ndimension() == 4 && valid_dims && input_.size(3) != 0),
-      "3D or 4D (batch mode) tensor expected for input");
-
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
     "divisor must be not zero");
 
@@ -279,14 +273,7 @@ Tensor& avg_pool2d_backward_out_cpu_template(
     "avg_pool2d: padding must either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
-
   const int64_t ndim = input.ndimension();
-
-  bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
-  TORCH_CHECK(
-    (ndim == 3 && valid_dims) ||
-    (ndim == 4 && valid_dims && input.size(3) != 0),
-    "3D or 4D (batch mode) tensor expected for input");
 
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");
 
