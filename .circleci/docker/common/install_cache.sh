@@ -42,8 +42,6 @@ else
       install_binary
       ;;
   esac
-  install_binary
-  apt-get install cargo pkg-config libssl-dev
 fi
 chmod a+x /opt/cache/bin/sccache
 
