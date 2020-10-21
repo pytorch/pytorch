@@ -17,6 +17,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/cpu/Loops.h>
 
 #include <type_traits>
 #include <functional>
@@ -300,24 +301,31 @@ Tensor& random_(Tensor& self, int64_t to, c10::optional<Generator> gen) {
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
   Tensor ret = at::empty(self.sizes(), self.options());
+  auto iter = TensorIteratorConfig()
+    .add_output(ret)
+    .add_input(self)
+    .add_input(output)
+    .build();
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "_standard_gamma_grad_cpu", [&] {
-    CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, self, output,
-      [](scalar_t& ret_val, const scalar_t& self_val, const scalar_t &output_val) {
-        ret_val = standard_gamma_grad_one<scalar_t, double>(self_val, output_val);
-      }
-    );
+    cpu_serial_kernel(iter, [](scalar_t self_val, scalar_t output_val) -> scalar_t{
+      return standard_gamma_grad_one<scalar_t, double>(self_val, output_val);
+    });
   });
   return ret;
 }
 
 Tensor _dirichlet_grad_cpu(const Tensor& x, const Tensor& alpha, const Tensor& total) {
   Tensor ret = at::empty(x.sizes(), x.options());
+  auto iter = TensorIteratorConfig()
+    .add_output(ret)
+    .add_input(x)
+    .add_input(alpha)
+    .add_input(total)
+    .build();
   AT_DISPATCH_FLOATING_TYPES(x.scalar_type(), "_dirichlet_grad_cpu", [&] {
-    CPU_tensor_apply4<scalar_t, scalar_t, scalar_t, scalar_t>(ret, x, alpha, total,
-      [](scalar_t& ret_val, const scalar_t& x_val, const scalar_t& alpha_val, const scalar_t& total_val) {
-        ret_val = dirichlet_grad_one<scalar_t, double>(x_val, alpha_val, total_val);
-      }
-    );
+    cpu_serial_kernel(iter, [](scalar_t x_val, scalar_t alpha_val, scalar_t total_val) -> scalar_t{
+      return dirichlet_grad_one<scalar_t, double>(x_val, alpha_val, total_val);
+    });
   });
   return ret;
 }
@@ -328,67 +336,72 @@ Tensor _dirichlet_grad_cpu(const Tensor& x, const Tensor& alpha, const Tensor& t
 
 Tensor _s_binomial_cpu(const Tensor& count, const Tensor& prob, c10::optional<Generator> gen) {
   Tensor ret = at::zeros(count.sizes(), count.options());
+  auto iter = TensorIteratorConfig()
+    .add_output(ret)
+    .add_input(count)
+    .add_input(prob)
+    .build();
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "binomial_cpu", [&] {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, count, prob,
-      [generator](scalar_t& ret_val, const scalar_t& count, const scalar_t& prob){
+    cpu_serial_kernel(iter, [generator](scalar_t count_val, scalar_t prob_val) -> scalar_t{
+      auto uniform_lambda = [generator] () {
+        at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
+        return standard_uniform(generator);
+      };
+      BaseSampler<double, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
 
-        auto uniform_lambda = [generator] () {
-          at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
-          return standard_uniform(generator);
-        };
-        BaseSampler<double, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
-
-        auto sample = sample_binomial<scalar_t, double, decltype(uniform_lambda)>(count, prob, standard_uniform);
-        ret_val = static_cast<scalar_t>(sample);
-      }
-    );
+      auto sample = sample_binomial<scalar_t, double, decltype(uniform_lambda)>(count_val, prob_val, standard_uniform);
+      return static_cast<scalar_t>(sample);
     });
+  });
   return ret;
 }
 
 Tensor _s_poisson_cpu(const Tensor& lambda, c10::optional<Generator> gen) {
   Tensor ret = at::zeros(lambda.sizes(), lambda.options());
+  auto iter = TensorIteratorConfig()
+    .add_output(ret)
+    .add_input(lambda)
+    .build();
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "poisson_cpu", [&] {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    CPU_tensor_apply2<scalar_t, scalar_t>(ret, lambda,
-      [generator](scalar_t& ret_val, const scalar_t& lambda){
-        ret_val = static_cast<scalar_t>(sample_poisson(static_cast<double>(lambda), generator));
-      }
-    );
+    cpu_serial_kernel(iter, [generator](scalar_t lambda_val) -> scalar_t{
+      return static_cast<scalar_t>(sample_poisson(static_cast<double>(lambda_val), generator));
     });
+  });
   return ret;
 }
 
 Tensor _s_gamma_cpu(const Tensor& alpha, c10::optional<Generator> gen) {
   Tensor ret = at::zeros(alpha.sizes(), alpha.options());
+  auto iter = TensorIteratorConfig()
+    .add_output(ret)
+    .add_input(alpha)
+    .build();
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "gamma_cpu", [&] {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    CPU_tensor_apply2<scalar_t, scalar_t>(ret, alpha,
-      [generator](scalar_t& ret_val, const scalar_t& alpha){
+    cpu_serial_kernel(iter, [generator](scalar_t alpha_val) -> scalar_t{
+      auto uniform_lambda = [generator] () {
+        at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
+        return standard_uniform(generator);
+      };
+      BaseSampler<double, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
 
-        auto uniform_lambda = [generator] () {
-          at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
-          return standard_uniform(generator);
-        };
-        BaseSampler<double, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
-
-        auto normal_lambda = [generator] () {
-          at::normal_distribution<double> normal(0.0, 1.0);
-          return normal(generator);
-        };
-        BaseSampler<double, decltype(normal_lambda)> standard_normal(normal_lambda);
-        auto sample = sample_gamma<scalar_t, double, decltype(uniform_lambda), decltype(normal_lambda)>(alpha, standard_uniform, standard_normal);
-        ret_val = std::max(std::numeric_limits<scalar_t>::min(), (scalar_t) sample);
-      }
-    );
+      auto normal_lambda = [generator] () {
+        at::normal_distribution<double> normal(0.0, 1.0);
+        return normal(generator);
+      };
+      BaseSampler<double, decltype(normal_lambda)> standard_normal(normal_lambda);
+      auto sample = sample_gamma<scalar_t, double, decltype(uniform_lambda), decltype(normal_lambda)>(alpha_val, standard_uniform, standard_normal);
+      return std::max(std::numeric_limits<scalar_t>::min(), (scalar_t) sample);
     });
+  });
 
   return ret;
 }
@@ -401,35 +414,41 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, c10::optional<Generator> gen) {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     /* Generate gamma sample by casting alpha to double to prevent underflow. */
-    CPU_tensor_apply2<double, scalar_t>(gamma, alpha,
-      [generator](double& ret_val, const scalar_t& alpha){
-        auto uniform_lambda = [generator] () {
-          at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
-          return standard_uniform(generator);
-        };
-        BaseSampler<double, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
+    auto iter1 = TensorIteratorConfig()
+      .add_output(gamma)
+      .add_input(alpha)
+      .check_all_same_dtype(false)
+      .build();
+    cpu_serial_kernel(iter1, [generator](scalar_t alpha_val) -> double{
+      auto uniform_lambda = [generator] () {
+        at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
+        return standard_uniform(generator);
+      };
+      BaseSampler<double, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
 
-        auto normal_lambda = [generator] () {
-          at::normal_distribution<double> normal(0.0, 1.0);
-          return normal(generator);
-        };
-        BaseSampler<double, decltype(normal_lambda)> standard_normal(normal_lambda);
-        auto sample = sample_gamma<double, double, decltype(uniform_lambda), decltype(normal_lambda)>
-          (alpha, standard_uniform, standard_normal);
-        ret_val = std::max(std::numeric_limits<double>::min(), sample);
-      }
-    );
+      auto normal_lambda = [generator] () {
+        at::normal_distribution<double> normal(0.0, 1.0);
+        return normal(generator);
+      };
+      BaseSampler<double, decltype(normal_lambda)> standard_normal(normal_lambda);
+      auto sample = sample_gamma<double, double, decltype(uniform_lambda), decltype(normal_lambda)>
+        (alpha_val, standard_uniform, standard_normal);
+      return std::max(std::numeric_limits<double>::min(), sample);
+    });
     /* Normalize and cast back to scalar_t. */
     Tensor gamma_sum = gamma.sum(-1, true).expand(alpha.sizes());
-    CPU_tensor_apply3<scalar_t, double , double>(ret, gamma, gamma_sum,
-      [](scalar_t& ret_val, const double& gamma, const double& gamma_sum){
-        ret_val = gamma / gamma_sum;
-        auto min_val = std::numeric_limits<scalar_t>::min();
-        auto max_val = std::nexttoward(static_cast<scalar_t>(1.0f), 0.0f);
-        ret_val = std::min(max_val, std::max(min_val, ret_val));
-        ret_val = static_cast<scalar_t>(ret_val);
-      }
-    );
+    auto iter2 = TensorIteratorConfig()
+      .add_output(ret)
+      .add_input(gamma)
+      .add_input(gamma_sum)
+      .check_all_same_dtype(false)
+      .build();
+    cpu_serial_kernel(iter2, [](double gamma_val, double gamma_sum_val) -> scalar_t{
+      auto ret_val = gamma_val / gamma_sum_val;
+      auto min_val = std::numeric_limits<scalar_t>::min();
+      auto max_val = std::nexttoward(static_cast<scalar_t>(1.0f), 0.0f);
+      return std::min(max_val, std::max(min_val, static_cast<scalar_t>(ret_val)));
+    });
   });
   return ret;
 }

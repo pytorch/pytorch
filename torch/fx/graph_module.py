@@ -28,9 +28,7 @@ def patched_getline(*args, **kwargs):
 linecache.getlines = patched_getline
 
 def _forward_from_src(src : str):
-    gbls: Dict[str, Any] = {
-        'torch': torch
-    }
+    gbls: Dict[str, Any] = {}
     exec_with_source(src, gbls)
     return gbls['forward']
 
@@ -59,7 +57,8 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
         def is_leaf_module(self, _: torch.nn.Module, __: str) -> bool:
             return True
 
-    return KeepModules().trace(CodeOnlyModule(body))
+    com = CodeOnlyModule(body)
+    return GraphModule(com, KeepModules().trace(com))
 
 # copy an attribute value with qualified name 'target' from 'from_module' to 'to_module'
 # This installs empty Modules where none exist yet if they are subpaths of target
@@ -106,7 +105,9 @@ class GraphModule(torch.nn.Module):
         forward : The Python method generated from `graph`
 
     Note that when `graph` is reassigned, `code` and `forward` will be automatically
-    regenerated.
+    regenerated. However, if you edit the contents of the `graph` without reassigning
+    the `graph` attribute itself, you must call `recompile()` to update the generated
+    code.
     """
     def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
         # each instance of a graph module needs its own forward method
@@ -164,7 +165,7 @@ class GraphModule(torch.nn.Module):
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
     #
     # Shouldn't be an issue since these methods shouldn't be used in TorchScript anyway
-    __ignored_properties__ = ['graph']
+    __jit_unused_properties__ = ['graph']
 
     @property
     def graph(self):
@@ -173,13 +174,15 @@ class GraphModule(torch.nn.Module):
     @graph.setter
     def graph(self, val) -> None:
         self._graph = val
-        body, result, free_variables = self._graph.python_code(root_module='self')
-        body = '\n'.join('    ' + line for line in body.split('\n')) + '\n'
-        self.code = f"""\
-def forward(self, {', '.join(free_variables)}):
-{body}
-    return {result}
-"""
+        self.recompile()
+
+    def recompile(self) -> None:
+        """
+        Recompile this GraphModule from its `graph` attribute. This should be
+        called after editing the contained `graph`, otherwise the generated
+        code of this `GraphModule` will be out of date.
+        """
+        self.code = self._graph.python_code(root_module='self')
         cls = type(self)
         cls.forward = _forward_from_src(self.code)
 

@@ -1,7 +1,7 @@
 import re
 
 from dataclasses import dataclass
-from typing import List, Sequence, Dict, Optional, Iterator, Tuple, Set, NoReturn
+from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn
 from enum import Enum
 import itertools
 
@@ -47,10 +47,13 @@ class Location:
 # Valid values of the 'variants' field in native_functions.yaml
 Variant = Enum('Variant', ('function', 'method'))
 
-UseC10Dispatcher = Enum('UseC10Dispatcher', (
-    'full',
-    'with_codegenerated_unboxing_wrapper'
-))
+class UseC10Dispatcher(Enum):
+    full = 0
+    with_codegenerated_unboxing_wrapper = 1
+    hacky_wrapper_for_legacy_signatures = 2
+
+    def dispatcher_uses_new_style(self) -> bool:
+        return self in [UseC10Dispatcher.full, UseC10Dispatcher.hacky_wrapper_for_legacy_signatures]
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -128,6 +131,8 @@ class NativeFunction:
             use_c10_dispatcher = UseC10Dispatcher.with_codegenerated_unboxing_wrapper
         elif use_c10_dispatcher_s == 'full':
             use_c10_dispatcher = UseC10Dispatcher.full
+        elif use_c10_dispatcher_s == 'hacky_wrapper_for_legacy_signatures':
+            use_c10_dispatcher = UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
         else:
             raise AssertionError(
                 f'use_c10_dispatcher must be unset or set to full, got {use_c10_dispatcher}')
@@ -168,6 +173,9 @@ class NativeFunction:
                 for k in ks.split(","):
                     dispatch[k.strip()] = v
 
+        # Throws if both DefaultBackend and Math are provided
+        assert not (dispatch is not None and 'DefaultBackend' in dispatch and 'Math' in dispatch)
+
         e.pop('__line__')
         assert not e, f"leftover entries: {e}"
 
@@ -196,6 +204,56 @@ class NativeFunction:
                 "be declared with only function variant; e.g., variants: function; " \
                 "otherwise you will tickle a Python argument binding bug " \
                 "(which usually manifests itself as the result variable being undefined.)"
+
+SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
+
+# Represents a bundle of native functions that are semantically related.
+@dataclass(frozen=True)
+class NativeFunctionGroup:
+    functional: Optional[NativeFunction]
+    inplace: Optional[NativeFunction]
+    out: Optional[NativeFunction]
+
+    def __post_init__(self) -> None:
+        test_sig: Optional[FunctionSchema] = None
+        for f in self.functions():
+            if test_sig is None:
+                test_sig = f.func.signature()
+            else:
+                if test_sig != f.func.signature():
+                    raise AssertionError(
+                        "NativeFunctionGroup constructed from two NativeFunctions "
+                        f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
+                    )
+
+    def signature(self) -> 'FunctionSchema':
+        if self.out is not None:
+            return self.out.func.signature()
+        elif self.functional is not None:
+            return self.functional.func.signature()
+        elif self.inplace is not None:
+            return self.inplace.func.signature()
+        else:
+            raise AssertionError("invalid NativeFunctionGroup has no NativeFunctions")
+
+    def functions(self) -> Iterator[NativeFunction]:
+        if self.out is not None:
+            yield self.out
+        if self.functional is not None:
+            yield self.functional
+        if self.inplace is not None:
+            yield self.inplace
+
+    @staticmethod
+    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> 'NativeFunctionGroup':
+        functional = d.get(SchemaKind.functional)
+        inplace = d.get(SchemaKind.inplace)
+        out = d.get(SchemaKind.out)
+        return NativeFunctionGroup(
+            functional=functional,
+            inplace=inplace,
+            out=out,
+        )
 
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,
@@ -255,18 +313,17 @@ class FunctionSchema:
     # The name of the operator this function schema describes.
     name: 'OperatorName'
 
-    # NB: Sequence here is intentional, to make it read only
-    arguments: Sequence['Argument']
-    kwarg_only_arguments: Sequence['Argument']  # but not including out args
+    arguments: Tuple['Argument', ...]
+    kwarg_only_arguments: Tuple['Argument', ...]  # but not including out args
     # Unlike in the previous codegen, we have factored out 'out' arguments
     # in the canonical representation, removing them from kwarg
     # arguments.  This choice is justified by numerous downstream
     # transformations which treat out arguments specially; additionally,
     # you can see that canonicity is not violated!
-    out_arguments: Sequence['Argument']  # these are also kwarg-only
+    out_arguments: Tuple['Argument', ...]  # these are also kwarg-only
 
     # TODO: Need to handle collisions with argument names at some point
-    returns: Sequence['Return']
+    returns: Tuple['Return', ...]
 
     def schema_order_arguments(self) -> Iterator['Argument']:
         return itertools.chain(self.arguments, self.kwarg_only_arguments, self.out_arguments)
@@ -303,11 +360,11 @@ class FunctionSchema:
         if self.name.name.inplace:
             # TODO: fixme
             if str(self.name) not in [
-                    '_amp_non_finite_check_and_unscale_',
-                    '_foreach_add_scalar_list_',
-                    '_foreach_sub_scalar_list_',
-                    '_foreach_mul_scalar_list_',
-                    '_foreach_div_scalar_list_',
+                    '_amp_foreach_non_finite_check_and_unscale_',
+                    '_foreach_add_.ScalarList',
+                    '_foreach_sub_.ScalarList',
+                    '_foreach_mul_.ScalarList',
+                    '_foreach_div_.ScalarList',
                     '_foreach_add_.Scalar',
                     '_foreach_sub_.Scalar',
                     '_foreach_mul_.Scalar',
@@ -318,8 +375,10 @@ class FunctionSchema:
                     '_foreach_div_.List',
                     '_foreach_exp_',
                     '_foreach_sqrt_',
-                    '_foreach_addcmul_',
-                    '_foreach_addcdiv_']:
+                    '_foreach_addcmul_.Scalar',
+                    '_foreach_addcdiv_.Scalar',
+                    '_foreach_addcmul_.ScalarList',
+                    '_foreach_addcdiv_.ScalarList']:
                 assert len(self.returns) == 1
 
     def is_out_fn(self) -> bool:
@@ -351,6 +410,76 @@ class FunctionSchema:
         #     we only do this check in tools/
         return bool(self.out_arguments)
 
+    def kind(self) -> SchemaKind:
+        """
+        What kind of schema is this?  A functional schema is one
+        that returns a newly allocated output; an inplace schema
+        modifies the self argument inplace; an out schema writes
+        the result into an explicitly provided out argument.
+        """
+        is_inplace = self.name.name.inplace
+        is_out = bool(self.out_arguments)
+        assert not (is_inplace and is_out)
+        if is_inplace:
+            return SchemaKind.inplace
+        elif is_out:
+            return SchemaKind.out
+        else:
+            return SchemaKind.functional
+
+    # WARNING: This method is not currently tested in any meaningful way
+    def signature(self) -> 'FunctionSchema':
+        """
+        Certain schemas are 'related', in that they are simply
+        inplace/out/functional versions of the same function.  This method
+        factors these schemas into the "core" functional signature which
+        is equal across all versions.
+
+        Here is what normalization happens to the schema to convert
+        it to a signature:
+        - The overload name is stripped (name is retained, since
+          it expresses semantic content about what the function does)
+        - Inplace is set False
+        - Out arguments are stripped
+        - Mutability annotations are stripped  (this is sound
+          because you cannot overload on mutability annotation)
+
+        This function is based off of get_signature in
+        tools.autograd.load_derivatives
+        """
+
+        # dataclasses.replace could be used here, but it is less
+        # type safe so for now I've opted to type everything out
+        def strip_arg_annotation(a: Argument) -> Argument:
+            return Argument(
+                name=a.name,
+                type=a.type,
+                default=a.default,  # hmmm
+                annotation=None,
+            )
+
+        def strip_ret_annotation(r: Return) -> Return:
+            return Return(
+                name=r.name,
+                type=r.type,
+                annotation=None,
+            )
+
+        return FunctionSchema(
+            name=OperatorName(
+                name=BaseOperatorName(
+                    base=self.name.name.base,
+                    inplace=False,
+                    dunder_method=self.name.name.dunder_method,
+                ),
+                overload_name="",  # stripped
+            ),
+            arguments=tuple(map(strip_arg_annotation, self.arguments)),
+            kwarg_only_arguments=tuple(map(strip_arg_annotation, self.kwarg_only_arguments)),
+            out_arguments=(),  # stripped
+            returns=tuple(map(strip_ret_annotation, self.returns)),
+        )
+
     def __str__(self) -> str:
         all_arguments: List[str] = []
         all_arguments.extend(map(str, self.arguments))
@@ -376,14 +505,14 @@ class FunctionSchema:
 class Annotation:
     # Typically only has one element.  Not actually a set so
     # we can conveniently assume it is canonically ordered
-    alias_set: Sequence[str]
+    alias_set: Tuple[str, ...]
     is_write: bool
 
     @staticmethod
     def parse(ann: str) -> 'Annotation':
         m = re.match(r'^([a-z])(!?)$', ann)
         assert m is not None, f'unrecognized alias annotation {ann}'
-        alias_set = [m.group(1)]
+        alias_set = (m.group(1),)
         is_write = m.group(2) == '!'
         r = Annotation(alias_set=alias_set, is_write=is_write)
         assert str(r) == ann, f'{r} != {ann}'
@@ -455,6 +584,7 @@ BaseTy = Enum('BaseTy', (
     'MemoryFormat',
     'QScheme',
     'Storage',
+    'Stream',
     'ConstQuantizerPtr',  # TODO: rename
 ))
 
@@ -729,21 +859,18 @@ class OperatorName:
 
 # Helper functions for parsing argument lists (both inputs and returns)
 
-def parse_returns(return_decl: str) -> Sequence[Return]:
+def parse_returns(return_decl: str) -> Tuple[Return, ...]:
     """
     Input: '()'
     Output: []
     """
     if return_decl == '()':
-        return []
+        return ()
     if return_decl[0] == '(' and return_decl[-1] == ')':
         return_decl = return_decl[1:-1]
-    returns = []
-    for arg in return_decl.split(', '):
-        returns.append(Return.parse(arg))
-    return returns
+    return tuple(Return.parse(arg) for arg in return_decl.split(', '))
 
-def parse_arguments(args: str) -> Tuple[Sequence[Argument], Sequence[Argument], Sequence[Argument]]:
+def parse_arguments(args: str) -> Tuple[Tuple[Argument, ...], Tuple[Argument, ...], Tuple[Argument, ...]]:
     """
     Input: 'int x, int y, int z'
     Output: positional args, kwarg only args
@@ -778,4 +905,4 @@ def parse_arguments(args: str) -> Tuple[Sequence[Argument], Sequence[Argument], 
             assert arguments_acc is not out_arguments
         arguments_acc.append(parg)
 
-    return arguments, kwarg_only_arguments, out_arguments
+    return tuple(arguments), tuple(kwarg_only_arguments), tuple(out_arguments)

@@ -436,6 +436,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: maximum
    .. automethod:: mean
    .. automethod:: median
+   .. automethod:: nanmedian
    .. automethod:: min
    .. automethod:: minimum
    .. automethod:: mm
@@ -453,6 +454,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: narrow
    .. automethod:: narrow_copy
    .. automethod:: ndimension
+   .. automethod:: nan_to_num
+   .. automethod:: nan_to_num_
    .. automethod:: ne
    .. automethod:: ne_
    .. automethod:: not_equal
@@ -492,6 +495,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: q_per_channel_axis
    .. automethod:: rad2deg
    .. automethod:: random_
+   .. automethod:: ravel
    .. automethod:: reciprocal
    .. automethod:: reciprocal_
    .. automethod:: record_stream
@@ -571,6 +575,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: symeig
    .. automethod:: t
    .. automethod:: t_
+   .. automethod:: tensor_split
    .. automethod:: to
    .. automethod:: to_mkldnn
    .. automethod:: take

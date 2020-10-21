@@ -192,6 +192,12 @@ class Tensor(torch._C._TensorBase):
         See :ref:`Default gradient layouts<default-grad-layouts>`
         for details on the memory layout of accumulated gradients.
 
+        .. note::
+
+            If you run any forward ops, create ``gradient``, and/or call ``backward``
+            in a user-specified CUDA stream context, see
+            :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
+
         Arguments:
             gradient (Tensor or None): Gradient w.r.t. the
                 tensor. If it is a tensor, it will be automatically converted
@@ -518,7 +524,7 @@ class Tensor(torch._C._TensorBase):
         if self.dtype.is_floating_point or self.dtype.is_complex:
             return self.reciprocal() * other
         else:
-            return (self.double().reciprocal() * other).type_as(self)
+            return self.to(torch.get_default_dtype()).reciprocal() * other
 
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__
@@ -552,10 +558,7 @@ class Tensor(torch._C._TensorBase):
 
     @_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
-        result = other / self
-        if result.dtype.is_floating_point:
-            result = result.trunc()
-        return result
+        return torch.floor_divide(other, self)
 
     __neg__ = _C._TensorBase.neg
 

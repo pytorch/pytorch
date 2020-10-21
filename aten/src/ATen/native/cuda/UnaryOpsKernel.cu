@@ -10,7 +10,9 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
+#include <ATen/NumericUtils.h>
 #include <c10/cuda/CUDAMathCompat.h>
+#include <ATen/NumericUtils.h>
 #include <c10/util/complex.h>
 
 namespace at {
@@ -153,29 +155,70 @@ void erfinv_kernel_cuda(TensorIterator& iter) {
 }
 
 void clamp_kernel_cuda(TensorIterator& iter, Scalar min_value, Scalar max_value) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_cuda", [&]() {
     auto lower = min_value.to<scalar_t>();
     auto upper = max_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
-      return (v < lower) ? lower : (v > upper ? upper : v);
+      // Propagate nan, which doesn't propagate automatically for ROCm
+      if (_isnan(v)) {
+        return v;
+      } else {
+        return ::min(::max(v, lower), upper);
+      }
     });
   });
 }
 
 void clamp_min_kernel_cuda(TensorIterator& iter, Scalar min_value) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_min_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_min_cuda", [&]() {
     auto lower = min_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
-      return v < lower ? lower : v;
+      // Propagate nan, which doesn't propagate automatically for ROCm
+      if (_isnan(v)) {
+        return v;
+      } else {
+        return ::max(v, lower);
+      }
     });
   });
 }
 
 void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "clamp_max_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_max_cuda", [&]() {
     auto upper = max_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
-      return v > upper ? upper : v;
+      // Propagate nan, which doesn't propagate automatically for ROCm
+      if (_isnan(v)) {
+        return v;
+      } else {
+        return ::min(v, upper);
+      }
+    });
+  });
+}
+
+void nan_to_num_kernel_cuda(
+    TensorIterator& iter,
+    c10::optional<double> nan,
+    c10::optional<double> pos_inf,
+    c10::optional<double> neg_inf) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "nan_to_num_cuda", [&]() {
+    scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
+    scalar_t pos_inf_replacement = pos_inf.has_value()
+        ? static_cast<scalar_t>(pos_inf.value())
+        : std::numeric_limits<scalar_t>::max();
+    scalar_t neg_inf_replacement = neg_inf.has_value()
+        ? static_cast<scalar_t>(neg_inf.value())
+        : std::numeric_limits<scalar_t>::lowest();
+    gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return (
+          at::_isnan(a)
+              ? nan_replacement
+              : (a == std::numeric_limits<scalar_t>::infinity()
+                     ? pos_inf_replacement
+                     : (a == -std::numeric_limits<scalar_t>::infinity()
+                            ? neg_inf_replacement
+                            : a)));
     });
   });
 }
@@ -206,6 +249,7 @@ REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel_cuda);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);
+REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel_cuda);
 
 } // namespace native
