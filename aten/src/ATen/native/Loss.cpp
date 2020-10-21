@@ -390,20 +390,22 @@ Tensor& mse_loss_backward_out(Tensor& grad_input, const Tensor& grad_output,
 }
 
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto loss = input.sub(target).abs_();
+  auto diff = input.sub(target);
+  auto loss = diff.is_complex() ? diff.abs() : diff.abs_();
   return apply_loss_reduction(loss, reduction);
 }
 
 Tensor& l1_loss_out(Tensor&result, const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto diff = input.sub(target);
   if (reduction != Reduction::None) {
-    auto loss = input.sub(target).abs_();
+    auto loss = diff.is_complex() ? diff.abs() : diff.abs_();
     if (reduction == Reduction::Mean) {
       at::mean_out(result, loss, 0);
     } else {
       at::sum_out(result, loss, 0);
     }
   } else {
-    at::sub_out(result, input, target).abs_();
+    at::abs_out(result, diff);
   }
   return result;
 }

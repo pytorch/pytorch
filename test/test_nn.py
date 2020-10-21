@@ -7056,11 +7056,12 @@ class TestNN(NNTestCase):
     # https://github.com/pytorch/pytorch/issues/27692 reports
     # that l1_loss get a wrong result for big batch size
     def test_l1_loss_correct(self):
-        for N in range(1, 50, 10):
-            input = torch.rand(N, 3, 1024, 1024)
-            self.assertEqual(
-                torch.nn.L1Loss()(input, torch.zeros_like(input)),
-                input.abs().mean())
+        for dtype in [torch.float, torch.cfloat]:
+            for N in range(1, 50, 10):
+                input = torch.rand(N, 3, 1024, 1024, dtype=dtype)
+                self.assertEqual(
+                    torch.nn.L1Loss()(input, torch.zeros_like(input)),
+                    input.abs().mean())
 
     def test_smoothl1loss_negative_beta_not_supported(self):
         with self.assertRaises(RuntimeError):
@@ -13126,7 +13127,7 @@ class TestLazyModules(TestCase):
         new_module = LazyModule()
         new_module.register_parameter('test_param', nn.Parameter(torch.ones(5, 5)))
         module.load_state_dict(new_module.state_dict())
-        self.assertEqual(module.test_param, torch.ones((5, 5))) 
+        self.assertEqual(module.test_param, torch.ones((5, 5)))
 
         # Uninitialized parameters are left unchanged
         module = LazyModule()
@@ -13185,9 +13186,9 @@ class TestLazyModules(TestCase):
     def test_linear_state(self):
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
-        lazy_module.load_state_dict(module.state_dict()) 
+        lazy_module.load_state_dict(module.state_dict())
         # Parameters have been initialized but the module won't become a full
-        # Linear one until the first iteration. This is due to 
+        # Linear one until the first iteration. This is due to
         # limitations on the state_dict loading logic
         self.assertFalse(lazy_module.has_uninitialized_params())
         self.assertTrue(lazy_module.weight.shape == (10, 5))
@@ -13195,7 +13196,7 @@ class TestLazyModules(TestCase):
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
-            module.load_state_dict(lazy_module.state_dict()) 
+            module.load_state_dict(lazy_module.state_dict())
 
     @suppress_warnings
     def test_materialize_dtype(self):
