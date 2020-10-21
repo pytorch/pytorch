@@ -1958,15 +1958,17 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_py_raise_in_user_func(self):
         with captured_output() as (_, err):
+            # This barrier prevents a race condition where the main thread has
+            # not entered the context manager when the remote function runs.
+            initialize_pg(self.init_method, self.rank, self.world_size)
+            dist.barrier()
             n = self.rank + 1
             dst_rank = n % self.world_size
             fut = rpc.rpc_async(worker_name(dst_rank), raise_func)
             with self.assertRaisesRegex(ValueError, expected_err):
                 fut.wait()
-            # The following barrier prevents a race condition which could happen
-            # if the main thread exits the context manager before the remote
-            # function has ran.
-            initialize_pg(self.init_method, self.rank, self.world_size)
+            # This barrier prevents a race condition where the main thread exits
+            # context manager before the remote function has ran.
             dist.barrier()
 
         stderr_lines = err.getvalue()
