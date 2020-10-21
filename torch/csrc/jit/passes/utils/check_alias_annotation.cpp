@@ -141,8 +141,8 @@ const Node* findNodeForOp(
   }
 
   // Check for alias-ed operator names
-  const auto aliasOp = torch::jit::alias_map.find(opName);
-  AT_ASSERT(aliasOp != torch::jit::alias_map.end());
+  const auto aliasOp = torch::jit::getOperatorAliasMap().find(opName);
+  AT_ASSERT(aliasOp != torch::jit::getOperatorAliasMap().end());
   for (const auto node : g.nodes()) {
     if (node->kind() == aliasOp->second) {
       return node;
