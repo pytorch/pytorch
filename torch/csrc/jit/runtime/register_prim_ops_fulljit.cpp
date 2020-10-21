@@ -273,14 +273,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::is_vulkan(Tensor a) -> bool",
-         [](Stack* stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.is_vulkan());
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::is_quantized(Tensor a) -> bool",
          [](Stack* stack) {
            at::Tensor a;
