@@ -119,13 +119,15 @@ VkDescriptorSet allocate_descriptor_set(
 Descriptor::Set::Set(
     const VkDevice device,
     const VkDescriptorPool descriptor_pool,
-    const VkDescriptorSetLayout descriptor_set_layout)
+    const Shader::Layout::Object& shader_layout)
   : device_(device),
     descriptor_set_(
         allocate_descriptor_set(
             device_,
             descriptor_pool,
-            descriptor_set_layout)) {
+            shader_layout.handle)),
+    shader_layout_signature_(shader_layout.signature),
+    bindings_{} {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       descriptor_set_,
       "Invalid Vulkan descriptor set!");
@@ -156,7 +158,6 @@ void Descriptor::Set::update(const Item& item) {
 
 Descriptor::Set& Descriptor::Set::bind(
     const uint32_t binding,
-    const VkDescriptorType type,
     const Resource::Buffer::Object& buffer) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
@@ -165,7 +166,7 @@ Descriptor::Set& Descriptor::Set::bind(
 
   update({
       binding,
-      type,
+      shader_layout_signature_[binding],
       {
         .buffer = {
           buffer.handle,
@@ -180,7 +181,6 @@ Descriptor::Set& Descriptor::Set::bind(
 
 Descriptor::Set& Descriptor::Set::bind(
     const uint32_t binding,
-    const VkDescriptorType type,
     const Resource::Image::Object& image) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
@@ -189,7 +189,7 @@ Descriptor::Set& Descriptor::Set::bind(
 
   update({
       binding,
-      type,
+      shader_layout_signature_[binding],
       {
         .image = {
           image.sampler,
@@ -309,7 +309,7 @@ Descriptor::Pool& Descriptor::Pool::operator=(Pool&& pool) {
 }
 
 Descriptor::Set Descriptor::Pool::allocate(
-    const VkDescriptorSetLayout descriptor_set_layout)
+    const Shader::Layout::Object& shader_layout)
 {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && descriptor_pool_,
@@ -317,13 +317,13 @@ Descriptor::Set Descriptor::Pool::allocate(
       "Potential reason: This descriptor pool is moved from.");
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      descriptor_set_layout,
-      "Invalid Vulkan descriptor set layout!");
+      shader_layout,
+      "Invalid Vulkan shader layout!");
 
   return Set(
       device_,
       descriptor_pool_.get(),
-      descriptor_set_layout);
+      shader_layout);
 }
 
 void Descriptor::Pool::purge() {
