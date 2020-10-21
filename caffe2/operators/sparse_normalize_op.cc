@@ -109,9 +109,6 @@ bool SparseNormalizeOp<c10::Half, CPUContext>::DoRunWithType() {
 }
 
 REGISTER_CPU_OPERATOR(SparseNormalize, SparseNormalizeOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(
-    Float16SparseNormalize,
-    SparseNormalizeOp<c10::Half, CPUContext>);
 OPERATOR_SCHEMA(SparseNormalize)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -139,4 +136,33 @@ Given a sparse matrix, apply max_norm or constant_norm sparse regularization.
 )DOC");
 
 SHOULD_NOT_DO_GRADIENT(SparseNormalize);
+
+REGISTER_CPU_OPERATOR(Float16SparseNormalize, SparseNormalizeOp<c10::Half, CPUContext>);
+OPERATOR_SCHEMA(Float16SparseNormalize)
+    .NumInputs(2, 3)
+    .NumOutputs(1)
+    .Input(0, "param", "Parameters to be normalized")
+    .Input(1, "indices", "Sparse indices")
+    .Input(
+        2,
+        "grad",
+        "Gradient computed (optional - not used, this argument is for backwards compatibility)")
+    .Output(0, "output_param", "Normalized parameters")
+    .EnforceOneToOneInplace()
+    .Arg(
+        "use_max_norm",
+        "A bool variable to control whether to use max norm \
+    or constant norm. When use_max_norm = false, constant norm is used so that \
+    all the embedding vectors are scaled to have a L2 norm equals to A \
+    (see blow argument norm=A). If use_max_norm = true, \
+    max norm is used so that embedding is scaled so that its l2 norm is no larger \
+    than A. If an embedding's norm is less than A originally, \
+    the embedding is left unchanged.\
+    The default is True.")
+    .Arg("norm", "L2 norm of the embedding. The default is 1.0.")
+    .SetDoc(R"DOC(
+Given a sparse matrix, apply max_norm or constant_norm sparse regularization.
+)DOC");
+
+SHOULD_NOT_DO_GRADIENT(Float16SparseNormalize);
 } // namespace caffe2

@@ -243,6 +243,14 @@ Module Module::clone_impl(
     for (auto& fn : type()->methods()) {
       r.clone_method(*this, *fn, type_remap);
     }
+
+    // Execute __setstate__(__getstate__()) to initialize custom class members.
+    if (auto setstate_method = r.find_method("__setstate__")) {
+      auto getstate_method = r.find_method("__getstate__");
+      TORCH_INTERNAL_ASSERT(getstate_method, "expect __getstate__");
+      auto state = (*getstate_method)(Stack{});
+      (*setstate_method)(Stack{state});
+    }
   }
   return r;
 }
