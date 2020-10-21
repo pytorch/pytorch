@@ -3095,6 +3095,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(Zero_(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_tolist(self):
         class List(torch.jit.ScriptModule):
             @torch.jit.script_method
