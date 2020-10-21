@@ -400,8 +400,8 @@ void triu_indices_kernel(scalar_t * tensor,
 // implementation, please enable them in test/test_cuda.py and make sure they
 // pass on your local server.
 Tensor triu_indices_cuda(
-    int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+    int64_t row, int64_t col, int64_t offset, const c10::optional<ScalarType>& dtype_opt,
+    const c10::optional<Layout>& layout_opt, const c10::optional<Device>& device_opt, const c10::optional<bool>& pin_memory_opt) {
   check_args(row, col, layout_opt);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);
