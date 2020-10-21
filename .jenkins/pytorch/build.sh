@@ -225,6 +225,9 @@ else
     if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
       WERROR=1 python setup.py bdist_wheel
       python -mpip install dist/*.whl
+    elif [[ "$BUILD_ENVIRONMENT" == *profile* ]]; then
+      CC=/usr/bin/gcc python setup.py bdist_wheel
+      python -mpip install dist/*.whl
     else
       python setup.py bdist_wheel
       python -mpip install dist/*.whl
@@ -321,8 +324,4 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   python setup.py install
   popd
   assert_git_not_dirty
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *profile* ]]; then
-  CC=/usr/bin/gcc python setup.py install
 fi
