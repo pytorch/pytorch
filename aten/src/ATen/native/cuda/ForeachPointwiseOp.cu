@@ -105,7 +105,7 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
 std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {  \
     check_nonempty_and_same_length(input, tensors1, tensors2);                                                                        \
                                                                                                                                       \
-    if (!can_use_fast_route(input, scalar) || !can_use_fast_route(input, tensors1, tensors2)) {                                       \
+    if (!can_use_fast_route(input, tensors1, tensors2, scalar)) {                                                                     \
         return at::native::foreach_tensor_##NAME##_scalar_slow(input, tensors1, tensors2, scalar);                                    \
     }                                                                                                                                 \
                                                                                                                                       \
@@ -115,7 +115,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, Tensor
 void foreach_tensor_##NAME##_scalar_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {                \
     check_nonempty_and_same_length(input, tensors1, tensors2);                                                                        \
                                                                                                                                       \
-    if (!can_use_fast_route(input, scalar) || !can_use_fast_route(input, tensors1, tensors2)) {                                       \
+    if (!can_use_fast_route(input, tensors1, tensors2, scalar)) {                                                                     \
         return at::native::foreach_tensor_##NAME##_scalar_slow_(input, tensors1, tensors2, scalar);                                   \
     }                                                                                                                                 \
                                                                                                                                       \
@@ -151,9 +151,6 @@ FOREACH_POINTWISE_OP_SCALARLIST(addcdiv, std::divides);
 
 #define FOREACH_MAXIMUM_MINIMUM_OP(NAME, OP)                                                               \
 std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors1, TensorList tensors2) {               \
-    TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");                        \
-    TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");          \
-                                                                                                           \
     if (!can_use_fast_route(tensors1, tensors2)) {                                                         \
         return at::native::foreach_tensor_##NAME##_slow(tensors1, tensors2);                               \
     }                                                                                                      \
