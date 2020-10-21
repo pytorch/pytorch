@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
+
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -859,7 +860,10 @@ struct to_ir {
     return emitStatements(statements.begin(), statements.end());
   }
 
-  // XXX - right now closures are used _only_ for defining gradients internally
+  // XXX: Right now closures are not generically implemented and are only used
+  // as an intermediate form for special tasks, like defining gradients or
+  // forked functions.
+  //
   // There are several unfinished aspects that make them unusable generally
   // 1. We do not have a type, ivalue, operator to represent prim::Function, so
   // closure_node has type None
@@ -870,6 +874,16 @@ struct to_ir {
   //    the changes to those variables will just get forgotten.
   // 4. There is no parsing support in frontend.py, this is intentional since it
   //    prevents people from accidentally using this feature.
+  //
+  // This function leaves in the graph something like:
+  //
+  //   %2 : None = prim::Function()
+  //     block0():
+  //       %1 : Tensor = prim::DoSomething(%0)
+  //       -> (%1)
+  //
+  // A separate pass is required to erase this closure and replace it with
+  // something actually executable (see liftClosure and inlineForkedClosure).
   std::shared_ptr<ClosureValue> emitClosure(
       const std::function<void(Block*)>& emit_body) {
     Node* closure_node = graph->insertNode(graph->create(prim::Function, 1));
@@ -1253,8 +1267,7 @@ struct to_ir {
 
     // comprehension introduces it's own scope. no variable assigned
     // leaks into the rest of the graph
-    Node* n =
-        graph->insertNode(create(prim::LocalVariableScope, lc.range(), 0));
+    Node* n = graph->insertNode(create(prim::ListComprehension, lc.range(), 0));
     auto* comprehension_block = n->addBlock();
     pushFrame(comprehension_block);
     WithInsertPoint guard(comprehension_block);
@@ -2086,8 +2099,8 @@ struct to_ir {
           stmt.range(),
           *method.graph(),
           getAugOp(stmt, lhs->type()),
-          /*inputs=*/{lhs, rhs},
-          /*attributes=*/{},
+          /*args=*/{lhs, rhs},
+          /*kwargs=*/{},
           /*self=*/c10::nullopt);
     }
   }
@@ -2657,9 +2670,9 @@ struct to_ir {
     if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
       return emitApplySpecialForm(special_form->form(), apply, type_hint);
     }
-    auto inputs = getNamedValues(apply.inputs(), true);
-    auto attributes = emitAttributes(apply.attributes());
-    return sv->call(loc, method, inputs, attributes, n_binders);
+    auto args = getNamedValues(apply.inputs(), true);
+    auto kwargs = emitAttributes(apply.attributes());
+    return sv->call(loc, method, std::move(args), std::move(kwargs), n_binders);
   }
 
   // this function handles expressions that look like apply statements
@@ -2680,9 +2693,10 @@ struct to_ir {
         }
         auto forked = emitSugaredExpr(Expr(trees[0]), 1);
         TreeList sliced_trees(trees.begin() + 1, trees.end());
-        auto inputs = getNamedValues(sliced_trees, true);
-        auto attributes = emitAttributes(apply.attributes());
-        return emitForkExpr(apply.range(), forked, inputs, attributes);
+        auto args = getNamedValues(sliced_trees, true);
+        auto kwargs = emitAttributes(apply.attributes());
+        return emitForkExpr(
+            apply.range(), forked, std::move(args), std::move(kwargs));
       }
       case prim::annotate: {
         checkApplyNumInputs(apply, 2);
@@ -2957,11 +2971,15 @@ struct to_ir {
     return graph->insertConstant(maybe_out_stack->at(0), tree->range());
   }
 
+  /**
+   * Emit a fork expression, of the form:
+   *   torch.jit.fork(forked, *args, **kwargs)
+   */
   std::shared_ptr<SugaredValue> emitForkExpr(
       SourceRange loc,
       const std::shared_ptr<SugaredValue>& forked,
-      at::ArrayRef<NamedValue> inputs,
-      at::ArrayRef<NamedValue> attributes) {
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs) {
     auto g = method.graph();
     Node* fork_node;
     TypePtr out_type;
@@ -2981,8 +2999,7 @@ struct to_ir {
         fork_node->addInput(closure_output);
       } else {
         auto emit_closure_body = [&](Block* closure_block) {
-          auto fn_sugared_output =
-              forked->call(loc, method, inputs, attributes, 1);
+          auto fn_sugared_output = forked->call(loc, method, args, kwargs, 1);
           auto fn_simple_output = fn_sugared_output->asValue(loc, method);
           closure_block->registerOutput(fn_simple_output);
           out_type = fn_simple_output->type();

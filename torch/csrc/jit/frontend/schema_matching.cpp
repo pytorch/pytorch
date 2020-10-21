@@ -584,8 +584,8 @@ Value* emitBuiltinCall(
     const SourceRange& loc,
     Graph& graph,
     Symbol name,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self) {
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
@@ -620,7 +620,7 @@ Value* emitBuiltinCall(
     throw error;
   }
 
-  auto matched = matchSchemas(schemas, loc, graph, inputs, attributes, self);
+  auto matched = matchSchemas(schemas, loc, graph, args, kwargs, self);
 
   if (matched.first < variants.size()) {
     return emitBuiltinNode(matched.second, loc, graph, name);
