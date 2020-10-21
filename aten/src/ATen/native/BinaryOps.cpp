@@ -136,7 +136,7 @@ Tensor copysign(const Tensor& self, const Tensor& other) {
 }
 
 Tensor copysign(const Tensor& self, Scalar other) {
-  return self.copysign(wrapped_scalar_tensor(other));
+  return at::copysign(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
