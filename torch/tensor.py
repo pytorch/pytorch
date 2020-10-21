@@ -997,7 +997,7 @@ class Tensor(torch._C._TensorBase):
         if not all(issubclass(cls, t) for t in types):
             return NotImplemented
 
-        with _C.DisableTorchFunction():
+        with _C._DisableTorchFunction():
             ret = func(*args, **kwargs)
             return _convert(ret, cls)
 

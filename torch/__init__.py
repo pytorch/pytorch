@@ -24,7 +24,7 @@ from ._utils_internal import get_file_path, prepare_multiprocessing_environment,
 from .version import __version__
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type, TYPE_CHECKING
+import typing
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
@@ -170,6 +170,8 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
             import torch._dl as _dl_flags  # type: ignore
     old_flags = sys.getdlopenflags()
     sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
+    # Note that this import ignores all the functions whose name that starts with "_"
+    # as mentioned here: https://docs.python.org/3/tutorial/modules.html#more-on-modules
     from torch._C import *
     sys.setdlopenflags(old_flags)
     del old_flags
@@ -187,11 +189,14 @@ else:
     # See Note [Global dependencies]
     if USE_GLOBAL_DEPS:
         _load_global_deps()
+
+    # Note that this import ignores all the functions whose name that starts with "_"
+    # as mentioned here: https://docs.python.org/3/tutorial/modules.html#more-on-modules
     from torch._C import *
 
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     import torch._C as _C
 
 # Check to see if we can load C extensions, and if not provide some guidance
@@ -477,7 +482,7 @@ _storage_classes = {
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
-_tensor_classes: Set[Type] = set()
+_tensor_classes: typing.Set[typing.Type] = set()
 
 # If you edit these imports, please update torch/__init__.py.in as well
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
@@ -506,7 +511,7 @@ del manager_path
 # Note that we will see "too many" functions when reexporting this way; there
 # is not a good way to fix this problem.  Perhaps, try to redesign VariableFunctions
 # so that this import is good enough
-if TYPE_CHECKING:
+if typing.TYPE_CHECKING:
     # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
@@ -619,11 +624,16 @@ from ._vmap_internals import vmap
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
 
-from .overrides import has_torch_function, handle_torch_function
 
 def Assert(condition, message):
     r"""A wrapper around Python's assert which is symbolically traceable.
     """
+    from .overrides import has_torch_function, handle_torch_function
+
     if type(condition) is not torch.Tensor and has_torch_function((condition,)):
         return handle_torch_function(Assert, (condition,), condition, message)
     assert condition, message
+
+# Cleanup namespace
+del typing
+del textwrap

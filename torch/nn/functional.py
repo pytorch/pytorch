@@ -4294,3 +4294,6 @@ def multi_head_attention_forward(query: Tensor,
         return attn_output, attn_output_weights.sum(dim=1) / num_heads
     else:
         return attn_output, None
+
+# Cleanup typing import
+del List, Optional, Tuple
