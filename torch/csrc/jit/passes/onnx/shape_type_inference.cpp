@@ -479,37 +479,56 @@ void ONNXAssignOutputShape(
   for (size_t i = 0; i < PyTuple_GET_SIZE(py_obj); ++i) {
     PyObject* elem = PyTuple_GET_ITEM(py_obj, i);
 
-    if (PyList_Check(elem) &&
-        HasSequenceTypeOutput(graph->outputs()[i]->node())) {
+    if (PyList_Check(elem)) {
       size_t list_len = PyList_GET_SIZE(elem);
-      if (list_len > 0) {
-        auto& var =
-            reinterpret_cast<THPVariable*>(PyList_GET_ITEM(elem, 0))->cdata;
-        outputs_index++;
-        for (size_t j = 1; j < list_len; ++j) {
-          PyObject* list_elem = PyList_GET_ITEM(elem, j);
-          auto& new_var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
-          TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
-          TORCH_INTERNAL_ASSERT(var.scalar_type() == new_var.scalar_type());
+      if (HasSequenceTypeOutput(graph->outputs()[i]->node())) {
+        if (list_len > 0) {
+          auto& var =
+              reinterpret_cast<THPVariable*>(PyList_GET_ITEM(elem, 0))->cdata;
+          for (size_t j = 1; j < list_len; ++j) {
+            PyObject* list_elem = PyList_GET_ITEM(elem, j);
+            auto& new_var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
+            TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
+            TORCH_INTERNAL_ASSERT(var.scalar_type() == new_var.scalar_type());
+          }
+          outputs_index += list_len;
+          graph->outputs()[i]->setType(ListType::create(
+              TensorType::create(var.scalar_type(), at::kCPU, {}, {})));
+          ONNXUpdateTypeFromTensor(
+              graph->outputs()[i], var, onnx_shape_inference);
+        }
+      } else {
+        for (size_t j = 0; j < list_len; ++j) {
+          ONNXUpdateTypeFromTensor(
+              graph->outputs()[i + j],
+              outputs[outputs_index],
+              onnx_shape_inference);
           outputs_index++;
         }
-        graph->outputs()[i]->setType(ListType::create(
-            TensorType::create(var.scalar_type(), at::kCPU, {}, {})));
+      }
+    } else if (PyTuple_Check(elem)) {
+      size_t tuple_len = PyTuple_GET_SIZE(elem);
+      if (tuple_len > 0) {
+        at::Tensor var =
+            reinterpret_cast<THPVariable*>(PyTuple_GET_ITEM(elem, 0))->cdata;
         ONNXUpdateTypeFromTensor(
             graph->outputs()[i], var, onnx_shape_inference);
-      }
-    } else {
-      at::Tensor var;
-      if (PyTuple_Check(elem)) {
-        size_t tuple_len = PyTuple_GET_SIZE(elem);
-        TORCH_INTERNAL_ASSERT(tuple_len > 0);
-        var = reinterpret_cast<THPVariable*>(PyTuple_GET_ITEM(elem, 0))->cdata;
         outputs_index += tuple_len;
-      } else {
-        var = reinterpret_cast<THPVariable*>(elem)->cdata;
+      }
+    } else if (THPVariable_Check(elem)) {
+      at::Tensor var = reinterpret_cast<THPVariable*>(elem)->cdata;
+      ONNXUpdateTypeFromTensor(graph->outputs()[i], var, onnx_shape_inference);
+      outputs_index++;
+    } else { // Dict
+      TORCH_INTERNAL_ASSERT(PyDict_Check(elem));
+      auto dict_items = py::reinterpret_borrow<py::list>(PyDict_Items(elem));
+      for (size_t j = 0; j < dict_items.size(); ++j) {
+        ONNXUpdateTypeFromTensor(
+            graph->outputs()[i + j],
+            outputs[outputs_index],
+            onnx_shape_inference);
         outputs_index++;
       }
-      ONNXUpdateTypeFromTensor(graph->outputs()[i], var, onnx_shape_inference);
     }
   }
 
