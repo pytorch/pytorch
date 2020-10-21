@@ -5,7 +5,7 @@ set -ex
 install_ubuntu() {
   echo "Preparing to build sccache from source"
   apt-get update
-  apt-get install cargo pkg-config libssl-dev
+  apt-get install -y cargo pkg-config libssl-dev
   echo "Checking out sccache repo"
   git clone https://github.com/pytorch/sccache
   cd sccache
