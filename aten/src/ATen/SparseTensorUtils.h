@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
+#include <ATen/Parallel.h>
 
 namespace at { namespace sparse {
 
@@ -126,6 +127,27 @@ inline LongTensor flatten_indices_by_dims(const LongTensor& indices, const IntAr
     new_indices.add_(indices.select(0, d));
   }
   return new_indices;
+}
+
+inline LongTensor coo_to_csr(const int64_t* indices, int64_t dim, int64_t nnz) {
+  LongTensor csr = native::zeros({dim + 1}, kLong);
+
+  // TODO: eliminate this conditional when zero-size dims supported correctly
+  if (nnz > 0) {
+    auto csr_accessor = csr.accessor<int64_t, 1>();
+    // Convert the sparse matrix to CSR format
+    at::parallel_for(0, nnz, 10000, [&](int64_t start, int64_t end) {
+      int64_t h, hp0, hp1;
+      for (auto i = start; i < end; i++) {
+        hp0 = indices[i];
+        hp1 = (i+1 == nnz) ?  dim : indices[i+1];
+        if (hp0 != hp1) for (h = hp0; h < hp1; h++) {
+          csr_accessor[h+1] = i+1;
+        }
+      }
+    });
+  }
+  return csr;
 }
 
 }} // namespace at::sparse

@@ -16,39 +16,6 @@
 namespace at { namespace native {
 
 using namespace at::sparse;
-// --------------------------------------------------------------------
-// Utility functions
-// --------------------------------------------------------------------
-
-namespace {
-  LongTensor _to_csr(const int64_t* indices, int64_t dim, int64_t nnz) {
-    LongTensor csr = native::zeros({dim + 1}, kLong);
-
-    // TODO: eliminate this conditional when zero-size dims supported correctly
-    if (nnz > 0) {
-      auto csr_accessor = csr.accessor<int64_t, 1>();
-      // Convert the sparse matrix to CSR format
-      at::parallel_for(0, nnz, 10000, [&](int64_t start, int64_t end) {
-        int64_t h, hp0, hp1;
-        for (auto i = start; i < end; i++) {
-          hp0 = indices[i];
-          hp1 = (i+1 == nnz) ?  dim : indices[i+1];
-          if (hp0 != hp1) for (h = hp0; h < hp1; h++) {
-            csr_accessor[h+1] = i+1;
-          }
-        }
-      });
-    }
-    return csr;
-  }
-
-  inline SparseTensor get_result_tensor_for_unary_op(const SparseTensor& input) {
-    if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true)) {
-      return at::empty_like(input, input.options().dtype(c10::get_default_dtype()));
-    }
-    return at::empty_like(input);
-  }
-}
 
 // --------------------------------------------------------------------
 // zero_(SparseTensor)
@@ -1112,7 +1079,7 @@ SparseTensor& _sspaddmm_out_cpu(
   LongTensor indices = sparse._indices().contiguous();
   Tensor values      = sparse._values();
 
-  LongTensor csr = _to_csr(indices.data_ptr<int64_t>(), dim_i, nnz);
+  LongTensor csr = coo_to_csr(indices.data_ptr<int64_t>(), dim_i, nnz);
 
   int64_t t_nnz = t._nnz();
   int64_t r_nnz = nnz * dim_k + t_nnz;

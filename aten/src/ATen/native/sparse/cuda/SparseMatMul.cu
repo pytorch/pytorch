@@ -19,6 +19,7 @@
 #include <ATen/cuda/CUDAUtils.h>
 
 #include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
@@ -83,6 +84,10 @@ struct csrOutput {
     create_general_description_(description_);
   }
 
+  ~csrOutput() {
+    TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(description_));
+  }
+
   int size(int index) const {
     return size_.at(index);
   }
@@ -114,7 +119,11 @@ struct csrMatrixRef {
         size_{size} {
     nnz_ = nnz;
     create_general_description_(description_);
-  } 
+  }
+
+  ~csrMatrixRef() {
+    TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(description_));
+  }
  
   int size(int index) const {
     return size_.at(index);
@@ -247,8 +256,10 @@ csrOutput cuSparse_matrix_multiply(
       &bufferSize1,
       NULL));
   
-  cudaMalloc((void**)&dBuffer1, bufferSize1);
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
 
+  at::DataPtr dataPtr1 = allocator.allocate(bufferSize1);
+  dBuffer1 = dataPtr1.get();
   // inspect the matrices A and B to understand the memory requiremnent for
   // the next step
   TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_workEstimation(
@@ -281,9 +292,9 @@ csrOutput cuSparse_matrix_multiply(
       spgemmDesc,
       &bufferSize2,
       NULL));
-  // todo:     data = THCudaMalloc(globalContext().lazyInitCUDA(), size);
 
-  cudaMalloc((void**)&dBuffer2, bufferSize2);
+  at::DataPtr dataPtr2 = allocator.allocate(bufferSize2);
+  dBuffer2 = dataPtr2.get();
 
   // compute the intermediate product of A * B
   TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_compute(
@@ -307,10 +318,6 @@ csrOutput cuSparse_matrix_multiply(
   // allocate matrix C
   // allocate C offsets
   out.nnz_ = C_num_nnz1;
-
-  // CHECK_CUDA(cudaMalloc((void**)&dC_csrOffsets, (A_num_rows + 1) * sizeof(int)))
-  // CHECK_CUDA(cudaMalloc((void**)&dC_columns, C_num_nnz1 * sizeof(int)))
-  // CHECK_CUDA(cudaMalloc((void**)&dC_values, C_num_nnz1 * sizeof(float)))
 
   out.csr_indices_ = at::empty({out.nnz_}, output_indices.options().dtype(kInt));
   out.csr_values_ = at::empty({out.nnz_}, output_values.options());
@@ -342,10 +349,6 @@ csrOutput cuSparse_matrix_multiply(
   TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(matC));
   TORCH_CUDASPARSE_CHECK(cusparseDestroy(handle));
 
-  cudaFree(dBuffer1);
-  cudaFree(dBuffer2);
-  //--------------------------------------------------------------------------
-
   return out;
 }
 
@@ -373,8 +376,7 @@ csrOutput Sgemm2(
     IntTensor &output_indices) {
   cusparseHandle_t cusparseHandle_;
   csrgemm2Info_t gemm2Info_;
-  static void* buffer_{nullptr};
-  static size_t currentBufferSize_{0};
+  void* buffer_{nullptr};
 
   TORCH_CUDASPARSE_CHECK(cusparseCreate(&cusparseHandle_));
   TORCH_CUDASPARSE_CHECK(cusparseSetPointerMode(cusparseHandle_, CUSPARSE_POINTER_MODE_HOST));
@@ -410,14 +412,9 @@ csrOutput Sgemm2(
       gemm2Info_,
       &new_bubber_sz));
 
-  // (Re)allocate buffer if needed
-  if (new_bubber_sz > currentBufferSize_) {
-    if (buffer_ != NULL) {
-      cudaFree(buffer_);
-    }
-    cudaMalloc(&buffer_, new_bubber_sz);
-    currentBufferSize_ = new_bubber_sz;
-  }
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  at::DataPtr data_ptr = allocator.allocate(new_bubber_sz);
+  buffer_ = data_ptr.get();
 
   // Find the resulting non-zero pattern.
   TORCH_CUDASPARSE_CHECK(cusparseXcsrgemm2Nnz(
@@ -493,8 +490,7 @@ csrOutput Dgemm2(
     IntTensor &output_indices) {
   cusparseHandle_t cusparseHandle_;
   csrgemm2Info_t gemm2Info_;
-  static void* buffer_{nullptr};
-  static size_t currentBufferSize_{0};
+  void* buffer_{nullptr};
 
   TORCH_CUDASPARSE_CHECK(cusparseCreate(&cusparseHandle_));
   TORCH_CUDASPARSE_CHECK(cusparseSetPointerMode(cusparseHandle_, CUSPARSE_POINTER_MODE_HOST));
@@ -529,13 +525,9 @@ csrOutput Dgemm2(
       &new_bubber_sz));
 
   // (Re)allocate buffer if needed
-  if (new_bubber_sz > currentBufferSize_) {
-    if (buffer_ != NULL) {
-      cudaFree(buffer_);
-    }
-    cudaMalloc(&buffer_, new_bubber_sz);
-    currentBufferSize_ = new_bubber_sz;
-  }
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  at::DataPtr data_ptr = allocator.allocate(new_bubber_sz);
+  buffer_ = data_ptr.get();
 
   // Find the resulting non-zero pattern.
   TORCH_CUDASPARSE_CHECK(cusparseXcsrgemm2Nnz(
@@ -808,7 +800,7 @@ Tensor fill_with(const Tensor& input, scalar_t fill_value) {
 template <typename scalar_t, short grad_order>
 void sparse_matmul_kernel_grad(Tensor& output, const Tensor& grad, const Tensor& x) {
   /* 
-    Computes  the backward output  for matrix C = A*B.
+    Computes  the backward output  for matrix C = A@B.
 
     C = A@B 
       then 
@@ -833,6 +825,7 @@ void sparse_matmul_kernel_grad(Tensor& output, const Tensor& grad, const Tensor&
 
 Tensor sparse_sparse_matmul_cuda(const Tensor& mat1_, const Tensor& mat2_) {
   TORCH_INTERNAL_ASSERT(mat1_.is_sparse());
+  TORCH_INTERNAL_ASSERT(mat2_.is_sparse());
   TORCH_CHECK(mat1_.dim() == 2);
   TORCH_CHECK(mat2_.dim() == 2);
 

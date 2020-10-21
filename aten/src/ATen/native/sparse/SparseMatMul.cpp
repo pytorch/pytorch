@@ -12,35 +12,15 @@ using namespace at::sparse;
 
 namespace {
 
-LongTensor _to_csr(const int64_t* indices, int64_t dim, int64_t nnz) {
-  /* Return the CSR indices from COO indices 
+/*
+    This is an implementation of the SMMP algorithm:
+     "Sparse Matrix Multiplication Package (SMMP)"
 
-    `indices` is the COO indices array
-    `dim` is the number of rows
-    `nnz` is the number of non zeros in the original sparse tensor
-  */
-  LongTensor csr = native::zeros({dim + 1}, kLong);
+      Randolph E. Bank and Craig C. Douglas
+      https://doi.org/10.1007/BF02070824
+*/
 
-  // TODO: eliminate this conditional when zero-size dims supported correctly
-  if (nnz > 0) {
-    auto csr_accessor = csr.accessor<int64_t, 1>();
-    // Convert the sparse matrix to CSR format
-    at::parallel_for(0, nnz, 10000, [&](int64_t start, int64_t end) {
-      int64_t h, hp0, hp1;
-      for (auto i = start; i < end; i++) {
-        hp0 = indices[i];
-        hp1 = (i+1 == nnz) ?  dim : indices[i+1];
-        if (hp0 != hp1) for (h = hp0; h < hp1; h++) {
-          csr_accessor[h+1] = i+1;
-        }
-      }
-    });
-  }
-  return csr;
-}
-
-
-void expandptr(const int64_t n_row, const int64_t Ap[], int64_t Bi[]) {
+void csr_to_coo(const int64_t n_row, const int64_t Ap[], int64_t Bi[]) {
   /* 
     Expands a compressed row pointer into a row indices array
     Inputs:
@@ -57,7 +37,7 @@ void expandptr(const int64_t n_row, const int64_t Ap[], int64_t Bi[]) {
   }
 }
 
-int64_t __csr_matmult_maxnnz(
+int64_t _csr_matmult_maxnnz(
     const int64_t n_row,
     const int64_t n_col,
     const int64_t Ap[],
@@ -69,18 +49,8 @@ int64_t __csr_matmult_maxnnz(
 
     The matrices should be in proper CSR structure, and their dimensions
     should be compatible.
-
-    This is an implementation of the SMMP algorithm:
-     "Sparse Matrix Multiplication Package (SMMP)"
-
-       Randolph E. Bank and Craig C. Douglas
-
-     http://citeseer.ist.psu.edu/445062.html
-     http://www.mgnet.org/~douglas/ccd-codes.html
   */
   std::vector<int64_t> mask(n_col, -1);
-  const auto long_max = std::numeric_limits<int64_t>::max();
-
   int64_t nnz = 0;
   for (int64_t i = 0; i < n_row; i++) {
     int64_t row_nnz = 0;
@@ -96,7 +66,6 @@ int64_t __csr_matmult_maxnnz(
       }
     }
     int64_t next_nnz = nnz + row_nnz;
-    TORCH_CHECK(row_nnz <= long_max - nnz, "nnz of the output is too large");
     nnz = next_nnz;
   }
   return nnz;
@@ -137,15 +106,6 @@ void _csr_matmult(
 
     Note:
       Output arrays Cp, Cj, and Cx must be preallocated
-
-    This is an implementation of the SMMP algorithm:
-     "Sparse Matrix Multiplication Package (SMMP)"
-
-       Randolph E. Bank and Craig C. Douglas
-
-     http://citeseer.ist.psu.edu/445062.html
-     http://www.mgnet.org/~douglas/ccd-codes.html
-
   */
   std::vector<int64_t> next(n_col, -1);
   std::vector<scalar_t> sums(n_col, 0);
@@ -180,11 +140,9 @@ void _csr_matmult(
     }
 
     for (int64_t jj = 0; jj < length; jj++) {
-      if (sums[head] != 0) {
-        Cj[nnz] = head;
-        Cx[nnz] = sums[head];
-        nnz++;
-      }
+      Cj[nnz] = head;
+      Cx[nnz] = sums[head];
+      nnz++;
 
       int64_t temp = head;
       head = next[head];
@@ -205,52 +163,40 @@ void sparse_matmul_kernel(
     const Tensor& mat2) {
   /* 
     Computes  the sparse-sparse matrix multiplication between `mat1` and `mat2`, which are sparse tensors in COO format. 
-
-    The implementation is based on the paper  
-    Bank and Douglas, 2001, Sparse Matrix Multiplication Package (SMPP)
   */
 
   auto mat1_indices_ = mat1._indices().contiguous();
   auto mat1_values = mat1._values().contiguous();
-  Tensor mat1_indptr = _to_csr(mat1_indices_.data_ptr<int64_t>(), mat1.size(0), mat1._nnz());
-  auto mat1_indices = mat1_indices_[1];
+  Tensor mat1_indptr = coo_to_csr(mat1_indices_.data_ptr<int64_t>(), mat1.size(0), mat1._nnz());
+  auto mat1_col_indices = mat1_indices_[1];
 
   auto mat2_indices_ = mat2._indices().contiguous();
   auto mat2_values = mat2._values().contiguous();
-  Tensor mat2_indptr = _to_csr(mat2_indices_.data_ptr<int64_t>(), mat2.size(0), mat2._nnz());
+  Tensor mat2_indptr = coo_to_csr(mat2_indices_.data_ptr<int64_t>(), mat2.size(0), mat2._nnz());
   auto mat2_indices = mat2_indices_[1];
   
   auto M = mat1.size(0);
-  auto K1 = mat1.size(1);
-
-  auto K2 = mat2.size(0);
   auto N = mat2.size(1);
 
-  auto major_axis = M;
-
-  auto nnz = __csr_matmult_maxnnz(M, N, mat1_indptr.data_ptr<int64_t>(), mat1_indices.data_ptr<int64_t>(), 
+  auto nnz = _csr_matmult_maxnnz(M, N, mat1_indptr.data_ptr<int64_t>(), mat1_col_indices.data_ptr<int64_t>(), 
       mat2_indptr.data_ptr<int64_t>(), mat2_indices.data_ptr<int64_t>());
 
   auto output_indices = output._indices();
   auto output_values = output._values();
 
-  Tensor output_indptr = at::empty({major_axis + 1}, kLong);
+  Tensor output_indptr = at::empty({M + 1}, kLong);
 
-  output_indices.resize_({2 * nnz});
+  output_indices.resize_({2, nnz});
   output_values.resize_(nnz);
 
-  _csr_matmult(M, N, mat1_indptr.data_ptr<int64_t>(), mat1_indices.data_ptr<int64_t>(), mat1_values.data_ptr<scalar_t>(), 
+  LongTensor output_row_indices = output_indices.select(0, 0);
+  LongTensor output_col_indices = output_indices.select(0, 1);
+
+  _csr_matmult(M, N, mat1_indptr.data_ptr<int64_t>(), mat1_col_indices.data_ptr<int64_t>(), mat1_values.data_ptr<scalar_t>(), 
   mat2_indptr.data_ptr<int64_t>(), mat2_indices.data_ptr<int64_t>(), mat2_values.data_ptr<scalar_t>(), 
-  output_indptr.data_ptr<int64_t>(), output_indices.data_ptr<int64_t>() + nnz, output_values.data_ptr<scalar_t>());
+  output_indptr.data_ptr<int64_t>(), output_col_indices.data_ptr<int64_t>(), output_values.data_ptr<scalar_t>());
   
-  auto major_dim = output.size(0);
-
-  Tensor major_indices = at::empty( {nnz}, kLong );
-  expandptr(major_dim, output_indptr.data_ptr<int64_t>(), major_indices.data_ptr<int64_t>());
-
-  std::memcpy(output_indices.data_ptr<int64_t>(), major_indices.data_ptr<int64_t>(), sizeof(int64_t) * nnz);
-  output._indices().set_(output_indices.view({2, nnz}));
-
+  csr_to_coo(M, output_indptr.data_ptr<int64_t>(), output_row_indices.data_ptr<int64_t>());
 }
 
 template <typename scalar_t>
@@ -301,7 +247,7 @@ Tensor fill_with(const Tensor& input, scalar_t fill_value){
 template <typename scalar_t, short grad_order>
 void sparse_matmul_kernel_grad(Tensor& output, const Tensor& grad, const Tensor& x) {
   /* 
-    Computes  the backward output  for matrix C = A*B.
+    Computes  the backward output  for matrix C = A@B.
 
     C = A@B 
       then 
@@ -325,6 +271,7 @@ void sparse_matmul_kernel_grad(Tensor& output, const Tensor& grad, const Tensor&
 
 Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
   TORCH_INTERNAL_ASSERT(mat1_.is_sparse());
+  TORCH_INTERNAL_ASSERT(mat2_.is_sparse());
   TORCH_CHECK(mat1_.dim() == 2);
   TORCH_CHECK(mat2_.dim() == 2);
 

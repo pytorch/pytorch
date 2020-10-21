@@ -17,6 +17,11 @@ from numbers import Number
 from torch.autograd.gradcheck import gradcheck
 from typing import Dict, Any
 
+try:
+    import scipy.sparse
+    scipy_available = True
+except ImportError:
+    scipy_available = False
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -3030,22 +3035,20 @@ class TestSparse(TestCase):
             assert r[-1] == nnz
             return r
 
-        def sparse_mm(a, b):
+        def sparse_mm(a, b, method='scipy'):
             a = a.to('cpu')
             b = b.to('cpu')
-            try:
-                from scipy import sparse
+            if method == 'scipy':
                 indices_1 = a._indices().numpy()
                 values_1 = a._values().numpy()
                 indices_2 = b._indices().numpy()
                 values_2 = b._values().numpy()
 
-                mat1 = sparse.coo_matrix((values_1, (indices_1[0], indices_1[1])), shape=a.shape)
-                mat2 = sparse.coo_matrix((values_2, (indices_2[0], indices_2[1])), shape=b.shape)
+                mat1 = scipy.sparse.coo_matrix((values_1, (indices_1[0], indices_1[1])), shape=a.shape)
+                mat2 = scipy.sparse.coo_matrix((values_2, (indices_2[0], indices_2[1])), shape=b.shape)
                 result = mat1.dot(mat2).tocoo()
                 return torch.sparse_coo_tensor([result.row, result.col], result.data, result.shape)
-
-            except ImportError as msg:
+            else:
                 assert a.shape[1] == b.shape[0]
                 n, p = a.shape
                 p, m = b.shape
@@ -3102,10 +3105,9 @@ class TestSparse(TestCase):
             b, i_b, v_b = self._gen_sparse(sparse_dims, nnz, shape_b)
 
             # python implementation
-            r1 = sparse_mm(a, b)
+            r1 = sparse_mm(a, b, 'scipy' if scipy_available else 'direct')
 
             self.assertEqual(r1.to_dense(), torch.mm(a.to_dense(), b.to_dense()))
-            self.assertEqual((r1._values() != 0).all(), True)
 
             # cpp implementation
             r2 = torch.sparse.mm(a, b)
