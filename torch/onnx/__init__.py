@@ -102,12 +102,12 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             exporter falls back on this op.
             OperatorExportTypes.RAW: Export raw ir.
             OperatorExportTypes.ONNX_FALLTHROUGH: If an op is not supported
-            in ONNX, fall through and export the operator as is, as a custom 
+            in ONNX, fall through and export the operator as is, as a custom
             ONNX op. Using this mode, the op can be exported and implemented by
             the user for their runtime backend.
             Example graph::
 
-                graph(%x.1 : Long(1:1))::
+                graph(%x.1 : Long(1, strides=[1]))::
                   %1 : None = prim::Constant()
                   %2 : Tensor = aten::sum(%x.1, %1)
                   %y.1 : Tensor[] = prim::ListConstruct(%2)
@@ -115,7 +115,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
             is exported as::
 
-                graph(%x.1 : Long(1:1))::
+                graph(%x.1 : Long(1, strides=[1]))::
                   %1 : Tensor = onnx::ReduceSum[keepdims=0](%x.1)
                   %y.1 : Long() = prim::ListConstruct(%1)
                   return (%y.1)
@@ -212,13 +212,13 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         external_data_format (bool, default False): If True, then the model is exported
             in ONNX external data format, in which case some of the model parameters are stored
             in external binary files and not in the ONNX model file itself. See link for format
-            details: 
+            details:
             https://github.com/onnx/onnx/blob/8b3f7e2e7a0f2aba0e629e23d89f07c7fc0e6a5e/onnx/onnx.proto#L423
             Also, in this case,  argument 'f' must be a string specifying the location of the model.
-            The external binary files will be stored in the same location specified by the model 
+            The external binary files will be stored in the same location specified by the model
             location 'f'. If False, then the model is stored in regular format, i.e. model and
             parameters are all in one file. This argument is ignored for all export types other
-            than ONNX. 
+            than ONNX.
     """
 
     from torch.onnx import utils

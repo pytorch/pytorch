@@ -1,15 +1,13 @@
 from torch.fx import (
-    GraphModule
+    GraphModule,
+    map_arg
 )
 
-from torch.fx.graph import (
-    Graph,
-    map_arg,
-)
+from torch.fx.graph import Graph
 
 from .pattern_utils import (
     is_match,
-    get_fusion_patterns,
+    get_default_fusion_patterns,
 )
 
 from .fusion_patterns import *  # noqa: F401
@@ -23,7 +21,7 @@ class Fuser:
         input_graph = model.graph
         self.modules = dict(input_root.named_modules())
 
-        fusion_patterns = get_fusion_patterns()
+        fusion_patterns = get_default_fusion_patterns()
         # find fusion
         fusion_pairs = self._find_matches(input_root, input_graph, fusion_patterns)
         self.fused_graph = Graph()
@@ -40,7 +38,6 @@ class Fuser:
                 env[node.name] = self.fused_graph.node_copy(node, load_arg)
             # node matched in patterns and is not root is removed here
 
-        self.fused_graph.output(load_arg(input_graph.result))
         model = GraphModule(input_root, self.fused_graph)
         return model
 
