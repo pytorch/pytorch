@@ -382,21 +382,22 @@ class BatchNorm(QuantizeHandler):
 class Embedding(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
-        assert node.op == 'call_module'
-        self.emb_node = node
-        self.emb = quantizer.modules[self.emb_node.target]
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
+        assert node.op == 'call_module'
+        emb_node = node
+        emb = quantizer.modules[emb_node.target]
         qconfig = quantizer.qconfig_map[node.name]
         assert not activation_is_statically_quantized(qconfig)
         qemb = nnq.Embedding
-        quantized = qemb.from_float(self.emb)
-        parent_name, name = _parent_name(self.emb_node.target)
+        quantized = qemb.from_float(emb)
+        parent_name, name = _parent_name(emb_node.target)
         setattr(quantizer.modules[parent_name], name, quantized)
         return quantizer.quantized_graph.create_node(
             'call_module',
-            self.emb_node.target,
-            (load_arg(quantized=False)(self.emb_node.args[0]),), {})
+            emb_node.target,
+            load_arg(quantized=False)(emb_node.args),
+            load_arg(quantized=False)(emb_node.kwargs))
 
 
 ARGS_TO_SKIP = {

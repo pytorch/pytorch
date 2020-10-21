@@ -1505,7 +1505,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             [[indices]],
             QuantType.DYNAMIC,
             quantized_node,
-            qconfig_input=float_qparams_dynamic_qconfig
+            custom_qconfig=float_qparams_dynamic_qconfig
         )
 
 class TestQuantizeFxModels(QuantizationTestCase):
