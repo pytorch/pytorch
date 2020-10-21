@@ -153,5 +153,5 @@ def get_quantized_operator(float_op):
     '''
     quantized_op = DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS.get(float_op, None)
     assert quantized_op is not None, \
-        'Operator {} does not have corresponding quantized op'.format(str(faloat_op))
+        'Operator {} does not have corresponding quantized op'.format(str(float_op))
     return quantized_op
