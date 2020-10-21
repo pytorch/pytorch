@@ -1431,7 +1431,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
        ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
 
     .. warning::
-        The LU factorization does support backward compatibility,
+        The LU factorization does have backward support,
         but only for square inputs of full rank.
 
     Arguments:
