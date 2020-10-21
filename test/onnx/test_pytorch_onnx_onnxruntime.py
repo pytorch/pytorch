@@ -48,8 +48,9 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
                        onnx_shape_inference=onnx_shape_inference,
                        use_new_jit_passes=use_new_jit_passes)
 
-    return f
-
+    # compute onnxruntime output prediction
+    ort_sess = onnxruntime.InferenceSession(f.getvalue())
+    return ort_sess
 
 def inline_flatten_list(inputs, res_list):
     for i in inputs:
@@ -99,16 +100,15 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         output = model(*input_copy)
         if isinstance(output, torch.Tensor):
             output = (output,)
-        f = convert_to_onnx(model, input=input, opset_version=self.opset_version,
-                            example_outputs=output, do_constant_folding=do_constant_folding,
-                            keep_initializers_as_inputs=self.keep_initializers_as_inputs,
-                            dynamic_axes=dynamic_axes, input_names=input_names,
-                            output_names=output_names, fixed_batch_size=fixed_batch_size, training=None,
-                            onnx_shape_inference=self.onnx_shape_inference,
-                            use_new_jit_passes=self.use_new_jit_passes)
+        ort_sess = convert_to_onnx(model, input=input, opset_version=self.opset_version,
+                                   example_outputs=output, do_constant_folding=do_constant_folding,
+                                   keep_initializers_as_inputs=self.keep_initializers_as_inputs,
+                                   dynamic_axes=dynamic_axes, input_names=input_names,
+                                   output_names=output_names, fixed_batch_size=fixed_batch_size, training=None,
+                                   onnx_shape_inference=self.onnx_shape_inference,
+                                   use_new_jit_passes=self.use_new_jit_passes)
 
         # compute onnxruntime output prediction
-        ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_outs = run_ort(ort_sess, input)
         ort_compare_with_pytorch(ort_outs, output, rtol, atol)
 
