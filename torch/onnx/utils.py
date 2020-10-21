@@ -433,7 +433,7 @@ def _model_to_graph(model, args, verbose=False,
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
     if torch_out is not None:
-        if not isinstance(torch_out, tuple):
+        if not (isinstance(torch_out, list) or isinstance(torch_out, tuple)):
             torch_out = [torch_out]
 
         output_tensors, out_desc = torch._C._jit_flatten(tuple(torch_out))
