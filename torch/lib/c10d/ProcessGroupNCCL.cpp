@@ -1435,7 +1435,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
-        torch::cuda::nccl::all2all(
+        torch::cuda::nccl::all2all_single(
               input,
               output,
               this->getSize(),
@@ -1500,30 +1500,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
         at::Tensor& /* unused */,
         ncclComm_t comm,
         at::cuda::CUDAStream& stream) {
-      C10D_NCCL_CHECK(ncclGroupStart());
-      for (size_t r = 0; r < outputTensors.size(); r++) {
-        at::Tensor &input = inputTensors[r];
-        at::Tensor &output = outputTensors[r];
-        if (input.numel() != 0) {
-          C10D_NCCL_CHECK(ncclSend(
-              input.data_ptr(),
-              input.numel(),
-              getNcclDataType(input.scalar_type()),
-              r,
-              comm,
-              stream.stream()));
-        }
-        if (output.numel() != 0) {
-          C10D_NCCL_CHECK(ncclRecv(
-              output.data_ptr(),
-              output.numel(),
-              getNcclDataType(output.scalar_type()),
-              r,
-              comm,
-              stream.stream()));
-        }
-      }
-      C10D_NCCL_CHECK(ncclGroupEnd());
+      torch::cuda::nccl::all2all(outputTensors, inputTensors, comm, stream);
       return ncclSuccess;
     },
     OpType::ALLTOALL);

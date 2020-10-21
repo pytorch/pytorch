@@ -136,11 +136,17 @@ TORCH_CUDA_API void all_gather(
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
-TORCH_CUDA_API void all2all(
+TORCH_CUDA_API void all2all_single(
     at::Tensor& input,
     at::Tensor& output,
     int size,
     ncclComm_t comm,
+    at::cuda::CUDAStream& stream);
+
+TORCH_CUDA_API void all2all(
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<at::Tensor>& inputTensors,
+    ncclComm_t _comm,
     at::cuda::CUDAStream& stream);
 
 TORCH_CUDA_API void send(

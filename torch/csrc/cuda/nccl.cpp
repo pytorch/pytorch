@@ -625,7 +625,7 @@ void all_gather(
 #endif
 }
 
-void all2all(at::Tensor& input,
+void all2all_single(at::Tensor& input,
              at::Tensor& output,
              int size,
              ncclComm_t _comm,
@@ -649,6 +649,47 @@ void all2all(at::Tensor& input,
     if (count != 0) {
       NCCL_CHECK(ncclSend(sendbuff + r * rankdiff, count, type, r, comm, stream));
       NCCL_CHECK(ncclRecv(recvbuff + r * rankdiff, count, type, r, comm, stream));
+    }
+  }
+  NCCL_CHECK(ncclGroupEnd());
+#else
+  AT_ERROR("all2all is only supported for NCCL lib version >= 2.7.0");
+#endif
+#else
+  AT_ERROR("PyTorch built without NCCL support");
+#endif
+}
+
+void all2all(std::vector<at::Tensor>& outputTensors,
+             std::vector<at::Tensor>& inputTensors,
+             ncclComm_t _comm,
+             at::cuda::CUDAStream& stream) {
+#ifdef USE_NCCL
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
+  using namespace torch::cuda::nccl::detail;
+  auto comm = to_nccl_comm(_comm);
+
+  NCCL_CHECK(ncclGroupStart());
+  for (size_t r = 0; r < outputTensors.size(); r++) {
+    at::Tensor &input = inputTensors[r];
+    at::Tensor &output = outputTensors[r];
+    if (input.numel() != 0) {
+      NCCL_CHECK(ncclSend(
+          input.data_ptr(),
+          input.numel(),
+          to_nccl_data_type(input),
+          r,
+          comm,
+          stream.stream()));
+    }
+    if (output.numel() != 0) {
+      NCCL_CHECK(ncclRecv(
+          output.data_ptr(),
+          output.numel(),
+          to_nccl_data_type(output),
+          r,
+          comm,
+          stream.stream()));
     }
   }
   NCCL_CHECK(ncclGroupEnd());
