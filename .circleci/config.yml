@@ -728,7 +728,7 @@ jobs:
       - store_artifacts:
           path: C:/w/build-results
 
-  pytorch_windows_test_2gpu:
+  pytorch_windows_test_2gpu_old:
     <<: *pytorch_windows_params
     parameters:
       executor:
@@ -783,7 +783,59 @@ jobs:
             az vm run-command invoke  --command-id RunPowerShellScript --name jozh-pytorch-test-vm-01 -g PyTorchCiTestGroup --scripts "@script.ps1"  -o json
             az vm delete --name jozh-pytorch-test-vm-01 -g PyTorchCiTestGroup -y
             az disk delete --name pytorch-test-vm-os-disk -g PyTorchCiTestGroup -y
-
+  pytorch_windows_test_2gpu:
+    <<: *pytorch_windows_params
+    parameters:
+      executor:
+        type: string
+        default: "windows-medium-cpu-with-nvidia-cuda"
+      build_environment:
+        type: string
+        default: ""
+      test_name:
+        type: string
+        default: ""
+      cuda_version:
+        type: string
+        default: "10"
+      python_version:
+        type: string
+        default: "3.6"
+      vc_version:
+        type: string
+        default: "14.16"
+      vc_year:
+        type: string
+        default: "2019"
+      vc_product:
+        type: string
+        default: "BuildTools"
+      use_cuda:
+        type: string
+        default: ""
+    executor: <<parameters.executor>>
+    steps:
+      - checkout
+      - attach_workspace:
+          at: c:/users/circleci/workspace
+      - run:
+          name: Download Azure cli
+          no_output_timeout: 3m
+          command: |
+            curl -L https://azurecliprod.blob.core.windows.net/msi/azure-cli-2.13.0.msi --output azure-cli-2.13.0.msi
+      - run:
+          name: Install Azure cli
+          no_output_timeout: 30m
+          command: |
+            start /wait msiexec /i azure-cli-2.13.0.msi /quiet /qn /norestart /log t1.log
+          shell: cmd.exe
+      - run:
+          name: Create Test Box
+          no_output_timeout: 60m
+          command: |
+            ls -l /c/users/circleci/workspace/build-results
+            echo $IMAGE_COMMIT_ID
+            echo $IMAGE_COMMIT_TAG
   pytorch_windows_test:
     <<: *pytorch_windows_params
     parameters:
@@ -2001,7 +2053,7 @@ jobs:
 workflows:
   binary_builds:
     jobs:
-      - pytorch_windows_test_2gpu:
+      - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cpu-py3
           cuda_version: cpu
           name: pytorch_windows_vs2019_py36_cpu_build
@@ -2010,38 +2062,14 @@ workflows:
           vc_product: Community
           vc_version: ""
           vc_year: "2019"
-      - pytorch_windows_test:
+      - pytorch_windows_test_2gpu:
           build_environment: pytorch-win-vs2019-cpu-py3
           cuda_version: cpu
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           name: pytorch_windows_vs2019_py36_cpu_test1
           python_version: "3.6"
           requires:
             - pytorch_windows_vs2019_py36_cpu_build
           test_name: pytorch-windows-test1
-          use_cuda: "0"
-          vc_product: Community
-          vc_version: ""
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cpu-py3
-          cuda_version: cpu
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          name: pytorch_windows_vs2019_py36_cpu_test2
-          python_version: "3.6"
-          requires:
-            - pytorch_windows_vs2019_py36_cpu_build
-          test_name: pytorch-windows-test2
           use_cuda: "0"
           vc_product: Community
           vc_version: ""
