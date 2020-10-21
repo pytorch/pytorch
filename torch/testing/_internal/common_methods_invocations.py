@@ -978,7 +978,7 @@ def method_tests():
         ('mm', (S, M), ((M, S),), '', (True,)),
         ('bmm', (M, S, M), ((M, M, S),), '', (True,)),
         ('mv', (S, M), ((M,),), '', (True,)),
-        ('outer', (S,), ((M,),)),
+        ('ger', (S,), ((M,),)),
         ('matmul', (L,), ((L,),), '', (True,)),
         ('matmul', (S, M), ((M,),), "2d_1d", (True,)),
         ('matmul', (M,), ((M, S),), "1d_2d", (True,)),

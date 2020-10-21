@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
@@ -138,6 +139,16 @@ const Node* findNodeForOp(
       return node;
     }
   }
+
+  // Check for alias-ed operator names
+  const auto aliasOp = torch::jit::alias_map.find(opName);
+  AT_ASSERT(aliasOp != torch::jit::alias_map.end());
+  for (const auto node : g.nodes()) {
+    if (node->kind() == aliasOp->second) {
+      return node;
+    }
+  }
+
   AT_ASSERT(false);
 }
 
