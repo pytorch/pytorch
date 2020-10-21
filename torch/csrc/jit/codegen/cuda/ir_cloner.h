@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -10,6 +9,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 class Fusion;
 
@@ -81,6 +81,7 @@ class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
   std::unordered_map<const Statement*, Statement*> clones_map_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch
