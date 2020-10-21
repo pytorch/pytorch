@@ -15,7 +15,7 @@ install_ubuntu() {
   echo "Cleaning up"
   cd ..
   rm -rf sccache
-  apt-get remove cargo
+  apt-get remove -y cargo rustc
   apt-get autoclean && apt-get clean
 }
 
