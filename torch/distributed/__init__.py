@@ -20,12 +20,6 @@ if is_available() and not torch._C._c10d_init():
 
 
 if is_available():
-    from .distributed_c10d import *
-    # Variables prefixed with underscore are not auto imported
-    # See the comment in `distributed_c10d.py` above `_backend` on why we expose
-    # this.
-
-    from .distributed_c10d import _backend
     from torch._C._distributed_c10d import (
         FileStore,
         _GradBucket,
@@ -42,3 +36,10 @@ if is_available():
             HashStore,
             _round_robin_process_groups,
         )
+
+    from .distributed_c10d import *
+    # Variables prefixed with underscore are not auto imported
+    # See the comment in `distributed_c10d.py` above `_backend` on why we expose
+    # this.
+
+    from .distributed_c10d import _backend
