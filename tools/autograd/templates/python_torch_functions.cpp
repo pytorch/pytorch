@@ -8,6 +8,12 @@
 
 #include <Python.h>
 
+// Undefine a MACRO created from CPython
+// https://github.com/python/cpython/blob/c60394c7fc9cc09b16e9675a3eeb5844b6d8523f/PC/pyconfig.h#L196
+#ifdef _MSC_VER
+#undef copysign
+#endif // _MSC_VER
+
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/Dtype.h"
@@ -30,11 +36,6 @@
 #include <stdexcept>
 #include <utility>
 
-// Undefine a MACRO created from CPython
-// https://github.com/python/cpython/blob/c60394c7fc9cc09b16e9675a3eeb5844b6d8523f/PC/pyconfig.h#L196
-#ifdef _MSC_VER
-#undef copysign
-#endif // _MSC_VER
 
 using at::Tensor;
 using at::Device;
