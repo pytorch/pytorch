@@ -34,7 +34,7 @@ __host__ __device__ __forceinline__ T THCRoundUp(T a, T b) {
  */
 template <typename T>
 __device__ __forceinline__ T doLdg(const T* p) {
-#ifndef __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 && !defined __HIP_PLATFORM_HCC__
   return __ldg(p);
 #else
   return *p;
