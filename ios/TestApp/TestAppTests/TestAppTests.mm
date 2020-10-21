@@ -1,6 +1,5 @@
 #import <XCTest/XCTest.h>
 
-#include <ATen/native/metal/mpscnn/tests/MPSCNNTests.h>
 #include <torch/script.h>
 
 @interface TestAppTests : XCTestCase
