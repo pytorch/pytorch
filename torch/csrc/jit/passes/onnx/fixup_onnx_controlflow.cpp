@@ -191,41 +191,22 @@ void ConvertSequenceDependencies(Block* block, int opset_version) {
     ConvertSequenceDependencies(node, opset_version);
   }
 }
-} // anonymous namespace
 
-void FixupONNXLoopNodeInputs(Node* node) {
-  if (node->kind() != ::c10::onnx::Loop) {
-    return;
+// Resolving limitation from ONNX that the block output can not be
+// a value from outside the block. Inserting an Identity node inside
+// the block, linking with the value outside as workaround.
+void FixupONNXSubblockOutputs(Node* n) {
+  for (Block* block : n->blocks()) {
+    for (Value* output : block->outputs()) {
+      if (output->node()->owningBlock() != block) {
+        Node* id_node = block->owningGraph()->create(onnx::Identity);
+        id_node->insertBefore(block->return_node());
+        id_node->addInput(output);
+        id_node->output()->copyMetadata(output);
+        block->return_node()->replaceInputWith(output, id_node->output());
+      }
+    }
   }
-
-  auto* graph = node->owningGraph();
-
-  // add cast to condition input outside the loop.
-  Value* cond_val = node->inputs()[1];
-  if (IsCondCastRequired(cond_val))
-    InsertCastForCond(cond_val, graph, node);
-
-  // Setup Loop input cond and i.
-  TORCH_INTERNAL_ASSERT(node->blocks().size() == 1);
-  auto* sub_block = node->blocks()[0];
-  Value* cond = sub_block->insertInput(1, "cond");
-  cond->setType(BoolType::create());
-
-  Value* i = sub_block->inputs()[0];
-  i->setType(TensorType::fromNumberType(IntType::get()));
-
-  // add cast to condition input inside the loop.
-  Value* next_cond_val = sub_block->outputs()[0];
-  if (IsCondCastRequired(next_cond_val))
-    InsertCastForCond(next_cond_val, graph, sub_block->return_node());
-}
-
-std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
-  auto output_size = node->outputs().size();
-  FixupONNXLoopNodeInputs(node);
-  auto new_outputs = ConvertSequenceDependencies(node, opset_version);
-  TORCH_INTERNAL_ASSERT(output_size == new_outputs.size());
-  return new_outputs;
 }
 
 // Check if node is prim::Uninitialized,
@@ -333,6 +314,18 @@ void ONNXFixupUninitializedOutput(Node* node) {
   }
 }
 
+std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
+  auto output_size = node->outputs().size();
+  FixupONNXLoopNodeInputs(node);
+  FixupONNXSubblockOutputs(node);
+  // NOTE: the output order is deliberately changed to match expected order
+  //       since onnx loop requires scan outputs to be the last outputs.
+  auto new_outputs = ConvertSequenceDependencies(node, opset_version);
+
+  TORCH_INTERNAL_ASSERT(output_size == new_outputs.size());
+  return new_outputs;
+}
+
 std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   if (node->kind() != ::c10::onnx::If) {
     return node->outputs().vec();
@@ -340,20 +333,39 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   GRAPH_DUMP("Graph before fixing controlflow: ", node->owningGraph());
   auto* if_node = node;
   auto* graph = if_node->owningGraph();
-  for (Block* block : node->blocks()) {
-    for (Value* output : block->outputs()) {
-      if (output->node()->owningBlock() != block) {
-        Node* id_node = graph->create(onnx::Identity);
-        id_node->insertBefore(block->return_node());
-        id_node->addInput(output);
-        id_node->output()->copyMetadata(output);
-        block->return_node()->replaceInputWith(output, id_node->output());
-      }
-    }
-  }
+  FixupONNXSubblockOutputs(if_node);
   ONNXFixupUninitializedOutput(if_node);
   GRAPH_DUMP("Graph after fixing controlflow: ", node->owningGraph());
   return if_node->outputs().vec();
+}
+
+} // anonymous namespace
+
+void FixupONNXLoopNodeInputs(Node* node) {
+  if (node->kind() != ::c10::onnx::Loop) {
+    return;
+  }
+
+  auto* graph = node->owningGraph();
+
+  // add cast to condition input outside the loop.
+  Value* cond_val = node->input(1);
+  if (IsCondCastRequired(cond_val))
+    InsertCastForCond(cond_val, graph, node);
+
+  // Setup Loop input cond and i.
+  TORCH_INTERNAL_ASSERT(node->blocks().size() == 1);
+  auto* sub_block = node->blocks().at(0);
+  Value* cond = sub_block->insertInput(1, "cond");
+  cond->setType(BoolType::create());
+
+  Value* i = sub_block->inputs().at(0);
+  i->setType(TensorType::fromNumberType(IntType::get()));
+
+  // add cast to condition input inside the loop.
+  Value* next_cond_val = sub_block->outputs().at(0);
+  if (IsCondCastRequired(next_cond_val))
+    InsertCastForCond(next_cond_val, graph, sub_block->return_node());
 }
 
 std::vector<Value*> FixupONNXControlflowNode(Node* n, int opset_version) {
