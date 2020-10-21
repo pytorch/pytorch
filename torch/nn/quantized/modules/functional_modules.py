@@ -82,7 +82,7 @@ class FloatFunctional(torch.nn.Module):
         r = self.activation_post_process(r)
         return r
 
-class FXFloatFunctional(FloatFunctional):
+class FXFloatFunctional(torch.nn.Module):
     r""" module to replace FloatFunctional module before FX graph mode quantization,
     since activation_post_process will be inserted in top level module directly
 
