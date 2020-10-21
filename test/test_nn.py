@@ -12893,6 +12893,22 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(functional, modular, atol=1e-6, rtol=1e-6)
             self.assertEqual(traced, modular, atol=1e-6, rtol=1e-6)
 
+    def test_to_complex(self, device):
+        m = nn.Linear(3, 5).to(device)
+        self.assertIs(m, m.to(device))
+        m.to(torch.cfloat)
+        self.assertIs(m.weight.dtype, torch.cfloat)
+        m.to(torch.cdouble)
+        self.assertIs(m.weight.dtype, torch.cdouble)
+        m.to(torch.float)
+        self.assertIs(m.weight.dtype, torch.float)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            m.to(torch.cfloat)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("Complex modules are a new feature" in str(w[-1].message))
+
 
 class TestModuleGlobalHooks(TestCase):
 
