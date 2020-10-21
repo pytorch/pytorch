@@ -202,7 +202,7 @@ class TestLinalg(TestCase):
             self.assertEqual(result_converted, result_out_converted, msg=msg)
 
         ord_vector = [0, 1, -1, 2, -2, 3, -3, 4.5, -4.5, inf, -inf, None]
-        ord_matrix = [1, -1, 2, -2, inf, -inf, None]
+        ord_matrix = ['fro', 'nuc', 1, -1, 2, -2, inf, -inf, None]
         S = 10
         test_cases = [
             ((S, ), ord_vector),
@@ -229,13 +229,6 @@ class TestLinalg(TestCase):
                         result = torch.Tensor().to(out_dtype)
                         with self.assertRaisesRegex(RuntimeError, r'provided dtype must match dtype of result'):
                             torch.linalg.norm(input, ord=ord, keepdim=keepdim, dtype=dtype, out=result)
-
-        # TODO: Once dtype arg is supported in nuclear and frobenius norms, remove the following test
-        #       and  add 'nuc' and 'fro' to ord_matrix above
-        for ord in ['nuc', 'fro']:
-            input = torch.randn(10, 10, device=device)
-            with self.assertRaisesRegex(RuntimeError, f"ord=\'{ord}\' does not yet support the dtype argument"):
-                torch.linalg.norm(input, ord, dtype=torch.float)
 
     # This test compares torch.linalg.norm and numpy.linalg.norm to ensure that
     # their vector norm results match
