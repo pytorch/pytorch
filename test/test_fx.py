@@ -4,6 +4,7 @@ import operator
 import numbers
 import pickle
 import copy
+import sys
 from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.experimental import GraphManipulation
@@ -828,6 +829,17 @@ class TestFX(JitTestCase):
         submodules_out = module_with_submodules(x, y)
 
         self.assertEqual(orig_out, submodules_out)
+
+    def test_deepcopy_recursion_depth(self):
+        depth = sys.getrecursionlimit() + 20
+
+        g = torch.fx.Graph()
+        x = g.placeholder('x')
+        for i in range(depth):
+            x = g.call_function(torch.relu, (x,))
+        g.output(x)
+
+        copied_graph = copy.deepcopy(g)
 
     @skipIfNoTorchVision
     def test_replace_uses(self):
