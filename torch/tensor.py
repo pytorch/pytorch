@@ -18,9 +18,10 @@ def _wrap_type_error_to_not_implemented(f):
     method_assignments = ('__name__', '__doc__')
     assigned = functools.WRAPPER_ASSIGNMENTS
 
+    from torch.overrides import has_torch_function, handle_torch_function
+
     @functools.wraps(f, assigned=assigned)
     def wrapped(*args, **kwargs):
-        from torch.overrides import has_torch_function, handle_torch_function
         if not all(type(t) is Tensor for t in args) and has_torch_function(args):
             return handle_torch_function(wrapped, args, *args, **kwargs)
         try:
