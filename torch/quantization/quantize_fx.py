@@ -20,6 +20,7 @@ def _swap_ff_with_fxff(model):
         if isinstance(module, torch.nn.quantized.FloatFunctional):
             modules_to_swap.append(name)
     for name in modules_to_swap:
+        del model._modules[name]
         model._modules[name] = torch.nn.quantized.FXFloatFunctional()
 
 def _fuse_fx(graph_module, inplace=False):

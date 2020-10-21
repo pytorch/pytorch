@@ -12,6 +12,8 @@ from torch.quantization import (
     prepare_fx,
     convert_fx,
     prepare_qat_fx,
+    prepare,
+    convert,
 )
 
 from torch.quantization import (
@@ -1494,31 +1496,50 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.ff1 = nnq.FloatFunctional()
                 self.ff2 = nnq.FloatFunctional()
                 self.ff3 = nnq.FloatFunctional()
+                self.ff4 = nnq.FloatFunctional()
+                self.ff5 = nnq.FloatFunctional()
+                self.ff6 = nnq.FloatFunctional()
 
             def forward(self, x):
                 x = self.ff1.add(x, x)
-                x = self.ff2.mul(x, x)
-                x = self.ff3.add_relu(x, x)
+                x = self.ff2.add_scalar(x, 3)
+                x = self.ff3.mul(x, x)
+                x = self.ff4.mul_scalar(x, 3)
+                x = self.ff5.add_relu(x, x)
+                x = self.ff6.cat([x])
                 return x
 
+        data = torch.rand(3, 3)
         m = M()
         m.eval()
         qconfig_dict = {"": default_qconfig}
         m = prepare_fx(m, qconfig_dict)
         node_occurrence = {
-            ns.call_module(torch.quantization.MinMaxObserver): 4,
+            ns.call_module(torch.quantization.MinMaxObserver): 5,
             ns.call_module(torch.nn.quantized.FloatFunctional): 0
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        m(data)
         node_list = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_function(torch.ops.quantized.add),
+            ns.call_function(torch.ops.quantized.add),
+            ns.call_function(torch.ops.quantized.mul),
             ns.call_function(torch.ops.quantized.mul),
             ns.call_function(torch.ops.quantized.add_relu),
+            ns.call_function(torch.ops.quantized.cat),
             ns.call_method('dequantize')
         ]
         m = convert_fx(m)
         self.checkGraphModuleNodes(m, expected_node_list=node_list)
+
+        # make sure numerics match with eager mode
+        ref_m = torch.quantization.QuantWrapper(M()).eval()
+        ref_m.qconfig = default_qconfig
+        ref_m = prepare(ref_m)
+        ref_m(data)
+        ref_m = convert(ref_m)
+        self.assertEqual(m(data), ref_m(data))
 
 class TestQuantizeFxModels(QuantizationTestCase):
     def _test_model_impl(
