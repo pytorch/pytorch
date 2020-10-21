@@ -223,11 +223,14 @@ void nan_to_num_kernel_cuda(
   });
 }
 
-void kaiser_window_kernel_cuda(TensorIterator& iter, int64_t window_length, double beta){
+void kaiser_window_kernel_cuda(TensorIterator& iter, int64_t window_length, double beta_){
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "kaiser_window_cuda", [&](){
-    const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
+    using T_ACC = acc_type<scalar_t, true>;
+    const T_ACC alpha = static_cast<T_ACC>((window_length - 1) / 2.0);
+    const T_ACC beta = static_cast<T_ACC>(beta_);
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return calc_i0(static_cast<scalar_t>(beta) * ::sqrt(1 - ::pow((a - alpha) / alpha, static_cast<scalar_t>(2.0)))) / calc_i0(static_cast<scalar_t>(beta));
+      auto x = static_cast<T_ACC>(a);
+      return calc_i0(beta * ::sqrt(1 - ::pow((x - alpha) / alpha, static_cast<T_ACC>(2.0)))) / calc_i0(beta);
     });
   });
 }
