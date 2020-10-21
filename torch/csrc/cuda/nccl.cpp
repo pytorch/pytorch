@@ -672,14 +672,14 @@ void all2all_single_unequal_split(
     const size_t* recvcounts,
     const size_t* recvdispls,
     size_t size,
-    c10::ScalarType type_,
+    c10::ScalarType _type,
     ncclComm_t _comm,
-    cudaStream_t& stream) {
+    at::cuda::CUDAStream& stream) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
   using namespace torch::cuda::nccl::detail;
 
-  auto type = to_nccl_data_type(type_);
+  auto type = to_nccl_data_type(_type);
   auto comm = to_nccl_comm(_comm);
   int numranks;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
