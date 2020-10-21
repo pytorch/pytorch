@@ -12,6 +12,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
 struct TypeHash {
@@ -200,6 +201,7 @@ enum class LaunchConfigType {
   TIDx
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

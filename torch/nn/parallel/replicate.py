@@ -80,7 +80,7 @@ def replicate(network, devices, detach=False):
         raise RuntimeError("Cannot replicate network where python modules are "
                            "childrens of ScriptModule")
 
-    devices = list(map(lambda x: _get_device_index(x, True), devices))
+    devices = [_get_device_index(x, True) for x in devices]
     num_replicas = len(devices)
 
     params = list(network.parameters())
