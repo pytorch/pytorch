@@ -237,7 +237,11 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
     (input.options().backend() == at::Backend::CPU &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
      !transposed && // or transposed tensors
-     (groups > 1 || weight.size(2) > 3 || input.size(0) > 1
+     (is_strided() || is_dilated() || input.size(0) >= 16 ||
+      weight.size(-1) != 1 || weight.size(-2) != 1) &&
+     (groups > 1
+      || (weight.size(-1) > 3 && weight.size(-2) > 3)
+      || input.size(0) > 1
       || input.size(0)*input.size(1)*input.size(2)*input.size(3) > 20480)); // for some case, native is faster
 #endif
   return false;
