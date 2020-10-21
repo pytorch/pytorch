@@ -504,7 +504,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_getDefaultStream",
     THCPModule_getDefaultStream_wrap, METH_O, nullptr},
   {"_cuda_getCurrentBlasHandle", THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, nullptr},
-  {"_cuda_getCurrentGeneratorTestingOnly", (PyCFunction)THCPModule_getCurrentGeneratorTestingOnly, METH_NOARGS, nullptr},
+  {"_cuda_getCurrentGeneratorTestingOnly", THCPModule_getCurrentGeneratorTestingOnly, METH_NOARGS, nullptr},
   {"_cuda_setStream",    THCPModule_setStream_wrap,  METH_O, nullptr},
   {"_cuda_getCompiledVersion", THCPModule_getCompiledVersion, METH_NOARGS, nullptr},
   {"_cuda_hasPrimaryContext", THCPModule_hasPrimaryContext,  METH_O,  nullptr},

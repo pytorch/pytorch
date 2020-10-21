@@ -622,7 +622,7 @@ static PyMethodDef TorchMethods[] = {
   {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS,     nullptr},
   {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O,  nullptr},
   {"_get_stateful_cuda_op_states_on_device", THPModule_statefulCUDAOpStatesOnDevice, METH_NOARGS,     nullptr},
-  {"_set_stateful_cuda_op_states_on_device", (PyCFunction)THPModule_setStatefulCUDAOpStatesOnDevice, METH_O,  nullptr},
+  {"_set_stateful_cuda_op_states_on_device", THPModule_setStatefulCUDAOpStatesOnDevice, METH_O,  nullptr},
   {"_vmapmode_increment_nesting", THPModule_vmapmode_increment_nesting, METH_NOARGS, nullptr},
   {"_vmapmode_decrement_nesting", THPModule_vmapmode_decrement_nesting, METH_NOARGS, nullptr},
   {"_to_dlpack",      THPModule_toDLPack,          METH_O,       nullptr},
