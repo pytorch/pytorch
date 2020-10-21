@@ -39,9 +39,9 @@ SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set,
     reduction_(std::move(reduction)),
     fill_value_(std::move(fill_value)) {}
 
-  void SparseGCSTensorImpl::resize_(IntArrayRef size) {
+void SparseGCSTensorImpl::resize_(IntArrayRef size) {
     
-  }
+}
 
 void SparseGCSTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, ArrayRef<int64_t> size) {
   // TODO: perform error checking.

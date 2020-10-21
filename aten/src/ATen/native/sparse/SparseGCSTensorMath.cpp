@@ -195,9 +195,11 @@ SparseTensor& add_out_sparse_gcs_cpu(SparseTensor& out, const SparseTensor& self
               " to output ", out.scalar_type(), " in add operation");
 
   std::cout << "calling add_out sparse: \n" ;
-  out.resize_as_(src);
+
 
   int64_t self_nnz = self._nnz(), src_nnz = src._nnz(), max_nnz = self_nnz + src_nnz;
+
+  out.resize_as_(src);
   
   Tensor self_values = self.values().to(commonDtype);
   Tensor src_values = src.values().to(commonDtype);
