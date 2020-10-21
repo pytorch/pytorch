@@ -2497,13 +2497,12 @@ t2.start()
         if add_kwargs is None:
             add_kwargs = {}
 
-        print(f"HEY _run_autocast_outofplace op {op} 0", file=sys.stderr)
+        print(f"HEY _run_autocast_outofplace top op {op}", file=sys.stderr)
         self.assertFalse(torch.is_autocast_enabled())
 
-        print(f"HEY _run_autocast_outofplace op {op} 1", file=sys.stderr)
         with torch.cuda.amp.autocast():
 
-            print(f"HEY _run_autocast_outofplace op {op} 2", file=sys.stderr)
+            print(f"HEY _run_autocast_outofplace inside with op {op}", file=sys.stderr)
             self.assertTrue(torch.is_autocast_enabled())
 
             out_type = out_type if out_type is not None else run_as_type
@@ -2512,10 +2511,13 @@ t2.start()
             # Try module.* variant, if requested:
             if module is not None and hasattr(module, op):
 
-                print(f"HEY module {module}", file=sys.stderr)
-                output = getattr(module, op)(*args, **add_kwargs)
+                print(f"HEY before module getattr {module}", file=sys.stderr)
+                module_op = getattr(module, op)
 
-                print(f"HEY done module {module}", file=sys.stderr)
+                print(f"HEY before module op call {module}", file=sys.stderr)
+                output = module_op(*args, **add_kwargs)
+
+                print(f"HEY after module op call {module}", file=sys.stderr)
                 if isinstance(output, torch.Tensor):
                     self.assertTrue(out_type == output.dtype,
                                     "autocast for torch.{} produced {}, should produce {}"
@@ -2560,19 +2562,15 @@ t2.start()
                 self.assertFalse(torch.is_autocast_enabled())
 
                 if module is not None and hasattr(module, op):
-                    print(f"HEY control module", file=sys.stderr)
                     control = getattr(module, op)(*cast(args, run_as_type), **add_kwargs)
-                    print(f"HEY done control module", file=sys.stderr)
                 else:
-                    print(f"HEY control Tensor", file=sys.stderr)
                     control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
-                    print(f"HEY done control Tensor", file=sys.stderr)
                 self.assertTrue(type(output_to_compare) == type(control))
                 comparison = compare(output_to_compare, control)
                 self.assertTrue(comparison, "torch.{} result did not match control".format(op))
             self.assertTrue(torch.is_autocast_enabled())
         self.assertFalse(torch.is_autocast_enabled())
-        print(f"HEY _run_autocast_outofplace done op {op}", file=sys.stderr)
+        print(f"HEY _run_autocast_outofplace bot op {op}", file=sys.stderr)
 
     def args_maybe_kwargs(self, op_with_args):
         if len(op_with_args) == 2:
@@ -2582,16 +2580,19 @@ t2.start()
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp16(self):
-        print(f"HEY test_autocast_torch_fp16 0", file=sys.stderr)
+        print(f"HEY test_autocast_torch_fp16 top", file=sys.stderr)
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
+            print(f"HEY test_autocast_torch_fp16 before loop", file=sys.stderr)
             for op_with_args in self.autocast_lists.torch_fp16:
                 skip_test = False
-                print(f"HEY test_autocast_torch_fp16 op_with_args {op_with_args}", file=sys.stderr)
                 op, args = op_with_args[0], op_with_args[1]
+                print(f"HEY test_autocast_torch_fp16 in loop op {op}", file=sys.stderr)
                 if len(op_with_args) == 3:
                     skip_test = op_with_args[2]  # TEST_WITH_ROCM
                 if not skip_test:
                     self._run_autocast_outofplace(op, args, torch.float16)
+            print(f"HEY test_autocast_torch_fp16 after loop", file=sys.stderr)
+        print(f"HEY test_autocast_torch_fp16 bot", file=sys.stderr)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp32(self):
@@ -2979,9 +2980,9 @@ class TestCudaComm(TestCase):
         self.assertEqual(result.cpu(), x + y)
 
     def _test_reduce_add_coalesced(self, tensors, buffer_size):
-        dup_tensors = [tensors, list(map(lambda t: t.cuda(1), tensors))]
+        dup_tensors = [tensors, [t.cuda(1) for t in tensors]]
 
-        r_tensors = list(map(comm.reduce_add, zip(*dup_tensors)))
+        r_tensors = [comm.reduce_add(t) for t in zip(*dup_tensors)]
         for r, t in zip(r_tensors, tensors):
             self.assertEqualTypeString(r, t)
             self.assertEqual(r, t * 2)
