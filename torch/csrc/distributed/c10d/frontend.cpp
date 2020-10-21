@@ -11,6 +11,10 @@ namespace c10d {
 // we need many additional conditionals to check whether group is WORLD and
 // then use default_pg_ explicitly.
 
+void DistributedC10d::checkDefaultPg() const {
+  TORCH_CHECK(default_pg_ != nullptr, "Default process group is not initialized")
+}
+
 int64_t DistributedC10d::getRank(const std::shared_ptr<ProcessGroup>& group) const {
   if (rankNotInGroup(group)) {
     return -1;

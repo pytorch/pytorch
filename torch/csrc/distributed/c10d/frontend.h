@@ -2,9 +2,9 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/Optional.h>
-#include <torch/lib/c10d/ProcessGroup.hpp>
-#include <torch/lib/c10d/Store.hpp>
-#include <torch/lib/c10d/Types.hpp>
+#include <c10d/ProcessGroup.hpp>
+#include <c10d/Store.hpp>
+#include <c10d/Types.hpp>
 
 #include <chrono>
 #include <memory>
@@ -13,7 +13,7 @@
 
 namespace c10d {
 
-class Backend {
+class TORCH_API Backend {
  public:
   // Maps to Backend.__new__ in Python.
   static std::string get(std::string);
@@ -27,7 +27,7 @@ class Backend {
   std::unordered_set<std::string> registered_backends_;
 };
 
-class DistributedC10d {
+class TORCH_API DistributedC10d {
  public:
   void initProcessGroup(
       const std::string& backend,
@@ -181,10 +181,10 @@ class DistributedC10d {
       std::chrono::milliseconds timeout,
       Backend backend);
 
-  std::shared_ptr<ProcessGroup> worldProcessGroup();
-
  private:
   DistributedC10d(){};
+
+  std::shared_ptr<ProcessGroup> worldProcessGroup();
 
   bool rankNotInGroup(const std::shared_ptr<ProcessGroup>& group) const;
   int64_t getGroupRank(

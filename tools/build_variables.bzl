@@ -287,6 +287,9 @@ libtorch_distributed_sources = [
     "torch/csrc/distributed/rpc/types.cpp",
     "torch/csrc/distributed/rpc/utils.cpp",
     "torch/csrc/distributed/rpc/metrics/registry.cpp",
+    "torch/csrc/distributed/c10d/comm.cpp",
+    "torch/csrc/distributed/c10d/frontend.cpp",
+    "torch/csrc/distributed/c10d/reducer.cpp",
 ]
 
 jit_sources_full = [
@@ -298,6 +301,11 @@ jit_sources_full = [
     "torch/csrc/jit/runtime/register_special_ops.cpp",
     "torch/csrc/jit/passes/remove_inplace_ops.cpp",
     "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
+]
+
+libtorch_python_distributed_core_sources = [
+    "torch/csrc/distributed/c10d/init.cpp",
+    "torch/csrc/distributed/c10d/python_comm_hook.cpp",
 ]
 
 libtorch_core_jit_sources = sorted(jit_sources_full)
@@ -540,12 +548,6 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/tensor_numpy.cpp",
     "torch/csrc/utils/tensor_types.cpp",
     "torch/csrc/utils/disable_torch_function.cpp",
-]
-
-libtorch_python_distributed_core_sources = [
-    "torch/csrc/distributed/c10d/comm.cpp",
-    "torch/csrc/distributed/c10d/init.cpp",
-    "torch/csrc/distributed/c10d/reducer.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [

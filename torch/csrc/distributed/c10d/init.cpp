@@ -3,8 +3,8 @@
 #include <c10d/FileStore.hpp>
 #ifndef _WIN32
 #include <c10d/HashStore.hpp>
-#include <c10d/ProcessGroupRoundRobin.hpp>
 #include <c10d/TCPStore.hpp>
+#include <torch/lib/c10d/ProcessGroupRoundRobin.hpp>
 #endif
 #include <c10d/ProcessGroup.hpp>
 
@@ -26,6 +26,7 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/comm.h>
+#include <torch/csrc/distributed/c10d/python_comm_hook.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
