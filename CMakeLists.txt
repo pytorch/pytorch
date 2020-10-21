@@ -203,6 +203,7 @@ cmake_dependent_option(
     USE_VALGRIND "Use Valgrind. Only available on Linux." ON
     "LINUX" OFF)
 option(USE_VULKAN "Use Vulkan GPU backend" OFF)
+option(USE_VULKAN_API "Use Vulkan GPU backend v2" OFF)
 option(USE_VULKAN_WRAPPER "Use Vulkan wrapper" ON)
 option(USE_VULKAN_SHADERC_RUNTIME "Use Vulkan Shader compilation runtime(Needs shaderc lib)" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Use Vulkan relaxed precision(mediump)" OFF)
@@ -534,6 +535,10 @@ endif()
 
 if(USE_VULKAN)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN")
+endif()
+
+if(USE_VULKAN_API)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_API")
 endif()
 
 if(USE_VULKAN_WRAPPER)
