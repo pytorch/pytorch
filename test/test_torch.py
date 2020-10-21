@@ -19146,8 +19146,12 @@ else:
 
     def _test_special_stacks(self, dim, at_least_dim, torch_fn, np_fn, device, dtype):
         # Test error for non-tuple argument
+        t = torch.randn(10)
         with self.assertRaisesRegex(TypeError, "must be tuple of Tensors, not Tensor"):
-            torch_fn(torch.randn(10))
+            torch_fn(t)
+        # Test error for a single array
+        with self.assertRaisesRegex(TypeError, "must be tuple of Tensors, not Tensor"):
+            torch_fn((t))
 
         # Test 0-D
         num_tensors = random.randint(1, 5)
