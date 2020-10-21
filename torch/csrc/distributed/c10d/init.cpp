@@ -24,8 +24,8 @@
 #include <pybind11/chrono.h>
 
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/distributed/c10d/c10d_frontend.h>
 #include <torch/csrc/distributed/c10d/comm.h>
+#include <torch/csrc/distributed/c10d/frontend.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -135,7 +135,7 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   module.def(
       "_register_comm_hook",
       &_register_comm_hook,
-      py::arg("ddp_model"),
+      py::arg("reducer"),
       py::arg("state"),
       py::arg("comm_hook"));
 
@@ -1143,7 +1143,7 @@ Arguments:
 
 // c10d methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
-    {"_c10d_init", (PyCFunction)c10d_init, METH_NOARGS, nullptr},
+    {"_c10d_init", c10d_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {

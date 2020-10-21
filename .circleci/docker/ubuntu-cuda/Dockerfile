@@ -78,6 +78,16 @@ ADD ./common/install_jni.sh install_jni.sh
 ADD ./java/jni.h jni.h
 RUN bash ./install_jni.sh && rm install_jni.sh
 
+# Install NCCL for when CUDA is version 10.1
+ADD ./common/install_nccl.sh install_nccl.sh
+RUN if [ "${CUDA_VERSION}" = 10.1 ]; then bash ./install_nccl.sh; fi
+RUN rm install_nccl.sh
+
+# Install Open MPI for CUDA
+ADD ./common/install_openmpi.sh install_openmpi.sh
+RUN if [ -n "${CUDA_VERSION}" ]; then bash install_openmpi.sh; fi
+RUN rm install_openmpi.sh
+
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}

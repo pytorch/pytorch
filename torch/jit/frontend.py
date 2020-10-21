@@ -394,7 +394,7 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_Assign(ctx, stmt):
         rhs = build_expr(ctx, stmt.value)
-        lhs = list(map(lambda x: build_expr(ctx, x), stmt.targets))
+        lhs = [build_expr(ctx, x) for x in stmt.targets]
         return Assign(lhs, rhs)
 
     @staticmethod
