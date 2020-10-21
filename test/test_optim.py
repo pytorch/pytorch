@@ -325,6 +325,10 @@ class TestOptim(TestCase):
             ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=0, centered=True)),
             ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=False)),
             ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=0, momentum=1, centered=False)),
+            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=True, lr_in_momentum=False)),
+            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=0, centered=True, lr_in_momentum=False)),
+            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=False, lr_in_momentum=False)),
+            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=0, momentum=1, centered=False, lr_in_momentum=False)),
             ((optim.Rprop, optim._multi_tensor.Rprop), dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
             ((optim.ASGD, optim._multi_tensor.ASGD), dict(weight_decay=0)),
             ((optim.ASGD, optim._multi_tensor.ASGD), dict(weight_decay=1)),
@@ -340,15 +344,15 @@ class TestOptim(TestCase):
         for optimizers, params in optimizer_pairs_with_flags:
             res = []
             for opt in optimizers:
-                weight = torch.tensor([[-0.2109, -0.4976], [-0.1413, -0.3420], [-0.2524, 0.6976]], 
+                weight = torch.tensor([[-0.2109, -0.4976], [-0.1413, -0.3420], [-0.2524, 0.6976]],
                                       dtype=torch.float64, device=device, requires_grad=True)
                 bias = torch.tensor([-0.1085, -0.2979, 0.6892], dtype=torch.float64, device=device, requires_grad=True)
-                weight2 = torch.tensor([[-0.0508, -0.3941, -0.2843]], 
+                weight2 = torch.tensor([[-0.0508, -0.3941, -0.2843]],
                                        dtype=torch.float64, device=device, requires_grad=True)
                 bias2 = torch.tensor([-0.0711], dtype=torch.float64, device=device, requires_grad=True)
                 input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device).reshape(3, 2)
 
-                model = torch.nn.Sequential(torch.nn.Linear(2, 3), 
+                model = torch.nn.Sequential(torch.nn.Linear(2, 3),
                                             torch.nn.Sigmoid(),
                                             torch.nn.Linear(3, 1),
                                             torch.nn.Sigmoid())
@@ -363,7 +367,7 @@ class TestOptim(TestCase):
 
                 optimizer = opt(model.parameters(), **params)
 
-                for _ in range(kIterations): 
+                for _ in range(kIterations):
                     optimizer.zero_grad()
                     output = model(input)
                     loss = output.sum()

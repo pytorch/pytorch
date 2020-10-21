@@ -28,10 +28,25 @@ class RMSprop(Optimizer):
         centered (bool, optional) : if ``True``, compute the centered RMSProp,
             the gradient is normalized by an estimation of its variance
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        decoupled_decay (bool, optional): decoupled weight decay as per
+            (https://arxiv.org/abs/1711.05101)
+        lr_in_momentum (bool, optional): learning rate scaling is included in the
+            momentum buffer update
 
     """
 
-    def __init__(self, params, lr=1e-2, alpha=0.99, eps=1e-8, weight_decay=0, momentum=0, centered=False):
+    def __init__(
+        self,
+        params,
+        lr=1e-2,
+        alpha=0.99,
+        eps=1e-8,
+        weight_decay=0,
+        momentum=0,
+        centered=False,
+        decoupled_decay=False,
+        lr_in_momentum=True
+    ):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -43,7 +58,16 @@ class RMSprop(Optimizer):
         if not 0.0 <= alpha:
             raise ValueError("Invalid alpha value: {}".format(alpha))
 
-        defaults = dict(lr=lr, momentum=momentum, alpha=alpha, eps=eps, centered=centered, weight_decay=weight_decay)
+        defaults = dict(
+            lr=lr,
+            momentum=momentum,
+            alpha=alpha,
+            eps=eps,
+            centered=centered,
+            weight_decay=weight_decay,
+            decoupled_decay=decoupled_decay,
+            lr_in_momentum=lr_in_momentum
+        )
         super(RMSprop, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -78,7 +102,7 @@ class RMSprop(Optimizer):
                         raise RuntimeError('RMSprop does not support sparse gradients')
 
                     grads.append(p.grad)
-                    params_with_grad.append(p)
+                    params_with_grad.append(p.data)
 
                     state = self.state[p]
                     # State initialization
@@ -96,27 +120,34 @@ class RMSprop(Optimizer):
                     square_avg.append(state['square_avg'])
 
             if group['weight_decay'] != 0:
-                torch._foreach_add_(grads, params_with_grad, alpha=group['weight_decay'])
+                if "decoupled_decay" in group and group["decoupled_decay"]:
+                    torch._foreach_add_(p.data, p.data, alpha=-group['weight_decay'])
+                else:
+                    torch._foreach_add_(grads, params_with_grad, alpha=group['weight_decay'])
 
             torch._foreach_mul_(square_avg, alpha)
-            torch._foreach_addcmul_(square_avg, grads, grads, value=1 - alpha)
+            torch._foreach_addcmul_(square_avg, grads, grads, value=1.0 - alpha)
 
             if group['centered']:
                 grad_avgs = [s['grad_avg'] for s in states]
                 torch._foreach_mul_(grad_avgs, alpha)
                 torch._foreach_add_(grad_avgs, grads, alpha=1 - alpha)
                 avg = torch._foreach_addcmul(square_avg, grad_avgs, grad_avgs, value=-1)
+                torch._foreach_add_(avg, group['eps'])
                 torch._foreach_sqrt_(avg)
-                torch._foreach_add_(avg, group['eps'])
             else:
-                avg = torch._foreach_sqrt(square_avg)
-                torch._foreach_add_(avg, group['eps'])
+                square_avg_tmp = torch._foreach_add(square_avg, group['eps'])
+                avg = torch._foreach_sqrt(square_avg_tmp)
 
             if group['momentum'] > 0:
                 buf = [s['momentum_buffer'] for s in states]
                 torch._foreach_mul_(buf, group['momentum'])
-                torch._foreach_addcdiv_(buf, grads, avg)
-                torch._foreach_add_(params_with_grad, buf, alpha=-group['lr'])
+                if "lr_in_momentum" in group and group["lr_in_momentum"]:
+                    torch._foreach_addcdiv_(buf, grads, avg, value=group["lr"])
+                    torch._foreach_add_(params_with_grad, buf, alpha=-1)
+                else:
+                    torch._foreach_addcdiv_(buf, grads, avg)
+                    torch._foreach_add_(params_with_grad, buf, alpha=-group['lr'])
             else:
                 torch._foreach_addcdiv_(params_with_grad, grads, avg, value=-group['lr'])
 
