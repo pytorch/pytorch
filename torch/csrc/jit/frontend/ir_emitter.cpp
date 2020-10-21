@@ -2672,7 +2672,7 @@ struct to_ir {
     }
     auto args = getNamedValues(apply.inputs(), true);
     auto kwargs = emitAttributes(apply.attributes());
-    return sv->call(loc, method, std::move(args), std::move(kwargs), n_binders);
+    return sv->call(loc, method, args, kwargs, n_binders);
   }
 
   // this function handles expressions that look like apply statements
