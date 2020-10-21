@@ -1395,19 +1395,20 @@ REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub, lstm_packed_fn);
 std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& _input, TensorList hx,
       TensorList _params, bool has_biases,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+      int64_t num_layers, double dropout_p, bool train, 
+      bool bidirectional, bool batch_first, int proj_dim) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-            num_layers, dropout_p, train, bidirectional, batch_first);
+            num_layers, dropout_p, train, bidirectional, batch_first, proj_dim);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
 
   if (use_miopen(_input, dropout_p)) {
     Tensor output, hy, cy;
     lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-              num_layers, dropout_p, train, bidirectional, batch_first);
+              num_layers, dropout_p, train, bidirectional, batch_first, proj_dim);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
   check_attributes(_input, _params, hx);
@@ -1420,6 +1421,20 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   }
   return results;
 }
+
+// std::tuple<Tensor, Tensor, Tensor> cudnn_lstm_proj(
+//       const Tensor& _input, TensorList hx,
+//       TensorList _params, bool has_biases,
+//       int64_t num_layers, double dropout_p, bool train, 
+//       bool bidirectional, bool batch_first, int proj_dim) {
+//   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
+//   Tensor output, hy, cy;
+//   // TODO (igor): proper message?
+//   assert(at::cudnn_is_acceptable(_input));
+//   lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
+//                   num_layers, dropout_p, train, bidirectional, batch_first, proj_dim);
+//   return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+// }
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& data, const Tensor& batch_sizes, TensorList hx,

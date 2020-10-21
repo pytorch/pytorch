@@ -1359,7 +1359,8 @@ ONE_HIDDEN_RNN(rnn_relu, CUDNN_RNN_RELU)
 void lstm_cudnn(Tensor& output, Tensor& hy, Tensor& cy,
       const Tensor& input, TensorList hx,
       TensorList params, bool has_biases,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+      int64_t num_layers, double dropout_p, bool train, 
+      bool bidirectional, bool batch_first, int proj_dim) {
   auto result = _cudnn_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
       CUDNN_LSTM, num_layers, dropout_p, train, bidirectional, batch_first);
   output = result.first;
