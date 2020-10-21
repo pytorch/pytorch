@@ -774,6 +774,7 @@ class Def(TreeView):
 
 class Decl(TreeView):
     ...
+
 # Defined in torch/csrc/distributed/rpc/init.cpp
 def _rpc_init() -> _bool: ...
 
