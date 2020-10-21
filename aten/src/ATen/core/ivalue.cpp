@@ -463,6 +463,9 @@ std::ostream& IValue::repr(
       return out << enum_holder->qualifiedClassName() << "." <<
           enum_holder->name();
     }
+    case IValue::Tag::Object:
+      out << "object(" << &v.toObjectRef();
+      return out << ")";
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
   }
