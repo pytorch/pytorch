@@ -151,7 +151,7 @@ TORCH_CUDA_API void all2all_single_unequal_split(
     const size_t* recvcounts,
     const size_t* recvdispls,
     size_t size,
-    ncclDataType_t type,
+    c10::ScalarType type,
     ncclComm_t comm,
     at::cuda::CUDAStream& stream);
 

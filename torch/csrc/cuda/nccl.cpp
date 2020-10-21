@@ -71,11 +71,8 @@ torch::cuda::nccl::ncclResult from_nccl_result(ncclResult_t var) {
   }
 }
 
-ncclDataType_t to_nccl_data_type(const at::Tensor& t) {
-  if (!t.is_cuda()) {
-    throw std::runtime_error("Unconvertible NCCL type");
-  }
-  switch (t.scalar_type()) {
+ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
+  switch (type) {
     case at::kFloat:
       return ncclDataType_t::ncclFloat;
     case at::kHalf:
@@ -97,6 +94,13 @@ ncclDataType_t to_nccl_data_type(const at::Tensor& t) {
     default:
       throw std::runtime_error("Unconvertible NCCL type");
   }
+}
+
+ncclDataType_t to_nccl_data_type(const at::Tensor& t) {
+  if (!t.is_cuda()) {
+    throw std::runtime_error("Unconvertible NCCL type");
+  }
+  return to_nccl_data_type(t.scalar_type());
 }
 
 ncclRedOp_t to_nccl_red_op(int var) {
@@ -660,7 +664,7 @@ void all2all_single_equal_split(at::Tensor& input,
 #endif
 }
 
-ncclResult_t all2all_single_unequal_split(
+void all2all_single_unequal_split(
     void* sendbuff,
     const size_t* sendcounts,
     const size_t* senddispls,
@@ -668,11 +672,15 @@ ncclResult_t all2all_single_unequal_split(
     const size_t* recvcounts,
     const size_t* recvdispls,
     size_t size,
-    ncclDataType_t type,
-    ncclComm_t comm,
-    cudaStream_t stream) {
+    c10::ScalarType type_,
+    ncclComm_t _comm,
+    cudaStream_t& stream) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
+  using namespace torch::cuda::nccl::detail;
+
+  auto type = to_nccl_data_type(type_);
+  auto comm = to_nccl_comm(_comm);
   int numranks;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
