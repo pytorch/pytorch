@@ -853,7 +853,6 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_add(self):
-        print("Running test add")
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync(
@@ -1971,6 +1970,7 @@ class RpcTest(RpcAgentTestFixture):
             # context manager before the remote function has ran.
             dist.barrier()
 
+        # Validate that trainers log errors when running functions.
         stderr_lines = err.getvalue()
         self.assertTrue(expected_err in stderr_lines)
 
