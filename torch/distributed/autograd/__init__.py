@@ -10,6 +10,8 @@ def is_available():
 if is_available() and not torch._C._dist_autograd_init():
     raise RuntimeError("Failed to initialize torch.distributed.autograd")
 
+if is_available():
+    from torch._C._distributed_autograd import get_gradients
 
 class context(object):
     '''
