@@ -767,8 +767,7 @@ jobs:
           command: |
             export IMAGE_COMMIT_ID=`git rev-parse HEAD`
             export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
-            echo "test" > $IMAGE_COMMIT_TAG.7z
-            copy /Y $IMAGE_COMMIT_TAG.7z C:/w/build-results/
+            echo "test" > /C/w/build-results/$IMAGE_COMMIT_TAG.7z
       - persist_to_workspace:
           root: "C:/w"
           paths: build-results
