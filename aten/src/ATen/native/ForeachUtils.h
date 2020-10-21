@@ -105,7 +105,6 @@ bool can_use_fast_route(TensorList tensors) {
 #ifdef __HIP_PLATFORM_HCC__
   return false;
 #else
-  auto expected_device = tensors[0].device();
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
   auto expected_device = tensors[0].device();
 
