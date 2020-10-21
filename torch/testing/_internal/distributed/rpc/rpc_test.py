@@ -1963,15 +1963,14 @@ class RpcTest(RpcAgentTestFixture):
             fut = rpc.rpc_async(worker_name(dst_rank), raise_func)
             with self.assertRaisesRegex(ValueError, expected_err):
                 fut.wait()
+            # The following barrier prevents a race condition which could happen
+            # if the main thread exits the context manager before the remote
+            # function has ran.
+            initialize_pg(self.init_method, self.rank, self.world_size)
+            dist.barrier()
 
         stderr_lines = err.getvalue()
-        # This passes for all agents
-        if self.rank in [0, 1]:
-            self.assertTrue(expected_err in stderr_lines)
-        # The following should actually be true for all ranks. But on TP agent,
-        # it fails for ranks 2 and 3, but succeeds for ranks 0 and 1.
-        if self.rank in [2, 3]:
-            self.assertTrue(expected_err in stderr_lines)
+        self.assertTrue(expected_err in stderr_lines)
 
     @dist_init
     def test_nested_rpc(self):
