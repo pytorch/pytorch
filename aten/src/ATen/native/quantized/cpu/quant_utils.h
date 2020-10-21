@@ -35,6 +35,7 @@ bool CheckAndSaturate(T max_val, T* element) {
 }
 }
 using namespace std;
+/*
 // A structure to hold quantization parameters 'scale' and 'zero_point'.
 // The meaning of these values is as the constants in the quantization equation
 //
@@ -149,7 +150,7 @@ inline TensorQuantizationParams ChooseQuantizationParams(
   result.zero_point = nudged_zero_point;
   return result;
 }
-
+*/
 // This function helps to convert the Conv1D dimensions usable by the Conv2d op.
 constexpr int64_t kConv1dSqueezeDim = 0;
 static torch::List<int64_t> MakeArgForConv1d(const torch::List<int64_t>& arg,

@@ -5,6 +5,7 @@
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
+#include <fbgemm/QuantUtils.h>
 
 namespace at {
 namespace native {
@@ -220,14 +221,13 @@ std::tuple<double, int64_t> _choose_qparams_per_tensor(
     reduce_range = false;
   }
 
-  auto q_params = quant_utils::ChooseQuantizationParams(
+  auto q_params = fbgemm::ChooseQuantizationParams(
       /*min=*/x_min,
       /*max=*/x_max,
       /*qmin=*/0,
       /*qmax=*/255,
       /*preserve_sparsity=*/false,
-      /*force_scale_power_of_two=*/false,
-      /*reduce_range=*/reduce_range);
+      /*force_scale_power_of_two=*/false);
 
   return std::make_tuple(q_params.scale, q_params.zero_point);
 }
