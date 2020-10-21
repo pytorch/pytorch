@@ -396,13 +396,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           .def(
               "backward",
               [](PyRRef& self,
-                 std::optional<int64_t> dist_autograd_ctx_id,
+                 int64_t dist_autograd_ctx_id,
                  bool retain_graph) {
-                self.backward(
-                    dist_autograd_ctx_id ? *dist_autograd_ctx_id : -1,
-                    retain_graph);
+                self.backward(dist_autograd_ctx_id, retain_graph);
               },
-              py::arg("dist_autograd_ctx_id") = std::nullopt,
+              py::arg("dist_autograd_ctx_id") = -1,
               py::arg("retain_graph") = false,
               py::call_guard<py::gil_scoped_release>(),
               R"(
@@ -419,7 +417,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                 Arguments:
                     dist_autograd_ctx_id (int, optional): The distributed
                         autograd context id for which we should retrieve the
-                        gradients (default: None).
+                        gradients (default: -1).
                     retain_graph(bool, optional): If False, the graph used to
                         compute the grad will be freed. Note that in nearly all
                         cases setting this option to True is not needed and
