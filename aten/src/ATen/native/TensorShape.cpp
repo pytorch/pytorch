@@ -1270,10 +1270,16 @@ Tensor row_stack(TensorList tensors) {
   return at::vstack(tensors);
 }
 
-static std::vector<Tensor> reshape_1d_tensors(TensorList tensors) {
+static std::vector<Tensor> reshape_input_for_column_stack(TensorList tensors) {
   std::vector<Tensor> result(tensors.size());
   auto transform_lambda = [](const Tensor& input) -> Tensor {
-    return input.reshape({input.size(0), 1});
+    if (input.dim() == 0) {
+      return input.reshape({1, 1});
+    }
+    if (input.dim() == 1) {
+      return input.reshape({input.size(0), 1});
+    }
+    return input;
   };
   std::transform(tensors.cbegin(),
                  tensors.cend(),
@@ -1286,24 +1292,16 @@ Tensor& column_stack_out(Tensor& result, TensorList tensors) {
   TORCH_CHECK(tensors.size() > 0,
               "column_stack expects a non-empty TensorList");
 
-  auto rep = at::atleast_1d(tensors);
-  if (rep[0].dim() == 1) {
-    auto reshaped_tensors = reshape_1d_tensors(rep);
-    return at::hstack_out(result, reshaped_tensors);
-  }
-  return at::hstack_out(result, rep);
+  auto reshaped_tensors = reshape_input_for_column_stack(tensors);
+  return at::hstack_out(result, reshaped_tensors);
 }
 
 Tensor column_stack(TensorList tensors) {
   TORCH_CHECK(tensors.size() > 0,
               "column_stack expects a non-empty TensorList");
 
-  auto rep = at::atleast_1d(tensors);
-  if (rep[0].dim() == 1) {
-    auto reshaped_tensors = reshape_1d_tensors(rep);
-    return at::hstack(reshaped_tensors);
-}
-  return at::hstack(rep);
+  auto reshaped_tensors = reshape_input_for_column_stack(tensors);
+  return at::hstack(reshaped_tensors);
 }
 
 static Tensor& propagate_transposed_names(

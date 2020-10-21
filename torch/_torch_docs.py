@@ -1789,7 +1789,10 @@ add_docstr(torch.column_stack,
            r"""
 column_stack(tensors, *, out=None) -> Tensor
 
-Stack 1D tensors as columns into a 2D tensor, 2D tensors are stacked just like :func:`torch.hstack`.
+Creates a new 2-dimensional tensor by horizontally stacking the tensors in :attr:`tensors`.
+
+:attr:`tensors` must be composed entirely of 1-dimensional and 2-dimensional tensors whose first dimension is the same size.
+The 1-dimensional tensors in :attr:`tensors` are reshaped into (*, 1) columns before being stacked horizontally.
 
 Args:
     tensors (sequence of Tensors)
@@ -1801,16 +1804,18 @@ Example::
 
     >>> a = torch.tensor([1, 2, 3])
     >>> b = torch.tensor([4, 5, 6])
-    >>> torch.column_stack((a,b))
+    >>> torch.column_stack((a, b))
     tensor([[1, 4],
         [2, 5],
         [3, 6]])
-    >>> a = torch.tensor([[1],[2],[3]])
-    >>> b = torch.tensor([[4],[5],[6]])
-    >>> torch.column_stack((a,b))
-    tensor([[1, 4],
-            [2, 5],
-            [3, 6]])
+    >>> a = torch.arange(5)
+    >>> b = torch.arange(10).reshape(5, 2)
+    >>> torch.column_stack((a, b, b))
+    tensor([[0, 0, 1, 0, 1],
+            [1, 2, 3, 2, 3],
+            [2, 4, 5, 4, 5],
+            [3, 6, 7, 6, 7],
+            [4, 8, 9, 8, 9]])
 
 """.format(**common_args))
 

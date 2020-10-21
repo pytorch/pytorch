@@ -599,7 +599,6 @@ _(aten, rnn_tanh) \
 _(aten, rnn_tanh_cell) \
 _(aten, rot90) \
 _(aten, round) \
-_(aten, row_stack) \
 _(aten, rrelu) \
 _(aten, rrelu_with_noise) \
 _(aten, rrelu_with_noise_backward) \
@@ -737,7 +736,6 @@ _(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
-_(aten, vstack) \
 _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \

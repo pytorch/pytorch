@@ -19202,6 +19202,18 @@ else:
         for torch_op, np_op in ops:
             self._test_special_stacks(1, 1, torch_op, np_op, device, dtype)
 
+        # Test torch.column_stack with combinations of 1D and 2D tensors input
+        one_dim_tensor = torch.arange(0, 10).to(dtype=dtype, device=device)
+        two_dim_tensor = torch.arange(0, 100).to(dtype=dtype, device=device).reshape(10, 10)
+        inputs = two_dim_tensor, one_dim_tensor, two_dim_tensor, one_dim_tensor
+        torch_result = torch.column_stack(inputs)
+
+        np_inputs = [input.cpu().numpy() for input in inputs]
+        np_result = np.column_stack(np_inputs)
+
+        self.assertEqual(np_result,
+                         torch_result)
+
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
