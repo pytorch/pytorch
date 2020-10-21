@@ -12,11 +12,6 @@ from torch.quantization import (
     prepare_fx,
     convert_fx,
     prepare_qat_fx,
-    prepare,
-    convert,
-)
-
-from torch.quantization import (
     default_qconfig,
     default_dynamic_qconfig,
     float16_dynamic_qconfig,
