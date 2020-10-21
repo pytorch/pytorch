@@ -9,6 +9,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 void StatefulExpressionEvaluator::safeBind(
     Val* value,
@@ -82,7 +83,7 @@ c10::optional<Int::ScalarType> StatefulExpressionEvaluator::getValue(
     Val* value) {
   TORCH_INTERNAL_ASSERT(
       value->isAnInt(),
-      "Expressoin Evaluation does not support values other than integers at this time.");
+      "Expression Evaluation does not support values other than integers at this time.");
 
   switch (value->getValType().value()) {
     case ValType::Scalar:
@@ -219,6 +220,7 @@ void StatefulExpressionEvaluator::handle(kir::BinaryOp* bop) {
   }
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch
