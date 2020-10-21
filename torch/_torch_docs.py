@@ -3295,11 +3295,15 @@ Computes the regularized lower incomplete gamma function:
 .. math::
     \text{out}_{i} = \frac{1}{\Gamma(\text{input}_i)} \int_0^{\text{other}_i} t^{\text{input}_i-1} e^{-t} dt
 
-where :math:`\Gamma(\cdot)` is the gamma function (see :func:`torch.lgamma`).
-Both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
+where both :math:`\text{input}_i` and :math:`\text{other}_i` are weakly positive
 and at least one is strictly positive.
-If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`
+If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
+:math:`\Gamma(\cdot)` in the equation above is the gamma function,
 
+.. math::
+    \Gamma(\text{input}_i) = \int_0^\infty t^{\text{input}_i-1} e^{-t} dt.
+
+See :func:`torch.lgamma` for a related function.
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
 
