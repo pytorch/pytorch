@@ -185,6 +185,41 @@ PlanDef parallelErrorPlanWithCancellableStuckNet() {
   return plan_def;
 }
 
+PlanDef reporterErrorPlanWithCancellableStuckNet() {
+  // Set a plan with a concurrent net and a reporter net: one stuck net with
+  // blocking operator that never returns; one reporter net with error op
+  // that throws.
+  PlanDef plan_def;
+
+  auto* stuck_blocking_net = plan_def.add_network();
+  stuck_blocking_net->set_name("stuck_blocking_net");
+  {
+    auto* op = stuck_blocking_net->add_op();
+    op->set_type("StuckBlocking");
+  }
+
+  auto* error_net = plan_def.add_network();
+  error_net->set_name("error_net");
+  {
+    auto* op = error_net->add_op();
+    op->set_type("Error");
+  }
+
+  auto* execution_step = plan_def.add_execution_step();
+  execution_step->set_concurrent_substeps(true);
+  {
+    auto* substep = execution_step->add_substep();
+    substep->add_network(stuck_blocking_net->name());
+  }
+  {
+    auto* substep = execution_step->add_substep();
+    substep->set_run_every_ms(1);
+    substep->add_network(error_net->name());
+  }
+
+  return plan_def;
+}
+
 struct HandleExecutorThreadExceptionsGuard {
   HandleExecutorThreadExceptionsGuard(int timeout = 60) {
     globalInit({
@@ -220,6 +255,7 @@ struct HandleExecutorThreadExceptionsGuard {
 TEST(PlanExecutorTest, ErrorAsyncPlan) {
   HandleExecutorThreadExceptionsGuard guard;
 
+  cancelCount = 0;
   PlanDef plan_def = parallelErrorPlan();
   Workspace ws;
   ASSERT_THROW(ws.RunPlan(plan_def), TestError);
@@ -267,6 +303,28 @@ TEST(PlanExecutorTest, BlockingErrorPlan) {
       "failed to stop concurrent workers after exception: test error");
 }
 #endif
+
+TEST(PlanExecutorTest, ErrorPlanWithCancellableStuckNet) {
+  HandleExecutorThreadExceptionsGuard guard;
+
+  cancelCount = 0;
+  PlanDef plan_def = parallelErrorPlanWithCancellableStuckNet();
+  Workspace ws;
+
+  ASSERT_THROW(ws.RunPlan(plan_def), TestError);
+  ASSERT_EQ(cancelCount, 1);
+}
+
+TEST(PlanExecutorTest, ReporterErrorPlanWithCancellableStuckNet) {
+  HandleExecutorThreadExceptionsGuard guard;
+
+  cancelCount = 0;
+  PlanDef plan_def = reporterErrorPlanWithCancellableStuckNet();
+  Workspace ws;
+
+  ASSERT_THROW(ws.RunPlan(plan_def), TestError);
+  ASSERT_EQ(cancelCount, 1);
+}
 
 } // namespace caffe2
 
