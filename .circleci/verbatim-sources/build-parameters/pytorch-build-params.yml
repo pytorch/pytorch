@@ -38,7 +38,7 @@ pytorch_ios_params: &pytorch_ios_params
       default: ""
     use_metal:
       type: string
-      default: "OFF"
+      default: "0"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     IOS_ARCH: << parameters.ios_arch >>
