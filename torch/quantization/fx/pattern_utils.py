@@ -3,27 +3,27 @@ import sys
 from collections import OrderedDict
 
 # pattern for conv bn fusion
-FUSION_PATTERNS = OrderedDict()
+DEFAULT_FUSION_PATTERNS = OrderedDict()
 def register_fusion_pattern(pattern):
     def insert(fn):
-        FUSION_PATTERNS[pattern] = fn
+        DEFAULT_FUSION_PATTERNS[pattern] = fn
         return fn
     return insert
 
-def get_fusion_patterns():
-    return FUSION_PATTERNS
+def get_default_fusion_patterns():
+    return DEFAULT_FUSION_PATTERNS
 
-QUANTIZATION_PATTERNS = OrderedDict()
+DEFAULT_QUANTIZATION_PATTERNS = OrderedDict()
 # Register pattern for both static quantization and qat
 def register_quant_pattern(pattern):
     def insert(fn):
-        QUANTIZATION_PATTERNS[pattern] = fn
+        DEFAULT_QUANTIZATION_PATTERNS[pattern] = fn
         return fn
     return insert
 
 # Get patterns for both static quantization and qat
-def get_quant_patterns():
-    return QUANTIZATION_PATTERNS
+def get_default_quant_patterns():
+    return DEFAULT_QUANTIZATION_PATTERNS
 
 # Example use of register pattern function:
 # @register_fusion_pattern(torch.nn.ReLU, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
