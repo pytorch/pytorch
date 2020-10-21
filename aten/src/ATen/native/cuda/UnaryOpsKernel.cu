@@ -230,8 +230,8 @@ void kaiser_window_kernel_cuda(TensorIterator& iter, int64_t window_length, doub
     const T_ACC beta = static_cast<T_ACC>(beta_);
     const T_ACC inv_i0_beta = 1.0 / calc_i0(beta);
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a) -> scalar_t {
-      T_ACC x = static_cast<T_ACC>(a);
-      return calc_i0(beta * ::sqrt(1 - ::pow((a - alpha) / alpha, static_cast<T_ACC>(2.0)))) * inv_i0_beta;
+      T_ACC x = (static_cast<T_ACC>(a) - alpha) / alpha;
+      return calc_i0(beta * ::sqrt(1 - x * x)) * inv_i0_beta;
     });
     // using T_ACC = acc_type<scalar_t, true>;
     // const T_ACC inv_alpha = static_cast<T_ACC>(2.0 / (window_length - 1));
