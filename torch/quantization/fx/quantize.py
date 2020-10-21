@@ -232,7 +232,9 @@ class Quantizer:
 
 
     def _qat_swap_modules(self, root, additional_qat_module_mapping):
-        all_mappings = dict(get_default_qat_module_mappings(), **additional_qat_module_mapping)
+        all_mappings = get_default_qat_module_mappings().copy()
+        for k, v in additional_qat_module_mapping.items():
+            all_mappings[k] = v
         convert(root, mapping=all_mappings, inplace=True, remove_qconfig=False)
 
     def _generate_qconfig_map(self,
