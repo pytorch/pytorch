@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -8,6 +7,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // Make sure we can inline something, before we attempt to.
 static void checkInlineable(const Expr* expr) {
@@ -176,39 +176,39 @@ void IrPrinter::handle(const NamedScalar* i) {
 }
 
 void IrPrinter::handle(const kir::Bool* b) {
-  os_ << "kir::Bool";
+  os_ << "kir::Bool (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const kir::Float* f) {
-  os_ << "kir::Float";
+  os_ << "kir::Float (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const kir::Half* h) {
-  os_ << "kir::Half";
+  os_ << "kir::Half (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const kir::Int* i) {
-  os_ << "kir::Int";
+  os_ << "kir::Int (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const kir::NamedScalar*) {
-  os_ << "kir::NamedScalar";
+  os_ << "kir::NamedScalar (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const kir::TensorIndex*) {
-  os_ << "kir::TensorIndex";
+  os_ << "kir::TensorIndex (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const kir::IterDomain*) {
-  os_ << "kir::IterDomain";
+  os_ << "kir::IterDomain (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const kir::TensorDomain*) {
-  os_ << "kir::TensorDomain";
+  os_ << "kir::TensorDomain (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const kir::TensorView*) {
-  os_ << "kir::TensorView";
+  os_ << "kir::TensorView (use kir::toString() to print Kernel IR nodes)";
 }
 
 static bool isTV(const Val* val) {
@@ -350,15 +350,15 @@ void IrPrinter::handle(const TernaryOp* top) {
 }
 
 void IrPrinter::handle(const kir::UnaryOp* uop) {
-  os_ << "kir::UnaryOp";
+  os_ << "kir::UnaryOp (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const kir::BinaryOp* bop) {
-  os_ << "kir::BinaryOp";
+  os_ << "kir::BinaryOp (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const kir::TernaryOp* top) {
-  os_ << "kir::TernaryOp";
+  os_ << "kir::TernaryOp (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const ReductionOp* rop) {
@@ -370,11 +370,11 @@ void IrPrinter::handle(const ReductionOp* rop) {
 }
 
 void IrPrinter::handle(const kir::ReductionOp* rop) {
-  os_ << "kir::ReductionOp";
+  os_ << "kir::ReductionOp (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const kir::GridReduction* gr) {
-  os_ << "kir::GridReduction";
+  os_ << "kir::GridReduction (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const BroadcastOp* bop) {
@@ -384,23 +384,23 @@ void IrPrinter::handle(const BroadcastOp* bop) {
 }
 
 void IrPrinter::handle(const kir::BroadcastOp*) {
-  os_ << "kir::BroadcastOp";
+  os_ << "kir::BroadcastOp (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const kir::ForLoop* fl) {
-  os_ << "kir::ForLoop";
+  os_ << "kir::ForLoop (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const kir::IfThenElse* ite) {
-  os_ << "kir::IfThenElse";
+  os_ << "kir::IfThenElse (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const kir::Allocate* a) {
-  os_ << "kir::Allocate";
+  os_ << "kir::Allocate (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const kir::Sync* a) {
-  os_ << "kir::Sync";
+  os_ << "kir::Sync (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const Split* s) {
@@ -440,6 +440,7 @@ std::ostream& operator<<(std::ostream& os, Fusion& f) {
   return os << &f;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch
