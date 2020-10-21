@@ -1262,6 +1262,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
   return self;
 }
 
+// torch.row_stack, alias for torch.vstack
 Tensor& row_stack_out(Tensor& result, TensorList tensors) {
   return at::vstack_out(result, tensors);
 }
