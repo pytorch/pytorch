@@ -292,7 +292,7 @@ class Node:
     ...
 
 
-# Defined in torch/csrc/jit/python/init.cpp
+# Defined in torch/aten/src/ATen/core/function_schema.h
 class Argument:
     name: str
     type: JitType
