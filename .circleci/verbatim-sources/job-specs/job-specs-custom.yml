@@ -439,7 +439,7 @@
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
             echo "IOS_ARCH: ${IOS_ARCH}"
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
-            echo "USE_PYTORCH_METAL": ${USE_METAL}""
+            echo "USE_PYTORCH_METAL": ${USE_METAL}"
 
             #check the custom build flag
             echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
