@@ -6143,6 +6143,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
+    @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
     def test_inverse_singular(self, device):
         def helper(batch_dim, n):
             x = torch.eye(3, 3, dtype=torch.float, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
