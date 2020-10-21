@@ -728,6 +728,52 @@ jobs:
       - store_artifacts:
           path: C:/w/build-results
 
+  pytorch_windows_build_2gpu:
+    <<: *pytorch_windows_params
+    parameters:
+      executor:
+        type: string
+        default: "windows-xlarge-cpu-with-nvidia-cuda"
+      build_environment:
+        type: string
+        default: ""
+      test_name:
+        type: string
+        default: ""
+      cuda_version:
+        type: string
+        default: "10"
+      python_version:
+        type: string
+        default: "3.6"
+      vc_version:
+        type: string
+        default: "14.16"
+      vc_year:
+        type: string
+        default: "2019"
+      vc_product:
+        type: string
+        default: "BuildTools"
+      use_cuda:
+        type: string
+        default: ""
+    executor: <<parameters.executor>>
+    steps:
+      - checkout
+      - run:
+          name: Build
+          no_output_timeout: "90m"
+          command: |
+            export IMAGE_COMMIT_ID=`git rev-parse HEAD`
+            export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
+            echo "test" > C:/w/build-results/$IMAGE_COMMIT_TAG.7z
+      - persist_to_workspace:
+          root: "C:/w"
+          paths: build-results
+      - store_artifacts:
+          path: C:/w/build-results
+
   pytorch_windows_test_2gpu_old:
     <<: *pytorch_windows_params
     parameters:
@@ -834,8 +880,13 @@ jobs:
           no_output_timeout: 60m
           command: |
             ls -l /c/users/circleci/workspace/build-results
-            echo $IMAGE_COMMIT_ID
-            echo $IMAGE_COMMIT_TAG
+            export IMAGE_COMMIT_ID=`git rev-parse HEAD`
+            export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
+            export PYTORCH_FINAL_PACKAGE_DIR="/c/users/circleci/workspace/build-results"
+            export PYTORCH_FINAL_PACKAGE="${PYTORCH_FINAL_PACKAGE_DIR}/${IMAGE_COMMIT_TAG}.7z"
+            az login --service-principal -u 51cbd086-ca4c-4d9a-8b6f-d0927f8bedb0 -p CaAHUC_d1eINRLdIMui-.ALXie8cGWdjtk --tenant e81f979e-21ba-433a-9fe1-673ae9641a5f
+            az storage blob upload --account-name pytorchbuildsto --container-name pytorch -n $PYTORCH_FINAL_PACKAGE -f $PYTORCH_FINAL_PACKAGE
+
   pytorch_windows_test:
     <<: *pytorch_windows_params
     parameters:
@@ -2053,7 +2104,7 @@ jobs:
 workflows:
   binary_builds:
     jobs:
-      - pytorch_windows_build:
+      - pytorch_windows_build_2gpu:
           build_environment: pytorch-win-vs2019-cpu-py3
           cuda_version: cpu
           name: pytorch_windows_vs2019_py36_cpu_build
