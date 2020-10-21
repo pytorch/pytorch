@@ -15619,7 +15619,7 @@ def add_autograd_test(
         return
 
     # Disable tests for lu from common_methods_invocations.py
-    # TODO(@nikitaved) Envable jit tests once autograd.Function does support scripting
+    # TODO(@nikitaved) Enable jit tests once autograd.Function does support scripting
     if 'square' in variant_name and name in ['lu']:
         return
 
