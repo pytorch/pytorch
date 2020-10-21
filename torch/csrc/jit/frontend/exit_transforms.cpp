@@ -119,7 +119,7 @@ struct ExitTransformer {
 
   static bool isGraphOrClosureBlock(Block* block) {
     return block->owningNode() == nullptr ||
-        owningNodeKind(block) == prim::Function;
+        owningNodeKind(block) == prim::Closure;
   }
 
   static void removeOutputs(Block* b) {
@@ -425,7 +425,7 @@ struct ExitTransformer {
         case prim::With: {
           exit_pair = transformWith(node);
         } break;
-        case prim::Function: {
+        case prim::Closure: {
           // exits of closure declaration stay local to the closure
           transformExits(node->blocks().at(0));
         } break;

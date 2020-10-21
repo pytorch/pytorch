@@ -417,7 +417,7 @@ struct FunctionValue : public SugaredValue {
 
 struct TORCH_API ClosureValue : public SugaredValue {
   ClosureValue(Value* value) : value_(value) {
-    TORCH_INTERNAL_ASSERT(value_->node()->kind() == prim::Function);
+    TORCH_INTERNAL_ASSERT(value_->node()->kind() == prim::Closure);
   }
   std::string kind() const override {
     return "closure";

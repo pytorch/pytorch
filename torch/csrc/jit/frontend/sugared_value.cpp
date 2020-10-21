@@ -329,7 +329,7 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
   // at the moment, but can be expanded later
   Node* self = getValue()->node();
   if (self->kind() == prim::TupleConstruct && self->inputs().size() == 2 &&
-      self->inputs().at(0)->node()->kind() == prim::Function) {
+      self->inputs().at(0)->node()->kind() == prim::Closure) {
     std::shared_ptr<Graph> graph =
         self->inputs().at(0)->node()->g(attr::Subgraph);
     Value* context = self->inputs().at(1);

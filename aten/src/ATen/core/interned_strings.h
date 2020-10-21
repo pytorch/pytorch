@@ -128,7 +128,7 @@ namespace c10 {
   _(prim, fork)                      \
   _(prim, forkClosure)               \
   _(prim, RaiseException)            \
-  _(prim, Function)                  \
+  _(prim, Closure)                   \
   _(prim, CreateObject)              \
   _(prim, SetAttr)                   \
   _(prim, GetAttr)                   \

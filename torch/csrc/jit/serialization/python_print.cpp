@@ -801,7 +801,7 @@ struct PythonPrintImpl {
         }
         level--;
       } break;
-      case prim::Function: {
+      case prim::Closure: {
         if (enforce_importable_) {
           throw ErrorReport(node->sourceRange())
               << "closures are not exportable";

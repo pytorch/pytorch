@@ -865,7 +865,7 @@ struct to_ir {
   // forked functions.
   //
   // There are several unfinished aspects that make them unusable generally
-  // 1. We do not have a type, ivalue, operator to represent prim::Function, so
+  // 1. We do not have a type, ivalue, operator to represent prim::Closure, so
   // closure_node has type None
   // 2. There is no export logic for it yet, so it cannot be
   // exported/python_printed
@@ -877,7 +877,7 @@ struct to_ir {
   //
   // This function leaves in the graph something like:
   //
-  //   %2 : None = prim::Function()
+  //   %2 : None = prim::Closure()
   //     block0():
   //       %1 : Tensor = prim::DoSomething(%0)
   //       -> (%1)
@@ -886,7 +886,7 @@ struct to_ir {
   // something actually executable (see liftClosure and inlineForkedClosure).
   std::shared_ptr<ClosureValue> emitClosure(
       const std::function<void(Block*)>& emit_body) {
-    Node* closure_node = graph->insertNode(graph->create(prim::Function, 1));
+    Node* closure_node = graph->insertNode(graph->create(prim::Closure, 1));
     // it is not a real thing yet, so just say the type is None
     closure_node->output()->setType(NoneType::get());
     Block* block = closure_node->addBlock();
