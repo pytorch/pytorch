@@ -335,6 +335,110 @@ void testKernel_4() {
       CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
     }
   }
+  {
+    // Test that we throw an error when input list for aten::cat is empty
+    KernelScope kernel_scope;
+
+    const auto graph_string = R"IR(
+      graph():
+        %dim : int = prim::Constant[value=1]()
+        %inputs : Tensor[] = prim::ListConstruct()
+        %r : Tensor = aten::cat(%inputs, %dim)
+        return (%r))IR";
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+    auto compile = [&]() {
+      TensorExprKernel k(graph);
+      k.getCodeGenStmt();
+    };
+    ASSERT_THROWS_WITH(compile(), "Empty input list is passed to aten::cat");
+  }
+  {
+    // Test that we throw an error when 'dim' passed to aten::cat is invalid
+    KernelScope kernel_scope;
+
+    const auto ir_dim_99 = R"IR(
+      graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
+            %b : Float(5, 3, 2, strides=[6, 2, 1], device=cpu)):
+        %dim : int = prim::Constant[value=99]()
+        %inputs : Tensor[] = prim::ListConstruct(%a, %b)
+        %r : Float(5, 3, 2, strides=[6, 2, 1], device=cpu) = aten::cat(%inputs, %dim)
+        return (%r))IR";
+    const auto ir_dim_minus_6 = R"IR(
+      graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
+            %b : Float(5, 3, 2, strides=[6, 2, 1], device=cpu)):
+        %dim : int = prim::Constant[value=-6]()
+        %inputs : Tensor[] = prim::ListConstruct(%a, %b)
+        %r : Float(5, 3, 2, strides=[6, 2, 1], device=cpu) = aten::cat(%inputs, %dim)
+        return (%r))IR";
+
+    auto compile = [](const std::string& graph_string) {
+      auto graph = std::make_shared<Graph>();
+      parseIR(graph_string, &*graph);
+      TensorExprKernel k(graph);
+      k.getCodeGenStmt();
+    };
+    ASSERT_THROWS_WITH(compile(ir_dim_99), "invalid 'dim' value in aten::cat");
+    ASSERT_THROWS_WITH(
+        compile(ir_dim_minus_6), "invalid 'dim' value in aten::cat");
+  }
+}
+
+void testKernelCatInputTypesPromotion() {
+  {
+    // Test that we properly promote input types for aten::cat
+    KernelScope kernel_scope;
+
+    const auto graph_string = R"IR(
+      graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
+            %b : Float(5, 7, 2, strides=[14, 2, 1], device=cpu),
+            %c : Double(5, 9, 2, strides=[18, 2, 1], device=cpu)):
+        %dim : int = prim::Constant[value=1]()
+        %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
+        %r : Tensor = aten::cat(%inputs, %dim)               # new size: [5,19,2]
+        return (%r))IR";
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+
+    auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    auto b = at::rand({5, 7, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    auto c = at::rand({5, 9, 2}, TensorOptions(kCPU).dtype(at::kDouble));
+    auto ref = at::cat({a, b, c}, 1);
+
+    TensorExprKernel k(graph);
+    std::vector<at::Tensor> inputs = {a, b, c};
+    Stmt* s = k.getCodeGenStmt();
+
+    std::ostringstream oss;
+    oss << *s;
+
+    // Check the IR we produced
+    const std::string& verification_pattern =
+        R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NEXT: for
+# CHECK-NEXT: aten_cat)IR";
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    auto o = stack[0].toTensor();
+
+    // Check sizes
+    CHECK_EQ(o.sizes().size(), ref.sizes().size());
+    CHECK_EQ(o.dtype(), ref.dtype());
+    size_t num_el = 1;
+    for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
+      CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
+      num_el *= ref.sizes()[idx];
+    }
+
+    // Check the contents
+    for (size_t i = 0; i < num_el; i++) {
+      CHECK_EQ(((double*)o.data_ptr())[i], ((double*)ref.data_ptr())[i]);
+    }
+  }
 }
 
 namespace {

@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
 
 #ifdef DEBUG
@@ -24,3 +26,5 @@
 #ifdef __clang__
   #pragma clang diagnostic pop
 #endif /* __clang__ */
+
+#endif /* USE_VULKAN_API */

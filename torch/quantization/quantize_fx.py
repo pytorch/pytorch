@@ -1,6 +1,5 @@
 import torch
 from torch.fx import GraphModule  # type: ignore
-from torch.fx import symbolic_trace  # type: ignore
 from torch.fx.symbolic_trace import Tracer  # type: ignore
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
@@ -24,16 +23,16 @@ def _fuse_fx(graph_module, inplace=False):
     return fuser.fuse(graph_module, inplace)
 
 class CustomTracer(Tracer):
-    def __init__(self, standalone_modules, custom_module_classes):
+    def __init__(self, skipped_module_names, skipped_module_classes):
         super().__init__()
-        self.standalone_modules = standalone_modules
-        self.custom_module_classes = custom_module_classes
+        self.skipped_module_names = skipped_module_names
+        self.skipped_module_classes = skipped_module_classes
 
     def is_leaf_module(self, m, module_qualified_name):
         return (m.__module__.startswith('torch.nn') and
                 not isinstance(m, torch.nn.Sequential)) or \
-            module_qualified_name in self.standalone_modules or \
-            type(m) in self.custom_module_classes
+            module_qualified_name in self.skipped_module_names or \
+            type(m) in self.skipped_module_classes
 
 
 def _prepare_fx(model, qconfig_dict, inplace, prepare_custom_config_dict=None, is_standalone_module=False):
@@ -50,17 +49,19 @@ forward graph of the parent module,
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
 
+    skipped_module_names = prepare_custom_config_dict.get("non_traceable_module_name", [])
+    skipped_module_classes = prepare_custom_config_dict.get("non_traceable_module_class", [])
+
     # symbolically trace the model
-    if is_standalone_module:
-        # standlone module is traced before quantizing standalone modules
-        graph_module = symbolic_trace(model)
-    else:
-        standalone_modules = prepare_custom_config_dict.get('standalone_module_name', [])
+    if not is_standalone_module:
+        # standalone module and custom module config are applied in top level module
+        standalone_module_names = prepare_custom_config_dict.get('standalone_module_name', [])
+        skipped_module_names += standalone_module_names
         custom_module_config = prepare_custom_config_dict.get('float_to_observed_custom_module_class', {})
         custom_module_classes = list(custom_module_config.keys())
-        # skipping tracing standalone modules when tracing top level module
-        tracer = CustomTracer(standalone_modules, custom_module_classes)
-        graph_module = GraphModule(model, tracer.trace(model))
+        skipped_module_classes += custom_module_classes
+    tracer = CustomTracer(skipped_module_names, skipped_module_classes)
+    graph_module = GraphModule(model, tracer.trace(model))
     graph_module = _fuse_fx(graph_module, inplace)
     quantizer = Quantizer()
     return quantizer.prepare(
@@ -156,7 +157,17 @@ def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=No
         # float custom module to observed custom module
         "float_to_observed_custom_module_class": {
            CustomModule: ObservedCustomModule
-        }
+        },
+
+        # the qualified names for the submodule that are not symbolically traceable
+        "non_traceable_module_name": [
+           "non_traceable_module"
+        ],
+
+        # the module classes that are not symbolically traceable
+        "non_traceable_module_class": [
+           NonTraceableModule
+        ]
       }
 
 
