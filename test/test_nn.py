@@ -11570,6 +11570,47 @@ class TestNNDeviceType(NNTestCase):
                         bags.append(embeddings.narrow(0, offset, length).max(0)[0])
         return torch.stack(bags)
 
+    def test_EmbeddingBag_empty_per_sample_weights_and_offsets(self, device):
+        # Test empty input and per sample weight, and backward pass. There was a CUDA
+        # invalid configuration bug (more context in #46572)
+        def test_per_sample_weights(mode, dtype, trainable_scale):
+            es = nn.EmbeddingBag(5, 2, mode=mode).to(dtype=dtype, device=device)
+            es.weight.data.copy_(
+                torch.arange(1, 11, device=device, dtype=dtype).view_as(es.weight))
+            input = torch.tensor([], device=device, dtype=torch.long)
+            offsets = torch.tensor([0, 0, 0, 0, 0], device=device, dtype=torch.long)
+            per_sample_weights = torch.randn_like(input, dtype=dtype) \
+                                      .requires_grad_(trainable_scale)
+            ref_per_sample_weights = \
+                per_sample_weights.detach().requires_grad_(trainable_scale)
+            reference_weights = es.weight.detach().requires_grad_()
+
+            expected = self._embedding_bag_reference_impl(
+                input, reference_weights, offsets, mode, ref_per_sample_weights)
+            result = es(input, offsets, per_sample_weights)
+            self.assertEqual(result, expected, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+            grad = torch.randn_like(expected)
+            result.backward(grad)
+            # the reference impl doesn't have grad fn for empty input; but the grad should
+            # simply be a zero tensor
+            ref_weights_grad = torch.zeros_like(es.weight)
+            self.assertEqual(es.weight.grad, ref_weights_grad,
+                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+            if trainable_scale:
+                ref_per_sample_weights_grad = torch.empty_like(per_sample_weights)
+                self.assertEqual(per_sample_weights.grad, ref_per_sample_weights_grad,
+                                 atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+        if device == 'cuda':
+            dtypes = (torch.float, torch.double, torch.half)
+        else:
+            dtypes = (torch.float, torch.double)
+        modes = ('sum',)
+        trainable_scale = (True, False)
+        for dtype, mode, trainable in itertools.product(dtypes, modes, trainable_scale):
+            test_per_sample_weights(mode, dtype, trainable)
+
     def test_EmbeddingBag_per_sample_weights_and_offsets(self, device):
         def test_per_sample_weights(mode, dtype, trainable_scale):
             es = nn.EmbeddingBag(5, 2, mode=mode).to(dtype=dtype, device=device)
@@ -13126,7 +13167,7 @@ class TestLazyModules(TestCase):
         new_module = LazyModule()
         new_module.register_parameter('test_param', nn.Parameter(torch.ones(5, 5)))
         module.load_state_dict(new_module.state_dict())
-        self.assertEqual(module.test_param, torch.ones((5, 5))) 
+        self.assertEqual(module.test_param, torch.ones((5, 5)))
 
         # Uninitialized parameters are left unchanged
         module = LazyModule()
@@ -13185,9 +13226,9 @@ class TestLazyModules(TestCase):
     def test_linear_state(self):
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
-        lazy_module.load_state_dict(module.state_dict()) 
+        lazy_module.load_state_dict(module.state_dict())
         # Parameters have been initialized but the module won't become a full
-        # Linear one until the first iteration. This is due to 
+        # Linear one until the first iteration. This is due to
         # limitations on the state_dict loading logic
         self.assertFalse(lazy_module.has_uninitialized_params())
         self.assertTrue(lazy_module.weight.shape == (10, 5))
@@ -13195,7 +13236,7 @@ class TestLazyModules(TestCase):
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
-            module.load_state_dict(lazy_module.state_dict()) 
+            module.load_state_dict(lazy_module.state_dict())
 
     @suppress_warnings
     def test_materialize_dtype(self):
