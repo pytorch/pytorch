@@ -1722,15 +1722,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4, 5)
         self.run_test(ListUnpackSlice(), x)
 
-    def test_std(self):
-        class StandardDeviation(torch.nn.Module):
-            def forward(self, input):
-                return torch.std(input, unbiased=False)
-
-        x = torch.randn(2, 3, 4)
-        model = StandardDeviation()
-        self.run_test(model, x)
-
     def test_pow(self):
         class PowModule(torch.nn.Module):
             def forward(self, x, y):
