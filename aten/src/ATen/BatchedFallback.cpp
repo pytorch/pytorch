@@ -195,6 +195,33 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
   torch::jit::push(stack, self);
 }
 
+static Tensor safeStack(TensorList tensors) {
+  auto is_defined = [](const Tensor& t) { return t.defined(); };
+  if (std::all_of(tensors.begin(), tensors.end(), is_defined)) {
+    return at::stack(tensors);
+  }
+  // NOTE [vmap through backward and undefined grad]
+  // While vmapping through backward functions (to compute batched grad), it
+  // is possible for the backward function to return an undefined grad for some
+  // grad_input for each example. In that case, we return an undefined grad.
+  //
+  // It is theoretically posssible for *some* of the examples to produce an
+  // undefined grad (a kernel could determine that the gradient is
+  // precisely full of zeros and return an undefined grad instead). We
+  // could handle this by treating the undefined grad as a zero-filled tensor
+  // of the correct shape while stacking the tensors together. However expect
+  // this to happen very rarely (I have not been able to find an example in our
+  // codebase to use as a test case) so we just error out in that case.
+  if (std::none_of(tensors.begin(), tensors.end(), is_defined)) {
+    return Tensor();
+  }
+  TORCH_CHECK(false,
+      "vmap: slow fallback received a mix of undefined and defined tensors ",
+      "as the result of an operation. This is not supported. If this error ",
+      "message appears in framework code (e.g. autograd), please file us ",
+      "a bug report");
+}
+
 // The general flow of the algorithm is as follows.
 // - First, we figure out which arguments are BatchedTensors and save them
 //   to a vector. We also store a vector of which index of the arguments list
@@ -318,7 +345,12 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   auto output_shards_chunks = MatrixRef<Tensor>(output_shards, num_batches);
   for (int64_t return_idx = 0; return_idx < num_returns; ++return_idx) {
     auto shards = output_shards_chunks[return_idx];
-    auto flat_output = at::stack(shards);
+    auto flat_output = safeStack(shards);
+    // See NOTE [vmap through backward and undefined grad]
+    if (!flat_output.defined()) {
+      torch::jit::push(stack, flat_output);
+      continue;
+    }
     VmapDimVector output_sizes(batch_sizes);
     output_sizes.insert(
         output_sizes.end(),
