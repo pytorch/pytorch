@@ -881,6 +881,7 @@ jobs:
           name: Create Test Box
           no_output_timeout: 60m
           command: |
+            cd .circleci/scripts
             ls -l /c/users/circleci/workspace/build-results
             export IMAGE_COMMIT_ID=`git rev-parse HEAD`
             export PULL_BRANCH='git branch --show-current'
