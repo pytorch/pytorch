@@ -632,17 +632,25 @@ static void eraseListConstruct(Block* block, int opset_version) {
 // For ops such as meshgrid where output is a list of Tensors
 // (returns prim::ListConstruct), we need to unpack the list
 // before the pass which deletes ListConstruct.
-static void fuseListConstructListUnpack(Block* b) {
+// This pass also covers the case when the input to ListUnpack
+// is int[] comming from some other op than ListConstruct (like Slice or Shape)
+static void fuseListAndListUnpack(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
-      fuseListConstructListUnpack(child_block);
+      fuseListAndListUnpack(child_block);
     }
     if (it->kind() == prim::ListUnpack) {
       for (size_t i = 0; i < it->outputs().size(); i++) {
         auto output = it->outputs().at(i);
         if (it->input()->node()->kind() == prim::ListConstruct) {
           output->replaceAllUsesWith(it->input()->node()->inputs().at(i));
-        } else if (it->input()->type()->cast<ListType>()) {
+        } else if (
+            it->input()->type()->cast<ListType>() &&
+            it->input()
+                ->type()
+                ->cast<ListType>()
+                ->getElementType()
+                ->cast<IntType>()) {
           Node* gather_indices = b->owningGraph()->create(onnx::Constant, 1);
           gather_indices->insertBefore(*it);
           gather_indices->t_(
@@ -877,7 +885,7 @@ void PeepholeOptimizeONNX(
   eliminateNopTranspose(graph->block());
   fuseTransposeIntoGemm(graph->block());
   speculateOps(graph->block());
-  fuseListConstructListUnpack(graph->block());
+  fuseListAndListUnpack(graph->block());
   fuseLogSoftmaxNllLoss(graph->block());
   eraseListConstruct(graph->block(), opset_version);
   removeMaxPoolUnusedOutput(graph->block());
