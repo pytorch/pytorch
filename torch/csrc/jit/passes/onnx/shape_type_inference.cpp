@@ -70,7 +70,7 @@ namespace onnx = ::ONNX_NAMESPACE;
 
 TensorTypePtr TorchTensorTypeFromONNX(
     const onnx::TypeProto_Tensor& onnx_tensor_type,
-    const SymbolDimMap& symbol_map) {
+    SymbolDimMap& symbol_map) {
   c10::optional<at::ScalarType> scalar_type;
   if (onnx_tensor_type.has_elem_type()) {
     scalar_type = ONNXTypeToATenType(onnx_tensor_type.elem_type());
@@ -101,6 +101,7 @@ TensorTypePtr TorchTensorTypeFromONNX(
         }
         if (!sym) {
           sym = c10::ShapeSymbol::newSymbol();
+          symbol_map[sym.value()] = dim.dim_param();
         }
         sizes.emplace_back(sym.value());
       }
@@ -120,7 +121,7 @@ TensorTypePtr TorchTensorTypeFromONNX(
 
 ListTypePtr TorchListTypeFromONNX(
     const onnx::TypeProto_Sequence& onnx_sequence_type,
-    SymbolDimMap symbol_map) {
+    SymbolDimMap& symbol_map) {
   c10::optional<at::ScalarType> scalar_type;
   if (onnx_sequence_type.has_elem_type()) {
     auto onnx_seq_elem_type = onnx_sequence_type.elem_type();
@@ -138,7 +139,7 @@ ListTypePtr TorchListTypeFromONNX(
 void UpdateTorchValueByOnnxValueInfo(
     Value* v,
     const onnx::ValueInfoProto& p_info,
-    SymbolDimMap symbol_map) {
+    SymbolDimMap& symbol_map) {
   if (!p_info.has_type()) {
     return;
   }
@@ -337,17 +338,26 @@ void UpdateOutputTypeByONNXProto(
     Node* n,
     Node* clone_node,
     const onnx::ModelProto& model_proto,
-    SymbolDimMap symbol_map) {
+    SymbolDimMap& symbol_map) {
   auto graph_proto = model_proto.graph();
-  // inferred shapes are stored in value_info.
-  for (size_t i = 0; i < graph_proto.value_info_size(); ++i) {
-    auto v_info = graph_proto.value_info(i);
-    // get data from value_info and updated original graph.
-    for (size_t j = 0; j < clone_node->outputs().size(); ++j) {
-      if (clone_node->output(j)->debugName() == v_info.name()) {
-        UpdateTorchValueByOnnxValueInfo(n->output(j), v_info, symbol_map);
+
+  // get data from value_info and updated original graph.
+  auto updateNodeOutputsByONNXValueInfo = [&](const onnx::ValueInfoProto& v_info) {
+    for (size_t i = 0; i < n->outputs().size(); ++i) {
+      if (clone_node->output(i)->debugName() == v_info.name()) {
+        UpdateTorchValueByOnnxValueInfo(n->output(i), v_info, symbol_map);
       }
     }
+  };
+
+  // Check graph outputs for inferred shapes.
+  for (size_t i = 0; i < graph_proto.output_size(); ++i) {
+    updateNodeOutputsByONNXValueInfo(graph_proto.output(i));
+  }
+
+  // Check value_infos for inferred shapes.
+  for (size_t i = 0; i < graph_proto.value_info_size(); ++i) {
+    updateNodeOutputsByONNXValueInfo(graph_proto.value_info(i));
   }
 }
 
