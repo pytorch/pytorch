@@ -309,6 +309,7 @@ Below is the list of supported patterns for RHS indexing. ::
   data[2, ..., torch.tensor([2, 1, 3]), 2:4, torch.tensor([[1], [2]])]
 
   # Boolean mask (supported for ONNX opset version >= 11)
+  # Cannot be used mixing with other patterns above.
   data[data != 1]
 
 And below is the list of unsupported patterns for RHS indexing. ::
@@ -371,6 +372,7 @@ Below is the list of supported patterns for LHS indexing. ::
   data[2, ..., torch.tensor([2, 1, 3]), 2:4] += update
 
   # Boolean mask
+  # Cannot be used mixing with other patterns above.
   data[data != 1] = new_data
 
 And below is the list of unsupported patterns for LHS indexing. ::
