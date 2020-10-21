@@ -1,11 +1,15 @@
 from collections import defaultdict
-from torch._six import container_abcs
-
-import torch
+from typing import Iterable, Union
 from copy import deepcopy
 from itertools import chain
 import warnings
 
+import torch
+from .. import Tensor
+from torch._six import container_abcs
+
+
+_params_t = Union[Iterable[Tensor], Iterable[dict]]
 
 class _RequiredParameter(object):
     """Singleton class representing a required parameter for an Optimizer."""

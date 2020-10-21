@@ -14,6 +14,9 @@ from .asgd import ASGD
 from .adamax import Adamax
 from .adadelta import Adadelta
 
+__all__ = ['ASGD', 'Adadelta', 'Adam', 'AdamW', 'Adamax',
+           'RMSprop', 'Rprop', 'SGD']
+
 del adam
 del adamw
 del sgd
