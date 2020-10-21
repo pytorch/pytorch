@@ -7051,6 +7051,7 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(lambda x: x.logcumsumexp(2), a)
         gradgradcheck(lambda x: x.logcumsumexp(2), a)
 
+    @slowTest
     def test_lu_backward(self, device):
         def run_test(*sizes):
             x = torch.rand(*sizes, device=device, dtype=torch.double).requires_grad_(True)
