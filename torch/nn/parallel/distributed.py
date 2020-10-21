@@ -496,7 +496,7 @@ class DistributedDataParallel(Module):
         for m in self._module_copies:
             for m_name, m_layer in m.named_modules():
                 if isinstance(m_layer, torch.nn.SyncBatchNorm):
-                    for b_name,  in m_layer.named_buffers():
+                    for b_name, _ in m_layer.named_buffers():
                         self.parameters_to_ignore += f"{m_name}.{b_name}"
 
         self.modules_buffers = [

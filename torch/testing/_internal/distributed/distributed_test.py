@@ -3681,15 +3681,6 @@ class DistributedTest:
             # and cause a timeout.
             self._barrier(timeout=60)
 
-        @skip_if_lt_x_gpu(2)
-        @skip_if_rocm
-        def test_ddp_ignore_sync_batch_norm_buffers(self):
-            syncbn_net = nn.SyncBatchNorm.convert_sync_batchnorm(BN_NET)
-            ddp = nn.parallel.DistributedDataParallel(
-                syncbn_net.cuda(self.rank),
-                device_ids=[self.rank]
-            )
-
         @require_backend({"nccl", "gloo"})
         @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
         def test_broadcast_object_list(self):
