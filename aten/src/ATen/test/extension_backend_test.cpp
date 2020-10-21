@@ -29,8 +29,20 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
   return a;
 }
 
+Tensor empty_strided_override(
+  IntArrayRef size,
+  IntArrayRef stride,
+  c10::optional<c10::ScalarType> dtype,
+  c10::optional<c10::Layout> layout,
+  c10::optional<c10::Device> device,
+  c10::optional<bool> pin_memory) {
+
+  return empty_override(size, at::kMSNPU, c10::nullopt);
+}
+
 TORCH_LIBRARY_IMPL(aten, MSNPU, m) {
   m.impl_UNBOXED("aten::empty.memory_format",  empty_override);
+  m.impl_UNBOXED("aten::empty_strided",        empty_strided_override);
   m.impl_UNBOXED("aten::add.Tensor",           add_override);
 }
 

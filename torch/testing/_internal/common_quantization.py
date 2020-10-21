@@ -14,9 +14,9 @@ from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig, \
     get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic
 from torch.quantization.quantization_mappings import (
-    get_dynamic_quant_module_mappings,
-    get_qconfig_propagation_list,
-    get_qat_module_mappings,
+    get_default_dynamic_quant_module_mappings,
+    get_default_qconfig_propagation_list,
+    get_default_qat_module_mappings,
 )
 # symbolic trace
 from torch.fx import symbolic_trace
@@ -186,7 +186,7 @@ def run_ddp(rank, world_size, prepared):
 
 
 def convert_dynamic(module):
-    convert(module, get_dynamic_quant_module_mappings(), inplace=True)
+    convert(module, get_default_dynamic_quant_module_mappings(), inplace=True)
 
 def prepare_dynamic(model, qconfig_dict=None):
     propagate_qconfig_(model, qconfig_dict)
@@ -342,7 +342,7 @@ class QuantizationTestCase(TestCase):
             have observers in preperation for quantization
         """
         if propagate_qconfig_list is None:
-            propagate_qconfig_list = get_qconfig_propagation_list()
+            propagate_qconfig_list = get_default_qconfig_propagation_list()
         if prepare_custom_config_dict is None:
             prepare_custom_config_dict = {}
         float_to_observed_module_class_mapping = prepare_custom_config_dict.get("float_to_observed_custom_module_class", {})
@@ -363,7 +363,7 @@ class QuantizationTestCase(TestCase):
                             'module: ' + str(type(module)) + ' do not have observer')
         # we don't need to check observers for child modules of the
         # qat modules
-        if type(module) not in get_qat_module_mappings().values() and \
+        if type(module) not in get_default_qat_module_mappings().values() and \
            type(module) not in float_to_observed_module_class_mapping.values():
             for child in module.children():
                 self.checkObservers(child, propagate_qconfig_list, prepare_custom_config_dict)
