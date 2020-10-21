@@ -2,6 +2,7 @@
 
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
@@ -285,10 +286,26 @@ c10::IValue PyRRef::toIValue() const {
   return IValue(rrefPtr);
 }
 
-void PyRRef::backward(int64_t dist_autograd_ctx_id, bool retain_graph) {
-  if (rref_->isOwner()) {
+void PyRRef::backward(int64_t autogradContextId, bool retainGraph) {
+  backward(autogradContextId, retainGraph, rref_);
+}
+
+void PyRRef::backward(int64_t autogradContextId, bool retainGraph, c10::intrusive_ptr<RRef> rref) {
+  if (rref->isOwner()) {
     auto value =
-        c10::static_intrusive_pointer_cast<const OwnerRRef>(rref_)->getValue();
+      c10::static_intrusive_pointer_cast<const OwnerRRef>(rref)->getValue();
+
+    // If we have a PyObj, retrieve the underlying tensor.
+    if (rref->isPyObj()) {
+      py::gil_scoped_acquire gil;
+      py::object obj = torch::jit::toPyObject(value);
+      try {
+        value = std::move(torch::jit::toIValue(obj, c10::TensorType::get()));
+      } catch (py::cast_error) {
+        throw std::runtime_error("RRef should contain a tensor for .backward()");
+      }
+    }
+
     TORCH_CHECK(
         value.isTensor(), "RRef should contain a tensor for .backward()");
     auto root = value.toTensor();
@@ -299,17 +316,31 @@ void PyRRef::backward(int64_t dist_autograd_ctx_id, bool retain_graph) {
     TORCH_CHECK(
         root.grad_fn(), "RRef does not have a valid gradient function.");
 
-    if (dist_autograd_ctx_id == -1) {
+    if (autogradContextId == -1) {
       auto rootEdge = torch::autograd::impl::gradient_edge(root);
       auto grad = at::ones_like(root, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       torch::autograd::Engine::get_default_engine().execute(
-          {rootEdge}, {grad}, retain_graph, false);
+          {rootEdge}, {grad}, retainGraph, false);
     } else {
       autograd::DistEngine::getInstance().execute(
-          dist_autograd_ctx_id, {root}, retain_graph);
+          autogradContextId, {root}, retainGraph);
     }
+
   } else {
-    // TODO
+    TORCH_CHECK(
+        autogradContextId != -1,
+        "User RRefs require 'dist_autograd_ctx_id' to be specified");
+
+    autograd::RRefBackwardReq rrefBackwardReq(
+        rref->rrefId(), autogradContextId, retainGraph);
+
+    // Invoke distributed backward remotely.
+    auto rpcAgent = rpc::RpcAgent::getCurrentRpcAgent();
+    rpcAgent
+        ->send(
+            rpcAgent->getWorkerInfo(rref->owner()),
+            std::move(rrefBackwardReq).toMessage())
+        ->wait();
   }
 }
 

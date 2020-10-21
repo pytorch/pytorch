@@ -56,6 +56,10 @@ enum MessageType {
   RUN_WITH_PROFILING_REQ = 21,
   RUN_WITH_PROFILING_RESP = 22,
 
+  // Messages to support RRef.backward().
+  RREF_BACKWARD_REQ = 23,
+  RREF_BACKWARD_RESP = 24,
+
   // Other internal message types
   EXCEPTION = 55,
   UNKNOWN = 60

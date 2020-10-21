@@ -92,7 +92,9 @@ bool Message::isRequest() const {
       // Cleanup Autograd context request
       MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ == type_ ||
       // Run with profiling request
-      MessageType::RUN_WITH_PROFILING_REQ == type_;
+      MessageType::RUN_WITH_PROFILING_REQ == type_ ||
+      // RRef.backward() request
+      MessageType::RREF_BACKWARD_REQ == type_;
 }
 
 bool Message::isResponse() const {
@@ -109,7 +111,9 @@ bool Message::isResponse() const {
       // Cleanup autograd context response
       MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP == type_ ||
       // Run with profiling response
-      MessageType::RUN_WITH_PROFILING_RESP == type_;
+      MessageType::RUN_WITH_PROFILING_RESP == type_ ||
+      // RRef.backward() resp
+      MessageType::RREF_BACKWARD_RESP == type_;
 }
 
 int64_t Message::id() const {
