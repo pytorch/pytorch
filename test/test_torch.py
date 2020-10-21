@@ -13432,7 +13432,7 @@ class TestTorchDeviceType(TestCase):
         def _test_addcdiv(a, alpha, b, c):
             actual = torch.addcdiv(a, b, c, value=alpha)
             # implementation of addcdiv downcasts alpha. arithmetic ops don't.
-            if not actual.dtype.is_floating_point:
+            if not (actual.dtype.is_floating_point or actual.dtype.is_complex):
                 alpha = int(alpha)
             expected = a + (alpha * b) / c
             self.assertEqual(expected, actual)
@@ -13458,7 +13458,7 @@ class TestTorchDeviceType(TestCase):
                 non_zero_rand((2, 2), dtype=dtype, device=device))
 
         for dtype in torch.testing.get_all_math_dtypes(device):
-            if not (dtype.is_floating_point or dtype.is_complex) :
+            if not (dtype.is_floating_point or dtype.is_complex):
                 # Integer division with addcdiv is prohibited
                 with self.assertRaises(RuntimeError):
                     _helper()
