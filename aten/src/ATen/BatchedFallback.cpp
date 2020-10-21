@@ -206,12 +206,12 @@ static Tensor safeStack(TensorList tensors) {
   // grad_input for each example. In that case, we return an undefined grad.
   //
   // It is theoretically posssible for *some* of the examples to produce an
-  // undefined grad (a kernel could determine that the gradient is
-  // precisely full of zeros and return an undefined grad instead). We
+  // undefined grad (a kernel could peek at the gradient values and return an
+  // undefined tensor if it determines the gradient is full of zeros). We
   // could handle this by treating the undefined grad as a zero-filled tensor
-  // of the correct shape while stacking the tensors together. However expect
+  // of the correct shape while stacking the tensors together. However I expect
   // this to happen very rarely (I have not been able to find an example in our
-  // codebase to use as a test case) so we just error out in that case.
+  // codebase) so we just error out in this case.
   if (std::none_of(tensors.begin(), tensors.end(), is_defined)) {
     return Tensor();
   }
