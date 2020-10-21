@@ -814,6 +814,7 @@ class TestQuantizeFx(QuantizationTestCase):
         # make sure these modules are not traced
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
+@skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
     """
@@ -1485,6 +1486,39 @@ class TestQuantizeFxOps(QuantizationTestCase):
             quantized,
             expected_node_occurrence=count_check,
             expected_node_list=order_check)
+
+    def test_float_functional(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.ff1 = nnq.FloatFunctional()
+                self.ff2 = nnq.FloatFunctional()
+                self.ff3 = nnq.FloatFunctional()
+
+            def forward(self, x):
+                x = self.ff1.add(x, x)
+                x = self.ff2.mul(x, x)
+                x = self.ff3.add_relu(x, x)
+                return x
+
+        m = M()
+        m.eval()
+        qconfig_dict = {"": default_qconfig}
+        m = prepare_fx(m, qconfig_dict)
+        node_occurrence = {
+            ns.call_module(torch.quantization.MinMaxObserver): 4,
+            ns.call_module(torch.nn.quantized.FloatFunctional): 0
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.add),
+            ns.call_function(torch.ops.quantized.mul),
+            ns.call_function(torch.ops.quantized.add_relu),
+            ns.call_method('dequantize')
+        ]
+        m = convert_fx(m)
+        self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
 class TestQuantizeFxModels(QuantizationTestCase):
     def _test_model_impl(
