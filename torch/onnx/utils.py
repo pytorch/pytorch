@@ -425,7 +425,7 @@ def _model_to_graph(model, args, verbose=False,
                                             "ScriptFunction."
 
         if isinstance(example_outputs, list):
-             example_outputs = [example_outputs]
+            example_outputs = [example_outputs]
 
         out_vars, desc = torch.jit._flatten(tuple(example_outputs))
         torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, desc, _onnx_shape_inference)
