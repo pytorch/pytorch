@@ -1001,6 +1001,13 @@ class TestLinalg(TestCase):
             expected = np.linalg.tensorsolve(a.cpu().numpy(), b.cpu().numpy(), axes=dims)
             self.assertEqual(result, expected)
 
+            # check non-contiguous out
+            out = torch.empty(2 * result.shape[0], *result.shape[1:], dtype=dtype, device=device)[::2]
+            self.assertFalse(out.is_contiguous())
+            ans = torch.linalg.tensorsolve(a, b, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
+
         a_shapes = [(2, 3, 6), (3, 4, 4, 3)]
         dims = [None, (0, 2)]
         for a_shape, d in itertools.product(a_shapes, dims):
