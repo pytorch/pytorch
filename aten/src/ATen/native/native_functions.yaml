@@ -8878,10 +8878,14 @@
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
   python_module: linalg
   variants: function
+  dispatch:
+    Math: linalg_tensorinv
 
 - func: linalg_tensorinv.out(Tensor self, int ind=2, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
+  dispatch:
+    Math: linalg_tensorinv_out
 
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
