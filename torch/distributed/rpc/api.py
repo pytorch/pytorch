@@ -8,7 +8,7 @@ from typing import Generic, TypeVar
 
 import torch
 
-from . import (
+from torch._C._distributed_rpc import (
     PyRRef,
     RemoteProfilerManager,
     WorkerInfo,
