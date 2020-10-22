@@ -379,6 +379,62 @@ namespace {
     }
   }
 
+  void add_projection_weights(
+        cudnnHandle_t handle,
+        const RNNDescriptor& rnn_desc,
+        const TensorDescriptor& x_desc,
+        const FilterDescriptor& w_desc,
+        const Tensor& weight_buf,
+        int64_t layer,
+        std::vector<Tensor>& params
+  ) {
+    void* matrix_pointer = nullptr;
+    // assuming it's LSTM which has 8 layers
+    int64_t linear_id = 8;
+    FilterDescriptor lin_layer_mat_desc;
+    AT_CUDNN_CHECK(cudnnGetRNNLinLayerMatrixParams(
+        /*handle=*/handle, 
+        /*rnnDesc=*/rnn_desc.desc(),
+        /*layer=*/layer, 
+        /*xDesc=*/x_desc.desc(),
+        /*wDesc=*/w_desc.desc(),
+        /*w=*/weight_buf.data_ptr(), 
+        /*linLayerID=*/linear_id,
+        /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
+        /*linLayerMat=*/&matrix_pointer));
+
+    cudnnDataType_t data_type;
+    cudnnTensorFormat_t format;
+    int nb_dims;
+    constexpr int min_dim = 3;
+    // TODO: The use of CPU tensor here is a bit goofy in C++,
+    // some sort of alloca would be good enough except that it is
+    // kind of convenient to be able to prod() on it.
+    Tensor filter_dim_a = at::empty(min_dim, at::initialTensorOptions().dtype(kInt));
+    AT_CUDNN_CHECK(cudnnGetFilterNdDescriptor(
+          lin_layer_mat_desc.desc(),
+          min_dim,
+          &data_type,
+          &format,
+          &nb_dims,
+          filter_dim_a.data_ptr<int>()
+          ));
+
+    AT_ASSERTM(nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
+    filter_dim_a = filter_dim_a.slice(0, 0, nb_dims);
+    auto elem_size = dataSize(getCudnnDataType(weight_buf));
+    auto offset_bytes = (char*)matrix_pointer - (char*)weight_buf.data_ptr();
+    AT_ASSERTM(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
+    size_t offset = offset_bytes / elem_size;
+
+    int mat_numel = *filter_dim_a.prod(at::ScalarType::Int).data_ptr<int>();
+    // Generate a new parameter tensor which is a view into the weight_buf.
+    std::initializer_list<int64_t> size = {mat_numel, 1};
+    Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
+    params.emplace_back(std::move(param));
+  }
+
+
   /*
     Returns weight and bias tensors for each layer of the RNN. These tensors
     are views on the underlying weight buffer allocated by CuDNN.
@@ -480,6 +536,11 @@ namespace {
           cur_offset = offset + mat_numel;
         }
       } // for cudnn_method
+      if (rnn.proj_size != 0 && rnn.proj_size != rnn.hidden_size) {
+        add_projection_weights(handle, rnn_desc, x_desc, w_desc, weight_buf, layer, params);
+        layer_params_count++;
+      }
+
       if (layer == 0) {
         global_layer_params_count = layer_params_count;
       } else {
@@ -493,6 +554,7 @@ namespace {
 
   // This is a lightweight version of the method above used to quickly get the expected
   // parameter offsets.
+  // TODOMODIFYIGOR ??
   std::vector<void*> get_expected_data_ptrs(
         const Tensor& weight_buf, cudnnHandle_t handle, const RNNDescriptorParams& rnn,
         const RNNDescriptor& rnn_desc, const TensorDescriptor& x_desc, cudnnDataType_t datatype) {
@@ -671,6 +733,8 @@ namespace cudnn_rnn {
     MatrixRef<Tensor> weight{weight_arr, static_cast<size_t>(weight_stride0)},
                       params{params_arr, params_stride0};
 
+
+    // TODO (igor): this will probably break if projections + no biases are used
     // Copy weights
     _viewOrCopyParams(weight, params, /*copy=*/true, allow_type_change);
 

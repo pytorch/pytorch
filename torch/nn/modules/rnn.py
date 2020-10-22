@@ -62,8 +62,8 @@ class RNNBase(Module):
                           "num_layers={}".format(dropout, num_layers))
         if proj_size < 0:
             raise ValueError("proj_size should be a positive integer or zero to disable projections")
-        if proj_size > hidden_size:
-            raise ValueError("proj_size cannot be bigger that hidden_size")
+        if proj_size >= hidden_size:
+            raise ValueError("proj_size has to be smaller than hidden_size")
 
         if mode == 'LSTM':
             gate_size = 4 * hidden_size
@@ -92,14 +92,14 @@ class RNNBase(Module):
                     layer_params = (w_ih, w_hh, b_ih, b_hh)
                 else:
                     w_hr = Parameter(torch.Tensor(proj_size, hidden_size))
-                    layer_params = (w_ih, w_hh, w_hr, b_ih, b_hh)
+                    layer_params = (w_ih, w_hh, b_ih, b_hh, w_hr)
 
                 suffix = '_reverse' if direction == 1 else ''
                 param_names = ['weight_ih_l{}{}', 'weight_hh_l{}{}']
-                if self.proj_size > 0:
-                    param_names += ['weight_hr_l{}{}']
                 if bias:
                     param_names += ['bias_ih_l{}{}', 'bias_hh_l{}{}']
+                if self.proj_size > 0:
+                    param_names += ['weight_hr_l{}{}']
                 param_names = [x.format(layer, suffix) for x in param_names]
 
                 for name, param in zip(param_names, layer_params):
@@ -157,8 +157,11 @@ class RNNBase(Module):
             # an inplace operation on self._flat_weights
             with torch.no_grad():
                 if torch._use_cudnn_rnn_flatten_weight():
+                    num_weights = 4 if self.bias else 2
+                    if self.proj_size > 0:
+                        num_weights += 1
                     torch._cudnn_rnn_flatten_weight(
-                        self._flat_weights, (4 if self.bias else 2),
+                        self._flat_weights, num_weights,
                         self.input_size, rnn.get_cudnn_mode(self.mode), 
                         self.hidden_size, self.proj_size, self.num_layers,
                         self.batch_first, bool(self.bidirectional))
