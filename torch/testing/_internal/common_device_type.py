@@ -527,6 +527,7 @@ def _has_sufficient_memory(device, size):
     if device.startswith('cuda'):
         if not torch.cuda.is_available():
             return False
+        gc.collect()
         torch.cuda.empty_cache()
         return torch.cuda.get_device_properties(device).total_memory - torch.cuda.memory_allocated(device) >= size
 
