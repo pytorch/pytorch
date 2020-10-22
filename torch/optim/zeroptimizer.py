@@ -14,7 +14,7 @@ import torch
 import torch.distributed as dist
 from torch.nn import Parameter
 from torch._six import container_abcs
-from .optimizer import SGD, Optimizer
+from .optimizer import Optimizer
 
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -107,7 +107,7 @@ class ZeROptimizer(Optimizer):
             parameters to be optimized
     Keyword Args:
         optim (torch.nn.Optimizer):
-            optimizer to shard (default: SGD)
+            optimizer to shard
         group (group):
             torch.distributed group (default: group.WORLD)
         broadcast_buffer_size (int):
@@ -122,7 +122,7 @@ class ZeROptimizer(Optimizer):
     def __init__(
         self,
         params: _params_t,
-        optim: Type[Optimizer] = SGD,
+        optim: Type[Optimizer],
         group: Optional[Any] = None,
         broadcast_buffer_size: int = 2 ** 17,
         **default: Any,

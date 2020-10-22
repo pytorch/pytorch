@@ -16,7 +16,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from typing import List, Any
 import io
-from torch.optim import ZeROptimizer
+from torch.optim import ZeROptimizer, SGD
 skip_if_no_cuda = unittest.skipIf(not torch.cuda.is_available(), reason="cuda required")
 
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO  # type: ignore
@@ -67,12 +67,12 @@ class TestZeROptimizer(unittest.TestCase):
     def test_create(self):
         TestZeROptimizer.dist_init(0, 1)
         params = [torch.rand(1)]
-        o = ZeROptimizer(params, lr=0.01)
+        o = ZeROptimizer(params, optim=SGD, lr=0.01)
 
     def test_state_dict(self):
         TestZeROptimizer.dist_init(0, 1)
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeROptimizer([x], lr=0.1, momentum=0.9)
+        o = ZeROptimizer([x], optim=SGD, lr=0.1, momentum=0.9)
         x.backward()
         o.step()
         assert x == torch.tensor([0.9], device=DEVICE)
@@ -98,7 +98,7 @@ class TestZeROptimizer(unittest.TestCase):
                 assert state_dict["param_groups"][0][k] == o.param_groups[0][k]
 
         # Check that it's correctly loaded
-        o = ZeROptimizer([x], lr=0.01)
+        o = ZeROptimizer([x], optim=SGD, lr=0.01)
         o.load_state_dict(state_dict)
         # Check that state is correct and on proper device
         assert o.optim.state[x]["momentum_buffer"] == torch.tensor([1.0], device=DEVICE)
@@ -118,7 +118,7 @@ class TestZeROptimizer(unittest.TestCase):
         TestZeROptimizer.dist_init(0, 1)
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
         x2 = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeROptimizer([x], lr=0.01)
+        o = ZeROptimizer([x], optim=SGD, lr=0.01)
         o2 = torch.optim.SGD([x2], lr=0.01)
         s = torch.optim.lr_scheduler.StepLR(o, 1)
         s2 = torch.optim.lr_scheduler.StepLR(o2, 1)
@@ -143,7 +143,7 @@ class TestZeROptimizer(unittest.TestCase):
 
         kwarg: List[Any] = []
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeROptimizer([x], SGDWithStepKWArg, lr=0.1)
+        o = ZeROptimizer([x], optim=SGDWithStepKWArg, lr=0.1)
         x.backward()
         o.step(0, kwarg=kwarg)
         assert kwarg == [5]
@@ -159,7 +159,7 @@ class TestZeROptimizer(unittest.TestCase):
                 self.param_groups[0]["new_key"] = 0.1
 
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeROptimizer([x], SGDWithNewKey, lr=0.1)
+        o = ZeROptimizer([x], optim=SGDWithNewKey, lr=0.1)
         x.backward()
         o.step()
         assert o.param_groups[0]["new_key"] == 0.1
@@ -173,7 +173,7 @@ class TestZeROptimizer(unittest.TestCase):
                 return super().step()
 
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeROptimizer([x], SGDWithoutClosure, lr=0.1)
+        o = ZeROptimizer([x], optim=SGDWithoutClosure, lr=0.1)
         x.backward()
         o.step()
         assert x == torch.tensor([0.9], device=DEVICE)
@@ -182,9 +182,9 @@ class TestZeROptimizer(unittest.TestCase):
         TestZeROptimizer.dist_init(0, 1)
 
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeROptimizer([x], lr=0.1)
+        o = ZeROptimizer([x], optim=SGD, lr=0.1)
         local_state_dict = o.local_state_dict()
-        o = ZeROptimizer([x], lr=0.01)
+        o = ZeROptimizer([x], optim=SGD, lr=0.01)
         o.load_local_state_dict(local_state_dict)
         # We should now be using a lr of 0.1.
         assert o.optim.param_groups[0]["lr"] == 0.1
@@ -197,9 +197,9 @@ class TestZeROptimizer(unittest.TestCase):
         TestZeROptimizer.dist_init(0, 1)
 
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeROptimizer([x], lr=0.1)
+        o = ZeROptimizer([x], optim=SGD, lr=0.1)
         local_state_dict = o.state_dict()
-        o = ZeROptimizer([x], lr=0.01)
+        o = ZeROptimizer([x], optim=SGD, lr=0.01)
         o.load_state_dict(local_state_dict)
         # We should now be using a lr of 0.1.
         assert o.optim.param_groups[0]["lr"] == 0.1
@@ -215,7 +215,7 @@ class TestZeROptimizer(unittest.TestCase):
         params = []
         for size in [4, 5, 2, 6, 4]:
             params.append(torch.rand(size, 1))
-        o = ZeROptimizer(params, lr=0.1)
+        o = ZeROptimizer(params, optim=SGD, lr=0.1)
         assert len(o.param_groups) == 1
         o.add_param_group({"params": [torch.rand(3, 1)]})
         assert len(o.param_groups) == 2
@@ -232,7 +232,7 @@ class TestZeROptimizer(unittest.TestCase):
         TestZeROptimizer.dist_init(rank, world_size)
         x = torch.rand(1)
         m = torch.nn.Linear(1, 1)
-        o = ZeROptimizer(m.parameters(), lr=0.1)
+        o = ZeROptimizer(m.parameters(), optim=SGD, lr=0.1)
         y = m(x)
         y.backward(x)
         assert m.weight.grad
@@ -253,7 +253,7 @@ class TestZeROptimizer(unittest.TestCase):
         m.weight.data = torch.tensor([[1.0]])
         m.bias.data = torch.tensor([2.0])
         m.to(rank)
-        o = ZeROptimizer(m.parameters(), lr=0.1)
+        o = ZeROptimizer(m.parameters(), optim=SGD, lr=0.1)
         y = m(x)
         y.backward(x)
         for p in m.parameters():
@@ -285,7 +285,7 @@ class TestZeROptimizer(unittest.TestCase):
         m.bias.data = torch.tensor([bias])
         m.to(rank)
 
-        o = ZeROptimizer(m.parameters(), lr=0.1)
+        o = ZeROptimizer(m.parameters(), optim=SGD, lr=0.1)
 
         y = m(x)
         y.backward(x)
@@ -317,7 +317,7 @@ class TestZeROptimizer(unittest.TestCase):
         params = []
         for size in [5, 4, 2, 6, 4, 3]:
             params.append(torch.rand(size, 1))
-        o = ZeROptimizer(params, lr=0.1)
+        o = ZeROptimizer(params, optim=SGD, lr=0.1)
         assert sum([x.numel() for x in o.optim.param_groups[0]["params"]]) == 8
 
     def test_sharding(self):
@@ -341,7 +341,7 @@ class TestZeROptimizer(unittest.TestCase):
         loss_fn.to(device)
 
         # With SGD, Momentum is required to get a state to shard
-        optimizer = ZeROptimizer(model.parameters(), lr=0.1, momentum=0.99)
+        optimizer = ZeROptimizer(model.parameters(), optim=SGD, lr=0.1, momentum=0.99)
 
         def closure():
             optimizer.zero_grad()
@@ -438,7 +438,7 @@ class TestZeROptimizer(unittest.TestCase):
 
             # With SGD, Momentum is required to get a state to shard
             optimizer = ZeROptimizer(
-                model.parameters(), lr=0.1, momentum=0.99, group=process_group, broadcast_buffer_size=2 ** 20
+                model.parameters(), optim=SGD, lr=0.1, momentum=0.99, group=process_group, broadcast_buffer_size=2 ** 20
             )
             check(optimizer)
 
@@ -449,7 +449,7 @@ class TestZeROptimizer(unittest.TestCase):
 
             # With SGD, Momentum is required to get a state to shard
             optimizer = ZeROptimizer(
-                model.parameters(), lr=0.1, momentum=0.99, group=process_group, broadcast_buffer_size=0
+                model.parameters(), optim=SGD, lr=0.1, momentum=0.99, group=process_group, broadcast_buffer_size=0
             )
             check(optimizer)
 
