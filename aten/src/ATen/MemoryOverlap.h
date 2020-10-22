@@ -24,7 +24,7 @@ CAFFE2_API void assert_no_internal_overlap(TensorImpl* t);
 CAFFE2_API MemOverlapStatus get_overlap_status(const Tensor& a, const Tensor& b);
 CAFFE2_API MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b);
 
-void assert_no_partial_overlap(const Tensor& a, const Tensor& b);
+CAFFE2_API void assert_no_partial_overlap(const Tensor& a, const Tensor& b);
 void assert_no_partial_overlap(TensorImpl* a, TensorImpl* b);
 
 }

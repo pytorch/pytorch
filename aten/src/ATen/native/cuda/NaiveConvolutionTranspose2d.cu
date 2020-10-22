@@ -216,7 +216,7 @@ void slow_conv_transpose2d_out_cuda_template(
   Tensor weight = weight_.contiguous();
 
   Tensor bias = Tensor();
-  
+
   if (bias_.defined()) {
     bias = bias_.contiguous();
     TORCH_CHECK(ones.is_contiguous(), "ones needs to be contiguous");
@@ -472,24 +472,25 @@ static void slow_conv_transpose2d_backward_out_cuda_template(
           grad_input_n = grad_input.select(0, elt);
           grad_output_n = grad_output.select(0, elt);
 
-          // Extract columns:
-          im2col<scalar_t>(
-              at::cuda::getCurrentCUDAStream(),
-              grad_output_n.data_ptr<scalar_t>(),
-              n_output_plane,
-              output_height,
-              output_width,
-              input_height,
-              input_width,
-              kernel_height,
-              kernel_width,
-              pad_height,
-              pad_width,
-              stride_height,
-              stride_width,
-              dilation_height,
-              dilation_width,
-              grad_columns.data_ptr<scalar_t>());
+          if (kernel_height != 1 || kernel_width != 1) {
+            im2col<scalar_t>(
+                at::cuda::getCurrentCUDAStream(),
+                grad_output_n.data_ptr<scalar_t>(),
+                n_output_plane,
+                output_height,
+                output_width,
+                input_height,
+                input_width,
+                kernel_height,
+                kernel_width,
+                pad_height,
+                pad_width,
+                stride_height,
+                stride_width,
+                dilation_height,
+                dilation_width,
+                grad_columns.data_ptr<scalar_t>());
+          }
 
           // M,N,K are dims of matrix A and B
           // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
@@ -499,6 +500,8 @@ static void slow_conv_transpose2d_backward_out_cuda_template(
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
+          auto gemm_in_ptr = (kernel_height != 1 || kernel_width != 1) ?
+              grad_columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
           at::cuda::blas::gemm<scalar_t>(
               'n',
               'n',
@@ -506,7 +509,7 @@ static void slow_conv_transpose2d_backward_out_cuda_template(
               m,
               k,
               1,
-              grad_columns.data_ptr<scalar_t>(),
+              gemm_in_ptr,
               n,
               weight.data_ptr<scalar_t>(),
               k,
@@ -681,24 +684,26 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
             // Matrix mulitply per output:
             input_n = input.select(0, elt);
 
-            // Extract columns:
-            im2col<scalar_t>(
-                at::cuda::getCurrentCUDAStream(),
-                grad_output_n.data_ptr<scalar_t>(),
-                n_output_plane,
-                output_height,
-                output_width,
-                input_height,
-                input_width,
-                kernel_height,
-                kernel_width,
-                pad_height,
-                pad_width,
-                stride_height,
-                stride_width,
-                dilation_height,
-                dilation_width,
-                columns.data_ptr<scalar_t>());
+            if (kernel_height != 1 || kernel_width != 1) {
+              // Extract columns:
+              im2col<scalar_t>(
+                  at::cuda::getCurrentCUDAStream(),
+                  grad_output_n.data_ptr<scalar_t>(),
+                  n_output_plane,
+                  output_height,
+                  output_width,
+                  input_height,
+                  input_width,
+                  kernel_height,
+                  kernel_width,
+                  pad_height,
+                  pad_width,
+                  stride_height,
+                  stride_width,
+                  dilation_height,
+                  dilation_width,
+                  columns.data_ptr<scalar_t>());
+            }
 
             // M,N,K are dims of matrix A and B
             // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
@@ -708,6 +713,8 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
 
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
+            auto gemm_in_ptr = (kernel_height != 1 || kernel_width != 1) ?
+                columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
             at::cuda::blas::gemm<scalar_t>(
                 't',
                 'n',
@@ -715,7 +722,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
                 m,
                 k,
                 scale,
-                columns.data_ptr<scalar_t>(),
+                gemm_in_ptr,
                 k,
                 input_n.data_ptr<scalar_t>(),
                 k,

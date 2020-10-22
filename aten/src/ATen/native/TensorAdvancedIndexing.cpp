@@ -54,6 +54,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
@@ -132,6 +133,26 @@ static Tensor reshape_indexer(const Tensor& index, int64_t dims_before, int64_t 
   shape.append(orig_shape.begin(), orig_shape.end());
   shape.append(dims_after, 1);
   return index.reshape(shape);
+}
+
+static ptrdiff_t dataOffset(const Tensor& tensor, ptrdiff_t linearIndex) {
+  auto size = tensor.sizes();
+  auto stride = tensor.strides();
+  int nDim = tensor.dim();
+  ptrdiff_t dataOffset = 0;
+  for (int i = nDim - 1; i >= 0; i--) {
+    dataOffset += (linearIndex % size[i]) * stride[i];
+    linearIndex /= size[i];
+  }
+  return dataOffset;
+}
+
+static inline int64_t wrapLinearIndex(int64_t linearIndex, int64_t numel) {
+  return linearIndex < 0 ? linearIndex + numel : linearIndex;
+}
+
+static inline void checkLinearIndex(int64_t linearIndex, int64_t numel) {
+  TORCH_CHECK(linearIndex < numel && linearIndex >= -numel, "out of range: ", linearIndex, " out of ", numel);
 }
 
 AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
@@ -222,6 +243,8 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
               "got ", info.src.scalar_type(), " for the destination "
               "and ", value.scalar_type(), " for the source.");
   TensorIteratorConfig config;
+  // info.src is restrided by restride_src with 0 strided dimensions
+  config.set_check_mem_overlap(false);
   config.resize_outputs(false);
   config.check_all_same_dtype(false);
   config.add_output(info.src);
@@ -234,7 +257,8 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
 
 static TensorIterator make_index_iterator(const AdvancedIndex& info) {
   TensorIteratorConfig config;
-  config.check_all_same_dtype(false)
+  config.set_check_mem_overlap(false)
+        .check_all_same_dtype(false)
         .declare_static_dtype_and_device(info.src.scalar_type(), info.src.device())
         .add_output(Tensor())
         .add_input(info.src);
@@ -246,7 +270,9 @@ static TensorIterator make_index_iterator(const AdvancedIndex& info) {
 
 static TensorIterator make_index_out_iterator(const AdvancedIndex& info, Tensor& result) {
   TensorIteratorConfig config;
-  config.check_all_same_dtype(false)
+  // info.src is a restrided view of result
+  config.set_check_mem_overlap(false)
+        .check_all_same_dtype(false)
         .add_output(result)
         .add_input(info.src);
   for (auto& index : info.indices) {
@@ -266,6 +292,7 @@ Tensor index(const Tensor & self, TensorList indices) {
 
 Tensor& index_out(Tensor& result, const Tensor & self, TensorList indices) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  at::assert_no_internal_overlap(result);
 
   auto info = make_info(self, indices);
   auto iter = make_index_out_iterator(info, result);
@@ -285,6 +312,15 @@ Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & valu
       index_put_accum_stub(self.device().type(), self, indices, value, unsafe);
       return self;
   }
+
+  if (at::has_internal_overlap(self) == MemOverlap::YES) {
+    TORCH_WARN(
+      "Use of index_put_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[indices] = tensor");
+  }
+  at::assert_no_partial_overlap(self, value);
+
   auto info = make_info(self, indices);
   auto iter = make_index_put_iterator(info, value);
   index_put_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides, accumulate);
@@ -353,6 +389,10 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
   TORCH_CHECK(numel == (source.dim() == 0 ? 1 : source.size(dim)),
               "index_add_(): Number of indices should be equal to self.size(dim)");
 
+  at::assert_no_internal_overlap(self);
+  at::assert_no_partial_overlap(self, index);
+  at::assert_no_partial_overlap(self, source);
+
   auto index_contig = index.contiguous();
   auto index_data = index_contig.data_ptr<int64_t>();
 
@@ -419,6 +459,7 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
               "index_select(): self and result must have the same scalar type");
   TORCH_CHECK(dim == 0 || dim < self.dim(),
               "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
+  at::assert_no_internal_overlap(result);
 
   auto result_size = self.sizes().vec();
   if (self.dim() > 0) {
@@ -512,6 +553,10 @@ Tensor index_select_cpu_(const Tensor & self, int64_t dim, const Tensor & index)
   return index_select_out_cpu_(result, self, dim, index);
 }
 
+Tensor index_select_backward(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
+  return at::zeros(self_sizes, grad.options()).index_add_(dim, index, grad);
+}
+
 Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   TORCH_CHECK(source.dim() == 0, "index_fill_ only supports a 0-dimensional value tensor, but got tensor "
       "with ", source.dim(), " dimension(s).");
@@ -537,6 +582,13 @@ Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool spars
   return gather_out_cpu_cuda(result, self, dim, index, sparse_grad);
 }
 
+Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad) {
+  if (sparse_grad) {
+    return at::_gather_sparse_backward(self, dim, index, grad);
+  }
+  return at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad);
+}
+
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
                     "scatter_(): Expected dtype int64 for index.");
@@ -555,22 +607,16 @@ SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
   if (reduce == "add") {
     return SCATTER_GATHER_OP::REDUCE_ADD;
   }
-  else if (reduce == "subtract") {
-    return SCATTER_GATHER_OP::REDUCE_SUBTRACT;
-  }
   else if (reduce == "multiply") {
     return SCATTER_GATHER_OP::REDUCE_MULTIPLY;
   }
-  else if (reduce == "divide") {
-    return SCATTER_GATHER_OP::REDUCE_DIVIDE;
-  }
   else {
     TORCH_CHECK(false,
-                "reduce argument must be either of add, subtract, multiply or divide.");
+                "reduce argument must be either add or multiply.");
   }
 }
 
-Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
+Tensor& scatter_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
                                    Scalar value, const std::string reduce) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
                     "scatter_(): Expected dtype int64 for index.");
@@ -581,7 +627,7 @@ Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor
   return self;
 }
 
-Tensor & scatter_cpu_reduce_(Tensor & self, const int64_t dim, const Tensor & index,
+Tensor & scatter_reduce_(Tensor & self, const int64_t dim, const Tensor & index,
                       const Tensor & src, const std::string reduce) {
   TORCH_CHECK_INDEX(index.scalar_type() == ScalarType::Long,
                     "scatter_(): Expected dtype int64 for index");
@@ -624,7 +670,16 @@ static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, Scalar 
             "please use a mask with dtype torch.bool instead.");
   }
 
+  if (at::has_internal_overlap(self) == MemOverlap::YES) {
+    TORCH_WARN(
+      "Use of masked_fill_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
+  }
+  at::assert_no_partial_overlap(self, mask);
+
   auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // deprecated, but not a hard error
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(self)
@@ -689,6 +744,10 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "masked_select(): self and result must have the same scalar type");
 
+  at::assert_no_internal_overlap(result);
+  at::assert_no_partial_overlap(result, self);
+  at::assert_no_partial_overlap(result, mask);
+
   if (mask.dtype() == at::ScalarType::Byte) {
     TORCH_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
@@ -718,6 +777,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   _self.is_contiguous() && _mask.is_contiguous();
   if (use_serial_kernel) {
     auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)  // result is intenionally zero-strided above
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(result_strided)
@@ -741,6 +801,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   std::partial_sum(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data);
 
   auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // result is intenionally zero-strided above
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(result_strided)
@@ -761,6 +822,92 @@ Tensor & masked_select_out_cpu(Tensor & result, const Tensor & self, const Tenso
 Tensor masked_select_cpu(const Tensor & self, const Tensor & mask) {
   Tensor result = at::empty({0}, self.options());
   return masked_select_out_cpu(result, self, mask);
+}
+
+Tensor masked_select_backward(const Tensor& grad, const Tensor& input, const Tensor& mask) {
+  // The following could just be written as `zeros_like(input).masked_scatter(mask, grad)`.
+  // However, as an optimization, we call the in-place variant of masked_scatter.
+  // Unfortunately, that doesn't allow for the broadcasting of the LHS, so we need
+  // to explicitly broadcast here (the out-of-place variant of masked_scatter
+  // implicitly handles broadcasting).
+  auto result = at::zeros_like(
+      input.expand(at::infer_size(input.sizes(), mask.sizes())), at::MemoryFormat::Preserve);
+  return result.masked_scatter_(mask, grad);
+}
+
+void take_out_cpu_template(
+    Tensor& output,
+    Tensor const& input,
+    Tensor const& index)
+{
+    TORCH_CHECK(output.device().type() == at::kCPU, "device type of output (", output.device().type(), ") is not CPU");
+    TORCH_CHECK(input.device().type() == at::kCPU, "device type of input (", input.device().type(), ") is not CPU");
+    TORCH_CHECK(index.device().type() == at::kCPU, "device type of index (", index.device().type(), ") is not CPU");
+
+    TORCH_CHECK(output.layout() == Layout::Strided, "take() only supports strided layout, got layout: ",
+            output.layout(), " on output tensor");
+    TORCH_CHECK(input.layout() == Layout::Strided, "take() only supports strided layout, got layout: ",
+            input.layout(), " on input tensor");
+    TORCH_CHECK(index.layout() == Layout::Strided, "take() only supports strided layout, got layout: ",
+            index.layout(), " on index tensor");
+
+    TORCH_CHECK(output.scalar_type() == input.scalar_type(), "output and input scalar type must match.",
+            "But got different types: ", output.scalar_type(), " and ", input.scalar_type());
+    TORCH_CHECK(index.scalar_type() == kLong, "index must be an int64 tensor");
+
+    output.resize_(index.sizes());
+    auto output_contiguous = output.contiguous();
+    auto index_continuous = index.contiguous();
+    bool is_contiguous = input.is_contiguous();
+    auto input_size = input.numel();
+
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, input.scalar_type(), "take_cpu", [&] {
+        auto output_data = output_contiguous.data_ptr<scalar_t>();
+        auto input_data = input.data_ptr<scalar_t>();
+        auto index_data = index.data_ptr<int64_t>();
+
+        // Exceptions must not be thrown across parallel sections, so we
+        // record the position of the invalid index and throw the exception after the
+        // loop.
+        std::atomic<int64_t> invalidIdxPos(-1);
+
+        at::parallel_for(0, index.numel(), at::internal::GRAIN_SIZE,
+            [&](int64_t start, int64_t end) {
+            for (auto i = start; i < end; i++) {
+                int64_t idx = index_data[i];
+                if (idx < input_size && idx >= -input_size) {
+                    idx = wrapLinearIndex(idx, input_size);
+                    if (is_contiguous) {
+                        output_data[i] = input_data[idx];
+                    } else {
+                        output_data[i] = input_data[dataOffset(input, idx)];
+                    }
+                } else {
+                    int64_t tmp = -1;
+                    invalidIdxPos.compare_exchange_strong(tmp, i);
+                }
+            }
+        });
+
+        if (invalidIdxPos >= 0) {
+            checkLinearIndex(index_data[invalidIdxPos], input_size);
+        }
+    });
+}
+
+Tensor take_cpu(const Tensor& self, const Tensor& index) {
+    auto output = at::empty(index.sizes(), self.options());
+    take_out_cpu_template(output, self, index);
+    return output;
+}
+
+Tensor& take_out_cpu(Tensor& out, const Tensor& self, const Tensor& index) {
+    take_out_cpu_template(out, self, index);
+    return out;
+}
+
+Tensor take_backward(const Tensor& grad, const Tensor& input, const Tensor& index) {
+  return at::zeros_like(input).put_(index, grad, true);
 }
 
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){

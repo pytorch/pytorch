@@ -13,6 +13,7 @@ namespace at { namespace native {
 using reduce_fn = void(*)(TensorIterator &);
 
 DECLARE_DISPATCH(reduce_fn, sum_stub);
+DECLARE_DISPATCH(reduce_fn, nansum_stub);
 DECLARE_DISPATCH(reduce_fn, prod_stub);
 DECLARE_DISPATCH(reduce_fn, mean_stub);
 DECLARE_DISPATCH(reduce_fn, and_stub);
