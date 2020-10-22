@@ -30,7 +30,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& input_r,
     TensorList weight, int64_t weight_stride0,
     const Tensor& weight_buf_r, const Tensor& hx, const Tensor& cx,
-    int64_t fn_mode, int64_t fn_hidden_size,
+    int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_proj_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
     bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state
@@ -42,7 +42,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
     const Tensor& output, const Tensor& grad_output_r, const Tensor& grad_hy_r,
     const Tensor& grad_cy_r,
-    int64_t mode, int64_t hidden_size,
+    int64_t mode, int64_t hidden_size, int64_t proj_size,
     int64_t num_layers, bool batch_first, double dropout,
     bool train, bool bidirectional, IntArrayRef batch_sizes,
     const Tensor& dropout_state, const Tensor& reserve,
@@ -726,7 +726,6 @@ const char * WEIGHT_FORMAT_WARN = "RNN module weights are not part of single con
                                   "To compact weights again call flatten_parameters().";
 
 // NB: when fn_batch_sizes is empty, that means no batch sizes was specified
-// TODOMODIFYIGOR
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& input_r,
     TensorList weight, int64_t weight_stride0,
@@ -873,7 +872,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   return std::make_tuple(output, hy, cy, reserve, weight_buf);
 }
 
-// TODOMODIFYIGOR
 std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
     const Tensor& input_r, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
     const Tensor& output_r, const Tensor& grad_output_r, const Tensor& grad_hy,
@@ -996,7 +994,6 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
 
 // NB: This MUST BE CALLED AFTER _cudnn_rnn_backward_input.
 // We'll give a user friendly combined function...
-// TODOMODIFYIGOR
 std::vector<Tensor> _cudnn_rnn_backward_weight(
     // TODO: I think tensor geometry sufficient for weight_buf/weight
     const Tensor& input_r, TensorList weight_arr, int64_t weight_stride0,
@@ -1111,7 +1108,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
     const Tensor& output, const Tensor& grad_output_r, const Tensor& grad_hy_r,
     const Tensor& grad_cy_r,
-    int64_t mode, int64_t hidden_size,
+    int64_t mode, int64_t hidden_size, int64_t proj_size,
     int64_t num_layers, bool batch_first, double dropout,
     bool train, bool bidirectional, IntArrayRef batch_sizes,
     const Tensor& dropout_state, const Tensor& reserve,
@@ -1127,10 +1124,10 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
 
   Tensor dx, dhx, dcx;
   // NB: unconditionally compute this gradient, because it mutates reserve
-  std::tie(dx, dhx, dcx) = at::native::_cudnn_rnn_backward_input(input, weight_buf, hx, cx, output, grad_output, grad_hy, grad_cy, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, {output_mask[0], output_mask[1], output_mask[2]});
+  std::tie(dx, dhx, dcx) = at::native::_cudnn_rnn_backward_input(input, weight_buf, hx, cx, output, grad_output, grad_hy, grad_cy, mode, hidden_size, proj_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, {output_mask[0], output_mask[1], output_mask[2]});
   std::vector<Tensor> dw;
   if (output_mask[3]) {
-    dw = at::native::_cudnn_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve);
+    dw = at::native::_cudnn_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, proj_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve);
   }
   return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{dx, dhx, dcx, dw};
 }
@@ -1308,7 +1305,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
   auto cudnn_output = at::_cudnn_rnn(
       input, params, has_biases ? 4 : 2, weight_buf,
-      hx, cx, static_cast<int>(mode), hidden_size, num_layers, /*batch_first=*/false,
+      hx, cx, static_cast<int>(mode), hidden_size, proj_size, num_layers, /*batch_first=*/false,
       dropout_p, train, bidirectional, batch_sizes, dropout_state.buffer);
 
   return {std::get<0>(cudnn_output),
@@ -1333,7 +1330,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
   auto cudnn_output = at::_cudnn_rnn(
       input, params, has_biases ? 4 : 2, weight_buf,
-      hx, cx, static_cast<int>(mode), hidden_size, num_layers, batch_first, dropout_p,
+      hx, cx, static_cast<int>(mode), hidden_size, proj_size, num_layers, batch_first, dropout_p,
       train, bidirectional, /*batch_sizes=*/{}, dropout_state.buffer);
 
   return {std::get<0>(cudnn_output),
