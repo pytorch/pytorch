@@ -1421,7 +1421,7 @@ def method_tests():
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
-        ('linalg.tensorinv', (2, S, M), (), '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('linalg.tensorinv', lambda: random_fullrank_matrix_distinct_singular_value(2*S).reshape(2, S, M), (), '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
     ]
 
 def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
