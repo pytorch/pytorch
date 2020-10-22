@@ -12,6 +12,20 @@ def _check_is_graph_module(model):
             'Got type:' + str(type(model)) + ' Please make ' +
             'sure to follow the tutorials.')
 
+def _swap_ff_with_fxff(model):
+    r""" Swap FloatFunctional with FXFloatFunctional
+    """
+    modules_to_swap = []
+    for name, module in model.named_children():
+        if isinstance(module, torch.nn.quantized.FloatFunctional):
+            modules_to_swap.append(name)
+        else:
+            _swap_ff_with_fxff(module)
+
+    for name in modules_to_swap:
+        del model._modules[name]
+        model._modules[name] = torch.nn.quantized.FXFloatFunctional()
+
 def _fuse_fx(graph_module, inplace=False, fuse_custom_config_dict=None):
     r""" Internal helper function to fuse modules in preparation for quantization
 
@@ -51,6 +65,9 @@ forward graph of the parent module,
 
     skipped_module_names = prepare_custom_config_dict.get("non_traceable_module_name", [])
     skipped_module_classes = prepare_custom_config_dict.get("non_traceable_module_class", [])
+
+    # swap FloatFunctional with FXFloatFunctional
+    _swap_ff_with_fxff(model)
 
     # symbolically trace the model
     if not is_standalone_module:
