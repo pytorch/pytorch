@@ -85,7 +85,7 @@ def _get_global_rank(group: Any, rank: int) -> int:
     return global_rank
 
 
-class ShardedOptimizer(Optimizer):
+class ZeROptimizer(Optimizer):
     """Wraps an arbitrary :class:`optim.Optimizer <torch.optim.Optimizer>`
     optimizer and shards its state as described by ZeRO_.
     ::
@@ -240,12 +240,18 @@ class ShardedOptimizer(Optimizer):
         self._sync_param_groups()
 
         # Run the optimizer step on this shard only:
-        self._free_other_grads()
-
         if closure is not None:
             loss = self.optim.step(closure=closure, **kwargs)  # type: ignore
         else:
             loss = self.optim.step(**kwargs)
+
+        # Free the other grads
+        # ideally this would not be needed, handled in the reduce step by a zero-matching DDP engin
+        for rank, partition in enumerate(self.partition_parameters()):
+            if rank != self.rank:
+                for p in partition:
+                    for t in p["params"]:
+                        t.grad = None
 
         # Sync all the updated shards in between the ranks
         with torch.no_grad():
@@ -457,16 +463,6 @@ class ShardedOptimizer(Optimizer):
                 global_rank = _get_global_rank(self.group, rank)
                 # Discard this tensor/rank, broadcast necessary for syncing
                 _broadcast_object(empty_buffer, src_rank=global_rank, group=self.group, dist_device=self._device)
-
-    def _free_other_grads(self) -> None:
-        """Free all the gradients only useful for the other ranks"""
-        for rank, partition in enumerate(self.partition_parameters()):
-            if rank == self.rank:
-                continue
-
-            for p in partition:
-                for t in p["params"]:
-                    t.grad = None
 
     def _broadcast_params(self, buffers: List[torch.Tensor], per_rank_params: List[List[Parameter]]) -> None:
         """Helper function to broadcast all the parameters from a given device"""
