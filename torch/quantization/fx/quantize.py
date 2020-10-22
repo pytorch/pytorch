@@ -16,14 +16,14 @@ from torch.quantization import (
 )
 
 from ..quantization_mappings import (
-    get_qat_module_mappings,
+    get_default_qat_module_mappings,
 )
 
 from ..quantize import _remove_qconfig
 
 from .pattern_utils import (
     is_match,
-    get_quant_patterns,
+    get_default_quant_patterns,
 )
 
 from .standalone_module import (
@@ -231,7 +231,7 @@ class Quantizer:
 
 
     def _qat_swap_modules(self, root):
-        convert(root, mapping=get_qat_module_mappings(), inplace=True, remove_qconfig=False)
+        convert(root, mapping=get_default_qat_module_mappings(), inplace=True, remove_qconfig=False)
 
     def _generate_qconfig_map(self,
                               root,
@@ -324,7 +324,7 @@ class Quantizer:
             prepare_custom_config_dict = {}
         if not inplace:
             model = copy.deepcopy(model)
-        self.patterns = get_quant_patterns()
+        self.patterns = get_default_quant_patterns()
 
         flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
         # TODO: support regex as well

@@ -1572,9 +1572,8 @@ void initJitScriptBindings(PyObject* module) {
           "add_module",
           [](ConcreteModuleTypeBuilder& self,
              std::string name,
-             std::shared_ptr<ConcreteModuleType> meta,
-             TypePtr containedTypeHint = nullptr) {
-            self.addModule(std::move(name), std::move(meta), containedTypeHint);
+             std::shared_ptr<ConcreteModuleType> meta) {
+            self.addModule(std::move(name), std::move(meta));
           })
       .def("add_overload", &ConcreteModuleTypeBuilder::addOverload)
       .def("set_poisoned", &ConcreteModuleTypeBuilder::setPoisoned)

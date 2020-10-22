@@ -92,14 +92,7 @@ ConcreteModuleType::ConcreteModuleType(ConcreteModuleTypeBuilder data)
 bool operator==(
     const ConcreteModuleTypeBuilder::ModuleInfo& lhs,
     const ConcreteModuleTypeBuilder::ModuleInfo& rhs) {
-  bool equals = lhs.name_ == rhs.name_;
-  equals &= lhs.meta_->equals(*rhs.meta_);
-
-  if (lhs.containedTypeHint_ && rhs.containedTypeHint_) {
-    equals &= *lhs.containedTypeHint_ == *rhs.containedTypeHint_;
-  }
-
-  return equals;
+  return lhs.name_ == rhs.name_ && lhs.meta_->equals(*rhs.meta_);
 }
 
 bool ConcreteModuleTypeBuilder::equals(
@@ -119,6 +112,12 @@ bool ConcreteModuleTypeBuilder::equals(
       overloads_ == other.overloads_ &&
       functionAttributes_ == other.functionAttributes_ &&
       builtinFunctions_ == other.builtinFunctions_;
+
+    bool containedTypeHintsMatch = (!containedTypeHint_ && !other.containedTypeHint_) ||
+      (containedTypeHint_ && other.containedTypeHint_ && *containedTypeHint_ == *other.containedTypeHint_);
+
+    equal &= containedTypeHintsMatch;
+
   // clang-format on
   if (!equal) {
     return false;
@@ -214,18 +213,6 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
   return it->meta_;
 }
 
-TypePtr ConcreteModuleType::findSubmoduleContainedTypeHint(
-    const std::string& name) const {
-  const auto it = std::find_if(
-      data_.modules_.cbegin(),
-      data_.modules_.cend(),
-      [&](const ConcreteModuleTypeBuilder::ModuleInfo& info) {
-        return info.name_ == name;
-      });
-  TORCH_INTERNAL_ASSERT(it != data_.modules_.end());
-  return it->containedTypeHint_;
-}
-
 void ConcreteModuleTypeBuilder::setContainedTypeHint(
     TypePtr containedTypeHint) {
   containedTypeHint_ = containedTypeHint;
@@ -297,10 +284,9 @@ void ConcreteModuleTypeBuilder::addBuiltinFunction(
 
 void ConcreteModuleTypeBuilder::addModule(
     std::string name,
-    std::shared_ptr<ConcreteModuleType> meta,
-    TypePtr containedTypeHint) {
-  modules_.emplace_back(ConcreteModuleTypeBuilder::ModuleInfo{
-      std::move(name), std::move(meta), containedTypeHint});
+    std::shared_ptr<ConcreteModuleType> meta) {
+  modules_.emplace_back(
+      ConcreteModuleTypeBuilder::ModuleInfo{std::move(name), std::move(meta)});
 }
 
 void ConcreteModuleTypeBuilder::addOverload(

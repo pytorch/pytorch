@@ -16,7 +16,6 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
-
 class TestModuleContainers(JitTestCase):
     def test_sequential_intermediary_types(self):
         class A(torch.nn.Module):
@@ -122,6 +121,7 @@ class TestModuleContainers(JitTestCase):
                     x2 = mod(mod(x2))
 
                 return x, x2, names, iter
+
 
         for name in ["", "one", "two", "three"]:
             inp = torch.tensor(1)
@@ -239,6 +239,7 @@ class TestModuleContainers(JitTestCase):
 
         with self.assertRaisesRegex(Exception, "Index -11 out of range"):
             torch.jit.script(M2())
+
 
         class M2(M):
             def __init__(self):
