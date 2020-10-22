@@ -3,18 +3,15 @@
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
-#include <torch/csrc/jit/tensorexpr/ir_deserializer.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
-#include <torch/csrc/jit/tensorexpr/ir_serializer.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
-#include <torch/csrc/jit/json.hpp>
 #include <sstream>
-
 namespace torch {
 namespace jit {
+
 using namespace torch::jit::tensorexpr;
 
 void testIRPrinterBasicValueTest() {
