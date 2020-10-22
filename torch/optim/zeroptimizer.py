@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Ty
 import torch
 import torch.distributed as dist
 from torch.nn import Parameter
-from torch.optim import SGD, Optimizer
 from torch._six import container_abcs
+from .optimizer import SGD, Optimizer
 
 
 if TYPE_CHECKING:  # pragma: no cover

@@ -16,7 +16,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from typing import List, Any
 import io
-
+from torch.optim import ZeROptimizer
 skip_if_no_cuda = unittest.skipIf(not torch.cuda.is_available(), reason="cuda required")
 
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO  # type: ignore
@@ -51,7 +51,7 @@ def _broadcast_object(
     return obj
 
 
-class TestShardedOptimizer(unittest.TestCase):
+class TestZeROptimizer(unittest.TestCase):
     def tearDown(self):
         try:
             torch.distributed.destroy_process_group()
@@ -65,14 +65,14 @@ class TestShardedOptimizer(unittest.TestCase):
         dist.init_process_group(backend=BACKEND, rank=rank, world_size=world_size)
 
     def test_create(self):
-        TestShardedOptimizer.dist_init(0, 1)
+        TestZeROptimizer.dist_init(0, 1)
         params = [torch.rand(1)]
-        o = torch.optim.ShardedOptimizer(params, lr=0.01)
+        o = ZeROptimizer(params, lr=0.01)
 
     def test_state_dict(self):
-        TestShardedOptimizer.dist_init(0, 1)
+        TestZeROptimizer.dist_init(0, 1)
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = torch.optim.ShardedOptimizer([x], lr=0.1, momentum=0.9)
+        o = ZeROptimizer([x], lr=0.1, momentum=0.9)
         x.backward()
         o.step()
         assert x == torch.tensor([0.9], device=DEVICE)
@@ -98,7 +98,7 @@ class TestShardedOptimizer(unittest.TestCase):
                 assert state_dict["param_groups"][0][k] == o.param_groups[0][k]
 
         # Check that it's correctly loaded
-        o = torch.optim.ShardedOptimizer([x], lr=0.01)
+        o = ZeROptimizer([x], lr=0.01)
         o.load_state_dict(state_dict)
         # Check that state is correct and on proper device
         assert o.optim.state[x]["momentum_buffer"] == torch.tensor([1.0], device=DEVICE)
@@ -115,10 +115,10 @@ class TestShardedOptimizer(unittest.TestCase):
         assert o.param_groups[0]["params"][0].device == x.device
 
     def test_lr_scheduler(self):
-        TestShardedOptimizer.dist_init(0, 1)
+        TestZeROptimizer.dist_init(0, 1)
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
         x2 = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = torch.optim.ShardedOptimizer([x], lr=0.01)
+        o = ZeROptimizer([x], lr=0.01)
         o2 = torch.optim.SGD([x2], lr=0.01)
         s = torch.optim.lr_scheduler.StepLR(o, 1)
         s2 = torch.optim.lr_scheduler.StepLR(o2, 1)
@@ -134,7 +134,7 @@ class TestShardedOptimizer(unittest.TestCase):
             assert x == x2
 
     def test_step_with_kwargs(self):
-        TestShardedOptimizer.dist_init(0, 1)
+        TestZeROptimizer.dist_init(0, 1)
 
         class SGDWithStepKWArg(torch.optim.SGD):
             def step(self, closure=None, kwarg=[]):
@@ -143,14 +143,14 @@ class TestShardedOptimizer(unittest.TestCase):
 
         kwarg: List[Any] = []
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = torch.optim.ShardedOptimizer([x], SGDWithStepKWArg, lr=0.1)
+        o = ZeROptimizer([x], SGDWithStepKWArg, lr=0.1)
         x.backward()
         o.step(0, kwarg=kwarg)
         assert kwarg == [5]
         assert x == torch.tensor([0.9], device=DEVICE)
 
     def test_step_with_extra_inner_key(self):
-        TestShardedOptimizer.dist_init(0, 1)
+        TestZeROptimizer.dist_init(0, 1)
 
         class SGDWithNewKey(torch.optim.SGD):
             # Dummy optimizer which adds a new key to the param groups
@@ -159,32 +159,32 @@ class TestShardedOptimizer(unittest.TestCase):
                 self.param_groups[0]["new_key"] = 0.1
 
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = torch.optim.ShardedOptimizer([x], SGDWithNewKey, lr=0.1)
+        o = ZeROptimizer([x], SGDWithNewKey, lr=0.1)
         x.backward()
         o.step()
         assert o.param_groups[0]["new_key"] == 0.1
         assert x == torch.tensor([0.9], device=DEVICE)
 
     def test_step_without_closure(self):
-        TestShardedOptimizer.dist_init(0, 1)
+        TestZeROptimizer.dist_init(0, 1)
 
         class SGDWithoutClosure(torch.optim.SGD):
             def step(self):
                 return super().step()
 
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = torch.optim.ShardedOptimizer([x], SGDWithoutClosure, lr=0.1)
+        o = ZeROptimizer([x], SGDWithoutClosure, lr=0.1)
         x.backward()
         o.step()
         assert x == torch.tensor([0.9], device=DEVICE)
 
     def test_local_state_dict(self):
-        TestShardedOptimizer.dist_init(0, 1)
+        TestZeROptimizer.dist_init(0, 1)
 
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = torch.optim.ShardedOptimizer([x], lr=0.1)
+        o = ZeROptimizer([x], lr=0.1)
         local_state_dict = o.local_state_dict()
-        o = torch.optim.ShardedOptimizer([x], lr=0.01)
+        o = ZeROptimizer([x], lr=0.01)
         o.load_local_state_dict(local_state_dict)
         # We should now be using a lr of 0.1.
         assert o.optim.param_groups[0]["lr"] == 0.1
@@ -194,12 +194,12 @@ class TestShardedOptimizer(unittest.TestCase):
         assert x == torch.tensor([0.9], device=DEVICE)
 
     def test_implicit_local_state_dict(self):
-        TestShardedOptimizer.dist_init(0, 1)
+        TestZeROptimizer.dist_init(0, 1)
 
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = torch.optim.ShardedOptimizer([x], lr=0.1)
+        o = ZeROptimizer([x], lr=0.1)
         local_state_dict = o.state_dict()
-        o = torch.optim.ShardedOptimizer([x], lr=0.01)
+        o = ZeROptimizer([x], lr=0.01)
         o.load_state_dict(local_state_dict)
         # We should now be using a lr of 0.1.
         assert o.optim.param_groups[0]["lr"] == 0.1
@@ -210,12 +210,12 @@ class TestShardedOptimizer(unittest.TestCase):
 
     @staticmethod
     def run_test_add_param_group(rank, world_size):
-        TestShardedOptimizer.dist_init(rank, world_size)
+        TestZeROptimizer.dist_init(rank, world_size)
 
         params = []
         for size in [4, 5, 2, 6, 4]:
             params.append(torch.rand(size, 1))
-        o = torch.optim.ShardedOptimizer(params, lr=0.1)
+        o = ZeROptimizer(params, lr=0.1)
         assert len(o.param_groups) == 1
         o.add_param_group({"params": [torch.rand(3, 1)]})
         assert len(o.param_groups) == 2
@@ -225,14 +225,14 @@ class TestShardedOptimizer(unittest.TestCase):
 
     def test_add_param_group(self):
         world_size = 3
-        mp.spawn(TestShardedOptimizer.run_test_add_param_group, args=(world_size,), nprocs=world_size, join=True)
+        mp.spawn(TestZeROptimizer.run_test_add_param_group, args=(world_size,), nprocs=world_size, join=True)
 
     @staticmethod
     def run_test_zero_grad(rank, world_size):
-        TestShardedOptimizer.dist_init(rank, world_size)
+        TestZeROptimizer.dist_init(rank, world_size)
         x = torch.rand(1)
         m = torch.nn.Linear(1, 1)
-        o = torch.optim.ShardedOptimizer(m.parameters(), lr=0.1)
+        o = ZeROptimizer(m.parameters(), lr=0.1)
         y = m(x)
         y.backward(x)
         assert m.weight.grad
@@ -243,17 +243,17 @@ class TestShardedOptimizer(unittest.TestCase):
 
     def test_zero_grad(self):
         world_size = 2
-        mp.spawn(TestShardedOptimizer.run_test_zero_grad, args=(world_size,), nprocs=world_size, join=True)
+        mp.spawn(TestZeROptimizer.run_test_zero_grad, args=(world_size,), nprocs=world_size, join=True)
 
     @staticmethod
     def run_test_step(rank, world_size):
-        TestShardedOptimizer.dist_init(rank, world_size)
+        TestZeROptimizer.dist_init(rank, world_size)
         x = torch.tensor([float(rank + 1)], device=rank)
         m = torch.nn.Linear(1, 1)
         m.weight.data = torch.tensor([[1.0]])
         m.bias.data = torch.tensor([2.0])
         m.to(rank)
-        o = torch.optim.ShardedOptimizer(m.parameters(), lr=0.1)
+        o = ZeROptimizer(m.parameters(), lr=0.1)
         y = m(x)
         y.backward(x)
         for p in m.parameters():
@@ -266,11 +266,11 @@ class TestShardedOptimizer(unittest.TestCase):
     @skip_if_no_cuda
     def test_step(self):
         world_size = min(2, torch.cuda.device_count())
-        mp.spawn(TestShardedOptimizer.run_test_step, args=(world_size,), nprocs=world_size, join=True)
+        mp.spawn(TestZeROptimizer.run_test_step, args=(world_size,), nprocs=world_size, join=True)
 
     @staticmethod
     def run_test_step_with_closure(rank, world_size, optimizer=None):
-        TestShardedOptimizer.dist_init(rank, world_size)
+        TestZeROptimizer.dist_init(rank, world_size)
 
         x_val = rank + 1
         weight = 1.0
@@ -285,7 +285,7 @@ class TestShardedOptimizer(unittest.TestCase):
         m.bias.data = torch.tensor([bias])
         m.to(rank)
 
-        o = torch.optim.ShardedOptimizer(m.parameters(), lr=0.1)
+        o = ZeROptimizer(m.parameters(), lr=0.1)
 
         y = m(x)
         y.backward(x)
@@ -309,24 +309,24 @@ class TestShardedOptimizer(unittest.TestCase):
     @skip_if_no_cuda
     def test_step_with_closure():
         world_size = min(2, torch.cuda.device_count())
-        mp.spawn(TestShardedOptimizer.run_test_step_with_closure, args=(world_size,), nprocs=world_size, join=True)
+        mp.spawn(TestZeROptimizer.run_test_step_with_closure, args=(world_size,), nprocs=world_size, join=True)
 
     @staticmethod
     def run_test_sharding(rank, world_size):
-        TestShardedOptimizer.dist_init(rank, world_size)
+        TestZeROptimizer.dist_init(rank, world_size)
         params = []
         for size in [5, 4, 2, 6, 4, 3]:
             params.append(torch.rand(size, 1))
-        o = torch.optim.ShardedOptimizer(params, lr=0.1)
+        o = ZeROptimizer(params, lr=0.1)
         assert sum([x.numel() for x in o.optim.param_groups[0]["params"]]) == 8
 
     def test_sharding(self):
         world_size = 3
-        mp.spawn(TestShardedOptimizer.run_test_sharding, args=(world_size,), nprocs=world_size, join=True)
+        mp.spawn(TestZeROptimizer.run_test_sharding, args=(world_size,), nprocs=world_size, join=True)
 
     @staticmethod
     def run_test_collect_shards(rank, world_size, reference_rank):
-        TestShardedOptimizer.dist_init(rank, world_size)
+        TestZeROptimizer.dist_init(rank, world_size)
         device = torch.device(rank) if torch.cuda.device_count() > 1 else torch.device(DEVICE)
 
         # Run a dummy step so that the optimizer state dict exists
@@ -341,7 +341,7 @@ class TestShardedOptimizer(unittest.TestCase):
         loss_fn.to(device)
 
         # With SGD, Momentum is required to get a state to shard
-        optimizer = torch.optim.ShardedOptimizer(model.parameters(), lr=0.1, momentum=0.99)
+        optimizer = ZeROptimizer(model.parameters(), lr=0.1, momentum=0.99)
 
         def closure():
             optimizer.zero_grad()
@@ -378,7 +378,7 @@ class TestShardedOptimizer(unittest.TestCase):
         reference_rank = 0
 
         mp.spawn(
-            TestShardedOptimizer.run_test_collect_shards,
+            TestZeROptimizer.run_test_collect_shards,
             args=(world_size, reference_rank),
             nprocs=world_size,
             join=True,
@@ -437,7 +437,7 @@ class TestShardedOptimizer(unittest.TestCase):
             )
 
             # With SGD, Momentum is required to get a state to shard
-            optimizer = torch.optim.ShardedOptimizer(
+            optimizer = ZeROptimizer(
                 model.parameters(), lr=0.1, momentum=0.99, group=process_group, broadcast_buffer_size=2 ** 20
             )
             check(optimizer)
@@ -448,7 +448,7 @@ class TestShardedOptimizer(unittest.TestCase):
             )
 
             # With SGD, Momentum is required to get a state to shard
-            optimizer = torch.optim.ShardedOptimizer(
+            optimizer = ZeROptimizer(
                 model.parameters(), lr=0.1, momentum=0.99, group=process_group, broadcast_buffer_size=0
             )
             check(optimizer)
@@ -458,7 +458,7 @@ def test_multiple_groups(self):
     world_size = 6
 
     mp.spawn(
-        TestShardedOptimizer.run_test_multiple_groups,
+        TestZeROptimizer.run_test_multiple_groups,
         args=(world_size,),
         nprocs=world_size,
         join=True,
