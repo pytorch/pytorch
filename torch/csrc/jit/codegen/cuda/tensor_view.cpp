@@ -512,7 +512,7 @@ TensorView* TensorView::cache_after() {
     auto this_ca_pos = getThisComputeAtAxis();
     auto this_ca_view = getComputeAtView();
 
-    computeAt(consumer, this_ca_pos);
+    setComputeAt(consumer, this_ca_pos);
     consumer->setComputeAt(this_ca_view, rel_ca_pos);
   } else {
     // Check users of this TV for computeAt for cache_after on inputs
