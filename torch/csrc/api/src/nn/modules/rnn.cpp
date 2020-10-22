@@ -488,7 +488,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
   std::tuple<Tensor, Tensor, Tensor> result;
   if (!batch_sizes.defined()) {
     result = torch::lstm(input, {std::get<0>(hx), std::get<1>(hx)}, flat_weights_, options.bias(), options.num_layers(),
-                     options.dropout(), this->is_training(), options.bidirectional(), options.batch_first(), 0);
+                     options.dropout(), this->is_training(), options.bidirectional(), options.batch_first());
   } else {
     result = torch::lstm(input, batch_sizes, {std::get<0>(hx), std::get<1>(hx)}, flat_weights_, options.bias(),
                      options.num_layers(), options.dropout(), this->is_training(), options.bidirectional());

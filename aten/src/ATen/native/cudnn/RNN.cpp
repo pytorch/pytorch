@@ -554,7 +554,6 @@ namespace {
 
   // This is a lightweight version of the method above used to quickly get the expected
   // parameter offsets.
-  // TODOMODIFYIGOR ??
   std::vector<void*> get_expected_data_ptrs(
         const Tensor& weight_buf, cudnnHandle_t handle, const RNNDescriptorParams& rnn,
         const RNNDescriptor& rnn_desc, const TensorDescriptor& x_desc, cudnnDataType_t datatype) {
@@ -588,6 +587,24 @@ namespace {
                 ));
           data_ptrs.push_back(matrix_pointer);
         }
+      }
+      if (rnn.proj_size != 0 && rnn.proj_size != rnn.hidden_size) {
+        // assuming it's LSTM which has 8 layers
+        int64_t linear_id = 8;
+        FilterDescriptor lin_layer_mat_desc;
+        void* matrix_pointer;
+        AT_CUDNN_CHECK(cudnnGetRNNLinLayerMatrixParams(
+              handle,
+              rnn_desc.desc(),
+              layer,
+              x_desc.desc(),
+              w_desc.desc(),
+              weight_buf.data_ptr(),
+              linear_id,
+              lin_layer_mat_desc.mut_desc(),
+              &matrix_pointer
+              ));
+        data_ptrs.push_back(matrix_pointer);
       }
     }
     return data_ptrs;
@@ -650,6 +667,7 @@ namespace {
     }
   }
 
+  // TODOMODIFYIGOR
   cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors, const Tensor input){
       cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
       const int64_t bsize = tensors.mini_batch;
@@ -1429,7 +1447,7 @@ void lstm_cudnn(Tensor& output, Tensor& hy, Tensor& cy,
       const Tensor& input, TensorList hx,
       TensorList params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, 
-      bool bidirectional, bool batch_first, int64_t proj_size) {
+      bool bidirectional, bool batch_first) {
   auto result = _cudnn_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
       CUDNN_LSTM, num_layers, dropout_p, train, bidirectional, batch_first);
   output = result.first;
