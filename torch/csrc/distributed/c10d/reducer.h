@@ -255,7 +255,7 @@ class Reducer {
   void check_grad_layout(const at::Tensor& grad, const at::Tensor& bucket_view);
   // If gradient_as_bucket_view_ is false, before allreduce buckets,
   // copy grads to buckets.
-  void copy_grad_to_bucket(at::Tensor& grad, at::Tensor& bucket_view);
+  void copy_grad_to_bucket(const at::Tensor& grad, at::Tensor& bucket_view);
 
   // A bucket holds N bucket replicas (1 per model replica).
   //

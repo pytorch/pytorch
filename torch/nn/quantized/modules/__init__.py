@@ -11,7 +11,7 @@ from .conv import ConvTranspose1d, ConvTranspose2d
 from .linear import Linear
 from .embedding_ops import Embedding, EmbeddingBag
 
-from .functional_modules import FloatFunctional, QFunctional
+from .functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
 
 
 class Quantize(torch.nn.Module):
@@ -110,5 +110,6 @@ __all__ = [
     'Sigmoid',
     # Wrapper modules
     'FloatFunctional',
+    'FXFloatFunctional',
     'QFunctional',
 ]
