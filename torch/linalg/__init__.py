@@ -146,20 +146,20 @@ linalg.tensorinv(input, ind=2, *, out=None) -> Tensor
 
 Computes a tensor ``input_inv`` such that ``tensordot(input_inv, input, ind) == I_n``,
 where ``I_n`` is the n-dimensional identity tensor and ``n`` is equal to ``input.ndim``.
-The resulting tensor ``input_inv`` has the shape equal to ``input.shape[ind:] + input.shape[:ind]``.
+The resulting tensor ``input_inv`` has shape equal to ``input.shape[ind:] + input.shape[:ind]``.
 
-Supports real and, only on the CPU, complex inputs.
+Supports real-valued and, only on the CPU, complex-valued inputs.
 
-.. note:: If :attr:`input` is not a 'square' tensor, meaning it does not satisfy the requirement
-          ``prod(input.shape[ind:]) == prod(input.shape[:ind])`` or if :attr:`input` is not invertible,
+.. note:: If :attr:`input` is not invertible or does not satisfy the requirement
+          ``prod(input.shape[ind:]) == prod(input.shape[:ind])``,
           then a RuntimeError will be thrown.
 
-.. note:: If :attr:`input` is a 2-dimensional tensor and ``ind=1``, then this function computes matrix inverse.
+.. note:: When :attr:`input` is a 2-dimensional tensor and ``ind=1``, this function computes the
+          (multiplicative) inverse of :attr:`input`, equivalent to calling :func:`torch.inverse`.
 
 Args:
-    input (Tensor): The tensor to invert. Its shape must satisfy ``prod(input.shape[:ind]) == prod(input.shape[ind:])``.
-    ind (int): The positive integer representing how many first indices are involved in the inverse contraction.
-               This number affects the result's shape and the 'squareness' requirement. Default: 2.
+    input (Tensor): A tensor to invert. Its shape must satisfy ``prod(input.shape[:ind]) == prod(input.shape[ind:])``.
+    ind (int): A positive integer that affects the result's shape. Default: 2.
 
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
