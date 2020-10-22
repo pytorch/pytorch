@@ -3565,16 +3565,24 @@ add_docstr(torch.kron,
            r"""
 kron(input, other, *, out=None) -> Tensor
 
-Computes the Kronecker product of :attr:`input` and :attr:`other`.
+Computes the Kronecker product, denoted by :math:`\otimes`, of :attr:`input` and :attr:`other`.
 
-If :attr:`input` is a :math:`(n \times m)` tensor, :attr:`other` is a
-:math:`(k \times l)` tensor, the result will be a :math:`(n*k \times m*l)` tensor.
+If :attr:`input` is a :math:`(m \times n)` tensor and :attr:`other` is a
+:math:`(p \times q)` tensor, the result will be a :math:`(p*m \times q*n)` block tensor:
+.. math::
+    \mathbf{A} \otimes \mathbf{B}=\left[\begin{array}{ccc}
+    a_{11} \mathbf{B} & \cdots & a_{1 n} \mathbf{B} \\
+    \vdots & \ddots & \vdots \\
+    a_{m 1} \mathbf{B} & \cdots & a_{m n} \mathbf{B}
+    \end{array}\right],
 
-Supports real and complex inputs.
+where :attr:`input` is :math:`\mathbf{A}` and :attr:`other` is :math:`\mathbf{B}`.
+
+Supports real-valued and complex-valued inputs.
 
 Arguments:
-    input (Tensor): the first tensor to be multiplied
-    other (Tensor): the second tensor to be multiplied
+    input (Tensor)
+    other (Tensor)
 
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
@@ -3582,7 +3590,7 @@ Keyword args:
 Returns:
     Tensor: A tensor made of blocks of the second tensor scaled by the first.
 
-Example::
+Examples::
 
     >>> mat1 = torch.eye(2)
     >>> mat2 = torch.ones(2, 2)
@@ -3591,6 +3599,14 @@ Example::
             [1., 1., 0., 0.],
             [0., 0., 1., 1.],
             [0., 0., 1., 1.]])
+
+    >>> mat1 = torch.eye(2)
+    >>> mat2 = torch.arange(1, 5).reshape(2, 2)
+    >>> torch.kron(mat1, mat2)
+    tensor([[1., 2., 0., 0.],
+            [3., 4., 0., 0.],
+            [0., 0., 1., 2.],
+            [0., 0., 3., 4.]])
 """)
 
 add_docstr(torch.kthvalue,
