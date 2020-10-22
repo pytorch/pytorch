@@ -353,7 +353,9 @@ void Reducer::check_grad_layout(
   }
 }
 
-void Reducer::copy_grad_to_bucket(at::Tensor& grad, at::Tensor& bucket_view) {
+void Reducer::copy_grad_to_bucket(
+    const at::Tensor& grad,
+    at::Tensor& bucket_view) {
   // See Note [DDP Communication Hook]
   if (comm_hook_ == nullptr) {
     // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
@@ -853,8 +855,8 @@ void Reducer::initialize_buckets(
       TORCH_CHECK(
           variable_index < variable_locators_.size(),
           "Out of range variable index specified.");
-      variable_locators_[variable_index] = VariableLocator(
-        bucket_index, intra_bucket_index++);
+      variable_locators_[variable_index] =
+          VariableLocator(bucket_index, intra_bucket_index++);
     }
     bucket.variable_indices = std::move(bucket_indices[bucket_index]);
 
@@ -1389,7 +1391,6 @@ void Reducer::ensure_prior_reduction_finished() {
         "value of `forward` of your module when reporting this issue (e.g. ",
         "list, dict, iterable).");
   }
-
 }
 
 namespace {
