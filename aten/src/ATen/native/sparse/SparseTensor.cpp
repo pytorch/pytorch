@@ -317,8 +317,8 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
   } else {
     Tensor i = nz.narrow(0, 0, sparse_dim);
     std::tie(indices, std::ignore, std::ignore) = unique_dim(i, 1);
-    indices = indices.contiguous();  // many sparse CUDA kernels require contiguity, see issue #12633
   }
+  indices = indices.contiguous();  // many sparse CUDA kernels require contiguity, see issue #12633
 
   Tensor values;
   if (self.dim() > 0) {
