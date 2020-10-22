@@ -19,6 +19,7 @@ from torch.quantization import (
     prepare,
     prepare_qat,
     convert,
+    FixedQParamsFakeQuantize,
 )
 
 # test utils
@@ -1406,7 +1407,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         """
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.avg_pool1d = torch.nn.AvgPool1d(3)
                 self.avg_pool2d = torch.nn.AvgPool2d(3)
@@ -1414,9 +1415,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
-                self.hardsigmoid = torch.nn.Hardsigmoid()
-                self.sigmoid = torch.nn.Sigmoid()
-                self.tanh = torch.nn.Tanh()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1438,21 +1436,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = x.mean([2, 3], True)
                 x = F.interpolate(x, 4, mode='nearest')
                 x = F.interpolate(x, 4, mode='linear')
-                x = self.hardsigmoid(x)
-                x = F.hardsigmoid(x)
-                x = F.hardsigmoid(x, inplace=True)
-                x = x.hardsigmoid()
-                x.hardsigmoid_()
-                x = self.sigmoid(x)
-                x = torch.sigmoid(x)
-                # F.sigmoid is deprecated
-                x = x.sigmoid()
-                x.sigmoid_()
-                x = self.tanh(x)
-                # F.tanh is deprecated
-                x = torch.tanh(x)
-                x = x.tanh()
-                x.tanh_()
                 x = self.conv(x)
                 return x
 
@@ -1476,6 +1459,72 @@ class TestQuantizeFxOps(QuantizationTestCase):
         order_check = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Conv2d),
+            ns.call_module(nnq.Conv2d),
+            ns.call_method('dequantize'),
+        ]
+        self.checkGraphModuleNodes(
+            quantized,
+            expected_node_occurrence=count_check,
+            expected_node_list=order_check)
+
+    @skipIfNoFBGEMM
+    def test_fixed_qparams_ops(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.sigmoid = torch.nn.Sigmoid()
+                self.hardsigmoid = torch.nn.Hardsigmoid()
+                self.tanh = torch.nn.Tanh()
+
+            def forward(self, x):
+                x = self.conv(x)
+                # F.sigmoid is deprecated
+                x = self.sigmoid(x)
+                x = torch.sigmoid(x)
+                x = x.sigmoid()
+                x.sigmoid_()
+                x = self.hardsigmoid(x)
+                x = F.hardsigmoid(x)
+                x = F.hardsigmoid(x, inplace=True)
+                x = x.hardsigmoid()
+                x.hardsigmoid_()
+                x = self.tanh(x)
+                # F.tanh is deprecated
+                x = torch.tanh(x)
+                x = x.tanh()
+                x.tanh_()
+                x = self.conv(x)
+                return x
+
+        # This model is not executable since we just put all ops
+        # in the same forward
+        m = M().train()
+        # nothing to fuse so skipping the fuse step
+        qconfig_dict = {'': default_qat_qconfig}
+        prepared = prepare_qat_fx(m, qconfig_dict)
+        # check the correct number of activation_post_process is inserted
+        count_check = {
+            ns.call_module(FixedQParamsFakeQuantize) : 13,
+        }
+        self.checkGraphModuleNodes(
+            prepared,
+            expected_node_occurrence=count_check)
+        # not runnable
+        quantized = convert_fx(prepared)
+
+        # This checks that the dequantize from the output of first conv
+        # is being propagated to the end, so that we don't insert extra
+        # observers
+        # check exact counts of quantize and dequantize
+        count_check = {
+            ns.call_function(torch.quantize_per_tensor) : 1,
+            ns.call_method('dequantize') : 1
+        }
+        order_check = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Conv2d),
+            ns.call_module(nn.Sigmoid),
             ns.call_module(nnq.Conv2d),
             ns.call_method('dequantize'),
         ]
