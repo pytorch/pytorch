@@ -393,6 +393,7 @@ class TestForeach(TestCase):
                 else:
                     self.assertEqual(tensors, expected)
 
+    @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
     def test_float_scalarlist(self, device, dtype):
         for N in N_values:
