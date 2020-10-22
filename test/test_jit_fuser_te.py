@@ -74,6 +74,58 @@ class TestTEFuser(JitTestCase):
 
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
 
+
+    def test_doc(self):
+
+
+        def cell(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
+            gates = x.mm(w_ih.t()) + hx.mm(w_hh.t()) + b_ih + b_hh
+            ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+            ingate = torch.sigmoid(ingate)
+            forgetgate = torch.sigmoid(forgetgate)
+            cellgate = torch.tanh(cellgate)
+            outgate = torch.sigmoid(outgate)
+            cy = (forgetgate * cx) + (ingate * cellgate)
+            hy = outgate * torch.tanh(cy)
+            return hy, cy
+
+
+        model = torch.jit.script(cell)
+
+        miniBatch = 64
+        inputSize = 512
+        hiddenSize = 512
+        seqLength = 100
+        numLayers = 2
+
+        x = torch.randn(seqLength, miniBatch, inputSize, device='cuda')
+        hx = torch.randn(numLayers, miniBatch, hiddenSize, device='cuda', requires_grad = True)
+        cx = torch.randn(numLayers, miniBatch, hiddenSize, device='cuda', requires_grad = True)
+
+        wih = torch.randn(numLayers, 4*hiddenSize, inputSize, device='cuda', requires_grad = True)
+        whh = torch.randn(numLayers, 4*hiddenSize, hiddenSize, device='cuda', requires_grad = True)
+        bih = torch.randn(numLayers, 4*hiddenSize, device='cuda', requires_grad = True)
+        bhh = torch.randn(numLayers, 4*hiddenSize, device='cuda', requires_grad = True)
+
+        layer = 0
+        seqIdx = 0
+        
+        model(x[seqIdx], hx[layer], cx[layer], wih[layer], whh[layer], bih[layer], bhh[layer])
+        model(x[seqIdx], hx[layer], cx[layer], wih[layer], whh[layer], bih[layer], bhh[layer])
+
+        # for seq_idx in range(len(inputs)):
+        #     hy, cy = cell(inputs[seq_idx], (hy, cy), wih, whh, bih, bhh)
+        #     outputs += [hy]
+        # return torch.stack(outputs), (hy.unsqueeze(0), cy.unsqueeze(0))
+
+
+        # input: lstm.all_weights format (wih, whh, bih, bhh = lstm.all_weights[layer])
+        # output: packed_weights with format
+        # packed_weights[0] is wih with size (layer, 4*hiddenSize, inputSize)
+        # packed_weights[1] is whh with size (layer, 4*hiddenSize, hiddenSize)
+        # packed_weights[2] is bih with size (layer, 4*hiddenSize)
+        # packed_weights[3] is bhh with size (layer, 4*hiddenSize)
+
     def assertAllFused(self, graph, except_for=()):
 
         # note this helper collects nodes on 'fast path' only

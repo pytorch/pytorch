@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/registerizer.h>
+#include <thread>
 
 namespace torch {
 namespace jit {
@@ -908,9 +909,15 @@ void CudaCodeGen::Initialize() {
   std::string func_name = GetUniqueFuncName("func");
   os() << "extern \"C\" __global__" << std::endl << "void " << func_name << "(";
   const std::vector<BufferArg> buffer_args = this->buffer_args();
+
+
+  std::stringstream fstr;
+  std::stringstream fargs;
+
   for (size_t i = 0; i < buffer_args.size(); i++) {
     if (i > 0) {
       os() << ", ";
+      fstr << ", ";
     }
     const BufferArg& buffer_arg = buffer_args[i];
     const Var* var = buffer_arg.var();
@@ -918,6 +925,9 @@ void CudaCodeGen::Initialize() {
 
     os() << cudaDtypeCppString(dtype) << (buffer_arg.isVar() ? " " : "* ")
          << name_manager()->get_unique_name(var);
+
+    fstr << name_manager()->get_unique_name(var) << " = %x";
+    fargs << ", " << name_manager()->get_unique_name(var);
   }
   const Var* rand_seed;
   const Var* rand_offset;
@@ -931,6 +941,7 @@ void CudaCodeGen::Initialize() {
   }
   os() << ") {";
   os() << std::endl;
+  //os() << "printf(\""<< fstr.str() << "\\n\"" << fargs.str() << ");\n";
 
   if (has_random_) {
     const Var* idx = new Var("idx", kInt);
@@ -1081,6 +1092,17 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   if (prior_device != this->device().index()) {
     at::cuda::set_device(this->device().index());
   }
+
+  CUcontext pctx = 0;
+  auto status = nvrtc().cuCtxGetCurrent(&pctx);
+  std::cerr << "thread id in cuda_codegen.cpp: " << std::this_thread::get_id() << " status = " << status << std::endl;
+  std::cerr << "device = " << this->device() << " index = " << this->device().index() << std::endl;
+  if (!status) {
+    std::unique_lock<std::mutex> cudaFreeMutexLock(
+        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
+    cudaFree(nullptr);
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  }
   // Launch the kernels
   auto stream = at::cuda::getCurrentCUDAStream();
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
@@ -1097,6 +1119,8 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
       nullptr));
   USE_TRIGGER(cuda_codegen_executed);
 
+  std::cout << "kernel triggered!\n";
+
   if (prior_device != this->device().index()) {
     at::cuda::set_device(prior_device);
   }
@@ -1110,6 +1134,7 @@ void CudaCodeGen::CompileToNVRTC(
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
   // properly in some scenarios
   const auto prior_device = at::cuda::current_device();
+  std::cerr << "device = " << this->device() << " index = " << this->device().index() << std::endl;
   if (prior_device != this->device().index()) {
     at::cuda::set_device(this->device().index());
   }
@@ -1121,16 +1146,30 @@ void CudaCodeGen::CompileToNVRTC(
     cudaFree(nullptr);
     AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   }
+  
+  if (!pctx) {
+    std::cerr << "still no context\n";
+  }
+  std::cerr << "getCurrentDeviceProperties\n";
   // Acquires device and NVRTC properties (for compile arch and occupancy
   // calculations)
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int major, minor;
   getMajorMinor(prop, major, minor);
 
+  if (!pctx) {
+    std::cerr << "still no context2\n";
+  }
+
   // Creates the NVRTC program
+  std::cout << "program = " << code.c_str() << std::endl;
   nvrtcProgram program;
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+
+  if (!pctx) {
+    std::cerr << "still no context3\n";
+  }
 
 #ifdef __HIP_PLATFORM_HCC__
   std::vector<const char*> args = {};
@@ -1143,6 +1182,10 @@ void CudaCodeGen::CompileToNVRTC(
 
   const auto result =
       nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
+
+  if (!pctx) {
+    std::cerr << "still no context4\n";
+  }
   if (result != NVRTC_SUCCESS) {
     size_t logsize;
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));
@@ -1154,6 +1197,9 @@ void CudaCodeGen::CompileToNVRTC(
     cu << code << std::endl;
     throw std::runtime_error(cu.str());
   }
+  if (!pctx) {
+    std::cerr << "still no context5\n";
+  }
   ResourceGuard holdProgram(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
   AT_CUDA_NVRTC_CHECK(result);
@@ -1162,7 +1208,15 @@ void CudaCodeGen::CompileToNVRTC(
   std::vector<char> ptx;
   ptx.resize(ptx_size);
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTX(program, ptx.data()));
-
+  if (!pctx) {
+    std::cerr << "still no context6\n";
+  }
+  {
+    std::unique_lock<std::mutex> cudaFreeMutexLock(
+        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
+    cudaFree(nullptr);
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  }
   CUmodule module;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&module, ptx.data()));
   AT_CUDA_DRIVER_CHECK(

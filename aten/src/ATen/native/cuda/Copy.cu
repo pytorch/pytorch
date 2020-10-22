@@ -197,6 +197,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
 #if HIP_VERSION >= 301
     AT_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
 #else
+    std::cout << "dst = " << dst << " , src = " << src << " , kind = " << static_cast<int>(kind) << std::endl;
     AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
     AT_CUDA_CHECK(cudaStreamSynchronize(stream));
 #endif
