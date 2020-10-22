@@ -13,11 +13,6 @@ namespace tensorexpr {
 
 using json = nlohmann::json;
 
-#define JSON_CACHE_GUARD() \
-  if (cachedJSON(v)) {     \
-    return;                \
-  }
-
 class TORCH_API IRSerializer : public IRVisitor {
  public:
   bool cachedJSON(const KernelScopedObject* e) {

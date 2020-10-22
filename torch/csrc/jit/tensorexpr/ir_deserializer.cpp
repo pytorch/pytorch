@@ -247,8 +247,7 @@ std::vector<Stmt*> IRDeserializer::dsVecStmt(const json& v) {
   return vec;
 }
 
-Stmt* IRDeserializer::dsStmt(const json& v) {
-  // caching not needed for statements
+Stmt* IRDeserializer::dsStmtImpl(const json& v) {
   std::string stmt_type = v["stmt_type"];
 
 #define CHECK_STMT_TYPE(stmt_name)    \
@@ -267,6 +266,15 @@ Stmt* IRDeserializer::dsStmt(const json& v) {
   CHECK_STMT_TYPE(Allocate)
 
   assert(false);
+}
+
+Stmt* IRDeserializer::dsStmt(const json& v) {
+  if (cachedKernelObj(v)) {
+    return getCachedStmt(v);
+  }
+  Stmt* stmt = dsStmtImpl(v);
+  putObj(v, stmt);
+  return stmt;
 }
 
 const Expr* deserializeExpr(const json& v) {

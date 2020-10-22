@@ -6,6 +6,11 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+#define JSON_CACHE_GUARD() \
+  if (cachedJSON(v)) {     \
+    return;                \
+  }
+
 json IRSerializer::serialize(ExprHandle expr) {
   expr.node()->accept(this);
   return JSONOf(expr.node());
@@ -465,6 +470,7 @@ void IRSerializer::visit(const FunctionCall* v) {
 }
 
 void IRSerializer::visit(const RoundOff* v) {
+  JSON_CACHE_GUARD();
   visitBinaryOp(v, "RoundOff", this);
 };
 
@@ -475,6 +481,7 @@ void IRSerializer::visit(const ReduceOp* v) {
 };
 
 void IRSerializer::visit(const AtomicAdd* v) {
+  JSON_CACHE_GUARD();
   putJSON(
       v,
       {
@@ -485,6 +492,7 @@ void IRSerializer::visit(const AtomicAdd* v) {
       });
 }
 void IRSerializer::visit(const SyncThreads* v) {
+  JSON_CACHE_GUARD();
   putJSON(v, {{"stmt_type", "SyncThreads"}});
 }
 void IRSerializer::visit(const Let* v) {
@@ -497,6 +505,8 @@ void IRSerializer::visit(const Let* v) {
           {"val", visitAndSerialize(v->value())},
       });
 }
+
+#undef JSON_CACHE_GUARD
 
 json serialize(const Expr* expr) {
   assert(expr);

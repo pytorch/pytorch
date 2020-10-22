@@ -41,9 +41,6 @@
 
 #endif // defined(USE_GTEST)
 
-#include <torch/csrc/jit/tensorexpr/ir_deserializer.h>
-#include <torch/csrc/jit/tensorexpr/ir_serializer.h>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {

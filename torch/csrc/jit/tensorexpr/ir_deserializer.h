@@ -13,24 +13,28 @@ namespace tensorexpr {
 
 using json = nlohmann::json;
 
-#define JSON_CACHE_GUARD()  \
-  if (cachedKernelObj(v)) { \
-    return;                 \
-  }
-
-/* Expression hasher providing comparable values representing sub-exprs.
- * Uses memoization to avoid excessive recursion. */
+// Generates Tensor IR from a serialized json form Uses memoization to correctly
+// resolve repeated references to same expr
 class TORCH_API IRDeserializer : public IRVisitor {
  public:
   bool cachedKernelObj(const json& v) {
     size_t id = v["json_id"];
-    return JSONToObj_.count(id) != 0;
+    return JSONToExpr_.count(id) != 0 && JSONToStmt_.count(id) != 0;
   }
 
   const Expr* getCachedExpr(const json& v) {
-    auto it = JSONToObj_.find(v["json_id"]);
-    if (it != JSONToObj_.end()) {
-      return it->second;
+    auto it = JSONToExpr_.find(v["json_id"]);
+    if (it != JSONToExpr_.end()) {
+      return dynamic_cast<const Expr*>(it->second);
+    }
+    assert(false);
+  }
+
+  Stmt* getCachedStmt(const json& v) {
+    auto it = JSONToStmt_.find(v["json_id"]);
+    if (it != JSONToStmt_.end()) {
+      const Stmt* stmt = dynamic_cast<const Stmt*>(it->second);
+      return const_cast<Stmt*>(stmt);
     }
     assert(false);
   }
@@ -61,6 +65,7 @@ class TORCH_API IRDeserializer : public IRVisitor {
   Free* deserializeFree(const json& v);
   Cond* deserializeCond(const json& v);
 
+  Stmt* dsStmtImpl(const json& v);
   Stmt* dsStmt(const json& v);
   std::vector<Stmt*> dsVecStmt(const json& v);
 
@@ -78,7 +83,15 @@ class TORCH_API IRDeserializer : public IRVisitor {
 
   void putObj(json h, const Expr* e) {
     size_t id = h["json_id"];
-    auto res = JSONToObj_.emplace(id, e);
+    auto res = JSONToExpr_.emplace(id, e);
+    if (res.second == false) {
+      // This is always a logic bug since we should check the cache first.
+      throw std::runtime_error("hash collision");
+    }
+  }
+  void putObj(json h, Stmt* e) {
+    size_t id = h["json_id"];
+    auto res = JSONToStmt_.emplace(id, e);
     if (res.second == false) {
       // This is always a logic bug since we should check the cache first.
       throw std::runtime_error("hash collision");
@@ -86,7 +99,8 @@ class TORCH_API IRDeserializer : public IRVisitor {
   }
 
  private:
-  std::unordered_map<size_t, const Expr*> JSONToObj_;
+  std::unordered_map<size_t, const Expr*> JSONToExpr_;
+  std::unordered_map<size_t, Stmt*> JSONToStmt_;
 };
 
 TORCH_API const Stmt* deserializeStmt(const json& v);
