@@ -23,7 +23,7 @@ def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tens
 
 class RNNBase(Module):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
-                     'batch_first', 'dropout', 'bidirectional']
+                     'batch_first', 'dropout', 'bidirectional', 'proj_size']
 
     mode: str
     input_size: int
@@ -33,10 +33,11 @@ class RNNBase(Module):
     batch_first: bool
     dropout: float
     bidirectional: bool
+    proj_size: bool
 
     def __init__(self, mode: str, input_size: int, hidden_size: int,
                  num_layers: int = 1, bias: bool = True, batch_first: bool = False,
-                 dropout: float = 0., bidirectional: bool = False) -> None:
+                 dropout: float = 0., bidirectional: bool = False, proj_size: int = 0) -> None:
         super(RNNBase, self).__init__()
         self.mode = mode
         self.input_size = input_size
@@ -46,6 +47,7 @@ class RNNBase(Module):
         self.batch_first = batch_first
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
+        self.proj_size = proj_size
         num_directions = 2 if bidirectional else 1
 
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
@@ -58,6 +60,10 @@ class RNNBase(Module):
                           "recurrent layer, so non-zero dropout expects "
                           "num_layers greater than 1, but got dropout={} and "
                           "num_layers={}".format(dropout, num_layers))
+        if proj_size < 0:
+            raise ValueError("proj_size should be a positive integer or zero to disable projections")
+        if proj_size > hidden_size:
+            raise ValueError("proj_size cannot be bigger that hidden_size")
 
         if mode == 'LSTM':
             gate_size = 4 * hidden_size
@@ -82,10 +88,16 @@ class RNNBase(Module):
                 # Second bias vector included for CuDNN compatibility. Only one
                 # bias vector is needed in standard definition.
                 b_hh = Parameter(torch.Tensor(gate_size))
-                layer_params = (w_ih, w_hh, b_ih, b_hh)
+                if self.proj_size == 0:
+                    layer_params = (w_ih, w_hh, b_ih, b_hh)
+                else:
+                    w_hr = Parameter(torch.Tensor(proj_size, hidden_size))
+                    layer_params = (w_ih, w_hh, w_hr, b_ih, b_hh)
 
                 suffix = '_reverse' if direction == 1 else ''
                 param_names = ['weight_ih_l{}{}', 'weight_hh_l{}{}']
+                if self.proj_size > 0:
+                    param_names += ['weight_hr_l{}{}']
                 if bias:
                     param_names += ['bias_ih_l{}{}', 'bias_hh_l{}{}']
                 param_names = [x.format(layer, suffix) for x in param_names]
