@@ -1789,13 +1789,13 @@ add_docstr(torch.column_stack,
            r"""
 column_stack(tensors, *, out=None) -> Tensor
 
-Creates a new 2-dimensional tensor by horizontally stacking the tensors in :attr:`tensors`.
+Creates a new tensor by horizontally stacking the tensors in :attr:`tensors`.
 
-:attr:`tensors` must be composed entirely of 1-dimensional and 2-dimensional tensors whose first dimension is the same size.
-The 1-dimensional tensors in :attr:`tensors` are reshaped into (*, 1) columns before being stacked horizontally.
+Equivalent to ``torch.hstack(tensors)``, except each zero or one dimensional tensor ``t``
+in :attr:`tensors` is first reshaped into a ``(t.numel(), 1)`` column before being stacked horizontally.
 
 Args:
-    tensors (sequence of Tensors)
+    tensors (sequence of Tensors): sequence of tensors to concatenate
 
 Keyword args:
     {out}

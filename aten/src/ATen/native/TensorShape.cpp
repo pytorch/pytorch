@@ -1274,11 +1274,9 @@ Tensor row_stack(TensorList tensors) {
 static std::vector<Tensor> reshape_input_for_column_stack(TensorList tensors) {
   std::vector<Tensor> result(tensors.size());
   auto transform_lambda = [](const Tensor& input) -> Tensor {
-    if (input.dim() == 0) {
-      return input.reshape({1, 1});
-    }
-    if (input.dim() == 1) {
-      return input.reshape({input.size(0), 1});
+    // reshape 0D or 1D tensor t into (t.numel(), 1)
+    if (input.dim() <= 1) {
+      return input.reshape({input.numel(), 1});
     }
     return input;
   };

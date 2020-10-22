@@ -1549,8 +1549,12 @@
 # row_stack is the alias of vstack
 - func: row_stack(Tensor[] tensors) -> Tensor
   use_c10_dispatcher: full
+  dispatch:
+    Math: row_stack
 
 - func: row_stack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: row_stack_out
 
 - func: embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor, Tensor)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
