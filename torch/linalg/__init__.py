@@ -145,24 +145,22 @@ tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
 linalg.tensorsolve(input, other, dims=None, *, out=None) -> Tensor
 
 Computes a tensor ``x`` such that ``tensordot(input, x, dims=x.ndim) = other``.
-The resulting tensor ``x`` has the shape equal to ``Q``, where ``Q`` is the shape
-of the sub-tensor of `:attr:`input` consisting of the appropriate number of
-its rightmost dimensions such that ``input.shape = other.shape + Q``.
-Before computing ``x``, dimensions of `:attr:`input` can be moved to the right
-using :attr:`dims` to match the shape requirements.
+The resulting tensor ``x`` has the shape equal to ``input[other.ndim:]``.
+Before computing ``x``, dimensions of `:attr:`input` can be moved using :attr:`dims` to match the shape requirements.
 
-Supports real and, only on the CPU, complex inputs.
+Supports real-valued and, only on the CPU, complex-valued inputs.
 
-.. note:: If :attr:`input` is not a 'square' tensor, meaning it does not satisfy the requirement
-          ``prod(x.shape) == prod(other.shape)``, then a RuntimeError will be thrown.
+.. note:: If :attr:`input` does not satisfy the requirement
+          ``prod(input.shape[other.ndim:]) == prod(input.shape[:other.ndim])``
+          after (optionally) moving the dimensions using using :attr:`dims`, then a RuntimeError will be thrown.
 
 Args:
-    input (Tensor): left-hand-side tensor of shape ``other.shape + Q``.
-        ``Q`` is the shape of that sub-tensor of `:attr:`input` consisting of the appropriate
-        number of its rightmost dimensions, and must be such that ``prod(Q) == prod(other.shape)``.
-    other (Tensor): right-hand-side tensor of any shape.
-    dims (Tuple[int]): dimensions of `:attr:`input` to be moved to the right, before solve.
-        If None (default), no reordering of dimensions is done.
+    input (Tensor): left-hand-side tensor, it must satisfy the requirement
+                    ``prod(input.shape[other.ndim:]) == prod(input.shape[:other.ndim])``.
+    other (Tensor): right-hand-side tensor of shape ``input.shape[other.ndim]``.
+    dims (Tuple[int]): dimensions of `:attr:`input` to be moved to the end keeping the order,
+                       i.e. ``movedim(input, dims, range(len(dims) - input.ndim, 0)), before solve.
+                       If None (default), no moving of dimensions is done.
 
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
