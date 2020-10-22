@@ -126,19 +126,26 @@ class Tracer(TracerBase):
         return self.create_proxy('call_module', module_qualified_name, args, kwargs)
 
     def create_args_for_root(self, root_fn, is_module):
-        co = root_fn.__code__
+        # In some cases, a function or method has been decorated with a wrapper
+        # defined via `functools.wraps`. In this case, the outer code object
+        # will likely not contain the actual parameters we care about, so unwrap
+        # the function to get to the innermost callable.
+        fn_for_analysis = inspect.unwrap(root_fn)
+        co = fn_for_analysis.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
         names_iter = iter(co.co_varnames)
         args : List[Any] = []
         skip_arg_idx = 0
         if is_module:
+            if total_args == 0:
+                raise RuntimeError('`self` argument cannot be part of *args expansion!')
             skip_arg_idx = 1
             next(names_iter)  # skip self
             args.append(self.root)
 
         def proxy_placeholder(name: str):
             return self.create_proxy('placeholder', name, (), {},
-                                     type_expr=root_fn.__annotations__.get(name, None))
+                                     type_expr=fn_for_analysis.__annotations__.get(name, None))
 
         args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
 
