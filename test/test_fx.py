@@ -5,6 +5,8 @@ import numbers
 import pickle
 import copy
 import sys
+import functools
+import contextlib
 from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.experimental import GraphManipulation
@@ -112,6 +114,16 @@ class TestFX(JitTestCase):
 
         t = T()
         self.checkGraphModule(t, (torch.rand(1), torch.rand(1)), {'foo': torch.rand(1)})
+
+    def test_args_kwargs_no_self(self):
+        class T(torch.nn.Module):
+            def forward(*args, **kwargs):  # noqa: B902
+                self = args[0]
+                return torch.relu(args[1])
+
+        t = T()
+        with self.assertRaisesRegex(RuntimeError, r'cannot be part of \*args expansion'):
+            self.checkGraphModule(t, (torch.rand(1), torch.rand(1)), {'foo': torch.rand(1)})
 
     def test_fx_shifts(self):
         class MyModule(torch.nn.Module):
@@ -784,6 +796,39 @@ class TestFX(JitTestCase):
         fxed = symbolic_trace(Foo())
         fxed_scripted = torch.jit.script(fxed)
         fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
+
+    def test_wrapped_method(self):
+        def wrap_with_relu(fn):
+            @functools.wraps(fn)
+            def wrapper(*args, **kwargs):
+                return torch.relu(fn(*args, **kwargs))
+            return wrapper
+
+        class Foo(torch.nn.Module):
+            @wrap_with_relu
+            def forward(self, x, w):
+                return torch.matmul(x, w)
+
+        f = Foo()
+        traced = symbolic_trace(f)
+        x, w = torch.rand(3, 4), torch.rand(4, 4)
+        self.assertTrue(any(n.target == torch.relu for n in traced.graph.nodes))
+
+    def test_ctx_mgr(self):
+        @contextlib.contextmanager
+        def do_nothing():
+            yield
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @do_nothing()
+            def forward(self, x):
+                return torch.relu(x)
+
+        m = M()
+        self.checkGraphModule(m, (torch.rand(3, 4),))
 
     def test_typename_print(self):
         graph : torch.fx.Graph = torch.fx.Graph()
