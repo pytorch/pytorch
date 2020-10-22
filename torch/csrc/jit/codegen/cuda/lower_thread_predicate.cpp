@@ -16,7 +16,7 @@ namespace {
 
 kir::Val* getPredicatePerParallelType(
     ParallelType pt,
-    const ThreadPredicateMap::SourceMapType& source_map) {
+    const ThreadPredicateMap::SourceMap& source_map) {
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
   if (pt == ParallelType::BIDx || pt == ParallelType::BIDy ||
@@ -35,7 +35,7 @@ kir::Val* getPredicatePerParallelType(
 
 kir::Bool* getPredicate(
     const ir_utils::ParallelTypeBitmap& bits,
-    const ThreadPredicateMap::SourceMapType& source_map) {
+    const ThreadPredicateMap::SourceMap& source_map) {
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
   if (bits.none()) {
@@ -58,8 +58,8 @@ kir::Bool* getPredicate(
 }
 
 void mergeSourceMap(
-    ThreadPredicateMap::SourceMapType& dst,
-    const ThreadPredicateMap::SourceMapType& src) {
+    ThreadPredicateMap::SourceMap& dst,
+    const ThreadPredicateMap::SourceMap& src) {
   for (const auto& kv : src) {
     const auto& src_key = kv.first;
     const auto& src_value = kv.second;
@@ -71,7 +71,7 @@ void mergeSourceMap(
 }
 
 void addToSouceMap(
-    ThreadPredicateMap::SourceMapType& dst,
+    ThreadPredicateMap::SourceMap& dst,
     const TensorView* tv,
     const ir_utils::ParallelTypeBitmap& reducton_pred) {
   for (const auto& kv : reducton_pred.getMap()) {
@@ -83,7 +83,7 @@ void addToSouceMap(
 }
 
 void maskSouceMap(
-    ThreadPredicateMap::SourceMapType& src_map,
+    ThreadPredicateMap::SourceMap& src_map,
     const ir_utils::ParallelTypeBitmap& mask) {
   for (const auto& kv : mask.getMap()) {
     if (!kv.second) {
@@ -125,7 +125,7 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
   // Which dims are bcast in inputs
   ir_utils::ParallelTypeBitmap input_bcasts;
 
-  SourceMapType src_map;
+  SourceMap src_map;
 
   // Run through inputs and update bitsets
   for (const auto* inp : expr->inputs()) {
@@ -138,9 +138,11 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
         "Thread predicate map was not initialized, couldn't find ",
         inp);
 
-    input_preds |= at(tv_inp).first;
+    const auto& pred_and_src = at(tv_inp);
 
-    mergeSourceMap(src_map, at(tv_inp).second);
+    input_preds |= pred_and_src.pred;
+
+    mergeSourceMap(src_map, pred_and_src.source_map);
 
     ir_utils::ParallelTypeBitmap id_reductions;
     ir_utils::ParallelTypeBitmap id_bcasts;
@@ -204,14 +206,13 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
   }
 }
 
-// TODO(kir): revisit this - can we build it from the kernel IR?
-ThreadPredicateMap::ThreadPredicateMap(Fusion* _fusion) : fusion_(_fusion) {
+ThreadPredicateMap::ThreadPredicateMap(Fusion* fusion) : fusion_(fusion) {
   FUSER_PERF_SCOPE("ThreadPredicateMap");
 
   // Initialize mapping for input tensors
   for (auto inp : fusion_->inputs()) {
     if (auto tv = dynamic_cast<const TensorView*>(inp)) {
-      insert(tv, ir_utils::ParallelTypeBitmap(), SourceMapType());
+      insert(tv, ir_utils::ParallelTypeBitmap(), SourceMap());
     }
   }
   for (auto expr : fusion_->exprs(true)) {
@@ -228,12 +229,12 @@ ThreadPredicateMap::const_iterator ThreadPredicateMap::end() const {
   return thread_predicates_.end();
 }
 
-const ThreadPredicateMap::MapType::mapped_type& ThreadPredicateMap::at(
+const ThreadPredicateMap::PredAndSource& ThreadPredicateMap::at(
     const TensorView* tv) const {
   return thread_predicates_.at(tv);
 }
 
-ThreadPredicateMap::MapType::mapped_type& ThreadPredicateMap::at(
+ThreadPredicateMap::PredAndSource& ThreadPredicateMap::at(
     const TensorView* tv) {
   return thread_predicates_.at(tv);
 }
@@ -241,20 +242,44 @@ ThreadPredicateMap::MapType::mapped_type& ThreadPredicateMap::at(
 void ThreadPredicateMap::insert(
     const TensorView* tv,
     const ir_utils::ParallelTypeBitmap& pred,
-    const SourceMapType& src_map) {
-  insert(tv, std::make_pair(pred, src_map));
+    const SourceMap& src_map) {
+  insert(tv, {pred, src_map});
 }
 
 void ThreadPredicateMap::insert(
     const TensorView* tv,
-    const std::pair<ir_utils::ParallelTypeBitmap, SourceMapType>&
-        pred_and_src) {
-  thread_predicates_.insert(std::make_pair(tv, pred_and_src));
+    const PredAndSource& pred_and_src) {
+  thread_predicates_.insert({tv, pred_and_src});
 }
 
 kir::Bool* ThreadPredicateMap::getExpr(const TensorView* out_tv) const {
   TORCH_INTERNAL_ASSERT(find(out_tv) != end(), "Couldn't find ", out_tv);
-  return getPredicate(at(out_tv).first, at(out_tv).second);
+  const auto& pred_and_src = at(out_tv);
+  return getPredicate(pred_and_src.pred, pred_and_src.source_map);
+}
+
+void ThreadPredicateMap::print() const {
+  std::cout << "\nThreadPredicateMap\n";
+  std::cout << "--------------------------------\n";
+  for (const auto& kv : thread_predicates_) {
+    std::cout << "T" << kv.first->name() << " {";
+    // ir_utils::ParallelTypeBitmap
+    for (auto ptkv : kv.second.pred.getMap()) {
+      if (ptkv.second) {
+        std::cout << " " << ptkv.first;
+      }
+    }
+    std::cout << " }\n";
+    // SourceMap
+    for (const auto& pkv : kv.second.source_map) {
+      std::cout << "  " << pkv.first << " : [";
+      for (auto tv : pkv.second) {
+        std::cout << " T" << tv->name();
+      }
+      std::cout << " ]\n";
+    }
+  }
+  std::cout << "--------------------------------\n\n";
 }
 
 } // namespace cuda

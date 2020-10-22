@@ -243,8 +243,6 @@ ParallelTypeBitmap getParallelBroadcastDomains(
     return ParallelTypeBitmap();
   }
 
-  const ParallelTypeBitmap& out_pred = preds.at(tv).first;
-
   ParallelTypeBitmap parallel_broadcast;
 
   const auto& iter_domains = tv->domain()->domain();
@@ -264,7 +262,7 @@ ParallelTypeBitmap getParallelBroadcastDomains(
     }
   }
 
-  return parallel_broadcast & out_pred;
+  return parallel_broadcast & preds.at(tv).pred;
 }
 
 } // namespace ir_utils
