@@ -159,7 +159,8 @@ class RNNBase(Module):
                 if torch._use_cudnn_rnn_flatten_weight():
                     torch._cudnn_rnn_flatten_weight(
                         self._flat_weights, (4 if self.bias else 2),
-                        self.input_size, rnn.get_cudnn_mode(self.mode), self.hidden_size, self.num_layers,
+                        self.input_size, rnn.get_cudnn_mode(self.mode), 
+                        self.hidden_size, self.proj_size, self.num_layers,
                         self.batch_first, bool(self.bidirectional))
 
     def _apply(self, fn):

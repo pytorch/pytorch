@@ -186,6 +186,8 @@ void RNNImplBase<Derived>::flatten_parameters() {
               options_base.input_size(),
               static_cast<int64_t>(get_cudnn_mode_for_rnn(options_base.mode())),
               options_base.hidden_size(),
+              // TODO (igor): probably not need to support projections here?
+              0,
               options_base.num_layers(),
               options_base.batch_first(),
               options_base.bidirectional());

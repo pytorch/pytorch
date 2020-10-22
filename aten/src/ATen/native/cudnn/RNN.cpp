@@ -19,7 +19,7 @@ namespace at { namespace native {
 Tensor _cudnn_rnn_flatten_weight(
     TensorList weight_arr, int64_t weight_stride0,
     int64_t input_size,
-    int64_t fn_mode, int64_t fn_hidden_size,
+    int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_proj_size,
     int64_t fn_num_layers, bool batch_first,
     bool fn_bidirectional
     ) {
@@ -621,7 +621,6 @@ namespace {
 // Utilities exposed in RNNUtils.h
 namespace cudnn_rnn {
 
-  // TODOMODIFYIGOR
   TORCH_CUDA_API std::tuple<Tensor, std::vector<Tensor>> copy_weights_to_flat_buf_views(
       TensorList weight_arr,
       int64_t weight_stride0,
@@ -701,7 +700,7 @@ using namespace cudnn_rnn;
 Tensor _cudnn_rnn_flatten_weight(
     TensorList weight_arr, int64_t weight_stride0,
     int64_t input_size,
-    int64_t fn_mode, int64_t fn_hidden_size,
+    int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_proj_size,
     int64_t fn_num_layers, bool batch_first,
     bool fn_bidirectional
     ) {
@@ -712,6 +711,7 @@ Tensor _cudnn_rnn_flatten_weight(
       input_size,
       fn_mode,
       fn_hidden_size,
+      fn_proj_size,
       fn_num_layers,
       batch_first,
       fn_bidirectional,
@@ -1235,7 +1235,6 @@ DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions opti
   return state;
 }
 
-// TODOMODIFYIGOR
 Tensor try_get_weight_buf(
       const Tensor& input, TensorList parameters, bool has_biases,
       cudnnRNNMode_t mode, int64_t hidden_size, int64_t proj_size, int64_t num_layers, bool bidirectional) {

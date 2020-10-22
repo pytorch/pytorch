@@ -140,7 +140,7 @@
 - func: _use_cudnn_rnn_flatten_weight() -> bool
   use_c10_dispatcher: full
 
-- func: _cudnn_rnn_flatten_weight(Tensor[] weight_arr, int weight_stride0, int input_size, int mode, int hidden_size, int num_layers, bool batch_first, bool bidirectional) -> Tensor
+- func: _cudnn_rnn_flatten_weight(Tensor[] weight_arr, int weight_stride0, int input_size, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, bool bidirectional) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     CUDA: _cudnn_rnn_flatten_weight
