@@ -15430,6 +15430,7 @@ EXCLUDE_SCRIPT_AD_CHECK = {
     'test_tensor_split_sections',
     'test_tensor_split_sections_dim',
     'test_tensor_split_sections_dim_neg0',
+    'test_lu_square_batch_no_info_cpu'
 }
 
 EXCLUDE_PYTHON_PRINT = {
@@ -15446,6 +15447,10 @@ EXCLUDE_PYTHON_PRINT = {
 EXCLUDE_ALIAS = {
     # aliases, which may appear in method_tests but are tested elsewhere
     'true_divide',
+
+    # Disable tests for lu from common_methods_invocations.py
+    # TODO(@nikitaved) Enable jit tests once autograd.Function does support scripting
+    'lu'
 }
 
 def check_alias_annotation(method_name, args, kwargs):
@@ -15616,11 +15621,6 @@ def add_autograd_test(
     # Disable complex tests
     # TODO: Add complex support for jit
     if 'complex' in variant_name or name in ['view_as_complex', 'complex']:
-        return
-
-    # Disable tests for lu from common_methods_invocations.py
-    # TODO(@nikitaved) Enable jit tests once autograd.Function does support scripting
-    if 'square' in variant_name and name in ['lu']:
         return
 
     # Skips aliases, which are tested in test_op_aliases.py
