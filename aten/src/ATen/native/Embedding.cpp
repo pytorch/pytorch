@@ -13,6 +13,7 @@ namespace at { namespace native {
 
 Tensor embedding(const Tensor & weight, const Tensor & indices,
                  int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+  TORCH_CHECK(weight.dim() >= 1, "'weight' must be at least 1-D");
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding", indices_arg, kLong);
 

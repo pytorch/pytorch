@@ -13,7 +13,7 @@ retry () {
 
 #until we find a way to reliably reuse previous build, this last_tag is not in use
 # last_tag="$(( CIRCLE_BUILD_NUM - 1 ))"
-tag="${CIRCLE_WORKFLOW_ID}"
+tag="${DOCKER_TAG}"
 
 
 registry="308535385114.dkr.ecr.us-east-1.amazonaws.com"
@@ -44,10 +44,6 @@ trap "docker logout ${registry}" EXIT
 ./build.sh ${IMAGE_NAME} -t "${image}:${tag}"
 
 docker push "${image}:${tag}"
-
-# TODO: Get rid of duplicate tagging once ${DOCKER_TAG} becomes the default
-docker tag "${image}:${tag}" "${image}:${DOCKER_TAG}"
-docker push "${image}:${DOCKER_TAG}"
 
 docker save -o "${IMAGE_NAME}:${tag}.tar" "${image}:${tag}"
 aws s3 cp "${IMAGE_NAME}:${tag}.tar" "s3://ossci-linux-build/pytorch/base/${IMAGE_NAME}:${tag}.tar" --acl public-read

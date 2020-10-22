@@ -49,7 +49,7 @@ def _set_SIGCHLD_handler():
     if IS_WINDOWS:
         return
     # can't set signal in child threads
-    if not isinstance(threading.current_thread(), threading._MainThread):
+    if not isinstance(threading.current_thread(), threading._MainThread):  # type: ignore
         return
     global _SIGCHLD_handler_set
     if _SIGCHLD_handler_set:
@@ -65,6 +65,7 @@ def _set_SIGCHLD_handler():
         # Python can still get and update the process status successfully.
         _error_if_any_worker_fails()
         if previous_handler is not None:
+            assert callable(previous_handler)
             previous_handler(signum, frame)
 
     signal.signal(signal.SIGCHLD, handler)

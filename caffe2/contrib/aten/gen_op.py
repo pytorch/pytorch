@@ -36,10 +36,10 @@ if args.aten_root:
     if not os.path.exists(args.aten_root):
         raise ValueError('aten_root ({}) does not exist'.format(
             args.aten_root))
-    sys.path.append(os.path.join(args.aten_root, 'src', 'ATen'))
-    from code_template import CodeTemplate as CT
+    sys.path.append(os.path.join(args.aten_root, '..'))  # TODO: fix this
+    from tools.codegen.code_template import CodeTemplate as CT
 else:
-    from src.ATen.code_template import CodeTemplate as CT  # type: ignore[import,no-redef]
+    from tools.codegen.code_template import CodeTemplate as CT  # type: ignore[import,no-redef]
 
 OP_TEMPLATE = CT.from_file(
     os.path.join(args.template_dir, 'aten_op_template.h'))
@@ -157,8 +157,12 @@ def supports(o, factory_methods):
 # non-tensor attributes are created in ${initialization}
 # and then saved as arguments to the lambda
 # Inputs/Outputs are read inside the lambda
-OPTION_TEMPLATE = CT("""\
-case ${key}: { // ${name}
+#
+# each implementation is defined in a separate method annotated with
+# C10_NOINLINE to avoid inlining into the ATenOp constructor, which would
+# trigger pathological compile times.
+IMPLEMENTATION_TEMPLATE = CT("""\
+C10_NOINLINE void implementation_${key}() { // ${name}
     ${initialization}
     run_op = [=] {
         at::AutoNonVariableTypeMode guard;
@@ -167,7 +171,13 @@ case ${key}: { // ${name}
         ${assignments}
         return true;
     };
-} break;
+}
+""")
+
+CASE_TEMPLATE = CT("""\
+case ${key}: // ${name}
+  implementation_${key}();
+  break;
 """)
 
 ASSIGN_CHECK_SIZE_TEMPLATE = CT("""\
@@ -229,6 +239,7 @@ if __name__ == '__main__':
     top_env = {
         'mappings': [],
         'implementations': [],
+        'cases': [],
     }  # type: Dict[str, List]
     seen = set()
     key = 0
@@ -303,6 +314,7 @@ if __name__ == '__main__':
             env['invocation'] = "self.{}({})".format(
                 o['name'], ', '.join(env['arguments'][1:]))
 
-        top_env['implementations'].append(OPTION_TEMPLATE.substitute(env))
+        top_env['implementations'].append(IMPLEMENTATION_TEMPLATE.substitute(env))
+        top_env['cases'].append(CASE_TEMPLATE.substitute(env))
         key += 1
     write(os.path.join(args.install_dir, args.output_prefix + "aten_op.h"), OP_TEMPLATE.substitute(top_env))

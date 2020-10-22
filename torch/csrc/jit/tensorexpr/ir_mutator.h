@@ -42,13 +42,17 @@ class Intrinsics;
 class FunctionCall;
 class Allocate;
 class Free;
+class Let;
 class Cond;
 class Stmt;
 class Term;
 class Polynomial;
 class RoundOff;
+class MaxTerm;
+class MinTerm;
 class ReduceOp;
 class AtomicAdd;
+class SyncThreads;
 
 class TORCH_API IRMutator {
  public:
@@ -91,6 +95,8 @@ class TORCH_API IRMutator {
   virtual const Expr* mutate(const Term* v);
   virtual const Expr* mutate(const Polynomial* v);
   virtual const Expr* mutate(const RoundOff* v);
+  virtual const Expr* mutate(const MaxTerm* v);
+  virtual const Expr* mutate(const MinTerm* v);
 
   virtual const Expr* mutate(const ReduceOp* v);
 
@@ -98,9 +104,11 @@ class TORCH_API IRMutator {
   virtual Stmt* mutate(const Block* v);
   virtual Stmt* mutate(const Store* v);
   virtual Stmt* mutate(const AtomicAdd* v);
+  virtual Stmt* mutate(const SyncThreads* v);
 
   virtual Stmt* mutate(const Allocate* v);
   virtual Stmt* mutate(const Free* v);
+  virtual Stmt* mutate(const Let* v);
   virtual Stmt* mutate(const Cond* v);
 
  protected:

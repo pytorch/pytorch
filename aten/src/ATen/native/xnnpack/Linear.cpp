@@ -1,7 +1,7 @@
 #ifdef USE_XNNPACK
 
 #include <ATen/native/xnnpack/Common.h>
-#include <ATen/native/xnnpack/Factory.h>
+#include <ATen/native/utils/Factory.h>
 #include <ATen/native/xnnpack/Linear.h>
 
 namespace at {
@@ -114,7 +114,7 @@ Tensor run(
     const Tensor& input) {
   using namespace internal;
 
-  const Tensor padded_input = allocate_padded_contiguous_if_needed(
+  const Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
       input, input.suggest_memory_format());
 
   TORCH_CHECK(
@@ -126,7 +126,7 @@ Tensor run(
   std::vector<int64_t> output_size(input_size.cbegin(), input_size.cend());
   output_size.back() = context.output_channels;
 
-  Tensor output = empty_with_tail_padding(
+  Tensor output = mobile::empty_with_tail_padding(
       output_size,
       padded_input.options().dtype(),
       padded_input.suggest_memory_format(),

@@ -469,6 +469,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::Vulkan);
   }
 
+  bool is_metal() const {
+    return key_set_.has(DispatchKey::Metal);
+  }
+
+  // TODO: remove this once we don't automatically enabled Autograd dispatch keys
+  //       in TensorImpl constructor.
+  // DON'T USE THIS API!! It's only created for testing purpose in
+  // file aten/src/ATen/core/boxing/impl/test_helpers.h
+  void remove_autograd_key() {
+    key_set_ = key_set_ - autograd_dispatch_keyset;
+  }
+
   int64_t get_device() const {
     TORCH_CHECK(
         device_opt_.has_value(),

@@ -20,6 +20,7 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
       break;
     case at::kFloat: *(float*)data = (float)THPUtils_unpackDouble(obj); break;
     case at::kDouble: *(double*)data = THPUtils_unpackDouble(obj); break;
+    case at::kComplexHalf: *(c10::complex<at::Half>*)data = (c10::complex<at::Half>)THPUtils_unpackComplexDouble(obj); break;
     case at::kComplexFloat: *(c10::complex<float>*)data = (c10::complex<float>)THPUtils_unpackComplexDouble(obj); break;
     case at::kComplexDouble: *(c10::complex<double>*)data = THPUtils_unpackComplexDouble(obj); break;
     case at::kBool: *(bool*)data = THPUtils_unpackNumberAsBool(obj); break;
@@ -40,8 +41,12 @@ inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
     case at::kHalf: return PyFloat_FromDouble(at::convert<double, at::Half>(*(at::Half*)data));
     case at::kFloat: return PyFloat_FromDouble(*(float*)data);
     case at::kDouble: return PyFloat_FromDouble(*(double*)data);
+    case at::kComplexHalf: {
+      auto data_ = reinterpret_cast<c10::complex<at::Half>*>(data);
+      return PyComplex_FromDoubles(data_->real(), data_->imag());
+    }
     case at::kComplexFloat: {
-      c10::complex<float>* data_ = (c10::complex<float>*)data;
+      auto data_ = reinterpret_cast<c10::complex<float>*>(data);
       return PyComplex_FromDoubles(data_->real(), data_->imag());
     }
     case at::kComplexDouble: return PyComplex_FromCComplex(*reinterpret_cast<Py_complex *>((c10::complex<double>*)data));

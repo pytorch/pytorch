@@ -1207,16 +1207,18 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
 #pragma omp parallel
 #endif
     {
+      conv_param_t<3> conv_p(
+          N,
+          C,
+          C,
+          {X.dim32(1), X.dim32(2), X.dim32(3)},
+          C,
+          {3, 3, 3},
+          {this->stride_[0], this->stride_[1], this->stride_[2]},
+          {1, 1, 1, 1, 1, 1});
       if (quantize_groupwise_) {
-        depthwise_3x3x3_per_channel_quantization_pad_1(
-            N,
-            X.dim32(1),
-            X.dim32(2),
-            X.dim32(3),
-            C,
-            this->stride_[0],
-            this->stride_[1],
-            this->stride_[2],
+        depthwise_3d_same_pad<QuantizationGranularity::OUT_CHANNEL>(
+            conv_p,
             // Shouldn't pass 0 if column_offsets_ is empty here because we
             // need zero_point for padding
             in_qparams_[INPUT].zero_point,
@@ -1234,29 +1236,22 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             dnnlowp_get_thread_num(),
             dnnlowp_get_num_threads());
       } else {
-        depthwise_3x3x3_pad_1(
-            N,
-            X.dim32(1),
-            X.dim32(2),
-            X.dim32(3),
-            C,
-            this->stride_[0],
-            this->stride_[1],
-            this->stride_[2],
+        depthwise_3d_same_pad<QuantizationGranularity::TENSOR>(
+            conv_p,
             // Shouldn't pass 0 if column_offsets_ is empty here because we
             // need zero_point for padding
             in_qparams_[INPUT].zero_point,
             reinterpret_cast<const uint8_t*>(Xdata),
-            FilterQuantizationParams(0).zero_point,
+            &FilterQuantizationParams(0).zero_point,
             *Wq_depthwise_packed_,
-            requantization_params_[0].real_multiplier,
+            &requantization_params_[0].real_multiplier,
             out_qparams_.zero_point,
             Y_uint8_data,
             // column_offsets_ empty means column_offsets_ are folded into bias
             column_offsets_->empty() ? nullptr : column_offsets_->data(),
             b_quantized_data_,
             ReluFused,
-            1.0f, /*act_times_w_scale*/
+            nullptr, /*act_times_w_scale*/
             dnnlowp_get_thread_num(),
             dnnlowp_get_num_threads());
       }

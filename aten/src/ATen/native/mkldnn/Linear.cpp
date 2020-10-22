@@ -11,7 +11,7 @@ Tensor mkldnn_linear(
     const Tensor& self,
     const Tensor& weight,
     const Tensor& bias) {
-  AT_ERROR("mkldnn_linear: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_linear: ATen not compiled with MKLDNN support");
 }
 
 } // namespace native
@@ -32,7 +32,8 @@ Tensor mkldnn_linear(
       "mkldnn_linear: input needs to has dim at least 2, input dim ", self.dim());
   TORCH_CHECK(self.is_mkldnn(),
       "mkldnn_linear: input needs to be mkldnn layout");
-  TORCH_CHECK(weight.is_mkldnn() && bias.is_mkldnn(),
+  TORCH_CHECK(
+      weight.is_mkldnn() && (!bias.defined() || bias.is_mkldnn()),
       "mkldnn_linear: weight and bias need to be mkldnn layout");
 
   // reshape first if input dim is greater than 2 and the reshape will cost a memory copy.

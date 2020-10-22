@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
@@ -120,16 +121,6 @@ bool isSimpleMap(Node* node) {
   return true;
 }
 
-Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
-  AT_ASSERT(!sizes.empty());
-  Graph* graph = sizes[0]->owningGraph();
-  Node* broadcast_n =
-      graph->insertNode(graph->create(prim::BroadcastSizes, sizes));
-  broadcast_n->output()->setType(ListType::ofInts());
-  db->createValue(broadcast_n->output());
-  return broadcast_n->output();
-}
-
 struct GraphFuser {
   using FusionCallback = std::function<bool(GraphFuser*, Node*)>;
 
@@ -140,7 +131,7 @@ struct GraphFuser {
     return gf->isFusableDefault(n, gf->strict_fuser_check_);
   };
   Symbol kind_ = prim::FusionGroup;
-  bool strict_fuser_check_;
+  bool strict_fuser_check_ = false;
 
   // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
   // The specific limit is a function of constant memory size, amount available
@@ -924,13 +915,6 @@ struct GraphFuser {
       }
       bchunk->destroy();
     }
-  }
-
-  bool usedOnlyInSize(Value* v) {
-    const auto& uses = v->uses();
-    return std::all_of(uses.begin(), uses.end(), [](const Use& u) {
-      return u.user->matches("aten::size(Tensor self) -> int[]");
-    });
   }
 
   // Builds up expressions that compute shapes of all intermediates (and

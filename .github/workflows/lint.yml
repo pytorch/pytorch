@@ -21,10 +21,6 @@ jobs:
         run: |
           pip install -r requirements.txt
           cd .circleci && ./ensure-consistency.py
-      - name: Ensure Docker version is correctly deployed
-        run: |
-          pip install pyyaml
-          .circleci/validate-docker-version.py
       - name: Shellcheck Jenkins scripts
         run: |
           sudo apt-get install -y shellcheck
@@ -114,10 +110,10 @@ jobs:
           # Install dependencies
           pip install pyyaml
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          sudo apt-add-repository "deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-8 main"
+          sudo apt-add-repository "deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-11 main"
           sudo apt-get update
-          sudo apt-get install -y clang-tidy-8
-          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-8 1000
+          sudo apt-get install -y clang-tidy-11
+          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-11 1000
       - name: Run clang-tidy
         run: |
           set -eux
@@ -135,33 +131,38 @@ jobs:
             time python setup.py --cmake-only build
 
             # Generate ATen files.
-            time python aten/src/ATen/gen.py \
+            time python -m tools.codegen.gen \
               -s aten/src/ATen \
-              -d build/aten/src/ATen \
-              aten/src/ATen/Declarations.cwrap \
-              aten/src/THCUNN/generic/THCUNN.h \
-              aten/src/ATen/nn.yaml \
-              aten/src/ATen/native/native_functions.yaml
+              -d build/aten/src/ATen
 
             # Generate PyTorch files.
             time python tools/setup_helpers/generate_code.py            \
               --declarations-path build/aten/src/ATen/Declarations.yaml \
+              --native-functions-path aten/src/ATen/native/native_functions.yaml \
               --nn-path aten/src
           fi
 
           # Run Clang-Tidy
           # The negative filters below are to exclude files that include onnx_pb.h or
           # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
+          # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
+          # in a follow up PR.
+          # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
           python tools/clang_tidy.py                               \
             --verbose                                              \
             --paths torch/csrc/                                    \
             --diff "$MERGE_BASE"                                   \
+            -g"-torch/csrc/jit/passes/onnx/helper.cpp"             \
+            -g"-torch/csrc/jit/passes/onnx/shape_type_inference.cpp"\
+            -g"-torch/csrc/jit/serialization/onnx.cpp"             \
             -g"-torch/csrc/jit/serialization/export.cpp"           \
             -g"-torch/csrc/jit/serialization/import.cpp"           \
             -g"-torch/csrc/jit/serialization/import_legacy.cpp"    \
             -g"-torch/csrc/onnx/init.cpp"                          \
             -g"-torch/csrc/cuda/nccl.*"                            \
             -g"-torch/csrc/cuda/python_nccl.cpp"                   \
+            -g"-torch/csrc/autograd/FunctionsManual.cpp"           \
+            -g"-torch/csrc/generic/*.cpp"                          \
             "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
 
           cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt

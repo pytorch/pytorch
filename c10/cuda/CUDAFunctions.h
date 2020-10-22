@@ -17,16 +17,20 @@
 namespace c10 {
 namespace cuda {
 
+// NB: In the past, we were inconsistent about whether or not this reported
+// an error if there were driver problems are not.  Based on experience
+// interacting with users, it seems that people basically ~never want this
+// function to fail; it should just return zero if things are not working.
+// Oblige them.
+// It still might log a warning for user first time it's invoked
 C10_CUDA_API DeviceIndex device_count() noexcept;
+
+// Version of device_count that throws is no devices are detected
+C10_CUDA_API DeviceIndex device_count_ensure_non_zero();
 
 C10_CUDA_API DeviceIndex current_device();
 
 C10_CUDA_API void set_device(DeviceIndex device);
-
-// Returns a pair of an int containing the version number and a string
-// containing an error description, if the string is not empty then the function
-// has failed and the integer value should be discarded
-C10_CUDA_API std::pair<int32_t, std::string> driver_version();
 
 C10_CUDA_API void device_synchronize();
 
