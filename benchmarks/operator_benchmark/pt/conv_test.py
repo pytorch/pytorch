@@ -3,7 +3,7 @@ import operator_benchmark as op_bench
 import torch
 import torch.nn as nn
 
-from . import configs
+from pt import configs
 
 """
 Microbenchmarks for Conv1d and ConvTranspose1d operators.
