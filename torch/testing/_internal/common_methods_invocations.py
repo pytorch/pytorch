@@ -174,6 +174,7 @@ class UnaryUfuncInfo(OpInfo):
                  handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
+                 promotes_integers_to_float=False,  # whether op promotes unary output to float or not
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
@@ -186,6 +187,7 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_large_floats = handles_large_floats
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
+        self.promotes_integers_to_float = promotes_integers_to_float
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
@@ -342,8 +344,12 @@ op_db = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16)),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    handles_large_floats=False,
                    handles_complex_extremals=False,
+                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
@@ -586,13 +592,13 @@ def method_tests():
         ('transpose', (S, S, S), (2, 0), '3d', (False,)),
         ('t', (1, 2), NO_ARGS, '', (False,)),
         ('view', (S, S, S), (S * S, S), '', (False,)),
-        ('view', (S, S, S), (torch.Size([S * S, S]),), 'size', (False,)),
+        ('view', (torch.Size([S * S, S]),), (S, S, S), 'size', (False,)),
         ('view', (S,), (S,), '1d', (False,)),
         ('view', (), (dont_convert(()),), 'scalar_to_scalar', (False,)),
         ('view', (), (1,), 'scalar_to_1d', (False,)),
         ('ravel', (S, S, S), NO_ARGS, '', (False,)),
         ('reshape', (S, S, S), (S * S, S), '', (False,)),
-        ('reshape', (S, S, S), (torch.Size([S * S, S]),), 'size', (False,)),
+        ('reshape', (torch.Size([S * S, S]),), (S, S, S), 'size', (False,)),
         ('reshape', (S,), (S,), '1d', (False,)),
         ('reshape', (), (dont_convert(()),), 'scalar_to_scalar', (False,)),
         ('reshape', (), (1,), 'scalar_to_1d', (False,)),

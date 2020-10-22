@@ -30,9 +30,11 @@ from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_onnx_export import TestONNXExport  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
 from jit.test_enum import TestEnum  # noqa: F401
+from jit.test_string_formatting import TestStringFormatting  # noqa: F401
 from jit.test_profiler import TestProfiler  # noqa: F401
 from jit.test_slice import TestSlice  # noqa: F401
 from jit.test_warn import TestWarn  # noqa: F401
+from jit.test_isinstance import TestIsinstance  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -7215,6 +7217,15 @@ dedent """
 
         scripted_foo = torch.jit.script(foo)
         self.assertEqual(scripted_foo(), foo())
+
+    def test_class_with_comment_at_lower_indentation(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                x = torch.neg(x)
+        # This comment is at the wrong indent
+                return x
+
+        torch.jit.script(Foo())
 
     # adapted from test in test_torch
     def test_tensor_to(self):
@@ -15728,7 +15739,7 @@ def add_autograd_test(
                                                     check_types=check_types)
 
                 # alias annotation testing
-                if is_inplace and test_name not in EXCLUDE_SCRIPT:
+                if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
                     check_alias_annotation(name, (self_variable,) + args_variable, kwargs_variable)
 
             check(name)
