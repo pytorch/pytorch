@@ -493,12 +493,15 @@ class _ConvTransposeNd(_ConvNd):
             mod (Module): a float module, either produced by torch.quantization
               utilities or provided by the user
         """
+        import  torch.quantization as tq
         assert type(mod) == cls._FLOAT_MODULE, \
             ' nnq.' + cls.__name__ + '.from_float only works for ' + \
             cls._FLOAT_MODULE.__name__
         assert hasattr(mod, 'qconfig'), \
             'Input float module must have qconfig defined.'
         weight_post_process = mod.qconfig.weight()
+        if isinstance(weight_post_process, tq.PerChannelMinMaxObserver):
+            weight_post_process.ch_axis = 1
         weight_post_process(mod.weight)
         act_scale, act_zp = mod.activation_post_process.calculate_qparams()
         assert weight_post_process.dtype == torch.qint8, \
