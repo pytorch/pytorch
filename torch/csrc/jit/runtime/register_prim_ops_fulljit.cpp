@@ -212,6 +212,13 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "aten::percentFormat(str self, ...) -> str",
+         [](Stack* stack) {
+           size_t num_inputs = pop(stack).toInt();
+           percentFormat(*stack, num_inputs);
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "aten::to.prim_other(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
          [](Stack* stack) {
            at::Tensor self;
