@@ -21,7 +21,7 @@ Tensor get_tensor(caffe2::TypeMeta dtype, IntArrayRef size) {
 }
 
 Tensor empty_override(IntArrayRef size, const c10::optional<ScalarType>& dtype, const c10::optional<Layout>& layout, const c10::optional<Device>& device,
-                      const c10::optional<bool>& pin_memory, const c10::optional<c10:&:MemoryFormat> optional_memory_format) {
+                      const c10::optional<bool>& pin_memory, c10::optional<c10::MemoryFormat> optional_memory_format) {
   test_int = 0;
   return get_tensor(scalarTypeToTypeMeta(dtype_or_default(dtype)), size);
 }
