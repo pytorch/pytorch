@@ -297,7 +297,7 @@ constexpr decltype(auto) INVOKE(Type T::* f, T1&& t1, Args&&... args)
         });});
     }, /* else */ [&] (auto _) {
         static_assert(std::is_member_object_pointer<decltype(_(f))>::value, "");
-        static_assert(sizeof...(args) == 0, "");
+        static_assert(sizeof...(args) == _(0), "");
         return if_constexpr<std::is_base_of<T, std::decay_t<T1>>::value>([&] (auto __) {
             using _T1 = typename decltype(__)::template type_identity<typename decltype(_)::template type_identity<T1>>;
             return std::forward<_T1>(t1).*f;
