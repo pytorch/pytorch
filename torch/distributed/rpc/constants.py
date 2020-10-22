@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from . import (
+from torch._C._distributed_rpc import (
     _DEFAULT_INIT_METHOD,
     _DEFAULT_NUM_SEND_RECV_THREADS,
     _DEFAULT_NUM_WORKER_THREADS,

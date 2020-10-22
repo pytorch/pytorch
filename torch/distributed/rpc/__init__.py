@@ -38,7 +38,6 @@ if is_available():
         get_rpc_timeout,
         enable_gil_profiling,
         RpcBackendOptions,
-        _TensorPipeRpcBackendOptionsBase as TensorPipeRpcBackendOptions,
         _TensorPipeRpcBackendOptionsBase,
         ProcessGroupRpcBackendOptions,
         ProcessGroupAgent,
@@ -52,6 +51,7 @@ if is_available():
     )  # noqa: F401
     from torch._C._distributed_c10d import Store
     from .api import *  # noqa: F401
+    from .options import TensorPipeRpcBackendOptions  # noqa: F401
     from .backend_registry import BackendType
     from .server_process_global_profiler import (
         _server_process_global_profile,
