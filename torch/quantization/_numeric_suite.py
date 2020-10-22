@@ -196,12 +196,13 @@ class OutputLogger(Logger):
         super(OutputLogger, self).__init__()
         self.stats["tensor_val"] = None
 
-    def forward(self, x):
+    def forward(self, x_orig):
+        x = x_orig.detach()
         if self.stats["tensor_val"] is None:
             self.stats["tensor_val"] = x
         else:
             self.stats["tensor_val"] = torch.cat((self.stats["tensor_val"], x))
-        return x
+        return x_orig
 
 
 def _convert_tuple_to_list(t):
@@ -291,7 +292,7 @@ class Shadow(nn.Module):
         return output
 
 
-def prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
+def prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger, shadow_class=None):
     r"""Prepare the model by attaching the float module to its matching quantized
     module as the shadow if the float module type is in module_swap_list.
 
@@ -306,8 +307,11 @@ def prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
         module_swap_list: list of float module types to attach the shadow
         Logger: type of logger to be used in shadow module to process the outputs of
             quantized module and its float shadow module
+        shadow_class: Custom shadow class
     """
     torch._C._log_api_usage_once("quantization_api._numeric_suite.prepare_model_with_stubs")
+    if shadow_class is None:
+        shadow_class = Shadow
 
     float_module_children = {}
     for name, mod in float_module.named_children():
@@ -321,17 +325,21 @@ def prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
         float_mod = float_module_children[name]
 
         if type(float_mod) not in module_swap_list:
-            prepare_model_with_stubs(float_mod, mod, module_swap_list, Logger)
+            prepare_model_with_stubs(float_mod, mod, module_swap_list, Logger,
+                                     shadow_class=shadow_class)
 
         if type(float_mod) in module_swap_list:
-            reassign[name] = Shadow(mod, float_mod, Logger)
+            reassign[name] = shadow_class(mod, float_mod, Logger)
 
     for key, value in reassign.items():
+        if isinstance(q_module._modules[key], shadow_class):
+            continue
         q_module._modules[key] = value
 
 
 def compare_model_stub(
-    float_model, q_model, module_swap_list, *data, Logger=ShadowLogger
+    float_model, q_model, module_swap_list, *data, Logger=ShadowLogger,
+    shadow_class=None
 ):
     r"""Compare quantized module in a model with its floating point counterpart,
     feeding both of them the same input. Return a dict with key corresponding to
@@ -364,7 +372,10 @@ def compare_model_stub(
             quantized module and its float shadow module
     """
     torch._C._log_api_usage_once("quantization_api._numeric_suite.compare_model_stub")
-    prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger)
+    if shadow_class is None:
+        shadow_class = Shadow
+    prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger,
+                             shadow_class=shadow_class)
     q_model(*data)
     ob_dict = get_logger_dict(q_model)
     return ob_dict
