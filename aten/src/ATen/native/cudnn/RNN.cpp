@@ -1004,6 +1004,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
 
   auto input_size = _input_size(fn.tensors);
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
+  auto cell_size = _cell_size(fn.rnn, fn.tensors);
   auto output_size = _output_size(fn.rnn, fn.tensors);
 
   TORCH_CHECK(hx.is_contiguous(),
@@ -1017,10 +1018,10 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   auto w = weight_buf;
   auto dx = at::empty(input.sizes(), input.options()); // TODO: more compact way of saying this
   auto dhy = grad_hy.contiguous().view(hidden_size);
-  auto dcy = grad_cy.defined() ? grad_cy.contiguous().view(hidden_size) : Tensor();
+  auto dcy = grad_cy.defined() ? grad_cy.contiguous().view(cell_size) : Tensor();
   auto dhx = at::empty(hidden_size, hx.options());
   AT_ASSERTM(cx.defined() || !output_mask[2], "illegally required grad of cx for non-LSTM RNN");
-  auto dcx = cx.defined() ? at::empty(hidden_size, cx.options()) : Tensor();
+  auto dcx = cx.defined() ? at::empty(cell_size, cx.options()) : Tensor();
 
   TORCH_CHECK(fn_train,
            "cudnn RNN backward can only be called in training mode");
@@ -1032,12 +1033,12 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
 
   TORCH_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
            "Expected hidden size ", IntArrayRef{hidden_size}, ", got ", hx.sizes());
-  TORCH_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
-           "Expected cell size ", IntArrayRef{hidden_size}, ", got ", cx.sizes());
+  TORCH_CHECK(!cx.defined() || cx.sizes().equals(cell_size),
+           "Expected cell size ", IntArrayRef{cell_size}, ", got ", cx.sizes());
   TORCH_CHECK(!dhy.defined() || dhy.sizes().equals(hidden_size),
            "Expected d_hidden size ", IntArrayRef{hidden_size}, ", got ", dhy.sizes());
-  TORCH_CHECK(!dcy.defined() || dcy.sizes().equals(hidden_size),
-           "Expected d_cell size ", IntArrayRef{hidden_size}, ", got ", dcy.sizes());
+  TORCH_CHECK(!dcy.defined() || dcy.sizes().equals(cell_size),
+           "Expected d_cell size ", IntArrayRef{cell_size}, ", got ", dcy.sizes());
 
   TORCH_CHECK(dhy.is_cuda() && dy.is_cuda() && (!dcy.defined() || dcy.is_cuda()),
            "Gradients aren't CUDA tensors");
