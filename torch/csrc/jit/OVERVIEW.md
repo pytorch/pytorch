@@ -887,13 +887,13 @@ def LSTMCellS(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
 ### Profiling ###
 
 In the profiling stage, a Profiling Graph Executor takes an unoptimized graph runs required and passes that doesn't need profiling information ([see the next section](#Optimization)) and inserts `prim::profile` on **tensor-typed** inputs to fusible operations. 
-`ProfilingRecord` also maintains a mapping between output values of `prim::profile` nodes and the properties of input tensors at runtime.
+`torch::jit::ProfilingRecord` also maintains a mapping between output values of `prim::profile` nodes and the properties of input tensors at runtime.
 This mapping is maintained for each invocation of a function identified by Interpreter's `frame_id` (which is globally unique).
-It's important to not mix the tensor properties from different invocations for the same `Value*`, as this may inhibit symbolic (dynamic) shape inference to correctly inferring the relationships between the arguments of an operation and its outputs.                                                                                     
+It's important to not mix the tensor properties from different invocations for the same `torch::jit::Value*`, as this may inhibit symbolic (dynamic) shape inference to correctly inferring the relationships between the arguments of an operation and its outputs.                                                                                     
 Whenever a `prim::profile` node is executed, its `prim::profile`'s `Value*` and `frame_id` are used as a key and input tensor's properties are captured in a freshly created `TensorType` and stored in `profiled_types_per_frame_`.
 If the `prim::profile` node is executed more than once per execution (i.e. it's in a loop), the existing and incoming `TensorType` are merged.
 The merging logic follows a very simple rule: if two individual properties are different, the result is unknown (denoted by an empty `c10::optional<T>`) 
-At the very end of the execution of the profiled function, a countdown counter whose starting value is set to the number of profiled runs is decremented. When the counter hits 0, the profiler merges the profiled types from all the runs into a single profiled tensor type per a `Value*`.
+At the very end of the execution of the profiled function, a countdown counter whose starting value is set to the number of profiled runs is decremented. When the counter hits 0, the profiler merges the profiled types from all the runs into a single profiled tensor type per a `Value*`. If the function is profiled more than once, some dimensions may contain a `torch::jit::ShapeSymbol` instead of a fixed number. For example, when a batch dimension changes from one run to another but stays the same within the same run across multiple operations, all participating tensor `Value`s should have the exact same `ShapeSymbol` in the batch dimension.
 Finally, the profiler annotates every `prim::profile` node in the instrumented graph with a `attr::profiled_type` attribute containing its inferred profiled type. Below is a graph with annotated `prim::profile` nodes for our running example: 
 
 ```
@@ -952,8 +952,6 @@ graph(%x.1 : Tensor,
   %55 : Tensor = prim::profile[profiled_type=Double(64:512, 512:1, requires_grad=1, device=cuda:0)](%cy.1)
   %56 : (Tensor, Tensor) = prim::TupleConstruct(%54, %55)
 ```
-
-https://github.com/pytorch/pytorch/blob/71e6ce66166bb74dbec0fffcdfc72b5fb0e6f9d5/torch/csrc/jit/runtime/profiling_record.cpp#L119
 
 ### Optimization ###
 
