@@ -44,7 +44,7 @@ try:
 except ImportError:
     _GLOO_AVAILABLE = False
 
-# Some reduce ops are not supported by complex numbers.
+# Some reduce ops are not supported by complex numbers and will result in an error.
 # We currently provide complex support to the distributed API by viewing
 # complex tensors as real (torch.view_as_real), meaning that calling
 # these unsupported ops will return garbage values rather than error out.
@@ -166,7 +166,7 @@ _pg_group_ranks = {}
 _default_pg = None
 _default_pg_init_method = None
 
-# Process group count for default naming
+# Process group counter for default naming
 _group_count = 0
 
 
@@ -486,9 +486,9 @@ def _new_process_group_helper(world_size,
     global _group_count
     global _pg_names
 
+    group_name_ = group_name
     if not group_name:
         group_name = str(_group_count)
-        _group_count += 1
 
     if group_name in _pg_names.values():
         raise RuntimeError("The specified group name has already been "
@@ -552,6 +552,9 @@ def _new_process_group_helper(world_size,
                 timeout)
             _pg_map[pg] = (backend, store)
             _pg_names[pg] = group_name
+
+    if not group_name_:
+        _group_count += 1
 
     return pg
 

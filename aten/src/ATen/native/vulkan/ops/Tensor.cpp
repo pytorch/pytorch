@@ -257,57 +257,61 @@ vTensor::vTensor(
     api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options)
-  : view_(context, sizes, options) {
+  : view_(new View{
+      context,
+      sizes,
+      options,
+    }) {
 }
 
 const vTensor* vTensor::host() const {
-  view_.staging(Access::Read);
+  view_->staging(Access::Read);
   return this;
 }
 
 vTensor* vTensor::host(const Access::Flags access) {
-  view_.staging(access);
+  view_->staging(access);
   return this;
 }
 
 vTensor::Buffer::Object vTensor::buffer() const & {
-  return view_.buffer(Access::Read).object;
+  return view_->buffer(Access::Read).object;
 }
 
 vTensor::Buffer::Object vTensor::buffer(
     const Access::Flags access) & {
-  return view_.buffer(access).object;
+  return view_->buffer(access).object;
 }
 
 vTensor::Buffer::Object vTensor::buffer(
     api::Command::Buffer& command_buffer) const & {
-  return view_.buffer(command_buffer, Access::Read).object;
+  return view_->buffer(command_buffer, Access::Read).object;
 }
 
 vTensor::Buffer::Object vTensor::buffer(
     api::Command::Buffer& command_buffer,
     const Access::Flags access) & {
-  return view_.buffer(command_buffer, access).object;
+  return view_->buffer(command_buffer, access).object;
 }
 
 vTensor::Image::Object vTensor::image() const & {
-  return view_.image(Access::Read).object;
+  return view_->image(Access::Read).object;
 }
 
 vTensor::Image::Object vTensor::image(
     const Access::Flags access) & {
-  return view_.image(access).object;
+  return view_->image(access).object;
 }
 
 vTensor::Image::Object vTensor::image(
     api::Command::Buffer& command_buffer) const & {
-  return view_.image(command_buffer, Access::Read).object;
+  return view_->image(command_buffer, Access::Read).object;
 }
 
 vTensor::Image::Object vTensor::image(
     api::Command::Buffer& command_buffer,
     const Access::Flags access) & {
-  return view_.image(command_buffer, access).object;
+  return view_->image(command_buffer, access).object;
 }
 
 vTensor::View::View()
