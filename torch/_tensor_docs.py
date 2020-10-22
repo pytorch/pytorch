@@ -1894,7 +1894,7 @@ Example::
 
 add_docstr_all('kron',
                r"""
-kron(tensor2) -> Tensor
+kron(other) -> Tensor
 
 See :func:`torch.kron`
 """)
