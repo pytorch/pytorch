@@ -270,24 +270,18 @@ ReductionOp::ReductionOp(
       init_(_init),
       out_(_out),
       in_(_in) {
-  if (_out->getValType().value() == ValType::TensorView) {
-    TORCH_INTERNAL_ASSERT(
-        _in->getValType() == ValType::TensorView &&
-            _out->getValType() == ValType::TensorView,
-        "Reduction operation was created that does not have tensor inputs and outputs.");
+  TORCH_CHECK(_out->getValType().value() == ValType::TensorView);
 
-    TORCH_INTERNAL_ASSERT(
-        TensorDomain::noReductions(
-            _in->as<TensorView>()->getMaybeRFactorDomain())
-                .size() == _out->as<TensorView>()->getRootDomain().size(),
-        "Reduction operation created with mismatched domains.");
+  TORCH_INTERNAL_ASSERT(
+      _in->getValType() == ValType::TensorView &&
+          _out->getValType() == ValType::TensorView,
+      "Reduction operation was created that does not have tensor inputs and outputs.");
 
-  } else {
-    TORCH_INTERNAL_ASSERT(
-        _in->getValType() == ValType::TensorIndex &&
-            _out->getValType() == ValType::TensorIndex,
-        "Reduction operation was created that does not have tensor inputs and outputs.");
-  }
+  TORCH_INTERNAL_ASSERT(
+      TensorDomain::noReductions(_in->as<TensorView>()->getMaybeRFactorDomain())
+              .size() == _out->as<TensorView>()->getRootDomain().size(),
+      "Reduction operation created with mismatched domains.");
+
   TORCH_INTERNAL_ASSERT(
       _init->isConstScalar(),
       "Tried to create a reduction operation whith an initial value that isn't a constant.");
@@ -352,8 +346,6 @@ IterDomain::IterDomain(
       "Cannot create an iter domain with a extent that is zero but received ",
       _extent,
       " .");
-
-  // TORCH_INTERNAL_ASSERT(!kir::isLoweredVal(_extent));
 
   name_ = fusion_->registerVal(this);
 }

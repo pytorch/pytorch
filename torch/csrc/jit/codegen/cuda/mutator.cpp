@@ -80,10 +80,6 @@ Statement* OptOutMutator::mutate(TensorView* tv) {
   return tv;
 }
 
-Statement* OptOutMutator::mutate(kir::TensorIndex* ti) {
-  return ti;
-}
-
 Statement* OptOutMutator::mutate(Bool* b) {
   return b;
 }
@@ -105,14 +101,6 @@ Statement* OptOutMutator::mutate(NamedScalar* ns) {
 }
 
 // MUTATE FUNCTIONS FOR EXPRESSIONS.
-
-Statement* OptOutMutator::mutate(kir::Allocate* a) {
-  return a;
-}
-
-Statement* OptOutMutator::mutate(kir::Sync* a) {
-  return a;
-}
 
 Statement* OptOutMutator::mutate(Split* s) {
   IterDomain* ot = mutateAsVal(s->outer())->as<IterDomain>();
@@ -183,20 +171,8 @@ Statement* OptOutMutator::mutate(ReductionOp* rop) {
   return new ReductionOp(rop->getReductionOpType(), init, out, in);
 }
 
-Statement* OptOutMutator::mutate(kir::GridReduction* gr) {
-  return gr;
-}
-
 Statement* OptOutMutator::mutate(BroadcastOp* bop) {
   return bop;
-}
-
-Statement* OptOutMutator::mutate(kir::ForLoop* fl) {
-  return fl;
-}
-
-Statement* OptOutMutator::mutate(kir::IfThenElse* ite) {
-  return ite;
 }
 
 } // namespace cuda

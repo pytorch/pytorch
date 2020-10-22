@@ -175,45 +175,8 @@ void IrPrinter::handle(const NamedScalar* i) {
   os_ << i->name();
 }
 
-void IrPrinter::handle(const kir::Bool* b) {
-  os_ << "kir::Bool (use kir::toString() to print Kernel IR nodes)";
-}
-
-void IrPrinter::handle(const kir::Float* f) {
-  os_ << "kir::Float (use kir::toString() to print Kernel IR nodes)";
-}
-
-void IrPrinter::handle(const kir::Half* h) {
-  os_ << "kir::Half (use kir::toString() to print Kernel IR nodes)";
-}
-
-void IrPrinter::handle(const kir::Int* i) {
-  os_ << "kir::Int (use kir::toString() to print Kernel IR nodes)";
-}
-
-void IrPrinter::handle(const kir::NamedScalar*) {
-  os_ << "kir::NamedScalar (use kir::toString() to print Kernel IR nodes)";
-}
-
-void IrPrinter::handle(const kir::TensorIndex*) {
-  os_ << "kir::TensorIndex (use kir::toString() to print Kernel IR nodes)";
-}
-
-void IrPrinter::handle(const kir::IterDomain*) {
-  os_ << "kir::IterDomain (use kir::toString() to print Kernel IR nodes)";
-}
-
-void IrPrinter::handle(const kir::TensorDomain*) {
-  os_ << "kir::TensorDomain (use kir::toString() to print Kernel IR nodes)";
-}
-
-void IrPrinter::handle(const kir::TensorView*) {
-  os_ << "kir::TensorView (use kir::toString() to print Kernel IR nodes)";
-}
-
 static bool isTV(const Val* val) {
-  return val->getValType().value() == ValType::TensorView ||
-      val->getValType().value() == ValType::TensorIndex;
+  return val->getValType().value() == ValType::TensorView;
 }
 
 // Check if we're a TensorView op that we can generate code for.
@@ -349,58 +312,16 @@ void IrPrinter::handle(const TernaryOp* top) {
     os_ << ";\n";
 }
 
-void IrPrinter::handle(const kir::UnaryOp* uop) {
-  os_ << "kir::UnaryOp (use kir::toString() to print Kernel IR nodes)";
-}
-
-void IrPrinter::handle(const kir::BinaryOp* bop) {
-  os_ << "kir::BinaryOp (use kir::toString() to print Kernel IR nodes)";
-}
-
-void IrPrinter::handle(const kir::TernaryOp* top) {
-  os_ << "kir::TernaryOp (use kir::toString() to print Kernel IR nodes)";
-}
-
 void IrPrinter::handle(const ReductionOp* rop) {
-  TORCH_CHECK(rop->out()->getValType() != ValType::TensorIndex);
   indent();
   os_ << rop->out() << " = reduction( " << rop->in()
       << ", op = " << rop->getReductionOpType()
       << ", initial value = " << rop->init() << " )\n";
 }
 
-void IrPrinter::handle(const kir::ReductionOp* rop) {
-  os_ << "kir::ReductionOp (use kir::toString() to print Kernel IR nodes)";
-}
-
-void IrPrinter::handle(const kir::GridReduction* gr) {
-  os_ << "kir::GridReduction (use kir::toString() to print Kernel IR nodes)";
-}
-
 void IrPrinter::handle(const BroadcastOp* bop) {
-  TORCH_CHECK(bop->out()->getValType() != ValType::TensorIndex);
   indent();
   os_ << bop->out() << " = broadcast( " << bop->in() << " )\n";
-}
-
-void IrPrinter::handle(const kir::BroadcastOp*) {
-  os_ << "kir::BroadcastOp (use kir::toString() to print Kernel IR nodes)";
-}
-
-void IrPrinter::handle(const kir::ForLoop* fl) {
-  os_ << "kir::ForLoop (use kir::toString() to print Kernel IR nodes)";
-}
-
-void IrPrinter::handle(const kir::IfThenElse* ite) {
-  os_ << "kir::IfThenElse (use kir::toString() to print Kernel IR nodes)";
-}
-
-void IrPrinter::handle(const kir::Allocate* a) {
-  os_ << "kir::Allocate (use kir::toString() to print Kernel IR nodes)";
-}
-
-void IrPrinter::handle(const kir::Sync* a) {
-  os_ << "kir::Sync (use kir::toString() to print Kernel IR nodes)";
 }
 
 void IrPrinter::handle(const Split* s) {

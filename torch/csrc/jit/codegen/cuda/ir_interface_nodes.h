@@ -175,7 +175,6 @@ class ComputeAt;
 class TransformReplay;
 class TransformIter;
 class OptOutMutator;
-class LoopNestGenerator;
 
 namespace ir_utils {
 class TVDomainGuard;
@@ -268,11 +267,11 @@ class TORCH_CUDA_API TensorView : public Val {
   }
 
   // Return position in compute_at_view that lines up with this->axis(pos)?
-  int getComputeAtRelPos(int pos);
+  int getComputeAtRelPos(int pos) const;
 
   // Will check if an axis is inside computeAtAxis and will fetch the reference
   // to be used in code generation.
-  std::pair<int, TensorView*> getComputeAtPos(int pos) {
+  std::pair<int, const TensorView*> getComputeAtPos(int pos) const {
     pos = normalizeAxisPos(pos);
     TORCH_INTERNAL_ASSERT(
         nDims() > 0, "Tried to access a computeAt axis in a 0-dim TensorView");
@@ -281,7 +280,7 @@ class TORCH_CUDA_API TensorView : public Val {
     return compute_at_view_->getComputeAtPos(getComputeAtRelPos(pos));
   }
 
-  std::pair<IterDomain*, TensorView*> getComputeAtAxis(int pos) {
+  std::pair<IterDomain*, const TensorView*> getComputeAtAxis(int pos) const {
     const auto computeAtPos = getComputeAtPos(pos);
     return std::make_pair(
         computeAtPos.second->axis(computeAtPos.first), computeAtPos.second);
@@ -354,22 +353,12 @@ class TORCH_CUDA_API TensorView : public Val {
 
   friend TORCH_CUDA_API TransformReplay;
   friend TORCH_CUDA_API OptOutMutator;
-  friend TORCH_CUDA_API LoopNestGenerator;
   friend ComputeAt;
   friend void IrFixComputeAt(Fusion*);
   friend void adjustMemoryTypes(Fusion* fusion);
   friend class ir_utils::TVDomainGuard;
 
  protected:
-  // Make an exact copy of this tensor (similar to clone()), however, also grabs
-  // the same name. Current use of this is for initialization of reductions.
-  // This will break our dependency chain as it is a literal clone of a
-  // TensorView but it has a different dependency chain. We need to improve our
-  // dependency model to allow for initailziation of reduction buffers. The only
-  // reason we can get away with this for now is because we don't use dependency
-  // analysis for the IR after we call this.
-  TensorView* unsafeClone() const;
-
   void setDomain(TensorDomain* td) {
     domain_ = td;
   }

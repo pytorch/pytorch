@@ -4,6 +4,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 
 #include <vector>
 
@@ -13,6 +14,7 @@ namespace fuser {
 namespace cuda {
 
 //! Insert sync at end of for-loops to prevent write-after-read race condition.
+//!
 //! WAR race condition occurs when the next iteration of the loop overwrites
 //! shared memory value before a previous operation has finished reading it.
 //!
@@ -43,9 +45,8 @@ namespace cuda {
 //! If Child - End and Parent has zero remaining operations, then
 //! Parent inherits Child End.
 //!
-std::vector<Expr*> insertThreadSynchronization(
-    Fusion* fusion,
-    const std::vector<Expr*>& exprs);
+std::vector<kir::Expr*> insertThreadSynchronization(
+    const std::vector<kir::Expr*>& exprs);
 
 } // namespace cuda
 } // namespace fuser

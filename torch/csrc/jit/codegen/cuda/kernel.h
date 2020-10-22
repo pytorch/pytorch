@@ -13,23 +13,21 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+namespace kir {
 
 //! Summary of interesting facts about the kernel
-//!
-//! TODO(kir): const node ptrs
-//!
 struct KernelSummary {
-  //! List of Write-After-Read (WAR) synchronization barriers
-  std::unordered_map<size_t, kir::Sync*> war_hazard_syncs;
+  //! Count of WAR (write-after-read) hazard barriers
+  int war_hazard_syncs_count = 0;
 
   //! List of global buffers
-  std::vector<kir::Allocate*> global_allocations;
+  std::vector<const kir::Allocate*> global_allocations;
 
   //! List of dynamic shared memory buffers
-  std::vector<kir::Allocate*> dynamic_smem_allocations;
+  std::vector<const kir::Allocate*> dynamic_smem_allocations;
 
   //! List of static shared memory buffers
-  std::vector<kir::Allocate*> static_smem_allocations;
+  std::vector<const kir::Allocate*> static_smem_allocations;
 
   //! Indicate the need to generate random numbers
   bool is_stochastic = false;
@@ -63,7 +61,7 @@ class TORCH_CUDA_API Kernel final : public NonCopyable {
   //! run analysis passes to build a KernelSummary
   //!
   void finalize(
-      std::vector<Expr*> top_level_exprs,
+      std::vector<kir::Expr*> top_level_exprs,
       ThreadPredicateMap predicate_map);
 
   //! Register input as an input of the kernel
@@ -88,6 +86,10 @@ class TORCH_CUDA_API Kernel final : public NonCopyable {
     return top_level_exprs_;
   }
 
+  const auto& irNodes() const {
+    return ir_nodes_;
+  }
+
   const KernelSummary& summary() const {
     return summary_;
   }
@@ -101,8 +103,15 @@ class TORCH_CUDA_API Kernel final : public NonCopyable {
   //! \note This is a specialized helper for kir::IrBuilder, not
   //!   intendted for general use
   //!
-  void registerIrNode(std::unique_ptr<Statement> node) {
+  void registerIrNode(kir::Passkey passkey, std::unique_ptr<kir::Node> node) {
+    TORCH_CHECK(passkey.kernel == this);
     ir_nodes_.push_back(std::move(node));
+  }
+
+  //! Allocates a new value identifier
+  kir::ValueId newValueId(kir::Passkey passkey) {
+    TORCH_CHECK(passkey.kernel == this);
+    return next_value_id_++;
   }
 
   //! Debug dump of the Kernel IR
@@ -114,17 +123,17 @@ class TORCH_CUDA_API Kernel final : public NonCopyable {
 
  private:
   // Kernel IR nodes
-  std::vector<std::unique_ptr<Statement>> ir_nodes_;
+  std::vector<std::unique_ptr<kir::Node>> ir_nodes_;
 
-  // Map from value to its definition expression
-  std::unordered_map<const Val*, Expr*> definitions_;
-
-  // Top level expressions
-  std::vector<Expr*> top_level_exprs_;
+  // Top level statements
+  std::vector<kir::Expr*> top_level_exprs_;
 
   // Kernel inputs and outputs
   std::vector<Val*> inputs_;
   std::vector<Val*> outputs_;
+
+  // Used to allocate unique value IDs
+  kir::ValueId next_value_id_ = 1;
 
   // Summary of interesting kernel data
   KernelSummary summary_;
@@ -134,6 +143,7 @@ class TORCH_CUDA_API Kernel final : public NonCopyable {
   std::unique_ptr<ThreadPredicateMap> predicate_map_;
 };
 
+} // namespace kir
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

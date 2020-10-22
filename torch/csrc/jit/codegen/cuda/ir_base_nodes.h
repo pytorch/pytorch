@@ -38,7 +38,7 @@ namespace cuda {
 
 using StmtNameType = unsigned int;
 
-constexpr StmtNameType UNINITIALIZED_STMTNAMETYPE =
+constexpr StmtNameType kInvalidStmName =
     std::numeric_limits<unsigned int>::max();
 
 class Fusion;
@@ -132,7 +132,7 @@ class TORCH_CUDA_API Statement : public NonCopyable, public PolymorphicBase {
   void print() const;
 
  protected:
-  StmtNameType name_ = UNINITIALIZED_STMTNAMETYPE;
+  StmtNameType name_ = kInvalidStmName;
   Fusion* fusion_ = nullptr;
 };
 
@@ -165,10 +165,6 @@ class TORCH_CUDA_API Statement : public NonCopyable, public PolymorphicBase {
  */
 class TORCH_CUDA_API Val : public Statement {
  public:
-  virtual ~Val() = default;
-
-  Val() = delete;
-
   // We may not want to register this value during Val's constructor. The reason
   // for this is that if we register the val, then ina derived constructor try
   // to throw, fusion's destructor will get called, but the pointer to this Val
@@ -192,16 +188,20 @@ class TORCH_CUDA_API Val : public Statement {
   Val(Val&& other) = delete;
   Val& operator=(Val&& other) = delete;
 
+  // TODO: why is this optional?
+  //
   c10::optional<ValType> getValType() const override {
     return vtype_;
   }
 
   // Throws if no DataType is found. Vals must have a DataType
+  //
+  // TODO: why is this optional?
+  //
   c10::optional<DataType> getDataType() const override;
 
   bool isScalar() const {
-    return vtype_ == ValType::Scalar || vtype_ == ValType::NamedScalar ||
-        vtype_ == ValType::KirScalar || vtype_ == ValType::KirNamedScalar;
+    return vtype_ == ValType::Scalar || vtype_ == ValType::NamedScalar;
   }
 
   bool isConstScalar() const;
@@ -217,8 +217,7 @@ class TORCH_CUDA_API Val : public Statement {
 
   // Returns the Expr that this value is an output of, returns nullptr if none
   // was found
-  Expr* getOrigin();
-  const Expr* getOrigin() const;
+  Expr* getOrigin() const;
 
   virtual bool sameType(const Statement* other) {
     return Statement::sameType(other) &&

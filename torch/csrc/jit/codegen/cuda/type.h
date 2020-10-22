@@ -29,14 +29,6 @@ enum class ValType {
   TensorView,
   Scalar,
   NamedScalar,
-
-  // Temporary: Kernel IR nodes
-  TensorIndex,
-  KirNamedScalar,
-  KirScalar,
-  KirTensorDomain,
-  KirIterDomain,
-  KirTensorView,
 };
 
 enum class DataType { Bool, Float, Half, Int, Null };
@@ -50,18 +42,6 @@ enum class ExprType {
   BroadcastOp,
   Split,
   Merge,
-
-  // Temporary: Kernel IR nodes
-  GridReduction,
-  ForLoop,
-  IfThenElse,
-  Allocate,
-  Sync,
-  KirUnaryOp,
-  KirBinaryOp,
-  KirTernaryOp,
-  KirReductionOp,
-  KirBroadcastOp,
 };
 
 enum class UnaryOpType {

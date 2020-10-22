@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -9,6 +11,15 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 namespace kir {
+
+Val::Val(Passkey passkey, DataType dtype) : Node(passkey), dtype_(dtype) {
+  id_ = passkey.kernel->newValueId(passkey);
+}
+
+void Expr::setParentScope(Expr* scope) {
+  // TODO(kir): checks to make sure the scope lists are consistent
+  parent_scope_ = scope;
+}
 
 NamedScalar* NamedScalar::getParallelDim(ParallelType p_type) {
   std::string parallel_dim = stringifyThreadSize(p_type);
@@ -56,49 +67,53 @@ c10::optional<ParallelType> NamedScalar::getParallelIndex() const {
   return c10::nullopt;
 }
 
-IterDomain::IterDomain(Passkey, Val* start, Val* extent)
-    : Val(ValType::KirIterDomain, DataType::Int, true, true),
-      start_(start),
-      extent_(extent) {}
+IterDomain::IterDomain(Passkey passkey, Val* start, Val* extent)
+    : Val(passkey, DataType::Int), start_(start), extent_(extent) {}
 
-IterDomain::IterDomain(Passkey, const fuser::cuda::IterDomain* iter_domain)
-    : Val(iter_domain),
-      start_(GpuLower::lowerValue(iter_domain->start())),
-      extent_(GpuLower::lowerValue(iter_domain->rawExtent())),
+IterDomain::IterDomain(
+    Passkey passkey,
+    const fuser::cuda::IterDomain* iter_domain)
+    : Val(passkey, iter_domain->getDataType().value()),
+      start_(GpuLower::current()->lowerValue(iter_domain->start())),
+      extent_(GpuLower::current()->lowerValue(iter_domain->rawExtent())),
       parallel_type_(iter_domain->getParallelType()),
       iter_type_(iter_domain->getIterType()),
-      is_rfactor_domain_(iter_domain->isRFactorProduct()) {}
+      is_rfactor_domain_(iter_domain->isRFactorProduct()),
+      is_simple_(iter_domain->getOrigin() == nullptr) {
+  // preserve the fusion node's name
+  setName(iter_domain->name());
+}
 
 Val* IterDomain::extent() const {
-  TORCH_CHECK(isLoweredVal(extent_));
   if (isThread()) {
-    if (extent_->getValType() == ValType::KirScalar) {
-      if (extent_->as<kir::Int>()->isConst()) {
-        return extent_;
-      }
+    if (extent_->isScalar() && extent_->isConst()) {
+      return extent_;
     }
     return NamedScalar::getParallelDim(getParallelType());
   }
   return extent_;
 }
 
-TensorDomain::TensorDomain(Passkey, std::vector<IterDomain*> domain)
-    : Val(ValType::KirTensorDomain), root_domain_(std::move(domain)) {
+TensorDomain::TensorDomain(Passkey passkey, std::vector<IterDomain*> domain)
+    : Val(passkey, DataType::Null), root_domain_(std::move(domain)) {
   domain_ = root_domain_;
   resetDomains();
 }
 
 TensorDomain::TensorDomain(
-    Passkey,
+    Passkey passkey,
     const fuser::cuda::TensorDomain* tensor_domain)
-    : Val(tensor_domain), contiguity_(tensor_domain->contiguity()) {
+    : Val(passkey, DataType::Null), contiguity_(tensor_domain->contiguity()) {
+  // preserve the fusion node's name
+  setName(tensor_domain->name());
+
   const auto lowerIterDomains =
       [](const std::vector<fuser::cuda::IterDomain*>& domains) {
         std::vector<IterDomain*> lowered_domains;
         lowered_domains.reserve(domains.size());
         for (const auto iter_domain : domains) {
           lowered_domains.push_back(
-              GpuLower::lowerValue(iter_domain)->as<IterDomain>());
+              GpuLower::current()->lowerValue(iter_domain)->as<IterDomain>());
         }
         return lowered_domains;
       };
@@ -167,67 +182,66 @@ std::vector<IterDomain*> TensorDomain::noBroadcasts(
   return no_broadcast_domains;
 }
 
-TensorView::TensorView(Passkey, const fuser::cuda::TensorView* tv)
-    : Val(tv), fuser_tv_(tv) {
-  domain_ = GpuLower::lowerValue(tv->domain())->as<TensorDomain>();
+TensorView::TensorView(Passkey passkey, const fuser::cuda::TensorView* tv)
+    : Val(passkey, tv->getDataType().value()), fuser_tv_(tv) {
+  setName(tv->name());
+  domain_ = GpuLower::current()->lowerValue(tv->domain())->as<TensorDomain>();
   memory_type_ = tv->getMemoryType();
 }
 
-UnaryOp::UnaryOp(Passkey, UnaryOpType type, Val* out, Val* in)
-    : Expr(ExprType::KirUnaryOp), unary_op_type_{type}, out_{out}, in_{in} {
+TensorView::TensorView(
+    Passkey passkey,
+    DataType dtype,
+    TensorDomain* domain,
+    MemoryType memory_type)
+    : Val(passkey, dtype), domain_(domain), memory_type_(memory_type) {}
+
+UnaryOp::UnaryOp(Passkey passkey, UnaryOpType operation, Val* out, Val* in)
+    : Expr(passkey), operation_(operation), out_(out), in_(in) {
   addOutput(out);
   addInput(in);
-  name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
 
-BinaryOp::BinaryOp(Passkey, BinaryOpType type, Val* out, Val* lhs, Val* rhs)
-    : Expr(ExprType::KirBinaryOp),
-      binary_op_type_{type},
-      out_{out},
-      lhs_{lhs},
-      rhs_{rhs} {
+BinaryOp::BinaryOp(
+    Passkey passkey,
+    BinaryOpType operation,
+    Val* out,
+    Val* lhs,
+    Val* rhs)
+    : Expr(passkey), operation_(operation), out_(out), lhs_(lhs), rhs_(rhs) {
   addOutput(out);
   addInput(lhs);
   addInput(rhs);
-  name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
 
 TernaryOp::TernaryOp(
-    Passkey,
-    TernaryOpType type,
+    Passkey passkey,
+    TernaryOpType operation,
     Val* out,
     Val* in1,
     Val* in2,
     Val* in3)
-    : Expr(ExprType::KirTernaryOp),
-      ternary_op_type_{type},
-      out_{out},
-      in1_{in1},
-      in2_{in2},
-      in3_{in3} {
+    : Expr(passkey),
+      operation_(operation),
+      out_(out),
+      in1_(in1),
+      in2_(in2),
+      in3_(in3) {
   addOutput(out);
   addInput(in1);
   addInput(in2);
   addInput(in3);
-  name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
 
 ReductionOp::ReductionOp(
-    Passkey,
-    BinaryOpType reduction_op_type,
+    Passkey passkey,
+    BinaryOpType operation,
     Val* init,
     Val* out,
-    Val* in,
-    Bool* pred)
-    : Expr(ExprType::KirReductionOp),
-      reduction_op_type_(reduction_op_type),
-      init_(init),
-      out_(out),
-      in_(in),
-      pred_(pred) {
+    Val* in)
+    : Expr(passkey), operation_(operation), init_(init), out_(out), in_(in) {
   addOutput(out);
   addInput(in);
-  name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
 
 std::vector<IterDomain*> ReductionOp::getReductionDomains() const {
@@ -256,116 +270,78 @@ std::unordered_map<ParallelType, IterDomain*, TypeHash> ReductionOp::
   return parallel_domains;
 }
 
-BroadcastOp::BroadcastOp(Passkey, Val* out, Val* in)
-    : Expr(ExprType::KirBroadcastOp), out_(out), in_(in) {
-  TORCH_CHECK(in->getValType().value() == ValType::TensorIndex);
-  TORCH_CHECK(out->getValType().value() == ValType::TensorIndex);
+BroadcastOp::BroadcastOp(Passkey passkey, Val* out, Val* in)
+    : Expr(passkey), out_(out), in_(in) {
+  TORCH_CHECK(in->isA<TensorIndex>() || in->isA<TensorView>());
+  TORCH_CHECK(out->isA<TensorIndex>() || out->isA<TensorView>());
   addOutput(out);
   addInput(in);
-  name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
 
 TensorIndex::TensorIndex(
-    Passkey,
+    Passkey passkey,
     const fuser::cuda::TensorView* view,
     std::vector<Val*> indices)
-    : Val(ValType::TensorIndex, view->getDataType().value(), true, true),
-      view_(GpuLower::lowerValue(view)->as<TensorView>()),
+    : Val(passkey, view->getDataType().value()),
+      view_(GpuLower::current()->lowerValue(view)->as<TensorView>()),
       indices_(indices) {
   TORCH_INTERNAL_ASSERT(
       std::all_of(
           indices.begin(),
           indices.end(),
-          [](Val* v) {
-            return (v->getValType() == ValType::KirScalar ||
-                    v->getValType() == ValType::KirNamedScalar) &&
-                v->getDataType() == DataType::Int;
-          }),
+          [](Val* v) { return v->dtype() == DataType::Int; }),
       "Cannot index with a value other than an int.");
 }
 
-Sync::Sync(Passkey, bool war_sync) : Expr(ExprType::Sync), war_sync_(war_sync) {
-  name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
-}
+Sync::Sync(Passkey passkey, bool war_sync)
+    : Expr(passkey), war_sync_(war_sync) {}
 
 void Scope::insert_before(Expr* ref, Expr* expr) {
-  auto it = exprs_.begin();
-  while (it != exprs_.end()) {
-    if ((*it)->sameAs(ref))
-      break;
-    it++;
-  }
-  if (it != exprs_.end())
+  const auto it = std::find(exprs_.begin(), exprs_.end(), ref);
+  if (it != exprs_.end()) {
     exprs_.insert(it, expr);
+  }
 }
 
 void Scope::insert_after(Expr* ref, Expr* expr) {
-  auto it = exprs_.begin();
-  while (it != exprs_.end()) {
-    if (*it == ref)
-      break;
-    it++;
+  const auto it = std::find(exprs_.begin(), exprs_.end(), ref);
+  if (it != exprs_.end()) {
+    exprs_.insert(it + 1, expr);
   }
-  if (it != exprs_.end())
-    exprs_.insert(++it, expr);
 }
 
 void Scope::erase(Expr* ref) {
-  auto it = exprs_.begin();
-  while (it != exprs_.end()) {
-    if (*it == ref)
-      break;
-    it++;
-  }
-  if (it != exprs_.end())
+  const auto it = std::find(exprs_.begin(), exprs_.end(), ref);
+  if (it != exprs_.end()) {
     exprs_.erase(it);
+  }
 }
 
 bool Scope::contains(Expr* expr) const {
-  for (auto e : exprs_)
-    if (e == expr)
-      return true;
-  return false;
+  const auto it = std::find(exprs_.begin(), exprs_.end(), expr);
+  return it != exprs_.end();
 }
 
 void Scope::clear() {
-  exprs_ = std::vector<Expr*>();
+  exprs_.clear();
 }
 
 ForLoop::ForLoop(
-    Passkey,
+    Passkey passkey,
     Val* index,
     IterDomain* iter_domain,
     Expr* parent_scope)
-    : Expr(ExprType::ForLoop),
-      index_{index},
-      iter_domain_{iter_domain},
-      parent_scope_{parent_scope} {
-  TORCH_INTERNAL_ASSERT(index->isAnInt());
-  TORCH_INTERNAL_ASSERT(isLoweredScalar(index));
+    : Expr(passkey), index_{index}, iter_domain_{iter_domain} {
+  TORCH_INTERNAL_ASSERT(index->dtype() == DataType::Int);
+  setParentScope(parent_scope);
   addInput(index);
   addInput(iter_domain);
-  name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
 
-void ForLoop::setParentScope(Expr* scope) {
-  TORCH_INTERNAL_ASSERT(
-      !scope_utils::exprInScope(parentScope(), this),
-      "Cannot change parent scope if not already removed from previous parent.");
-  parent_scope_ = scope;
-}
-
-IfThenElse::IfThenElse(Passkey, Bool* cond, Expr* parent_scope)
-    : Expr(ExprType::IfThenElse), cond_{cond}, parent_scope_(parent_scope) {
+IfThenElse::IfThenElse(Passkey passkey, Bool* cond, Expr* parent_scope)
+    : Expr(passkey), cond_{cond} {
+  setParentScope(parent_scope);
   addInput(cond);
-  name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
-}
-
-void IfThenElse::setParentScope(Expr* scope) {
-  TORCH_INTERNAL_ASSERT(
-      !scope_utils::exprInScope(parentScope(), this),
-      "Cannot change parent scope if not already removed from previous parent.");
-  parent_scope_ = scope;
 }
 
 Val* TensorIndex::index(int i) const {
@@ -378,25 +354,20 @@ Val* TensorIndex::index(int i) const {
 }
 
 Allocate::Allocate(
-    Passkey,
+    Passkey passkey,
     Val* buffer,
     MemoryType memory_type,
     Val* size,
     bool zero_init)
-    : Expr(ExprType::Allocate),
+    : Expr(passkey),
       buffer_(buffer),
       memory_type_(memory_type),
       size_(size),
       zero_init_(zero_init) {
   if (size_ != nullptr) {
-    TORCH_INTERNAL_ASSERT(
-        size_->isOneInt() ||
-            buffer_->getValType().value() == ValType::KirTensorView,
-        "Cannot allocate a non-TensorView buffer with a size != 1, received buffer: ",
-        buffer_);
+    TORCH_INTERNAL_ASSERT(size_->isOneInt() || buffer_->isA<TensorView>());
   } else {
-    TORCH_INTERNAL_ASSERT(
-        buffer_->getValType().value() == ValType::KirTensorView);
+    TORCH_INTERNAL_ASSERT(buffer_->isA<TensorView>());
     TORCH_INTERNAL_ASSERT(
         buffer_->as<TensorView>()->memoryType() == memory_type_);
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
@@ -409,37 +380,29 @@ Allocate::Allocate(
   }
 
   if (memory_type_ == MemoryType::Local) {
-    if (!size_->isConstScalar()) {
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "Allocations must be based on constant integers for the memory type ",
-          memory_type_,
-          " but tried to alloc ",
-          buffer_,
-          " with symbolic size.");
-    }
+    TORCH_INTERNAL_ASSERT(
+        ExpressionEvaluator::isConst(size_),
+        "Allocations must be based on constant integers for the memory type ",
+        memory_type_);
   }
 
   addInput(size_);
-  name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
 
-GridReduction::GridReduction(Passkey, ReductionOp* reduction_op)
-    : Expr(ExprType::GridReduction), reduction_op_(reduction_op) {
+GridReduction::GridReduction(Passkey passkey, ReductionOp* reduction_op)
+    : Expr(passkey), reduction_op_(reduction_op) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 
 GridReduction::GridReduction(
-    Passkey,
+    Passkey passkey,
     ReductionOp* reduction_op,
     Allocate* reduction_buffer,
-    Allocate* sync_buffer,
-    Bool* pred)
-    : Expr(ExprType::GridReduction),
+    Allocate* sync_buffer)
+    : Expr(passkey),
       reduction_op_(reduction_op),
       reduction_buffer_(reduction_buffer),
-      sync_buffer_(sync_buffer),
-      pred_(pred) {}
+      sync_buffer_(sync_buffer) {}
 
 std::string GridReduction::getPredicateFlagName(const TensorView* val) {
   std::stringstream ss;

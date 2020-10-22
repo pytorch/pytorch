@@ -6,37 +6,11 @@ namespace fuser {
 namespace cuda {
 namespace kir {
 
-bool isLoweredScalar(const Val* val) {
-  switch (val->getValType().value()) {
-    case ValType::KirNamedScalar:
-    case ValType::KirScalar:
-      return true;
-    default:
-      return false;
-  }
-}
-
-bool isLoweredVal(const Val* val) {
-  switch (val->getValType().value()) {
-    case ValType::TensorIndex:
-    case ValType::KirNamedScalar:
-    case ValType::KirScalar:
-    case ValType::KirTensorDomain:
-    case ValType::KirIterDomain:
-    case ValType::KirTensorView:
-      return true;
-    default:
-      return false;
-  }
-}
-
 Val* IrBuilder::newResult(const Val* lhs, const Val* rhs) {
-  TORCH_CHECK(isLoweredScalar(lhs));
-  TORCH_CHECK(isLoweredScalar(rhs));
-  TORCH_CHECK(lhs->getDataType() == rhs->getDataType());
+  TORCH_CHECK(lhs->dtype() == rhs->dtype());
 
   // Allocate a compatible result value
-  switch (lhs->getDataType().value()) {
+  switch (lhs->dtype()) {
     case DataType::Bool:
       return create<Bool>(c10::nullopt);
     case DataType::Float:

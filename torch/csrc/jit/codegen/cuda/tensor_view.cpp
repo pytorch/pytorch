@@ -152,16 +152,6 @@ IterDomain* TensorView::axis(int pos) const {
   return domain()->axis(pos);
 }
 
-TensorView* TensorView::unsafeClone() const {
-  TensorView* new_view = new TensorView(domain_, getDataType().value());
-  new_view->compute_at_view_ = compute_at_view_;
-  new_view->relative_compute_at_axis_ = relative_compute_at_axis_;
-  new_view->this_compute_at_axis_ = this_compute_at_axis_;
-  new_view->memory_type_ = memory_type_;
-  new_view->name_ = name();
-  return new_view;
-}
-
 void TensorView::setComputeAt(TensorView* computeAtView, int axis) {
   compute_at_view_ = computeAtView;
   relative_compute_at_axis_ = axis;
@@ -199,7 +189,7 @@ void TensorView::setComputeAt(
 // another fusion output,  we may want to check that there is a direct
 // consumer/producer relationship between this and compute_at view before using
 // this function, and creating another pass to handle relative outputs.
-int TensorView::getComputeAtRelPos(int pos) {
+int TensorView::getComputeAtRelPos(int pos) const {
   if (!hasComputeAt()) {
     return pos;
   }

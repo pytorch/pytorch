@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
 #include <torch/csrc/jit/resource_guard.h>
 
@@ -187,24 +188,77 @@ void validateKernelOutputs(
       !mismatch, "Found one or more invalid arguments: ", msg.str());
 }
 
-StatefulExpressionEvaluator statefulBindInputs(
+kir::ExpressionEvaluator bindKernelInputs(
     const at::ArrayRef<IValue>& aten_inputs,
-    Fusion* fusion,
-    GpuLower* lower) {
-  FUSER_PERF_SCOPE("statefulBindInputs");
+    kir::Kernel* kernel) {
+  FUSER_PERF_SCOPE("bindKernelInputs");
+
+  TORCH_INTERNAL_ASSERT(
+      kernel->inputs().size() == aten_inputs.size(),
+      "Something went wrong configuring launch. Inputs no longer match.");
+
+  kir::ExpressionEvaluator expr_eval;
+  const auto& inputs = kernel->inputs();
+
+  for (size_t i = 0; i < inputs.size(); i++) {
+    const auto input = inputs[i];
+
+    if (auto tensor_input = dynamic_cast<kir::TensorView*>(input)) {
+      TORCH_INTERNAL_ASSERT(
+          aten_inputs[i].isTensor(),
+          "Something went wrong configuring launch. Inputs no longer match.");
+
+      const auto aten_tensor = aten_inputs[i].toTensor();
+      const auto root_domain =
+          kir::TensorDomain::noReductions(tensor_input->domain()->rootDomain());
+      TORCH_INTERNAL_ASSERT(
+          aten_tensor.ndimension() == static_cast<int>(root_domain.size()),
+          "Something went wrong configuring launch. Inputs no longer match.");
+
+      for (size_t dim = 0; dim < root_domain.size(); dim++) {
+        const auto extent = root_domain[dim]->extent();
+        const auto value = aten_tensor.sizes()[dim];
+        const auto prev_value = expr_eval.evaluate(extent);
+        if (prev_value.has_value()) {
+          TORCH_CHECK(
+              *prev_value == value,
+              "Attempting to bind ",
+              kir::toString(extent),
+              " to ",
+              value,
+              "but it's already set to ",
+              *prev_value);
+        } else {
+          expr_eval.bind(extent, value);
+        }
+      }
+    } else if (input->isScalar() && input->dtype() == DataType::Int) {
+      TORCH_INTERNAL_ASSERT(
+          aten_inputs[i].type()->kind() == c10::TypeKind::IntType);
+      expr_eval.bind(input, aten_inputs[i].toInt());
+    }
+  }
+
+  return expr_eval;
+}
+
+StatefulExpressionEvaluator bindFusionInputs(
+    const at::ArrayRef<IValue>& aten_inputs,
+    Fusion* fusion) {
+  FUSER_PERF_SCOPE("bindFusionInputs");
 
   TORCH_INTERNAL_ASSERT(
       fusion->inputs().size() == aten_inputs.size(),
       "Something went wrong configuring launch. Inputs no longer match.");
 
-  auto fusion_inputs = fusion->inputs();
   StatefulExpressionEvaluator evaluator(fusion);
+  auto inputs = fusion->inputs();
 
   // This should probably move to EvaluationContext as we may want to bind
   // input values frequently. Bind fusion input values to runtime values.
-  for (size_t i = 0; i < fusion->inputs().size(); i++) {
-    if (fusion->inputs()[i]->getValType() == ValType::TensorView) {
-      TensorView* cg_tensor = fusion->inputs()[i]->as<TensorView>();
+  for (size_t i = 0; i < inputs.size(); i++) {
+    if (inputs[i]->getValType() == ValType::TensorView) {
+      TensorView* cg_tensor = inputs[i]->as<TensorView>();
 
       TORCH_INTERNAL_ASSERT(
           aten_inputs[i].isTensor(),
@@ -217,15 +271,14 @@ StatefulExpressionEvaluator statefulBindInputs(
           "Something went wrong configuring launch. Inputs no longer match.");
 
       for (size_t dim = 0; dim < root_dom.size(); dim++) {
-        evaluator.safeBind(
-            root_dom[dim]->extent(), aten_tensor.sizes()[dim], lower);
+        evaluator.safeBind(root_dom[dim]->extent(), aten_tensor.sizes()[dim]);
       }
     } else if (
-        fusion->inputs()[i]->getValType().value() == ValType::Scalar &&
-        fusion->inputs()[i]->getDataType().value() == DataType::Int) {
+        inputs[i]->getValType().value() == ValType::Scalar &&
+        inputs[i]->getDataType().value() == DataType::Int) {
       TORCH_INTERNAL_ASSERT(
           aten_inputs[i].type()->kind() == c10::TypeKind::IntType);
-      evaluator.safeBind(fusion->inputs()[i], aten_inputs[i].toInt(), lower);
+      evaluator.safeBind(inputs[i], aten_inputs[i].toInt());
     }
   }
   return evaluator;

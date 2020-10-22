@@ -320,8 +320,7 @@ TORCH_CUDA_API c10::optional<ReductionParams> getReductionHeuristics(
           red_expr->getExprType().value() == ExprType::ReductionOp,
       "TensorView doesn't have a reduction.");
 
-  StatefulExpressionEvaluator evaluator(
-      executor_utils::statefulBindInputs(fusion_inputs, fusion));
+  auto evaluator = executor_utils::bindFusionInputs(fusion_inputs, fusion);
 
   int64_t red_outputs = 1;
   int64_t red_elements = 1;

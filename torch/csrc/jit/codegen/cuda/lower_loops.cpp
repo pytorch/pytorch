@@ -3,11 +3,13 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
 #include <algorithm>
+#include <deque>
 #include <numeric>
 
 namespace torch {
@@ -17,22 +19,21 @@ namespace cuda {
 
 LoopNestGenerator::LoopNestGenerator(
     Fusion* fusion,
-    ThreadPredicateMap& thread_predicates,
     const std::vector<Expr*>& exprs)
-    : fusion_(fusion),
-      thread_predicates_(thread_predicates),
-      ir_builder_(GpuLower::current()->kernel()) {
+    : fusion_(fusion), ir_builder_(GpuLower::current()->kernel()) {
   generate(exprs);
 }
 
 // Create, place, and return the allocation for tv
-Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
+kir::Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
+  const auto gpu_lower = GpuLower::current();
+
   TORCH_INTERNAL_ASSERT(
       !(FusionGuard::getCurFusion()->hasInput(tv) ||
         FusionGuard::getCurFusion()->hasOutput(tv)),
       "Tried to allocate an input or output tensor.");
 
-  const auto alloc_point = loop_utils::getAllocPoint(tv, for_loops);
+  const auto alloc_point = loop_utils::getAllocPoint(tv, for_loops_);
   const auto alloc_loop = alloc_point.first;
   const auto alloc_pos = alloc_point.second;
 
@@ -41,12 +42,12 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
   for (size_t i = alloc_pos; i < tv->nDims(); i++) {
     IterDomain* compute_at_dim = tv->getComputeAtAxis(i).first;
     IterDomain* local_dim = tv->axis(i);
+    const auto memory_type = tv->getMemoryType();
     if (
         // If shared memory, don't use any IDs bound to a grid dimension
-        (tv->memory_type_ == MemoryType::Shared &&
-         compute_at_dim->isBlockDim()) ||
+        (memory_type == MemoryType::Shared && compute_at_dim->isBlockDim()) ||
         // If local memory, don't use any IDs bound to a grid or block dimension
-        (tv->memory_type_ == MemoryType::Local && compute_at_dim->isThread()) ||
+        (memory_type == MemoryType::Local && compute_at_dim->isThread()) ||
         // If we're reducing this dimension, don't use it in the allocation
         // computation
         local_dim->isReduction() ||
@@ -60,13 +61,13 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
 
   // Multiply all the dimensions we're going to use for the allocation together
   // to get the total size
-  Val* size = nullptr;
+  kir::Val* size = nullptr;
   if (alloc_dims.size() == 0) {
     size = ir_builder_.create<kir::Int>(1);
   } else {
-    size = GpuLower::lowerValue(alloc_dims[0]);
+    size = gpu_lower->lowerValue(alloc_dims[0]);
     for (size_t i = 1; i < alloc_dims.size(); i++) {
-      size = ir_builder_.mulExpr(size, GpuLower::lowerValue(alloc_dims[i]));
+      size = ir_builder_.mulExpr(size, gpu_lower->lowerValue(alloc_dims[i]));
     }
   }
 
@@ -77,7 +78,7 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
 
   // Track Dynamic Shared Memory Allocation Nodes
   if (tv->getMemoryType() == MemoryType::Shared) {
-    if (!size->isConstScalar()) {
+    if (!kir::ExpressionEvaluator::isConst(size)) {
       dynamic_smem_.push_front(alloc);
       return nullptr;
     }
@@ -88,38 +89,60 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
     alloc_loop->body().insert(for_loop_allocations_[alloc_loop], alloc);
     ++for_loop_allocations_[alloc_loop];
   } else {
-    lowered_exprs.insert(lowered_exprs.begin(), alloc);
+    lowered_exprs_.insert(lowered_exprs_.begin(), alloc);
   }
 
   return alloc;
 }
 
-void LoopNestGenerator::openFor(std::pair<IterDomain*, TensorView*> id_pair) {
-  compute_at_scope.push_back(id_pair);
-  IterDomain* id = id_pair.first;
-  if (for_loops.size() > 0) {
-    kir::ForLoop* new_scope = scope_utils::openFor(for_loops.back(), id);
-    for_loop_allocations_.insert({new_scope, 0});
-    for_loops.push_back(new_scope);
+namespace {
+
+// TODO(kir): revisit and try to simplify this
+kir::ForLoop* openForHelper(kir::ForLoop* scope, IterDomain* id) {
+  const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
+  const auto kir_id = gpu_lower->lowerValue(id)->as<kir::IterDomain>();
+  kir::ForLoop* new_scope = nullptr;
+  if (id->isThread()) {
+    std::stringstream ss;
+    ss << id->getParallelType();
+    new_scope = ir_builder.create<kir::ForLoop>(
+        ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int),
+        kir_id,
+        scope);
   } else {
-    for_loops.push_back(scope_utils::openFor(nullptr, id));
-    lowered_exprs.push_back(for_loops.back());
+    new_scope = ir_builder.create<kir::ForLoop>(
+        ir_builder.create<kir::Int>(c10::nullopt), kir_id, scope);
+  }
+  if (scope != nullptr) {
+    scope->body().push_back(new_scope);
+  }
+  return new_scope;
+}
+
+} // namespace
+
+void LoopNestGenerator::openFor(IterDomain* iter_domain) {
+  if (for_loops_.size() > 0) {
+    const auto new_scope = openForHelper(for_loops_.back(), iter_domain);
+    for_loop_allocations_.insert({new_scope, 0});
+    for_loops_.push_back(new_scope);
+  } else {
+    for_loops_.push_back(openForHelper(nullptr, iter_domain));
+    lowered_exprs_.push_back(for_loops_.back());
   }
 }
 
-void LoopNestGenerator::popFor() {
-  TORCH_INTERNAL_ASSERT(
-      !for_loops.empty() && !compute_at_scope.empty(),
-      "Can't pop for loop, scope is empty.");
-  for_loops.pop_back();
-  compute_at_scope.pop_back();
+void LoopNestGenerator::closeFor() {
+  TORCH_INTERNAL_ASSERT(!for_loops_.empty());
+  for_loops_.pop_back();
 }
 
-void LoopNestGenerator::pushBack(Expr* expr) {
-  if (for_loops.size() == 0) {
-    lowered_exprs.push_back(expr);
+void LoopNestGenerator::pushBack(kir::Expr* expr) {
+  if (for_loops_.size() == 0) {
+    lowered_exprs_.push_back(expr);
   } else {
-    scope_utils::pushBack(for_loops.back(), expr);
+    for_loops_.back()->body().push_back(expr);
   }
 }
 
@@ -129,10 +152,12 @@ void LoopNestGenerator::pushBack(Expr* expr) {
 void LoopNestGenerator::initReduction(
     TensorView* tv,
     Val* init_val,
-    Expr* alloc_expr) {
-  auto alloc_point = loop_utils::getAllocPoint(tv, for_loops);
-  auto alloc_loop = alloc_point.first;
-  auto alloc_pos = alloc_point.second;
+    kir::Expr* alloc_expr) {
+  const auto gpu_lower = GpuLower::current();
+
+  const auto alloc_point = loop_utils::getAllocPoint(tv, for_loops_);
+  const auto alloc_loop = alloc_point.first;
+  const auto alloc_pos = alloc_point.second;
 
   // Grab the IDs that will be involved in the initialization, ignore reduction
   // dimensions. Everything else will be iterated over to cover the entire
@@ -143,31 +168,24 @@ void LoopNestGenerator::initReduction(
     IterDomain* dim = tv->getComputeAtAxis(i).first;
     if (dim->isReduction())
       continue;
-    ids.push_back(GpuLower::lowerValue(dim)->as<kir::IterDomain>());
+    ids.push_back(gpu_lower->lowerValue(dim)->as<kir::IterDomain>());
   }
 
-  // Unsafe clone, as we want an exact replica of tv so we can create a UnaryOp
-  // to set the buffer to the init_val.
-  auto clone = tv->unsafeClone();
-  thread_predicates_.duplicate(clone, tv);
-  // The initilization stmt that will be located inside the loop nest (if there
-  // is one)
-  auto init_stmt = new UnaryOp(UnaryOpType::Set, clone, init_val);
-
   // Init a pointer that will become the entirety of the initialization
-  Expr* init_loop_nest = nullptr;
+  kir::Expr* init_loop_nest = nullptr;
 
   // The for loop that we will place the initialization within (alloc_pos - 1),
   // if one exists. Once we're done this inner_fl will be the inner most loop
   // containing the init_stmt
   kir::ForLoop* inner_fl = nullptr;
-  if (alloc_pos >= 1)
-    inner_fl = for_loops[alloc_pos - 1];
+  if (alloc_pos >= 1) {
+    inner_fl = for_loops_[alloc_pos - 1];
+  }
 
   // Work through the iter domains that we need to initialize on, outside to
   // inside, to construct the loop nest for the initialization.
   for (auto id : ids) {
-    kir::ForLoop* new_fl;
+    kir::ForLoop* new_fl = nullptr;
 
     if (id->isThread()) {
       // If based on a thread, make sure we get the named Int right
@@ -192,33 +210,38 @@ void LoopNestGenerator::initReduction(
       // Otherwise place it inside the last generated loop
       inner_fl->body().push_back(new_fl);
     }
+
     // Increment the inner most for loop
     inner_fl = new_fl;
   }
 
+  // Create the initialization assignment
+  const auto kir_tv = gpu_lower->lowerValue(tv);
+  const auto init_stmt = ir_builder_.create<kir::UnaryOp>(
+      UnaryOpType::Set, kir_tv, gpu_lower->lowerValue(init_val));
+
+  // If there were for loops generated, place the init_stmt in the inner most
+  // for loop. If no loops were generated, than our init_stmt is all we need.
   if (init_loop_nest == nullptr) {
-    // If no loops were generated, than our init_stmt is all we need
     init_loop_nest = init_stmt;
   } else {
-    // If there were for loops generated, place the init_stmt in the inner most
-    // for loop.
     inner_fl->body().push_back(init_stmt);
   }
 
   // If we don't have an alloc_loop defined it means it needs to go in
-  // lowered_exprs. Make sure to place after the allocation of what we're
+  // lowered_exprs_. Make sure to place after the allocation of what we're
   // initializing if there is one.
   if (alloc_loop == nullptr) {
     if (alloc_expr != nullptr) {
       auto it =
-          std::find(lowered_exprs.begin(), lowered_exprs.end(), alloc_expr);
+          std::find(lowered_exprs_.begin(), lowered_exprs_.end(), alloc_expr);
       TORCH_INTERNAL_ASSERT(
-          it != lowered_exprs.end(),
+          it != lowered_exprs_.end(),
           "Could not figure out where to initialize the buffer for ",
           tv);
-      lowered_exprs.insert(it + 1, init_loop_nest);
+      lowered_exprs_.insert(it + 1, init_loop_nest);
     } else {
-      lowered_exprs.insert(lowered_exprs.begin(), init_loop_nest);
+      lowered_exprs_.insert(lowered_exprs_.begin(), init_loop_nest);
     }
   } else {
     if (alloc_expr != nullptr) {
@@ -233,7 +256,9 @@ void LoopNestGenerator::initReduction(
   }
 }
 
-void LoopNestGenerator::handle(Expr* expr) {
+void LoopNestGenerator::handle(const Expr* expr) {
+  const auto gpu_lower = GpuLower::current();
+
   // Check if it's a tensor view expression we need to place in the loop nest
   // structure
   if (!ir_utils::isTVOp(expr)) {
@@ -246,11 +271,11 @@ void LoopNestGenerator::handle(Expr* expr) {
           out->getValType().value());
 
       pushBack(ir_builder_.create<kir::Allocate>(
-          GpuLower::lowerValue(out),
+          gpu_lower->lowerValue(out),
           MemoryType::Local,
           ir_builder_.create<kir::Int>(1)));
     }
-    pushBack(expr);
+    pushBack(gpu_lower->lowerExpr(expr));
     return;
   }
 
@@ -260,19 +285,20 @@ void LoopNestGenerator::handle(Expr* expr) {
     shared_memory_sync |= isModifiedSharedMemory(in);
   }
   if (shared_memory_sync) {
-    TORCH_INTERNAL_ASSERT(!for_loops.empty(), "Attempted to add SyncThreads");
-    // push Sync to the back of the last for loop
-    scope_utils::pushBack(for_loops.back(), ir_builder_.create<kir::Sync>());
+    TORCH_INTERNAL_ASSERT(!for_loops_.empty(), "Attempted to add SyncThreads");
+
+    // Push "sync" to the back of the last for loop
+    for_loops_.back()->body().push_back(ir_builder_.create<kir::Sync>());
     cleanSharedMemory();
   }
 
   TensorView* out = expr->output(0)->as<TensorView>();
 
   // Figure out what the entire loop structure should look like.
-  std::deque<std::pair<IterDomain*, TensorView*>> loop_structure;
+  std::deque<IterDomain*> loop_structure;
 
   // As we go through iteration domains track the previous view
-  TensorView* last_ca_view = nullptr;
+  const TensorView* last_ca_view = nullptr;
   // Check where in the previous view our last axis was in that view
   int64_t last_ca_view_ind = 0;
 
@@ -297,8 +323,7 @@ void LoopNestGenerator::handle(Expr* expr) {
     } else {
       // This is a new view, figure out where we are in it, and start from there
       for (start = 0; start < ca_view->nDims(); start++) {
-        if (loop_structure.back().first ==
-            ca_view->getComputeAtAxis(start).first) {
+        if (loop_structure.back() == ca_view->getComputeAtAxis(start).first) {
           break;
         }
       }
@@ -310,7 +335,7 @@ void LoopNestGenerator::handle(Expr* expr) {
     for (size_t ca_i = start; ca_i < ca_view->nDims(); ca_i++) {
       // Note that ca_view->getComputeAtAxis(ca_i) is equivalent to
       // std::pair(ca_view->axis(ca_i), ca_view)
-      loop_structure.push_back(ca_view->getComputeAtAxis(ca_i));
+      loop_structure.push_back(ca_view->getComputeAtAxis(ca_i).first);
 
       // Update the last view processed
       last_ca_view_ind = ca_i;
@@ -333,36 +358,37 @@ void LoopNestGenerator::handle(Expr* expr) {
        out_i++) {
     // It's actually local, but getComputeAtAxis returns a std::pair, axis
     // doesn't
-    loop_structure.push_back(out->getComputeAtAxis(out_i));
+    loop_structure.push_back(out->getComputeAtAxis(out_i).first);
   }
 
   // At this point loop_structure contains our overal target loop nest structure
   // Lets get a copy of the loop structure, and figure out which loops we need
   // to open.
-  decltype(loop_structure) loops_to_open(loop_structure);
+  auto loops_to_open = loop_structure;
+
   // Pop out loops already opened
-  for (const auto& existing_loop : for_loops) {
+  for (const auto& existing_loop : for_loops_) {
     if (loops_to_open.empty()) {
       // Nothing to open
       break;
     }
-    if (GpuLower::lowerValue(loops_to_open.front().first)
-            ->as<kir::IterDomain>() == existing_loop->iter_domain()) {
+    if (gpu_lower->lowerValue(loops_to_open.front())->as<kir::IterDomain>() ==
+        existing_loop->iter_domain()) {
       loops_to_open.pop_front();
     }
   }
 
-  // At this point for_loops + loops_to_open contains our overal target loop
+  // At this point for_loops_ + loops_to_open contains our overal target loop
   // nest structure. Open loops in "loops_to_open".
   while (!loops_to_open.empty()) {
     openFor(loops_to_open.front());
     loops_to_open.pop_front();
   }
 
-  Expr* alloc_expr = nullptr;
+  kir::Expr* alloc_expr = nullptr;
+
   // Place the allocation for out
-  if (!FusionGuard::getCurFusion()->hasInput(out) &&
-      !FusionGuard::getCurFusion()->hasOutput(out)) {
+  if (!fusion_->hasInput(out) && !fusion_->hasOutput(out)) {
     alloc_expr = pushAlloc(out);
   }
 
@@ -374,23 +400,24 @@ void LoopNestGenerator::handle(Expr* expr) {
   }
 
   //  Place the expression
-  pushBack(expr);
+  pushBack(gpu_lower->lowerExpr(expr));
 
   // If output is a shared memory buffer, set modified status
   modifySharedMemory(out);
 
   // Reduce the loop nest structure back to computeAt
   if (out->getThisComputeAtAxis() == 0) {
-    while (!for_loops.empty()) {
-      popFor();
+    while (!for_loops_.empty()) {
+      closeFor();
     }
   } else {
-    auto ca_axis = out->getThisComputeAtAxis() - 1;
-    while (for_loops.size() > 0 &&
-           for_loops.back()->iter_domain() !=
-               GpuLower::lowerValue(out->getComputeAtAxis(ca_axis).first)
-                   ->as<kir::IterDomain>()) {
-      popFor();
+    const auto ca_axis = out->getThisComputeAtAxis() - 1;
+    const auto target_domain =
+        gpu_lower->lowerValue(out->getComputeAtAxis(ca_axis).first)
+            ->as<kir::IterDomain>();
+    while (!for_loops_.empty() &&
+           for_loops_.back()->iter_domain() != target_domain) {
+      closeFor();
     }
   }
 }
@@ -686,7 +713,7 @@ void mergeGroupsIntoSortedList(
 // correct loop nests. Vector exprs is assumed to be topologically
 // sorted, but that is not sufficient as tensors computed at
 // outer loops need to be located earlier.
-void reorderExprsForComputeAt(std::vector<Expr*>& exprs) {
+std::vector<Expr*> reorderExprsForComputeAt(const std::vector<Expr*>& exprs) {
   ExprListT reordered_exprs;
 
   // expr -> target
@@ -712,7 +739,7 @@ void reorderExprsForComputeAt(std::vector<Expr*>& exprs) {
 
   // If no computeAt found, no need to reorder.
   if (computed_at_exprs.size() == 0) {
-    return;
+    return exprs;
   }
 
   // 2. Sort each loop-nest group based on axis (i.e., score)
@@ -741,17 +768,18 @@ void reorderExprsForComputeAt(std::vector<Expr*>& exprs) {
   // Reordering completed. Reordered exprs exist in reordered_exprs.
 
   TORCH_INTERNAL_ASSERT(exprs.size() == reordered_exprs.size());
-  exprs = std::move(reordered_exprs);
+  return reordered_exprs;
 }
 
 } // namespace
 
-// Generate the loop nest structure and place it in lowered_exprs
+// Generate the loop nest structure and place it in lowered_exprs_
 void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
   FusionGuard fg(fusion_);
 
+  TORCH_INTERNAL_ASSERT(lowered_exprs_.empty());
+
   // Identify all shared memory TensorViews
-  // Insert into shared_memory map <tv, modify status>
   for (auto v : fusion_->vals()) {
     if (v->getValType().value() == ValType::TensorView) {
       if (v->as<TensorView>()->getMemoryType() == MemoryType::Shared) {
@@ -760,19 +788,14 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
     }
   }
 
-  // Initialize members of the class
-  lowered_exprs = std::vector<Expr*>();
-
-  auto reordered = exprs;
-  reorderExprsForComputeAt(reordered);
-
-  for (auto* expr : reordered) {
+  // Process the carefully ordered expressions
+  for (const auto* expr : reorderExprsForComputeAt(exprs)) {
     handle(expr);
   }
 
   // Insert Dynamic Shared Memory at beginning of kernel
   for (auto smem_alloc : dynamic_smem_) {
-    lowered_exprs.insert(lowered_exprs.begin(), smem_alloc);
+    lowered_exprs_.insert(lowered_exprs_.begin(), smem_alloc);
   }
 }
 

@@ -3,7 +3,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 #include <c10/util/Optional.h>
 
@@ -14,6 +13,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+// TODO: rename to just ExpressionEvaluator (since it's the only kind we have)
 class TORCH_CUDA_API StatefulExpressionEvaluator : private OptOutDispatch {
  public:
   explicit StatefulExpressionEvaluator(Fusion* fusion) : fusion_(fusion) {}
@@ -22,10 +22,7 @@ class TORCH_CUDA_API StatefulExpressionEvaluator : private OptOutDispatch {
     return fusion_;
   }
 
-  void safeBind(
-      Val* value,
-      Int::ScalarType concrete_value,
-      GpuLower* lower = nullptr);
+  void safeBind(Val* value, Int::ScalarType concrete_value);
 
   // Returns value if found in mapping, otherwise returns c10::nullopt
   c10::optional<Int::ScalarType> getValue(Val* value);
@@ -40,19 +37,14 @@ class TORCH_CUDA_API StatefulExpressionEvaluator : private OptOutDispatch {
  private:
   using OptOutDispatch::handle;
 
-  void handle(Expr* expr) override {
+  // TODO: revisit this method, it may not be needed
+  void handle(Expr* expr) final {
     switch (expr->getExprType().value()) {
       case ExprType::UnaryOp:
         handle(expr->as<UnaryOp>());
         break;
       case ExprType::BinaryOp:
         handle(expr->as<BinaryOp>());
-        break;
-      case ExprType::KirUnaryOp:
-        handle(expr->as<kir::UnaryOp>());
-        break;
-      case ExprType::KirBinaryOp:
-        handle(expr->as<kir::BinaryOp>());
         break;
       default:
         TORCH_INTERNAL_ASSERT(
@@ -63,12 +55,8 @@ class TORCH_CUDA_API StatefulExpressionEvaluator : private OptOutDispatch {
     }
   }
 
-  void handle(UnaryOp*) override;
-  void handle(BinaryOp*) override;
-
-  // TODO(kir): remove this
-  void handle(kir::UnaryOp*) override;
-  void handle(kir::BinaryOp*) override;
+  void handle(UnaryOp*) final;
+  void handle(BinaryOp*) final;
 
   c10::optional<Int::ScalarType> maybeHandle(Val*);
 

@@ -2,7 +2,6 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 
@@ -20,7 +19,7 @@ namespace kir {
 //! This class is intended for debug printing, so it attempts
 //! to handle invalid IR states as much as possible.
 //!
-class TORCH_CUDA_API IrPrinter : private OptInConstDispatch {
+class TORCH_CUDA_API IrPrinter : private kir::IrVisitor {
   static constexpr char* kTab = "  ";
 
  public:
@@ -28,13 +27,13 @@ class TORCH_CUDA_API IrPrinter : private OptInConstDispatch {
   explicit IrPrinter(std::ostream& os) : os_(os) {}
 
   //! Print a single Kernel IR node
-  void printNode(const Statement* stmt);
+  void printNode(const kir::Node* stmt);
 
   //! Print a complete Kernel definition
   void printKernel(const Kernel* kernel);
 
  private:
-  static std::string gen(const Statement* stmt);
+  static std::string gen(const kir::Node* stmt);
 
   std::ostream& indent();
 
@@ -42,32 +41,28 @@ class TORCH_CUDA_API IrPrinter : private OptInConstDispatch {
   void endBlock();
   void handleBlock(const kir::Scope& scope);
 
-  void handle(const Statement*) final;
-  void handle(const Val*) final;
-  void handle(const Expr*) final;
+  void visit(const kir::Bool*) final;
+  void visit(const kir::Float*) final;
+  void visit(const kir::Half*) final;
+  void visit(const kir::Int*) final;
+  void visit(const kir::NamedScalar*) final;
 
-  void handle(const kir::Bool*) final;
-  void handle(const kir::Float*) final;
-  void handle(const kir::Half*) final;
-  void handle(const kir::Int*) final;
-  void handle(const kir::NamedScalar*) final;
+  void visit(const kir::TensorIndex*) final;
+  void visit(const kir::IterDomain*) final;
+  void visit(const kir::TensorDomain*) final;
+  void visit(const kir::TensorView*) final;
 
-  void handle(const kir::TensorIndex*) final;
-  void handle(const kir::IterDomain*) final;
-  void handle(const kir::TensorDomain*) final;
-  void handle(const kir::TensorView*) final;
+  void visit(const kir::UnaryOp*) final;
+  void visit(const kir::BinaryOp*) final;
+  void visit(const kir::TernaryOp*) final;
+  void visit(const kir::ReductionOp*) final;
+  void visit(const kir::BroadcastOp*) final;
 
-  void handle(const kir::UnaryOp*) final;
-  void handle(const kir::BinaryOp*) final;
-  void handle(const kir::TernaryOp*) final;
-  void handle(const kir::ReductionOp*) final;
-  void handle(const kir::BroadcastOp*) final;
-
-  void handle(const kir::GridReduction*) final;
-  void handle(const kir::ForLoop*) final;
-  void handle(const kir::IfThenElse*) final;
-  void handle(const kir::Allocate*) final;
-  void handle(const kir::Sync*) final;
+  void visit(const kir::GridReduction*) final;
+  void visit(const kir::ForLoop*) final;
+  void visit(const kir::IfThenElse*) final;
+  void visit(const kir::Allocate*) final;
+  void visit(const kir::Sync*) final;
 
  private:
   std::ostream& os_;
@@ -75,7 +70,7 @@ class TORCH_CUDA_API IrPrinter : private OptInConstDispatch {
 };
 
 //! Returns the string representation of a Kernel IR node
-std::string toString(const Statement* stmt);
+std::string toString(const kir::Node* stmt);
 
 } // namespace kir
 } // namespace cuda

@@ -24,17 +24,13 @@ class TORCH_CUDA_API GpuLower {
     lower();
   }
 
-  Kernel* kernel() const;
+  kir::Kernel* kernel() const;
 
-  // Converts a Fusion IR value into the Kernel IR equivalent
-  //
-  // TODO(kir): revisit this interface
-  //
-  static Val* lowerValue(const Val* val);
+  //! Converts a Fusion IR value into the Kernel IR equivalent
+  kir::Val* lowerValue(const Val* val);
 
-  // TODO(kir): we have two methods which do almost the same thing
-  //
-  Val* getLowerValue(const Val* val);
+  //! Converts a Fusion IR expression into the Kernel IR equivalent
+  kir::Expr* lowerExpr(const Expr* expr);
 
   //! Returns the currently active lowering object
   //! (or nullptr if no lowering is in progress)
@@ -53,10 +49,11 @@ class TORCH_CUDA_API GpuLower {
 
  private:
   // Lowered Kernel IR
-  std::unique_ptr<Kernel> kernel_;
+  std::unique_ptr<kir::Kernel> kernel_;
 
   // Fusion IR node to Kernel IR node mapping
-  std::unordered_map<const Val*, Val*> kir_map_;
+  std::unordered_map<const Val*, kir::Val*> kir_val_map_;
+  std::unordered_map<const Expr*, kir::Expr*> kir_expr_map_;
 
   Fusion* fusion_ = nullptr;
 };

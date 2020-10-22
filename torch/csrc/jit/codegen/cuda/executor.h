@@ -1,11 +1,11 @@
 #pragma once
 #include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
@@ -73,7 +73,7 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
     uint64_t rand_offset;
   };
 
-  Kernel* kernel() const {
+  kir::Kernel* kernel() const {
     return lowered_.kernel();
   }
 
@@ -98,19 +98,19 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
 
   LaunchParams computeLaunchParams(
       const LaunchParams& launch_constraints,
-      StatefulExpressionEvaluator& see);
+      kir::ExpressionEvaluator& expr_eval);
 
   uint64_t computeSharedMemory(
-      StatefulExpressionEvaluator& see,
-      const std::vector<kir::Allocate*>& buffers,
+      kir::ExpressionEvaluator& expr_eval,
+      const std::vector<const kir::Allocate*>& buffers,
       bool align_padding = false,
       uint64_t total = 0);
 
   // return a pair of vector of tensors, where tensors in the first vector are
   // not initialized, while the second vector contains zero-initiliazed tensors
-  GlobalBuffers allocGlobalVals(StatefulExpressionEvaluator& see);
+  GlobalBuffers allocGlobalVals(kir::ExpressionEvaluator& expr_eval);
 
-  std::vector<at::Tensor> allocOutputs(StatefulExpressionEvaluator& see);
+  std::vector<at::Tensor> allocOutputs(kir::ExpressionEvaluator& expr_eval);
 
   void setUsedTVs();
 

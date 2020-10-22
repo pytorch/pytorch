@@ -62,7 +62,7 @@ class PolymorphicBase {
   //
   // NOTE: Don't use this for conditional casts. Use:
   //
-  //  if (auto t = dynamic_cast<T>(p)) { ... }
+  //  if (auto t = dynamic_cast<T*>(p)) { ... }
   //
   // instead of:
   //

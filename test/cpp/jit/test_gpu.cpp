@@ -1126,25 +1126,25 @@ TEST(NVFuserTest, FusionParser_CUDA) {
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3) {
   float T2[1];
   if ((((((blockIdx.x * 1) + (1 - 1)) * 128) + threadIdx.x) < T0.size[0])) {
-    for(size_t i6 = 0; i6 < 1; ++i6) {
-      T2[i6]
-        = T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)]
-        * T1[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
-      T3[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)]
-        = T2[i6]
-        * T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
+    for(size_t ki25 = 0; ki25 < 1; ++ki25) {
+      T2[ki25]
+        = T0[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)]
+        * T1[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)];
+      T3[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)]
+        = T2[ki25]
+        * T0[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)];
     }
   } else {
-    for(size_t i6 = 0; i6 < 1; ++i6) {
-      if ((((((blockIdx.x * 1) + i6) * 128) + threadIdx.x) < T0.size[0])) {
-        T2[i6]
-          = T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)]
-          * T1[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
+    for(size_t ki25 = 0; ki25 < 1; ++ki25) {
+      if ((((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x) < T0.size[0])) {
+        T2[ki25]
+          = T0[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)]
+          * T1[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)];
       }
-      if ((((((blockIdx.x * 1) + i6) * 128) + threadIdx.x) < T0.size[0])) {
-        T3[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)]
-          = T2[i6]
-          * T0[((((blockIdx.x * 1) + i6) * 128) + threadIdx.x)];
+      if ((((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x) < T0.size[0])) {
+        T3[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)]
+          = T2[ki25]
+          * T0[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)];
       }
     }
   }
@@ -5700,7 +5700,7 @@ TEST(NVFuserTest, FusionSmem_CUDA) {
       aten_output.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 0);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 0);
 }
 
 TEST(NVFuserTest, FusionSmemReduce_CUDA) {
@@ -5750,8 +5750,7 @@ TEST(NVFuserTest, FusionSmemReduce_CUDA) {
       aten_output.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 1);
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.count(24) == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
 }
 
 TEST(NVFuserTest, FusionSmemBlockGemm_CUDA) {
@@ -5814,7 +5813,7 @@ TEST(NVFuserTest, FusionSmemBlockGemm_CUDA) {
       aten_output.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 0);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
 }
 
 TEST(NVFuserTest, FusionSmemBlockGemmCache_CUDA) {
@@ -5900,7 +5899,7 @@ TEST(NVFuserTest, FusionSmemBlockGemmCache_CUDA) {
       aten_output.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 0);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
 }
 
 TEST(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
@@ -6413,7 +6412,7 @@ TEST(NVFuserTest, FusionSmemDynamicReductionSymbolic_CUDA) {
       aten_output.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 0);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 0);
 }
 
 TEST(NVFuserTest, FusionSmemDynamicReductionSymbolicArg_CUDA) {
@@ -6471,8 +6470,7 @@ TEST(NVFuserTest, FusionSmemDynamicReductionSymbolicArg_CUDA) {
       aten_output.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 1);
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.count(24) == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
 }
 
 TEST(NVFuserTest, FusionSmemDynamicPwiseMulSymbolicArgWAR_CUDA) {
@@ -6529,8 +6527,7 @@ TEST(NVFuserTest, FusionSmemDynamicPwiseMulSymbolicArgWAR_CUDA) {
       aten_output.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 1);
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.count(22) == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
 }
 
 TEST(NVFuserTest, FusionSmemDynamicTiledGemm_CUDA) {
@@ -6655,8 +6652,7 @@ TEST(NVFuserTest, FusionSmemDynamicTiledGemm_CUDA) {
       aten_C.allclose(C_fuser, 1e-5, 1e-5),
       "Error of: ",
       aten_C.sub(C_fuser).abs().max());
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.size() == 1);
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs.count(41) == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
 }
 
 TEST(NVFuserTest, FusionGlobalIntermediate_CUDA) {
