@@ -518,10 +518,10 @@ class TestDataParallel(TestCase):
     def test_data_parallel_module_zero_inputs(self):
         class TestModule(nn.Module):
             def forward(self):
-                t = torch.eye(2,3,device='cuda:0')
+                t = torch.eye(2, 3, device='cuda:0')
                 return t + (1 - t)
 
-        expected = torch.ones(2,3,device='cuda:0')
+        expected = torch.ones(2, 3, device='cuda:0')
 
         model = TestModule()
         pmodel = torch.nn.DataParallel(model, [0])
