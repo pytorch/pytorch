@@ -1,8 +1,6 @@
 import logging
 import threading
 
-from torch.autograd import ProfilerConfig, ProfilerState
-from datetime import timedelta
 from typing import Generator, Tuple
 import torch
 import torch.distributed as dist
