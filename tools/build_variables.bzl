@@ -382,6 +382,7 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/transform_replay.cpp",
     "torch/csrc/jit/codegen/cuda/transform_rfactor.cpp",
     "torch/csrc/jit/codegen/cuda/type.cpp",
+    "torch/csrc/jit/codegen/cuda/utils.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
 ]
 

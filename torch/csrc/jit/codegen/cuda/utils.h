@@ -7,17 +7,31 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// Common Functions
+//! Types of debug print-outs
+//!
+//! These can be set through the `PYTORCH_NVFUSER_DUMP` environment variable
+//!
+enum class DebugDumpOption {
+  FusionIr, //!< Dump the Fusion IR before lowering
+  FusionIrMath, //!< Dump just the compute (math) part of the Fusion IR
+  KernelIr, //!< Dump the compiler Kernel IR
+  CudaKernel, //!< Dump the generated CUDA C++ kernel code
+  CudaFull, //!< Dump the complete CUDA C++ code
+};
+
+bool isDebugDumpEnabled(DebugDumpOption option);
+
+//! Ceil integer division
 constexpr int64_t ceilDiv(int64_t a, int64_t b) {
   return (a + b - 1) / b;
 }
 
-// Simple mixin for suppressing copy & move operations, ex:
-//
-//  class Foo : public NonCopyable {
-//   ...
-//  };
-//
+//! Simple mixin for suppressing copy & move operations, ex:
+//!
+//!  class Foo : public NonCopyable {
+//!   ...
+//!  };
+//!
 class NonCopyable {
  public:
   NonCopyable() = default;
@@ -27,9 +41,9 @@ class NonCopyable {
   NonCopyable& operator=(const NonCopyable&) = delete;
 };
 
-// A generic root for a hierarchy of polymorphic classes:
-// - It ensures virtual destructors
-// - Provides the base->as<Derived>() and node->isA<T>() notation
+//! A generic root for a hierarchy of polymorphic classes:
+//! - It ensures virtual destructors
+//! - Provides the base->as<Derived>() and node->isA<T>() notation
 class PolymorphicBase {
  public:
   virtual ~PolymorphicBase() = default;
@@ -58,16 +72,16 @@ class PolymorphicBase {
     return downcast_ptr;
   }
 
-  // Check if the runtime time is T (or derived from T)
-  //
-  // NOTE: Don't use this for conditional casts. Use:
-  //
-  //  if (auto t = dynamic_cast<T*>(p)) { ... }
-  //
-  // instead of:
-  //
-  //  if (p->isA<T>()) { auto t = p->as<T>(); ... }
-  //
+  //! Check if the runtime time is T (or derived from T)
+  //!
+  //! \note Don't use this for conditional casts. Instead, use:
+  //!
+  //!  if (auto t = dynamic_cast<T>(p)) { ... }
+  //!
+  //! instead of:
+  //!
+  //!  if (p->isA<T>()) { auto t = p->as<T>(); ... }
+  //!
   template <class T>
   bool isA() const {
     return dynamic_cast<const T*>(this) != nullptr;

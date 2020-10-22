@@ -338,12 +338,12 @@ void Fusion::print() {
   FUSER_PERF_SCOPE("Fusion::print");
 
   FusionGuard fg(this);
-  std::cout << "%kernel {\n";
+  std::cout << "\n%kernel {\n";
   IrMathPrinter op_exprs(std::cout);
   op_exprs.handle(this);
   IrTransformPrinter t_exprs(std::cout);
   t_exprs.handle(this);
-  std::cout << "}\n";
+  std::cout << "}\n\n";
 }
 
 void Fusion::printKernel() {
@@ -355,9 +355,11 @@ void Fusion::printMath(bool from_outputs_only) {
   FUSER_PERF_SCOPE("Fusion::printMath");
 
   FusionGuard fg(this);
+  std::cout << "\n%kernel_math {\n";
   for (auto expr : exprs(from_outputs_only)) {
     std::cout << expr;
   }
+  std::cout << "}\n\n";
 }
 
 void Fusion::printTransforms() {

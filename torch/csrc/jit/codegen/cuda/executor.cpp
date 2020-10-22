@@ -1,3 +1,6 @@
+
+#include <torch/csrc/jit/codegen/cuda/executor.h>
+
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
 #include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -5,8 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
-
-#include <torch/csrc/jit/codegen/cuda/executor.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -15,8 +17,6 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
-
-#include <cstdlib>
 
 namespace torch {
 namespace jit {
@@ -35,18 +35,20 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   code += std::string("namespace ") + FusionExecutor::kernelNamespace() +
       " {\n" + executor_utils::kernelPreamble() + kernel + "}\n";
 
-  const char* debug_env = std::getenv("PYTORCH_CUDA_FUSER_DEBUG");
-  if (debug_env && atoi(debug_env)) {
-    std::cout << "\n==== codegen output for kernel: " << kernelName()
-              << " ====" << std::endl
-              << code << std::endl
-              << "======================================\n"
-              << std::endl;
+  if (isDebugDumpEnabled(DebugDumpOption::CudaKernel)) {
+    std::cout << "\n======= Codegen output for kernel: " << kernelName()
+              << " =======\n\n"
+              << kernel << "\n======================================\n\n";
+  } else if (isDebugDumpEnabled(DebugDumpOption::CudaFull)) {
+    std::cout << "\n======= Codegen output for kernel: " << kernelName()
+              << " =======\n\n"
+              << code << "\n======================================\n\n";
   }
 
   return code;
 }
 
+// TODO: come up with a more user friendly interface
 void FusionExecutor::debugCompileFusionFromStr(
     Fusion* fusion,
     const std::string& code,
@@ -57,8 +59,13 @@ void FusionExecutor::debugCompileFusionFromStr(
   FusionGuard fg(&fusion_);
   options_ = options;
 
-  const char* debug_env = std::getenv("PYTORCH_CUDA_FUSER_DEBUG");
-  if (debug_env && atoi(debug_env)) {
+  if (isDebugDumpEnabled(DebugDumpOption::FusionIr)) {
+    fusion->print();
+  } else if (isDebugDumpEnabled(DebugDumpOption::FusionIrMath)) {
+    fusion->printMath();
+  }
+
+  if (isDebugDumpEnabled(DebugDumpOption::CudaFull)) {
     std::cout << "\n==== codegen output for kernel: " << kernelName()
               << " ====" << std::endl
               << code << std::endl
@@ -72,8 +79,7 @@ void FusionExecutor::debugCompileFusionFromStr(
   lowered_ = GpuLower(&fusion_);
   const auto kernel = lowered_.kernel();
 
-  const char* dump_kir_env = std::getenv("PYTORCH_CUDA_FUSER_DUMP_KIR");
-  if (dump_kir_env && atoi(dump_kir_env)) {
+  if (isDebugDumpEnabled(DebugDumpOption::KernelIr)) {
     kernel->print();
   }
 
@@ -108,6 +114,12 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
         "Output types from fusions that are not tensors are not supported at this point.");
   }
 
+  if (isDebugDumpEnabled(DebugDumpOption::FusionIr)) {
+    fusion->print();
+  } else if (isDebugDumpEnabled(DebugDumpOption::FusionIrMath)) {
+    fusion->printMath();
+  }
+
   // Clone the fusion so we can store it
   fusion_ = *fusion;
   FusionGuard fg(&fusion_);
@@ -124,8 +136,7 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
   lowered_ = GpuLower(&fusion_);
   const auto kernel = lowered_.kernel();
 
-  const char* dump_kir_env = std::getenv("PYTORCH_CUDA_FUSER_DUMP_KIR");
-  if (dump_kir_env && atoi(dump_kir_env)) {
+  if (isDebugDumpEnabled(DebugDumpOption::KernelIr)) {
     kernel->print();
   }
 
