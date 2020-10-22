@@ -41,6 +41,9 @@
 
 #endif // defined(USE_GTEST)
 
+#include <torch/csrc/jit/tensorexpr/ir_deserializer.h>
+#include <torch/csrc/jit/tensorexpr/ir_serializer.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -82,6 +85,7 @@ static void assertAllEqual(const std::vector<T>& v1, const std::vector<T>& v2) {
     ASSERT_EQ(v1[i], v2[i]);
   }
 }
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

@@ -38,6 +38,23 @@ namespace jit {
   _(IRPrinterBasicValueTest02)              \
   _(IRPrinterCastTest)                      \
   _(IRPrinterFunctionName)                  \
+  _(IRSerializationBasicValueTest)          \
+  _(IRSerializationCastTest)                \
+  _(IRSerializationLetTest)                 \
+  _(IRSerializationIMMTest)                 \
+  _(IRSerializationBinOp)                   \
+  _(IRSerializationCompareSelect)           \
+  _(IRSerializationRampLoadBroadcast)       \
+  _(IRSerializationStore)                   \
+  _(IRSerializationForBlock)                \
+  _(IRSerializationIfThenElse)              \
+  _(IRSerializationInstrinsic)              \
+  _(IRSerializationAlloc)                   \
+  _(IRSerializationFree)                    \
+  _(IRSerializationCond)                    \
+  _(IRSerializationAtomicAdd)               \
+  _(IRSerializationFunction)                \
+  _(IRSerializationLet)                     \
   _(ExprSimple01)                           \
   _(ExprLower01)                            \
   _(ExprSimple02)                           \

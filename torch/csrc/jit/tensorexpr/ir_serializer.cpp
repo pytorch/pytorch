@@ -57,8 +57,7 @@ json IRSerializer::visitAndSerialize(const std::vector<const Stmt*>& v) {
   return json_vec;
 }
 
-void torch::jit::tensorexpr::IRSerializer::visit(
-    torch::jit::tensorexpr::LongImm const* v) {
+void IRSerializer::visit(LongImm const* v) {
   JSON_CACHE_GUARD();
   putJSON(
       v,
@@ -69,8 +68,7 @@ void torch::jit::tensorexpr::IRSerializer::visit(
       });
 }
 
-void torch::jit::tensorexpr::IRSerializer::visit(
-    torch::jit::tensorexpr::ShortImm const* v) {
+void IRSerializer::visit(ShortImm const* v) {
   JSON_CACHE_GUARD();
   putJSON(
       v,
@@ -81,8 +79,7 @@ void torch::jit::tensorexpr::IRSerializer::visit(
       });
 }
 
-void torch::jit::tensorexpr::IRSerializer::visit(
-    torch::jit::tensorexpr::BoolImm const* v) {
+void IRSerializer::visit(BoolImm const* v) {
   JSON_CACHE_GUARD();
   putJSON(
       v,
@@ -93,8 +90,7 @@ void torch::jit::tensorexpr::IRSerializer::visit(
       });
 }
 
-void torch::jit::tensorexpr::IRSerializer::visit(
-    torch::jit::tensorexpr::FloatImm const* v) {
+void IRSerializer::visit(FloatImm const* v) {
   JSON_CACHE_GUARD();
   putJSON(
       v,
@@ -105,8 +101,7 @@ void torch::jit::tensorexpr::IRSerializer::visit(
       });
 }
 
-void torch::jit::tensorexpr::IRSerializer::visit(
-    torch::jit::tensorexpr::DoubleImm const* v) {
+void IRSerializer::visit(DoubleImm const* v) {
   JSON_CACHE_GUARD();
   putJSON(
       v,
@@ -117,8 +112,7 @@ void torch::jit::tensorexpr::IRSerializer::visit(
       });
 }
 
-void torch::jit::tensorexpr::IRSerializer::visit(
-    torch::jit::tensorexpr::CharImm const* v) {
+void IRSerializer::visit(CharImm const* v) {
   JSON_CACHE_GUARD();
   putJSON(
       v,
@@ -129,8 +123,7 @@ void torch::jit::tensorexpr::IRSerializer::visit(
       });
 }
 
-void torch::jit::tensorexpr::IRSerializer::visit(
-    torch::jit::tensorexpr::HalfImm const* v) {
+void IRSerializer::visit(HalfImm const* v) {
   JSON_CACHE_GUARD();
   putJSON(
       v,
@@ -141,8 +134,7 @@ void torch::jit::tensorexpr::IRSerializer::visit(
       });
 }
 
-void torch::jit::tensorexpr::IRSerializer::visit(
-    torch::jit::tensorexpr::ByteImm const* v) {
+void IRSerializer::visit(ByteImm const* v) {
   JSON_CACHE_GUARD();
   putJSON(
       v,
@@ -153,8 +145,7 @@ void torch::jit::tensorexpr::IRSerializer::visit(
       });
 }
 
-void torch::jit::tensorexpr::IRSerializer::visit(
-    torch::jit::tensorexpr::IntImm const* v) {
+void IRSerializer::visit(IntImm const* v) {
   JSON_CACHE_GUARD();
   putJSON(
       v,
@@ -165,8 +156,6 @@ void torch::jit::tensorexpr::IRSerializer::visit(
       });
 }
 
-// TODO: change whether to include the parenthesis to the parent expression,
-// we need to look at the operator precedence to make the output simpler.
 template <typename Op>
 void visitBinaryOp(
     const BinaryOpNode<Op>* v,
@@ -205,11 +194,23 @@ void IRSerializer::visit(const Mod* v) {
 }
 
 void IRSerializer::visit(const Max* v) {
-  visitBinaryOp(v, "Max", this);
+  JSON_CACHE_GUARD();
+  json value = {{"lhs", visitAndSerialize(v->lhs())},
+                {"rhs", visitAndSerialize(v->rhs())},
+                {"dtype", serializeDtype(v->dtype())},
+                {"expr_type", "Max"},
+                {"propagate_nans", v->propagate_nans()}};
+  putJSON(v, value);
 }
 
 void IRSerializer::visit(const Min* v) {
-  visitBinaryOp(v, "Min", this);
+  JSON_CACHE_GUARD();
+  json value = {{"lhs", visitAndSerialize(v->lhs())},
+                {"rhs", visitAndSerialize(v->rhs())},
+                {"dtype", serializeDtype(v->dtype())},
+                {"expr_type", "Min"},
+                {"propagate_nans", v->propagate_nans()}};
+  putJSON(v, value);
 }
 
 void IRSerializer::visit(const And* v) {
@@ -243,7 +244,7 @@ void IRSerializer::visit(const CompareSelect* v) {
           {"rhs", visitAndSerialize(v->rhs())},
           {"ret_val1", visitAndSerialize(v->ret_val1())},
           {"ret_val2", visitAndSerialize(v->ret_val2())},
-          {"CompareSelectOperation", v->compare_select_op()},
+          {"compare_select_op", v->compare_select_op()},
       });
 }
 
@@ -283,10 +284,10 @@ void IRSerializer::visit(const Load* v) {
   putJSON(
       v,
       {
-          {"base_handle", visitAndSerialize(v->base_handle())},
+          {"buf", visitAndSerialize(v->buf())},
           {"indices", visitAndSerialize(v->indices())},
           {"mask", visitAndSerialize(v->mask())},
-          {"stmt_type", "Load"},
+          {"expr_type", "Load"},
       });
 }
 
@@ -305,7 +306,6 @@ void IRSerializer::visit(const Store* v) {
 
 void IRSerializer::visit(const Block* v) {
   JSON_CACHE_GUARD();
-  // TODO: why is Block using std::list instead of std::vector ?
   std::vector<json> stmts;
   for (Stmt* s : *v) {
     s->accept(this);
@@ -385,7 +385,6 @@ void IRSerializer::visit(const Intrinsics* v) {
 
 void IRSerializer::visit(const Allocate* v) {
   JSON_CACHE_GUARD();
-  // TODO: why is allocate a stmt and not an expr ?
   putJSON(
       v,
       {
@@ -426,64 +425,23 @@ void IRSerializer::visit(const Cond* v) {
        {"false_stmt", visitAndSerialize(v->false_stmt())}});
 }
 
+// Following terms except only temporarily in IR simplification
+// So we do not need to serialize them
 void IRSerializer::visit(const Term* v) {
-  JSON_CACHE_GUARD();
-  // TODO: why is Term not a a kernel scoped object ?
-  putJSON(
-      v,
-      {
-          {"expr_type", "Term"},
-          {"dtype", serializeDtype(v->dtype())},
-          {"scalar", visitAndSerialize(v->scalar())},
-          {"variables", visitAndSerialize(v->variables())},
-      });
+  assert(false);
 }
 
 void IRSerializer::visit(const Polynomial* v) {
-  JSON_CACHE_GUARD();
-  std::vector<json> variables;
-  for (const auto* var : v->variables()) {
-    variables.push_back(visitAndSerialize(var));
-  }
-  putJSON(
-      v,
-      {
-          {"expr_type", "Term"},
-          {"dtype", serializeDtype(v->dtype())},
-          {"scalar", visitAndSerialize(v->scalar())},
-          {"variables", variables},
-      });
+  assert(false);
 }
 
 void IRSerializer::visit(const MaxTerm* v) {
-  JSON_CACHE_GUARD();
-  putJSON(
-      v,
-      {
-          {"expr_type", "MaxTerm"},
-          {"dtype", serializeDtype(v->dtype())},
-          {"scalar", visitAndSerialize(v->scalar())},
-          {"propagate_nans", v->propagate_nans()},
-          {"variables", visitAndSerialize(v->variables())},
-      });
+  assert(false);
 }
 
 void IRSerializer::visit(const MinTerm* v) {
-  JSON_CACHE_GUARD();
-  putJSON(
-      v,
-      {
-          {"expr_type", "MaxTerm"},
-          {"dtype", serializeDtype(v->dtype())},
-          {"scalar", visitAndSerialize(v->scalar())},
-          {"variables", visitAndSerialize(v->variables())},
-      });
+  assert(false);
 }
-
-// void IRSerializer::visit(const Tensor * v) {
-//   JSON_CACHE_GUARD
-
-// }
 
 void IRSerializer::visit(const FunctionCall* v) {
   JSON_CACHE_GUARD();

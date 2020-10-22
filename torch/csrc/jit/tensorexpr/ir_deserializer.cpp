@@ -9,99 +9,75 @@ namespace jit {
 namespace tensorexpr {
 
 const Expr* IRDeserializer::deserializeBinaryOp(
-    const json& json,
+    const json& v,
     IRNodeType type) {
   bool option = false;
-  if (json.find("propagate_nans") != json.end()) {
-    option = json["propagate_nans"];
+  if (v.find("propagate_nans") != v.end()) {
+    option = v["propagate_nans"];
   }
-  const Expr* binop =
-      newBinaryOpOfType(type, dsExpr(json["lhs"]), dsExpr(json["rhs"]), option);
-  return binop;
+  return newBinaryOpOfType(type, dsExpr(v["lhs"]), dsExpr(v["rhs"]), option);
 }
 
-const LongImm* IRDeserializer::deserializeLongImm(const json& json) {
-  const LongImm* longimm = new LongImm(json["value"]);
-  return longimm;
+const LongImm* IRDeserializer::deserializeLongImm(const json& v) {
+  return new LongImm(v["value"]);
 }
 
-const ShortImm* IRDeserializer::deserializeShortImm(const json& json) {
-  const ShortImm* longimm = new ShortImm(json["value"]);
-  return longimm;
+const ShortImm* IRDeserializer::deserializeShortImm(const json& v) {
+  return new ShortImm(v["value"]);
 }
-const BoolImm* IRDeserializer::deserializeBoolImm(const json& json) {
-  const BoolImm* boolimm = new BoolImm(json["value"]);
-  return boolimm;
+const BoolImm* IRDeserializer::deserializeBoolImm(const json& v) {
+  return new BoolImm(v["value"]);
 }
-const FloatImm* IRDeserializer::deserializeFloatImm(const json& json) {
-  const FloatImm* floatimm = new FloatImm(json["value"]);
-  return floatimm;
+const FloatImm* IRDeserializer::deserializeFloatImm(const json& v) {
+  return new FloatImm(v["value"]);
 }
-const DoubleImm* IRDeserializer::deserializeDoubleImm(const json& json) {
-  const DoubleImm* doublimm = new DoubleImm(json["value"]);
-  return doublimm;
+const DoubleImm* IRDeserializer::deserializeDoubleImm(const json& v) {
+  return new DoubleImm(v["value"]);
 }
-const CharImm* IRDeserializer::deserializeCharImm(const json& json) {
-  const CharImm* charimm = new CharImm(json["value"]);
-  return charimm;
+const CharImm* IRDeserializer::deserializeCharImm(const json& v) {
+  return new CharImm(v["value"]);
+  ;
 }
-const HalfImm* IRDeserializer::deserializeHalfImm(const json& json) {
-  float val = json["value"];
-  const HalfImm* charimm = new HalfImm(at::Half(val));
-  return charimm;
+const HalfImm* IRDeserializer::deserializeHalfImm(const json& v) {
+  float val = v["value"];
+  return new HalfImm(at::Half(val));
 }
-const IntImm* IRDeserializer::deserializeIntImm(const json& json) {
-  const IntImm* intimm = new IntImm(json["value"]);
-  return intimm;
+const IntImm* IRDeserializer::deserializeIntImm(const json& v) {
+  return new IntImm(v["value"]);
 }
 
-const ByteImm* IRDeserializer::deserializeByteImm(const json& json) {
-  const ByteImm* byteimm = new ByteImm(json["value"]);
-  return byteimm;
+const ByteImm* IRDeserializer::deserializeByteImm(const json& v) {
+  return new ByteImm(v["value"]);
 }
 
-Dtype getDtype(const json& v) {
+Dtype deserializeDtype(const json& v) {
   std::string dtype = v["dtype"];
   return Dtype(toDtype(dtype));
 }
 
 const Cast* IRDeserializer::deserializeCast(const json& v) {
-  auto cast = new Cast(getDtype(v), dsExpr(v["src_value"]));
-  return cast;
+  return new Cast(deserializeDtype(v), dsExpr(v["src_value"]));
 }
 
 const Ramp* IRDeserializer::deserializeRamp(const json& v) {
-  auto ramp = new Ramp(dsExpr(v["base"]), dsExpr(v["stride"]), v["lanes"]);
-  return ramp;
+  return new Ramp(dsExpr(v["base"]), dsExpr(v["stride"]), v["lanes"]);
 }
 const Broadcast* IRDeserializer::deserializeBroadcast(const json& v) {
-  auto broadcast = new Broadcast(dsExpr(v["value"]), v["lanes"]);
-  return broadcast;
+  return new Broadcast(dsExpr(v["value"]), v["lanes"]);
 }
 const Var* IRDeserializer::deserializeVar(const json& v) {
-  auto var = new Var(v["name"], getDtype(v));
-  if (v["name"] == "producer") {
-    std::cout << "here we go\n";
-  }
-  return var;
+  return new Var(v["name"], deserializeDtype(v));
 }
 const IfThenElse* IRDeserializer::deserializeIfThenElse(const json& v) {
-  auto ifthenelse = new IfThenElse(
+  return new IfThenElse(
       dsExpr(v["condition"]),
       dsExpr(v["true_value"]),
       dsExpr(v["false_value"]));
-  return ifthenelse;
-}
-const MaxTerm* IRDeserializer::deserializeMaxTerm(const json& v) {
-  auto maxterm = new MaxTerm(
-      h_, dsExpr(v["scalar"]), v["propagate_nans"], dsVecExpr(v["variables"]));
-  return maxterm;
 }
 
-const MinTerm* IRDeserializer::deserializeMinTerm(const json& v) {
-  auto minterm = new MinTerm(
-      h_, dsExpr(v["scalar"]), v["propagate_nans"], dsVecExpr(v["variables"]));
-  return minterm;
+const Load* IRDeserializer::deserializeLoad(const json& v) {
+  const Buf* buf = dynamic_cast<const Buf*>(dsExpr(v["buf"]));
+  return new Load(buf, dsVecExpr(v["indices"]), dsExpr(v["mask"]));
 }
 
 const FunctionCall* IRDeserializer::deserializeFunctionCall(const json& v) {
@@ -113,34 +89,22 @@ const FunctionCall* IRDeserializer::deserializeFunctionCall(const json& v) {
     auto var = dynamic_cast<const Var*>(arg);
     arg_vars.push_back(var);
   }
+  const Buf* buf = dynamic_cast<const Buf*>(dsExpr(v["buf"]));
   const std::string name = v["function_name"];
-  // Todo: can Function or Tensor appear multiple times, should I be caching ?
-  // Dependency/ownership of Function/Tensor confusing, leave as is for initial
-  // implementation No visitor for Function or Tensor is defined
-  Function* func = new Function(name, dims, arg_vars, body);
+  Function* func =
+      new Function(name, const_cast<Buf*>(buf), dims, arg_vars, body);
   Tensor* tensor = new Tensor(func, v["output_index"]);
-  FunctionCall* func_call = new FunctionCall(tensor, dsVecExpr(v["params"]));
-  return func_call;
+  return new FunctionCall(tensor, dsVecExpr(v["params"]));
 }
 
 const Buf* IRDeserializer::deserializeBuf(const json& v) {
-  // TODO: need to add caching to the direct invocations
-  const json& j = v["base_handle"];
-  if (j["name"] == "producer") {
-    std::cout << " hi elias \n";
-  }
-
   const Var* var = dynamic_cast<const Var*>(dsExpr(v["base_handle"]));
-  const std::vector<const Expr*> dims = dsVecExpr(v["dims"]);
-  Dtype dtype = getDtype(v);
-  auto buf = new Buf(var, dims, dtype);
-  return buf;
+  return new Buf(var, dsVecExpr(v["dims"]), deserializeDtype(v));
 }
 
 const Intrinsics* IRDeserializer::deserializeIntrinsics(const json& v) {
-  const Intrinsics* intrinsics = new Intrinsics(
+  return new Intrinsics(
       stringToIntrinsics(v["func_name"]), dsVecExpr(v["params"]));
-  return intrinsics;
 }
 
 const std::vector<const Expr*> IRDeserializer::dsVecExpr(const json& v) {
@@ -151,37 +115,28 @@ const std::vector<const Expr*> IRDeserializer::dsVecExpr(const json& v) {
   return vec;
 }
 
-AtomicAdd* IRDeserializer::deserializeAtomicAdd(const json& json) {
-  const Buf* buf = dynamic_cast<const Buf*>(dsExpr(json["buf"]));
-  AtomicAdd* atomicadd =
-      new AtomicAdd(buf, dsVecExpr(json["indices"]), dsExpr(json["value"]));
-  return atomicadd;
+AtomicAdd* IRDeserializer::deserializeAtomicAdd(const json& v) {
+  const Buf* buf = dynamic_cast<const Buf*>(dsExpr(v["buf"]));
+  return new AtomicAdd(buf, dsVecExpr(v["indices"]), dsExpr(v["value"]));
 }
 
-SyncThreads* IRDeserializer::deserializeSyncThreads(const json& json) {
-  SyncThreads* syncthreads = new SyncThreads();
-  return syncthreads;
+SyncThreads* IRDeserializer::deserializeSyncThreads(const json& v) {
+  return new SyncThreads();
 }
 
-Let* IRDeserializer::deserializeLet(const json& json) {
-  const Var* var = dynamic_cast<const Var*>(dsExpr(json["var"]));
-  Let* let = new Let(var, dsExpr(json["value"]));
-  return let;
+Let* IRDeserializer::deserializeLet(const json& v) {
+  const Var* var = dynamic_cast<const Var*>(dsExpr(v["var"]));
+  return new Let(var, dsExpr(v["val"]));
 }
 
-Store* IRDeserializer::deserializeStore(const json& json) {
-  const Buf* buf = dynamic_cast<const Buf*>(dsExpr(json["buf"]));
-  Store* store = new Store(
-      buf,
-      dsVecExpr(json["indices"]),
-      dsExpr(json["value"]),
-      dsExpr(json["mask"]));
-  return store;
+Store* IRDeserializer::deserializeStore(const json& v) {
+  const Buf* buf = dynamic_cast<const Buf*>(dsExpr(v["buf"]));
+  return new Store(
+      buf, dsVecExpr(v["indices"]), dsExpr(v["value"]), dsExpr(v["mask"]));
 }
 
-Block* IRDeserializer::deserializeBlock(const json& json) {
-  Block* block = new Block(dsVecStmt(json["stmts"]));
-  return block;
+Block* IRDeserializer::deserializeBlock(const json& v) {
+  return new Block(dsVecStmt(v["stmts"]));
 }
 
 For* IRDeserializer::deserializeFor(const json& v) {
@@ -198,23 +153,33 @@ For* IRDeserializer::deserializeFor(const json& v) {
   lo.set_buffer_mapping(buffer_mapping);
   lo.set_gpu_thread_index(loop_options["gpu_thread_index"]);
   lo.set_gpu_block_index(loop_options["gpu_block_index"]);
-  For* for_var = new For(
+  return new For(
       var, dsExpr(v["start"]), dsExpr(v["stop"]), dsStmt(v["body"]), lo);
-  return for_var;
 }
 
-Free* IRDeserializer::deserializeFree(const json& json) {
-  const Var* var = static_cast<const Var*>(dsExpr(json["buffer_var"]));
-  Free* free = new Free(var);
-  return free;
+Free* IRDeserializer::deserializeFree(const json& v) {
+  const Var* var = static_cast<const Var*>(dsExpr(v["buffer_var"]));
+  return new Free(var);
 }
 
-Cond* IRDeserializer::deserializeCond(const json& json) {
-  Cond* cond = new Cond(
-      dsExpr(json["condition"]),
-      dsStmt(json["true_stmt"]),
-      dsStmt(json["false_stmt"]));
-  return cond;
+const CompareSelect* IRDeserializer::deserializeCompareSelect(const json& v) {
+  CompareSelectOperation op = v["compare_select_op"];
+  return new CompareSelect(
+      dsExpr(v["lhs"]),
+      dsExpr(v["rhs"]),
+      dsExpr(v["ret_val1"]),
+      dsExpr(v["ret_val2"]),
+      op);
+}
+
+Cond* IRDeserializer::deserializeCond(const json& v) {
+  return new Cond(
+      dsExpr(v["condition"]), dsStmt(v["true_stmt"]), dsStmt(v["false_stmt"]));
+}
+
+Allocate* IRDeserializer::deserializeAllocate(const json& v) {
+  const Var* buffer_var = dynamic_cast<const Var*>(dsExpr(v["buffer_var"]));
+  return new Allocate(buffer_var, deserializeDtype(v), dsVecExpr(v["dims"]));
 }
 
 const Expr* IRDeserializer::dsExprImpl(const json& v) {
@@ -238,7 +203,6 @@ const Expr* IRDeserializer::dsExprImpl(const json& v) {
   CHECK_BINARY_OP(Xor)
   CHECK_BINARY_OP(Lshift)
   CHECK_BINARY_OP(Rshift)
-  CHECK_BINARY_OP(CompareSelect)
   CHECK_BINARY_OP(RoundOff)
 #undef CHECK_BINARY_OP
 
@@ -251,13 +215,11 @@ const Expr* IRDeserializer::dsExprImpl(const json& v) {
   CHECK_EXPR_TYPE(Ramp);
   CHECK_EXPR_TYPE(Broadcast);
   CHECK_EXPR_TYPE(IfThenElse);
-  // CHECK_EXPR_TYPE(Term);
-  // CHECK_EXPR_TYPE(Polynomial);
-  CHECK_EXPR_TYPE(MaxTerm);
-  CHECK_EXPR_TYPE(MinTerm);
+  CHECK_EXPR_TYPE(Load);
   CHECK_EXPR_TYPE(FunctionCall);
   CHECK_EXPR_TYPE(Buf);
   CHECK_EXPR_TYPE(Intrinsics);
+  CHECK_EXPR_TYPE(CompareSelect);
 
 #define IMM_CHECK(Type, Name) CHECK_EXPR_TYPE(Name##Imm);
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_CHECK);
@@ -286,23 +248,7 @@ std::vector<Stmt*> IRDeserializer::dsVecStmt(const json& v) {
 }
 
 Stmt* IRDeserializer::dsStmt(const json& v) {
-  if (v["json_id"] == 8) {
-    std::cout << "Hello\n";
-  }
-
-  // std::cout << " DS STMT:: \n";
-  // std::cout << v;
-  // std::cout << "\n";
-
-  if (cachedKernelObj(v)) {
-    // TODO: separate map for stmts
-    return const_cast<Stmt*>(getCachedStmt(v));
-  }
-
-  // std::cout << " DS STMT:: \n";
-  // std::cout << v;
-  // std::cout << "\n";
-
+  // caching not needed for statements
   std::string stmt_type = v["stmt_type"];
 
 #define CHECK_STMT_TYPE(stmt_name)    \
@@ -318,25 +264,26 @@ Stmt* IRDeserializer::dsStmt(const json& v) {
   CHECK_STMT_TYPE(For)
   CHECK_STMT_TYPE(Free)
   CHECK_STMT_TYPE(Cond)
+  CHECK_STMT_TYPE(Allocate)
 
   assert(false);
 }
 
-const Expr* deserializeExpr(const json& json) {
+const Expr* deserializeExpr(const json& v) {
   IRDeserializer d;
-  return d.dsExpr(json);
+  return d.dsExpr(v);
 }
 
-const Stmt* deserializeStmt(const json& json) {
+const Stmt* deserializeStmt(const json& v) {
   IRDeserializer d;
-  return d.dsStmt(json);
+  return d.dsStmt(v);
 }
 
-const KernelScopedObject* deserialize(const json& json) {
-  if (json.find("expr_type") != json.end()) {
-    return deserializeExpr(json);
+const KernelScopedObject* deserialize(const json& v) {
+  if (v.find("expr_type") != v.end()) {
+    return deserializeExpr(v);
   } else {
-    return deserializeStmt(json);
+    return deserializeStmt(v);
   }
 }
 
