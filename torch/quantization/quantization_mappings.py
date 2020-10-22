@@ -96,14 +96,20 @@ def get_default_static_quant_module_mappings():
     '''
     return DEFAULT_STATIC_QUANT_MODULE_MAPPINGS
 
-def get_static_quant_module_class(float_module_class):
-    ''' Get the statically quantized module class corresponding to
+def get_static_quant_module_class(float_module_class, additional_static_quant_mapping=None):
+    r"""n Get the statically quantized module class corresponding to
     the floating point module class
-    '''
-    static_quant_module_class = DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.get(float_module_class, None)
+    """
+    if additional_static_quant_mapping is None:
+        additional_static_quant_mapping = {}
+    all_mappings = DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.copy()
+    for k, v in additional_static_quant_mapping.items():
+        all_mappings[k] = v
+
+    static_quant_module_class = all_mappings.get(float_module_class, None)
     assert static_quant_module_class is not None, \
-        'Floating point module class {}'.format(float_module_class) + \
-        ' does not have a corresponding quantized module class'
+        "Floating point module class {}".format(str(float_module_class)) + \
+        " does not have a corresponding quantized module class"
     return static_quant_module_class
 
 def get_default_qat_module_mappings():
@@ -150,5 +156,5 @@ def get_quantized_operator(float_op):
     '''
     quantized_op = DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS.get(float_op, None)
     assert quantized_op is not None, \
-        'Operator {} does not have corresponding quantized op'.format(float_op)
+        'Operator {} does not have corresponding quantized op'.format(str(float_op))
     return quantized_op

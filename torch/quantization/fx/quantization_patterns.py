@@ -174,6 +174,9 @@ class ConvRelu(QuantizeHandler):
             # note that relu should already be fused into conv module in the fusion step
             assert self.relu_node is None, 'conv module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
+            if convert_custom_config_dict is None:
+                convert_custom_config_dict = {}
+            additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
             # 1. attach activation post process to module
             if type(self.conv) in [
                     torch.nn.intrinsic.ConvReLU1d,
@@ -184,7 +187,8 @@ class ConvRelu(QuantizeHandler):
             else:
                 self.conv.activation_post_process = quantizer.activation_post_process_map[node.name]
             # 2. select quantized class
-            qconv_cls = get_static_quant_module_class(type(self.conv))
+            qconv_cls = get_static_quant_module_class(
+                type(self.conv), additional_static_quant_mapping)
             quantized = qconv_cls.from_float(self.conv)
             parent_name, name = _parent_name(self.conv_node.target)
             setattr(quantizer.modules[parent_name], name, quantized)
@@ -360,6 +364,9 @@ class BatchNorm(QuantizeHandler):
         self.bn = quantizer.modules[self.bn_node.target]
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
+        if convert_custom_config_dict is None:
+            convert_custom_config_dict = {}
+        additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
         # 1. attach activation post process to module
         activation_post_process = quantizer.activation_post_process_map[node.name]
         if type(self.bn) in \
@@ -368,7 +375,7 @@ class BatchNorm(QuantizeHandler):
             self.bn[1].activation_post_process = activation_post_process
         else:
             self.bn.activation_post_process = activation_post_process
-        qbn_cls = get_static_quant_module_class(type(self.bn))
+        qbn_cls = get_static_quant_module_class(type(self.bn), additional_static_quant_mapping)
         quantized = qbn_cls.from_float(self.bn)
         parent_name, name = _parent_name(self.bn_node.target)
         setattr(quantizer.modules[parent_name], name, quantized)
@@ -424,11 +431,15 @@ class DefaultNode(QuantizeHandler):
             return NotImplemented
         assert node.op in ['call_module', 'call_function'], 'Only call_module and ' + \
             'call_function are handled in DefaultNode'
+        if convert_custom_config_dict is None:
+            convert_custom_config_dict = {}
+        additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
         activation_post_process = quantizer.activation_post_process_map[node.name]
         if node.op == 'call_module':
             module = quantizer.modules[node.target]
             module.activation_post_process = activation_post_process
-            quantized_module_cls = get_static_quant_module_class(type(module))
+            quantized_module_cls = get_static_quant_module_class(
+                type(module), additional_static_quant_mapping)
             quantized_module = quantized_module_cls.from_float(module)
             parent_name, name = _parent_name(node.target)
             setattr(quantizer.modules[parent_name], name, quantized_module)
