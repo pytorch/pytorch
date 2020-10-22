@@ -14,6 +14,7 @@
 #include <aten/src/ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <c10/cuda/CUDAStream.h>
 
 #include <regex>
 #include <sstream>
@@ -433,6 +434,14 @@ RegisterOperators reg({
         "aten::set_grad_enabled(bool val) -> ()",
         [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
+    Operator(
+        "aten::cuda_getCurrentStream(int64_t val) -> int64_t",
+        [](Stack* stack) {
+          int64_t device;
+          pop(stack, device);
+          push(stack, (int64_t)c10::cuda::getCurrentCUDAStream(device).pack());
+        },
+        aliasAnalysisFromSchema()),
 });
 } // namespace
 } // namespace jit

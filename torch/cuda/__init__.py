@@ -228,6 +228,7 @@ class device(object):
         _lazy_init()
 
     def __exit__(self, *args):
+        print(args)
         if self.prev_idx != self.idx:
             torch._C._cuda_setDevice(self.prev_idx)
         return False
@@ -299,8 +300,7 @@ def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
         raise AssertionError("Invalid device id")
     return _get_device_properties(device)
 
-
-@contextlib.contextmanager
+#@contextlib.contextmanager
 def stream(stream):
     r"""Context-manager that selects a given stream.
 
@@ -316,23 +316,23 @@ def stream(stream):
         match the stream.
     """
     if stream is None:
-        yield
         return
-    src_prev_stream = current_stream()
+    #src_prev_stream = current_stream()
 
-    if src_prev_stream.device != stream.device:
+    src_prev_stream = Stream(_cdata=torch.cuda_getCurrentStream(0))
+    print("In Stream:::",src_prev_stream.device,"This is Stream:::", stream)
+
+    if src_prev_stream.device != stream.device():
         # The given stream is on a different device; have to restore the
         # current_stream on that device on exit as well
         with device(stream.device):
             dst_prev_stream = current_stream()
 
     torch._C._cuda_setStream(stream._cdata)
-    try:
-        yield
-    finally:
-        if src_prev_stream.device != stream.device:
-            torch._C._cuda_setStream(dst_prev_stream._cdata)
-        torch._C._cuda_setStream(src_prev_stream._cdata)
+
+    if src_prev_stream.device != stream.device:
+        torch._C._cuda_setStream(dst_prev_stream._cdata)
+    torch._C._cuda_setStream(src_prev_stream._cdata)
 
 
 def device_count() -> int:
@@ -403,9 +403,9 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
             (default).
     """
     _lazy_init()
+    print("In current Stream::::",device)
     return Stream(_cdata=torch._C._cuda_getCurrentStream(
         _get_device_index(device, optional=True)))
-
 
 def default_stream(device: Optional[_device_t] = None) -> Stream:
     r"""Returns the default :class:`Stream` for a given device.
@@ -418,7 +418,7 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
     """
     _lazy_init()
     return Stream(_cdata=torch._C._cuda_getDefaultStream(
-        _get_device_index(device, optional=True)))
+        _get_device_index(device, optional=False)))
 
 
 def current_blas_handle():

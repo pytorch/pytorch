@@ -1,5 +1,7 @@
 #include <aten/src/ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
 #include <torch/custom_class.h>
 
 namespace torch {
@@ -20,6 +22,12 @@ public:
   }
   void waitEvent(c10::intrusive_ptr<CUDAEvent> event);
   void waitStream(c10::intrusive_ptr<CUDAStream> stream);
+  /// Get the CUDA device index that this stream is associated with.
+  int16_t device_index() const { return stream_->device_index(); }
+
+  /// Get the full Device that this stream is associated with.  The Device
+  /// is guaranteed to be a CUDA device.
+  c10::Device device() const { return stream_->device(); }
 private:
   std::unique_ptr<c10::cuda::CUDAStream> stream_;
 
