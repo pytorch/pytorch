@@ -1524,7 +1524,8 @@ class Net(object):
         ops = net.Proto().op
         if device_option is not None:
             ops = [copy.deepcopy(op) for op in ops]
-            map(lambda x: x.device_option.CopyFrom(device_option), ops)
+            for op in ops:
+                op.device_option.CopyFrom(device_option)
             for op in ops:
                 if op.type == "RecurrentNetwork":
                     for arg in op.arg:

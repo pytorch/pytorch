@@ -163,8 +163,7 @@ def require_backends_available(backends):
         if backend == dist.Backend.MPI:
             return dist.is_mpi_available()
         return False
-    backends = map(lambda b: dist.Backend(b), backends)
-    if not all(map(check, backends)):
+    if not all(check(dist.Backend(backend)) for backend in backends):
         return unittest.skip(
             "Test requires backends to be available %s" % backends)
     return lambda func: func
