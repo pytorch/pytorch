@@ -1025,10 +1025,10 @@ class TestLinalg(TestCase):
     def test_tensorinv_errors(self, device, dtype):
 
         def check_shape(a_shape, ind):
-            # tensorinv requires the input to be a 'square' tensor
-            # such that prod(a.shape[ind:]) == prod(a.shape[:ind])
+            # tensorinv requires the input to satisfy
+            # prod(a.shape[ind:]) == prod(a.shape[:ind])
             a = torch.randn(a_shape)
-            with self.assertRaisesRegex(RuntimeError, "be a 'square' tensor such that"):
+            with self.assertRaisesRegex(RuntimeError, "Expected self to satisfy the requirement"):
                 torch.linalg.tensorinv(a, ind=ind)
 
         def check_ind(a_shape, ind):

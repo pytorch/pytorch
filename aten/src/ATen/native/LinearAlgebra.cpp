@@ -1625,7 +1625,7 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
 
   // Check whether the self tensor can be reshaped to the 2D square matrix
   TORCH_CHECK(prod_ind_end == prod_start_ind,
-    "Expected self to be a 'square' tensor such that prod(self.shape[ind:]) == prod(self.shape[:ind]), but got ",
+    "Expected self to satisfy the requirement prod(self.shape[ind:]) == prod(self.shape[:ind]), but got ",
     prod_ind_end, " != ", prod_start_ind);
 
   // Concatenate shape_ind_end and shape_start_ind to form the shape of the result
