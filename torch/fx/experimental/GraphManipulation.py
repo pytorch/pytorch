@@ -1,36 +1,9 @@
-from typing import Dict, List
+from typing import Dict, List, NamedTuple
 from torch.fx.graph_module import GraphModule
-from typing import Any
-from torch.fx.node import Node, Target
-from torch.fx.graph import Graph, map_arg
-
-
-"""find_use is used to find out if the node is another node's arg or kwargs."""
-def find_use(arg: Any, node: Node) -> bool:
-    if isinstance(arg, (tuple, list)):
-        return any(find_use(elem, node) for elem in arg)
-    elif isinstance(arg, dict):
-        return any(find_use(v, node) for k, v in arg.items())
-    elif isinstance(arg, slice):
-        return any([find_use(arg.start, node), find_use(arg.stop, node), find_use(arg.step, node)])
-    elif isinstance(arg, Node):
-        return arg is node
-    else:
-        return False
-
-def get_all_users_of(fx_module: GraphModule, index: int) -> List[int]:
-    """Given the graph(fx_module) and an index, return a list of all node indexes that use this node"""
-    graph = fx_module.graph
-    current_node = graph.nodes[index]
-    user_indexes: List[int] = []
-    """if the node A is in node B's args, then B is the user of A
-       go through all the nodes, if the input node in any node's args,
-       then that node is the input node's user
-    """
-    for i, n in enumerate(graph.nodes):
-        if find_use(n.args, current_node) or find_use(n.kwargs, current_node):
-            user_indexes.append(i)
-    return user_indexes
+from torch.fx.node import Node, Target, map_arg
+from torch.fx.graph import Graph
+import torch
+from torch.fx.experimental.shape_prop import ShapeProp
 
 def replace_target_nodes_with(
     fx_module: GraphModule,
@@ -53,3 +26,53 @@ def replace_target_nodes_with(
         else:
             val_map[node] = new_graph.node_copy(node, lambda n : val_map[n])
     fx_module.graph = new_graph
+
+class size_bytes(NamedTuple):
+    output_size: int
+    total_size: int
+
+def get_size_of_all_nodes(fx_module: GraphModule, args: List[torch.Tensor]) -> None:
+    """Given a fx graph module, update each node with its total size (weights + bias + output)
+    and its output_size(output). For a non-module node, the total size is the output size.
+    return total size"""
+    # Mark shape and dtype for each node (node.shape and node.dtype)
+    ShapeProp(fx_module).propagate(*args)
+    # Calculate the total size of the whole fx graph
+    total_size_of_graph = 0.0
+    for node in fx_module.graph.nodes:
+        if node.op == 'output':
+            break
+        node.size_bytes = get_size_of_node(fx_module, node)
+    return
+
+def get_size_of_node(fx_module: GraphModule, node: Node) -> size_bytes:
+    """Given a node with node.dtype and node.shape, return its total size and its output size.
+       total_size = weights + bias + output_size
+    """
+    # Total num of elements
+    total_num_of_elems = 0
+    # For a module, conside all parameters
+    if node.op == 'call_module':
+        submodule_dict = dict(fx_module.named_modules())
+        submodule = submodule_dict[node.target]
+        parameters = submodule.named_parameters()
+        # Parameters are named tuples
+        for name, p in parameters:
+            total_num_of_elems += p.numel()
+    # Don't forget the output size
+    # node.shape is the shape of this node's output
+    shape = getattr(node, 'shape', None)
+    if shape:
+        output_elem = shape.numel()
+    else:
+        raise RuntimeError('Node has no shape attr')
+    total_num_of_elems += output_elem
+    size_per_elem_bytes = 0
+    dtype = getattr(node, 'dtype', None)
+    if dtype:
+        size_per_elem_bytes = torch.tensor([], dtype=dtype).element_size()
+    else:
+        raise RuntimeError('Node has no dtype attr')
+    total_size = size_per_elem_bytes * total_num_of_elems
+    output_size = size_per_elem_bytes * output_elem
+    return size_bytes(output_size, total_size)

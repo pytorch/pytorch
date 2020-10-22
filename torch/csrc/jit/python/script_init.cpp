@@ -743,18 +743,26 @@ void initJitScriptBindings(PyObject* module) {
           .def(
               "getattr",
               [](Object& self, const std::string& name) {
-                return toPyObject(self.attr(name));
+                try {
+                  return toPyObject(self.attr(name));
+                } catch (const ObjectAttributeError& err) {
+                  throw AttributeError("%s", err.what());
+                }
               })
           .def(
               "__getattr__",
               [](Object& self, const std::string& name) -> py::object {
-                if (name == "__qualname__") {
-                  return py::cast(self.type()->name()->name());
+                try {
+                  if (name == "__qualname__") {
+                    return py::cast(self.type()->name()->name());
+                  }
+                  if (auto method = self.find_method(name)) {
+                    return py::cast(*method);
+                  }
+                  return toPyObject(self.attr(name));
+                } catch (const ObjectAttributeError& err) {
+                  throw AttributeError("%s", err.what());
                 }
-                if (auto method = self.find_method(name)) {
-                  return py::cast(*method);
-                }
-                return toPyObject(self.attr(name));
               })
           .def(
               "hasattr",
@@ -1448,6 +1456,8 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_debug_set_autodiff_subgraph_inlining",
       debugSetAutodiffSubgraphInlining);
+  m.def("_debug_set_fusion_group_inlining", debugSetFusionGroupInlining);
+  m.def("_debug_get_fusion_group_inlining", getFusionGroupInlining);
   m.def("_propagate_shapes", _propagate_shapes);
   m.def(
       "_propagate_and_assign_input_shapes", _propagate_and_assign_input_shapes);
@@ -1565,6 +1575,17 @@ void initJitScriptBindings(PyObject* module) {
           "add_failed_attribute",
           &ConcreteModuleTypeBuilder::addFailedAttribute)
       .def(
+          "add_ignored_attribute",
+          &ConcreteModuleTypeBuilder::addIgnoredAttribute)
+      .def(
+          "add_ignored_attributes",
+          [](ConcreteModuleTypeBuilder& self,
+             const std::vector<std::string>& names) {
+            for (auto& name : names) {
+              self.addIgnoredAttribute(name);
+            }
+          })
+      .def(
           "set_module_dict",
           [](ConcreteModuleTypeBuilder& self) {
             self.setIterableModuleKind(IterableModuleKind::DICT);
@@ -1589,6 +1610,7 @@ void initJitScriptBindings(PyObject* module) {
       .def("get_attributes", &ConcreteModuleType::getAttributesPy)
       .def("get_modules", &ConcreteModuleType::getModulesPy)
       .def("dump", &ConcreteModuleType::dump)
+      .def("is_ignored_attribute", &ConcreteModuleType::isIgnoredAttribute)
       .def(
           "equals",
           [](const ConcreteModuleType& self, const ConcreteModuleType& other) {
