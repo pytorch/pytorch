@@ -31,6 +31,10 @@ class GradBucket {
     return tensors_;
   }
 
+  std::vector<at::Tensor>* getTensorsRef() {
+    return &tensors_;
+  }
+
  private:
   std::vector<at::Tensor> tensors_;
 };
