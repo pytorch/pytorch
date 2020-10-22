@@ -1602,7 +1602,7 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, opt
   return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
 }
 
-Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
+Tensor& linalg_tensorinv_out(Tensor& result, const Tensor& self, int64_t ind) {
   /*
   The idea is to reduce the problem to 2D square matrix inversion.
   Step 1. Calculate the shape of the result and the shape of the intermediate 2D matrix.
@@ -1613,6 +1613,8 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
           Note that for CUDA this causes cross-device memory synchronization that can be slow.
   Step 4. reshape the result.
   */
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
   TORCH_CHECK(ind > 0, "Expected a strictly positive integer for 'ind', but got ", ind);
 
   // self[ind:]
@@ -1633,36 +1635,20 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   shape_ind_end.insert(shape_ind_end.end(), shape_start_ind.begin(), shape_start_ind.end());
 
   // If the reshaped self is not invertible catch this error
-  Tensor result;
   try {
-    result = at::inverse(self.reshape({prod_ind_end, prod_ind_end}));
+    at::native::resize_output(result, shape_ind_end);
+    result.resize_({prod_ind_end, prod_ind_end});
+    result = at::inverse_out(result, self.reshape({prod_ind_end, prod_ind_end}));
   } catch (...) {
     TORCH_CHECK(false, "Failed to invert the input tensor, because it is singular.");
   }
-
-  return result.reshape(shape_ind_end);
+  result.resize_(shape_ind_end);
+  return result;
 }
 
-Tensor& linalg_tensorinv_out(Tensor& result, const Tensor& self, int64_t ind) {
-  CheckedFrom c = "linalg_tensorinv_out";
-  TensorArg result_arg(result, "result", 0);
-  TensorArg self_arg(result, "self", 1);
-  checkSameType(c, result_arg, self_arg);
-
-  // self[ind:]
-  std::vector<int64_t> expected_result_shape = self.sizes().slice(ind).vec();
-  // self[:ind]
-  std::vector<int64_t> shape_start_ind = self.sizes().slice(0, ind).vec();
-  // Concatenate shape_ind_end and shape_start_ind to form the shape of the result
-  // self[ind:] + self[:ind]
-  expected_result_shape.insert(expected_result_shape.end(), shape_start_ind.begin(), shape_start_ind.end());
-
-  TORCH_CHECK(result.sizes().equals(expected_result_shape),
-    "Expected result tensor to have size of ", expected_result_shape, ", but got tensor of size ", result.sizes());
-
-  Tensor result_tmp = at::linalg_tensorinv(self, ind);
-  result.copy_(result_tmp);
-  return result;
+Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
+  Tensor result = at::empty({0}, self.options());
+  return at::linalg_tensorinv_out(result, self, ind);
 }
 
 static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {
