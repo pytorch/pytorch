@@ -21,6 +21,7 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_new.h>
@@ -145,8 +146,9 @@ static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject 
 }
 
 // Instantiates a subclass of self with the same data.
-static PyObject* THPVariable_as_subclass(THPVariable* self, PyObject* args, PyObject* kwargs) {
+static PyObject* THPVariable_as_subclass(PyObject* _self, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
+  auto self = (THPVariable*)_self;
   static PythonArgParser parser({
     "as_subclass(PyObject* cls)",
   });
@@ -423,7 +425,7 @@ PyObject *THPVariable_get_names(PyObject *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_names(PyObject *self, PyObject *names) {
+int THPVariable_set_names(PyObject *self, PyObject *names, void *unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
     return handle_torch_function_setter((THPVariable*)self, "names", names);
@@ -715,8 +717,10 @@ static PyMappingMethods THPVariable_as_mapping = {
 };
 
 static PyMethodDef extra_methods[] = {
-  {"as_subclass", (PyCFunction)THPVariable_as_subclass, METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"_make_subclass", (PyCFunction)THPVariable_make_subclass, METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"as_subclass", castPyCFunctionWithKeywords(THPVariable_as_subclass),
+    METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_make_subclass", castPyCFunctionWithKeywords(THPVariable_make_subclass),
+    METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
   {nullptr}
 };
 
