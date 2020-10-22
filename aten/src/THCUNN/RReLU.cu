@@ -43,8 +43,8 @@ template <typename T>
 __global__ void rreluUpdateOutputTrain(int n, at::PhiloxCudaState philox_args,
   T *input, T* noise, T *output, double a, double b)
 {
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
   auto seeds = at::cuda::philox::unpack(philox_args);
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
   curand_init(std::get<0>(seeds),
               std::get<1>(seeds) + idx,

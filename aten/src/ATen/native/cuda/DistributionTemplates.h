@@ -66,8 +66,8 @@ __global__ void distribution_elementwise_grid_stride_kernel(int numel,
                                                             PhiloxCudaState philox_args,
                                                             const dist_t dist_func,
                                                             const transform_t transform_func) {
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
   auto seeds = at::cuda::philox::unpack(philox_args);
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
   curand_init(std::get<0>(seeds),
               std::get<1>(seeds) + idx,
@@ -182,6 +182,8 @@ __global__ void distribution_binary_elementwise_kernel(
     const typename function_traits<func_t>::template arg<2>::type *input_data_2,
     inp_offset_calc_t inp_calc,
     out_offset_calc_t out_calc) {
+  auto seeds = at::cuda::philox::unpack(philox_args);
+
   using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
   using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
 
@@ -191,7 +193,6 @@ __global__ void distribution_binary_elementwise_kernel(
   int base_index = BLOCK_WORK_SIZE * blockIdx.x;
   int remaining = std::min<int>(numel - base_index, BLOCK_WORK_SIZE);
 
-  auto seeds = at::cuda::philox::unpack(philox_args);
   curandStatePhilox4_32_10_t state;
   curand_init(std::get<0>(seeds),
               std::get<1>(seeds) + blockIdx.x * blockDim.x + threadIdx.x,

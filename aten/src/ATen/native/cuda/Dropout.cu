@@ -31,7 +31,7 @@ template <
           int ADims,
           int VEC>
 #if __CUDA_ARCH__ >= 350
-C10_LAUNCH_BOUNDS_2(256, 8)
+C10_LAUNCH_BOUNDS_2(256, 4)
 #elif defined (__HIP_PLATFORM_HCC__)
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
@@ -48,14 +48,14 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
   using MaskLoadT = memory::aligned_vector<uint8_t, VEC>;
 
   auto seeds = at::cuda::philox::unpack(philox_args);
-
-  accscalar_t pinv = accscalar_t(1)/p;
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
   curand_init(std::get<0>(seeds),
               std::get<1>(seeds) + idx,
               std::get<2>(seeds),
               &state);
+
+  accscalar_t pinv = accscalar_t(1)/p;
 
   // Note: Vectorized loads means we'll stride each thread by an additional VEC factor, as we'll load VEC elements at a time
   for (IndexType linearIndex = idx * VEC;
@@ -105,7 +105,7 @@ template <
           typename IndexType,
           int ADims>
 #if __CUDA_ARCH__ >= 350
-C10_LAUNCH_BOUNDS_2(256, 8)
+C10_LAUNCH_BOUNDS_2(256, 4)
 #elif defined (__HIP_PLATFORM_HCC__)
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
@@ -116,14 +116,14 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
                      IndexType totalElements, accscalar_t p,
                      PhiloxCudaState philox_args) {
   auto seeds = at::cuda::philox::unpack(philox_args);
-
-  accscalar_t pinv = accscalar_t(1)/p;
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
   curand_init(std::get<0>(seeds),
               std::get<1>(seeds) + idx,
               std::get<2>(seeds),
               &state);
+
+  accscalar_t pinv = accscalar_t(1)/p;
 
   IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) *
         blockDim.x * gridDim.x * UNROLL;

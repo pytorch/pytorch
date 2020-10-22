@@ -23,7 +23,9 @@ namespace {
  * For a given RNG consumer kernel in a given stream, each thread
  * is assigned a subsequence from the active stream's pool.
  *
- * max_kernel_threads is an estimated upper limit of the maximum
+ * max_kernel_threads, defined in StatefulCUDAOpsUtils.cuh as
+ *   constexpr uint64_t max_kernel_threads =  (uint64_t(1) << 40);
+ * is an estimated upper limit of the maximum
  * number of threads any kernel may possibly need.
  * In other words, it estimates how many subsequences we should assign
  * to each stream's pool.
@@ -32,7 +34,6 @@ namespace {
  * to each stream, stream id values must be <= 2^24.
  * See Note [StreamId assignment] in c10/cuda/CUDAStream.cpp.
  */
-constexpr uint64_t max_kernel_threads =  (uint64_t(1) << 40);
 
 // Ensures we only call cudaGetDeviceCount only once.
 std::once_flag num_gpu_init_flag;
@@ -242,7 +243,7 @@ PhiloxCudaState CUDAGeneratorImplHostState::philox_cuda_state(uint64_t increment
 std::pair<uint64_t, uint64_t> CUDAGeneratorImplHostState::philox_engine_inputs(uint64_t increment) {
   TORCH_CHECK(seeded_, "CUDAGeneratorImplHostState instance not yet seeded");
   auto state = this->philox_cuda_state(increment);
-  return std::make_pair(state.seed_, state.offset_);
+  return std::make_pair(state.seed_.val, state.offset_.val);
 }
 
 std::shared_ptr<CUDAGeneratorImplHostState> CUDAGeneratorImplHostState::clone() const {
@@ -324,7 +325,7 @@ CUDAGeneratorImplDevState::add_stream_state(Tensor seed,
   PhiloxCudaState new_raw{seed.data_ptr<int64_t>(),
                           offset.data_ptr<int64_t>(),
                           next_offset.data_ptr<int64_t>(),
-                          /*subseq_pool_start=*/stream.id() * at::cuda::detail::max_kernel_threads};
+                          stream.id()};
   // emplace state or assign if it already exists
   auto outcome = stream_states_.emplace(std::make_pair(stream.id(), std::make_pair(new_raw, new_refs)));
   if (!outcome.second) {
@@ -365,12 +366,12 @@ PhiloxCudaState CUDAGeneratorImplDevState::philox_cuda_state(uint64_t increment)
 
   // Value-copied snapshot for the caller's kernel.
   PhiloxCudaState for_kernel = state;
-  for_kernel.increment_ = increment;
+  for_kernel.set_increment(increment);
 
   // *next_offset_ptr_ will be updated by at::cuda::philox::unpack in the caller's kernel.
   // After freezing for_kernel, swaps current and next so "next" becomes "current" for
   // the kernel after the caller's kernel.
-  std::swap(state.offset_ptr_, state.next_offset_ptr_);
+  std::swap(state.offset_.ptr, state.next_offset_ptr_);
 
   return for_kernel;
 }

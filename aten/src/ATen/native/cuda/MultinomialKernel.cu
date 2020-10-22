@@ -125,10 +125,11 @@ sampleMultinomialWithReplacement(PhiloxCudaState philox_args,
   // search due to divergence. It seems possible to compute multiple
   // values and limit divergence though later on.
 
+  auto seeds = at::cuda::philox::unpack(philox_args);
+
   // global index formula for 2D grid of 1D blocks
   int idx = blockIdx.y * gridDim.x * blockDim.x + blockIdx.x * blockDim.x + threadIdx.x;
 
-  auto seeds = at::cuda::philox::unpack(philox_args);
   curandStatePhilox4_32_10_t state;
   curand_init(std::get<0>(seeds),
               std::get<1>(seeds) + idx,

@@ -4,12 +4,16 @@
 #include <ATen/core/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/Context.h>
+#include <limits>
+
 
 // TODO: this file should be in ATen/cuda, not top level
 
 namespace at {
 
-/*
+/**
+ * Note [Non-divergent use of HostState and DevState in callers]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  * PhiloxCudaState in this file, and unpack() in
  * cuda/StatefulCUDAOpsUtils.cuh allow non-divergent use of
  * CUDAGeneratorImplHostState::philox_cuda_state() and
@@ -49,52 +53,61 @@ namespace at {
  *
  */
 
+
+// Stores state values.  See Note [Non-divergent use...] above.
+// Unions and some bitshifting help reduce size,
+// to (hopefully) reduce register use in kernels.
 struct PhiloxCudaState {
   PhiloxCudaState() = default;
   PhiloxCudaState(const PhiloxCudaState&) = default;
-  // Called by CUDAGeneratorImplDevState
+  // Called by CUDAGeneratorImplHostState
   PhiloxCudaState(uint64_t seed,
                   uint64_t offset,
-                  uint64_t subseq_pool_start)
-    : subseq_pool_start_{subseq_pool_start},
-      has_device_ptrs_{false},
-      seed_{seed},
-      offset_{offset} {}
+                  StreamId stream_id) {
+    seed_.val = seed;
+    offset_.val = offset;
+    TORCH_INTERNAL_ASSERT(stream_id <= std::numeric_limits<int>::max());
+    is_on_device_and_seq_pool_id_ = uint32_t(stream_id);
+  }
   // Called by CUDAGeneratorImplDevState.
   // Pointers are int64_t*, not uint64_t* (there's no such thing as uint64_t Tensors)
   PhiloxCudaState(int64_t* seed,
                   int64_t* offset,
                   int64_t* next_offset,
-                  uint64_t subseq_pool_start)
-    : subseq_pool_start_{subseq_pool_start},
-      has_device_ptrs_{true},
-      seed_ptr_{seed},
-      offset_ptr_{offset},
-      next_offset_ptr_{next_offset} {}
+                  StreamId stream_id)
+    : next_offset_ptr_{next_offset} {
+    seed_.ptr = seed;
+    offset_.ptr = offset;
+    TORCH_INTERNAL_ASSERT(stream_id <= std::numeric_limits<int>::max());
+    // Uses first bit to indicate state is on device.
+    is_on_device_and_seq_pool_id_ = (uint32_t(stream_id) | 0x80000000);
+  }
 
   // Public members, directly accessible by at::cuda::philox::unpack.
   // If we made them private with getters/setters, the getters/setters
   // would have to be __device__, and we can't declare __device__ in ATen.
-  // Deliberately not packed in pairs/tuples to make point-of-use less opaque.
 
-  // Helps select a subsequence from the active stream's pool.
-  // See Note [Per stream and device RNG states] in CUDAGeneratorImpl.cpp.
-  uint64_t subseq_pool_start_;
+  union Payload {
+    uint64_t val;
+    int64_t* ptr;
+  };
 
-  // false if the state came from the CPU, true if it lives on the GPU.
-  bool has_device_ptrs_ = false;
-
-  // Contains the state if has_device_ptrs_ is false.
-  uint64_t seed_;
-  uint64_t offset_;
-
-  // The following are only populated and used by unpack() if has_device_ptrs_ is true.
-  int64_t* seed_ptr_;
-  int64_t* offset_ptr_;
+  Payload seed_;
+  Payload offset_;
   int64_t* next_offset_ptr_;
 
   // Added to this launch's offset to compute next launch's offset
-  uint64_t increment_;
+  int increment_;
+
+  void set_increment(uint64_t increment) {
+    TORCH_INTERNAL_ASSERT(increment <= std::numeric_limits<int>::max());
+    increment_ = int(increment);
+  }
+
+  // Helps select a subsequence from the active stream's pool.
+  // See Note [Per stream and device RNG states] in CUDAGeneratorImpl.cpp.
+  // Also, the first bit is set if state lives on the device.
+  uint32_t is_on_device_and_seq_pool_id_;
 };
 
 // Some callers cast to CUDAGeneratorImpl, so we need it as an interface.
