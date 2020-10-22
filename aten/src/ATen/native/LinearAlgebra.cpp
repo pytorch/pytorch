@@ -1642,25 +1642,11 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
 }
 
 Tensor& linalg_tensorsolve_out(Tensor& result, const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
-  CheckedFrom c = "linalg_tensorsolve_out";
-  TensorArg result_arg(result, "result", 0);
-  TensorArg self_arg(result, "self", 1);
-  checkSameType(c, result_arg, self_arg);
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
 
-  Tensor self_ = self;
-  // move dimensions of `self_` from `dims` to the end
-  if (dims.has_value()) {
-    DimVector dest_axes(dims.value().size());
-    std::iota(dest_axes.begin(), dest_axes.end(), self.dim() - dest_axes.size());
-    self_ = at::movedim(self_, dims.value(), dest_axes);
-  }
-
-  auto expected_result_shape = self_.sizes().slice(other.dim(), self.dim() - other.dim());
-  TORCH_CHECK(result.sizes().equals(expected_result_shape),
-    "Expected result tensor to have size of ", expected_result_shape, ", but got tensor of size ", result.sizes());
-
-  // We've already reordered self with dims, let's pass that result
-  Tensor result_tmp = at::linalg_tensorsolve(self_, other, c10::nullopt);
+  Tensor result_tmp = at::linalg_tensorsolve(self, other, dims);
+  at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
   return result;
 }
