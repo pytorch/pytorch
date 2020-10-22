@@ -8842,6 +8842,12 @@
   dispatch:
     DefaultBackend: det
 
+- func: inner(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: inner.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
 # torch.outer, alias for torch.ger
 - func: outer(Tensor self, Tensor vec2) -> Tensor
   use_c10_dispatcher: full
