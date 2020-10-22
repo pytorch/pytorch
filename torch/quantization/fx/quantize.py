@@ -328,7 +328,7 @@ class Quantizer:
         if not inplace:
             model = copy.deepcopy(model)
         additional_quant_patterns = prepare_custom_config_dict.get("additional_quant_pattern", {})
-        self.patterns = get_default_quant_patterns.copy()
+        self.patterns = get_default_quant_patterns().copy()
         for k, v in additional_quant_patterns.items():
             self.patterns[k] = v
 
