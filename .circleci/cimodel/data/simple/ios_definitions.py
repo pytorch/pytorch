@@ -1,16 +1,16 @@
 from cimodel.data.simple.util.versions import MultiPartVersion
-
+import cimodel.lib.miniutils as miniutils
 
 XCODE_VERSION = MultiPartVersion([12, 0, 0])
 
 
 class ArchVariant:
-    def __init__(self, name, is_custom=False):
+    def __init__(self, name, custom_build_name=""):
         self.name = name
-        self.is_custom = is_custom
+        self.custom_build_name = custom_build_name
 
     def render(self):
-        extra_parts = ["custom"] if self.is_custom else []
+        extra_parts = [self.custom_build_name] if len(self.custom_build_name) > 0 else []
         return "_".join([self.name] + extra_parts)
 
 
@@ -63,7 +63,8 @@ class IOSJob:
 WORKFLOW_DATA = [
     IOSJob(XCODE_VERSION, ArchVariant("x86_64"), is_org_member_context=False),
     IOSJob(XCODE_VERSION, ArchVariant("arm64")),
-    IOSJob(XCODE_VERSION, ArchVariant("arm64", True), extra_props={"op_list": "mobilenetv2.yaml"}),
+    IOSJob(XCODE_VERSION, ArchVariant("arm64", "metal"), extra_props={"use_metal": miniutils.quote(str(int(True)))}),
+    IOSJob(XCODE_VERSION, ArchVariant("arm64", "custom"), extra_props={"op_list": "mobilenetv2.yaml"}),
 ]
 
 
