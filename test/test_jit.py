@@ -7218,6 +7218,15 @@ dedent """
         scripted_foo = torch.jit.script(foo)
         self.assertEqual(scripted_foo(), foo())
 
+    def test_class_with_comment_at_lower_indentation(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                x = torch.neg(x)
+        # This comment is at the wrong indent
+                return x
+
+        torch.jit.script(Foo())
+
     # adapted from test in test_torch
     def test_tensor_to(self):
         template = dedent('''
