@@ -46,6 +46,8 @@ static inline const char* toString(ScalarType t) {
     default:
       return "UNKNOWN_SCALAR";
   }
+
+  assert(false);
 #undef DEFINE_CASE
 }
 
