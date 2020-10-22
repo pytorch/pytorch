@@ -129,6 +129,9 @@ allow_list = [
     ("aten::_foreach_addcdiv", datetime.date(2020, 10, 15)),
     ("aten::_foreach_addcmul", datetime.date(2020, 10, 15)),
     ("aten::conj", datetime.date(2020, 11, 10)),
+    ("aten::add_relu.Tensor", datetime.date(2020, 10, 28)),
+    ("aten::add_relu.out", datetime.date(2020, 10, 28)),
+    ("aten::add_relu_.Tensor", datetime.date(2020, 10, 28)),
 ]
 
 def allow_listed(schema, allow_list):
