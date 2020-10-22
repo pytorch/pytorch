@@ -942,6 +942,13 @@ class TestLinalg(TestCase):
             self.assertEqual(ans, out)
             self.assertEqual(ans, result)
 
+            # check non-contiguous out
+            out = torch.empty(2 * result.shape[0], *result.shape[1:], dtype=dtype, device=device)[::2]
+            self.assertFalse(out.is_contiguous())
+            ans = torch.linalg.tensorinv(a, ind=ind, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
+
         # compare to NumPy output
         run_test((12, 3, 4), ind=1)
         run_test((3, 8, 24), ind=2)
