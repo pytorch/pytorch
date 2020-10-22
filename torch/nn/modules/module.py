@@ -1015,11 +1015,7 @@ class Module:
         for key in list(state_dict.keys()):
             new_key = key[len(prefix):]
             state_dict[new_key] = state_dict.pop(key)
-
-        try:
             metadata = state_dict._metadata
-        except AttributeError:
-            pass
 
         else:
             for key in list(metadata.keys()):
@@ -1058,14 +1054,15 @@ class Module:
         missing_keys = []
         unexpected_keys = []
         error_msgs = []
-        if is_parallel:
-            state_dict = self._strip_prefix_from_state_dict_if_exists(state_dict, prefix='module.')
 
         # copy state_dict so _load_from_state_dict can modify it
         metadata = getattr(state_dict, '_metadata', None)
         state_dict = state_dict.copy()
         if metadata is not None:
             state_dict._metadata = metadata
+        if is_parallel:
+            state_dict = self._strip_prefix_from_state_dict_if_exists(state_dict, prefix='module.')
+
 
         def load(module, prefix=''):
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
