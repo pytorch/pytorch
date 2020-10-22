@@ -208,17 +208,16 @@ class RNNBase(Module):
     def forward(self,
                 input: Union[Tensor, PackedSequence],
                 hx: Optional[Tensor] = None) -> Tuple[Union[Tensor, PackedSequence], Tensor]:
-        is_packed = isinstance(input, PackedSequence)
-        if is_packed:
+        if isinstance(input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
-            max_batch_size = batch_sizes[0]
-            max_batch_size = int(max_batch_size)
+            max_batch_size = int(batch_sizes[0])
         else:
             batch_sizes = None
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
             sorted_indices = None
             unsorted_indices = None
 
+        assert isinstance(input, Tensor)
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
             hx = torch.zeros(self.num_layers * num_directions,
@@ -243,7 +242,7 @@ class RNNBase(Module):
         output = result[0]
         hidden = result[1]
 
-        if is_packed:
+        if isinstance(input, PackedSequence):
             output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
 
