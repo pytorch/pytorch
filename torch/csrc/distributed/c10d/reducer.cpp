@@ -117,8 +117,11 @@ Reducer::Reducer(
 
         // Map raw function pointer to replica index and parameter index.
         // This is used later on when the autograd graph is traversed
-        // to check for parameters for which no gradient is computed.
-        func_[grad_accumulator.get()] = index;
+        // to check for parameters for which no gradient is computed, if
+        // find_unused_parameters=True.
+        if (find_unused_parameters_) {
+          gradAccToVariableMap_[grad_accumulator.get()] = index;
+        }
 
         // The gradient accumulator is stored as weak_ptr in the autograd
         // metadata of the variable, so we have to keep it alive here for
@@ -350,7 +353,9 @@ void Reducer::check_grad_layout(
   }
 }
 
-void Reducer::copy_grad_to_bucket(at::Tensor& grad, at::Tensor& bucket_view) {
+void Reducer::copy_grad_to_bucket(
+    const at::Tensor& grad,
+    at::Tensor& bucket_view) {
   // See Note [DDP Communication Hook]
   if (comm_hook_ == nullptr) {
     // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
@@ -850,8 +855,8 @@ void Reducer::initialize_buckets(
       TORCH_CHECK(
           variable_index < variable_locators_.size(),
           "Out of range variable index specified.");
-      variable_locators_[variable_index] = VariableLocator(
-        bucket_index, intra_bucket_index++);
+      variable_locators_[variable_index] =
+          VariableLocator(bucket_index, intra_bucket_index++);
     }
     bucket.variable_indices = std::move(bucket_indices[bucket_index]);
 
@@ -991,7 +996,7 @@ void Reducer::prepare_for_backward(
   }
 
   // Find accumulator functions that don't show up in this graph.
-  for (const auto& it : func_) {
+  for (const auto& it : gradAccToVariableMap_) {
     // If the accumulator function is present in the graph, we know
     // a gradient will be computed for the corresponding parameter.
     if (seen.count(it.first) > 0) {
@@ -1386,7 +1391,6 @@ void Reducer::ensure_prior_reduction_finished() {
         "value of `forward` of your module when reporting this issue (e.g. ",
         "list, dict, iterable).");
   }
-
 }
 
 namespace {

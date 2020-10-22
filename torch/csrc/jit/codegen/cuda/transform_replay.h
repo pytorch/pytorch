@@ -9,6 +9,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 /*
  * compute_at is a relative property between two TensorViews which marks at what
@@ -151,6 +152,7 @@ class TORCH_CUDA_API TransformReplay {
       const TensorDomain* self);
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch
