@@ -1746,34 +1746,11 @@ Tensor kron(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& kron_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  std::vector<int64_t> self_sizes = self.sizes().vec();
-  std::vector<int64_t> other_sizes = other.sizes().vec();
-  int64_t self_ndim = self.dim();
-  int64_t other_ndim = other.dim();
-  int64_t min_ndim = std::min(self_ndim, other_ndim);
-  int64_t ndim_diff = std::abs(self_ndim - other_ndim);
-
-  std::vector<int64_t> a_axes(self_ndim);
-  std::vector<int64_t> b_axes(other_ndim);
-  std::iota(a_axes.begin(), a_axes.end(), 0);
-  std::iota(b_axes.begin(), b_axes.end(), 0 + self_ndim);
-
-  bool is_a_larger = self_ndim >= other_ndim;
-
-  std::vector<int64_t> expected_result_shape(std::max(self_ndim, other_ndim));
-  for (int64_t i = 0; i < ndim_diff; i++) {
-    expected_result_shape[i] = is_a_larger ? self_sizes[i] : other_sizes[i];
-  }
-  for (int64_t i = 0; i < min_ndim; i++) {
-    expected_result_shape[ndim_diff + i] = is_a_larger
-        ? self_sizes[ndim_diff + i] * other_sizes[i]
-        : other_sizes[ndim_diff + i] * self_sizes[i];
-  }
-
-  TORCH_CHECK(result.sizes().equals(expected_result_shape),
-    "Expected result tensor to have size of ", expected_result_shape, ", but got tensor of size ", result.sizes());
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
 
   Tensor result_tmp = at::kron(self, other);
+  at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
   return result;
 }

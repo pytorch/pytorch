@@ -1,6 +1,7 @@
 import torch
 import unittest
 import itertools
+import warnings
 from math import inf, nan, isnan
 from random import randrange
 
@@ -221,14 +222,22 @@ class TestLinalg(TestCase):
             run_test_case(empty_shape)
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_kron_errors(self, device, dtype):
-
-        # out tensor should have the correct resulting shape
+    def test_kron_errors_and_warnings(self, device, dtype):
+        # if non-empty out tensor with wrong shape is passed a warning is given
         a = torch.eye(3, dtype=dtype, device=device)
         b = torch.ones((2, 2), dtype=dtype, device=device)
         out = torch.empty_like(a)
-        with self.assertRaisesRegex(RuntimeError, r'Expected result tensor to have size of'):
-            ans = torch.kron(a, b, out=out)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.kron(a, b, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should match
+        out = torch.empty_like(a).to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+            torch.kron(a, b, out=out)
 
     # This test confirms that torch.linalg.norm's dtype argument works
     # as expected, according to the function's documentation
