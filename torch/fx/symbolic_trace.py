@@ -10,12 +10,6 @@ from .proxy import TracerBase
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
-def _find_module(root: torch.nn.Module, m: torch.nn.Module):
-    for n, p in root.named_modules():
-        if m is p:
-            return n
-    raise NameError('module is not installed as a submodule')
-
 def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     co = fn.__code__
     co_flags = co.co_flags & ~HAS_VARSTUFF
@@ -119,10 +113,51 @@ class Tracer(TracerBase):
         """
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
-    def call_module(self, m: torch.nn.Module, module_qualified_name: str, forward: Callable[..., Any], args, kwargs):
+    def path_of_module(self, mod):
+        for n, p in self.root.named_modules():
+            if mod is p:
+                return n
+        raise NameError('module is not installed as a submodule')
+
+    def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args, kwargs):
+        module_qualified_name = self.path_of_module(m)
         if not self.is_leaf_module(m, module_qualified_name):
             return forward(*args, **kwargs)
         return self.create_proxy('call_module', module_qualified_name, args, kwargs)
+
+    def create_args_for_root(self, root_fn, is_module):
+        # In some cases, a function or method has been decorated with a wrapper
+        # defined via `functools.wraps`. In this case, the outer code object
+        # will likely not contain the actual parameters we care about, so unwrap
+        # the function to get to the innermost callable.
+        fn_for_analysis = inspect.unwrap(root_fn)
+        co = fn_for_analysis.__code__
+        total_args = co.co_argcount + co.co_kwonlyargcount
+        names_iter = iter(co.co_varnames)
+        args : List[Any] = []
+        skip_arg_idx = 0
+        if is_module:
+            if total_args == 0:
+                raise RuntimeError('`self` argument cannot be part of *args expansion!')
+            skip_arg_idx = 1
+            next(names_iter)  # skip self
+            args.append(self.root)
+
+        def proxy_placeholder(name: str):
+            return self.create_proxy('placeholder', name, (), {},
+                                     type_expr=fn_for_analysis.__annotations__.get(name, None))
+
+        args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
+
+        if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
+            # TODO: type annotations for *args and **kwargs
+            if co.co_flags & inspect.CO_VARARGS:
+                args.append(proxy_placeholder('*' + next(names_iter)))
+            if co.co_flags & inspect.CO_VARKEYWORDS:
+                args.append(proxy_placeholder('**' + next(names_iter)))
+            root_fn = _patch_function(root_fn, len(args))
+
+        return root_fn, args
 
     def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
         if isinstance(root, torch.nn.Module):
@@ -134,39 +169,16 @@ class Tracer(TracerBase):
         self.graph = Graph()
 
         assert isinstance(fn, FunctionType)
-        co = fn.__code__
-        total_args = co.co_argcount + co.co_kwonlyargcount
-        names_iter = iter(co.co_varnames)
-        args : List[Any] = []
-        skip_arg_idx = 0
-        if isinstance(root, torch.nn.Module):
-            skip_arg_idx = 1
-            next(names_iter)  # skip self
-            args.append(root)
 
-        def proxy_placeholder(name: str):
-            return self.create_proxy('placeholder', name, (), {},
-                                     type_expr=fn.__annotations__.get(name, None))
-
-        args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
-
-        if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
-            # TODO: type annotations for *args and **kwargs
-            if co.co_flags & inspect.CO_VARARGS:
-                args.append(proxy_placeholder('*' + next(names_iter)))
-            if co.co_flags & inspect.CO_VARKEYWORDS:
-                args.append(proxy_placeholder('**' + next(names_iter)))
-            fn = _patch_function(fn, len(args))
+        fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module))
 
         orig_call = torch.nn.Module.__call__
 
         def module_call_wrapper(mod, *args, **kwargs):
-            module_qualified_name = _find_module(self.root, mod)
-
             def forward(*args, **kwargs):
                 return orig_call(mod, *args, **kwargs)
 
-            return self.call_module(mod, module_qualified_name, forward, args, kwargs)
+            return self.call_module(mod, forward, args, kwargs)
 
         try:
             torch.nn.Module.__call__ = module_call_wrapper
