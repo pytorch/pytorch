@@ -107,6 +107,7 @@ Tensor _inverse_helper_cuda_lib(const Tensor& self) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
       apply_batched_inverse_lib<scalar_t>(
         self_working_copy, self_inv_working_copy, infos);
+    });
     batchCheckErrors(infos, "inverse_cuda", false, 2);
   } else {
     Tensor info = at::zeros({2}, self.options().dtype(at::kInt));
