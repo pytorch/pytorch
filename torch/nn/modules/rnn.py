@@ -201,8 +201,12 @@ class RNNBase(Module):
         else:
             mini_batch = input.size(0) if self.batch_first else input.size(1)
         num_directions = 2 if self.bidirectional else 1
-        expected_hidden_size = (self.num_layers * num_directions,
-                                mini_batch, self.hidden_size)
+        if self.proj_size > 0:
+            expected_hidden_size = (self.num_layers * num_directions,
+                                    mini_batch, self.proj_size)
+        else:
+            expected_hidden_size = (self.num_layers * num_directions,
+                                    mini_batch, self.hidden_size)
         return expected_hidden_size
 
     def check_hidden_size(self, hx: Tensor, expected_hidden_size: Tuple[int, int, int],
@@ -541,13 +545,23 @@ class LSTM(RNNBase):
     def __init__(self, *args, **kwargs):
         super(LSTM, self).__init__('LSTM', *args, **kwargs)
 
+    def get_expected_cell_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
+        if batch_sizes is not None:
+            mini_batch = batch_sizes[0]
+            mini_batch = int(mini_batch)
+        else:
+            mini_batch = input.size(0) if self.batch_first else input.size(1)
+        num_directions = 2 if self.bidirectional else 1
+        expected_hidden_size = (self.num_layers * num_directions,
+                                mini_batch, self.hidden_size)
+        return expected_hidden_size
+
     def check_forward_args(self, input: Tensor, hidden: Tuple[Tensor, Tensor], batch_sizes: Optional[Tensor]):
         self.check_input(input, batch_sizes)
-        expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
 
-        self.check_hidden_size(hidden[0], expected_hidden_size,
+        self.check_hidden_size(hidden[0], self.get_expected_hidden_size(input, batch_sizes),
                                'Expected hidden[0] size {}, got {}')
-        self.check_hidden_size(hidden[1], expected_hidden_size,
+        self.check_hidden_size(hidden[1], self.get_expected_cell_size(input, batch_sizes),
                                'Expected hidden[1] size {}, got {}')
 
     def permute_hidden(self, hx: Tuple[Tensor, Tensor], permutation: Optional[Tensor]) -> Tuple[Tensor, Tensor]:
@@ -582,10 +596,13 @@ class LSTM(RNNBase):
 
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
-            zeros = torch.zeros(self.num_layers * num_directions,
-                                max_batch_size, self.hidden_size,
-                                dtype=input.dtype, device=input.device)
-            hx = (zeros, zeros)
+            h_zeros = torch.zeros(self.num_layers * num_directions,
+                                  max_batch_size, self.hidden_size,
+                                  dtype=input.dtype, device=input.device)
+            c_zeros = torch.zeros(self.num_layers * num_directions,
+                                  max_batch_size, self.proj_size,
+                                  dtype=input.dtype, device=input.device)
+            hx = (h_zeros, c_zeros)
         else:
             # Each batch of the hidden state should match the input sequence that
             # the user believes he/she is passing in.
