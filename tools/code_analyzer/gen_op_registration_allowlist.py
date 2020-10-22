@@ -59,7 +59,10 @@ def gen_transitive_closure(dep_graph, root_ops):
                 result.add(dep)
                 queue.append(dep)
 
-    return ' '.join(sorted(result))
+    return sorted(result)
+
+def gen_transitive_closure_str(dep_graph, root_ops):
+    return ' '.join(gen_transitive_closure(dep_graph, root_ops))
 
 
 if __name__ == "__main__":
@@ -77,4 +80,4 @@ if __name__ == "__main__":
 
     deps = load_op_dep_graph(args.op_dependency) if args.op_dependency else {}
     root_ops = load_root_ops(args.root_ops)
-    print(gen_transitive_closure(deps, root_ops))
+    print(gen_transitive_closure_str(deps, root_ops))
