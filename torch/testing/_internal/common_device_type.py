@@ -524,8 +524,11 @@ class skipCUDAIf(skipIf):
 
 def _has_sufficient_memory(device, size):
     if device.startswith('cuda'):
-        return (torch.cuda.is_available() and
-                torch.cuda.get_device_properties(0).total_memory >= size * 1.1)
+        if not torch.cuda.is_available():
+            return False
+        torch.cuda.empty_cache()
+        return torch.cuda.get_device_properties(device).total_memory - torch.cuda.memory_allocated(device) >= size
+
     if device == 'xla':
         raise unittest.SkipTest('TODO: Memory availability checks for XLA?')
 
@@ -547,7 +550,7 @@ def _has_sufficient_memory(device, size):
     return psutil.virtual_memory().available >= effective_size
 
 
-def largeTensorTest(size, device=None):
+def largeTensorTest(size):
     """Skip test if the device has insufficient memory to run the test
 
     size may be a number of bytes, a string of the form "N GB", or a callable
@@ -560,9 +563,9 @@ def largeTensorTest(size, device=None):
         @wraps(fn)
         def dep_fn(self, *args, **kwargs):
             size_bytes = size(self, *args, **kwargs) if callable(size) else size
-            _device = self.device_type if device is None else device
-            if not _has_sufficient_memory(_device, size_bytes):
-                raise unittest.SkipTest('Insufficient {} memory'.format(_device))
+            device = self.get_primary_device()
+            if not _has_sufficient_memory(device, size_bytes):
+                raise unittest.SkipTest('Insufficient {} memory'.format(device))
 
             return fn(self, *args, **kwargs)
         return dep_fn
