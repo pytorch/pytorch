@@ -2695,8 +2695,7 @@ struct to_ir {
         TreeList sliced_trees(trees.begin() + 1, trees.end());
         auto args = getNamedValues(sliced_trees, true);
         auto kwargs = emitAttributes(apply.attributes());
-        return emitForkExpr(
-            apply.range(), forked, std::move(args), std::move(kwargs));
+        return emitForkExpr(apply.range(), forked, args, kwargs);
       }
       case prim::annotate: {
         checkApplyNumInputs(apply, 2);
