@@ -2,7 +2,7 @@
 
 #include <Python.h>
 
-// Undefine a MACRO created from CPython
+// Undefine the copysign macro so that at::copysign works as intended with MSVC
 // https://github.com/python/cpython/blob/c60394c7fc9cc09b16e9675a3eeb5844b6d8523f/PC/pyconfig.h#L196
 #ifdef _MSC_VER
 #undef copysign
@@ -38,7 +38,6 @@
 #include "c10/core/Stream.h"
 
 #include <stdexcept>
-
 
 using at::DeviceGuard;
 using at::device_of;

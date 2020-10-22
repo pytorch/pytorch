@@ -111,39 +111,12 @@ void heaviside_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-template<typename scalar_t, typename accscalar_t>
-struct CopySignScalarFunctor {
-    CopySignScalarFunctor(accscalar_t b_): b(b_) {}
-    __device__ scalar_t operator() (scalar_t a) const {
-      return c10::cuda::compat::copysign(a, b);
-    }
-  private:
-    accscalar_t b;
-};
-
-template<typename scalar_t>
-struct CopySignFunctor {
-  __device__ scalar_t operator() (scalar_t a, scalar_t b) const {
-    return c10::cuda::compat::copysign(a, b);
-  }
-};
-
 void copysign_kernel_cuda(TensorIterator& iter) {
-  if (iter.is_cpu_scalar(1) || iter.is_cpu_scalar(2)) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "copysign_cuda", [&]() {
-      using accscalar_t = at::acc_type<scalar_t, true>;
-      int scalar_arg = iter.is_cpu_scalar(1) ? 1 : 2;
-      auto b = iter.scalar_value<accscalar_t>(scalar_arg);
-      iter.remove_operand(scalar_arg);
-      CopySignScalarFunctor<scalar_t, decltype(b)> f(b);
-      gpu_kernel(iter, f);
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "copysign_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return c10::cuda::compat::copysign(a, b);
     });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "copysign_cuda", [&]() {
-      CopySignFunctor<scalar_t> f;
-      gpu_kernel_with_scalars(iter, f);
-    });
-  }
+  });
 }
 
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);

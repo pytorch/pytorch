@@ -916,7 +916,7 @@ add_docstr_all('copysign',
                r"""
 copysign(other) -> Tensor
 
-Copy the sign of a scalar or tensor to :attr:`self` tensor.
+Returns a new tensor with the magnitude of :attr:`input` and the sign of :attr:`other` elementwise.
 
 When :attr:`other` is a tensor, the shape of :attr:`other` must be
 :ref:`broadcastable <broadcasting-semantics>` with the shape of the underlying

@@ -46,7 +46,7 @@ __MATH_FUNCTIONS_DECL__ float copysign(float x, float y) {
   return ::copysignf(x, y);
 }
 __MATH_FUNCTIONS_DECL__ double copysign(double x, double y) {
-  return ::copysignf(x, y);
+  return ::copysign(x, y);
 }
 
 __MATH_FUNCTIONS_DECL__ float floor(float x) {

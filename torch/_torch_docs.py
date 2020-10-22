@@ -1878,8 +1878,8 @@ Returns a new tensor with the magnitude of :attr:`input` and the sign of :attr:`
 
 .. math::
     \text{out}_{i} = \begin{cases}
-        -|\text{input}_{i}| & \text{if } \text{other}_{i} < 0 \\
-        |\text{input}_{i}| & \text{if } \text{other}_{i} \geq 0 \\
+        -|\text{input}_{i}| & \text{if } \text{other}_{i} < 0 \Vert \text{other}_{i} == -0 \\
+        |\text{input}_{i}| & \text{if } \text{other}_{i} \gt 0 \Vert \text{other}_{i} == 0\\
     \end{cases}
 """ + r"""
 
