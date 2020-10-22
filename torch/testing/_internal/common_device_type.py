@@ -552,10 +552,12 @@ def _has_sufficient_memory(device, size):
     return psutil.virtual_memory().available >= effective_size
 
 
-def largeTensorTest(size):
+def largeTensorTest(size, device=None):
     """Skip test if the device has insufficient memory to run the test
 
     size may be a number of bytes, a string of the form "N GB", or a callable
+
+    If your test is not a DeviceTypeTest, e.g. test_something(self, device), you need to specifiy `device=`.
     """
     if isinstance(size, str):
         assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
@@ -565,9 +567,9 @@ def largeTensorTest(size):
         @wraps(fn)
         def dep_fn(self, *args, **kwargs):
             size_bytes = size(self, *args, **kwargs) if callable(size) else size
-            device = self.get_primary_device()
-            if not _has_sufficient_memory(device, size_bytes):
-                raise unittest.SkipTest('Insufficient {} memory'.format(device))
+            _device = device if device is not None else self.get_primary_device()
+            if not _has_sufficient_memory(_device, size_bytes):
+                raise unittest.SkipTest('Insufficient {} memory'.format(_device))
 
             return fn(self, *args, **kwargs)
         return dep_fn
