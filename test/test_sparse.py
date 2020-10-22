@@ -15,6 +15,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_versi
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
 from typing import Dict, Any
+from itertools import product
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -2259,6 +2260,23 @@ class TestSparse(TestCase):
         tensor = torch.sparse_coo_tensor(torch.Size([2, 2, 0, 0]), device=device)
         expected_indices = torch.empty((4, 0), dtype=torch.long, device=device)
         self.assertEqual(tensor._indices(), expected_indices)
+
+    def test_sparse_eye(self):
+        device = 'cuda' if self.is_cuda else 'cpu'
+        for dtype in torch.testing.get_all_dtypes(include_bool=False, include_half=False,
+                                                  include_bfloat16=False, include_complex=False):
+            for n in (3, 5, 7):
+                sparse_tensor = torch.eye(n, layout=torch.sparse_coo, device=device, dtype=dtype)
+                dense_tensor = torch.eye(n, device=device, dtype=dtype)
+                assert sparse_tensor.is_coalesced()
+                self.assertEqual(sparse_tensor.to_dense(), dense_tensor)
+
+            for n, m in product([3, 5, 7], repeat=2):
+                # Construct identity using diagonal and fill
+                sparse_tensor = torch.eye(n, m, layout=torch.sparse_coo, device=device, dtype=dtype)
+                dense_tensor = torch.eye(n, m, device=device, dtype=dtype)
+                assert sparse_tensor.is_coalesced()
+                self.assertEqual(sparse_tensor.to_dense(), dense_tensor)
 
     def test_factory_nnz(self):
         indices = self.index_tensor([[0]])  # (sparse_dim, nnz): (1, 1)

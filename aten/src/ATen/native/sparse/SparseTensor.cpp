@@ -129,6 +129,36 @@ Tensor sparse_coo_tensor(ArrayRef<int64_t> size, const TensorOptions& options) {
   return at::_sparse_coo_tensor_with_dims(size.size(), 0, size, options.layout(at::kSparse));
 }
 
+/*eye init*/
+Tensor& eye_sparse(Tensor& result, int64_t n) {
+  return eye_sparse(result, n, -1);
+}
+
+Tensor& eye_sparse(Tensor& result, int64_t n, int64_t m) {
+  TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
+
+  if (m < 0) {
+    m = n;
+  }
+
+  // take the smaller of the rows/columns
+  int64_t sz = (m < n) ? m : n;
+  TensorOptions options = TensorOptions(result.device());
+  options = options.dtype(result.dtype());
+
+  Tensor values = at::ones({sz}, options);
+
+  // hard code sparse dimensions to 2 as this is a guranteed matrix
+  options = options.dtype(ScalarType::Long);
+  Tensor indices = at::arange(sz, options).unsqueeze(0).expand({2, -1});
+
+  get_sparse_impl(result)->resize_(2, 0, {n, m});
+  copy_into_sparse(result, indices, values, false);
+  get_sparse_impl(result)->coalesced_ = true;
+
+  return result;
+}
+
 /* Pointer-copy init */
 
 // helper
