@@ -10,6 +10,7 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN
+from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing import \
     (get_all_dtypes)
 
@@ -801,6 +802,13 @@ def skipCPUIfNoMkl(fn):
 def skipCUDAIfNoMagma(fn):
     return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
 
+def skipCUDAIfNoMagmaAndNoCusolver(fn):
+    version = _get_torch_cuda_version()
+    if version >= [10, 2]:
+        return fn
+    else:
+        # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
+        return skipCUDAIfNoMagma(fn)
 
 # Skips a test on CUDA when using ROCm.
 def skipCUDAIfRocm(fn):
