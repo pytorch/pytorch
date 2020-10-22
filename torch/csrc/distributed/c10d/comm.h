@@ -36,39 +36,42 @@ class GradBucket {
 };
 
 // Base class of both `PythonCommHook` and `CppCommHook`.
-// Requires implementing `runHook` method thhat communicate gradients
-// asynchronously.
+// Requires implementing 1) `runHook` method that communicates gradients
+// asynchronously, and 2) `parseHookResult` method that converts the hook result
+// into a tensor vector.
 class TORCH_API CommHookInterface {
  public:
   virtual ~CommHookInterface() {}
 
-  // Runs the registered communication hook to communicate gradients
-  // asynchronously, Returns a future that holds the communication results.
+  // Passes the input grad bucket to the registered communication hook.
+  // Once the tensors in the bucket are ready, kicks off the hook asynchronously
+  // and returns a future that holds the communication results.
   virtual c10::intrusive_ptr<torch::jit::Future> runHook(
       const GradBucket& bucket) = 0;
 
   // Returns the resulting tensors once the communication hook result is ready.
-  std::vector<at::Tensor> parseFromHookResult(const c10::IValue& result);
+  // The resulting tensors will then be copied to the grads of individual
+  // parameters.
+  virtual std::vector<at::Tensor> parseHookResult(
+      const c10::IValue& result) = 0;
 };
 
 class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
  public:
+  // Takes a state and a callable hook. The inputs are Python objects.
+  // The state is passed to the hook in runHook method, and it can be used to
+  // maintain and update any state information during the execution of the hook.
+  // The hook performs user-specified processing and returns a future indicating
+  // asychronous communication of gradients.
   PythonCommHook(py::object state, py::object hook)
       : state_(std::move(state)), hook_(std::move(hook)) {}
 
-  ~PythonCommHook() override {
-    py::gil_scoped_acquire ag;
-    state_.dec_ref();
-    hook_.dec_ref();
-    // Explicitly set state_ and hook_ to nullptr to prevent py::object's dtor
-    // to decref on the PyObject again.
-    // See Note [Destructing py::object] in python_ivalue.h
-    state_.ptr() = nullptr;
-    hook_.ptr() = nullptr;
-  }
+  ~PythonCommHook() override;
 
   c10::intrusive_ptr<torch::jit::Future> runHook(
       const GradBucket& bucket) override;
+
+  std::vector<at::Tensor> parseHookResult(const c10::IValue& result) override;
 
  private:
   // Only needed for stateful communication.
