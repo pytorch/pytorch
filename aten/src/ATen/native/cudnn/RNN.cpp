@@ -656,6 +656,14 @@ namespace {
   }
 
   std::vector<int64_t> _hidden_size(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors) {
+    if (rnn.proj_size != 0) {
+      return {rnn.num_layers * rnn.num_directions(), tensors.mini_batch, rnn.proj_size};
+    } else {
+      return {rnn.num_layers * rnn.num_directions(), tensors.mini_batch, rnn.hidden_size};
+    }
+  }
+
+  std::vector<int64_t> _cell_size(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors) {
     return {rnn.num_layers * rnn.num_directions(), tensors.mini_batch, rnn.hidden_size};
   }
 
@@ -667,10 +675,12 @@ namespace {
     }
   }
 
-  // TODOMODIFYIGOR
   cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors, const Tensor input){
       cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
       const int64_t bsize = tensors.mini_batch;
+      if (rnn.proj_size != 0 && rnn.proj_size != rnn.hidden_size) {
+        return CUDNN_RNN_ALGO_STANDARD;
+      }
       //excluding Turing from using persistent rnn.
       if (prop->major == 7 && prop->minor != 5 && getCudnnDataType(input) == CUDNN_DATA_HALF && !tensors.is_input_packed()) {
           if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && rnn.num_directions() == 1 &&
@@ -861,7 +871,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   auto hy = at::empty(hidden_size, hx.options());
   Tensor cy;
   if (cx.defined()) {
-    cy = at::empty(hidden_size, cx.options());
+    auto cell_size = _cell_size(fn.rnn, fn.tensors);
+    cy = at::empty(cell_size, cx.options());
   } else {
     cy = at::empty({0}, hx.options()); // NB: Not allowed to return undefined tensors
   }
@@ -887,9 +898,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     w_desc.set(weight_buf, 3);
   }
 
-  TORCH_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
-           "Expected cell size ", IntArrayRef{hidden_size}, ", got ", cx.sizes());
-
+  if (fn_proj_size != 0 && fn_proj_size != fn_hidden_size) {
+    TORCH_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
+            "Expected cell size ", IntArrayRef{hidden_size}, ", got ", cx.sizes());
+  }
   size_t workspace_size;
   auto x_descs_arr = descs.get_x_descs();
   auto y_descs_arr = descs.get_y_descs();
@@ -1386,6 +1398,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       const Tensor& input, const Tensor& _batch_sizes, const hidden_type& hidden,
       TensorList params, bool has_biases, cudnnRNNMode_t mode,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
+  // TODO (igor): this one is not implemented at the moment
   Tensor hx, cx;
   std::tie(hx, cx) = unpack_hidden(hidden);
   int64_t hidden_size = cx.size(2);
@@ -1428,8 +1441,12 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());
   std::unique_lock<DropoutState> lock { dropout_state };
   // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
+  int64_t num_params = has_biases ? 4 : 2;
+  if (proj_size != hidden_size) {
+    ++num_params;
+  }
   auto cudnn_output = at::_cudnn_rnn(
-      input, params, has_biases ? 4 : 2, weight_buf,
+      input, params, num_params, weight_buf,
       hx, cx, static_cast<int>(mode), hidden_size, proj_size, num_layers, batch_first, dropout_p,
       train, bidirectional, /*batch_sizes=*/{}, dropout_state.buffer);
 
