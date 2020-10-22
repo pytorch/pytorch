@@ -204,6 +204,50 @@ class TestLinalg(TestCase):
             run_test_case(a_shape, b_shape)
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_kron_non_contiguous(self, device, dtype):
+
+        def run_test_transposed(a_shape, b_shape):
+            # check for transposed case
+            a = torch.rand(a_shape, dtype=dtype, device=device).transpose(-2, -1)
+            b = torch.rand(b_shape, dtype=dtype, device=device).transpose(-2, -1)
+            self.assertFalse(a.is_contiguous())
+            self.assertFalse(b.is_contiguous())
+
+            expected = np.kron(a.cpu().numpy(), b.cpu().numpy())
+            result = torch.kron(a, b)
+            self.assertEqual(result, expected)
+
+            # check the out= variant
+            out = torch.empty(result.transpose(-2, -1).shape, dtype=dtype, device=device).transpose(-2, -1)
+            self.assertFalse(out.is_contiguous())
+            ans = torch.kron(a, b, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
+
+        def run_test_skipped_elements(a_shape, b_shape):
+            # check for transposed case
+            a = torch.rand(a_shape, dtype=dtype, device=device)[::2]
+            b = torch.rand(b_shape, dtype=dtype, device=device)[::2]
+            self.assertFalse(a.is_contiguous())
+            self.assertFalse(b.is_contiguous())
+
+            expected = np.kron(a.cpu().numpy(), b.cpu().numpy())
+            result = torch.kron(a, b)
+            self.assertEqual(result, expected)
+
+            # check the out= variant
+            out = torch.empty(2 * result.shape[0], *result.shape[1:], dtype=dtype, device=device)[::2]
+            self.assertFalse(out.is_contiguous())
+            ans = torch.kron(a, b, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, result)
+
+        shapes = [(4,), (2, 2), (1, 2, 3), (1, 2, 3, 3)]
+        for a_shape, b_shape in itertools.product(shapes, reversed(shapes)):
+            run_test_transposed(a_shape, b_shape)
+            run_test_skipped_elements(a_shape, b_shape)
+
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_kron_empty(self, device, dtype):
 
         def run_test_case(empty_shape):
