@@ -184,7 +184,12 @@ def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=No
         # the module classes that are not symbolically traceable
         "non_traceable_module_class": [
            NonTraceableModule
-        ]
+        ],
+
+        # Additioanl module mapping for qat
+        "additional_qat_module_mapping": {
+           FloatModule: QATModule
+        },
       }
 
 
