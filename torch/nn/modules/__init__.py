@@ -1,5 +1,5 @@
 from .module import Module
-from .linear import Identity, Linear, Bilinear
+from .linear import Identity, Linear, Bilinear, LazyLinear
 from .conv import Conv1d, Conv2d, Conv3d, \
     ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
 from .activation import Threshold, ReLU, Hardtanh, ReLU6, Sigmoid, Tanh, \
@@ -54,6 +54,6 @@ __all__ = [
     'AdaptiveAvgPool2d', 'AdaptiveAvgPool3d', 'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad1d', 'ConstantPad2d',
     'ConstantPad3d', 'Bilinear', 'CosineSimilarity', 'Unfold', 'Fold',
     'AdaptiveLogSoftmaxWithLoss', 'TransformerEncoder', 'TransformerDecoder',
-    'TransformerEncoderLayer', 'TransformerDecoderLayer', 'Transformer',
+    'TransformerEncoderLayer', 'TransformerDecoderLayer', 'Transformer', 'LazyLinear',
     'Flatten', 'Unflatten', 'Hardsigmoid', 'Hardswish', 'SiLU', 'TripletMarginWithDistanceLoss', 'ChannelShuffle'
 ]
