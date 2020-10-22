@@ -95,7 +95,7 @@ CMAKE_ARGS+=("-DUSE_NNPACK=OFF")
 CMAKE_ARGS+=("-DUSE_MKLDNN=OFF")
 
 # Metal
-if [ -n "${USE_PYTORCH_METAL:-}" ]; then
+if [ "${USE_PYTORCH_METAL:-}" == "1" ]; then
   CMAKE_ARGS+=("-DUSE_PYTORCH_METAL=ON")
 fi
 
