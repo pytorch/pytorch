@@ -52,8 +52,11 @@ class QuantizeHandler(ABC):
         return NotImplemented
 
 @register_quant_pattern(operator.add)
+@register_quant_pattern(torch.add)
 @register_quant_pattern((torch.nn.ReLU, operator.add))
+@register_quant_pattern((torch.nn.ReLU, torch.add))
 @register_quant_pattern((torch.nn.functional.relu, operator.add))
+@register_quant_pattern((torch.nn.functional.relu, torch.add))
 class Add(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
@@ -62,7 +65,7 @@ class Add(QuantizeHandler):
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
             node = node.args[0]
-        assert node.op == 'call_function' and node.target == operator.add
+        assert node.op == 'call_function' and node.target in [operator.add, torch.add]
         self.add_node = node
         self.all_nodes = all([isinstance(a, Node) for a in self.add_node.args[:2]])
 
@@ -90,8 +93,11 @@ class Add(QuantizeHandler):
                 'call_function', op, load_arg(quantized=True)(self.add_node.args), kwargs)
 
 @register_quant_pattern(operator.mul)
+@register_quant_pattern(torch.mul)
 @register_quant_pattern((torch.nn.ReLU, operator.mul))
+@register_quant_pattern((torch.nn.ReLU, torch.mul))
 @register_quant_pattern((torch.nn.functional.relu, operator.mul))
+@register_quant_pattern((torch.nn.functional.relu, torch.mul))
 class Mul(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
@@ -100,7 +106,7 @@ class Mul(QuantizeHandler):
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
             node = node.args[0]
-        assert node.op == 'call_function' and node.target == operator.mul
+        assert node.op == 'call_function' and node.target in [operator.mul, torch.mul]
         self.mul_node = node
         self.all_nodes = all([isinstance(a, Node) for a in self.mul_node.args[:2]])
 
