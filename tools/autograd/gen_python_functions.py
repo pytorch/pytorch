@@ -632,11 +632,11 @@ BINARY_OP_NAMES = [
 
 # PyMethodDef entry for binary op, throws not implemented error
 PY_VARIABLE_METHOD_BINOP_DEF = CodeTemplate("""\
-{"${name}", (PyCFunction)${pycfunc_voidcast}TypeError_to_NotImplemented_<${pycname}>, ${flags}, NULL},""")
+{"${name}", ${pyfunc_cast}(TypeError_to_NotImplemented_<${pycname}>), ${flags}, NULL},""")
 
 # PyMethodDef entry
 PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
-{"${name}", (PyCFunction)${pycfunc_voidcast}${pycname}, ${flags}, NULL},""")
+{"${name}", ${pyfunc_cast}(${pycname}), ${flags}, NULL},""")
 
 
 def method_def(name, declarations, is_python_method, module):
@@ -646,10 +646,10 @@ def method_def(name, declarations, is_python_method, module):
     pycname = get_pycname(name)
 
     if is_noarg_binding(declarations):
-        pycfunc_voidcast = ''
+        pyfunc_cast = ''
         flags = 'METH_NOARGS' if is_python_method else 'METH_VARARGS | METH_KEYWORDS'
     else:
-        pycfunc_voidcast = '(void(*)(void))'
+        pyfunc_cast = 'castPyCFunctionWithKeywords'
         flags = 'METH_VARARGS | METH_KEYWORDS'
 
     if module == "torch":
@@ -663,7 +663,7 @@ def method_def(name, declarations, is_python_method, module):
     return def_template.substitute(
         name=name,
         pycname=pycname,
-        pycfunc_voidcast=pycfunc_voidcast,
+        pyfunc_cast=pyfunc_cast,
         flags=flags,
     )
 
