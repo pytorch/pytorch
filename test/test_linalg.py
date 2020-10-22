@@ -1,6 +1,7 @@
 import torch
 import unittest
 import itertools
+import warnings
 from math import inf, nan, isnan
 from random import randrange
 
@@ -1013,7 +1014,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32)
-    def test_tensorsolve_errors(self, device, dtype):
+    def test_tensorsolve_errors_and_warnings(self, device, dtype):
         # tensorsolve expects the input that can be reshaped to a square matrix
         a = torch.eye(2 * 3 * 4).reshape((2 * 3, 4, 2, 3, 4))
         b = torch.randn(8, 4)
@@ -1021,10 +1022,19 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, r'Expected self to satisfy the requirement'):
             torch.linalg.tensorsolve(a, b)
 
-        # out tensor should have the correct resulting shape
+        # if non-empty out tensor with wrong shape is passed a warning is given
         out = torch.empty_like(a)
-        with self.assertRaisesRegex(RuntimeError, r'Expected result tensor to have size of'):
-            ans = torch.linalg.tensorsolve(a, b, out=out)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.linalg.tensorsolve(a, b, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should match
+        out = torch.empty_like(a).to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+            torch.linalg.tensorsolve(a, b, out=out)
 
 instantiate_device_type_tests(TestLinalg, globals())
 
