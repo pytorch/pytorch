@@ -3151,9 +3151,9 @@ class TestQuantizedConv(TestCase):
             return
         if channelwise:
             if transposed:
-                output_channels = W.shape[1] # IC OC/G
+                output_channels = W.shape[1]  # IC OC/G
             else:
-                output_channels = W.shape[0] # OC IC/G
+                output_channels = W.shape[0]  # OC IC/G
             W_scale = torch.tensor([W_scale] * output_channels)
             W_zero_point = torch.tensor([W_zero_point] * output_channels)
             W_q = torch.quantize_per_channel(
