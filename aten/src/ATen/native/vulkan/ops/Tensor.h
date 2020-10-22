@@ -235,6 +235,11 @@ class vTensor final {
         api::Context* context,
         IntArrayRef sizes,
         const TensorOptions& options);
+    View(const View&) = delete;
+    View& operator=(const View&) = delete;
+    View(View&&) = default;
+    View operator=(View&&) = delete;
+    ~View() = default;
 
     Buffer& buffer(Access::Flags) const;
     Buffer& buffer(api::Command::Buffer&, Access::Flags) const;
@@ -348,7 +353,27 @@ class vTensor final {
     friend std::ostream& operator<<(
       std::ostream&,
       const View::State::Bundle&);
-  } view_;
+  };
+
+  // Even at the cost of a heap allocation plus the resulting negative impact
+  // on cache locality due to the subsequent pointer chasing, it is still
+  // critcal to share the view across vTensor implementations to minimize
+  // programmer errors.  Ideally this class should have been only made movable,
+  // and non-copyable - something we cannot do unfortunately due to the inner
+  // workings of at::TensorImpl requiring copy semantics in
+  // at::TensorImpl::release_resources() to function as expected.  Now that this
+  // class is made copyable though, a new door to a whole new class of bugs is
+  // opened, in that there now is a chance of two [shallow] copies, have their
+  // State objects go out of sync as a result of an operation being performed on
+  // one shallow copy that is not reflected in the other.  Technically, if the
+  // programmer is very careful, it is possible to avoid this trap and not pay
+  // the cost of indirection, but the resulting bugs of missing memory barriers
+  // will be so frustrating to hunt down for those unfamiliar with the internal
+  // mechanics of this class, that I decided to take the performance pentalty
+  // of this extra layer of indirection in favor of making this class easier
+  // to use.
+
+  std::shared_ptr<View> view_;
 
  private:
   // Debug
@@ -436,7 +461,7 @@ vTensor::Future<Type, kAccess>::wait() const & {
       "vTensor::Future is in an invalid state!  "
       "Potential reason: This future is moved from.");
 
-  return tensor_->view_.wait().template map<Type, kAccess>();
+  return tensor_->view_->wait().template map<Type, kAccess>();
 }
 
 template<typename Type>
@@ -450,23 +475,23 @@ inline vTensor::Future<Type, kAccess> vTensor::host() & {
 }
 
 inline bool vTensor::has_image() const {
-  return view_.has_image();
+  return view_->has_image();
 }
 
 inline const VkExtent3D& vTensor::extents() const {
-  return view_.extents();
+  return view_->extents();
 }
 
 inline const TensorOptions& vTensor::options() const {
-  return view_.options();
+  return view_->options();
 }
 
 inline IntArrayRef vTensor::sizes() const {
-  return view_.sizes();
+  return view_->sizes();
 }
 
 inline IntArrayRef vTensor::strides() const {
-  return view_.strides();
+  return view_->strides();
 }
 
 inline bool vTensor::View::has_image() const {
