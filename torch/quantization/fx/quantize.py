@@ -117,7 +117,6 @@ def graph_module_from_producer_nodes(root, producer_nodes):
     graph_module = GraphModule(root, graph)
     return graph_module
 
-
 def assert_and_get_unique_device(module):
     """
     Returns the unique device for a module, or None if no device is found.
