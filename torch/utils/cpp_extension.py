@@ -157,9 +157,12 @@ COMMON_NVCC_FLAGS = [
     '--expt-relaxed-constexpr'
 ]
 
-COMMON_HIPCC_FLAGS = [
+COMMON_HIP_FLAGS = [
     '-fPIC',
     '-D__HIP_PLATFORM_HCC__=1',
+]
+
+COMMON_HIPCC_FLAGS = [
     '-DCUDA_HAS_FP16=1',
     '-D__HIP_NO_HALF_OPERATORS__=1',
     '-D__HIP_NO_HALF_CONVERSIONS__=1',
@@ -408,13 +411,13 @@ class BuildExtension(build_ext, object):
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
                     if IS_HIP_EXTENSION:
-                        cflags = cflags + _get_rocm_arch_flags(cflags)
+                        cflags = COMMON_HIPCC_FLAGS + cflags + _get_rocm_arch_flags(cflags)
                     else:
                         cflags = unix_cuda_flags(cflags)
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
                 if IS_HIP_EXTENSION:
-                    cflags = cflags + COMMON_HIPCC_FLAGS
+                    cflags = COMMON_HIP_FLAGS + cflags
                 append_std14_if_no_std_present(cflags)
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
@@ -463,7 +466,7 @@ class BuildExtension(build_ext, object):
             else:
                 post_cflags = list(extra_postargs)
             if IS_HIP_EXTENSION:
-                post_cflags += COMMON_HIPCC_FLAGS
+                post_cflags = COMMON_HIP_FLAGS + post_cflags
             append_std14_if_no_std_present(post_cflags)
 
             cuda_post_cflags = None
@@ -476,7 +479,7 @@ class BuildExtension(build_ext, object):
                     cuda_post_cflags = list(extra_postargs)
                 if IS_HIP_EXTENSION:
                     cuda_post_cflags = cuda_post_cflags + _get_rocm_arch_flags(cuda_post_cflags)
-                    cuda_post_cflags = cuda_post_cflags + COMMON_HIPCC_FLAGS
+                    cuda_post_cflags = COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS + cuda_post_cflags
                 else:
                     cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
                 append_std14_if_no_std_present(cuda_post_cflags)
@@ -1604,7 +1607,7 @@ def _write_ninja_file_to_build_library(path,
         cflags = common_cflags + ['-fPIC', '-std=c++14'] + extra_cflags
 
     if with_cuda and IS_HIP_EXTENSION:
-        cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIPCC_FLAGS
+        cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
         cuda_flags += extra_cuda_cflags
         cuda_flags += _get_rocm_arch_flags(cuda_flags)
         sources = [s if not _is_cuda_file(s) else
