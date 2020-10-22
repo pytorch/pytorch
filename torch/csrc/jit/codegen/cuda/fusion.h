@@ -123,8 +123,9 @@ class TORCH_CUDA_API Fusion final {
   // Print this fusion to cout.
   void print();
 
-  // Print Arith exprs used in outputs
-  void printMath();
+  //! Print Arith exprs
+  //! \param from_outputs_only Only print exprs reachable from outputs
+  void printMath(bool from_outputs_only = true);
 
   // Print transformations used in fusion (can be very verbose)
   void printTransforms();

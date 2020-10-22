@@ -351,12 +351,13 @@ void Fusion::printKernel() {
   std::cout << codegen::generateCudaKernel(GpuLower(this).kernel());
 }
 
-void Fusion::printMath() {
+void Fusion::printMath(bool from_outputs_only) {
   FUSER_PERF_SCOPE("Fusion::printMath");
 
   FusionGuard fg(this);
-  for (auto expr : exprs(true))
+  for (auto expr : exprs(from_outputs_only)) {
     std::cout << expr;
+  }
 }
 
 void Fusion::printTransforms() {
