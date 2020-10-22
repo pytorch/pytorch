@@ -1351,13 +1351,31 @@ Tensor try_get_weight_buf(
 
   int64_t num_parameters = parameters.size();
   int64_t num_ptrs = expected_data_ptrs.size();
-  AT_ASSERT(num_ptrs == (num_parameters * (has_biases ? 1 : 2)));
-  AT_ASSERT(num_ptrs % (has_biases ? 4 : 2) == 0);
-  for (int64_t param_i = 0, ptr_i = 0;
-       ptr_i < num_ptrs;
-       ptr_i += (has_biases ? 2 : 4), param_i += 2) {
-    if (expected_data_ptrs[ptr_i] != parameters[param_i].data_ptr()) return {};
-    if (expected_data_ptrs[ptr_i + 1] != parameters[param_i + 1].data_ptr()) return {};
+  // TODO (igor): can probably make this with less duplication
+  if (proj_size != 0 && proj_size != hidden_size) {
+    AT_ASSERT(num_ptrs % (has_biases ? 5 : 3) == 0);
+    if (has_biases) {
+      AT_ASSERT(num_ptrs == num_parameters);
+      for (int64_t i = 0; i < num_parameters; i++) {
+        if (expected_data_ptrs[i] != parameters[i].data_ptr()) {
+          return {};
+        }
+      }
+    } else {
+      AT_ASSERT(num_parameters % 3 == 0);
+      AT_ASSERT(num_ptrs == num_parameters * 5 / 3);
+      // TODO (igor): this one is not implemented at the moment, since no bias is not going to work anyway
+      return {};
+    }
+  } else {
+    AT_ASSERT(num_ptrs == (num_parameters * (has_biases ? 1 : 2)));
+    AT_ASSERT(num_ptrs % (has_biases ? 4 : 2) == 0);
+    for (int64_t param_i = 0, ptr_i = 0;
+        ptr_i < num_ptrs;
+        ptr_i += (has_biases ? 2 : 4), param_i += 2) {
+      if (expected_data_ptrs[ptr_i] != parameters[param_i].data_ptr()) return {};
+      if (expected_data_ptrs[ptr_i + 1] != parameters[param_i + 1].data_ptr()) return {};
+    }
   }
   if (!parameters[num_parameters - 1].is_contiguous()) return {};
   return weight_buf;
