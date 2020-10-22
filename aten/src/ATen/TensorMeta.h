@@ -8,19 +8,19 @@ namespace at {
 struct TensorMeta {
   DimVector sizes;
   // TODO: DimVector strides;
-  ScalarType dtype;
+  TensorOptions options;
 };
 
 inline Tensor tensor_from_meta(const TensorMeta& meta) {
   // TODO: eliminate indirection
-  return at::empty(meta.sizes, dtype(meta.dtype));
+  return at::empty(meta.sizes, meta.options);
 }
 
 // Analogous to x.new_empty(sizes)
 inline TensorMeta new_meta(const Tensor& self, IntArrayRef sizes) {
   TensorMeta m;
   m.sizes = sizes;
-  m.dtype = self.scalar_type();
+  m.options = self.options();
   return m;
 }
 

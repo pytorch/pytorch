@@ -918,6 +918,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return SpecialFormValue::create(prim::annotate);
+  } else if (
+      obj.ptr() == py::module::import("torch.jit").attr("isinstance").ptr()) {
+    return SpecialFormValue::create(prim::isinstance);
 #ifdef USE_RPC
     // RPC module is only avaialble when build flag "USE_DISTRIBUTED" is on.
   } else if (

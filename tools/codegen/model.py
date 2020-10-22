@@ -112,6 +112,7 @@ class NativeFunction:
 
     # TODO COMMENT TODO
     structured: bool
+    abstract: Optional[bool]
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
@@ -160,6 +161,9 @@ class NativeFunction:
         structured = e.pop('structured', False)
         assert isinstance(structured, bool), f'not a bool: {structured}'
 
+        abstract = e.pop('abstract', None)
+        assert abstract is None or isinstance(abstract, bool), f'not a bool: {abstract}'
+
         python_module = e.pop('python_module', None)
         assert python_module is None or isinstance(python_module, str), f'not a str: {python_module}'
 
@@ -189,6 +193,7 @@ class NativeFunction:
             func=func,
             use_c10_dispatcher=use_c10_dispatcher,
             variants=variants,
+            abstract=abstract,
             structured=structured,
             manual_kernel_registration=manual_kernel_registration,
             python_module=python_module,
@@ -377,10 +382,10 @@ class FunctionSchema:
             # TODO: fixme
             if str(self.name) not in [
                     '_amp_foreach_non_finite_check_and_unscale_',
-                    '_foreach_add_scalar_list_',
-                    '_foreach_sub_scalar_list_',
-                    '_foreach_mul_scalar_list_',
-                    '_foreach_div_scalar_list_',
+                    '_foreach_add_.ScalarList',
+                    '_foreach_sub_.ScalarList',
+                    '_foreach_mul_.ScalarList',
+                    '_foreach_div_.ScalarList',
                     '_foreach_add_.Scalar',
                     '_foreach_sub_.Scalar',
                     '_foreach_mul_.Scalar',
@@ -391,8 +396,10 @@ class FunctionSchema:
                     '_foreach_div_.List',
                     '_foreach_exp_',
                     '_foreach_sqrt_',
-                    '_foreach_addcmul_',
-                    '_foreach_addcdiv_']:
+                    '_foreach_addcmul_.Scalar',
+                    '_foreach_addcdiv_.Scalar',
+                    '_foreach_addcmul_.ScalarList',
+                    '_foreach_addcdiv_.ScalarList']:
                 assert len(self.returns) == 1
 
     def is_out_fn(self) -> bool:
