@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import copy
 from datetime import datetime
 import importlib
 import modulefinder
@@ -53,6 +54,7 @@ TESTS = [
     'test_numba_integration',
     'test_ops',
     'test_optim',
+    'test_pytree',
     'test_mobile_optimizer',
     'test_xnnpack_integration',
     'test_vulkan',
@@ -94,6 +96,54 @@ TESTS = [
     'test_fx_experimental',
     'test_functional_autograd_benchmark',
     'test_package',
+    'distributed/_pipeline/sync/skip/test_api',
+    'distributed/_pipeline/sync/skip/test_gpipe',
+    'distributed/_pipeline/sync/skip/test_inspect_skip_layout',
+    'distributed/_pipeline/sync/skip/test_leak',
+    'distributed/_pipeline/sync/skip/test_portal',
+    'distributed/_pipeline/sync/skip/test_stash_pop',
+    'distributed/_pipeline/sync/skip/test_tracker',
+    'distributed/_pipeline/sync/skip/test_verify_skippables',
+    'distributed/_pipeline/sync/test_balance',
+    'distributed/_pipeline/sync/test_bugs',
+    'distributed/_pipeline/sync/test_checkpoint',
+    'distributed/_pipeline/sync/test_copy',
+    'distributed/_pipeline/sync/test_deferred_batch_norm',
+    'distributed/_pipeline/sync/test_dependency',
+    'distributed/_pipeline/sync/test_inplace',
+    'distributed/_pipeline/sync/test_microbatch',
+    'distributed/_pipeline/sync/test_phony',
+    'distributed/_pipeline/sync/test_pipe',
+    'distributed/_pipeline/sync/test_pipeline',
+    'distributed/_pipeline/sync/test_stream',
+    'distributed/_pipeline/sync/test_transparency',
+    'distributed/_pipeline/sync/test_worker',
+]
+
+# Tests need to be run with pytest.
+USE_PYTEST_LIST = [
+    'distributed/_pipeline/sync/skip/test_api',
+    'distributed/_pipeline/sync/skip/test_gpipe',
+    'distributed/_pipeline/sync/skip/test_inspect_skip_layout',
+    'distributed/_pipeline/sync/skip/test_leak',
+    'distributed/_pipeline/sync/skip/test_portal',
+    'distributed/_pipeline/sync/skip/test_stash_pop',
+    'distributed/_pipeline/sync/skip/test_tracker',
+    'distributed/_pipeline/sync/skip/test_verify_skippables',
+    'distributed/_pipeline/sync/test_balance',
+    'distributed/_pipeline/sync/test_bugs',
+    'distributed/_pipeline/sync/test_checkpoint',
+    'distributed/_pipeline/sync/test_copy',
+    'distributed/_pipeline/sync/test_deferred_batch_norm',
+    'distributed/_pipeline/sync/test_dependency',
+    'distributed/_pipeline/sync/test_inplace',
+    'distributed/_pipeline/sync/test_microbatch',
+    'distributed/_pipeline/sync/test_phony',
+    'distributed/_pipeline/sync/test_pipe',
+    'distributed/_pipeline/sync/test_pipeline',
+    'distributed/_pipeline/sync/test_stream',
+    'distributed/_pipeline/sync/test_transparency',
+    'distributed/_pipeline/sync/test_worker',
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -169,6 +219,28 @@ SLOW_TESTS = [
     'test_quantization',
     'test_determination',
     'test_futures',
+    'distributed/_pipeline/sync/skip/test_api',
+    'distributed/_pipeline/sync/skip/test_gpipe',
+    'distributed/_pipeline/sync/skip/test_inspect_skip_layout',
+    'distributed/_pipeline/sync/skip/test_leak',
+    'distributed/_pipeline/sync/skip/test_portal',
+    'distributed/_pipeline/sync/skip/test_stash_pop',
+    'distributed/_pipeline/sync/skip/test_tracker',
+    'distributed/_pipeline/sync/skip/test_verify_skippables',
+    'distributed/_pipeline/sync/test_balance',
+    'distributed/_pipeline/sync/test_bugs',
+    'distributed/_pipeline/sync/test_checkpoint',
+    'distributed/_pipeline/sync/test_copy',
+    'distributed/_pipeline/sync/test_deferred_batch_norm',
+    'distributed/_pipeline/sync/test_dependency',
+    'distributed/_pipeline/sync/test_inplace',
+    'distributed/_pipeline/sync/test_microbatch',
+    'distributed/_pipeline/sync/test_phony',
+    'distributed/_pipeline/sync/test_pipe',
+    'distributed/_pipeline/sync/test_pipeline',
+    'distributed/_pipeline/sync/test_stream',
+    'distributed/_pipeline/sync/test_transparency',
+    'distributed/_pipeline/sync/test_worker',
 ]
 _DEP_MODULES_CACHE: Dict[str, set] = {}
 
@@ -761,12 +833,15 @@ def main():
     failure_messages = []
     try:
         for test in selected_tests:
-            err_message = run_test_module(test, test_directory, options)
+            options_clone = copy.deepcopy(options)
+            if test in USE_PYTEST_LIST:
+                options_clone.pytest = True
+            err_message = run_test_module(test, test_directory, options_clone)
             if err_message is None:
                 continue
             has_failed = True
             failure_messages.append(err_message)
-            if not options.continue_through_error:
+            if not options_clone.continue_through_error:
                 raise RuntimeError(err_message)
             print_to_stderr(err_message)
     finally:
