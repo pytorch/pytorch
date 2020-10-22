@@ -763,6 +763,9 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     is_factory_method = any(isinstance(a.argument, TensorOptionsArguments) for a in cpp_args) \
         and Variant.method not in f.variants
 
+    # Having only Math in dispatch section is equivalent to no dispatch section.
+    is_abstract = f.dispatch is not None and set(f.dispatch.keys()) != set({'Math'})  # type ignore
+
     return OrderedDict([
         ('name', cpp.name(f.func)),
         ('operator_name', str(f.func.name.name)),
@@ -796,7 +799,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         # for the entry or not (as this affects whether or not the operation is
         # overrideable or not.)  Once this all gets cleaned up, this
         # property will be obsolete.
-        ('abstract', f.dispatch is not None),
+        ('abstract', is_abstract),
         ('device_guard', f.device_guard),
         ('with_gil', False),
         ('deprecated', False),
