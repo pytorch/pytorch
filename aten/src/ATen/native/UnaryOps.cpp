@@ -44,6 +44,22 @@ static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub
   return result;
 }
 
+template <typename Stub>
+static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self, Stub& stub) {
+  auto iter = TensorIterator::unary_float_op(result, self);
+  stub(iter.device_type(), iter);
+  iter.cast_outputs();
+  return result;
+}
+
+template <typename Stub>
+Tensor unary_op_impl_float(const Tensor& self, Stub& stub) {
+  Tensor result;
+  auto iter = TensorIterator::unary_float_op(result, self);
+  stub(iter.device_type(), iter);
+  return iter.output();
+}
+
 // An alternate version of unary_op_impl_out that follows the same pattern
 // for non-complex inputs, but returns a floating point tensor
 // for complex inputs by default.
@@ -315,8 +331,8 @@ Tensor& sgn_out(Tensor& result, const Tensor& self) {
 Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
 Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
-Tensor& sin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sin_stub); }
-Tensor sin(const Tensor& self) { return unary_op_impl(self, at::sin_out); }
+Tensor& sin_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sin_stub); }
+Tensor sin(const Tensor& self) { return unary_op_impl_float(self, sin_stub); }
 Tensor& sin_(Tensor& self) { return unary_op_impl_(self, at::sin_out); }
 
 Tensor& cos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, cos_stub); }
@@ -393,6 +409,12 @@ Tensor& nan_to_num_out(
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
     c10::optional<double> neg_inf) {
+  TORCH_CHECK(
+      self.scalar_type() == result.scalar_type(),
+      "nan_to_num: dtype of out: ",
+      result.scalar_type(),
+      " should be same as input: ",
+      self.scalar_type());
 
   if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
     result.resize_as_(self);

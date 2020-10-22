@@ -34,14 +34,14 @@ from torch.testing._internal.common_utils import \
      wrapDeterministicFlagAPITest, make_tensor)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
+    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCUDAIfNotRocm, \
+    onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA, expectedAlertNondeterministic
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, with_tf32_off, \
-    _get_torch_cuda_version, TEST_MAGMA
+from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, with_tf32_off
 
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -194,8 +194,6 @@ class AbstractTestCases:
             test_namespace(torch.randn(1),
                            'as_strided_',
                            re.compile('^clamp_(min|max)_?$'),
-                           'coalesce',
-                           'is_coalesced',
                            'is_distributed',
                            'is_nonzero',
                            'is_same_size',
@@ -208,14 +206,9 @@ class AbstractTestCases:
                            'prelu',
                            'resize',
                            'resize_as',
-                           'smm',
                            'softmax',
                            'split_with_sizes',
                            'unsafe_split_with_sizes',
-                           'sspaddmm',
-                           'to_dense',
-                           'sparse_resize_',
-                           'sparse_resize_and_clear_',
                            )
             test_namespace(torch.nn)
             test_namespace(torch.nn.functional, 'assert_int_or_pair')
@@ -6073,10 +6066,7 @@ class TestTorchDeviceType(TestCase):
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
 
-    @skipCUDAIf(
-        _get_torch_cuda_version() < [10, 0] and not TEST_MAGMA,
-        "On cuda 9.2, torch.inverse relies on magma"
-    )
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @dtypesIfCUDA(torch.float32, torch.float64)
@@ -6156,10 +6146,7 @@ class TestTorchDeviceType(TestCase):
     # TODO: once there is more support for complex dtype, they shall be added to above test
     @unittest.expectedFailure
     @onlyCUDA
-    @skipCUDAIf(
-        _get_torch_cuda_version() < [10, 0] and not TEST_MAGMA,
-        "On cuda 9.2, torch.inverse relies on magma"
-    )
+    @skipCUDAIfNoMagmaAndNoCusolver
     @dtypes(torch.complex64, torch.complex128)
     def test_inverse_complex_xfailed(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
@@ -6184,10 +6171,7 @@ class TestTorchDeviceType(TestCase):
         test_inverse_helper(_matrices, batches, n)
 
     @onlyCUDA
-    @skipCUDAIf(
-        _get_torch_cuda_version() < [10, 0] and not TEST_MAGMA,
-        "On cuda 9.2, torch.inverse relies on magma"
-    )
+    @skipCUDAIfNoMagmaAndNoCusolver
     @dtypes(torch.complex64, torch.complex128)
     @precisionOverride({torch.complex64: 1e-4})
     def test_inverse_complex_single_matrix(self, device, dtype):
@@ -6208,6 +6192,20 @@ class TestTorchDeviceType(TestCase):
             ans = torch.inverse(matrix, out=matrix_inverse_out)
             self.assertEqual(ans, matrix_inverse_out)
             self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
+
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
+    def test_inverse_singular(self, device):
+        def helper(batch_dim, n):
+            x = torch.eye(3, 3, dtype=torch.float, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
+            x[n, -1, -1] = 0
+
+            with self.assertRaisesRegex(RuntimeError, rf'For batch {n}: U\(3,3\) is zero'):
+                torch.inverse(x)
+
+        for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
+            helper(*params)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
@@ -6935,7 +6933,7 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(t2.is_set_to(t1))
 
     @slowTest
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     def test_inverse_many_batches(self, device):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
