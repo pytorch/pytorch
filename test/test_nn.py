@@ -5685,6 +5685,7 @@ class TestNN(NNTestCase):
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
         torch.testing.assert_allclose(result, ref_output)
 
+
     @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
     def test_cudnn_rnn_dropout_states_device(self):
         rnn = nn.RNN(10, 20, num_layers=2, dropout=.5)
