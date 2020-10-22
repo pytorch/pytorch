@@ -1,6 +1,7 @@
 import torch
 import unittest
 import itertools
+import warnings
 from math import inf, nan, isnan
 from random import randrange
 
@@ -1029,7 +1030,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @dtypesIfCUDA(torch.float32, torch.float64)
-    def test_tensorinv_errors(self, device, dtype):
+    def test_tensorinv_errors_and_warnings(self, device, dtype):
 
         def check_shape(a_shape, ind):
             # tensorinv requires the input to satisfy
@@ -1044,10 +1045,19 @@ class TestLinalg(TestCase):
                 torch.linalg.tensorinv(a, ind=ind)
 
         def check_out(a_shape, ind):
-            # out tensor should have the correct resulting shape
+            # if non-empty out tensor with wrong shape is passed a warning is given
             a = torch.randn(a_shape)
             out = torch.empty_like(a)
-            with self.assertRaisesRegex(RuntimeError, r'Expected result tensor to have size of'):
+            with warnings.catch_warnings(record=True) as w:
+                # Trigger warning
+                torch.linalg.tensorinv(a, ind=ind, out=out)
+                # Check warning occurs
+                self.assertEqual(len(w), 1)
+                self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+            # dtypes should match
+            out = torch.empty_like(a).to(torch.int)
+            with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
                 torch.linalg.tensorinv(a, ind=ind, out=out)
 
         # test for invalid shape
