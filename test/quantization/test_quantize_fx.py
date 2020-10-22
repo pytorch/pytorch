@@ -1485,10 +1485,19 @@ class TestQuantizeFxOps(QuantizationTestCase):
             expected_node_list=order_check)
 
     def test_float_functional(self):
+        class TorchAdd(nn.Module):
+            """Wrapper around torch.add so that all ops can be found at build"""
+            def __init__(self):
+                super().__init__()
+                self.add_func = nnq.FloatFunctional()
+
+            def forward(self, x, y):
+                return self.add_func.add(x, y)
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.ff1 = nnq.FloatFunctional()
+                self.ff1 = TorchAdd()
                 self.ff2 = nnq.FloatFunctional()
                 self.ff3 = nnq.FloatFunctional()
                 self.ff4 = nnq.FloatFunctional()
@@ -1496,7 +1505,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.ff6 = nnq.FloatFunctional()
 
             def forward(self, x):
-                x = self.ff1.add(x, x)
+                x = self.ff1(x, x)
                 x = self.ff2.add_scalar(x, 3)
                 x = self.ff3.mul(x, x)
                 x = self.ff4.mul_scalar(x, 3)
@@ -1532,7 +1541,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
             m(data)
-            print('observed:', m)
             node_list = [
                 ns.call_function(torch.quantize_per_tensor),
                 ns.call_function(torch.ops.quantized.add),
@@ -1544,7 +1552,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 ns.call_method('dequantize')
             ]
             m = convert_fx(m)
-            print('quantized:', m)
             self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
             # make sure numerics match with eager mode
@@ -1552,9 +1559,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             prepare_function = prepare_qat if is_qat else prepare
             ref_m = prepare_function(ref_m)
             ref_m(data)
-            print('ref observed:', ref_m)
             ref_m = convert(ref_m)
-            print('ref quantized:', ref_m)
             self.assertEqual(m(data), ref_m(data))
 
 class TestQuantizeFxModels(QuantizationTestCase):
