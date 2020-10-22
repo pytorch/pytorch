@@ -3587,9 +3587,6 @@ Arguments:
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
 
-Returns:
-    Tensor: A tensor made of blocks of the second tensor scaled by the first.
-
 Examples::
 
     >>> mat1 = torch.eye(2)
