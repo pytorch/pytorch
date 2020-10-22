@@ -2696,10 +2696,11 @@ class DistributedTest:
                 return sum([b.numel() for b in buffers])
 
             # calculate total buffer size from all SyncBN layers
+            syncbn_model = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(model))
             syncbn_buffer_size = 0
-            for m_name, m_layer in BN_NET.named_modules():
-                if isinstance(m_layer, nn.SyncBatchNorm):
-                    syncbn_buffer_size += buffer_size(m_layer.buffers())
+            for m in syncbn_model.modules():
+                if isinstance(m, nn.SyncBatchNorm):
+                    syncbn_buffer_size += buffer_size(m.buffers())
 
             # single gpu training setup
             model_gpu = copy.deepcopy(model)
@@ -2713,12 +2714,11 @@ class DistributedTest:
             )
 
             # verify that DDP has excluded buffers from SyncBN layers
-            ddp_buffer_size = buffer_size(model_DDP.modules_buffers)
-            self.assertTrue(ddp_buffer_size % len(gpu_subset) == 0)
-            self.assertEqual(
-                syncbn_buffer_size,
-                buffer_size(model.buffers()) - ddp_buffer_size / len(gpu_subset)
-            )
+            for replica_buffers in model_DDP.modules_buffers:
+                self.assertEqual(
+                    syncbn_buffer_size,
+                    buffer_size(model.buffers()) - buffer_size(replica_buffers)
+                )
 
             # test serializable/unserializable
             with tempfile.NamedTemporaryFile() as tmp:
