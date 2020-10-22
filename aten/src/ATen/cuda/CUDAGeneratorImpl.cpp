@@ -306,7 +306,7 @@ uint64_t CUDAGeneratorImplDevState::philox_offset_per_thread() const {
     // Returns init_offset_ instead of lazy-initing state, because this function is const.
     return init_offset_;
   } else {
-    const auto& offset_tensor = std::get<0>((*state_iter).second.second);
+    const auto& offset_tensor = std::get<1>((*state_iter).second.second);
     // .item() syncs on the current stream.
     return static_cast<uint64_t>(offset_tensor.item().to<int64_t>());
   }
@@ -406,8 +406,8 @@ CUDAGeneratorImplDevState* CUDAGeneratorImplDevState::clone_impl() const {
 }
 
 void CUDAGeneratorImplDevState::accept_clone_impl(const uint64_t& init_seed,
-                                                     const uint64_t& init_offset,
-                                                     const StreamStatesWithRefs& stream_states) {
+                                                  const uint64_t& init_offset,
+                                                  const StreamStatesWithRefs& stream_states) {
   TORCH_CHECK(seeded_, "CUDAGeneratorImplDevState instance not yet seeded");
   init_seed_ = init_seed;
   init_offset_ = init_offset;
