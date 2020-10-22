@@ -1055,9 +1055,10 @@ class TestLinalg(TestCase):
         check_out((12, 3, 4), ind=1)
         check_out((3, 8, 24), ind=2)
 
+    @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfCUDA(torch.float32, torch.float64)
     def test_tensorinv_singular_input(self, device, dtype):
 
         def check_singular_input(a_shape, ind):
@@ -1071,22 +1072,6 @@ class TestLinalg(TestCase):
         # test for non-invertible input
         check_singular_input((12, 3, 4), ind=1)
         check_singular_input((3, 6, 18), ind=2)
-
-    # TODO: torch.inverse on CUDA for single matrices does not raise the error
-    # see issue https://github.com/pytorch/pytorch/issues/46557
-    @unittest.expectedFailure
-    @onlyCUDA
-    @skipCUDAIfNoMagma
-    @dtypes(torch.float32, torch.float64)
-    def test_tensorinv_singular_input_xfailed(self, device, dtype):
-        a_shape = (12, 3, 4)
-        ind = 1
-        prod_ind_end = np.prod(a_shape[ind:])
-        a = torch.eye(prod_ind_end, dtype=dtype, device=device)
-        a[-1, -1] = 0   # Now `a` is singular
-        a = a.reshape(a_shape)
-        with self.assertRaisesRegex(RuntimeError, "Failed to invert the input tensor, because it is singular"):
-            torch.linalg.tensorinv(a, ind=ind)
 
 instantiate_device_type_tests(TestLinalg, globals())
 
