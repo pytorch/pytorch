@@ -2,9 +2,6 @@
 #define TH_GENERIC_FILE "TH/generic/THLapack.cpp"
 #else
 
-#include <iostream>
-
-
 TH_EXTERNC void dgels_(char *trans, int *m, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, double *work, int *lwork, int *info);
 TH_EXTERNC void sgels_(char *trans, int *m, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, float *work, int *lwork, int *info);
 TH_EXTERNC void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double* vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
@@ -80,7 +77,6 @@ void THLapack_(geqrf)(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_
 /* Build Q from output of geqrf */
 void THLapack_(orgqr)(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info)
 {
-  std::cout << ">>>>> calling core orgqr\n";
 #ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
   dorgqr_(&m, &n, &k, a, &lda, tau, work, &lwork, info);
