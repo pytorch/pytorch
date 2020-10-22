@@ -1018,7 +1018,7 @@ class TestLinalg(TestCase):
         a = torch.eye(2 * 3 * 4).reshape((2 * 3, 4, 2, 3, 4))
         b = torch.randn(8, 4)
         self.assertTrue(np.prod(a.shape[2:]) != np.prod(b.shape))
-        with self.assertRaisesRegex(RuntimeError, r'Expected self to be a \'square\' tensor'):
+        with self.assertRaisesRegex(RuntimeError, r'Expected self to satisfy the requirement'):
             torch.linalg.tensorsolve(a, b)
 
         # out tensor should have the correct resulting shape

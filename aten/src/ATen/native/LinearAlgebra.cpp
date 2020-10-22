@@ -1630,7 +1630,7 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
 
   // Check whether the self tensor can be reshaped to the 2D square matrix
   TORCH_CHECK(result_product == other_product,
-    "Expected self to be a 'square' tensor such that prod(result.shape) == prod(other.shape), but got ",
+    "Expected self to satisfy the requirement prod(self.shape[other.ndim:]) == prod(self.shape[:other.ndim]), but got ",
     result_product, " != ", other_product);
 
   self_ = self_.reshape({result_product, result_product});
