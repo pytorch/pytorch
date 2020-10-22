@@ -15440,8 +15440,7 @@ EXCLUDE_SCRIPT_AD_CHECK = {
     'test_tensor_indices_sections_dim_neg0',
     'test_tensor_split_sections',
     'test_tensor_split_sections_dim',
-    'test_tensor_split_sections_dim_neg0',
-    'test_lu_square_batch_no_info_cpu'
+    'test_tensor_split_sections_dim_neg0'
 }
 
 EXCLUDE_PYTHON_PRINT = {
