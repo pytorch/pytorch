@@ -13746,6 +13746,32 @@ dedent """
 
         self.assertEqual(foo(), 1)
 
+    def test_boolean_literal_constant_metacompile(self):
+        class Mod(torch.nn.Module):
+            val: torch.jit.Final[bool]
+
+            def __init__(self, val):
+                super(Mod, self).__init__()
+                self.val = val
+
+            def forward(self):
+                if self.val:
+                    return 1
+                else:
+                    return "2"
+
+        self.checkModule(Mod(True), ())
+        self.checkModule(Mod(False), ())
+
+        @torch.jit.script
+        def foo():
+            if True:
+                return 1
+            else:
+                return "2"
+
+        self.assertEqual(foo(), 1)
+
     def test_assert_is_scripting_metacompile(self):
         def foo():
             assert not torch.jit.is_scripting(), "TestErrorMsg"
