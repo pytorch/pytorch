@@ -636,13 +636,23 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
   for (int64_t i = 0; i < num_unsqueezed; ++i) {
     grad = grad.sum(0, false);
   }
-  for (size_t j = num_unsqueezed; j < repeats.size(); ++j) {
+
+  const auto grad_sizes = grad.sizes();
+  std::vector<int64_t> grad_sizes_(input_dims);
+  std::copy(grad_sizes.begin(), grad_sizes.end(), grad_sizes_.begin());
+  auto grad_iter_ = grad_sizes_.begin();
+  for (size_t j = num_unsqueezed; j < repeats.size(); ++j, ++grad_iter_) {
     int64_t repeat = repeats[j];
     if (repeat == 1) {
       continue;
     }
     int64_t dim = j - num_unsqueezed;
-    grad = sum_tensorlist(grad.chunk(repeat, dim));
+
+    grad_iter_ = grad_sizes_.insert(grad_iter_, repeat);
+    *(grad_iter_ + 1) /= repeat;
+    grad = grad.reshape(grad_sizes_);
+    grad_iter_ = grad_sizes_.erase(grad_iter_);
+    grad = grad.sum(dim, false);
   }
   return grad;
 }
