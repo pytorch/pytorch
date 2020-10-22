@@ -19,14 +19,19 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
 
   // TODO: use tensor.index() after improving perf
   if (indices.dim() == 1) {
-    return weight.index_select(0, indices);
+    auto out = weight.index_select(0, indices);
+    out.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
+    return out;
   }
 
   auto size = indices.sizes().vec();
   for (auto d : weight.sizes().slice(1)) {
     size.push_back(d);
   }
-  return weight.index_select(0, indices.reshape(-1)).view(size);
+
+  auto out = weight.index_select(0, indices.reshape(-1));
+  out.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
+  return out.view(size);
 }
 
 Tensor embedding_backward(
