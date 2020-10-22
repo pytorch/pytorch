@@ -113,6 +113,7 @@ bool ConcreteModuleTypeBuilder::equals(
       functionAttributes_ == other.functionAttributes_ &&
       builtinFunctions_ == other.builtinFunctions_;
 
+    // Contained types match if both are absent or if both are present and the types they point to are equal.
     bool containedTypeHintsMatch = (!containedTypeHint_ && !other.containedTypeHint_) ||
       (containedTypeHint_ && other.containedTypeHint_ && *containedTypeHint_ == *other.containedTypeHint_);
 
