@@ -2134,8 +2134,12 @@
 
 - func: kron(Tensor self, Tensor other) -> Tensor
   variants: function, method
+  dispatch:
+    Math: kron
 
 - func: kron.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    Math: kron_out
 
 - func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
