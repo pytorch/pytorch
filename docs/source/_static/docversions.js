@@ -1,3 +1,11 @@
+/* Create version-related dynamic output: instert_version_links() will output
+   <li> elements for each string in `version`. The content will be an <a>,
+   with the href to the parallel document in the other version. Using jquery
+   ajax, it will check that the document exists, if not the href will point to
+   the root of the other version
+ */
+
+// These are all the valid directories in pytorch/pytorch.github.io/docs
 var versions = ['master',  '1.7.0', '1.6.0',
                 '1.5.1', '1.5.0', '1.4.0', '1.3.1', '1.3.0', '1.2.0',
                 '1.1.0', '1.0.1', '1.0.0', '0.4.1', '0.4.0', '0.3.1',
@@ -24,7 +32,15 @@ function insert_version_links() {
                 open_list = '<li id="current">'
             }
         }
-        const pathPattern = /docs\/(build\/html|stable|master|[0-9.rc]+)(.*)/;
+        /* CI will be       https://circle-artifacts.com/0/docs/distributed.html
+           deployed will be https://pytorch.org/docs/stable/index.html
+                         or https://pytorch.org/docs/1.7.0/index.html
+                   or maybe https://pytorch.org/docs/1.7.1rc2/index.html
+           local build will be file:///tmp/pytorch/docs/build/html/index.html
+           So we want to capture '/docs', then any of '/build/html',
+           '/' + version[i], or an empty string (the final '|'), in that order.
+         */ 
+        const pathPattern = /docs(\/build\/html\/|\/stable|\/master|\/[0-9.rc]+|)(.*)/;
         const m = location.pathname.match(pathPattern);
         base_url = 'https://pytorch.org/docs/' + versions[i];
         if (m == null) {
