@@ -765,7 +765,6 @@ class Intrinsics : public CallNode<Intrinsics> {
   IntrinsicsOp op_type_;
 };
 
-
 class Polynomial;
 class Term;
 class MaxTerm;

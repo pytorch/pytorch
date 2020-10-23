@@ -23,23 +23,17 @@ void checkRoundTrip(ExprHandle expr) {
   std::stringstream original;
   original << *expr.node();
   std::stringstream round_trip;
-  std::cout << torch::jit::tensorexpr::serialize(expr.node());
   round_trip << *deserializeExpr(
       torch::jit::tensorexpr::serialize(expr.node()));
-  std::string originals = original.str();
-  ASSERT_EQ(originals, round_trip.str());
-  std::cout << originals;
+  ASSERT_EQ(original.str(), round_trip.str());
 }
 
 void checkRoundTrip(Stmt* stmt) {
   std::stringstream original;
   original << *stmt;
   std::stringstream round_trip;
-  std::cout << torch::jit::tensorexpr::serialize(stmt);
   round_trip << *deserializeStmt(torch::jit::tensorexpr::serialize(stmt));
-  std::string originals = original.str();
-  ASSERT_EQ(originals, round_trip.str());
-  std::cout << originals;
+  ASSERT_EQ(original.str(), round_trip.str());
 }
 
 void testIRSerializationBasicValueTest() {
