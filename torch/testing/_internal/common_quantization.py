@@ -570,8 +570,7 @@ class QuantizationTestCase(TestCase):
                     self.assertTrue(
                         expected_node not in nodes_in_graph,
                         'Check failed for node:' + str(expected_node) +
-                        ' expected no occurrence but found' +
-                        ' occurrences: ' + str(nodes_in_graph[expected_node]))
+                        ' expected no occurrence but found')
 
         if expected_node_list is not None:
             cur_index = 0

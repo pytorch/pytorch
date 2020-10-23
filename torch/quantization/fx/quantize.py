@@ -943,7 +943,7 @@ class Quantizer:
                     map_arg(matched_nodes[-1].kwargs, visit(matched_nodes[-1], None, qconfig))
 
                     # output
-                    # we don't insert observer for output of custom module
+                    # we don't insert observer for output of standalone module
                     if not isinstance(quantize_handler, StandaloneModuleQuantizeHandler):
                         # passing in matched_pattern here so that we can customize
                         # activation_post_process constructor for output based on the pattern, e.g.
