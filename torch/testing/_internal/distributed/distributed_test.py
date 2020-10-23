@@ -583,6 +583,57 @@ class DistributedTest:
         def test_backend_full_group(self):
             self._test_group_override_backend(self._init_full_group_test)
 
+        @skip_if_no_gpu
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        def test_batch_isend_irecv_nccl_debug_hang(self):
+            self._barrier()
+            rank = dist.get_rank()
+            p2p_op_list = []
+
+            if rank == 0:
+                send_tensor = torch.empty(1).cuda(0)
+                recv_tensor = torch.empty(2).cuda(0)
+                send_op = dist.P2POp(dist.isend, send_tensor, peer=1)
+                recv_op = dist.P2POp(dist.irecv, recv_tensor, peer=1)
+                p2p_op_list.extend([send_op, recv_op])
+            elif rank == 1:
+                send_tensor = torch.empty(2).cuda(1)
+                recv_tensor = torch.empty(1).cuda(1)
+                send_op = dist.P2POp(dist.isend, send_tensor, peer=0)
+                recv_op = dist.P2POp(dist.irecv, recv_tensor, peer=0)
+                p2p_op_list.extend([send_op, recv_op])
+
+            reqs = dist.batch_isend_irecv(p2p_op_list)
+            for req in reqs:
+                req.wait()
+
+            self._barrier(timeout=100)
+
+        @skip_if_no_gpu
+        @unittest.skipIf(BACKEND != "nccl", "NCCL Batch Send Recv Only")
+        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
+        def test_batch_isend_irecv_nccl_pass(self):
+            self._barrier()
+            rank = dist.get_rank()
+            p2p_op_list = []
+
+            if rank == 0:
+                send_tensor = torch.empty(1).cuda(0)
+                send_op = dist.P2POp(dist.isend, send_tensor, peer=1)
+                p2p_op_list.extend([send_op])
+            elif rank == 1:
+                recv_tensor = torch.empty(1).cuda(1)
+                recv_op = dist.P2POp(dist.irecv, recv_tensor, peer=0)
+                p2p_op_list.extend([recv_op])
+
+            reqs = dist.batch_isend_irecv(p2p_op_list)
+            for req in reqs:
+                req.wait()
+
+            self._barrier(timeout=100)
+
+
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
         @unittest.skip("NCCL P2P is not enabled for OSS builds")
