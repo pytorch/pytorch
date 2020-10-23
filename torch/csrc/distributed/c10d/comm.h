@@ -39,7 +39,7 @@ class GradBucket {
 // Requires implementing 1) `runHook` method that communicates gradients
 // asynchronously, and 2) `parseHookResult` method that converts the hook result
 // into a tensor vector.
-class TORCH_API CommHookInterface {
+class TORCH_PYTHON_API CommHookInterface {
  public:
   virtual ~CommHookInterface() {}
 
