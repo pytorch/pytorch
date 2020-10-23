@@ -7051,6 +7051,32 @@ class TestAutogradDeviceType(TestCase):
         gradcheck(lambda x: x.logcumsumexp(2), a)
         gradgradcheck(lambda x: x.logcumsumexp(2), a)
 
+    @slowTest
+    def test_lu_backward(self, device):
+        def run_test(*sizes):
+            x = torch.rand(*sizes, device=device, dtype=torch.double).requires_grad_(True)
+
+            gradcheck(lambda x: x.lu(get_infos=True), x)
+            gradgradcheck(lambda x: x.lu(get_infos=True), x)
+
+            gradcheck(lambda x: x.lu(get_infos=False), x)
+            gradgradcheck(lambda x: x.lu(get_infos=False), x)
+
+            # there is no pivot-less LU factorization on CPU
+            if x.device.type == 'cuda':
+                gradcheck(lambda x: x.lu(pivot=False, get_infos=True), x)
+                gradgradcheck(lambda x: x.lu(pivot=False, get_infos=True), x)
+
+                gradcheck(lambda x: x.lu(pivot=False, get_infos=False), x)
+                gradgradcheck(lambda x: x.lu(pivot=False, get_infos=False), x)
+
+        run_test(3, 3)
+        run_test(3, 3, 3)
+        run_test(3, 3, 3, 3)
+        run_test(5, 5)
+        run_test(3, 5, 5)
+        run_test(3, 3, 5, 5)
+
     def test_strided_leaf_grad_layout(self, device):
         # (1) If leaf is non-overlapping and dense, grad's layout should match its leaf.
         for fmt_a in (torch.contiguous_format, torch.channels_last):
