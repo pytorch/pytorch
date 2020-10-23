@@ -293,7 +293,6 @@ void avg_pool2d_out_cuda_template(
   bool use_divisor = divisor_override.has_value();
   const auto divisor_override_value = use_divisor ? divisor_override.value() : 0; 
 
-  // don't run the kernel if no elements are present.
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
     "avg_pool2d_out_cuda_frame",
     [&] {
