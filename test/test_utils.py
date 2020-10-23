@@ -618,7 +618,7 @@ class TestHub(TestCase):
 class TestHubPrivate(TestCase):
     @retry(URLError, tries=3, skip_after_retries=True)
     def test_load_from_private_github(self):
-        # 1. we can specify username & password for private repo access
+        # we can specify username & password for private repo access
         os.environ["GIT_USER"] = "pytorch-hub-test"
         os.environ["GIT_PASSWORD"] = "3c7684adb2a7743a0282fad3ff10b8c88ebbc515"
         hub_model = hub.load(
