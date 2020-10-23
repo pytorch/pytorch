@@ -59,6 +59,7 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
       can_start.block(main_stream);
 
       auto dataPtr = allocator.allocate(sizeof(int) * n);
+      int* pivot = reinterpret_cast<int*>(dataPtr.get());
       _apply_single_inverse_helper<scalar_t>(
         &self_data[i * self_mat_stride], &self_inv_data[i * self_inv_mat_stride], pivot, p_infos + i * 2, n);
 
