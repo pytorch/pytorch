@@ -409,10 +409,13 @@ Tensor& avg_pool2d_backward_out_cuda_template(
     outputHeight, outputWidth);
 
   gradInput.resize_as_(input);
-
   const int32_t count = safe_downcast<int32_t, int64_t>(input.numel());
+  if (count == 0) {
+    return gradInput;
+  }
+  
   const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
-  const uint32_t num_blocks = cuda::ATenCeilDiv<uint32_t>(count ? count : 1, num_threads);
+  const uint32_t num_blocks = cuda::ATenCeilDiv<uint32_t>(count, num_threads);
 
   bool use_divisor = divisor_override.has_value();
   const auto divisor_override_value = use_divisor ? divisor_override.value() : 0;
