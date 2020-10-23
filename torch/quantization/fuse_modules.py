@@ -104,14 +104,18 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
                     of the same length. For example,
                     fuser_func([convModule, BNModule]) returns the list [ConvBNModule, nn.Identity()]
                     Defaults to torch.quantization.fuse_known_modules
-        `fuse_custom_config_dict`: custom configuration for fusion:
-         Example:
-         fuse_custom_config_dict = {
+        `fuse_custom_config_dict`: custom configuration for fusion
+
+    .. code-block:: python
+
+       # Example of fuse_custom_config_dict
+       fuse_custom_config_dict = {
            # Additional fuser_method mapping
            "additional_fuser_method_mapping": {
-              (torch.nn.Conv2d, torch.nn.BatchNorm2d): fuse_conv_bn
+               (torch.nn.Conv2d, torch.nn.BatchNorm2d): fuse_conv_bn
            },
-         }
+       }
+
     Returns:
         model with fused modules. A new copy is created if inplace=True.
 
