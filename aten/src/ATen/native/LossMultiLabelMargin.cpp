@@ -104,8 +104,9 @@ static void multilabel_margin_loss_forward_out_cpu_template(
   const auto ndims = input.dim();
 
   TORCH_CHECK(
-      input.numel() > 0 && ndims <= 2,
-      "non-empty vector or matrix expected, got size: ",
+      (ndims == 2 && input.size(1) != 0) ||
+      (ndims == 1 && input.size(0) != 0),
+      "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
       input.sizes());
 
   int64_t nframe, dim;
@@ -239,8 +240,9 @@ static void multilabel_margin_loss_backward_out_cpu_template(
   const auto ndims = input.dim();
 
   TORCH_CHECK(
-      input.numel() > 0 && ndims <= 2,
-      "non-empty vector or matrix expected, got size: ",
+      (ndims == 2 && input.size(1) != 0) ||
+      (ndims == 1 && input.size(0) != 0),
+      "Expected non-empty vector or matrix expected with optional 0-dim batch size, but got: ",
       input.sizes());
 
   int64_t nframe, dim;

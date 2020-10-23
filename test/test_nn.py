@@ -10213,6 +10213,17 @@ class TestNNDeviceType(NNTestCase):
             mod(inp)
 
     @onlyOnCPUAndCUDA
+    def test_MultiLabelMarginLoss_empty(self, device):
+        mod = torch.nn.MultiLabelMarginLoss()
+        x = torch.randn(10, requires_grad=True)
+        y = torch.ones(10, 10).type(torch.long)
+
+        out = mod(x, y)
+        out.sum().backward()
+
+        self.assertEqual(x, torch.zeros_like(x))
+
+    @onlyOnCPUAndCUDA
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)
         unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
