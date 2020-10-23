@@ -21,11 +21,11 @@ namespace c10 {
 DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device);
 
 inline ScalarType dtype_or_default(c10::optional<ScalarType> dtype) {
-  return dtype.value_or_else(&get_default_dtype_as_scalartype);
+  return dtype.value_or_else([] {return get_default_dtype_as_scalartype();});
 }
 
 inline caffe2::TypeMeta dtype_or_default(c10::optional<caffe2::TypeMeta> dtype) {
-  return dtype.value_or_else(&get_default_dtype);
+  return dtype.value_or_else([] {return get_default_dtype();});
 }
 
 inline Layout layout_or_default(c10::optional<Layout> layout) {
