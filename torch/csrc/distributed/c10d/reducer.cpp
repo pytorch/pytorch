@@ -120,7 +120,16 @@ Reducer::Reducer(
         // to check for parameters for which no gradient is computed, if
         // find_unused_parameters=True.
         if (find_unused_parameters_) {
-          gradAccToVariableMap_[grad_accumulator.get()] = index;
+          auto gradAcc = gradAccToVariablesMap_.find(grad_accumulator.get());
+          if (gradAcc == gradAccToVariablesMap_.end()) {
+            std::vector<VariableIndex> indexVec{index};
+            gradAccToVariablesMap_[grad_accumulator.get()] =
+                std::move(indexVec);
+          } else {
+            // Scenario where we have indices whose corresponding parameters
+            // share the same grad accumulator.
+            gradAcc->second.push_back(index);
+          }
         }
 
         // The gradient accumulator is stored as weak_ptr in the autograd
@@ -996,14 +1005,15 @@ void Reducer::prepare_for_backward(
   }
 
   // Find accumulator functions that don't show up in this graph.
-  for (const auto& it : gradAccToVariableMap_) {
+  for (const auto& it : gradAccToVariablesMap_) {
     // If the accumulator function is present in the graph, we know
     // a gradient will be computed for the corresponding parameter.
-    if (seen.count(it.first) > 0) {
-      continue;
+    if (seen.count(it.first) <= 0) {
+      auto& indices = it.second;
+      unused_parameters_.reserve(unused_parameters_.size() + indices.size());
+      unused_parameters_.insert(
+          unused_parameters_.end(), indices.begin(), indices.end());
     }
-
-    unused_parameters_.push_back(it.second);
   }
 }
 
