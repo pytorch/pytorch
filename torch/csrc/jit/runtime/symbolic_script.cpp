@@ -795,6 +795,13 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
+        def gelu(self):
+            result = torch.gelu(self)
+            def backward(grad_output):
+                return 0.5 * (1. + torch.erf(self * 0.70710678)) + 0.3989423 * self * torch.exp(-0.5 * self * self) * grad_output
+
+            return result, backward
+
         def erfc(self):
             def backward(grad_output):
                 # Precomputed constant C = -2.0 / math.sqrt(math.pi)
