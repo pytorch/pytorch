@@ -34,8 +34,8 @@ def addmm(mat: Tensor, mat1: Tensor, mat2: Tensor,
 
     Args:
         mat (Tensor): a dense matrix to be added
-        mat1 (SparseTensor): a sparse matrix to be multiplied
-        mat2 (Tensor): a dense matrix be multiplied
+        mat1 (Tensor): a sparse matrix to be multiplied
+        mat2 (Tensor): a dense matrix to be multiplied
         beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
         alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
     """
@@ -52,7 +52,7 @@ def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
     :attr:`mat1` is a coalesced sparse tensor.
 
     Args:
-        mat1 (SparseTensor): the first sparse matrix to be multiplied
+        mat1 (Tensor): the first sparse matrix to be multiplied
         mat2 (Tensor): the second dense matrix to be multiplied
 
     Example::
@@ -87,10 +87,10 @@ def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
 def sum(input: Tensor, dim: DimOrDims = None,
         dtype: Optional[DType] = None) -> Tensor:
     r"""
-    Returns the sum of each row of SparseTensor :attr:`input` in the given
+    Returns the sum of each row of the sparse tensor :attr:`input` in the given
     dimensions :attr:`dim`. If :attr:`dim` is a list of dimensions,
     reduce over all of them. When sum over all ``sparse_dim``, this method
-    returns a Tensor instead of SparseTensor.
+    returns a dense tensor instead of a sparse tensor.
 
     All summed :attr:`dim` are squeezed (see :func:`torch.squeeze`), resulting an output
     tensor having :attr:`dim` fewer dimensions than :attr:`input`.
@@ -99,7 +99,7 @@ def sum(input: Tensor, dim: DimOrDims = None,
     will propagate back. Note that the gradients of :attr:`input` is coalesced.
 
     Args:
-        input (Tensor): the input SparseTensor
+        input (Tensor): the input sparse tensor
         dim (int or tuple of ints): a dimension or a list of dimensions to reduce. Default: reduce
             over all dims.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned Tensor.
@@ -127,7 +127,7 @@ def sum(input: Tensor, dim: DimOrDims = None,
                                [-1.9682, -0.5340,  0.7483]]]),
                size=(5, 5, 2, 3), nnz=3, layout=torch.sparse_coo)
 
-        # when sum over only part of sparse_dims, return a SparseTensor
+        # when sum over only part of sparse_dims, return a sparse tensor
         >>> torch.sparse.sum(S, [1, 3])
         tensor(indices=tensor([[0, 2, 3]]),
                values=tensor([[-1.4512,  0.4073],
@@ -135,7 +135,7 @@ def sum(input: Tensor, dim: DimOrDims = None,
                               [-0.3183, -1.7539]]),
                size=(5, 2), nnz=3, layout=torch.sparse_coo)
 
-        # when sum over all sparse dim, return a dense Tensor
+        # when sum over all sparse dim, return a dense tensor
         # with summed dims squeezed
         >>> torch.sparse.sum(S, [0, 1, 3])
         tensor([-2.6596, -1.1450])
@@ -161,7 +161,7 @@ def softmax(input: Tensor, dim: int, dtype: Optional[DType] = None) -> Tensor:
 
     where :math:`i, j` run over sparse tensor indices and unspecified
     entries are ignores. This is equivalent to defining unspecified
-    entries as negative infinity so that :max:`exp(x_k) = 0` when the
+    entries as negative infinity so that :math:`exp(x_k) = 0` when the
     entry with index :math:`k` has not specified.
 
     It is applied to all slices along `dim`, and will re-scale them so
