@@ -83,7 +83,8 @@ class RNNBase(Module):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
 
                 w_ih = Parameter(torch.Tensor(gate_size, layer_input_size))
-                w_hh = Parameter(torch.Tensor(gate_size, hidden_size))
+                real_hid_size = proj_size if proj_size > 0 else hidden_size
+                w_hh = Parameter(torch.Tensor(gate_size, real_hid_size))
                 b_ih = Parameter(torch.Tensor(gate_size))
                 # Second bias vector included for CuDNN compatibility. Only one
                 # bias vector is needed in standard definition.
