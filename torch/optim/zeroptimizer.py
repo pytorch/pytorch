@@ -491,7 +491,7 @@ class ZeROptimizer(Optimizer):
                     if offset > 0 and not bucket_sent:
                         bucket_requests.append(
                             (
-                                dist.broadcast(tensor=buffer, dst=global_src_rank, group=group, async_op=True),  # type: ignore
+                                dist.broadcast(tensor=buffer, src=global_src_rank, group=self.group, async_op=True),  # type: ignore
                                 src_rank,
                                 bucket_params,
                             )
@@ -508,7 +508,7 @@ class ZeROptimizer(Optimizer):
             work_handle.wait()
             if src_rank != self.rank:
                 for p, offset, end in bucket_params:
-                    p.grad.data.copy_(buffers[dst_rank][offset:end].view_as(p.data))  # type: ignore
+                    p.data.copy_(buffers[src_rank][offset:end].view_as(p.data))  # type: ignore
 
         # Unroll all the async work items, just in case
         _ = list(map(lambda x: x.wait(), direct_requests))
