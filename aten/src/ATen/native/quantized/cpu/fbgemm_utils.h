@@ -257,7 +257,9 @@ fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
     const std::vector<int>& kernels,
     const std::vector<int>& strides,
     const std::vector<int>& pads,
-    const std::vector<int>& dilations);
+    const std::vector<int>& dilations,
+    const std::vector<int>& output_padding = std::vector<int>(kSpatialDim, 0),
+    bool transposed = false);
 
 // TODO: Remove functions below when ChannelsLast3d is ready.
 Tensor MakeStridedQTensorCPU(
@@ -287,6 +289,11 @@ Tensor MakeEmptyPerChannelAffineQuantizedChannelsLast3dTensor(
     const Tensor& zero_points);
 
 Tensor ConvertToChannelsLast3dTensor(const Tensor& src);
+
+template <int kSpatialDim = 2>
+Tensor TransposeConvTensorUnpackConversion(
+    const Tensor& src,
+    int groups);
 
 } // namespace fbgemm_utils
 } // namespace native
@@ -332,5 +339,13 @@ struct CAFFE2_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
     const c10::optional<at::Tensor>& offsets,
     bool sparse,
     const c10::optional<at::Tensor>& per_sample_weights_,
+    bool include_last_offset) override;
+
+  at::Tensor embeddingbag_4bit(
+    const at::Tensor& indices,
+    const c10::optional<at::Tensor>& offsets,
+    bool sparse,
+    const c10::optional<at::Tensor>& per_sample_weights_,
+    const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) override;
 };
