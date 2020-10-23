@@ -1392,6 +1392,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
+        // See [Sync Streams].
+        c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
         torch::cuda::nccl::all2all_single_equal_split(
               input,
               output,
@@ -1421,7 +1424,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
               inputSplitSizes, input, &send_lengths, &send_offsets);
           c10d::computeLengthsAndOffsets(
               outputSplitSizes, output, &recv_lengths, &recv_offsets);
-          torch::cuda::nccl::all2all_single_unequal_split(
+          // See [Sync Streams].
+          c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
+          return torch::cuda::nccl::all2all_single_unequal_split(
               input.data_ptr(),
               send_lengths.data(),
               send_offsets.data(),

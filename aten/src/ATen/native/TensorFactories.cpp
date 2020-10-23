@@ -348,6 +348,12 @@ Tensor empty_like(
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
       result = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
+    } else if (self.layout() == kStrided) {
+      // If input tensor is not dense and non-overlapping but strided, we will infer an output strides
+      // which keeps the layout permutation of the input tensor.
+      std::vector<int64_t> strides = infer_dense_strides(self.sizes(), self.strides());
+      // See Note [Explicit nullopt MemoryFormat argument]
+      result = at::empty_strided(self.sizes(), strides, options.memory_format(c10::nullopt));
     } else {
       // See Note [Explicit nullopt MemoryFormat argument]
       result = at::empty(self.sizes(), options.memory_format(self.suggest_memory_format()), c10::nullopt);
