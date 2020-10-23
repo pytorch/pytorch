@@ -63,6 +63,11 @@ def test_process_exit(idx):
     sys.exit(12)
 
 
+def raise_excepiton(char_size: int):
+    msg = "x" * char_size
+    raise RuntimeError(f"Raising exception with message: {msg}")
+
+
 def test_nested(i, pids_queue, nested_child_sleep, start_method):
     context = mp.get_context(start_method)
     nested_child_ready_queue = context.Queue()
@@ -135,6 +140,15 @@ class _TestMultiProcessing(object):
 
         with self.assertRaisesRegex(Exception, message):
             mp.start_processes(test_terminate_signal_func, nprocs=2, start_method=self.start_method)
+
+    def test_raise_long_exception(self):
+        # The test checks that both reader and writes processes do not get stuck
+        # when writer process has huge stacktrace
+        size = 250000
+        with self.assertRaisesRegex(RuntimeError, "Raising exception with message"):
+            mp.start_processes(
+                raise_excepiton, args=(size,), nprocs=2, start_method=self.start_method
+            )
 
     def test_terminate_exit(self):
         exitcode = 123
