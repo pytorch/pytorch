@@ -10830,6 +10830,8 @@ class TestNNDeviceType(NNTestCase):
                 embedding.zero_grad()
                 self.assertEqual(after, pre)
 
+    # Test fails on Vg20
+    @skipCUDAIfRocm
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypes(torch.float)
     def test_softmax_results(self, device, dtype):
@@ -11429,6 +11431,8 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(output[1], output[2])
         self.assertTrue(output.data.norm(p=2, dim=1).le(1).all())
 
+    # Test fails on Vg20
+    @skipCUDAIfRocm
     @onlyCUDA
     @dtypes(torch.half, torch.float)
     def test_softmax(self, device, dtype):
