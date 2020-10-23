@@ -37,9 +37,9 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("add.out", CppFunction::makeFallthrough());
   m.impl("add_.Scalar", CppFunction::makeFallthrough());
   m.impl("add_.Tensor", CppFunction::makeFallthrough());
-  m.impl("add_relu.Tensor", CppFunction::makeFallthrough());
-  m.impl("add_relu.out", CppFunction::makeFallthrough());
-  m.impl("add_relu_.Tensor", CppFunction::makeFallthrough());
+  m.impl("_add_relu.Tensor", CppFunction::makeFallthrough());
+  m.impl("_add_relu.out", CppFunction::makeFallthrough());
+  m.impl("_add_relu_.Tensor", CppFunction::makeFallthrough());
   m.impl("addcdiv", CppFunction::makeFallthrough());
   m.impl("addcdiv.out", CppFunction::makeFallthrough());
   m.impl("addcdiv_", CppFunction::makeFallthrough());
