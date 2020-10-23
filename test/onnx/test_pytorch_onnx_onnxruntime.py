@@ -849,6 +849,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50, 44, 31)
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_floating_point(self):
         class FloatingPoint(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -873,6 +874,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(FloatingPoint(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     @skipIfONNXShapeInference(False)
     def test_floating_point_infer_dtype(self):
         class FloatingPoint(torch.jit.ScriptModule):
