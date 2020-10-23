@@ -217,8 +217,33 @@ Tensor neuronKernel(const Tensor& input, MPSCNNNeuron* neuron) {
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
+Tensor& neuronKernel_(Tensor& input, MPSCNNNeuron* neuron) {
+  MPSImage* X = imageFromTensor(input);
+  std::vector<int64_t> outputSize = input.sizes().vec();
+  std::vector<int64_t> textureSize = outputSize;
+  if (input.dim() == 2) {
+    textureSize = {outputSize[0], outputSize[1], 1, 1};
+  }
+  MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
+  MPSImage* Y = [MPSImage temporaryImageFromSize:input.sizes().vec()
+                                   commandBuffer:commandBuffer];
+  [neuron encodeToCommandBuffer:commandBuffer.buffer
+                    sourceImage:X
+               destinationImage:Y];
+  MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
+  MetalTensor& metalTensor = impl->unsafe_opaque_handle();
+  metalTensor.texture()->copyFromTexture(Y);
+  return input;
+}
+
+API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor relu(const Tensor& input) {
   return neuronKernel(input, [MPSCNNNeuronOp relu]);
+}
+
+API_AVAILABLE(ios(10.0), macos(10.13))
+Tensor& relu_(Tensor& input) {
+  return neuronKernel_(input, [MPSCNNNeuronOp relu]);
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
@@ -357,8 +382,46 @@ Tensor binaryElementwiseKernel(
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
+Tensor& binaryElementwiseKernel_(
+    Tensor& input1,
+    const Tensor& input2,
+    NSString* arrayKernel,
+    NSString* nonarrayKernal) {
+  MPSImage* X1 = imageFromTensor(input1);
+  MPSImage* X2 = imageFromTensor(input2);
+  std::vector<int64_t> outputSize = input1.sizes().vec();
+  MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
+  MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);
+  TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different command buffer");
+  MPSImage* Y = [MPSImage temporaryImageFromSize:outputSize commandBuffer:cb1];
+  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+      pipelineState:kernelFor(X1, arrayKernel, nonarrayKernal)];
+  id<MTLComputeCommandEncoder> encoder = [cb1.buffer computeCommandEncoder];
+  [encoder setComputePipelineState:state];
+  [encoder setTexture:[X1 texture] atIndex:0];
+  [encoder setTexture:[X2 texture] atIndex:1];
+  [encoder setTexture:[Y texture] atIndex:2];
+  const auto& launchParams = spatialPointwiseKernelLaunchParams(state, Y);
+  [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
+          threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
+  [encoder endEncoding];
+  [X1 markRead];
+  [X2 markRead];
+  MetalTensorImpl* impl = (MetalTensorImpl*)input1.unsafeGetTensorImpl();
+  MetalTensor& metalTensor = impl->unsafe_opaque_handle();
+  metalTensor.texture()->copyFromTexture(Y);
+  return input1;
+}
+
+API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor add(const Tensor& input1, const Tensor& input2) {
   return binaryElementwiseKernel(
+      input1, input2, @"elementwise_add", @"elementwise_add_nonarray");
+}
+
+API_AVAILABLE(ios(10.0), macos(10.13))
+Tensor& add_(Tensor& input1, const Tensor& input2) {
+  return binaryElementwiseKernel_(
       input1, input2, @"elementwise_add", @"elementwise_add_nonarray");
 }
 
@@ -508,6 +571,35 @@ Tensor upsample_nearest2d_vec(
   }
   auto output = MetalTensor::toTensor(std::move(mt), input.options());
   return output;
+}
+
+Tensor flatten_using_ints(
+    const Tensor& input,
+    int64_t start_dim,
+    int64_t end_dim) {
+  start_dim = maybe_wrap_dim(start_dim, input.dim());
+  end_dim = maybe_wrap_dim(end_dim, input.dim());
+  TORCH_CHECK(
+      start_dim <= end_dim,
+      "flatten() has invalid args: start_dim cannot come after end_dim");
+  std::vector<int64_t> shape;
+  if (input.dim() == 0) {
+    return input.reshape({1});
+  }
+  if (start_dim == end_dim) {
+    return input;
+  }
+  auto slice_numel =
+      prod_intlist(input.sizes().slice(start_dim, end_dim - start_dim + 1));
+  shape.reserve(input.dim() - end_dim + start_dim);
+  for (int64_t i = 0; i < start_dim; i++) {
+    shape.push_back(input.size(i));
+  }
+  shape.push_back(slice_numel);
+  for (int64_t i = end_dim + 1; i < input.dim(); i++) {
+    shape.push_back(input.size(i));
+  }
+  return input.reshape(shape);
 }
 
 Tensor copy_to_host(const Tensor& input) {

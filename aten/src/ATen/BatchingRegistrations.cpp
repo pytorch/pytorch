@@ -524,6 +524,34 @@ Tensor to_dtype_layout_batching_rule(
   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
 }
 
+Tensor new_zeros_batching_rule(
+    const Tensor& self,
+    IntArrayRef size,
+    optional<ScalarType> dtype,
+    optional<Layout> layout,
+    optional<Device> device,
+    optional<bool> pin_memory) {
+  auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto physical_size = physical_view.getPhysicalShape(size);
+  auto options = TensorOptions()
+    .dtype(dtype)
+    .layout(layout)
+    .device(device)
+    .pinned_memory(pin_memory);
+  auto result = physical_view.tensor().new_zeros(physical_size, options);
+  return physical_view.newLogicalFromPhysical(result);
+}
+
+Tensor new_empty_batching_rule(
+    const Tensor& self,
+    IntArrayRef size,
+    const TensorOptions& options) {
+  auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto physical_size = physical_view.getPhysicalShape(size);
+  auto result = physical_view.tensor().new_empty(physical_size, options);
+  return physical_view.newLogicalFromPhysical(result);
+}
+
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
@@ -669,6 +697,10 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("select_backward", select_backward_batching_rule);
   m.impl("slice_backward", slice_backward_batching_rule);
   m.impl("diagonal_backward", diagonal_backward_batching_rule);
+
+  // Tensor.new_* operators
+  m.impl_UNBOXED("new_empty", new_empty_batching_rule);
+  m.impl("new_zeros", new_zeros_batching_rule);
 }
 
 } // namespace at
