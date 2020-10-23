@@ -99,6 +99,7 @@ class Add(QuantizeHandler):
             return quantizer.quantized_graph.create_node(
                 'call_function', op, load_arg(quantized=True)(self.add_node.args), kwargs)
 
+# TODO: merge with Add
 @register_quant_pattern(operator.mul)
 @register_quant_pattern(torch.mul)
 @register_quant_pattern((torch.nn.ReLU, operator.mul))
@@ -115,7 +116,7 @@ class Mul(QuantizeHandler):
             node = node.args[0]
         assert node.op == 'call_function' and node.target in [operator.mul, torch.mul]
         self.mul_node = node
-        self.num_node_args = len([a for a in self.add_node.args[:2] if isinstance(a, Node)])
+        self.num_node_args = len([a for a in self.mul_node.args[:2] if isinstance(a, Node)])
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         if self.num_node_args == 1:
@@ -124,8 +125,14 @@ class Mul(QuantizeHandler):
                 op = torch.ops.quantized.mul_relu
             else:
                 op = torch.ops.quantized.mul
+
+            if isinstance(self.mul_node.args[0], Node):
+                quantized_index = 0
+            else:
+                quantized_index = 1
+
             return quantizer.quantized_graph.create_node(
-                'call_function', op, load_arg(quantized=[0])(self.mul_node.args), self.mul_node.kwargs)
+                'call_function', op, load_arg(quantized=[quantized_index])(self.mul_node.args), self.mul_node.kwargs)
         else:
             activation_post_process = quantizer.activation_post_process_map[node.name]
             scale, zero_point = activation_post_process.calculate_qparams()
