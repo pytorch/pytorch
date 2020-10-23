@@ -145,6 +145,7 @@ if(BLAS_FOUND)
          set(OPEN_LAPACK_WORKS NO)
        endif()
       endif()
+    endif()
 
     set(CMAKE_REQUIRED_LIBRARIES)
     if(OPEN_LAPACK_WORKS)
