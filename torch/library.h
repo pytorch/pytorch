@@ -99,7 +99,7 @@ public:
   /// This overload accepts compile time function pointers, e.g., `CppFunction(TORCH_FN(add_impl))`
   template <typename FuncPtr>
   explicit CppFunction(FuncPtr f, std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, std::nullptr_t> = nullptr)
-    : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f.func_ptr()))
+    : func_(c10::KernelFunction::makeFromUnboxedFunction(f))
     , cpp_signature_(c10::impl::CppSignature::make<typename FuncPtr::FuncType>())
     // TODO: Don't go through WrapRuntimeKernelFunctor
     , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<typename FuncPtr::FuncType>>>())
@@ -543,7 +543,7 @@ public:
   }
   template <typename Func>
   Library& impl_UNBOXED(detail::SelectiveStr<true> name, Func* raw_f) & {
-    return impl_UNBOXED(name.operator const char*(), std::forward<Func>(raw_f));
+    return impl(name.operator const char*(), CppFunction::makeUnboxedOnly(raw_f));
   }
 
   /// Register a fallback implementation for all operators which will be used

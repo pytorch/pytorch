@@ -10,6 +10,41 @@
 namespace torch {
 namespace jit {
 
+namespace {
+
+class ProfileRegistry {
+ public:
+  static ProfileRegistry* getRegistry() {
+    static ProfileRegistry profile_registry_;
+    return &profile_registry_;
+  }
+
+  void registerProfileNode(const std::function<bool(const Node*)>& func) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    registry_funcs_.push_back(func);
+  }
+
+  bool shouldProfileNode(const Node* node) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    for (const auto& func : registry_funcs_) {
+      if (func(node)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+ private:
+  std::vector<std::function<bool(const Node*)>> registry_funcs_;
+  std::mutex mutex_;
+};
+
+} // namespace
+
+void RegisterProfilingNode(const std::function<bool(const Node*)>& func) {
+  ProfileRegistry::getRegistry()->registerProfileNode(func);
+}
+
 bool ShapeSymbolTable::bindSymbolicShapes(
     at::IntArrayRef new_sizes,
     const c10::SymbolicShape& sym_shapes) {
@@ -171,6 +206,8 @@ bool needsProfiledInputs(Node* n) {
     // specialize_autogradzero
     case prim::AutogradAdd:
     case prim::AutogradAnyNonZero:
+    case prim::AutogradAllNonZero:
+    case prim::AutogradAllZero:
     case prim::AutogradZero:
     // peephole
     case aten::dim:
@@ -187,7 +224,7 @@ bool needsProfiledInputs(Node* n) {
     case aten::mm:
       return true;
     default:
-      return false;
+      return ProfileRegistry::getRegistry()->shouldProfileNode(n);
   }
 }
 
@@ -201,7 +238,7 @@ bool needsProfiledOutput(Node* n) {
     case prim::AutogradZero:
       return true;
     default:
-      return false;
+      return ProfileRegistry::getRegistry()->shouldProfileNode(n);
   }
 }
 

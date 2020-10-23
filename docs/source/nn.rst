@@ -10,7 +10,7 @@ These are the basic building block for graphs
     :depth: 2
     :local:
     :backlinks: top
-    
+
 
 .. currentmodule:: torch.nn
 
@@ -21,6 +21,7 @@ These are the basic building block for graphs
     :template: classtemplate.rst
 
     ~parameter.Parameter
+    ~parameter.UninitializedParameter
 
 Containers
 ----------------------------------
@@ -207,6 +208,7 @@ Linear Layers
     nn.Identity
     nn.Linear
     nn.Bilinear
+    nn.LazyLinear
 
 Dropout Layers
 --------------
@@ -269,6 +271,7 @@ Loss Functions
     nn.CosineEmbeddingLoss
     nn.MultiMarginLoss
     nn.TripletMarginLoss
+    nn.TripletMarginWithDistanceLoss
 
 Vision Layers
 ----------------
@@ -282,6 +285,16 @@ Vision Layers
     nn.Upsample
     nn.UpsamplingNearest2d
     nn.UpsamplingBilinear2d
+
+Shuffle Layers
+----------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.ChannelShuffle
 
 DataParallel Layers (multi-GPU, distributed)
 --------------------------------------------
@@ -362,3 +375,14 @@ Quantized Functions
 
 Quantization refers to techniques for performing computations and storing tensors at lower bitwidths than
 floating point precision. PyTorch supports both per tensor and per channel asymmetric linear quantization. To learn more how to use quantized functions in PyTorch, please refer to the :ref:`quantization-doc` documentation.
+
+Lazy Modules Initialization
+---------------------------
+
+.. currentmodule:: torch
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.modules.lazy.LazyModuleMixin

@@ -4,6 +4,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
+#include <c10/core/Stream.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Storage.h>
@@ -49,6 +50,8 @@ namespace at {
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
 
+using Stream = c10::Stream;
+
 namespace impl {
 inline bool variable_excluded_from_dispatch() {
 #ifdef C10_MOBILE
@@ -56,7 +59,7 @@ inline bool variable_excluded_from_dispatch() {
   return true;
 #else
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::Autograd));
-  return c10::impl::tls_local_dispatch_key_set().excluded_.isSupersetOf(c10::getRuntimeDispatchKeySet(DispatchKey::Autograd));
+  return c10::impl::tls_local_dispatch_key_set().excluded_.isSupersetOf(c10::autograd_dispatch_keyset);
 #endif
 }
 }
@@ -329,6 +332,9 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` is vulkan tensor.
   bool is_vulkan() const;
 
+  /// Returns if a `Tensor` is metal tensor.
+  bool is_metal() const;
+
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
@@ -447,6 +453,7 @@ class CAFFE2_API Tensor {
   Tensor cuda() const;
   Tensor hip() const;
   Tensor vulkan() const;
+  Tensor metal() const;
 
   // ~~~~~ Autograd API ~~~~~
 

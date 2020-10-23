@@ -42,26 +42,35 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("NVTX", ProfilerState::NVTX);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
-      .def(py::init<ProfilerState, bool, bool>());
+      .def(py::init<ProfilerState, bool, bool, bool>());
 
   py::class_<Event>(m, "ProfilerEvent")
       .def("kind", &Event::kind)
       .def("name", [](const Event& e) { return e.name(); })
-      .def("thread_id", &Event::thread_id)
+      .def("thread_id", &Event::threadId)
+      .def("fwd_thread_id", &Event::fwdThreadId)
       .def("device", &Event::device)
-      .def("cpu_elapsed_us", &Event::cpu_elapsed_us)
-      .def("cuda_elapsed_us", &Event::cuda_elapsed_us)
-      .def("has_cuda", &Event::has_cuda)
+      .def("cpu_elapsed_us", &Event::cpuElapsedUs)
+      .def("cuda_elapsed_us", &Event::cudaElapsedUs)
+      .def("has_cuda", &Event::hasCuda)
       .def("shapes", &Event::shapes)
-      .def("cpu_memory_usage", &Event::cpu_memory_usage)
-      .def("cuda_memory_usage", &Event::cuda_memory_usage)
+      .def("cpu_memory_usage", &Event::cpuMemoryUsage)
+      .def("cuda_memory_usage", &Event::cudaMemoryUsage)
       .def("handle", &Event::handle)
-      .def("node_id", &Event::node_id)
+      .def("node_id", &Event::nodeId)
       .def("is_remote", &Event::isRemote)
-      .def("sequence_nr", &Event::sequence_nr);
+      .def("sequence_nr", &Event::sequenceNr)
+      .def("stack", &Event::stack)
+      .def("scope", &Event::scope);
+
+  py::class_<ProfilerDisableOptions>(m, "_ProfilerDisableOptions")
+    .def(py::init<bool, bool>());
 
   m.def("_enable_profiler", enableProfiler);
-  m.def("_disable_profiler", disableProfiler);
+  m.def(
+      "_disable_profiler",
+      disableProfiler,
+      py::arg("profiler_disable_options") = ProfilerDisableOptions());
   m.def("_profiler_enabled", profilerEnabled);
   m.def("_enable_record_function", [](bool enable) {
     at::enableRecordFunction(enable);
@@ -168,15 +177,15 @@ static PyObject * is_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
 
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
-  {"_set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, nullptr},
-  {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, nullptr},
-  {"set_autocast_enabled", (PyCFunction)set_autocast_enabled, METH_O, nullptr},
-  {"is_autocast_enabled", (PyCFunction)is_autocast_enabled, METH_NOARGS, nullptr},
-  {"clear_autocast_cache", (PyCFunction)clear_autocast_cache, METH_NOARGS, nullptr},
-  {"autocast_increment_nesting", (PyCFunction)autocast_increment_nesting, METH_NOARGS, nullptr},
-  {"autocast_decrement_nesting", (PyCFunction)autocast_decrement_nesting, METH_NOARGS, nullptr},
-  {"set_anomaly_enabled", (PyCFunction)set_anomaly_mode_enabled, METH_O, nullptr},
-  {"is_anomaly_enabled", (PyCFunction)is_anomaly_mode_enabled, METH_NOARGS, nullptr},
+  {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
+  {"is_grad_enabled", is_grad_enabled, METH_NOARGS, nullptr},
+  {"set_autocast_enabled", set_autocast_enabled, METH_O, nullptr},
+  {"is_autocast_enabled", is_autocast_enabled, METH_NOARGS, nullptr},
+  {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
+  {"autocast_increment_nesting", autocast_increment_nesting, METH_NOARGS, nullptr},
+  {"autocast_decrement_nesting", autocast_decrement_nesting, METH_NOARGS, nullptr},
+  {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},
+  {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

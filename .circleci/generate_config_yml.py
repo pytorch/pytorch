@@ -22,6 +22,7 @@ import cimodel.data.simple.macos_definitions
 import cimodel.data.simple.mobile_definitions
 import cimodel.data.simple.nightly_android
 import cimodel.data.simple.nightly_ios
+import cimodel.data.simple.anaconda_prune_defintions
 import cimodel.data.windows_build_definitions as windows_build_definitions
 import cimodel.lib.miniutils as miniutils
 import cimodel.lib.miniyaml as miniyaml
@@ -93,6 +94,7 @@ def gen_build_workflows_tree():
         cimodel.data.simple.binary_smoketest.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
         cimodel.data.simple.nightly_android.get_workflow_jobs,
+        cimodel.data.simple.anaconda_prune_defintions.get_workflow_jobs,
         windows_build_definitions.get_windows_workflows,
         binary_build_definitions.get_post_upload_jobs,
         binary_build_definitions.get_binary_smoke_test_jobs,

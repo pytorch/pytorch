@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
 #include <torch/csrc/jit/api/function_impl.h>
@@ -67,6 +67,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case StringType::Kind:
       case FunctionType::Kind:
       case DeviceObjType::Kind:
+      case StreamObjType::Kind:
       case QSchemeType::Kind:
       case LayoutType::Kind:
       case ScalarTypeType::Kind:
@@ -549,7 +550,7 @@ void Unpickler::readGlobal(
     stack_.emplace_back(int64_t(globals_.size() - 1));
     return;
   } else if (module_name == "torch.distributed.rpc" && class_name == "rref") {
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
     return rebuildRRef();
 #else
     TORCH_INTERNAL_ASSERT(
@@ -669,7 +670,7 @@ void Unpickler::rebuildTensor(bool quantized) {
   });
 }
 
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
 void Unpickler::rebuildRRef() {
   globals_.emplace_back([this] {
     // It is the same as how rref is unpickled in python,

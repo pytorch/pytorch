@@ -575,6 +575,8 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append(False)
                 elif t.startswith('int') or t in {'Dimname', 'DimnameList'}:
                     func_args.append(0)
+                elif t in {'Stream'}:
+                    func_args.append(torch.Stream())
                 elif t.startswith('float') or t == 'double':
                     func_args.append(1.0)
                 elif t in {'Generator', 'MemoryFormat', 'TensorOptions'}:
@@ -587,6 +589,16 @@ def generate_tensor_like_override_tests(cls):
                     raise RuntimeError(f"Unsupported argument type {t} for {arg['name']} of function {func}")
         else:
             args = inspect.getfullargspec(override)
+            try:
+                func_args = inspect.getfullargspec(func)
+                # Remove annotations from argspec
+                func_args = type(func_args)(**{**func_args, 'annotations': None})
+                if func_args != args:
+                    raise RuntimeError(f"Override for {func} doesn't match its argspec.\n"
+                                       + f"Original: {inspect.signature(func)}\n"
+                                       + f"Override: {inspect.signature(override)}")
+            except TypeError:
+                pass
             nargs = len(args.args)
             if args.defaults is not None:
                 nargs -= len(args.defaults)
@@ -694,6 +706,9 @@ class Wrapper:
     def __add__(self, other):
         return self.__torch_function__(torch.add, (Wrapper,), (self, other))
 
+    def __mul__(self, other):
+        return self.__torch_function__(torch.mul, (Wrapper,), (self, other))
+
     def __sub__(self, other):
         return self.__torch_function__(torch.sub, (Wrapper,), (self, other))
 
@@ -757,11 +772,10 @@ class TestEinsumOverride(TestCase):
         self.assertTrue(torch.allclose(torch.einsum('ik,jkl,il->ij', [a, b, c]),
                                        torch.nn.functional.bilinear(a, c, b)))
 
-
 class TestGradCheckOverride(TestCase):
     "Test that wrappers work with gradcheck."
     def test_gradcheck(self):
-        from torch.autograd import gradcheck
+        from torch.autograd import gradcheck, gradgradcheck
 
         a = wrap(torch.tensor(5.0, dtype=torch.double))
         b = wrap(torch.tensor(6.0, dtype=torch.double))
@@ -770,6 +784,7 @@ class TestGradCheckOverride(TestCase):
         b.requires_grad = True
 
         gradcheck(torch.add, (a, b), raise_exception=False)
+        gradgradcheck(torch.add, (a, b), raise_exception=False)
 
         total_used_attrs = a.used_attrs.union(b.used_attrs)
         total_used_calls = a.used_calls.union(b.used_calls)
@@ -780,7 +795,9 @@ class TestGradCheckOverride(TestCase):
         # Tensor-likes.
         self.assertEqual(total_used_attrs, {
             'data',
+            'device',
             'dtype',
+            'is_complex',
             'is_floating_point',
             'is_sparse',
             'layout',
@@ -795,6 +812,7 @@ class TestGradCheckOverride(TestCase):
         self.assertEqual(total_used_calls, {
             torch.Tensor.new_zeros,
             torch.Tensor.size,
+            torch.Tensor.is_complex,
             torch.Tensor.is_floating_point,
             torch.Tensor.nelement,
             torch.Tensor.retain_grad,

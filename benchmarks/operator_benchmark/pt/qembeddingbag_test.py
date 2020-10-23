@@ -1,10 +1,9 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import operator_benchmark as op_bench
 import torch
-import torch.nn.quantized.dynamic as nnqd
+import torch.nn.quantized as nnq
 import numpy
-from . import configs
+from pt import configs
 
 """
 Microbenchmarks for qEmbeddingBag operators.
@@ -12,7 +11,7 @@ Microbenchmarks for qEmbeddingBag operators.
 
 class QEmbeddingBagBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, embeddingbags, dim, mode, input_size, offset, sparse, include_last_offset, device):
-        self.embedding = nnqd.EmbeddingBag(
+        self.embedding = nnq.EmbeddingBag(
             num_embeddings=embeddingbags,
             embedding_dim=dim,
             mode=mode,

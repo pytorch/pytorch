@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/annotate_warns.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -1082,6 +1083,10 @@ struct to_ir {
           throw ErrorReport(stmt)
               << "Unrecognized statement kind " << kindToString(stmt.kind());
       }
+      // Found an exit statement in this block. The remaining statements aren't
+      // reachable so we don't emit them.
+      if (exit_blocks.count(environment_stack->block()))
+        return;
     }
   }
 
@@ -1189,6 +1194,14 @@ struct to_ir {
             if (Var(callee).name().name() == "hasattr") {
               checkApplyNumInputs(apply, 2);
               return emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
+            }
+          }
+          auto sv = emitSugaredExpr(apply.callee(), 1);
+          auto loc = apply.callee().range();
+          if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
+            if (special_form->form() == prim::isinstance) {
+              checkApplyNumInputs(apply, 2);
+              return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
             }
           }
         }
@@ -2185,13 +2198,13 @@ struct to_ir {
   NamedValue emitValueToTensor(
       const NamedValue& value,
       const NamedValue& matchTypeOf) {
-    // Add implicit conversion of int/float/bool types to tensors
+    // Add implicit conversion of int/float/bool/number types to tensors
     // Used in emitSubscriptAssign to convert:
     //   `tensor(...)[x] = 99` to `tensor(...)[x] = tensor(99)`
     // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
     const auto kind = value.type()->kind();
-    if (kind == c10::TypeKind::IntType || kind == c10::TypeKind::BoolType ||
-        kind == c10::TypeKind::FloatType) {
+    if (kind == c10::TypeKind::NumberType || kind == c10::TypeKind::IntType ||
+        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType) {
       auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
       auto device = graph->insert(prim::device, {matchTypeOf}, {});
       auto converted = graph->insert(
@@ -2263,6 +2276,10 @@ struct to_ir {
             << "Sliced expression not yet supported for"
             << " subscripted assignment. "
             << "File a bug if you want this";
+      }
+      if (sliceable->type()->isSubtypeOf(AnyTupleType::get())) {
+        throw ErrorReport(lhs) << sliceable->type()->repr_str()
+                               << " does not support subscripted assignment";
       }
 
       std::vector<NamedValue> args;
@@ -2693,7 +2710,7 @@ struct to_ir {
               << why_not.str();
         }
 
-        // None is a subtype of Optional[T], but we want to remember what T is,
+        // None is a subtype of Optional[T], but we want to remember what T is
         // after annotation so that variables assigned to this None will still
         // get the right type. To do this, we make a None constant that
         // has the type Optional[T]
@@ -3115,6 +3132,22 @@ struct to_ir {
     return std::make_shared<SimpleValue>(rpc_node_output);
   }
 
+  Value* emitBinaryOp(const TreeRef& tree) {
+    const auto& inputs = tree->trees();
+    auto kind = getNodeKind(tree->kind(), inputs.size());
+    auto overload = getOperatorOverload(tree->kind(), inputs.size());
+    auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+    if (tree->kind() == TK_IN) {
+      // For `in` the arguments are in reverse order (the object being
+      // checked is second)
+      std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
+    }
+    return asSimple(
+        makeMagic(
+            overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
+            ->call(tree->range(), method, named_values, {}, 0));
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree,
       const TypePtr& type_hint = nullptr) {
@@ -3126,6 +3159,21 @@ struct to_ir {
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
         return emitBuiltinCall(
             tree->range(), *method.graph(), kind, named_values, {});
+      }
+      case '%': {
+        auto lhs = emitSugaredExpr(Expr(tree->tree(0)), 0)
+                       ->asValue(tree->tree(0)->range(), method);
+        auto const& lhs_type = lhs->type();
+        if (lhs_type == StringType::get()) {
+          auto values = getValues(tree->trees(), /*maybe_unpack=*/false);
+          auto node = graph->create(aten::percentFormat, values, 1)
+                          ->setSourceRange(tree->range());
+          Value* output = graph->insertNode(node)->output();
+          output->setType(StringType::get());
+          return output;
+        } else {
+          return emitBinaryOp(tree);
+        }
       }
       case TK_IN:
       case TK_POW:
@@ -3139,28 +3187,12 @@ struct to_ir {
       case '/':
       case '+':
       case '-':
-      case '%':
       case '&':
       case '|':
       case '^':
       case TK_LSHIFT:
-      case TK_RSHIFT: {
-        const auto& inputs = tree->trees();
-        auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto overload = getOperatorOverload(tree->kind(), inputs.size());
-        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-
-        if (tree->kind() == TK_IN) {
-          // For `in` the arguments are in reverse order (the object being
-          // checked is second)
-          std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
-        }
-
-        return asSimple(
-            makeMagic(
-                overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
-                ->call(tree->range(), method, named_values, {}, 0));
-      }
+      case TK_RSHIFT:
+        return emitBinaryOp(tree);
       case TK_IS:
       case TK_ISNOT:
       case TK_AND:
@@ -3326,6 +3358,57 @@ struct to_ir {
     return emitBuiltinCall(loc, *graph, aten::select, {input, dim, index}, {});
   }
 
+  Value* emitSliceOp(
+      const SourceRange& loc,
+      Value* sliceable,
+      Value* dim,
+      Value* start,
+      Value* end,
+      Value* step) {
+    std::vector<NamedValue> args;
+    args.reserve(4);
+    args.emplace_back(loc, "self", sliceable);
+
+    // XXX: If list slicing becomes more complicated or stops using
+    // aten::slice, we should separate it from this function.
+    if (dim) {
+      AT_ASSERT(sliceable->type()->isSubtypeOf(TensorType::get()));
+
+      args.emplace_back(dim);
+    } else {
+      AT_ASSERT(!sliceable->type()->isSubtypeOf(TensorType::get()));
+    }
+
+    // Default value for start is 0.
+    if (!start) {
+      start = graph->insertConstant(0, loc);
+    }
+    args.emplace_back(loc, "start", start);
+
+    if (end) {
+      args.emplace_back(loc, "end", end);
+    }
+    if (sliceable->type()->cast<TupleType>()) {
+      if (step) {
+        // TODO: add support for slicing tuples with a step
+        throw ErrorReport(loc)
+            << "Unsupported operation: slicing tuples with a step isn't supported";
+      }
+
+      if (end) {
+        return emitTupleSlice(loc, args[0], args[1], /*end*/ args[2]);
+      } else {
+        return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
+      }
+    }
+
+    if (!step) {
+      step = graph->insertConstant(1, loc);
+    }
+    NamedValue step_nv = NamedValue(loc, "step", step);
+    return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
+  }
+
   // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end,
   // 1)
   Value* emitSlice(
@@ -3333,43 +3416,19 @@ struct to_ir {
       Value* input,
       Value* dim, // Only used for tensor slicing
       const SliceExpr& slice) {
-    std::vector<NamedValue> args;
-    args.reserve(4);
-    args.emplace_back(loc, "self", input);
-
-    // XXX: If list slicing becomes more complicated or stops using
-    // aten::slice, we should separate it from this function.
-    if (dim) {
-      AT_ASSERT(input->type()->isSubtypeOf(TensorType::get()));
-
-      args.emplace_back(dim);
-    } else {
-      AT_ASSERT(!input->type()->isSubtypeOf(TensorType::get()));
+    Value* start = nullptr;
+    Value* end = nullptr;
+    Value* step = nullptr;
+    if (slice.start().present()) {
+      start = emitExpr(Expr(slice.start().get()));
     }
-
-    args.emplace_back(loc, "begin", emitExpr(Expr(slice.startOr(0))));
-    const auto has_end = slice.end().present();
-    if (has_end) {
-      args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
+    if (slice.end().present()) {
+      end = emitExpr(Expr(slice.end().get()));
     }
-    if (input->type()->cast<TupleType>()) {
-      auto has_step = slice.step().present();
-      if (has_step) {
-        // TODO: add support for slicing tuples with a step
-        throw ErrorReport(loc)
-            << "Unsupported operation: slicing tuples with a step isn't supported";
-      }
-
-      if (has_end) {
-        return emitTupleSlice(loc, args[0], args[1], /*end*/ args[2]);
-      } else {
-        return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
-      }
+    if (slice.step().present()) {
+      step = emitExpr(Expr(slice.step().get()));
     }
-
-    auto step = emitExpr(Expr(slice.stepOr(1)));
-    NamedValue step_nv = NamedValue(loc, "step", step);
-    return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
+    return emitSliceOp(loc, input, dim, start, end, step);
   }
 
   Value* emitUnsqueeze(const SourceRange& loc, Value* input, Value* dim_val) {
@@ -3427,6 +3486,8 @@ struct to_ir {
                                int64_t dim,
                                bool is_reverse = false) {
       dims[expr_idx] = dim;
+
+      // Slice expression case, does not represent a single index.
       if (subscript_expr.kind() == TK_SLICE_EXPR) {
         if (is_reverse) {
           return dim - 1;
@@ -3434,6 +3495,17 @@ struct to_ir {
           return dim + 1;
         }
       }
+
+      // Slice object case, does not represent a single index.
+      auto subscript_sv = emitSugaredExpr(subscript_expr, 1);
+      if (dynamic_cast<SliceValue*>(subscript_sv.get())) {
+        if (is_reverse) {
+          return dim - 1;
+        } else {
+          return dim + 1;
+        }
+      }
+
       TypePtr type_hint;
       if (subscript_expr.kind() == TK_NONE) {
         type_hint = NoneType::get();
@@ -3524,7 +3596,25 @@ struct to_ir {
               sliceable,
               insert_value_for_dim(dims[i]),
               SliceExpr(subscript_exprs[i]));
+          continue;
         }
+
+        if (subscript_exprs[i].kind() == TK_DOTS) {
+          continue;
+        }
+
+        auto subscript_sv = emitSugaredExpr(subscript_exprs[i], 1);
+        if (const auto slice_value =
+                dynamic_cast<SliceValue*>(subscript_sv.get())) {
+          sliceable = emitSliceOp(
+              loc,
+              sliceable,
+              insert_value_for_dim(dims[i]),
+              slice_value->start(),
+              slice_value->stop(),
+              slice_value->step());
+        }
+
         continue;
       }
       auto expr = exprs[i].value();
@@ -3734,17 +3824,39 @@ struct to_ir {
             range, sv->asValue(val_range, method), subscript_exprs));
       }
     } else {
-      // Desugars gather syntactic sugar foo[i]
-      Value* idx = emitExpr(subscript_exprs[0]);
-      Value* val = sv->asValue(val_range, method);
       AT_ASSERT(subscript_exprs.size() == 1);
+      Value* sliceable = sv->asValue(val_range, method);
 
-      if (val->type()->cast<TupleType>()) {
+      // In case of subscript expression being a Python Slice object.
+      auto subscript_sv = emitSugaredExpr(subscript_exprs[0], 1);
+      if (const auto slice_value =
+              dynamic_cast<SliceValue*>(subscript_sv.get())) {
+        Value* dim = nullptr;
+        // aten::slice.tensor needs an additional `dim` input.
+        if (sliceable->type()->isSubtypeOf(TensorType::get())) {
+          dim = method.graph()->insertConstant(0, val_range);
+        }
+
+        Value* sliced = emitSliceOp(
+            val_range,
+            sliceable,
+            dim,
+            slice_value->start(),
+            slice_value->stop(),
+            slice_value->step());
+        return std::make_shared<SimpleValue>(sliced);
+      }
+
+      // subscript is not a slice object, then it must be convertible to
+      // a normal value.
+      // Desugars gather syntactic sugar foo[i]
+      Value* idx = subscript_sv->asValue(val_range, method);
+      if (sliceable->type()->cast<TupleType>()) {
         return std::make_shared<SimpleValue>(
             emitTupleIndex(range, sv->asValue(val_range, method), idx));
-      } else if (val->type()->isSubtypeOf(TensorType::get())) {
+      } else if (sliceable->type()->isSubtypeOf(TensorType::get())) {
         return std::make_shared<SimpleValue>(
-            emitMultidimSlicing(range, val, subscript_exprs));
+            emitMultidimSlicing(range, sliceable, subscript_exprs));
       } else {
         return sv->getitem(range, method, idx);
       }
@@ -4002,6 +4114,10 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
 
   // For jitter
   CanonicalizeOutputs(to_clean);
+
+  // Annotate aten::warns so that each has its unique ID. This enables us to
+  // mimic Python behavior of only emitting each warning only once.
+  AnnotateWarns(to_clean);
 }
 
 // we consider _N where N is a number, to be a non-meaningful name

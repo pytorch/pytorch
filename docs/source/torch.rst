@@ -99,6 +99,7 @@ Indexing, Slicing, Joining, Mutating Ops
     stack
     t
     take
+    tensor_split
     transpose
     unbind
     unsqueeze
@@ -280,6 +281,7 @@ Pointwise Ops
     cosh
     deg2rad
     div
+    divide
     digamma
     erf
     erfc
@@ -309,7 +311,9 @@ Pointwise Ops
     hypot
     i0
     mul
+    multiply
     mvlgamma
+    nan_to_num
     neg
     negative
     nextafter
@@ -351,11 +355,13 @@ Reduction Ops
     logsumexp
     mean
     median
+    nanmedian
     mode
     norm
     nansum
     prod
     quantile
+    nanquantile
     std
     std_mean
     sum
@@ -415,6 +421,7 @@ Spectral Ops
     blackman_window
     hamming_window
     hann_window
+    kaiser_window
 
 
 Other Operations
@@ -455,6 +462,7 @@ Other Operations
     meshgrid
     lcm
     logcumsumexp
+    ravel
     renorm
     repeat_interleave
     roll
@@ -531,3 +539,5 @@ Utilities
     promote_types
     set_deterministic
     is_deterministic
+    vmap
+    Assert

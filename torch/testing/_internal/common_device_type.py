@@ -4,16 +4,18 @@ import inspect
 import runpy
 import threading
 from functools import wraps
+from typing import List, Any, ClassVar
 import unittest
 import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN
+from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing import \
     (get_all_dtypes)
 
 try:
-    import psutil
+    import psutil  # type: ignore[import]
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
@@ -163,7 +165,10 @@ except ImportError:
 # List of device type test bases that can be used to instantiate tests.
 # See below for how this list is populated. If you're adding a device type
 # you should check if it's available and (if it is) add it to this list.
-device_type_test_bases = []
+
+# set type to List[Any] due to mypy list-of-union issue:
+# https://github.com/python/mypy/issues/3351
+device_type_test_bases: List[Any] = list()
 
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
@@ -181,7 +186,7 @@ def _construct_test_name(test_name, op, device_type, dtype):
     return test_name
 
 class DeviceTypeTestBase(TestCase):
-    device_type = 'generic_device_type'
+    device_type: str = 'generic_device_type'
 
     # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
@@ -256,7 +261,7 @@ class DeviceTypeTestBase(TestCase):
                                                      self.device_type, dtype):
                     self.skipTest("Skipped!")
 
-                device_arg = cls.get_primary_device()
+                device_arg: str = cls.get_primary_device()
                 if hasattr(test_fn, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
 
@@ -265,8 +270,7 @@ class DeviceTypeTestBase(TestCase):
                 guard_precision = self.precision
                 try:
                     self.precision = self._get_precision_override(test_fn, dtype)
-                    args = (device_arg, dtype, op)
-                    args = (arg for arg in args if arg is not None)
+                    args = (arg for arg in (device_arg, dtype, op) if arg is not None)
                     result = test_fn(self, *args)
                 finally:
                     self.precision = guard_precision
@@ -319,6 +323,11 @@ class CUDATestBase(DeviceTypeTestBase):
     device_type = 'cuda'
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+    primary_device: ClassVar[str]
+    cudnn_version: ClassVar[Any]
+    no_magma: ClassVar[bool]
+    no_cudnn: ClassVar[bool]
+
 
     def has_cudnn(self):
         return not self.no_cudnn
@@ -418,7 +427,10 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
             continue
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
-        device_type_test_class = type(class_name, (base, empty_class), {})
+
+        # type set to Any and suppressed due to unsupport runtime class:
+        # https://github.com/python/mypy/wiki/Unsupported-Python-Features
+        device_type_test_class: Any = type(class_name, (base, empty_class), {})
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
@@ -790,6 +802,13 @@ def skipCPUIfNoMkl(fn):
 def skipCUDAIfNoMagma(fn):
     return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
 
+def skipCUDAIfNoMagmaAndNoCusolver(fn):
+    version = _get_torch_cuda_version()
+    if version >= [10, 2]:
+        return fn
+    else:
+        # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
+        return skipCUDAIfNoMagma(fn)
 
 # Skips a test on CUDA when using ROCm.
 def skipCUDAIfRocm(fn):

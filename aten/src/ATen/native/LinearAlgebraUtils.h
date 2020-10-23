@@ -1,3 +1,5 @@
+#pragma once
+
 #include <c10/core/ScalarType.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
@@ -76,6 +78,7 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
 
 // Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig)
 static inline void squareCheckInputs(const Tensor& self) {
+  TORCH_CHECK(self.dim() >= 2, "Tensor of matrices must have at least 2 dimensions. ");
   TORCH_CHECK(self.size(-1) == self.size(-2),
               "A must be batches of square matrices, "
               "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
@@ -107,16 +110,16 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
 /*
  * This is an overloaded case of the previous function for a tensor of infos.
  */
-static inline void batchCheckErrors(const Tensor& infos, const char* name, bool allow_singular=false) {
+static inline void batchCheckErrors(const Tensor& infos, const char* name, bool allow_singular=false, int info_per_batch=1) {
   auto batch_size = infos.numel();
   auto infos_cpu = infos.to(at::kCPU);
   auto infos_data = infos_cpu.data_ptr<int>();
   for (int64_t i = 0; i < batch_size; i++) {
     auto info = infos_data[i];
     if (info < 0) {
-      AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
+      AT_ERROR(name, ": For batch ", i/info_per_batch, ": Argument ", -info, " has illegal value");
     } else if (!allow_singular && info > 0) {
-      AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
+      AT_ERROR(name, ": For batch ", i/info_per_batch, ": U(", info, ",", info, ") is zero, singular U.");
     }
   }
 }
@@ -313,6 +316,21 @@ static inline std::vector<int64_t> create_reverse_permutation(std::vector<int64_
     reverse_permutation[permutation[dim_ind]] = dim_ind;
   }
   return reverse_permutation;
+}
+
+// Compute R-work array size for MAGMA/LAPACK cgesdd/zgesdd
+// See https://github.com/Reference-LAPACK/lapack/blob/122506cd8b6ce050a200920c3d4c0b153b150fd8/SRC/cgesdd.f#L186
+static inline int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n) {
+  auto mn = std::min(m, n);
+  auto mx = std::max(m, n);
+  // These settings are valid for on LAPACK 3.6+
+  if (jobz == 'N') {
+    return 5 * mn;
+  }
+  if (mx > 10 * mn) {
+    return 5 * mn * mn + 5 * mn;
+  }
+  return std::max(5 * mn * mn + 5 * mn, 2 * mx * mn + 2 * mn * mn + mn);
 }
 
 }}  // namespace at::native
