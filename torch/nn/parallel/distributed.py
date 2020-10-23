@@ -16,7 +16,7 @@ if dist.is_available():
     from torch.distributed.distributed_c10d import ReduceOp
 from ..modules import Module
 from .replicate import replicate
-from .scatter_gather import scatter_kwargs, gather
+from .scatter_gather import scatter_kwargs, gather, is_namedtuple
 from .parallel_apply import parallel_apply
 from torch._utils import _get_device_index, _get_all_device_indices
 
@@ -666,10 +666,11 @@ class DistributedDataParallel(Module):
             self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
         if self.device_ids:
-            inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
             if len(self.device_ids) == 1:
+                inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
                 output = self.module(*inputs[0], **kwargs[0])
             else:
+                inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
                 outputs = self.parallel_apply(self._module_copies[:len(inputs)], inputs, kwargs)
                 output = self.gather(outputs, self.output_device)
         else:
@@ -693,6 +694,41 @@ class DistributedDataParallel(Module):
 
     def scatter(self, inputs, kwargs, device_ids):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
+
+    def _recursive_to(self, inputs, target_gpu):
+        r"""
+        Recursively moves input to the target_gpu.
+        """
+        def to_map(obj):
+            if isinstance(obj, torch.Tensor):
+                return (obj.to(target_gpu), )
+            if is_namedtuple(obj):
+                return [type(obj)(*args) for args in zip(*map(to_map, obj))]
+            if isinstance(obj, tuple) and len(obj) > 0:
+                return list(zip(*map(to_map, obj)))
+            if isinstance(obj, list) and len(obj) > 0:
+                return [list(i) for i in zip(*map(to_map, obj))]
+            if isinstance(obj, dict) and len(obj) > 0:
+                return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
+            return [obj]
+
+        # Avoid reference cycle
+        try:
+            res = to_map(inputs)
+        finally:
+            to_map = None
+        return res
+
+    def to_kwargs(self, inputs, kwargs, device_id):
+        inputs = self._recursive_to(inputs, device_id) if inputs else []
+        kwargs = self._recursive_to(kwargs, device_id) if kwargs else []
+        if len(inputs) < len(kwargs):
+            inputs.extend([() for _ in range(len(kwargs) - len(inputs))])
+        elif len(kwargs) < len(inputs):
+            kwargs.extend([{} for _ in range(len(inputs) - len(kwargs))])
+        inputs = tuple(inputs)
+        kwargs = tuple(kwargs)
+        return inputs, kwargs
 
     def parallel_apply(self, replicas, inputs, kwargs):
         return parallel_apply(replicas, inputs, kwargs, self.device_ids[:len(replicas)])
