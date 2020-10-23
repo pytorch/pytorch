@@ -380,7 +380,7 @@ class Quantizer:
                 continue
 
             prefix = node.name + '_activation_post_process_'
-            root_node, _, obj, qconfig = matches.get(node.name, (None, None, None, None))
+            root_node, matched_nodes, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is None:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
             elif root_node is node:
@@ -445,7 +445,17 @@ class Quantizer:
                     if is_observed(node.args[0]):
                         observed_node_names_set.add(node.name)
                 elif (isinstance(obj, Add) or isinstance(obj, Mul)) and not obj.all_nodes:
-                    if node.args[0].name in observed_node_names_set:
+                    input_node = matched_nodes[-1]  # first node in the sequence
+                    is_node = [isinstance(x, Node) for x in input_node.args]
+                    assert is_node.count(True) == 1, " add_scalar/mul_scalar only " + \
+                        "with one Tensor input, got Tenosr inputs: {}".format(is_node.count(True))
+                    def input_is_observed(arg):
+                        return isinstance(arg, Node) and arg.name in observed_node_names_set
+                    # This is checking if one of the argument of add/mul
+                    # is an observed node
+                    # If both of the inputs are number,
+                    # we will not consider the output to be observed
+                    if input_is_observed(input_node.args[0]) or input_is_observed(input_node.args[1]):
                         observed_node_names_set.add(node.name)
                 elif isinstance(obj, StandaloneModuleQuantizeHandler):
                     assert node.op == 'call_module'
@@ -728,8 +738,8 @@ class Quantizer:
                 # the node is quantized in parent module
                 quant_env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
             else:
-                # dequantize inputs for the node that are not quantized
-                env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
+                # copy quantized or non-quantized node
+                env[node.name] = self.quantized_graph.node_copy(node, load_x)
 
         # remove activation post process
         act_post_process_removed_graph = Graph()

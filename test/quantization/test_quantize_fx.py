@@ -964,7 +964,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def forward(self, x, y):
                 x = self.conv1(x)
                 y = 3 if self.is_scalar else self.conv2(y)
+                # x = x + y
                 x = self.op(x, y)
+                # x = y + x
+                x = self.op(y, x)
                 return x
 
         # TODO: decide whether we want to quantize or not
@@ -1006,6 +1009,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.conv1(x)
                 y = 3 if self.is_scalar else self.conv2(y)
                 x = self.op(x, y)
+                x = self.relu(x)
+                x = self.op(y, x)
                 x = self.relu(x)
                 return x
 

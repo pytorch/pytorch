@@ -76,9 +76,15 @@ class Add(QuantizeHandler):
                 op = torch.ops.quantized.add_relu
             else:
                 op = torch.ops.quantized.add
+
+            if isinstance(self.add_node.args[0], Node):
+                quantized_index = 0
+            else:
+                quantized_index = 1
+
             return quantizer.quantized_graph.create_node(
                 'call_function', op,
-                load_arg(quantized=[0])(self.add_node.args), self.add_node.kwargs)
+                load_arg(quantized=[quantized_index])(self.add_node.args), self.add_node.kwargs)
         else:
             activation_post_process = quantizer.activation_post_process_map[node.name]
             scale, zero_point = activation_post_process.calculate_qparams()
