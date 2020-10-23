@@ -221,16 +221,38 @@ class intrusive_ptr final {
     target_ = NullType::singleton();
   }
 
+
+  // raw pointer constructors are not public because we shouldn't make intrusive_ptr
+  // out of raw pointers except from inside the make_intrusive(), reclaim() and
+  // weak_intrusive_ptr::lock() implementations.
+
   // This constructor will not increase the ref counter for you.
-  // This is not public because we shouldn't make intrusive_ptr out of raw
-  // pointers except from inside the make_intrusive() and
-  // weak_intrusive_ptr::lock() implementations
-  explicit intrusive_ptr(TTarget* target) noexcept : target_(target) {}
+  // We use the tagged dispatch mechanism to explicitly mark this constructor
+  // to not increase the refcount
+  static struct DontIncreaseRefcount {} dont_increase_refcount;
+  explicit intrusive_ptr(TTarget* target, DontIncreaseRefcount) noexcept : target_(target) {}
+
+  // This constructor will increase the ref counter for you.
+  // This constructor will be used by the make_intrusive(), and also pybind11, which
+  // wrap the intrusive_ptr holder around the raw pointer and incref correspondingly
+  // (pybind11 requires raw pointer constructor to incref by default).
+  explicit intrusive_ptr(TTarget* target): intrusive_ptr(target, dont_increase_refcount) {
+    // We can't use retain_(), because we also have to increase weakcount
+    // and because we allow raising these values from 0, which retain_()
+    // has an assertion against.
+    ++target_->refcount_;
+    ++target_->weakcount_;
+  }
+
+  //
+  // If you want to use the raw pointer constructor, use the tagged dispatch version above.
+  // , implementations in intrusive_ptr/weak_intrusive_ptr
+  // should use this constructor if they need a conversion directly from raw pointer
 
  public:
   using element_type = TTarget;
 
-  intrusive_ptr() noexcept : intrusive_ptr(NullType::singleton()) {}
+  intrusive_ptr() noexcept : intrusive_ptr(NullType::singleton(), dont_increase_refcount) {}
 
   intrusive_ptr(intrusive_ptr&& rhs) noexcept : target_(rhs.target_) {
     rhs.target_ = NullType::singleton();
@@ -361,19 +383,12 @@ class intrusive_ptr final {
    * passed in *must* have been created using intrusive_ptr::release().
    */
   static intrusive_ptr reclaim(TTarget* owning_ptr) {
-    return intrusive_ptr(owning_ptr);
+    return intrusive_ptr(owning_ptr, dont_increase_refcount);
   }
 
   template <class... Args>
   static intrusive_ptr make(Args&&... args) {
-    auto result = intrusive_ptr(new TTarget(std::forward<Args>(args)...));
-    // We can't use retain_(), because we also have to increase weakcount
-    // and because we allow raising these values from 0, which retain_()
-    // has an assertion against.
-    ++result.target_->refcount_;
-    ++result.target_->weakcount_;
-
-    return result;
+    return intrusive_ptr(new TTarget(std::forward<Args>(args)...));
   }
 
   /**
@@ -614,7 +629,7 @@ class weak_intrusive_ptr final {
           return intrusive_ptr<TTarget, NullType>(NullType::singleton());
         }
       } while (!target_->refcount_.compare_exchange_weak(refcount, refcount + 1));
-      return intrusive_ptr<TTarget, NullType>(target_);
+      return intrusive_ptr<TTarget, NullType>(target_, intrusive_ptr<TTarget, NullType>::dont_increase_refcount);
     }
   }
 
