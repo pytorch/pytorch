@@ -423,6 +423,7 @@ matrix arguments.
     .. automethod:: is_coalesced
     .. automethod:: indices
     .. automethod:: values
+    .. automethod:: nse
 
 The following :class:`torch.Tensor` methods support :ref:`sparse COO
 tensors <sparse-coo-docs>`:

@@ -1556,21 +1556,33 @@ igamma_(other) -> Tensor
 In-place version of :meth:`~Tensor.igamma`
 """)
 
-add_docstr_all('indices',
-               r"""
-indices() -> Tensor
-
-Return the indices tensor of a :ref:`sparse COO tensor <sparse-coo-docs>`.
+coalesce_arg_doc = """
+Return the {subject} of a :ref:`COO tensor <sparse-coo-docs>`.
 
 .. warning::
-  Throws an error if :attr:`self` is not a sparse COO tensor.
+  Throws an error if :attr:`self` is not a COO tensor.
 
-See also :meth:`Tensor.values`.
+Args:
+
+  coalesce (bool): when True, return the {subject} of coalesced
+    :attr:`self`, otherwise return the {subject} of :attr:`self`
+    as it is.
 
 .. note::
-  This method can only be called on a coalesced sparse tensor. See
-  :meth:`Tensor.coalesce` for details.
-""")
+  If :attr:`self` is not coalesced, a coalesced copy of :attr:`self`
+  is computed at every method call. To avoid repeated coalesce
+  operations, call :meth:`Tensor.coalesce` before acquiring the
+  {subject}.
+"""
+
+add_docstr_all('indices',
+               """
+indices(coalesce=True) -> Tensor
+
+{}
+
+See also :meth:`Tensor.values`.
+""".format(coalesce_arg_doc.format(subject='indices tensor')))
 
 add_docstr_all('get_device',
                r"""
@@ -1588,20 +1600,20 @@ Example::
 """)
 
 add_docstr_all('values',
-               r"""
-values() -> Tensor
+               """
+values(coalesce=True) -> Tensor
 
-Return the values tensor of a :ref:`sparse COO tensor <sparse-coo-docs>`.
-
-.. warning::
-  Throws an error if :attr:`self` is not a sparse COO tensor.
+{}
 
 See also :meth:`Tensor.indices`.
+""".format(coalesce_arg_doc.format(subject='values tensor')))
 
-.. note::
-  This method can only be called on a coalesced sparse tensor. See
-  :meth:`Tensor.coalesce` for details.
-""")
+add_docstr_all('nse',
+               """
+nse(coalesce=True) -> Tensor
+
+{}
+""".format(coalesce_arg_doc.format(subject='number of specified elements')))
 
 add_docstr_all('gt', r"""
 gt(other) -> Tensor
