@@ -17,10 +17,16 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding", indices_arg, kLong);
 
+  auto zerofill_padding = [&](Tensor& embedding) {
+    if (padding_idx >= 0) {
+      embedding.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
+    }
+  };
+
   // TODO: use tensor.index() after improving perf
   if (indices.dim() == 1) {
     auto out = weight.index_select(0, indices);
-    out.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
+    zerofill_padding(out);
     return out;
   }
 
@@ -30,7 +36,7 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
   }
 
   auto out = weight.index_select(0, indices.reshape(-1));
-  out.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
+  zerofill_padding(out);
   return out.view(size);
 }
 
