@@ -504,7 +504,7 @@ class ZeROptimizer(Optimizer):
                     )
 
             # Catch a trailing bucket
-            if not bucket_sent:
+            if offset > 0 and not bucket_sent:
                 bucket_requests.append(
                     (
                         dist.broadcast(tensor=buffer, src=global_src_rank, group=self.group, async_op=True),
