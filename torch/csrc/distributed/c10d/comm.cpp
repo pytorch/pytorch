@@ -85,6 +85,17 @@ void broadcast_coalesced(
   }
 }
 
+PythonCommHook::~PythonCommHook() {
+  py::gil_scoped_acquire ag;
+  state_.dec_ref();
+  hook_.dec_ref();
+  // Explicitly set state_ and hook_ to nullptr to prevent py::object's dtor
+  // to decref on the PyObject again.
+  // See Note [Destructing py::object] in python_ivalue.h
+  state_.ptr() = nullptr;
+  hook_.ptr() = nullptr;
+}
+
 c10::intrusive_ptr<torch::jit::Future> PythonCommHook::runHook(
     const GradBucket& bucket) {
   py::gil_scoped_acquire acquire;
