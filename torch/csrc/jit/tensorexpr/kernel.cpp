@@ -411,6 +411,16 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   return scalars_.at(v->unique());
 }
 
+ExprHandle promoteIntegerToFloat(const ExprHandle& e) {
+  auto scalarType = static_cast<c10::ScalarType>(e.dtype().scalar_type());
+  if (!c10::isIntegralType(scalarType)) {
+    return e;
+  }
+  auto defaultType = static_cast<tensorexpr::ScalarType>(
+      c10::typeMetaToScalarType(c10::get_default_dtype()));
+  return Cast::make(Dtype(defaultType, e.dtype().lanes()), e);
+}
+
 void TensorExprKernel::promoteInputs(std::vector<ExprHandle>& inputs) {
   if (inputs.empty()) {
     return;
@@ -965,18 +975,21 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::cos: {
-      return computeOneOperand(
-          "aten_cos", v, [](const ExprHandle& a) { return cos(a); });
+      return computeOneOperand("aten_cos", v, [](const ExprHandle& a) {
+        return cos(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::sin: {
-      return computeOneOperand(
-          "aten_sin", v, [](const ExprHandle& a) { return sin(a); });
+      return computeOneOperand("aten_sin", v, [](const ExprHandle& a) {
+        return sin(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::tan: {
-      return computeOneOperand(
-          "aten_tan", v, [](const ExprHandle& a) { return tan(a); });
+      return computeOneOperand("aten_tan", v, [](const ExprHandle& a) {
+        return tan(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::type_as: {
