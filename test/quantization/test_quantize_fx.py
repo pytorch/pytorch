@@ -1497,41 +1497,51 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.conv(x)
                 return x
 
-        # This model is not executable since we just put all ops
-        # in the same forward
-        m = M().train()
-        # nothing to fuse so skipping the fuse step
-        qconfig_dict = {'': default_qat_qconfig}
-        prepared = prepare_qat_fx(m, qconfig_dict)
-        # check the correct number of activation_post_process is inserted
-        count_check = {
-            ns.call_module(FixedQParamsFakeQuantize) : 13,
-        }
-        self.checkGraphModuleNodes(
-            prepared,
-            expected_node_occurrence=count_check)
-        # not runnable
-        quantized = convert_fx(prepared)
+        for eval_mode in [True, False]:
+            # This model is not executable since we just put all ops
+            # in the same forward
+            m = M()
+            if eval_mode:
+                m.eval()
+                qconfig = default_qconfig
+                prepare = prepare_fx
+            else:
+                m.train()
+                qconfig = default_qat_qconfig
+                prepare = prepare_qat_fx
 
-        # This checks that the dequantize from the output of first conv
-        # is being propagated to the end, so that we don't insert extra
-        # observers
-        # check exact counts of quantize and dequantize
-        count_check = {
-            ns.call_function(torch.quantize_per_tensor) : 1,
-            ns.call_method('dequantize') : 1
-        }
-        order_check = [
-            ns.call_function(torch.quantize_per_tensor),
-            ns.call_module(nnq.Conv2d),
-            ns.call_module(nn.Sigmoid),
-            ns.call_module(nnq.Conv2d),
-            ns.call_method('dequantize'),
-        ]
-        self.checkGraphModuleNodes(
-            quantized,
-            expected_node_occurrence=count_check,
-            expected_node_list=order_check)
+            # nothing to fuse so skipping the fuse step
+            qconfig_dict = {'': qconfig}
+            prepared = prepare(m, qconfig_dict)
+            # check the correct number of activation_post_process is inserted
+            count_check = {
+                ns.call_module(FixedQParamsFakeQuantize) : 13,
+            }
+            self.checkGraphModuleNodes(
+                prepared,
+                expected_node_occurrence=count_check)
+            # not runnable
+            quantized = convert_fx(prepared)
+
+            # This checks that the dequantize from the output of first conv
+            # is being propagated to the end, so that we don't insert extra
+            # observers
+            # check exact counts of quantize and dequantize
+            count_check = {
+                ns.call_function(torch.quantize_per_tensor) : 1,
+                ns.call_method('dequantize') : 1
+            }
+            order_check = [
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_module(nnq.Conv2d),
+                ns.call_module(nn.Sigmoid),
+                ns.call_module(nnq.Conv2d),
+                ns.call_method('dequantize'),
+            ]
+            self.checkGraphModuleNodes(
+                quantized,
+                expected_node_occurrence=count_check,
+                expected_node_list=order_check)
 
     def test_float_functional(self):
         class TorchAdd(nn.Module):
