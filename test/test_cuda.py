@@ -1545,7 +1545,6 @@ class TestCuda(TestCase):
         counted = t.bincount(minlength=65536)
         self.assertEqual(torch.sum(counted), 10)
 
-    @skipIfRocm
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
         a /= 100000000

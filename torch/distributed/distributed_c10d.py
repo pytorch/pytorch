@@ -166,7 +166,7 @@ _pg_group_ranks = {}
 _default_pg = None
 _default_pg_init_method = None
 
-# Process group counter for default naming
+# Process group count for default naming
 _group_count = 0
 
 
@@ -486,9 +486,9 @@ def _new_process_group_helper(world_size,
     global _group_count
     global _pg_names
 
-    group_name_ = group_name
     if not group_name:
         group_name = str(_group_count)
+        _group_count += 1
 
     if group_name in _pg_names.values():
         raise RuntimeError("The specified group name has already been "
@@ -552,9 +552,6 @@ def _new_process_group_helper(world_size,
                 timeout)
             _pg_map[pg] = (backend, store)
             _pg_names[pg] = group_name
-
-    if not group_name_:
-        _group_count += 1
 
     return pg
 
