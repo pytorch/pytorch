@@ -401,6 +401,29 @@ class Tensor(torch._C._TensorBase):
         from torch.overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.lu, relevant_args, self, pivot=pivot, get_infos=get_infos)
+
+        if not torch._jit_internal.is_scripting():
+            if self.requires_grad:
+                if not (self.size(-2) == self.size(-1) and self.dtype.is_floating_point):
+                    raise ValueError(
+                        'lu.backward works only with batches of squared full-rank matrices'
+                        ' of floating types.'
+                    )
+
+                from torch._autograd_functions import _LU
+                LU, pivots, infos = _LU.apply(self, pivot, get_infos)
+                if get_infos:
+                    return LU, pivots, infos
+                else:
+                    return LU, pivots
+        else:
+            if self.requires_grad:
+                raise RuntimeError(
+                    'Script and require gradients is not supported at the moment.'
+                    'If you just want to do the forward, use .detach()'
+                    'on the input before calling the function.'
+                )
+
         LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
         if get_infos:
             return LU, pivots, infos

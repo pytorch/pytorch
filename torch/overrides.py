@@ -156,8 +156,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.is_deterministic,
         torch.set_deterministic,
         torch.unify_type_list,
-        torch.valgrind_supported_platform,
-        torch.valgrind_toggle,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,
@@ -211,7 +209,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.arccos: lambda input, out=None: -1,
         torch.acosh: lambda input, out=None: -1,
         torch.arccosh: lambda input, out=None: -1,
-        torch.add_relu: lambda input, other, out=None: -1,
         torch.add: lambda input, other, out=None: -1,
         torch.addbmm: lambda input, batch1, batch2, alpha=1, beta=1, out=None: -1,
         torch.addcdiv: lambda input, tensor1, tensor2, value=1, out=None: -1,
@@ -817,6 +814,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.is_mkldnn.__get__: lambda self: -1,
         Tensor.is_quantized.__get__: lambda self: -1,
         Tensor.is_sparse.__get__: lambda self: -1,
+        Tensor.is_vulkan.__get__: lambda self: -1,
         Tensor.layout.__get__: lambda self: -1,
         Tensor.name.__get__: lambda self: -1,
         Tensor.names.__get__: lambda self: -1,
@@ -1073,7 +1071,7 @@ def handle_torch_function(
     func_name = '{}.{}'.format(public_api.__module__, public_api.__name__)
     raise TypeError("no implementation found for '{}' on types that implement "
                     '__torch_function__: {}'
-                    .format(func_name, list(map(type, overloaded_args))))
+                    .format(func_name, [type(arg) for arg in overloaded_args]))
 
 def has_torch_function(relevant_args: Iterable[Any]) -> bool:
     """Check for __torch_function__ implementations in the elements of an iterable
