@@ -613,6 +613,24 @@ class TestHub(TestCase):
             self.assertEqual(sum_of_state_dict(loaded_state),
                              SUM_OF_HUB_EXAMPLE)
 
+
+@unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
+class TestHubPrivate(TestCase):
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_from_private_github(self):
+        # 1. we can specify username & password for private repo access
+        os.environ["GIT_USER"] = "pytorch-hub-test"
+        os.environ["GIT_PASSWORD"] = "3c7684adb2a7743a0282fad3ff10b8c88ebbc515"
+        hub_model = hub.load(
+            'pytorch-hub-test/torchhub_example',
+            'mnist',
+            source='github',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
+
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python # noqa
