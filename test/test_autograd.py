@@ -6313,7 +6313,7 @@ class TestAutogradDeviceType(TestCase):
             # FIXME: make gradgradcheck work.
             # gradgradcheck(fn, (inp,))
 
-            # assert that _values is non-differentiable
+            # assert that values(False) is non-differentiable
             with self.assertRaisesRegex(RuntimeError, "does not have a grad_fn"):
                 other.detach().requires_grad_().values(False).backward(torch.ones_like(other.values(False)))
 

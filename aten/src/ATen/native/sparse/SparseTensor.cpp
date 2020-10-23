@@ -62,23 +62,23 @@ Tensor &_coalesced_sparse_(SparseTensor& self, bool coalesced) {
 }
 
 Tensor indices_sparse(const Tensor& self, bool coalesce) {
+  if (!coalesce) {
+    return get_sparse_impl(self)->indices();
+  }
   if (self.is_coalesced()) {
     return get_sparse_impl(self)->indices().alias();
   }
-  if (coalesce) {
-    return get_sparse_impl(self.coalesce())->indices();
-  }
-  return get_sparse_impl(self)->indices();
+  return get_sparse_impl(self.coalesce())->indices();
 }
 
-    Tensor values_sparse(const Tensor& self, bool coalesce) {
+Tensor values_sparse(const Tensor& self, bool coalesce) {
+  if (!coalesce) {
+    return get_sparse_impl(self)->values();
+  }
   if (self.is_coalesced()) {
     return get_sparse_impl(self)->values().alias();
   }
-  if (coalesce) {
-    return get_sparse_impl(self.coalesce())->values();
-  }
-  return get_sparse_impl(self)->values();
+  return get_sparse_impl(self.coalesce())->values();
 }
 
 /******************************************************************************

@@ -149,7 +149,12 @@ class TestSparse(TestCase):
                 printed.append("# _indices")
                 printed.append(str(x.indices(False)))
                 printed.append("# _values")
-                printed.append(str(x.values(False)))
+                # TODO: replace `_values()` with `values(False)`. This
+                # likely requires manual Autograd implementation for
+                # `values` because when coalesce is False, grad_fn
+                # should not be set for the output of `values(False)`
+                # call.
+                printed.append(str(x._values()))
             printed.append('')
         self.assertExpected('\n'.join(printed))
 

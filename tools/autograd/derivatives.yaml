@@ -1155,8 +1155,10 @@
 - name: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   self: not_implemented("_standard_gamma_grad")
 
+# Why is values(false) not differentiable?
+# See NOTE [ Sparse: autograd and API ]
 - name: values(Tensor(a) self, bool coalesce=True) -> Tensor(a)
-  self: at::_sparse_coo_tensor_unsafe(self.indices(), grad, self.sizes())._coalesced_(true)
+  self: "([=]() { TORCH_CHECK(coalesce, \"values(false) does not have a grad_fn\"); return at::_sparse_coo_tensor_unsafe(self.indices(), grad, self.sizes())._coalesced_(true); }) ()"
 
 # Why is _values() not differentiable?
 # See NOTE [ Sparse: autograd and API ]
