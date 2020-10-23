@@ -707,7 +707,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         >>> # With cubic kernels and equal stride
         >>> m = nnq.ConvTranspose3d(16, 33, 3, stride=2)
         >>> # non-cubic kernels and unequal stride and with padding
-        >>> m = nnq.ConvTranspose3d(16, 33, (3, 3, 5), stride=(2, 1), padding=(4, 2))
+        >>> m = nnq.ConvTranspose3d(16, 33, (3, 3, 5), stride=(2, 1, 1), padding=(4, 2, 2))
         >>> input = torch.randn(20, 16, 50, 100, 100)
         >>> q_input = torch.quantize_per_tensor(input, scale=1.0, zero_point=0, dtype=torch.quint8)
         >>> output = m(q_input)

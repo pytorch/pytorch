@@ -3981,7 +3981,7 @@ class TestQuantizedConv(TestCase):
         pad_w=st.integers(1, 2),
         o_pad=st.integers(0, 2),
         channelwise=st.booleans(),
-        qengine=st.sampled_from(("fbgemm",)))
+        qengine=st.sampled_from(["fbgemm"]))
     def test_qconv3d_unpack(
         self, inputs, stride_d, stride_h, stride_w, pad_d, pad_h, pad_w, o_pad,
         channelwise, qengine
