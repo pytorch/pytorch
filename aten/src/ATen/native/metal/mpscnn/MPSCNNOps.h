@@ -30,6 +30,8 @@ Tensor global_avg_pool2d(const Tensor& input, IntArrayRef output_size);
 
 Tensor relu(const Tensor& input);
 
+Tensor& relu_(Tensor& input);
+
 Tensor sigmoid(const Tensor& input);
 
 Tensor& hardtanh_(Tensor& input, Scalar min_val, Scalar max_val);
@@ -44,6 +46,8 @@ Tensor addmm(const Tensor& bias, const Tensor& input, const Tensor& weight);
 
 Tensor add(const Tensor& input1, const Tensor& input2);
 
+Tensor& add_(Tensor& input1, const Tensor& input2);
+
 Tensor sub(const Tensor& input1, const Tensor& input2);
 
 Tensor mul(const Tensor& input1, const Tensor& input2);
@@ -54,6 +58,8 @@ Tensor upsample_nearest2d_vec(
     const Tensor& input,
     c10::optional<IntArrayRef> output_size,
     c10::optional<ArrayRef<double>> scale_factors);
+
+Tensor flatten_using_ints(const Tensor & input, int64_t start_dim, int64_t end_dim);
 
 Tensor copy_to_host(const Tensor& input);
 

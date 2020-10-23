@@ -30,9 +30,11 @@ from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_onnx_export import TestONNXExport  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
 from jit.test_enum import TestEnum  # noqa: F401
+from jit.test_string_formatting import TestStringFormatting  # noqa: F401
 from jit.test_profiler import TestProfiler  # noqa: F401
 from jit.test_slice import TestSlice  # noqa: F401
 from jit.test_warn import TestWarn  # noqa: F401
+from jit.test_isinstance import TestIsinstance  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -582,7 +584,7 @@ class TestJit(JitTestCase):
         m = torch.jit.load(buffer)
         new_res = m(a, b, c)
         FileCheck().check_not("aten::relu(") \
-            .check("aten::add_relu(") \
+            .check("aten::_add_relu(") \
             .run(m.graph)
         torch.testing.assert_allclose(orig_res, new_res)
 
@@ -601,7 +603,7 @@ class TestJit(JitTestCase):
         m = torch.jit.load(buffer)
         new_res = m(a, b, c)
         FileCheck().check_not("aten::relu_(") \
-            .check("aten::add_relu(") \
+            .check("aten::_add_relu(") \
             .run(m.graph)
         torch.testing.assert_allclose(orig_res, new_res)
 
@@ -632,10 +634,10 @@ class TestJit(JitTestCase):
         new_res = m(a_copy, b)
         FileCheck().check_not("aten::add_(") \
             .check_not("aten::relu_(") \
-            .check("aten::add_relu_(") \
+            .check("aten::_add_relu_(") \
             .run(m.graph)
         torch.testing.assert_allclose(orig_res, new_res)
-        # Since add_relu_ does inplace mutation ensure
+        # Since _add_relu_ does inplace mutation ensure
         # a_copy is modified
         torch.testing.assert_allclose(orig_res, a_copy)
 
@@ -670,10 +672,10 @@ class TestJit(JitTestCase):
         new_res = m(a_copy, b)
         FileCheck().check_not("aten::add(") \
             .check_not("aten::relu_(") \
-            .check("aten::add_relu(") \
+            .check("aten::_add_relu(") \
             .run(m.graph)
         torch.testing.assert_allclose(orig_res, new_res)
-        # Since add_relu_ with out=a does inplace mutation ensure
+        # Since _add_relu_ with out=a does inplace mutation ensure
         # a_copy is modified
         torch.testing.assert_allclose(orig_res, a_copy)
 
@@ -1986,7 +1988,7 @@ graph(%Ra, %Rb):
         def func():
             print({constant_constructor})
         ''')
-        single_elem_tuples = map(lambda x: "(" + x + ",)", constants)
+        single_elem_tuples = ("(" + x + ",)" for x in constants)
         input_arg = ", ".join(single_elem_tuples)
         scope = {}
         funcs_str = funcs_template.format(constant_constructor=input_arg)
@@ -2012,7 +2014,7 @@ graph(%Ra, %Rb):
         xprod = itertools.product(constants, constants)
 
         # test that equal tuples and dicts correctly work with node hashing
-        for tup in map(lambda x: "(" + x + ",)", constants):
+        for tup in ("(" + x + ",)" for x in constants):
             funcs_str = funcs_template.format(constant_constructor=tup)
             scope = {}
             execWrapper(funcs_str, globals(), scope)
@@ -4161,8 +4163,8 @@ def foo(xyz):
             archive = zipfile.ZipFile(buffer)
             files = list(filter(lambda x: x.startswith('archive/code/'), archive.namelist()))
             debug_files = filter(lambda f: f.endswith('.debug_pkl'), files)
-            debug_files = map(lambda f: archive.open(f), debug_files)
-            debug_files = map(lambda f: pickle.load(f), debug_files)
+            debug_files = (archive.open(f) for f in debug_files)
+            debug_files = (pickle.load(f) for f in debug_files)
             return list(debug_files)
 
         debug_files = debug_records_from_mod(ft3)
@@ -7215,6 +7217,15 @@ dedent """
 
         scripted_foo = torch.jit.script(foo)
         self.assertEqual(scripted_foo(), foo())
+
+    def test_class_with_comment_at_lower_indentation(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                x = torch.neg(x)
+        # This comment is at the wrong indent
+                return x
+
+        torch.jit.script(Foo())
 
     # adapted from test in test_torch
     def test_tensor_to(self):
@@ -12093,7 +12104,7 @@ dedent """
         self.assertEqual(scripted_fn(torch.tensor(1)), (2, 3))
         tuple_graph = scripted_fn.graph
         slices = tuple_graph.findAllNodes("prim::TupleSlice")
-        num_outputs = set(map(lambda x: len(x.output().type().elements()), slices))
+        num_outputs = set(len(x.output().type().elements()) for x in slices)
         # one tuple slice should have an output with 2 elements, other 4
         self.assertTrue(num_outputs == {2, 4})
         self.run_pass('lower_all_tuples', tuple_graph)
@@ -15723,7 +15734,7 @@ def add_autograd_test(
                                                     check_types=check_types)
 
                 # alias annotation testing
-                if is_inplace and test_name not in EXCLUDE_SCRIPT:
+                if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
                     check_alias_annotation(name, (self_variable,) + args_variable, kwargs_variable)
 
             check(name)
