@@ -132,7 +132,7 @@ typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
     3u,
     specialization_map_entires,
     sizeof(Shader::WorkGroup),
-    &descriptor.work_group,
+    &descriptor.local_work_group,
   };
 
   const VkComputePipelineCreateInfo compute_pipeline_create_info{
@@ -170,6 +170,10 @@ typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
     pipeline,
     Deleter(device_),
   };
+}
+
+Pipeline::Cache::Cache(Factory factory)
+  : cache_(std::move(factory)) {
 }
 
 } // namespace api

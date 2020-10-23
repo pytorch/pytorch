@@ -6,6 +6,19 @@
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
+
+void run_schema_check(const NetDef& net) {
+  for (auto& op : net.op()) {
+    auto* schema = OpSchemaRegistry::Schema(op.type());
+    if (schema) {
+      CAFFE_ENFORCE(
+          schema->Verify(op),
+          "Operator def did not pass schema checking: ",
+          ProtoDebugString(op));
+    }
+  }
+}
+
 namespace memonger {
 
 NetDef optimize_inference_net(
@@ -15,6 +28,10 @@ NetDef optimize_inference_net(
     LOG(INFO) << "Cannot optimize memory for nets of type: " << net.type();
     return net;
   }
+
+  // Memonger modifies the graph. Do an early schema check here to make sure
+  // the operators are valid
+  run_schema_check(net);
 
   std::vector<OperatorDef> ops;
   for (auto& op : net.op()) {

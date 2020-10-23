@@ -11,7 +11,8 @@ DEFINE_DISPATCH(pow_tensor_tensor_stub);
 DEFINE_DISPATCH(pow_tensor_scalar_stub);
 
 Tensor& pow_out(Tensor& result, const Tensor& base, const Tensor& exp) {
-  if (exp.dim() == 0 && base.dim() != 0) {
+  if (exp.dim() == 0 && exp.device().type() == DeviceType::CPU
+    && base.device().type() == DeviceType::CUDA) {
     return native::pow_out(result, base, exp.item());
   }
   auto iter = TensorIterator::binary_op(result, base, exp);

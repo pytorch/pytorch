@@ -124,7 +124,7 @@
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CIRCLECI=1
+            export IN_CI=1
 
             # Install sccache
             sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
@@ -160,7 +160,7 @@
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CIRCLECI=1
+            export IN_CI=1
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
@@ -408,7 +408,7 @@
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CIRCLECI=1
+            export IN_CI=1
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             export TCLLIBPATH="/usr/local/lib"
@@ -439,6 +439,7 @@
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
             echo "IOS_ARCH: ${IOS_ARCH}"
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
+            echo "USE_PYTORCH_METAL": "${USE_METAL}"
 
             #check the custom build flag
             echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
@@ -447,6 +448,9 @@
             fi
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
+            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
+              export USE_PYTORCH_METAL=${USE_METAL}
+            fi
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
       - run:
           name: Run Build Test
