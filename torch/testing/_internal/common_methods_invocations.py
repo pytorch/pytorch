@@ -674,6 +674,8 @@ def method_tests():
         ('copysign', (S, S), ((S, S, S),), 'broadcast_lhs', (False,)),
         ('copysign', (S, 1, S), ((M, S),), 'broadcast_all', (False,)),
         ('copysign', (S, S), (3.14,), 'scalar', (False,)),
+        ('copysign', (S, S), (0.0,), 'scalar_pos_zero', (False,)),
+        ('copysign', (S, S), (-0.0,), 'scalar_neg_zero', (False,)),
         ('real', (S, S, S), NO_ARGS, 'complex'),
         ('imag', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
