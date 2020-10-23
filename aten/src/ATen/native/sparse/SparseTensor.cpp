@@ -32,6 +32,7 @@ bool is_coalesced_sparse(const SparseTensor& self) {
 }
 
 int64_t _nnz_sparse(const SparseTensor& self) {
+  TORCH_WARN_ONCE("The _nnz() method is deprecated and will be removed in a future PyTorch release. Please use nse(False) instead.");
   return get_sparse_impl(self)->nnz();
 }
 
@@ -46,10 +47,12 @@ int64_t nse_sparse(const SparseTensor& self, bool coalesce) {
 // See Note [ Sparse: different methods to get indices and values ] in native_functions.yaml
 
 Tensor _indices_sparse(const SparseTensor& self) {
+  TORCH_WARN_ONCE("The _indices() method is deprecated and will be removed in a future PyTorch release. Please use indices(False) instead.");
   return get_sparse_impl(self)->indices();
 }
 
 Tensor _values_sparse(const SparseTensor& self) {
+  TORCH_WARN_ONCE("The _values() method is deprecated and will be removed in a future PyTorch release. Please use values(False) instead.");
   return get_sparse_impl(self)->values();
 }
 
