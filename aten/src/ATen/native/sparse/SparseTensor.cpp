@@ -129,6 +129,14 @@ Tensor sparse_coo_tensor(ArrayRef<int64_t> size, const TensorOptions& options) {
   return at::_sparse_coo_tensor_with_dims(size.size(), 0, size, options.layout(at::kSparse));
 }
 
+Tensor& abs_out_sparse(Tensor& result, const Tensor& self) {
+  Tensor temp = self.coalesce();
+  Tensor temp_result = at::abs(temp.values());
+  get_sparse_impl(result)->resize_(temp.sparse_dim(), temp.dense_dim(), temp.sizes());
+  copy_into_sparse(result, temp.indices(), temp_result, true);
+  get_sparse_impl(result)->coalesced_ = true;
+  return result;
+}
 /* Pointer-copy init */
 
 // helper

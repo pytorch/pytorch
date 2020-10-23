@@ -427,6 +427,7 @@ matrix arguments.
 The following :class:`torch.Tensor` methods support :ref:`sparse COO
 tensors <sparse-coo-docs>`:
 
+:meth:`~torch.Tensor.abs`
 :meth:`~torch.Tensor.add`
 :meth:`~torch.Tensor.add_`
 :meth:`~torch.Tensor.addmm`
