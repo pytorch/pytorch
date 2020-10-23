@@ -12,7 +12,21 @@ def _check_is_graph_module(model):
             'Got type:' + str(type(model)) + ' Please make ' +
             'sure to follow the tutorials.')
 
-def _fuse_fx(graph_module, inplace=False):
+def _swap_ff_with_fxff(model):
+    r""" Swap FloatFunctional with FXFloatFunctional
+    """
+    modules_to_swap = []
+    for name, module in model.named_children():
+        if isinstance(module, torch.nn.quantized.FloatFunctional):
+            modules_to_swap.append(name)
+        else:
+            _swap_ff_with_fxff(module)
+
+    for name in modules_to_swap:
+        del model._modules[name]
+        model._modules[name] = torch.nn.quantized.FXFloatFunctional()
+
+def _fuse_fx(graph_module, inplace=False, fuse_custom_config_dict=None):
     r""" Internal helper function to fuse modules in preparation for quantization
 
     Args:
@@ -20,7 +34,7 @@ def _fuse_fx(graph_module, inplace=False):
     """
     _check_is_graph_module(graph_module)
     fuser = Fuser()
-    return fuser.fuse(graph_module, inplace)
+    return fuser.fuse(graph_module, inplace, fuse_custom_config_dict)
 
 class CustomTracer(Tracer):
     def __init__(self, skipped_module_names, skipped_module_classes):
@@ -52,6 +66,9 @@ forward graph of the parent module,
     skipped_module_names = prepare_custom_config_dict.get("non_traceable_module_name", [])
     skipped_module_classes = prepare_custom_config_dict.get("non_traceable_module_class", [])
 
+    # swap FloatFunctional with FXFloatFunctional
+    _swap_ff_with_fxff(model)
+
     # symbolically trace the model
     if not is_standalone_module:
         # standalone module and custom module config are applied in top level module
@@ -62,7 +79,7 @@ forward graph of the parent module,
         skipped_module_classes += custom_module_classes
     tracer = CustomTracer(skipped_module_names, skipped_module_classes)
     graph_module = GraphModule(model, tracer.trace(model))
-    graph_module = _fuse_fx(graph_module, inplace)
+    graph_module = _fuse_fx(graph_module, inplace, prepare_custom_config_dict)
     quantizer = Quantizer()
     return quantizer.prepare(
         graph_module,
@@ -90,12 +107,18 @@ def _prepare_standalone_module_fx(model, qconfig_dict, inplace=False, prepare_cu
     return _prepare_fx(model, qconfig_dict, inplace, prepare_custom_config_dict, is_standalone_module=True)
 
 
-def fuse_fx(model, inplace=False):
+def fuse_fx(model, inplace=False, fuse_custom_config_dict=None):
     r""" Fuse modules like conv+bn, conv+bn+relu etc, model must be in eval mode.
     Fusion rules are defined in torch.quantization.fx.fusion_pattern.py
     Args:
         `model`: a torch.nn.Module model
         `inplace`: flag for whether we fuse modules inplace or out of place
+        `fuse_custom_config_dict`: Dictionary for custom configurations for fuse_fx, e.g.
+         fuse_custom_config_dict = {
+           "additional_fuser_method_mapping": {
+             (Module1, Module2): fuse_module1_module2
+           }
+         }
 
     Example:
     ```python
@@ -107,7 +130,7 @@ def fuse_fx(model, inplace=False):
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
     assert not model.training, 'fuse_fx only works on models in eval mode'
     graph_module = torch.fx.symbolic_trace(model)
-    return _fuse_fx(graph_module, inplace)
+    return _fuse_fx(graph_module, inplace, fuse_custom_config_dict)
 
 def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=None):
     r""" Prepare a model for post training static quantization
@@ -167,7 +190,17 @@ def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=No
         # the module classes that are not symbolically traceable
         "non_traceable_module_class": [
            NonTraceableModule
-        ]
+        ],
+
+        # Additional fuser_method mapping
+        "additional_fuser_method_mapping": {
+           (ModuleClass1, ModuleClass2): fuse_module1_module2
+        },
+
+        # Additioanl module mapping for qat
+        "additional_qat_module_mapping": {
+           FloatModule: QATModule
+        },
       }
 
 
@@ -253,6 +286,18 @@ def convert_fx(graph_module, inplace=False, debug=False, convert_custom_config_d
         `debug`: flag for producing a debug friendly model (preserve weight attribute)
         `convert_custom_config_dict`: dictionary for custom configurations for convert function:
         convert_custom_config_dict = {
+          # addtional object (module/operator) mappings that will overwrite the default
+          # module mappingn
+          "additional_object_mapping": {
+             "static": {
+                FloatModule: QuantizedModule,
+                float_op: quantized_op
+             },
+             "dynamic": {
+                FloatModule: DynamicallyQuantizedModule,
+                float_op: dynamically_quantized_op
+             },
+          }
           # user will manually define the corresponding quantized
           # module class which has a from_observed class method that converts
           # observed custom module to quantized custom module
