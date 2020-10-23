@@ -62,8 +62,8 @@ void CopyToChannelsLast3dTensor(
 
 } // namespace
 
-template <>
-fbgemm::conv_param_t<2> MakeFbgemmConvParam<2>(
+template <int kSpatialDim>
+fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
     int N,
     int C,
     int M,
@@ -72,40 +72,43 @@ fbgemm::conv_param_t<2> MakeFbgemmConvParam<2>(
     const std::vector<int>& kernels,
     const std::vector<int>& strides,
     const std::vector<int>& pads,
-    const std::vector<int>& dilations) {
-  return fbgemm::conv_param_t<2>(
-      N, // batch size
-      C, // input channels
-      M, // output channels
-      {image_shape[0], image_shape[1]}, // feature map size
-      groups, // groups
-      {kernels[0], kernels[1]}, // kernels
-      {strides[0], strides[1]}, // strides
-      {pads[0], pads[1], pads[0], pads[1]}, // paddings
-      {dilations[0], dilations[1]}); // dilations
-}
+    const std::vector<int>& dilations,
+    const std::vector<int>& output_padding,
+    bool transposed) {
+  std::array<int, kSpatialDim> image_shape_;
+  std::array<int, kSpatialDim> kernels_;
+  std::array<int, kSpatialDim> strides_;
+  std::array<int, kSpatialDim * 2> pads_;
+  std::array<int, kSpatialDim> dilations_;
+  std::array<int, kSpatialDim> output_padding_;
+  std::move(image_shape.begin(), image_shape.begin() + image_shape.size(), image_shape_.begin());
+  std::move(
+      kernels.begin(), kernels.begin() + kernels.size(), kernels_.begin());
+  std::move(
+      strides.begin(), strides.begin() + strides.size(), strides_.begin());
+  std::move(
+      dilations.begin(),
+      dilations.begin() + dilations.size(),
+      dilations_.begin());
+  std::move(
+      output_padding.begin(),
+      output_padding.begin() + output_padding.size(),
+      output_padding_.begin());
+  std::copy(pads.begin(), pads.begin() + pads.size(), pads_.begin());
+  std::move(pads.begin(), pads.begin() + pads.size(), pads_.begin() + pads.size());
 
-template <>
-fbgemm::conv_param_t<3> MakeFbgemmConvParam<3>(
-    int N,
-    int C,
-    int M,
-    const std::vector<int>& image_shape,
-    int groups,
-    const std::vector<int>& kernels,
-    const std::vector<int>& strides,
-    const std::vector<int>& pads,
-    const std::vector<int>& dilations) {
-  return fbgemm::conv_param_t<3>(
+  return fbgemm::conv_param_t<kSpatialDim>(
       N, // batch size
       C, // input channels
       M, // output channels
-      {image_shape[0], image_shape[1], image_shape[2]}, // feature map size
+      image_shape_, // feature map size
       groups, // groups
-      {kernels[0], kernels[1], kernels[2]}, // kernels
-      {strides[0], strides[1], strides[2]}, // strides
-      {pads[0], pads[1], pads[2], pads[0], pads[1], pads[2]}, // paddings
-      {dilations[0], dilations[1], dilations[2]}); // dilations
+      kernels_, // kernels
+      strides_, // strides
+      pads_, // paddings
+      dilations_, // dilations
+      output_padding_, // output paddings for conv transpose
+      transposed);
 }
 
 Tensor MakeStridedQTensorCPU(
@@ -206,9 +209,57 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
   return dst;
 }
 
+template <>
+Tensor TransposeConvTensorUnpackConversion<2>(const Tensor& src, int groups) {
+  // OC IC/G HW -> IC OC/G HW logically
+  auto oc_g_ic_g_hw_tensors = src.chunk(groups);
+  auto fused_tensor =
+      at::cat(oc_g_ic_g_hw_tensors, 1).set_quantizer_(src.quantizer());
+  return fused_tensor.permute({1, 0, 2, 3});
+}
+
+template fbgemm::conv_param_t<1> MakeFbgemmConvParam<1>(
+    int N,
+    int C,
+    int M,
+    const std::vector<int>& image_shape,
+    int groups,
+    const std::vector<int>& kernels,
+    const std::vector<int>& strides,
+    const std::vector<int>& pads,
+    const std::vector<int>& dilations,
+    const std::vector<int>& output_padding,
+    bool transposed);
+
+template fbgemm::conv_param_t<2> MakeFbgemmConvParam<2>(
+    int N,
+    int C,
+    int M,
+    const std::vector<int>& image_shape,
+    int groups,
+    const std::vector<int>& kernels,
+    const std::vector<int>& strides,
+    const std::vector<int>& pads,
+    const std::vector<int>& dilations,
+    const std::vector<int>& output_padding,
+    bool transposed);
+
+template fbgemm::conv_param_t<3> MakeFbgemmConvParam<3>(
+    int N,
+    int C,
+    int M,
+    const std::vector<int>& image_shape,
+    int groups,
+    const std::vector<int>& kernels,
+    const std::vector<int>& strides,
+    const std::vector<int>& pads,
+    const std::vector<int>& dilations,
+    const std::vector<int>& output_padding,
+    bool transposed);
 } // namespace fbgemm_utils
 } // namespace native
 } // namespace at
+
 
 #endif // USE_FBGEMM
 
