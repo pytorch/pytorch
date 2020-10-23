@@ -855,7 +855,7 @@ def main():
 
     if options.continue_through_error and has_failed:
         for err in failure_messages:
-            print_to_stderr(message)
+            print_to_stderr(err)
         sys.exit(1)
 
 if __name__ == '__main__':
