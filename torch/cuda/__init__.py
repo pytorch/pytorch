@@ -300,7 +300,7 @@ def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
     return _get_device_properties(device)
 
 
-@contextlib.contextmanager
+#@contextlib.contextmanager
 def stream(stream):
     r"""Context-manager that selects a given stream.
 
@@ -316,9 +316,10 @@ def stream(stream):
         match the stream.
     """
     if stream is None:
-        yield
+    #    yield
         return
-    src_prev_stream = current_stream()
+    #src_prev_stream = current_stream()
+    src_prev_stream = torch.cuda_getCUrrentStream(0)
 
     if src_prev_stream.device != stream.device:
         # The given stream is on a different device; have to restore the

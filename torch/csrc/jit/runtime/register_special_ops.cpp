@@ -10,6 +10,9 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <torch/csrc/jit/cuda/cuda.cpp>
+#include <c10/cuda/CUDAStream.h>
+#include <c10/util/intrusive_ptr.h>
 
 #include <aten/src/ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>
@@ -433,6 +436,15 @@ RegisterOperators reg({
         "aten::set_grad_enabled(bool val) -> ()",
         [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
+    Operator(
+        "aten::cuda_getCurrentStream(int64_t val) -> intrusive_ptr",
+        [](Stack* stack) {
+          int64_t idx;
+          pop(stack, idx);
+          IValue cur_stream = torch::make_custom_class<torch::jit::CUDAStream>(idx);
+          push(stack, cur_stream.toCustomClass<torch::jit::CUDAStream>());
+        },
+        aliasAnalysisFromSchema()),
 });
 } // namespace
 } // namespace jit
