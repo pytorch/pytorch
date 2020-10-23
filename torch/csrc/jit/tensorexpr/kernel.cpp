@@ -141,6 +141,25 @@ ExprHandle TensorExprKernel::chunk(
   return t->call(indices);
 }
 
+ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
+  if (e.dtype().scalar_type() == dt) {
+    return e;
+  }
+
+  switch (dt) {
+// NOLINTNEXTLINE
+#define TYPE_CASE(Type, Name) \
+  case ScalarType::Name:      \
+    e = cast<Type>(e);        \
+    break;
+    AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
+#undef TYPE_CASE
+    default:
+      throw unsupported_dtype();
+  }
+  return e;
+}
+
 ExprHandle TensorExprKernel::tensorOrConstant(
     const torch::jit::Value* v,
     const std::vector<ExprHandle>& axes) {
@@ -206,6 +225,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::relu:
     case aten::log:
     case aten::log10:
+    case aten::log1p:
     case aten::log2:
     case aten::exp:
     case aten::expm1:
@@ -323,20 +343,36 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       // The sizes of the output tensor on that dimension is a sum of the
       // corresponding sizes of the input tensors, the other dimension have the
       // same sizes.
+      // Negative dim will correspond to dim = dim + input.dim().
       auto const& n = v->node();
       auto inputs = n->input(0)->node()->inputs();
+      if (inputs.size() == 0) {
+        throw std::runtime_error("Empty input list is passed to aten::cat");
+      }
+
       TORCH_INTERNAL_ASSERT(n->input(1)->node()->kind() == prim::Constant);
       int64_t dim = n->input(1)->node()->i(attr::value);
-
-      ExprHandle concat_size = IntImm::make(0);
-      for (auto input : inputs) {
-        concat_size = concat_size + sizesForValue(input)[dim];
-      }
-      concat_size = IRSimplifier::simplify(concat_size);
       auto shape = sizesForValue(inputs[0]);
-      shape[dim] = concat_size;
+      if (dim < 0) {
+        dim += shape.size();
+      }
+      if (dim < 0 || dim > shape.size()) {
+        throw std::runtime_error("Invalid 'dim' input in aten::cat");
+      }
+
+      ExprHandle concat_dim_size = 0;
+      for (auto input : inputs) {
+        concat_dim_size = concat_dim_size + sizesForValue(input)[dim];
+      }
+      concat_dim_size = IRSimplifier::simplify(concat_dim_size);
+      shape[dim] = concat_dim_size;
       return shape;
     }
+
+    case aten::softmax:
+      // Output of Softmax has the same shape as input 0.
+      return sizesForValue(v->node()->input(0));
+
     case aten::slice:
       throw std::runtime_error(
           "Shape info is not implemented for this kind of node");
@@ -387,21 +423,7 @@ void TensorExprKernel::promoteInputs(std::vector<ExprHandle>& inputs) {
   }
 
   for (ExprHandle& e : inputs) {
-    if (e.dtype().scalar_type() == highType) {
-      continue;
-    }
-
-    switch (highType) {
-// NOLINTNEXTLINE
-#define TYPE_CASE(Type, Name) \
-  case ScalarType::Name:      \
-    e = cast<Type>(e);        \
-    break;
-      AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
-#undef TYPE_CASE
-      default:
-        throw unsupported_dtype();
-    }
+    e = promoteToDtype(e, highType);
   }
 }
 
@@ -682,6 +704,16 @@ ExprHandle boolToInteger(const ExprHandle& x) {
 
 } // namespace
 
+c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
+  if (v->type()->kind() == TypeKind::TensorType) {
+    auto tt = v->type()->cast<TensorType>();
+    if (tt->scalarType()) {
+      return static_cast<ScalarType>(*tt->scalarType());
+    }
+  }
+  return c10::nullopt;
+}
+
 Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   switch (v->node()->kind()) {
     case aten::add: {
@@ -900,6 +932,11 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::log10: {
       return computeOneOperand(
           "aten_log10", v, [](const ExprHandle& a) { return log10(a); });
+    } break;
+
+    case aten::log1p: {
+      return computeOneOperand(
+          "aten_log1p", v, [](const ExprHandle& a) { return log1p(a); });
     } break;
 
     case aten::log2: {
@@ -1164,19 +1201,82 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           [this, v](const std::vector<VarHandle>& axes) {
             auto const& n = v->node();
             auto inputs = n->inputs()[0]->node()->inputs();
-            size_t dim = n->inputs()[1]->node()->i(attr::value);
+            if (inputs.size() == 0) {
+              throw std::runtime_error(
+                  "Empty input list is passed to aten::cat");
+            }
 
+            // Some of the inputs can be empty tensors, we need to skip them
+            // when we construct the expression, but we need to take them into
+            // account in dtype promotion.
+            std::vector<const torch::jit::Value*> nonempty_inputs;
+            for (auto input : inputs) {
+              if (input->type()->kind() == TypeKind::TensorType) {
+                auto tt = input->type()->cast<TensorType>();
+                if (tt->isComplete() && tt->sizes().size() && tt->sizes()[0] &&
+                    *tt->sizes()[0]) {
+                  nonempty_inputs.push_back(input);
+                }
+              }
+            }
+
+            // When all inputs are empty tensors, the tensor we create for this
+            // computation would contain no elements, so it doesn't really
+            // matter what we return here, so just return 0.
+            if (!nonempty_inputs.size()) {
+              return ExprHandle(0);
+            }
+
+            int64_t dim = n->inputs()[1]->node()->i(attr::value);
+            if (dim < 0) {
+              dim += axes.size();
+            }
+
+            if (dim < 0 || dim >= axes.size()) {
+              throw std::runtime_error("invalid 'dim' value in aten::cat");
+            }
+
+            // Promote input types.
+            // Note that we need to consider all inputs, including empty - they
+            // also affect the resultant dtype.
+            auto maybe_dtype = findDtypeForValue(inputs[0]);
+            TORCH_INTERNAL_ASSERT(
+                maybe_dtype, "Cannot find dtype for one of aten::cat inputs");
+            ScalarType highType = *maybe_dtype;
+            for (const auto input : inputs) {
+              auto maybe_dtype = findDtypeForValue(input);
+              TORCH_INTERNAL_ASSERT(
+                  maybe_dtype, "Cannot find dtype for one of aten::cat inputs");
+              highType = promoteTypes(highType, *maybe_dtype);
+            }
+
+            // Now we know the final dtype, we know what inputs are non-empty,
+            // and we know that there is at least one such an input. With all
+            // that we construct a tensor expression performing the
+            // concatenation.
+            // The expression we build here is a cascading if-then-else that
+            // essentially represents:
+            //
+            //              inp1[i, j, k]         if 0   < i < l1,
+            // out[i,j,k] = inp2[i, j-l1, k]      if l1 =< i < l1 + l2,
+            //              ...
+            //              inpN[i, j-l_N_1, k]   if l1+l2+...l_N_1  < i
+            // where l_i is the corresponding size of the i-th input.
             std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
-            ExprHandle load = tensorOrConstant(inputs[0], newAxes);
-            size_t offset = bufferSizes(tensors_.at(inputs[0]->unique()))[dim];
+            ExprHandle load = promoteToDtype(
+                tensorOrConstant(nonempty_inputs[0], newAxes), highType);
+            size_t offset =
+                bufferSizes(tensors_.at(nonempty_inputs[0]->unique()))[dim];
             newAxes[dim] = newAxes[dim] - IntImm::make(offset);
 
-            for (size_t ii = 1; ii < inputs.size(); ++ii) {
+            for (size_t ii = 1; ii < nonempty_inputs.size(); ++ii) {
+              auto input = nonempty_inputs[ii];
               load = ifThenElse(
                   CompareSelect::make(axes[dim], IntImm::make(offset), kLT),
                   load,
-                  tensorOrConstant(inputs[ii], newAxes));
-              offset += bufferSizes(tensors_.at(inputs[ii]->unique()))[dim];
+                  promoteToDtype(tensorOrConstant(input, newAxes), highType));
+
+              offset += bufferSizes(tensors_.at(input->unique()))[dim];
               newAxes[dim] = axes[dim] - IntImm::make(offset);
             }
 
@@ -1230,6 +1330,10 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::sum: {
       return computeSum(v);
+    }
+
+    case aten::softmax: {
+      return computeSoftmax(v);
     }
 
     default: {
@@ -1554,6 +1658,110 @@ Tensor* TensorExprKernel::computeSum(const torch::jit::Value* v) {
       reduction_info.reductionDims);
 }
 
+Tensor* TensorExprKernel::computeSoftmax(const torch::jit::Value* v) {
+  // Softmax is computed as follows:
+  //    softmax(vi) = exp(vi) / sum(exp(vi))
+  //
+  // In order to avoid overflow issues due to exp of a large number, we
+  // subtract the max of that dim before computing exp.
+  //    softmax(vi) = exp(vi - max(vi)) / sum(exp(vi - max(vi)))
+  //
+  // This is implemented as 4 loopnests:
+  //   - First loop computes the max over the softmax dim.
+  //   - Second loop computes exp for every element in v after subtracting
+  //     the max of the softmax dim it belongs to.
+  //   - Third loop computes the sum over the softmax dim.
+  //   - Final loop computes softmax for every element in v.
+
+  TORCH_INTERNAL_ASSERT(v->node()->inputs().size() == 3);
+  auto output_dims = dimsFromSizes(sizesForValue(v));
+
+  // We do not handle None for dims (input 1) because that is supposed to
+  // be deprecated.
+  TORCH_INTERNAL_ASSERT(v->node()->input(1)->node()->kind() == prim::Constant);
+  size_t softmax_dim = v->node()->input(1)->node()->i(attr::value);
+  TORCH_INTERNAL_ASSERT(softmax_dim < output_dims.size());
+
+  std::vector<DimArg> non_softmax_dims;
+  for (size_t i = 0; i < output_dims.size(); ++i) {
+    if (i != softmax_dim) {
+      non_softmax_dims.push_back(output_dims[i]);
+    }
+  }
+
+  // Softmax implementation includes two reductions, one to find the max and
+  // the other to calculate the sum along the softmax dim. These reductions
+  // will have the softmax dimension as the inner most loop. So, the innermost
+  // index in the indices will refer to the softmax dimension.
+
+  // Update the indices by moving the softmax dimension index to the
+  // appropriate position.
+  auto move_softmax_dim_index_to_pos = [&](const ParameterList& indices) {
+    std::vector<ExprHandle> new_indices;
+    for (auto ind : indices) {
+      new_indices.push_back(ind);
+    }
+    for (size_t i = softmax_dim; i < indices.size() - 1; ++i) {
+      new_indices[i + 1] = indices[i];
+    }
+    new_indices[softmax_dim] = indices[indices.size() - 1];
+    return new_indices;
+  };
+
+  // Remove the index corresponding to the softmax dimension.
+  auto remove_softmax_dim_index = [&](const ParameterList& indices) {
+    std::vector<ExprHandle> new_indices;
+    for (size_t i = 0; i < indices.size(); ++i) {
+      if (i != softmax_dim) {
+        new_indices.push_back(indices[i]);
+      }
+    }
+    return new_indices;
+  };
+
+  auto convert_indices_to_expr_handle = [&](const ParameterList& indices) {
+    std::vector<ExprHandle> new_indices(indices.size());
+    for (size_t i = 0; i < indices.size(); ++i) {
+      new_indices[i] = indices[i];
+    }
+    return new_indices;
+  };
+
+  c10::optional<Dtype> dtype = ToDtype(ScalarType::None);
+  auto maybe_dtype = v->node()->get(attr::dtype);
+  if (maybe_dtype && !maybe_dtype->isNone()) {
+    dtype = ToDtype(static_cast<ScalarType>(maybe_dtype->toInt()));
+  }
+
+  auto max = Reduce(
+      "aten_softmax_max",
+      non_softmax_dims,
+      Maximum(dtype.value()),
+      [&](ParameterList& indices) {
+        return tensorOrConstant(
+            v->node()->inputs()[0], move_softmax_dim_index_to_pos(indices));
+      },
+      {output_dims[softmax_dim]});
+  auto e =
+      Compute("aten_softmax_exp", output_dims, [&](ParameterList& indices) {
+        auto inp = tensorOrConstant(
+            v->node()->inputs()[0], convert_indices_to_expr_handle(indices));
+        return exp(inp - max->call(remove_softmax_dim_index(indices)));
+      });
+  auto sum = Reduce(
+      "aten_softmax_sum",
+      non_softmax_dims,
+      Sum(),
+      [&](ParameterList& indices) {
+        return e->call(move_softmax_dim_index_to_pos(indices));
+      },
+      {output_dims[softmax_dim]});
+  auto res = Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
+    return e->call(indices) / sum->call(remove_softmax_dim_index(indices));
+  });
+  return res;
+}
+
 TensorExprKernel::ReductionInfo TensorExprKernel::getReductionInfo(
     const torch::jit::Node* node) {
   std::vector<size_t> axes;
@@ -1626,6 +1834,7 @@ std::vector<int64_t> TensorExprKernel::getReductionAxes(
 
 void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
+  GRAPH_DUMP("TensorExprKernel graph:", graph_);
   // Bind inputs to buffers.
   nInputs_ = graph_->inputs().size();
   for (auto const& input : graph_->inputs()) {

@@ -2,7 +2,7 @@
 import torch
 from torch.nn.modules.pooling import MaxPool2d
 
-from .activation import ReLU, ReLU6, Hardswish, ELU
+from .activation import ReLU, ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid
 from .batchnorm import BatchNorm2d, BatchNorm3d
 from .normalization import LayerNorm, GroupNorm, InstanceNorm1d, \
     InstanceNorm2d, InstanceNorm3d
@@ -11,7 +11,7 @@ from .conv import ConvTranspose1d, ConvTranspose2d
 from .linear import Linear
 from .embedding_ops import Embedding, EmbeddingBag
 
-from .functional_modules import FloatFunctional, QFunctional
+from .functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
 
 
 class Quantize(torch.nn.Module):
@@ -92,21 +92,24 @@ __all__ = [
     'ConvTranspose1d',
     'ConvTranspose2d',
     'DeQuantize',
+    'ELU',
+    'Embedding',
+    'EmbeddingBag',
+    'GroupNorm',
+    'Hardswish',
+    'InstanceNorm1d',
+    'InstanceNorm2d',
+    'InstanceNorm3d',
+    'LayerNorm',
+    'LeakyReLU',
     'Linear',
     'MaxPool2d',
     'Quantize',
     'ReLU',
     'ReLU6',
-    'Hardswish',
-    'ELU',
-    'LayerNorm',
-    'GroupNorm',
-    'InstanceNorm1d',
-    'InstanceNorm2d',
-    'InstanceNorm3d',
-    'Embedding',
-    'EmbeddingBag',
+    'Sigmoid',
     # Wrapper modules
     'FloatFunctional',
+    'FXFloatFunctional',
     'QFunctional',
 ]

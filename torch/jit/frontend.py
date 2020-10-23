@@ -4,6 +4,7 @@ import ast
 import inspect
 import string
 from textwrap import dedent
+from typing import List
 from torch._C._jit_tree_views import (
     ClassDef, Ident, Stmt, Decl, Def, Var,
     EmptyTypeAnnotation, Param, ExprStmt, Assign,
@@ -178,34 +179,42 @@ def get_jit_class_def(cls, self_name):
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
     return build_class_def(ctx, py_ast.body[0], methods, properties, self_name)
 
-def check_and_indent_multiline_strings(sourcelines):
-    """
-    This is a helper function which checks for multiline strings and
-    indents the strings by calculating the leading space and appending
-    the spaces to each line of the multiline string.The failure to indent
-    multiline strings causes failures during downstream dedent
-    Arguments:
-        sourcelines: This is an array of source lines of the function
-    Returns:
-        This function returns the updated indented sources,i.e,sourcelines
-    """
-    indices = []
-    triple_quotes = '\"\"\"'
-    # Extract the start and end line number of the multiline string
-    for index, source in enumerate(sourcelines):
-        if triple_quotes in source and source.find(triple_quotes) == source.rfind(triple_quotes):
-            indices.append(index)
 
-    # Adding leading space for every line of the multiline string
-    indices_length = len(indices)
-    for i in range(0, indices_length, 2):
-        if i + 1 < indices_length:
-            start = indices[i]
-            end = indices[i + 1]
-            leading_space = len(sourcelines[start]) - len(sourcelines[start].lstrip())
-            for lines in range(start + 1, end + 1):
-                sourcelines[lines] = ' ' * leading_space + sourcelines[lines]
-    return sourcelines
+def normalize_source_lines(sourcelines: List[str]) -> List[str]:
+    """
+    This helper function accepts a list of source lines. It finds the
+    indentation level of the function definition (`def`), then it indents
+    all lines in the function body to a point at or greater than that
+    level. This allows for comments and continued string literals that
+    are at a lower indentation than the rest of the code.
+    Arguments:
+        sourcelines: function source code, separated into lines by
+                        the '\n' character
+    Returns:
+        A list of source lines that have been correctly aligned
+    """
+
+    def remove_prefix(text, prefix):
+        return text[text.startswith(prefix) and len(prefix):]
+
+    # Find the line and line number containing the function definition
+    for i, l in enumerate(sourcelines):
+        if l.lstrip().startswith("def"):
+            idx = i
+            break
+    fn_def = sourcelines[idx]
+
+    # Get a string representing the amount of leading whitespace
+    whitespace = fn_def.split("def")[0]
+
+    # Add this leading whitespace to all lines before and after the `def`
+    aligned_prefix = [whitespace + remove_prefix(s, whitespace) for s in sourcelines[:idx]]
+    aligned_suffix = [whitespace + remove_prefix(s, whitespace) for s in sourcelines[idx + 1:]]
+
+    # Put it together again
+    aligned_prefix.append(fn_def)
+    return aligned_prefix + aligned_suffix
+
 
 def get_jit_def(fn, def_name, self_name=None):
     """
@@ -223,12 +232,12 @@ def get_jit_def(fn, def_name, self_name=None):
         self_name: If this function is a method, what the type name of `self` is.
     """
     sourcelines, file_lineno, filename = get_source_lines_and_file(fn, torch._C.ErrorReport.call_stack())
-    sourcelines = check_and_indent_multiline_strings(sourcelines)
+    sourcelines = normalize_source_lines(sourcelines)
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-        raise RuntimeError("Expected a single top-level function")
+        raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, True)
@@ -238,7 +247,7 @@ def get_jit_def(fn, def_name, self_name=None):
     if should_drop(fn):
         unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")")
         if len(unused_fn_def.body) != 1 or not isinstance(unused_fn_def.body[0], ast.FunctionDef):
-            raise RuntimeError("Expected a single top-level function")
+            raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
         unused_def = unused_fn_def.body[0]
         fn_def.body = unused_def.body
         # kwarg/vararg not supported by `build_def`
@@ -394,7 +403,7 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_Assign(ctx, stmt):
         rhs = build_expr(ctx, stmt.value)
-        lhs = list(map(lambda x: build_expr(ctx, x), stmt.targets))
+        lhs = [build_expr(ctx, x) for x in stmt.targets]
         return Assign(lhs, rhs)
 
     @staticmethod
@@ -686,11 +695,10 @@ class ExprBuilder(Builder):
             return SliceExpr(base.range(), lower, upper, step)
 
         def build_Index(ctx, base, index_expr):
-            if isinstance(index_expr.value, ast.Tuple) or \
-                    isinstance(index_expr.value, ast.List):
+            if isinstance(index_expr.value, ast.Tuple):
                 raise NotSupportedError(base.range(),
                                         "slicing multiple dimensions with "
-                                        "sequences not supported yet")
+                                        "tuples not supported yet")
             return build_expr(ctx, index_expr.value)
 
         def build_ExtSlice(ctx, base, extslice):
