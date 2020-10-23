@@ -121,7 +121,7 @@ class ProcessContext:
         while True:
             self._try_populate_process_errors()
             process.join(period)
-            if deadline - time.monotonic() < 0:
+            if not process.is_alive() or deadline - time.monotonic() < 0:
                 break
 
     def join(self, timeout=None):
