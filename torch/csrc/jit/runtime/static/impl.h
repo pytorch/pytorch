@@ -12,6 +12,7 @@ namespace jit {
 
 struct TORCH_API StaticRuntimeOptions {
   bool cleanup_activations{true};
+  bool enable_out_variant{true};
 };
 
 /// Static runime supports two execution modes.
@@ -157,7 +158,8 @@ class ProcessedNode {
   ProcessedNode(
       Node* n,
       std::vector<size_t>&& input_regs,
-      std::vector<size_t>&& output_regs);
+      std::vector<size_t>&& output_regs,
+      bool enable_out_variant);
   void run(std::vector<IValue>& reg) const;
 
   Node* get_node() const {
