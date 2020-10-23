@@ -55,7 +55,7 @@ name.
 ```
 THIndexTensor *THSTensor_(newIndices)(const THSTensor *self) {
   // ...
-  return THIndexTensor_(newNarrow)(self->indices, 1, 0, self->nnz);
+  return THIndexTensor_(newNarrow)(self->indices, 1, 0, self->nse);
 }
 ```
 

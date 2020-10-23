@@ -62,7 +62,7 @@ def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
         tensor(indices=tensor([[0, 0, 0, 1, 1, 1],
                                [0, 1, 2, 0, 1, 2]]),
                values=tensor([ 1.5901,  0.0183, -0.6146,  1.8061, -0.0112,  0.6302]),
-               size=(2, 3), nnz=6, layout=torch.sparse_coo, requires_grad=True)
+               size=(2, 3), nse=6, layout=torch.sparse_coo, requires_grad=True)
 
         >>> b = torch.randn(3, 2, requires_grad=True)
         >>> b
@@ -79,7 +79,7 @@ def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
         tensor(indices=tensor([[0, 0, 0, 1, 1, 1],
                                [0, 1, 2, 0, 1, 2]]),
                values=tensor([ 0.1394, -0.6415, -2.1639,  0.1394, -0.6415, -2.1639]),
-               size=(2, 3), nnz=6, layout=torch.sparse_coo)
+               size=(2, 3), nse=6, layout=torch.sparse_coo)
     """
     return torch._sparse_mm(mat1, mat2)
 
@@ -95,7 +95,7 @@ def sum(input: Tensor, dim: DimOrDims = None,
     All summed :attr:`dim` are squeezed (see :func:`torch.squeeze`), resulting an output
     tensor having :attr:`dim` fewer dimensions than :attr:`input`.
 
-    During backward, only gradients at ``nnz`` locations of :attr:`input`
+    During backward, only gradients at ``nse`` locations of :attr:`input`
     will propagate back. Note that the gradients of :attr:`input` is coalesced.
 
     Args:
@@ -107,11 +107,11 @@ def sum(input: Tensor, dim: DimOrDims = None,
 
     Example::
 
-        >>> nnz = 3
+        >>> nse = 3
         >>> dims = [5, 5, 2, 3]
-        >>> I = torch.cat([torch.randint(0, dims[0], size=(nnz,)),
-                           torch.randint(0, dims[1], size=(nnz,))], 0).reshape(2, nnz)
-        >>> V = torch.randn(nnz, dims[2], dims[3])
+        >>> I = torch.cat([torch.randint(0, dims[0], size=(nse,)),
+                           torch.randint(0, dims[1], size=(nse,))], 0).reshape(2, nse)
+        >>> V = torch.randn(nse, dims[2], dims[3])
         >>> size = torch.Size(dims)
         >>> S = torch.sparse_coo_tensor(I, V, size)
         >>> S
@@ -125,7 +125,7 @@ def sum(input: Tensor, dim: DimOrDims = None,
 
                               [[ 0.1276,  0.1874, -0.6334],
                                [-1.9682, -0.5340,  0.7483]]]),
-               size=(5, 5, 2, 3), nnz=3, layout=torch.sparse_coo)
+               size=(5, 5, 2, 3), nse=3, layout=torch.sparse_coo)
 
         # when sum over only part of sparse_dims, return a sparse tensor
         >>> torch.sparse.sum(S, [1, 3])
@@ -133,7 +133,7 @@ def sum(input: Tensor, dim: DimOrDims = None,
                values=tensor([[-1.4512,  0.4073],
                               [-0.8901,  0.2017],
                               [-0.3183, -1.7539]]),
-               size=(5, 2), nnz=3, layout=torch.sparse_coo)
+               size=(5, 2), nse=3, layout=torch.sparse_coo)
 
         # when sum over all sparse dim, return a dense tensor
         # with summed dims squeezed

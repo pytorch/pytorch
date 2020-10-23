@@ -14799,7 +14799,7 @@ class TestTorchDeviceType(TestCase):
         y_sparse._dimI()
         y_sparse.dense_dim()
         y_sparse._dimV()
-        y_sparse._nnz()
+        y_sparse.nse(False)
         y_sparse.is_coalesced()
         y_sparse.indices(False)
         y_sparse.values(False)

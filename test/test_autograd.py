@@ -3926,9 +3926,9 @@ class TestAutograd(TestCase):
         def fn(sparse):
             return torch.sparse.sum(sparse)
 
-        gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=True)
+        gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nse=True)
         with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
-            gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=False)
+            gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nse=False)
 
     def test_gradcheck_nondeterministic(self):
         class NonDetFunc(Function):
@@ -6291,14 +6291,14 @@ class TestAutogradDeviceType(TestCase):
     @skipCUDAIfRocm
     def test_sparse_ctor_getter_backward(self, device):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
-        def _test(size, sparse_dim, nnz, device):
-            v_size = [nnz] + list(size[sparse_dim:])
-            i = torch.rand(sparse_dim, nnz)
+        def _test(size, sparse_dim, nse, device):
+            v_size = [nse] + list(size[sparse_dim:])
+            i = torch.rand(sparse_dim, nse)
             i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
             i = i.to(torch.long)
 
             inp = torch.randn(v_size, requires_grad=True)
-            other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True)[0]
+            other = self.genSparseTensor(size, sparse_dim, nse, is_uncoalesced=True)[0]
             other = other.to(device)
 
             def fn(v):
@@ -6317,15 +6317,15 @@ class TestAutogradDeviceType(TestCase):
             with self.assertRaisesRegex(RuntimeError, "does not have a grad_fn"):
                 other.detach().requires_grad_().values(False).backward(torch.ones_like(other.values(False)))
 
-        for empty_i, empty_v, empty_nnz in product([True, False], repeat=3):
+        for empty_i, empty_v, empty_nse in product([True, False], repeat=3):
             sparse_size = [] if empty_i else [2, 1]
             dense_size = [1, 0, 2] if empty_v else [1, 2]
-            nnz = 0 if empty_nnz else 5
-            _test(sparse_size + dense_size, len(sparse_size), nnz, device)
+            nse = 0 if empty_nse else 5
+            _test(sparse_size + dense_size, len(sparse_size), nse, device)
 
     # autograd tests via common_method_invocations don't allow input tensors to
     # be sparse (RuntimeError: gradcheck expects all tensor inputs are dense when
-    # check_sparse_nnz is set to False.)
+    # check_sparse_nse is set to False.)
     def test_sparse_mask_autograd(self, device):
         tensor = torch.randn(3, requires_grad=True, device=device)
         mask = torch.ones(3, device=device)

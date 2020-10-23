@@ -924,7 +924,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
   //
   //   - [0:4]: sparse dims
   //   - [4:8]: dense dims
-  //   -   [8]: nnz
+  //   -   [8]: nse
   //
   class SparseTensorMetadata {
    public:
@@ -955,7 +955,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
           data_[i + 4] = tensor.size(sparse_dim + i);
         }
       }
-      data_[8] = tensor._nnz();
+      data_[8] = tensor.nse(false);
     }
 
     std::vector<int64_t> sizes() const {
@@ -981,6 +981,10 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
       return data_[8];
     }
 
+    int64_t nse() const {
+      return data_[8];
+    }
+
    protected:
     at::Tensor metadata_;
     int64_t* data_;
@@ -988,8 +992,8 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
   // Sparse allreduce is implemented with allgather on indices and values.
   // Every process then sums the resulting sparse tensors locally.
-  // The nnz for sparse tensors may be different across processes, so first
-  // we run allgather on the nnz, and then allgather with max(nnz).
+  // The nse for sparse tensors may be different across processes, so first
+  // we run allgather on the nse, and then allgather with max(nse).
   // We could use an allgatherv for this, if it were available.
   at::Tensor allreduce(std::vector<at::Tensor>& tensors) {
     // TODO: This is a massive hack!  There is some confusion about
@@ -1095,7 +1099,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     std::vector<size_t> counts(context->size);
     int64_t totalSize = 0;
     for (size_t i = 0; i < metadata.size(); i++) {
-      counts[i] = metadata[i].nnz() * sparseDim;
+      counts[i] = metadata[i].nse() * sparseDim;
       totalSize += counts[i];
     }
 
@@ -1117,10 +1121,10 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     indices.reserve(metadata.size());
     size_t offset = 0;
     for (size_t i = 0; i < metadata.size(); i++) {
-      const auto nnz = metadata[i].nnz();
-      const auto numel = sparseDim * nnz;
+      const auto nse = metadata[i].nse();
+      const auto numel = sparseDim * nse;
       indices.push_back(
-          output.narrow(0, offset, numel).reshape({sparseDim, nnz}));
+          output.narrow(0, offset, numel).reshape({sparseDim, nse}));
       offset += numel;
     }
 
@@ -1130,7 +1134,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
   std::vector<at::Tensor> allgather_values(
       const at::Tensor& tensor,
       const std::vector<SparseTensorMetadata>& metadata) {
-    // There are nnz #dense_dim()-dimensional tensors per rank.
+    // There are nse #dense_dim()-dimensional tensors per rank.
     const auto valueShape = tensor.sizes().slice(tensor.sparse_dim());
     size_t denseNumel = 1;
     for (auto dim : valueShape) {
@@ -1140,7 +1144,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     std::vector<size_t> counts(context->size);
     int64_t totalSize = 0;
     for (size_t i = 0; i < metadata.size(); i++) {
-      counts[i] = metadata[i].nnz() * denseNumel;
+      counts[i] = metadata[i].nse() * denseNumel;
       totalSize += counts[i];
     }
 
@@ -1162,9 +1166,9 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     values.reserve(metadata.size());
     size_t offset = 0;
     for (size_t i = 0; i < metadata.size(); i++) {
-      const auto nnz = metadata[i].nnz();
-      const auto numel = denseNumel * nnz;
-      auto tensorShape = std::vector<int64_t>({(int64_t)nnz});
+      const auto nse = metadata[i].nse();
+      const auto numel = denseNumel * nse;
+      auto tensorShape = std::vector<int64_t>({(int64_t)nse});
       std::copy(
           valueShape.begin(),
           valueShape.end(),

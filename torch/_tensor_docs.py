@@ -1834,7 +1834,7 @@ Example::
 
                           [[ 0.0793,  0.0036],
                            [-0.2569, -0.1055]]]),
-           size=(5, 5, 2, 2), nnz=4, layout=torch.sparse_coo)
+           size=(5, 5, 2, 2), nse=4, layout=torch.sparse_coo)
 """)
 
 add_docstr_all('inverse',
@@ -3800,11 +3800,11 @@ Example::
     tensor(indices=tensor([[1, 1],
                            [0, 2]]),
            values=tensor([ 9, 10]),
-           size=(3, 3), nnz=2, layout=torch.sparse_coo)
+           size=(3, 3), nse=2, layout=torch.sparse_coo)
     >>> d.to_sparse(1)
     tensor(indices=tensor([[1]]),
            values=tensor([[ 9,  0, 10]]),
-           size=(3, 3), nnz=1, layout=torch.sparse_coo)
+           size=(3, 3), nse=1, layout=torch.sparse_coo)
 """)
 
 add_docstr_all('to_mkldnn',

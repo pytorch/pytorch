@@ -4451,16 +4451,16 @@
 #
 # To achieve 1, we need to provide a set of *dangerous* APIs (dangerous in the
 # sense that misusing them will break sparse tensor invariant and may out in
-# unexpected behavior, e.g., crash). These methods are all prefixed with
-# underscore "_" to indicate that they should be used with care. We provide:
+# unexpected behavior, e.g., crash).
+# We provide:
 #
-#   + `_indices()`: returns the *raw* indices within the sparse tensor (not just
+#   + `indices(false)`: returns the *raw* indices within the sparse tensor (not just
 #                   sharing storage). Any inplace operation will change the
 #                   actual indices, including t_, set_, as_strided_, resize_,
 #                   etc.
-#   + `_values()`: returns the *raw* values within the sparse tensor. Similar
-#                  semantics as `_indices()`
-#   + `_nnz()`: returns the number of non-zero entries. This will always be
+#   + `values(false)`: returns the *raw* values within the sparse tensor. Similar
+#                  semantics as `indices(false)`
+#   + `nse(false)`: returns the number of specified entries. This will always be
 #               determined by the shapes of indices and values.
 #   + `_coalesced_(bool)`: inplace sets whether the tensor is coalesced, and
 #                          returns itself.
@@ -4469,19 +4469,26 @@
 # autograd Function.
 #
 # We also provide other public *safe* APIs:
-#   + `indices()`: returns a **view** of the indices tensor if the sparse tensor
-#                  is **coalesced**.
+
+#   + `indices()`: returns a **view** of the indices tensor if the
+#                  sparse tensor is **coalesced**, otherwise returns a
+#                  **view** of the indices tensor of a coalesced
+#                  **copy**.
 #   + `values()`: returns a **view** of the values tensor if the containing
-#                 sparse tensor is **coalesced**.
+#                 sparse tensor is **coalesced**, otherwise returns a
+#                  **view** of the values tensor of a coalesced
+#                  **copy**.
 #   + `sparse_dim()`: number of sparse dimensions
 #   + `dense_dim()`: number of dense dimensions
 #   + `is_coalesced()`: whether the sparse tensor is coalesced
 #
-# `_indices()` and `_values()` should returns the raw indices and values dense
-# tensors within a sparse tensor. They can be quite unsafe with inplace
-# operations like `t_()`, and exposes uncoalesced indices and values. The public
-# recommended API is `indices()` and `values()`, both of which first check that
-# the tensor is coalesced and return views on those tensors.
+# `indices(false)` and `values(false)` should returns the raw indices
+# and values dense tensors within a sparse tensor. They can be quite
+# unsafe with inplace operations like `t_()`, and exposes uncoalesced
+# indices and values. The public recommended API is `indices()` and
+# `values()`, both of which first check that the tensor is coalesced
+# and return views on those tensors or coalesced copies of the
+# tensors.
 #
 #
 # Autograd Support
@@ -4491,7 +4498,7 @@
 # values tensors. E.g., `torch.sparse_coo_tensor(i, v).values().sum()` is
 # differentiable w.r.t. `v`.
 #
-# NB: The `values()` and `_values()` operators are special in that they are
+# NB: The `values()` and `values(false)` operators are special in that they are
 # layout-aware, i.e., the output depends not just on the data it represents, but
 # also on the input layout details (in this case, the `indices` tensor). See
 # NOTE [ as_strided Backward and layout-aware/agnostic autograd ] in Functions.cpp
@@ -4506,7 +4513,7 @@
 #     Note that `values()` normally is layout-aware even if we constrain
 #     ourselves on sparse inputs since it may include all zeros values entries
 #     as "present" entries.
-#   + `_values()`:
+#   + `values(false)`:
 #     Input may be uncoalesced.
 #     It is not straightforward to construct a layout-agnostic version because
 #     duplicate indices entries may exist and additional parameterization is
@@ -4526,11 +4533,12 @@
 # Variable, so it is only view of the values tensor.
 # TODO: clone indices in sparse tensor ctor.
 #
-# For other methods that return outputs that share storage with inputs, i.e.,
-# `indices()` and `_indices()`. We mark their outputs as non-differentiable, so
-# the view relation is not tracked by autograd, but the version counter is still
-# shared. In other words, their outputs are non-differentiable views of the
-# sparse tensor.
+# For other methods that return outputs that share storage with
+# inputs, i.e., `indices()` and `indices(false)`. We mark their
+# outputs as non-differentiable, so the view relation is not tracked
+# by autograd, but the version counter is still shared. In other
+# words, their outputs are non-differentiable views of the sparse
+# tensor.
 
 # FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given
 # the default would never make sense.

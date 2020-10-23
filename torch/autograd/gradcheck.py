@@ -123,7 +123,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, grad_out=1.0):
                     tmp *= size[i]
                 return stride
 
-            x_nnz = x_tensor._nnz()
+            x_nse = x_tensor.nse(False)
             x_size = list(x_tensor.size())
             x_indices = x_tensor.indices(False).t()
             x_values = x_tensor.values(False)
@@ -132,7 +132,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, grad_out=1.0):
             # Use .data here to get around the version check
             x_values = x_values.data
 
-            for i in range(x_nnz):
+            for i in range(x_nse):
                 x_value = x_values[i]
                 for x_idx in product(*[range(m) for m in x_values.size()[1:]]):
                     indices = x_indices[i].tolist() + list(x_idx)
@@ -231,7 +231,7 @@ def gradcheck(
     atol: float = 1e-5,
     rtol: float = 1e-3,
     raise_exception: bool = True,
-    check_sparse_nnz: bool = False,
+    check_sparse_nse: bool = False,
     nondet_tol: float = 0.0,
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False
@@ -271,8 +271,8 @@ def gradcheck(
         raise_exception (bool, optional): indicating whether to raise an exception if
             the check fails. The exception gives more information about the
             exact nature of the failure. This is helpful when debugging gradchecks.
-        check_sparse_nnz (bool, optional): if True, gradcheck allows for SparseTensor input,
-            and for any SparseTensor at input, gradcheck will perform check at nnz positions only.
+        check_sparse_nse (bool, optional): if True, gradcheck allows for SparseTensor input,
+            and for any SparseTensor at input, gradcheck will perform check at nse positions only.
         nondet_tol (float, optional): tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
             exactly (default, 0.0) or be within this tolerance.
@@ -288,8 +288,8 @@ def gradcheck(
         return False
 
     tupled_inputs = _as_tuple(inputs)
-    if not check_sparse_nnz and any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)):
-        return fail_test('gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False.')
+    if not check_sparse_nse and any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)):
+        return fail_test('gradcheck expects all tensor inputs are dense when check_sparse_nse is set to False.')
 
     # Make sure that gradients are saved for at least one input
     any_input_requiring_grad = False

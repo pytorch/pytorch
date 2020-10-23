@@ -19,7 +19,7 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
       "sparse_mask: arguments are located on different devices; self is on device ", t.get_device(),
       ", mask is on device ", mask.get_device(), ", out is on device ", r.get_device());
   r.resize_as_(mask);
-  if (mask._nnz() == 0) {
+  if (mask.nse(false) == 0) {
     return r.zero_();
   }
   LongTensor mask_indices = mask.indices(false);
@@ -33,7 +33,7 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
 
   // Get a flattened sparse indices, similar to NOTE [ Flatten Sparse Indices ].
   // Keeping this implementation because it is faster than flatten_indices
-  LongTensor indices = at::zeros({mask._nnz()}, mask_indices.options());
+  LongTensor indices = at::zeros({mask.nse(false)}, mask_indices.options());
   for (int64_t d = 0; d < mask.sparse_dim(); d++) {
     indices.mul_(mask.size(d));
     // This used to use a buffer but I deoptimized it

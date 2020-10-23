@@ -132,7 +132,7 @@ __global__ void cuda_sparse_coo_softmax_backward_kernel(
     int64_t* pool_sizes,
     int64_t* pool_offsets,
     int64_t nvalues,
-    int64_t grad_nnz,
+    int64_t grad_nse,
     int64_t* grad_offsets,
     int64_t* out_offsets,
     int64_t* lower_bound_values,
@@ -167,7 +167,7 @@ __global__ void cuda_sparse_coo_softmax_backward_kernel(
         auto j = lower_bound_values[i];
 
         /* Update `tmp_row` accumulator only when limits and pools are valid */
-        if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
+        if (j < grad_nse && (out_offsets[i] == grad_offsets[j])) {
           auto grad_values_row = grad_values_accessor[j];
           if (LogSoftMax) {
             tmp_row -= grad_values_row[k];
@@ -183,7 +183,7 @@ __global__ void cuda_sparse_coo_softmax_backward_kernel(
         auto out_values_row = out_values_accessor[i];
         auto values_row = values_accessor[i];
         auto j = lower_bound_values[i];
-        if (j < grad_nnz && (out_offsets[i] == grad_offsets[j])) {
+        if (j < grad_nse && (out_offsets[i] == grad_offsets[j])) {
           auto grad_values_row = grad_values_accessor[j];
           if (LogSoftMax) {
             values_row[k] = grad_values_row[k] +
@@ -221,7 +221,7 @@ Tensor get_offsets(
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   auto ndim = indices.size(0);
-  auto nnz = indices.size(1);
+  auto nse = indices.size(1);
   std::vector<int64_t> host_strides(ndim, 1);
   if (ndim > 1) {
     for (int64_t i = ndim - 2; i >= 0; i--) {
@@ -239,12 +239,12 @@ Tensor get_offsets(
 
   auto indices_accessor = indices.packed_accessor<int64_t, 2>();
 
-  Tensor offsets = at::empty({nnz}, indices.options());
+  Tensor offsets = at::empty({nse}, indices.options());
 
   thrust::transform(
       policy,
       thrust::make_counting_iterator(int64_t(0)),
-      thrust::make_counting_iterator(int64_t(nnz)),
+      thrust::make_counting_iterator(int64_t(nse)),
       thrust::device_ptr<int64_t>(offsets.data_ptr<int64_t>()),
       [indices_accessor, strides_ptr, dim, ndim] __device__(int64_t x) {
         int64_t pool_index = 0;
@@ -279,28 +279,28 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
 
-  auto nnz = indices.size(1);
+  auto nse = indices.size(1);
   auto offsets = get_offsets(indices, sizes, dim);
   int64_t* offsets_ptr = offsets.data_ptr<int64_t>();
 
-  auto sorted_indices = at::empty({nnz}, indices.options());
+  auto sorted_indices = at::empty({nse}, indices.options());
   thrust_ptr sorted_indices_thrust_ptr(sorted_indices.data_ptr<int64_t>());
   thrust::sequence(
-      policy, sorted_indices_thrust_ptr, sorted_indices_thrust_ptr + nnz, 0);
+      policy, sorted_indices_thrust_ptr, sorted_indices_thrust_ptr + nse, 0);
 
   thrust::sort(
       policy,
       sorted_indices_thrust_ptr,
-      sorted_indices_thrust_ptr + nnz,
+      sorted_indices_thrust_ptr + nse,
       [offsets_ptr] __device__(int64_t x, int64_t y) {
         return offsets_ptr[x] < offsets_ptr[y];
       });
-  auto pool_sizes = at::empty({nnz}, indices.options());
+  auto pool_sizes = at::empty({nse}, indices.options());
 
   auto new_end = thrust::reduce_by_key(
       policy,
       sorted_indices_thrust_ptr,
-      sorted_indices_thrust_ptr + nnz,
+      sorted_indices_thrust_ptr + nse,
       thrust::make_constant_iterator(int64_t(1)),
       thrust::make_discard_iterator(),
       thrust_ptr(pool_sizes.data_ptr<int64_t>()),
@@ -324,7 +324,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
   if (requireMxRows) {
     
     auto values_accessor =
-        values.packed_accessor<scalar_t, 2>(); // {nnz, nvalues}
+        values.packed_accessor<scalar_t, 2>(); // {nse, nvalues}
 
     mx_buffer = at::full({new_sz * nvalues}, Scalar(-std::numeric_limits<scalar_t>::infinity()), values.options());
  
@@ -394,15 +394,15 @@ void cuda_sparse_coo_softmax(
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
 
-  auto nnz = values.size(0);
+  auto nse = values.size(0);
   auto sizes = input.sizes();
-  auto nvalues = values.numel() / nnz;
+  auto nvalues = values.numel() / nse;
 
   /* Prepare accessors */
-  auto values_2 = values.view({nnz, nvalues});
+  auto values_2 = values.view({nse, nvalues});
   auto values_accessor = values_2.packed_accessor<scalar_t, 2>();
 
-  auto out_values_2 = out_values.view({nnz, nvalues});
+  auto out_values_2 = out_values.view({nse, nvalues});
   auto out_values_accessor = out_values_2.packed_accessor<scalar_t, 2>();
 
   Tensor sorted_indices;
@@ -449,8 +449,8 @@ void cuda_sparse_coo_softmax_backward(
   auto out_values = output.values(false).contiguous();
   auto values = grad_input.values(false);
   auto indices = grad_input.indices(false);
-  auto out_nnz = out_values.size(0);
-  auto grad_nnz = grad_values.size(0);
+  auto out_nse = out_values.size(0);
+  auto grad_nse = grad_values.size(0);
 
   values.resize_as_(out_values);
   values.zero_();
@@ -482,7 +482,7 @@ void cuda_sparse_coo_softmax_backward(
           grad_offsets.to(at::Device(kCPU), indices.dtype(), false, true);
       auto out_offsets_accessor = host_out_offsets.data_ptr<int64_t>();
       auto grad_offsets_accessor = host_grad_offsets.data_ptr<int64_t>();
-      for (int64_t i = 0; i < out_nnz; i++) {
+      for (int64_t i = 0; i < out_nse; i++) {
         Tensor unused = at::native::empty_like(grad_values);
         auto low = thrust::lower_bound(
             grad_offsets_accessor,
@@ -493,7 +493,7 @@ void cuda_sparse_coo_softmax_backward(
           Compute output using dense backward only when limits and pools are valid 
           If this check is false then a sparse tensor with full of zeros is returned 
         */ 
-        if (j < grad_nnz && out_offsets_accessor[i] == grad_offsets_accessor[j]) {
+        if (j < grad_nse && out_offsets_accessor[i] == grad_offsets_accessor[j]) {
           if (LogSoftMax) {
             auto r = log_softmax_backward_cuda(
                 grad_values[j], out_values[i], dim - sparse_dim, unused);
@@ -509,16 +509,16 @@ void cuda_sparse_coo_softmax_backward(
     return;
   }
 
-  auto nnz = values.size(0);
-  auto nvalues = values.numel() / nnz;
+  auto nse = values.size(0);
+  auto nvalues = values.numel() / nse;
 
-  auto values_2 = values.view({nnz, nvalues});
+  auto values_2 = values.view({nse, nvalues});
   auto values_accessor = values_2.packed_accessor<scalar_t, 2>();
 
-  auto out_values_2 = out_values.view({out_nnz, nvalues});
+  auto out_values_2 = out_values.view({out_nse, nvalues});
   auto out_values_accessor = out_values_2.packed_accessor<scalar_t, 2>();
 
-  auto grad_values_2 = grad_values.view({grad_nnz, nvalues});
+  auto grad_values_2 = grad_values.view({grad_nse, nvalues});
   auto grad_values_accessor = grad_values_2.packed_accessor<scalar_t, 2>();
 
   Tensor lower_bound_values =
@@ -554,7 +554,7 @@ void cuda_sparse_coo_softmax_backward(
           pool_sizes.data_ptr<int64_t>(),
           pool_offsets.data_ptr<int64_t>(),
           nvalues,
-          grad_nnz,
+          grad_nse,
           grad_offsets.data_ptr<int64_t>(),
           out_offsets.data_ptr<int64_t>(),
           lower_bound_values.data_ptr<int64_t>(),

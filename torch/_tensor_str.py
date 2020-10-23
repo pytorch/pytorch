@@ -295,7 +295,7 @@ def _str_intern(self):
     has_default_dtype = self.dtype in (torch.get_default_dtype(), _default_complex_dtype, torch.int64, torch.bool)
     if self.is_sparse:
         suffixes.append('size=' + str(tuple(self.shape)))
-        suffixes.append('nnz=' + str(self._nnz()))
+        suffixes.append('nse=' + str(self.nse(False)))
         if not has_default_dtype:
             suffixes.append('dtype=' + str(self.dtype))
         indices_prefix = 'indices=tensor('

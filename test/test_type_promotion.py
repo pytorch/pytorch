@@ -727,13 +727,13 @@ class TestTypePromotion(TestCase):
             self.assertEqual(e, dense_sparse, atol=precision, rtol=rtol, msg=err)
         else:
             # sparse division only supports division by a scalar
-            # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'
+            # mul: Didn't find kernel to dispatch to for operator 'aten::nse'
             self.assertRaises(RuntimeError, lambda: op(d1, s2))
 
         # Test op(sparse, dense) not supported for any ops:
         # add(sparse, dense) is not supported. Use add(dense, sparse) instead.
         # sparse division only supports division by a scalar
-        # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'.
+        # mul: Didn't find kernel to dispatch to for operator 'aten::nse'.
         self.assertRaises(RuntimeError, lambda: op(s1, d2))
 
         # Test op(sparse, scalar)

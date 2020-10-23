@@ -51,9 +51,9 @@ inline bool is_same_density(const SparseTensor& self, const SparseTensor& src) {
 // as 'values' but with a new number of non-zero elements.
 // TODO: Expose this for real in ATen, some day?
 // NB: Doesn't preserve data.
-inline Tensor new_values_with_size_of(const Tensor& values, int64_t nnz) {
+inline Tensor new_values_with_size_of(const Tensor& values, int64_t nse) {
   std::vector<int64_t> size = values.sizes().vec();
-  size[0] = nnz;
+  size[0] = nse;
   return at::empty(size, values.options());
 }
 

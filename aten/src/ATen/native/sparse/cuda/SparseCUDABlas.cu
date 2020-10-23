@@ -67,16 +67,16 @@ const char* cusparseGetErrorString(cusparseStatus_t status) {
 
 namespace at { namespace native { namespace sparse { namespace cuda {
 
-void Xcoo2csr(const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr) {
-  TORCH_CHECK((m <= INT_MAX) && (nnz <= INT_MAX),
-    "cusparseXcoo2csr only supports m, nnz with the bound [val] <= ",
+void Xcoo2csr(const int *coorowind, int64_t nse, int64_t m, int *csrrowptr) {
+  TORCH_CHECK((m <= INT_MAX) && (nse <= INT_MAX),
+    "cusparseXcoo2csr only supports m, nse with the bound [val] <= ",
     INT_MAX);
 
-  int i_nnz = (int)nnz;
+  int i_nse = (int)nse;
   int i_m = (int)m;
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
-  TORCH_CUDASPARSE_CHECK(cusparseXcoo2csr(handle, coorowind, i_nnz, i_m, csrrowptr, CUSPARSE_INDEX_BASE_ZERO));
+  TORCH_CUDASPARSE_CHECK(cusparseXcoo2csr(handle, coorowind, i_nse, i_m, csrrowptr, CUSPARSE_INDEX_BASE_ZERO));
 }
 
 cusparseOperation_t convertTransToCusparseOperation(char trans) {
@@ -93,7 +93,7 @@ cusparseOperation_t convertTransToCusparseOperation(char trans) {
 template<typename T>
 void csrmm2(
   char transa, char transb,
-  int64_t m, int64_t n, int64_t k, int64_t nnz,
+  int64_t m, int64_t n, int64_t k, int64_t nse,
   T alpha, T *csrvala, int *csrrowptra, int *csrcolinda,
   T *b, int64_t ldb, T beta, T *c, int64_t ldc)
 {
@@ -107,8 +107,8 @@ void csrmm2(
 
   // cusparseSpMM actually supports int64_t.
   // In order to support int64 here, index pointers csrrowptra, csrcolinda have to be passed as int64_t.
-  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nnz <= INT_MAX) && (ldb <= INT_MAX) && (ldc <= INT_MAX),
-    "At the moment, cusparseSpMM only supports m, n, k, nnz, ldb, ldc with the bound [val] <= ", INT_MAX, ".",
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nse <= INT_MAX) && (ldb <= INT_MAX) && (ldc <= INT_MAX),
+    "At the moment, cusparseSpMM only supports m, n, k, nse, ldb, ldc with the bound [val] <= ", INT_MAX, ".",
     "If you need this, please file an issue on GitHub."
   );
 
@@ -118,10 +118,10 @@ void csrmm2(
   cusparseSpMatDescr_t descA;
   TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
     &descA,                     /* output */
-    ma, ka, nnz,                /* rows, cols, number of non zero elements */
+    ma, ka, nse,                /* rows, cols, number of non zero elements */
     csrrowptra,                 /* row offsets of the sparse matrix, size = rows +1 */
-    csrcolinda,                 /* column indices of the sparse matrix, size = nnz */
-    csrvala,                    /* values of the sparse matrix, size = nnz */
+    csrcolinda,                 /* column indices of the sparse matrix, size = nse */
+    csrvala,                    /* values of the sparse matrix, size = nse */
     CUSPARSE_INDEX_32I,         /* data type of row offsets index */
     CUSPARSE_INDEX_32I,         /* data type of col indices */
     CUSPARSE_INDEX_BASE_ZERO,   /* base index of row offset and col indes */
@@ -187,12 +187,12 @@ void csrmm2(
 }
 template void csrmm2<float>(
   char transa, char transb,
-  int64_t m, int64_t n, int64_t k, int64_t nnz,
+  int64_t m, int64_t n, int64_t k, int64_t nse,
   float alpha, float *csrvala, int *csrrowptra, int *csrcolinda,
   float *b, int64_t ldb, float beta, float *c, int64_t ldc);
 template void csrmm2<double>(
   char transa, char transb,
-  int64_t m, int64_t n, int64_t k, int64_t nnz,
+  int64_t m, int64_t n, int64_t k, int64_t nse,
   double alpha, double *csrvala, int *csrrowptra, int *csrcolinda,
   double *b, int64_t ldb, double beta, double *c, int64_t ldc);
 
@@ -217,40 +217,40 @@ void adjustLd(char transb, int64_t m, int64_t n, int64_t k, int64_t *ldb, int64_
   }
 }
 
-void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, float alpha, float *csrvala, int *csrrowptra, int *csrcolinda, float *b, int64_t ldb, float beta, float *c, int64_t ldc)
+void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nse, float alpha, float *csrvala, int *csrrowptra, int *csrcolinda, float *b, int64_t ldb, float beta, float *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
   cusparseOperation_t opb = convertTransToCusparseOperation(transb);
 
-  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nnz <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX),
-    "cusparseScsrmm2 only supports m, n, k, nnz, ldb, ldc with the bound [val] <= ", INT_MAX);
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nse <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX),
+    "cusparseScsrmm2 only supports m, n, k, nse, ldb, ldc with the bound [val] <= ", INT_MAX);
   int i_m = (int)m;
   int i_n = (int)n;
   int i_k = (int)k;
-  int i_nnz = (int)nnz;
+  int i_nse = (int)nse;
   int i_ldb = (int)ldb;
   int i_ldc = (int)ldc;
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-  TORCH_CUDASPARSE_CHECK(cusparseScsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
+  TORCH_CUDASPARSE_CHECK(cusparseScsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nse, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
 }
 
-void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, double alpha, double *csrvala, int *csrrowptra, int *csrcolinda, double *b, int64_t ldb, double beta, double *c, int64_t ldc)
+void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nse, double alpha, double *csrvala, int *csrrowptra, int *csrcolinda, double *b, int64_t ldb, double beta, double *c, int64_t ldc)
 {
   adjustLd(transb, m, n, k, &ldb, &ldc);
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
   cusparseOperation_t opb = convertTransToCusparseOperation(transb);
 
-  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nnz <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX),
-    "cusparseDcsrmm2 only supports m, n, k, nnz, ldb, ldc with the bound [val] <= ", INT_MAX);
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nse <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX),
+    "cusparseDcsrmm2 only supports m, n, k, nse, ldb, ldc with the bound [val] <= ", INT_MAX);
   int i_m = (int)m;
   int i_n = (int)n;
   int i_k = (int)k;
-  int i_nnz = (int)nnz;
+  int i_nse = (int)nse;
   int i_ldb = (int)ldb;
   int i_ldc = (int)ldc;
 
@@ -258,7 +258,7 @@ void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-  TORCH_CUDASPARSE_CHECK(cusparseDcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
+  TORCH_CUDASPARSE_CHECK(cusparseDcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nse, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
   // TODO: Proper fix is to create real descriptor classes
 }
@@ -267,7 +267,7 @@ void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
 template<typename T>
 void csrmm2(
   char transa, char transb,
-  int64_t m, int64_t n, int64_t k, int64_t nnz,
+  int64_t m, int64_t n, int64_t k, int64_t nse,
   T alpha, T *csrvala, int *csrrowptra, int *csrcolinda,
   T *b, int64_t ldb, T beta, T *c, int64_t ldc)
 {
@@ -276,88 +276,88 @@ void csrmm2(
 
 template<> void csrmm2<float>(
   char transa, char transb,
-  int64_t m, int64_t n, int64_t k, int64_t nnz,
+  int64_t m, int64_t n, int64_t k, int64_t nse,
   float alpha, float *csrvala, int *csrrowptra, int *csrcolinda,
   float *b, int64_t ldb, float beta, float *c, int64_t ldc)
 {
-  Scsrmm2(transa, transb, m, n, k, nnz, alpha, csrvala, csrrowptra, csrcolinda, b, ldb, beta, c, ldc);
+  Scsrmm2(transa, transb, m, n, k, nse, alpha, csrvala, csrrowptra, csrcolinda, b, ldb, beta, c, ldc);
 }
 
 template<> void csrmm2<double>(
   char transa, char transb,
-  int64_t m, int64_t n, int64_t k, int64_t nnz,
+  int64_t m, int64_t n, int64_t k, int64_t nse,
   double alpha, double *csrvala, int *csrrowptra, int *csrcolinda,
   double *b, int64_t ldb, double beta, double *c, int64_t ldc)
 {
-  Dcsrmm2(transa, transb, m, n, k, nnz, alpha, csrvala, csrrowptra, csrcolinda, b, ldb, beta, c, ldc);
+  Dcsrmm2(transa, transb, m, n, k, nse, alpha, csrvala, csrrowptra, csrcolinda, b, ldb, beta, c, ldc);
 }
 
 #endif
 
 /* format conversion */
-void CreateIdentityPermutation(int64_t nnz, int *P) {
-  TORCH_CHECK((nnz <= INT_MAX),
-    "Xcsrsort_bufferSizeExt only supports m, n, nnz with the bound [val] <= ",
+void CreateIdentityPermutation(int64_t nse, int *P) {
+  TORCH_CHECK((nse <= INT_MAX),
+    "Xcsrsort_bufferSizeExt only supports m, n, nse with the bound [val] <= ",
     INT_MAX);
-  int i_nnz = (int)nnz;
+  int i_nse = (int)nse;
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
-  cusparseCreateIdentityPermutation(handle, i_nnz, P);
+  cusparseCreateIdentityPermutation(handle, i_nse, P);
 }
 
-void Xcsrsort_bufferSizeExt(int64_t m, int64_t n, int64_t nnz, const int *csrRowPtr, const int *csrColInd, size_t *pBufferSizeInBytes)
+void Xcsrsort_bufferSizeExt(int64_t m, int64_t n, int64_t nse, const int *csrRowPtr, const int *csrColInd, size_t *pBufferSizeInBytes)
 {
-  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
-    "Xcsrsort_bufferSizeExt only supports m, n, nnz with the bound [val] <=",
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nse <= INT_MAX),
+    "Xcsrsort_bufferSizeExt only supports m, n, nse with the bound [val] <=",
     INT_MAX);
   int i_m = (int)m;
   int i_n = (int)n;
-  int i_nnz = (int)nnz;
+  int i_nse = (int)nse;
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
-  TORCH_CUDASPARSE_CHECK(cusparseXcsrsort_bufferSizeExt(handle, i_m, i_n, i_nnz, csrRowPtr, csrColInd, pBufferSizeInBytes));
+  TORCH_CUDASPARSE_CHECK(cusparseXcsrsort_bufferSizeExt(handle, i_m, i_n, i_nse, csrRowPtr, csrColInd, pBufferSizeInBytes));
 }
 
-void Xcsrsort(int64_t m, int64_t n, int64_t nnz, const int *csrRowPtr, int *csrColInd, int *P, void *pBuffer)
+void Xcsrsort(int64_t m, int64_t n, int64_t nse, const int *csrRowPtr, int *csrColInd, int *P, void *pBuffer)
 {
-  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
-    "Xcsrsort only supports m, n, nnz with the bound [val] <= ",
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nse <= INT_MAX),
+    "Xcsrsort only supports m, n, nse with the bound [val] <= ",
     INT_MAX);
   int i_m = (int)m;
   int i_n = (int)n;
-  int i_nnz = (int)nnz;
+  int i_nse = (int)nse;
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-  TORCH_CUDASPARSE_CHECK(cusparseXcsrsort(handle, i_m, i_n, i_nnz, desc, csrRowPtr, csrColInd, P, pBuffer));
+  TORCH_CUDASPARSE_CHECK(cusparseXcsrsort(handle, i_m, i_n, i_nse, desc, csrRowPtr, csrColInd, P, pBuffer));
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
 }
 
-void Xcoosort_bufferSizeExt(int64_t m, int64_t n, int64_t nnz, const int *cooRows, const int *cooCols, size_t *pBufferSizeInBytes)
+void Xcoosort_bufferSizeExt(int64_t m, int64_t n, int64_t nse, const int *cooRows, const int *cooCols, size_t *pBufferSizeInBytes)
 {
-  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
-    "Xcoosort_bufferSizeExt only supports m, n, nnz with the bound [val] <= ",
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nse <= INT_MAX),
+    "Xcoosort_bufferSizeExt only supports m, n, nse with the bound [val] <= ",
     INT_MAX);
   int i_m = (int)m;
   int i_n = (int)n;
-  int i_nnz = (int)nnz;
+  int i_nse = (int)nse;
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
-  TORCH_CUDASPARSE_CHECK(cusparseXcoosort_bufferSizeExt(handle, i_m, i_n, i_nnz, cooRows, cooCols, pBufferSizeInBytes));
+  TORCH_CUDASPARSE_CHECK(cusparseXcoosort_bufferSizeExt(handle, i_m, i_n, i_nse, cooRows, cooCols, pBufferSizeInBytes));
 }
 
-void XcoosortByRow(int64_t m, int64_t n, int64_t nnz, int *cooRows, int *cooCols, int *P, void *pBuffer)
+void XcoosortByRow(int64_t m, int64_t n, int64_t nse, int *cooRows, int *cooCols, int *P, void *pBuffer)
 {
-  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
-    "XcoosortByRow only supports m, n, nnz with the bound [val] <= ",
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nse <= INT_MAX),
+    "XcoosortByRow only supports m, n, nse with the bound [val] <= ",
     INT_MAX);
   int i_m = (int)m;
   int i_n = (int)n;
-  int i_nnz = (int)nnz;
+  int i_nse = (int)nse;
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
-  TORCH_CUDASPARSE_CHECK(cusparseXcoosortByRow(handle, i_m, i_n, i_nnz, cooRows, cooCols, P, pBuffer));
+  TORCH_CUDASPARSE_CHECK(cusparseXcoosortByRow(handle, i_m, i_n, i_nse, cooRows, cooCols, P, pBuffer));
 }
 
 

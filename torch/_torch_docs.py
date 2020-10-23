@@ -7152,13 +7152,13 @@ Example::
     tensor(indices=tensor([[0, 1, 1],
                            [2, 0, 2]]),
            values=tensor([3., 4., 5.]),
-           size=(2, 4), nnz=3, layout=torch.sparse_coo)
+           size=(2, 4), nse=3, layout=torch.sparse_coo)
 
     >>> torch.sparse_coo_tensor(i, v)  # Shape inference
     tensor(indices=tensor([[0, 1, 1],
                            [2, 0, 2]]),
            values=tensor([3., 4., 5.]),
-           size=(2, 3), nnz=3, layout=torch.sparse_coo)
+           size=(2, 3), nse=3, layout=torch.sparse_coo)
 
     >>> torch.sparse_coo_tensor(i, v, [2, 4],
                                 dtype=torch.float64,
@@ -7166,27 +7166,27 @@ Example::
     tensor(indices=tensor([[0, 1, 1],
                            [2, 0, 2]]),
            values=tensor([3., 4., 5.]),
-           device='cuda:0', size=(2, 4), nnz=3, dtype=torch.float64,
+           device='cuda:0', size=(2, 4), nse=3, dtype=torch.float64,
            layout=torch.sparse_coo)
 
     # Create an empty sparse tensor with the following invariants:
     #   1. sparse_dim + dense_dim = len(SparseTensor.shape)
-    #   2. SparseTensor.indices(False).shape = (sparse_dim, nnz)
-    #   3. SparseTensor.values(False).shape = (nnz, SparseTensor.shape[sparse_dim:])
+    #   2. SparseTensor.indices(False).shape = (sparse_dim, nse)
+    #   3. SparseTensor.values(False).shape = (nse, SparseTensor.shape[sparse_dim:])
     #
-    # For instance, to create an empty sparse tensor with nnz = 0, dense_dim = 0 and
+    # For instance, to create an empty sparse tensor with nse = 0, dense_dim = 0 and
     # sparse_dim = 1 (hence indices is a 2D tensor of shape = (1, 0))
     >>> S = torch.sparse_coo_tensor(torch.empty([1, 0]), [], [1])
     tensor(indices=tensor([], size=(1, 0)),
            values=tensor([], size=(0,)),
-           size=(1,), nnz=0, layout=torch.sparse_coo)
+           size=(1,), nse=0, layout=torch.sparse_coo)
 
-    # and to create an empty sparse tensor with nnz = 0, dense_dim = 1 and
+    # and to create an empty sparse tensor with nse = 0, dense_dim = 1 and
     # sparse_dim = 1
     >>> S = torch.sparse_coo_tensor(torch.empty([1, 0]), torch.empty([0, 2]), [1, 2])
     tensor(indices=tensor([], size=(1, 0)),
            values=tensor([], size=(0, 2)),
-           size=(1, 2), nnz=0, layout=torch.sparse_coo)
+           size=(1, 2), nse=0, layout=torch.sparse_coo)
 
 .. _torch.sparse: https://pytorch.org/docs/stable/sparse.html
 """.format(**factory_common_args))

@@ -48,16 +48,16 @@ __global__ void sparseElementwiseKernel(
     TensorInfo<Real, IndexType> dense,
     TensorInfo<indexT, IndexType> indices,
     TensorInfo<Real, IndexType> values,
-    const IndexType nnz) {
+    const IndexType nse) {
   IndexType ind_skip = indices.strides[0];
-  IndexType ind_nnz_skip = indices.strides[1];
+  IndexType ind_nse_skip = indices.strides[1];
   IndexType value_size = values.strides[0];  // numel of each slice in values
   for (IndexType linearId = blockIdx.x;
-       linearId < nnz;
+       linearId < nse;
        linearId += gridDim.x) {
     IndexType index = 0;
     for (IndexType d = 0; d < indices.sizes[0]; d++) {
-      index = dense.sizes[d] * index + indices.data[d * ind_skip + linearId * ind_nnz_skip];
+      index = dense.sizes[d] * index + indices.data[d * ind_skip + linearId * ind_nse_skip];
     }
     Real *dst = dense.data + index * value_size;
     Real *src = values.data + linearId * value_size;
@@ -78,16 +78,16 @@ __global__ void sparseElementwiseKernelScalar(
     TensorInfo<Real, IndexType> dense,
     TensorInfo<indexT, IndexType> indices,
     TensorInfo<Real, IndexType> values,
-    const IndexType nnz) {
+    const IndexType nse) {
   IndexType ind_skip = indices.strides[0];
-  IndexType ind_nnz_skip = indices.strides[1];
+  IndexType ind_nse_skip = indices.strides[1];
   IndexType value_skip = values.strides[0];
   for (IndexType linearId = blockIdx.x * blockDim.x + threadIdx.x;
-       linearId < nnz;
+       linearId < nse;
        linearId += gridDim.x * blockDim.x) {
     IndexType index = 0;
     for (IndexType d = 0; d < indices.sizes[0]; d++) {
-      index = dense.sizes[d] * index + indices.data[d * ind_skip + linearId * ind_nnz_skip];
+      index = dense.sizes[d] * index + indices.data[d * ind_skip + linearId * ind_nse_skip];
     }
     op(dense.data + index, values.data + linearId * value_skip);
   }
@@ -107,17 +107,17 @@ __global__ void valueSparseUnionKernel(
     TensorInfo<Real, IndexType> r_values,
     TensorInfo<Real, IndexType> t_values,
     TensorInfo<Real, IndexType> s_values,
-    const IndexType t_nnz, const IndexType s_nnz) {
+    const IndexType t_nse, const IndexType s_nse) {
   IndexType t_indskip = t_indices.strides[0];
   IndexType s_indskip = s_indices.strides[0];
   int64_t cmp, d;
   int64_t nDimI = r_indices.sizes[0];
   IndexType valueSize = r_values.strides[0];
   IndexType r_i = 0, t_i = 0, s_i = 0;
-  while (t_i < t_nnz || s_i < s_nnz) {
-    if (t_i >= t_nnz) {
+  while (t_i < t_nse || s_i < s_nse) {
+    if (t_i >= t_nse) {
       cmp = -1;
-    } else if (s_i >= s_nnz) {
+    } else if (s_i >= s_nse) {
       cmp = 1;
     } else {
       cmp = 0;
@@ -148,17 +148,17 @@ __global__ void indexSparseUnionKernel(
     TensorInfo<indexT, IndexType> r_indices,
     TensorInfo<indexT, IndexType> t_indices,
     TensorInfo<indexT, IndexType> s_indices,
-    const IndexType t_nnz, const IndexType s_nnz, IndexType *resultNnz) {
+    const IndexType t_nse, const IndexType s_nse, IndexType *resultNse) {
   IndexType r_indskip = r_indices.strides[0];
   IndexType t_indskip = t_indices.strides[0];
   IndexType s_indskip = s_indices.strides[0];
   int64_t cmp, d;
   int64_t nDimI = r_indices.sizes[0];
   IndexType r_i = 0, t_i = 0, s_i = 0;
-  while (t_i < t_nnz || s_i < s_nnz) {
-    if (t_i >= t_nnz) {
+  while (t_i < t_nse || s_i < s_nse) {
+    if (t_i >= t_nse) {
       cmp = -1;
-    } else if (s_i >= s_nnz) {
+    } else if (s_i >= s_nse) {
       cmp = 1;
     } else {
       cmp = 0;
@@ -187,7 +187,7 @@ __global__ void indexSparseUnionKernel(
     }
     r_i++;
   }
-  *resultNnz = r_i;
+  *resultNse = r_i;
 }
 
 template <typename Op, typename IndexType, typename Real>
@@ -202,14 +202,14 @@ __global__ void valueSparseIntersectionKernel(
     TensorInfo<Real, IndexType> r_values,
     TensorInfo<Real, IndexType> t_values,
     TensorInfo<Real, IndexType> s_values,
-    const IndexType t_nnz, const IndexType s_nnz) {
+    const IndexType t_nse, const IndexType s_nse) {
   IndexType t_indskip = t_indices.strides[0];
   IndexType s_indskip = s_indices.strides[0];
   int64_t match, d;
   int64_t nDimI = r_indices.sizes[0];
   IndexType valueSize = r_values.strides[0];
   IndexType r_i = 0, t_i = 0, s_i = 0;
-  while (t_i < t_nnz && s_i < s_nnz) {
+  while (t_i < t_nse && s_i < s_nse) {
     match = 1;
     for (d = 0; d < nDimI; d++) {
       if (t_indices.data[d * t_indskip + t_i] < s_indices.data[d * s_indskip + s_i]) {
@@ -237,14 +237,14 @@ __global__ void indexSparseIntersectionKernel(
     TensorInfo<indexT, IndexType> r_indices,
     TensorInfo<indexT, IndexType> t_indices,
     TensorInfo<indexT, IndexType> s_indices,
-    const IndexType t_nnz, const IndexType s_nnz, IndexType *resultNnz) {
+    const IndexType t_nse, const IndexType s_nse, IndexType *resultNse) {
   IndexType r_indskip = r_indices.strides[0];
   IndexType t_indskip = t_indices.strides[0];
   IndexType s_indskip = s_indices.strides[0];
   int64_t match, d;
   int64_t nDimI = r_indices.sizes[0];
   IndexType r_i = 0, t_i = 0, s_i = 0;
-  while (t_i < t_nnz && s_i < s_nnz) {
+  while (t_i < t_nse && s_i < s_nse) {
     match = 1;
     for (d = 0; d < nDimI; d++) {
       if (t_indices.data[d * t_indskip + t_i] < s_indices.data[d * s_indskip + s_i]) {
@@ -264,17 +264,17 @@ __global__ void indexSparseIntersectionKernel(
     }
     r_i++; t_i++; s_i++;
   }
-  *resultNnz = r_i;
+  *resultNse = r_i;
 }
 
 // template <typename Dtype, typename Acctype>
 // __global__ void coalesceValuesKernel_gridStrided(
 //   long *segment_offsets, long *value_indices,
 //   Dtype *values, Dtype *newValues,
-//   long nnz, long newNnz, long stride) {
+//   long nse, long newNse, long stride) {
 //
 //   long chunksPerSeg = THCCeilDiv(stride, (long) blockDim.x);
-//   long numChunks = newNnz * chunksPerSeg;
+//   long numChunks = newNse * chunksPerSeg;
 //   long chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
 //   long chunkStride = gridDim.x * blockDim.y;
 //
@@ -284,7 +284,7 @@ __global__ void indexSparseIntersectionKernel(
 //       auto valFeat = values + featureDim;
 //       long seg = chunk / chunksPerSeg;
 //       auto begin = segment_offsets[seg];
-//       auto end = (seg < newNnz - 1) ? segment_offsets[seg + 1] : nnz;
+//       auto end = (seg < newNse - 1) ? segment_offsets[seg + 1] : nse;
 //       Acctype valSum = static_cast<Acctype>::to(0);
 //       for (long valIdx = begin; valIdx < end; valIdx++) {
 //         const long valRow = value_indices[valIdx] * stride;
@@ -299,17 +299,17 @@ template <typename Dtype, typename Acctype>
 __global__ void coalesceValuesKernel(
   int64_t *segment_offsets, int64_t *value_indices,
   Dtype *values, Dtype *newValues,
-  int64_t nnz, int64_t newNnz, int64_t stride) {
+  int64_t nse, int64_t newNse, int64_t stride) {
 
   int seg = blockIdx.x * 4 + threadIdx.y;
 
   // Number of values processed by each thread (grain size)
   const int SZ = 4;
 
-  if (seg < newNnz) {
+  if (seg < newNse) {
     const int newValueRow = seg * stride;
     const int begin = segment_offsets[seg];
-    const int end = (seg < newNnz - 1) ? segment_offsets[seg + 1] : nnz;
+    const int end = (seg < newNse - 1) ? segment_offsets[seg + 1] : nse;
     const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
     Acctype tmp[SZ];
     #pragma unroll

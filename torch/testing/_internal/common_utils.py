@@ -847,14 +847,14 @@ class TestCase(expecttest.TestCase):
 
         set_rng_seed(SEED)
 
-    def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device='cpu'):
+    def genSparseTensor(self, size, sparse_dim, nse, is_uncoalesced, device='cpu'):
         # Assert not given impossible combination, where the sparse dims have
-        # empty numel, but nnz > 0 makes the indices containing values.
-        assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
+        # empty numel, but nse > 0 makes the indices containing values.
+        assert all(size[d] > 0 for d in range(sparse_dim)) or nse == 0, 'invalid arguments'
 
-        v_size = [nnz] + list(size[sparse_dim:])
+        v_size = [nse] + list(size[sparse_dim:])
         v = torch.randn(*v_size, device=device)
-        i = torch.rand(sparse_dim, nnz, device=device)
+        i = torch.rand(sparse_dim, nse, device=device)
         i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
         i = i.to(torch.long)
         if is_uncoalesced:
@@ -884,9 +884,9 @@ class TestCase(expecttest.TestCase):
         self.assertEqual(tc.to_dense(), t.to_dense())
         self.assertTrue(tc.is_coalesced())
 
-        # Our code below doesn't work when nnz is 0, because
+        # Our code below doesn't work when nse is 0, because
         # then it's a 0D tensor, not a 2D tensor.
-        if t._nnz() == 0:
+        if t.nse(False) == 0:
             self.assertEqual(t.indices(False), tc.indices(False))
             self.assertEqual(t.values(False), tc.values(False))
             return tc
@@ -1674,8 +1674,8 @@ def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
             else:
                 data.pop(jk, None)
 
-    target_nnz = density * matrix_size * matrix_size
-    while len(data) < target_nnz:
+    target_nse = density * matrix_size * matrix_size
+    while len(data) < target_nse:
         i = random.randint(0, matrix_size - 1)
         j = random.randint(0, matrix_size - 1)
         if i != j:

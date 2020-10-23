@@ -91,8 +91,8 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   TORCH_CHECK(indices.options().backend() == values.options().backend(), "backend of indices (", indices.options().backend(), ") must match backend of values (", values.options().backend(), ")");
   TORCH_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(), ") must match device of values (", values.get_device(), ")");
 
-  TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes());
-  TORCH_CHECK(indices.size(1) == values.size(0), "indices and values must have same nnz, but got nnz from indices: ", indices.size(1), ", nnz from values: ", values.size(0));
+  TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nse, but got: ", indices.sizes());
+  TORCH_CHECK(indices.size(1) == values.size(0), "indices and values must have same nse, but got nse from indices: ", indices.size(1), ", nse from values: ", values.size(0));
   TORCH_CHECK(indices.size(0) == sparse_dim_, "indices has incorrect first dimension, expected ", sparse_dim_, ", got ", indices.size(0));
   TORCH_CHECK(values.dim() == dense_dim_ + 1, "values has incorrect number of dimensions, expected ", dense_dim_ + 1, ", got ", values.dim());
 

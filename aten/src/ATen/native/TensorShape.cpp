@@ -335,7 +335,7 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
     int64_t cumulative_offset = 0;
     for (size_t i = 0; i < tensors.size(); ++i) {
       auto const &t = tensors[i];
-      int64_t this_piece_size = t._nnz();
+      int64_t this_piece_size = t.nse(false);
       // cumulative_offset is zero for the first piece, so
       // don't waste time doing this operation unless i > 0.
       if (i > 0) {
@@ -972,12 +972,12 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     Algorithm:
     index - a 1-D tensor of indicies with shape (n,)
     self - sparse tensor, its shape is sizes = sparse_shape + dense_shape
-      indices - 2-D tensor of indices, shape is (sparse_dims, nnz)
-      values - (1+len(dense_shape))-D tensor of values, shape is (nnz,) + dense_shape
+      indices - 2-D tensor of indices, shape is (sparse_dims, nse)
+      values - (1+len(dense_shape))-D tensor of values, shape is (nse,) + dense_shape
     index_select(dim, index) returns a sparse tensor with the following data
       new_sizes = sizes[:dim] + (n,) + sizes[dim+1:]
-      new_indices - shape is (sparse_dims, new_nnz)
-      new_values - shape is (new_nnz,) + dense_shape
+      new_indices - shape is (sparse_dims, new_nse)
+      new_values - shape is (new_nse,) + dense_shape
 
       if dim < len(sparse_shape):
           for i, idx in enumerate(index):
@@ -988,7 +988,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
                       new_values.add_row(values[j])
       else:
           new_indices = indices
-          new_values[k] = values[k].index_select(dim - len(sparse_shape), index) for k in range(nnz)
+          new_values[k] = values[k].index_select(dim - len(sparse_shape), index) for k in range(nse)
     */
   auto ndim = self.dim();
   if (ndim == 0) {
@@ -1003,7 +1003,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
   auto dense_dim = self.dense_dim();
   auto indices = self.indices(false);
   auto values = self.values(false);
-  auto nnz = values.size(0);
+  auto nse = values.size(0);
   auto new_sizes = self.sizes().vec();
   new_sizes[dim] = index.size(0);
 
@@ -1012,7 +1012,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     auto dim_indices = indices[dim];
     std::vector<int64_t> zindices;
     std::vector<int64_t> iindices;
-    int64_t new_nnz = 0;
+    int64_t new_nse = 0;
     for (int64_t i=0; i < new_sizes[dim]; i++) {
       auto idx = index[i].item<int64_t>();
       if (idx < -size || idx >= size) {
@@ -1022,18 +1022,18 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
       if (idx < 0) {
         idx += size;
       }
-      for (int64_t j=0; j < nnz; j++) {
+      for (int64_t j=0; j < nse; j++) {
         auto jdx = dim_indices[j].item<int64_t>();
         if (idx == jdx) {
-          new_nnz++;
+          new_nse++;
           iindices.push_back(i);
           zindices.push_back(j);
         }
       }
     }
-    auto zIndices = at::from_blob(zindices.data(), {new_nnz}, at::kLong).to(indices.device());
+    auto zIndices = at::from_blob(zindices.data(), {new_nse}, at::kLong).to(indices.device());
     auto new_indices = indices.index_select(1, zIndices);
-    new_indices[dim] = at::from_blob(iindices.data(), {new_nnz}, at::kLong).to(indices.device());
+    new_indices[dim] = at::from_blob(iindices.data(), {new_nse}, at::kLong).to(indices.device());
     auto new_values = values.index_select(0, zIndices);
     return _sparse_coo_tensor_with_dims_and_tensors(
         sparse_dim, dense_dim, new_sizes, new_indices, new_values, self.options());
@@ -1043,7 +1043,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     auto vsize = values.sizes().vec();
     vsize[dim + 1 - sparse_dim] = index.size(0);
     auto new_values = at::empty(vsize, values.options());
-    for (int64_t k=0; k < nnz; k++) {
+    for (int64_t k=0; k < nse; k++) {
       new_values[k] = values[k].index_select(dim - sparse_dim, index);
     }
     return _sparse_coo_tensor_with_dims_and_tensors(
