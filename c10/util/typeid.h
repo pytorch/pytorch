@@ -303,11 +303,10 @@ class _Uninitialized final {};
 } // namespace detail
 
 //
-// note: these are outside TypeMeta bc gcc seems to have trouble
+// note: this is outside TypeMeta bc gcc seems to have trouble
 // with scalarTypeItemSizes as a constexpr static member used by
 // a public inline instance method
 //
-static constexpr uint16_t NumScalarTypes = static_cast<uint16_t>(ScalarType::NumOptions);
 
 // item sizes for TypeMeta::itemsize() fast path
 static constexpr size_t scalarTypeItemSizes[NumScalarTypes] = {
@@ -547,7 +546,7 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_METADATA_INSTANCE)
 #undef DEFINE_SCALAR_METADATA_INSTANCE
 
 template <>
-constexpr uint16_t TypeMeta::_typeMetaData<detail::_Uninitialized>() noexcept {
+C10_EXPORT constexpr uint16_t TypeMeta::_typeMetaData<detail::_Uninitialized>() noexcept {
   return static_cast<uint16_t>(ScalarType::Undefined);
 }
 
