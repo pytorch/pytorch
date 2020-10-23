@@ -36,9 +36,9 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
             raise RuntimeError("Cannot cast sparse tensor to dense tensor")
         new_module_name = dtype.__module__.replace('.sparse', '')
         new_values_type_name = new_module_name + '.' + dtype.__name__
-        new_values = torch._values(self).type(new_values_type_name, non_blocking)
+        new_values = torch.values(self, False).type(new_values_type_name, non_blocking)
         new_indices_type_name = new_module_name + '.LongTensor'
-        new_indices = torch._indices(self).type(new_indices_type_name, non_blocking)
+        new_indices = torch.indices(self, False).type(new_indices_type_name, non_blocking)
         return dtype(new_indices, new_values, self.size())
     if dtype.is_sparse:
         raise RuntimeError("Cannot cast dense tensor to sparse tensor")
@@ -71,8 +71,8 @@ def _cuda(self, device=None, non_blocking=False, **kwargs):
     with torch.cuda.device(device):
         if self.is_sparse:
             new_type = getattr(torch.cuda.sparse, self.__class__.__name__)
-            indices = torch._indices(self).cuda(device, non_blocking)
-            values = torch._values(self).cuda(device, non_blocking)
+            indices = torch.indices(self, False).cuda(device, non_blocking)
+            values = torch.values(self, False).cuda(device, non_blocking)
             return new_type(indices, values, self.size())
         else:
             new_type = getattr(torch.cuda, self.__class__.__name__)
@@ -158,7 +158,7 @@ _sparse_tensors_to_validate = []
 def _validate_loaded_sparse_tensors():
     try:
         for t in _sparse_tensors_to_validate:
-            torch._validate_sparse_coo_tensor_args(t._indices(), t._values(),
+            torch._validate_sparse_coo_tensor_args(t.indices(False), t.values(False),
                                                    t.size())
     finally:
         _sparse_tensors_to_validate.clear()
@@ -270,8 +270,8 @@ def _flatten_sparse_tensors(tensors):
         A tuple of two contiguous 1D buffers, one containing input tensors'
         indices and the other containing the values.
     """
-    flat_indices = _flatten_dense_tensors([torch._indices(t) for t in tensors])
-    flat_values = _flatten_dense_tensors([torch._values(t) for t in tensors])
+    flat_indices = _flatten_dense_tensors([torch.indices(t, False) for t in tensors])
+    flat_values = _flatten_dense_tensors([torch.values(t, False) for t in tensors])
     return flat_indices, flat_values
 
 
@@ -313,8 +313,8 @@ def _unflatten_sparse_tensors(flat, tensors):
         flat.
     """
     flat_indices, flat_values = flat
-    indices = _unflatten_dense_tensors(flat_indices, [torch._indices(t) for t in tensors])
-    values = _unflatten_dense_tensors(flat_values, [torch._values(t) for t in tensors])
+    indices = _unflatten_dense_tensors(flat_indices, [torch.indices(t, False) for t in tensors])
+    values = _unflatten_dense_tensors(flat_values, [torch.values(t, False) for t in tensors])
     outputs = []
     for t, i, v in zip(tensors, indices, values):
         outputs.append(t.new(i, v, t.size()))
@@ -359,8 +359,8 @@ def _take_tensors(tensors, size_limit):
     for tensor in tensors:
         t = tensor.type()
         if tensor.is_sparse:
-            indices = torch._indices(tensor)
-            values = torch._values(tensor)
+            indices = torch.indices(tensor, False)
+            values = torch.values(tensor, False)
             size = indices.numel() * indices.element_size() + values.numel() * values.element_size()
         else:
             size = tensor.numel() * tensor.element_size()

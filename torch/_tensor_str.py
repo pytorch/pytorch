@@ -299,12 +299,12 @@ def _str_intern(self):
         if not has_default_dtype:
             suffixes.append('dtype=' + str(self.dtype))
         indices_prefix = 'indices=tensor('
-        indices = self._indices().detach()
+        indices = self.indices(False).detach()
         indices_str = _tensor_str(indices, indent + len(indices_prefix))
         if indices.numel() == 0:
             indices_str += ', size=' + str(tuple(indices.shape))
         values_prefix = 'values=tensor('
-        values = self._values().detach()
+        values = self.values(False).detach()
         values_str = _tensor_str(values, indent + len(values_prefix))
         if values.numel() == 0:
             values_str += ', size=' + str(tuple(values.shape))

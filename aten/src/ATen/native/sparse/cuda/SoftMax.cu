@@ -371,10 +371,10 @@ void cuda_sparse_coo_softmax(
     based on.
   */
   auto sparse_dim = input.sparse_dim();
-  auto indices = input._indices().contiguous();
-  auto values = input._values().contiguous();
-  auto out_values = output._values();
-  auto out_indices = output._indices();
+  auto indices = input.indices(false).contiguous();
+  auto values = input.values(false).contiguous();
+  auto out_values = output.values(false);
+  auto out_indices = output.indices(false);
   out_values.resize_as_(values);
   out_indices.resize_as_(indices);
   out_indices.copy_(indices);
@@ -443,12 +443,12 @@ void cuda_sparse_coo_softmax_backward(
   */
   auto sparse_dim = output.sparse_dim();
   auto sizes = output.sizes().vec();
-  auto grad_indices = grad._indices().contiguous();
-  auto grad_values = grad._values().contiguous();
-  auto out_indices = output._indices().contiguous();
-  auto out_values = output._values().contiguous();
-  auto values = grad_input._values();
-  auto indices = grad_input._indices();
+  auto grad_indices = grad.indices(false).contiguous();
+  auto grad_values = grad.values(false).contiguous();
+  auto out_indices = output.indices(false).contiguous();
+  auto out_values = output.values(false).contiguous();
+  auto values = grad_input.values(false);
+  auto indices = grad_input.indices(false);
   auto out_nnz = out_values.size(0);
   auto grad_nnz = grad_values.size(0);
 

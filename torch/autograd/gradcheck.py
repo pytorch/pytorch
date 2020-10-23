@@ -125,8 +125,8 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, grad_out=1.0):
 
             x_nnz = x_tensor._nnz()
             x_size = list(x_tensor.size())
-            x_indices = x_tensor._indices().t()
-            x_values = x_tensor._values()
+            x_indices = x_tensor.indices(False).t()
+            x_values = x_tensor.values(False)
             x_stride = get_stride(x_size)
 
             # Use .data here to get around the version check
@@ -301,7 +301,7 @@ def gradcheck(
                     'is not a double precision floating point or complex. '
                     'This check will likely fail if all the inputs are '
                     'not of double precision floating point or complex. ')
-            content = inp._values() if inp.is_sparse else inp
+            content = inp.values(False) if inp.is_sparse else inp
             # TODO: To cover more problematic cases, replace stride = 0 check with
             # "any overlap in memory" once we have a proper function to check it.
             if content.layout is not torch._mkldnn:  # type: ignore

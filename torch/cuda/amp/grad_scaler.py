@@ -209,10 +209,10 @@ class GradScaler(object):
                         # is_coalesced() == False means the sparse grad has values with duplicate indices.
                         # coalesce() deduplicates indices and adds all values that have the same index.
                         # For scaled fp16 values, there's a good chance coalescing will cause overflow,
-                        # so we should check the coalesced _values().
+                        # so we should check the coalesced values(False).
                         if param.grad.dtype is torch.float16:
                             param.grad = param.grad.coalesce()
-                        to_unscale = param.grad._values()
+                        to_unscale = param.grad.values(False)
                     else:
                         to_unscale = param.grad
 

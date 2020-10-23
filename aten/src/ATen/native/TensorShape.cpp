@@ -317,8 +317,8 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
     for (size_t i = 0; i < tensors.size(); ++i) {
       auto const &t = tensors[i];
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
-      indices.push_back(t._indices());
-      values.push_back(t._values());
+      indices.push_back(t.indices(false));
+      values.push_back(t.values(false));
     }
     Tensor idxs = at::cat(indices, 1);
     Tensor vals = at::cat(values, 0);
@@ -371,7 +371,7 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
     const int64_t total_size = std::accumulate(tensors.begin(), tensors.end(), static_cast<int64_t>(0), [values_dim](int64_t l, Tensor const &r) {
       return l + r._values().size(values_dim);
     });
-    auto zeros_sizes = tensors[0]._values().sizes().vec();
+    auto zeros_sizes = tensors[0].values(false).sizes().vec();
     int64_t cumulative_size = 0;
     std::vector<Tensor> vals_pieces;
     std::vector<Tensor> idxs_pieces;
@@ -380,14 +380,14 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
       // dimension 0 of values corresponds to the number of values,
       // rather than to any logical dimension of the sparse tensor.
-      zeros_sizes[0] = t._values().size(0);
+      zeros_sizes[0] = t.values(false).size(0);
       zeros_sizes[values_dim] = cumulative_size;
-      cumulative_size += t._values().size(values_dim);
-      auto z1 = native::zeros(zeros_sizes, t._values().options());
+      cumulative_size += t.values(false).size(values_dim);
+      auto z1 = native::zeros(zeros_sizes, t.values(false).options());
       zeros_sizes[values_dim] = total_size - cumulative_size;
-      auto z2 = native::zeros(zeros_sizes, t._values().options());
-      vals_pieces.push_back(native::cat({z1, t._values(), z2}, values_dim));
-      idxs_pieces.push_back(t._indices());
+      auto z2 = native::zeros(zeros_sizes, t.values(false).options());
+      vals_pieces.push_back(native::cat({z1, t.values(false), z2}, values_dim));
+      idxs_pieces.push_back(t.indices(false));
     }
     auto sizes_copy = sizes.vec();
     sizes_copy[wrapped] = total_size;
@@ -726,7 +726,7 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
     "Dimension ", dim, " out of range. Expecting 0 <= dim < ", allDim, ".");
   TORCH_CHECK(start >= 0 && length >= 0 && end <= self.size(dim),
     "Invalid range to narrow. range(start, start+length) must be a subset of range(0, ", self.size(dim), ").")
-  Tensor indices = self._indices();
+  Tensor indices = self.indices(false);
   int64_t sparse_dim = self.sparse_dim();
 
   std::vector<int64_t> new_sizes = self.sizes().vec();
@@ -739,13 +739,13 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
     new_indices = indices.masked_select(mask).view({sparse_dim, -1});
     new_indices[dim].sub_(start);
     Tensor nzIndices = mask.nonzero().view(-1);
-    new_values = self._values().index_select(0, nzIndices);
+    new_values = self.values(false).index_select(0, nzIndices);
   } else {
     /* This means we are narrowing on a dense dim, which is in effect just a
-        regular narrow on _values() */
+        regular narrow on values(false) */
     new_indices = indices;
     int64_t dense_dim = dim - sparse_dim + 1;
-    new_values = self._values().narrow_copy(dense_dim, start, length);
+    new_values = self.values(false).narrow_copy(dense_dim, start, length);
   }
 
   auto newTensor = at::sparse_coo_tensor(new_indices, new_values, new_sizes);
@@ -898,8 +898,8 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
   int64_t dense_dim = self.dense_dim();
   TORCH_INTERNAL_ASSERT(dim >= 0 && dim < sparse_dim + dense_dim);
 
-  auto indices = self._indices();
-  auto values = self._values();
+  auto indices = self.indices(false);
+  auto values = self.values(false);
   auto new_sizes = self.sizes().vec();
   new_sizes.erase(new_sizes.begin() + dim);
 
@@ -1001,8 +1001,8 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
   auto size = self.size(dim);
   auto sparse_dim = self.sparse_dim();
   auto dense_dim = self.dense_dim();
-  auto indices = self._indices();
-  auto values = self._values();
+  auto indices = self.indices(false);
+  auto values = self.values(false);
   auto nnz = values.size(0);
   auto new_sizes = self.sizes().vec();
   new_sizes[dim] = index.size(0);
@@ -1236,13 +1236,13 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
            "sparse transpose: transposed dimensions must be sparse ",
            "Got sparse_dim: ", nsparse_dim, ", d0: ", dim0, ", d1: ", dim1);
 
-  if (self._indices().numel() == 0 && self._values().numel() == 0) {
+  if (self.indices(false).numel() == 0 && self.values(false).numel() == 0) {
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
     at::sparse::get_sparse_impl(self)->raw_resize_(self.sparse_dim(), self.dense_dim(), sizes);
   } else {
-    auto indices = self._indices();
+    auto indices = self.indices(false);
     auto row0 = indices.select(0, dim0);
     auto row1 = indices.select(0, dim1);
 
@@ -1257,7 +1257,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
-    at::sparse::get_sparse_impl(self)->raw_resize_(self._indices().size(0), self._values().dim() - 1, sizes);
+    at::sparse::get_sparse_impl(self)->raw_resize_(self.indices(false).size(0), self.values(false).dim() - 1, sizes);
   }
   return self;
 }
@@ -1548,7 +1548,7 @@ Tensor _unsafe_view(const Tensor& self, IntArrayRef size) {
 static Tensor unsqueeze_sparse(Tensor const &self, int64_t dim /* should already be wrapped */) {
   int64_t sparse_dim = self.sparse_dim();
   int64_t dense_dim = self.dense_dim();
-  auto indices = self._indices();
+  auto indices = self.indices(false);
   auto sizes = self.sizes().vec();
   sizes.insert(sizes.begin() + dim, 1);
   if (dim <= sparse_dim) {
@@ -1558,10 +1558,10 @@ static Tensor unsqueeze_sparse(Tensor const &self, int64_t dim /* should already
       indices.narrow(0, dim, indices.size(0) - dim)
     });
     return _sparse_coo_tensor_with_dims_and_tensors(
-        sparse_dim + 1, dense_dim, sizes, new_indices, self._values(), self.options());
+        sparse_dim + 1, dense_dim, sizes, new_indices, self.values(false), self.options());
   } else {
     return _sparse_coo_tensor_with_dims_and_tensors(
-        sparse_dim, dense_dim + 1, sizes, indices, self._values().unsqueeze(dim - sparse_dim + 1), self.options());
+        sparse_dim, dense_dim + 1, sizes, indices, self.values(false).unsqueeze(dim - sparse_dim + 1), self.options());
   }
 }
 

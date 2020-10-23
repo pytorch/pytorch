@@ -1962,7 +1962,7 @@ class DistAutogradTest(RpcAgentTestFixture):
 
             @staticmethod
             def backward(ctx, grad):
-                MyFunc.static_grad_ptr = grad._values().data_ptr()
+                MyFunc.static_grad_ptr = grad.values(False).data_ptr()
                 return grad
 
         class NonContGradFunc(Function):
@@ -1981,7 +1981,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                 nv = v.expand(8, 3)
                 ni = i.expand(1, 8)
                 ngrad = torch.sparse.FloatTensor(ni, nv, torch.Size([10, 3]))
-                NonContGradFunc.static_grad_ptr = ngrad._values().data_ptr()
+                NonContGradFunc.static_grad_ptr = ngrad.values(False).data_ptr()
                 return ngrad, ngrad
 
         a = torch.randn(10, 3, requires_grad=True)
@@ -1997,7 +1997,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             dist_autograd.backward(context_id, [loss], retain_graph=True)
             grads = dist_autograd.get_gradients(context_id)
             p_g = MyFunc.static_grad_ptr
-            p_a = grads[a]._values().data_ptr()
+            p_a = grads[a].values(False).data_ptr()
             # check a uses the same buffer
             self.assertTrue(p_a == p_g)
 
@@ -2012,8 +2012,8 @@ class DistAutogradTest(RpcAgentTestFixture):
             dist_autograd.backward(context_id, [loss], retain_graph=True)
             grads = dist_autograd.get_gradients(context_id)
             p_g = NonContGradFunc.static_grad_ptr
-            p_a = grads[a]._values().data_ptr()
-            p_b = grads[b]._values().data_ptr()
+            p_a = grads[a].values(False).data_ptr()
+            p_b = grads[b].values(False).data_ptr()
             # check a,b uses different grad buffer
             self.assertFalse(p_a == p_b)
             # Verify we cloned both grads.
@@ -2038,12 +2038,12 @@ class DistAutogradTest(RpcAgentTestFixture):
 
             @staticmethod
             def backward(ctx, grad):
-                MyFunc.static_grad_ptr = grad._values().data_ptr()
+                MyFunc.static_grad_ptr = grad.values(False).data_ptr()
                 # indices() and values() return views, so holding onto
                 # references of them would not increment refcount of indices
                 # and values inside the sparse tensor.
-                MyFunc.static_grad_indices_ref = grad._indices()
-                MyFunc.static_grad_values_ref = grad._values()
+                MyFunc.static_grad_indices_ref = grad.indices(False)
+                MyFunc.static_grad_values_ref = grad.values(False)
                 return grad
 
         a = torch.randn(10, 3, requires_grad=True)
@@ -2057,7 +2057,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             dist_autograd.backward(context_id, [loss], retain_graph=True)
             grads = dist_autograd.get_gradients(context_id)
             p_g = MyFunc.static_grad_ptr
-            p_a = grads[a]._values().data_ptr()
+            p_a = grads[a].values(False).data_ptr()
             self.assertIsNotNone(MyFunc.static_grad_indices_ref)
             self.assertIsNotNone(MyFunc.static_grad_values_ref)
             # grad would be stolen, since static_grad_indices_ref and

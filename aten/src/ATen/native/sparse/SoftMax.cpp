@@ -31,10 +31,10 @@ std::vector<int64_t> get_offsets(const Tensor& indices, const IntArrayRef& sizes
     for the entries in the equivalent dense tensor:
 
       If
-        offsets = get_offsets(A._indices(), A.sizes(), -1)
+        offsets = get_offsets(A.indices(false), A.sizes(), -1)
         data = A.to_dense().resize((nnz,))
       then
-        data[offsets[n]] == A._values()[n]
+        data[offsets[n]] == A.values(false)[n]
 
     `indices` must be a contiguous 2-d tensor with int64_t entries.
     `sizes` must be a vector with at least ndim entries.
@@ -198,12 +198,12 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
 
     For the example sparse tensor X, we have:
 
-      S_0._indices() == S_1._indices() == X._indices()
+      S_0.indices() == S_1.indices() == X.indices()
 
       maxX_0 = [11, 22, -inf, 24, 15]
       maxX_1 = [15, 24]
 
-      S_0._values() = [exp(11 - maxX_0[0]) / exp(11 - maxX_0[0]),
+      S_0.values() = [exp(11 - maxX_0[0]) / exp(11 - maxX_0[0]),
                        exp(14 - maxX_0[3]) / (exp(14 - maxX_0[3]) + exp(24 - maxX_0[3])),
                        exp(15 - maxX_0[4]) / exp(15 - maxX_0[4]),
                        exp(22 - maxX_0[1]) / exp(22 - maxX_0[1]),
@@ -212,7 +212,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
 
       (note that `maxX_0[2] == -inf` not used to obtain S_0)
 
-      S_1._values() = [exp(11 - maxX_1[0]) / (exp(11 - maxX_1[0]) + exp(14 - maxX_1[0]) + exp(15 - maxX_1[0])),
+      S_1.values() = [exp(11 - maxX_1[0]) / (exp(11 - maxX_1[0]) + exp(14 - maxX_1[0]) + exp(15 - maxX_1[0])),
                        exp(14 - maxX_1[0]) / (exp(11 - maxX_1[0]) + exp(14 - maxX_1[0]) + exp(15 - maxX_1[0])),
                        exp(15 - maxX_1[0]) / (exp(11 - maxX_1[0]) + exp(14 - maxX_1[0]) + exp(15 - maxX_1[0])),
                        exp(22 - maxX_1[1]) / (exp(22 - maxX_1[1]) + exp(24 - maxX_1[1])),
@@ -224,10 +224,10 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
                        1 / (exp(-2) + 1)]
 
     To obtain the above via the for-loop over
-    `nnz(=len(X._values()))`, we introduce the indices mapping `pool`
+    `nnz(=len(X.values()))`, we introduce the indices mapping `pool`
     as follows:
 
-      indices = X._indices()
+      indices = X.indices()
       for i in range(nnz):
           for j in range(nnz):
               if indices[d, i] == indices[d, j]:
@@ -238,7 +238,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
     that is, the entries with values indices i and j are in the same
     pool iff their locations in the grid of tensor indices align with
     the direction along which the softmax is calculated. The `pool`
-    mapping maps the X._values() indices to the corresponding pool
+    mapping maps the X.values() indices to the corresponding pool
     index.
 
     To save memory and processor resources, we pre-compute the entries
@@ -261,7 +261,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
 
     and
 
-      S_0._values() = [exp(11 - mx_0[pool_0[0]]) / exp_sum_0[pool_0[0]]
+      S_0.values() = [exp(11 - mx_0[pool_0[0]]) / exp_sum_0[pool_0[0]]
                        exp(14 - mx_0[pool_0[1]]) / exp_sum_0[pool_0[1]]
                        exp(15 - mx_0[pool_0[2]]) / exp_sum_0[pool_0[2]]
                        exp(22 - mx_0[pool_0[3]]) / exp_sum_0[pool_0[3]]
@@ -269,7 +269,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
 
     or in general,
 
-      S_d._values() = [exp(values[i] - mx_d[pool_d[i]]) / exp_sum_d[pool_d[i] for i in range(nnz)]
+      S_d.values() = [exp(values[i] - mx_d[pool_d[i]]) / exp_sum_d[pool_d[i] for i in range(nnz)]
 
     The above algorithm can be easily extended for cases with
     non-scalar dense part of the sparse tensor where all scalar
@@ -281,10 +281,10 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
     log_softmax.
   */
   auto sparse_dim = input.sparse_dim();
-  auto indices = input._indices().contiguous();
-  auto values = input._values().contiguous();
-  auto out_values = output._values();
-  auto out_indices = output._indices();
+  auto indices = input.indices(false).contiguous();
+  auto values = input.values(false).contiguous();
+  auto out_values = output.values(false);
+  auto out_indices = output.indices(false);
   out_values.resize_as_(values);
   out_indices.resize_as_(indices);
   out_indices.copy_(indices);
@@ -394,12 +394,12 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
   */
   auto sparse_dim = output.sparse_dim();
   auto sizes = output.sizes().vec();
-  auto grad_indices = grad._indices().contiguous();
-  auto grad_values = grad._values().contiguous();
-  auto out_indices = output._indices().contiguous();
-  auto out_values = output._values().contiguous();
-  auto values = grad_input._values();
-  auto indices = grad_input._indices();
+  auto grad_indices = grad.indices(false).contiguous();
+  auto grad_values = grad.values(false).contiguous();
+  auto out_indices = output.indices(false).contiguous();
+  auto out_values = output.values(false).contiguous();
+  auto values = grad_input.values(false);
+  auto indices = grad_input.indices(false);
   auto out_nnz = out_values.size(0);
   auto grad_nnz = grad_values.size(0);
 

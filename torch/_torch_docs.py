@@ -7171,8 +7171,8 @@ Example::
 
     # Create an empty sparse tensor with the following invariants:
     #   1. sparse_dim + dense_dim = len(SparseTensor.shape)
-    #   2. SparseTensor._indices().shape = (sparse_dim, nnz)
-    #   3. SparseTensor._values().shape = (nnz, SparseTensor.shape[sparse_dim:])
+    #   2. SparseTensor.indices(False).shape = (sparse_dim, nnz)
+    #   3. SparseTensor.values(False).shape = (nnz, SparseTensor.shape[sparse_dim:])
     #
     # For instance, to create an empty sparse tensor with nnz = 0, dense_dim = 0 and
     # sparse_dim = 1 (hence indices is a 2D tensor of shape = (1, 0))

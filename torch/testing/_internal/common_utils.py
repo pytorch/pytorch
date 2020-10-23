@@ -873,7 +873,7 @@ class TestCase(expecttest.TestCase):
             #        for sparse views.
             # NOTE: We do clone() after detach() here because we need to be able to change size/storage of x afterwards
             x = x.detach().clone()
-        return x, x._indices().clone(), x._values().clone()
+        return x, x.indices(False).clone(), x.values(False).clone()
 
     def safeToDense(self, t):
         r = self.safeCoalesce(t)
@@ -887,12 +887,12 @@ class TestCase(expecttest.TestCase):
         # Our code below doesn't work when nnz is 0, because
         # then it's a 0D tensor, not a 2D tensor.
         if t._nnz() == 0:
-            self.assertEqual(t._indices(), tc._indices())
-            self.assertEqual(t._values(), tc._values())
+            self.assertEqual(t.indices(False), tc.indices(False))
+            self.assertEqual(t.values(False), tc.values(False))
             return tc
 
         value_map: Dict[Any, Any] = {}
-        for idx, val in zip(t._indices().t(), t._values()):
+        for idx, val in zip(t.indices(False).t(), t.values(False)):
             idx_tup = tuple(idx.tolist())
             if idx_tup in value_map:
                 value_map[idx_tup] += val
@@ -901,20 +901,20 @@ class TestCase(expecttest.TestCase):
 
         new_indices = sorted(list(value_map.keys()))
         _new_values = [value_map[idx] for idx in new_indices]
-        if t._values().ndimension() < 2:
-            new_values = t._values().new(_new_values)
+        if t.values(False).ndimension() < 2:
+            new_values = t.values(False).new(_new_values)
         else:
             new_values = torch.stack(_new_values)
 
-        new_indices = t._indices().new(new_indices).t()
+        new_indices = t.indices(False).new(new_indices).t()
         tg = t.new(new_indices, new_values, t.size())
 
-        self.assertEqual(tc._indices(), tg._indices())
-        self.assertEqual(tc._values(), tg._values())
+        self.assertEqual(tc.indices(False), tg.indices(False))
+        self.assertEqual(tc.values(False), tg.values(False))
 
         if t.is_coalesced():
-            self.assertEqual(tc._indices(), t._indices())
-            self.assertEqual(tc._values(), t._values())
+            self.assertEqual(tc.indices(False), t.indices(False))
+            self.assertEqual(tc.values(False), t.values(False))
 
         return tg
 
@@ -1082,7 +1082,7 @@ class TestCase(expecttest.TestCase):
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
-                indices_result, debug_msg = self._compareTensors(x._indices(), y._indices(),
+                indices_result, debug_msg = self._compareTensors(x.indices(False), y.indices(False),
                                                                  rtol=rtol, atol=atol,
                                                                  equal_nan=equal_nan, exact_dtype=exact_dtype,
                                                                  exact_device=exact_device)
@@ -1092,7 +1092,7 @@ class TestCase(expecttest.TestCase):
                     msg = "Sparse tensor indices failed to compare as equal! " + debug_msg
                 self.assertTrue(indices_result, msg=msg)
 
-                values_result, debug_msg = self._compareTensors(x._values(), y._values(),
+                values_result, debug_msg = self._compareTensors(x.values(False), y.values(False),
                                                                 rtol=rtol, atol=atol,
                                                                 equal_nan=equal_nan, exact_dtype=exact_dtype,
                                                                 exact_device=exact_device)

@@ -133,8 +133,8 @@ class Tensor(torch._C._TensorBase):
         elif self.is_sparse:
             if self.layout == torch.sparse_coo:
                 args_sparse = (self.layout,
-                               (self._indices(),
-                                self._values(),
+                               (self.indices(False),
+                                self.values(False),
                                 self.size()))
             else:
                 raise NotImplementedError(

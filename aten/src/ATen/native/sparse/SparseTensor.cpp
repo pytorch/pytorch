@@ -279,7 +279,7 @@ SparseTensor clone_sparse(const SparseTensor& self, c10::optional<c10::MemoryFor
       "unsupported memory format option ",
       optional_memory_format.value());
   SparseTensor other = new_with_dims_sparse(self.sparse_dim(), self.dense_dim(), self.sizes(), self.options());
-  copy_into_sparse(other, self._indices(), self._values(), true);
+  copy_into_sparse(other, self.indices(false), self.values(false), true);
   return other._coalesced_(self.is_coalesced());
 }
 
@@ -366,7 +366,7 @@ Tensor sparse_to_dense(const SparseTensor& self) {
 SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non_blocking) {
   if (is_same_tensor(self, src)) return self;
   get_sparse_impl(self)->resize_(src.sparse_dim(), src.dense_dim(), src.sizes());
-  copy_into_sparse(self, src._indices(), src._values(), non_blocking);
+  copy_into_sparse(self, src.indices(false), src.values(false), non_blocking);
   return self._coalesced_(src.is_coalesced());
 }
 
@@ -386,8 +386,8 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
     return dst;
   }
 
-  LongTensor indices = self._indices();
-  Tensor values = self._values().contiguous();
+  LongTensor indices = self.indices(false);
+  Tensor values = self.values(false).contiguous();
   int64_t sparse_dim = self.sparse_dim();
   int64_t dense_dim = self.dense_dim();
   int64_t nnz = self._nnz();
@@ -487,9 +487,9 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   }
   int64_t dim = t.dim();
   int64_t sparse_dim = mask.sparse_dim();
-  LongTensor mask_indices = mask._indices();
-  Tensor mask_values = mask._values();
-  Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
+  LongTensor mask_indices = mask.indices(false);
+  Tensor mask_values = mask.values(false);
+  Tensor r_values = at::empty(mask_values.sizes(), r.values(false).options());
   alias_into_sparse(r, mask_indices.clone(), r_values);
   r._coalesced_(mask.is_coalesced());
   int64_t r_nnz = mask._nnz();

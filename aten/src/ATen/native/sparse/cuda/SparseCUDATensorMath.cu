@@ -147,8 +147,8 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
   SparseTensor sparse = sparse_.coalesce();
 
   int64_t nnz = sparse._nnz();
-  LongTensor indices = sparse._indices();
-  Tensor values = sparse._values();
+  LongTensor indices = sparse.indices(false);
+  Tensor values = sparse.values(false);
 
 
   // No half support, so we don't have to use CUDATypeConversion
@@ -255,7 +255,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
   // why does sparse need to be cloned? If this is really necessary maybe we
   // need to fuse this with newCoalesce
   SparseTensor newSparse = sparse.clone();
-  LongTensor spIndices = newSparse._indices();
+  LongTensor spIndices = newSparse.indices(false);
   LongTensor dstIndices = spIndices.select(0, 0);
   // Save destination indices to output hybrid tensor
   indices.copy_(dstIndices);
@@ -311,7 +311,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
   }
 
   Tensor dense_buffer = dense.to(commonDtype);
-  Tensor values = sparse._values().to(commonDtype);
+  Tensor values = sparse.values(false).to(commonDtype);
 
   if (is_same_tensor(r, dense_buffer)) {
     TORCH_CHECK(r_.is_contiguous(), "add: CUDA dense-sparse addition with a non-contiguous output tensor does not work; shout if you need it (see https://github.com/pytorch/pytorch/issues/1521 )");
@@ -320,7 +320,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     r.copy_(dense_buffer);
   }
 
-  LongTensor indices = sparse._indices();
+  LongTensor indices = sparse.indices(false);
   int64_t nDim = dense.dim();
   int64_t nDimI = sparse.sparse_dim();
 
@@ -437,11 +437,11 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
   // rather than merging them. This removes the need to synchronously fetch nnz
   // at the end of the operation, at the cost of having a non-coalesced result.
   // This trade-off is preferable for the common use-case of gradient accumulation.
-  LongTensor t_indices_ = t._indices();
-  LongTensor s_indices_ = src._indices();
+  LongTensor t_indices_ = t.indices(false);
+  LongTensor s_indices_ = src.indices(false);
 
-  Tensor t_values_ = t._values().to(commonDtype);
-  Tensor s_values_ = src._values().to(commonDtype);
+  Tensor t_values_ = t.values(false).to(commonDtype);
+  Tensor s_values_ = src.values(false).to(commonDtype);
 
   AT_DISPATCH_ALL_TYPES_AND2(
     at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_sparse_cuda", [&] {
@@ -460,8 +460,8 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
     alias_into_sparse(promoted, r_indices_, r_values_);
     // performs the addition under the common dtype.
     promoted = promoted.coalesce();
-    r_values_ = promoted._values().to(r_.scalar_type());
-    r_indices_ = promoted._indices();
+    r_values_ = promoted.values(false).to(r_.scalar_type());
+    r_indices_ = promoted.indices(false);
   } else {
     r_.resize_as_(src);
   }
@@ -472,7 +472,7 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
   // TODO: Improved heuristic on when to coalesce or remove need to coalesce
   if (r_._nnz() > r_.numel()) {
     auto c = r_.coalesce();
-    alias_into_sparse(r_, c._indices(), c._values());
+    alias_into_sparse(r_, c.indices(false), c.values(false));
   }
 
   return r_;
@@ -509,10 +509,10 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   int64_t sparse_dim = src.sparse_dim();
   auto commonDtype = at::result_type(t, src);
   TORCH_CHECK(canCast(commonDtype, r_.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
-  LongTensor t_indices_ = t._indices().contiguous();
-  Tensor t_values_ = t._values().to(commonDtype);
-  LongTensor s_indices_ = src._indices().contiguous();
-  Tensor s_values_ = src._values().to(commonDtype);
+  LongTensor t_indices_ = t.indices(false).contiguous();
+  Tensor t_values_ = t.values(false).to(commonDtype);
+  LongTensor s_indices_ = src.indices(false).contiguous();
+  Tensor s_values_ = src.values(false).to(commonDtype);
   LongTensor r_indices_ = at::empty({sparse_dim, max_nnz}, t_indices_.options());
   r_.resize_as_(src);
 
@@ -609,8 +609,8 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
   auto dims_to_sum_v = dims_to_sum.vec();
   maybe_wrap_dims(dims_to_sum_v, input_dim);
 
-  LongTensor input_indices = input._indices();
-  Tensor input_values = input._values();
+  LongTensor input_indices = input.indices(false);
+  Tensor input_values = input.values(false);
   IntArrayRef input_sizes = input.sizes();
   const int64_t input_sparse_dim = input.sparse_dim();
   const int64_t input_dense_dim = input.dense_dim();
@@ -649,8 +649,8 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
   else {
     TORCH_CHECK(grad_.is_sparse(), "_sparse_sum_backward_cuda: expected grad_ Tensor to be sparse, but got dense");
     auto grad = grad_.coalesce();
-    LongTensor grad_indices = grad._indices();
-    Tensor grad_values = grad._values();
+    LongTensor grad_indices = grad.indices(false);
+    Tensor grad_values = grad.values(false);
     const int64_t grad_sparse_dim = grad.sparse_dim();
     const int64_t grad_nnz = grad._nnz();
 
@@ -863,8 +863,8 @@ Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Ten
   SparseTensor self_coalesced = coalesce_sparse_cuda(self);
 
   int64_t nnz =        self_coalesced._nnz();
-  LongTensor indices = self_coalesced._indices();
-  Tensor values =      self_coalesced._values();
+  LongTensor indices = self_coalesced.indices(false);
+  Tensor values =      self_coalesced.values(false);
 
   LongTensor indices_dim0 = indices[0];
 

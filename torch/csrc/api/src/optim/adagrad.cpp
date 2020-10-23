@@ -83,8 +83,8 @@ Tensor Adagrad::step(LossClosure closure) {
 
       if (grad.is_sparse()) {
         grad = grad.coalesce();
-        auto grad_indices = grad._indices();
-        auto grad_values = grad._values();
+        auto grad_indices = grad.indices(false);
+        auto grad_values = grad.values(false);
         auto size = grad.sizes();
 
         auto make_sparse = [&] (const Tensor& values) -> Tensor {
@@ -95,7 +95,7 @@ Tensor Adagrad::step(LossClosure closure) {
         };
         state.sum(state.sum().add_(make_sparse(grad_values.pow(2))));
         auto std = state.sum().sparse_mask(grad);
-        const auto std_values = std._values().sqrt_().add_(options.eps());
+        const auto std_values = std.values(false).sqrt_().add_(options.eps());
 
         p.add_(make_sparse(grad_values / std_values), -clr);
       }

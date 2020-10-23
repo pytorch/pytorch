@@ -10798,25 +10798,25 @@ class TestNNDeviceType(NNTestCase):
 
         embedding.zero_grad()
         embedding(tensor[0]).sum().backward()
-        self.assertEqual(embedding.weight.grad._indices(), tensor)
+        self.assertEqual(embedding.weight.grad.indices(False), tensor)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(embedding.weight.grad._values(), ones)
+        self.assertEqualIgnoreType(embedding.weight.grad.values(False), ones)
 
         embedding.zero_grad()
         embedding(tensor[0]).sum().backward()
         embedding(tensor[0]).sum().backward()
-        self.assertEqual(embedding.weight.grad._indices(), tensorTwice)
+        self.assertEqual(embedding.weight.grad.indices(False), tensorTwice)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(embedding.weight.grad._values(), onesTwice)
+        self.assertEqualIgnoreType(embedding.weight.grad.values(False), onesTwice)
 
         embedding.zero_grad()
         embedding(tensor[0]).sum().backward()
         tensor[0, 0] = 8
         embedding(tensor[0]).sum().backward()
         tensorTwice[0, 3] = 8
-        self.assertEqual(embedding.weight.grad._indices(), tensorTwice)
+        self.assertEqual(embedding.weight.grad.indices(False), tensorTwice)
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(embedding.weight.grad._values(), onesTwice)
+        self.assertEqualIgnoreType(embedding.weight.grad.values(False), onesTwice)
 
     @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float32)

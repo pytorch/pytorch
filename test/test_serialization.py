@@ -296,7 +296,7 @@ class SerializationMixin(object):
                 self.tensor = tensor
 
             def __reduce_ex__(self, proto):
-                invalid_indices = self.tensor._indices().clone()
+                invalid_indices = self.tensor.indices(False).clone()
                 invalid_indices[0][0] = 3
                 return (
                     torch._utils._rebuild_sparse_tensor,
@@ -304,7 +304,7 @@ class SerializationMixin(object):
                         self.tensor.layout,
                         (
                             invalid_indices,
-                            self.tensor._values(),
+                            self.tensor.values(False),
                             self.tensor.size())))
 
         with tempfile.NamedTemporaryFile() as f:

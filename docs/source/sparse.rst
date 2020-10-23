@@ -300,16 +300,10 @@ acquired using methods :meth:`torch.Tensor.indices()` and
 
 .. note::
 
-  Currently, one can acquire the COO format data only when the tensor
-  instance is coalesced:
-
-    >>> s.indices()
-    RuntimeError: Cannot get indices on an uncoalesced tensor, please call .coalesce() first
-
   For acquiring the COO format data of an uncoalesced tensor, use
-  :func:`torch.Tensor._values()` and :func:`torch.Tensor._indices()`:
+  :func:`torch.Tensor.values(False)` and :func:`torch.Tensor.indices(False)`:
 
-    >>> s._indices()
+    >>> s.indices(False)
     tensor([[0, 1, 1],
             [2, 0, 2]])
 

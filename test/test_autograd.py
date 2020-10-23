@@ -3853,7 +3853,7 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, grad):
-                MyFunc.static_grad_ptr = grad._values().data_ptr()
+                MyFunc.static_grad_ptr = grad.values(False).data_ptr()
                 return grad, grad
 
         class NonContGradFunc(Function):
@@ -3872,7 +3872,7 @@ class TestAutograd(TestCase):
                 nv = v.expand(8, 3)
                 ni = i.expand(1, 8)
                 ngrad = torch.sparse.FloatTensor(ni, nv, torch.Size([10, 3]))
-                NonContGradFunc.static_grad_ptr = ngrad._values().data_ptr()
+                NonContGradFunc.static_grad_ptr = ngrad.values(False).data_ptr()
                 return ngrad, ngrad
 
         a = torch.randn(10, 3, requires_grad=True)
@@ -3886,8 +3886,8 @@ class TestAutograd(TestCase):
         loss = F.embedding_bag(emb_matrix, input, offsets, sparse=True).sum()
         loss.backward(retain_graph=True)
         p_g = MyFunc.static_grad_ptr
-        p_a = a.grad._values().data_ptr()
-        p_b = b.grad._values().data_ptr()
+        p_a = a.grad.values(False).data_ptr()
+        p_b = b.grad.values(False).data_ptr()
         # check a,b uses different grad buffer
         self.assertFalse(p_a == p_b)
         # check one of them is using the computed buffer
@@ -3903,8 +3903,8 @@ class TestAutograd(TestCase):
         loss = F.embedding_bag(emb_matrix, input, offsets, sparse=True).sum()
         loss.backward(retain_graph=True)
         p_g = NonContGradFunc.static_grad_ptr
-        p_a = a.grad._values().data_ptr()
-        p_b = b.grad._values().data_ptr()
+        p_a = a.grad.values(False).data_ptr()
+        p_b = b.grad.values(False).data_ptr()
         # check a,b uses different grad buffer
         self.assertFalse(p_a == p_b)
         # Verify we cloned both grads.
@@ -6315,7 +6315,7 @@ class TestAutogradDeviceType(TestCase):
 
             # assert that _values is non-differentiable
             with self.assertRaisesRegex(RuntimeError, "does not have a grad_fn"):
-                other.detach().requires_grad_()._values().backward(torch.ones_like(other._values()))
+                other.detach().requires_grad_().values(False).backward(torch.ones_like(other.values(False)))
 
         for empty_i, empty_v, empty_nnz in product([True, False], repeat=3):
             sparse_size = [] if empty_i else [2, 1]
