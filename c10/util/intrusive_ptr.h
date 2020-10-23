@@ -244,11 +244,6 @@ class intrusive_ptr final {
     ++target_->weakcount_;
   }
 
-  //
-  // If you want to use the raw pointer constructor, use the tagged dispatch version above.
-  // , implementations in intrusive_ptr/weak_intrusive_ptr
-  // should use this constructor if they need a conversion directly from raw pointer
-
  public:
   using element_type = TTarget;
 
