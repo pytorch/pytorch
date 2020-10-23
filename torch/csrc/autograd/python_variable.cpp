@@ -568,6 +568,17 @@ PyObject *THPVariable_is_mkldnn(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_is_vulkan(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "is_vulkan");
+  }
+  auto& self_ = self->cdata;
+  return torch::autograd::utils::wrap(self_.is_vulkan());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_is_quantized(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -697,6 +708,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
   {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
+  {"is_vulkan", (getter)THPVariable_is_vulkan, nullptr, nullptr, nullptr},
   {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
   {"is_quantized", (getter)THPVariable_is_quantized, nullptr, nullptr, nullptr},
   {"is_meta", (getter)THPVariable_is_meta, nullptr, nullptr, nullptr},
