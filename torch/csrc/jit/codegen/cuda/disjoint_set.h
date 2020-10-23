@@ -2,7 +2,9 @@
 
 #include <c10/util/Exception.h>
 
+#include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace torch {
@@ -15,9 +17,7 @@ namespace cuda {
 //! Each instance of this class keeps a set of equivalent classes
 //! DisjointSet::join(a,b) makes the full class of a and b equivalent
 //! DisjointSet::areEqual(a,b) checks if a and b belong same class
-//!
-//! \note The template type T is assumed to be hashable
-template <typename T>
+template <typename T, typename Hash = std::hash<T>>
 class DisjointSet {
  public:
   DisjointSet() = default;
@@ -72,6 +72,53 @@ class DisjointSet {
     return fixedPoint(a) == fixedPoint(b);
   }
 
+  //! Queries if an element exists in this set
+  bool contains(T a) const {
+    return entry_map.count(a) > 0;
+  }
+
+  //! Returns all elements added to this set
+  std::vector<T> getAllElements() const {
+    std::vector<T> elms(entry_map.size());
+    std::transform(
+        entry_map.begin(),
+        entry_map.end(),
+        elms.begin(),
+        [](const auto& entry_map_kv) { return entry_map_kv.first; });
+    return elms;
+  }
+
+  //! Clears the equivalence relationships
+  void clear() {
+    set_map.clear();
+    weights.clear();
+    entry_map.clear();
+    next_index_ = 0;
+  }
+
+  //! Dumps the equivalent relationships
+  std::ostream& print(std::ostream& os) const {
+    std::unordered_map<int, std::unordered_set<T, Hash>> fixedPointMap;
+    for (const auto& kv : entry_map) {
+      int fixed_point = fixedPoint(kv.first);
+      auto it = fixedPointMap.find(fixed_point);
+      if (it == fixedPointMap.end()) {
+        it = fixedPointMap.insert({fixed_point, {}}).first;
+      }
+      it->second.insert(kv.first);
+    }
+    os << "{\n";
+    for (const auto& kv : fixedPointMap) {
+      os << "\t{ ";
+      for (const auto& val : kv.second) {
+        os << val << " ";
+      }
+      os << "}\n";
+    }
+    os << "}\n";
+    return os;
+  }
+
  private:
   // Internal fixed point implementation:
   //  Returns the equivalent class that e belongs to
@@ -114,7 +161,7 @@ class DisjointSet {
   std::vector<int> weights;
 
   // Map the input of type T to its equivalence class
-  std::unordered_map<T, int> entry_map;
+  std::unordered_map<T, int, Hash> entry_map;
 
   // Running counter for generating new index when
   // Creating new equiv classes
