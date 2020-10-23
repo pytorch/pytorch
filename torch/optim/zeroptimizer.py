@@ -467,65 +467,48 @@ class ZeROptimizer(Optimizer):
     def _broadcast_params(self, buffers: List[torch.Tensor], per_rank_params: List[List[Parameter]]) -> None:
         """Helper function to broadcast all the parameters from a given device"""
         buffer_size = buffers[0].numel()
-        restore_require_grad = []
         bucket_requests = []
-        requests = []
+        direct_requests = []
 
         # Bucket and issue all the async calls
-        for (rank, params), buffer in zip(enumerate(per_rank_params), buffers):
-            # All the params are sorted per rank and per increasing size
-            if len(params) == 0:
-                continue
+        for (src_rank, params), buffer in zip(enumerate(per_rank_params), buffers):
+            global_src_rank = _get_global_rank(self.group, src_rank)
 
-            global_rank = _get_global_rank(self.group, rank)
-
-            # Copy small parameters into per-GPU buffers
-            i_bucketed = 0  # the number of tensors packed in the buffer
+            # Copy small gradients into per-GPU buffers and then async broadcast
             offset = 0
+            bucket_sent = False
+            bucket_params = []
 
-            # Since all the parameters are already sorted per increasing size, we only need to consider the first ones.
-            while i_bucketed < len(params) and offset + params[i_bucketed].numel() < buffer_size:
-                end = offset + params[i_bucketed].numel()
-                if global_rank == self.global_rank:
-                    buffer[offset:end].copy_(params[i_bucketed].data.view(-1))  # type: ignore
-                offset = end
-                i_bucketed += 1
+            # All the params are sorted per rank and per increasing size
+            for p in params:
+                # Since all the parameters are already sorted per increasing size, we only need to consider the first ones.
+                if not bucket_sent and offset + p.numel() < buffer_size:
+                    end = offset + p.numel()
+                    buffer[offset:end].copy_(p.data.view(-1))  # type: ignore
+                    bucket_params.append((p, offset, end))
+                    offset = end
+                else:
+                    if offset > 0 and not bucket_sent:
+                        bucket_requests.append(
+                            (
+                                dist.broadcast(tensor=buffer, dst=global_src_rank, group=group, async_op=True),  # type: ignore
+                                src_rank,
+                                bucket_params,
+                            )
+                        )
 
-            if i_bucketed > 0:
-                future = dist.broadcast(tensor=buffer, src=global_rank, group=self.group, async_op=True)
-                if global_rank != self.global_rank:
-                    # This request will need to be unrolled
-                    bucket_requests.append((future, rank))
+                        bucket_sent = True
 
-            # Directly broadcast the rest
-            for param in params[i_bucketed:]:
-                # NOTE: Broadcast is in-place and not differentiable
-                # Gloo will assert on this operation for any tensor that requires grad.
-                # We save and restore the grad requirement state to work around that, in our case
-                # the grad is only useful on the source rank.
-                if param.requires_grad:
-                    restore_require_grad.append(param)
-                    param.requires_grad = False
-
-                requests.append(dist.broadcast(tensor=param, src=global_rank, group=self.group, async_op=True))
+                    direct_requests.append(
+                        dist.broadcast(tensor=p.data, src=global_src_rank, group=self.group, async_op=True)
+                    )
 
         # Unroll the initial packed small parameters
-        for gate, rank in bucket_requests:
-            gate.wait()
-
-            params = per_rank_params[rank]
-            buffer = buffers[rank]
-            i_bucketed = 0  # the number of tensors packed in the buffer
-            offset = 0
-
-            while i_bucketed < len(params) and offset + params[i_bucketed].numel() < buffer_size:
-                end = offset + params[i_bucketed].numel()
-                params[i_bucketed].data.copy_(buffer[offset:end].view_as(params[i_bucketed]))  # type: ignore
-                offset = end
-                i_bucketed += 1
+        for work_handle, src_rank, bucket_params in bucket_requests:
+            work_handle.wait()
+            if src_rank != self.rank:
+                for p, offset, end in bucket_params:
+                    p.grad.data.copy_(buffers[dst_rank][offset:end].view_as(p.data))  # type: ignore
 
         # Unroll all the async work items, just in case
-        _ = list(map(lambda x: x.wait(), requests))
-
-        for p in restore_require_grad:
-            p.requires_grad = True
+        _ = list(map(lambda x: x.wait(), direct_requests))
