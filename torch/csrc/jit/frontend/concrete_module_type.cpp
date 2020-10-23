@@ -101,6 +101,13 @@ bool ConcreteModuleTypeBuilder::equals(
     return false;
   }
 
+  // Contained types match if both are absent or if both are present and the
+  // types they point to are equal.
+  bool containedTypeHintsMatch =
+      (!containedTypeHint_ && !other.containedTypeHint_) ||
+      (containedTypeHint_ && other.containedTypeHint_ &&
+       *containedTypeHint_ == *other.containedTypeHint_);
+
   // clang-format off
     // These are vaguely ordered so that cheap, discriminating checks happen first.
     bool equal =
@@ -111,14 +118,8 @@ bool ConcreteModuleTypeBuilder::equals(
       attributes_ == other.attributes_ &&
       overloads_ == other.overloads_ &&
       functionAttributes_ == other.functionAttributes_ &&
-      builtinFunctions_ == other.builtinFunctions_;
-
-    // Contained types match if both are absent or if both are present and the types they point to are equal.
-    bool containedTypeHintsMatch = (!containedTypeHint_ && !other.containedTypeHint_) ||
-      (containedTypeHint_ && other.containedTypeHint_ && *containedTypeHint_ == *other.containedTypeHint_);
-
-    equal &= containedTypeHintsMatch;
-
+      builtinFunctions_ == other.builtinFunctions_ &&
+      containedTypeHintsMatch;
   // clang-format on
   if (!equal) {
     return false;
