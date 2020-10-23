@@ -219,7 +219,7 @@ class Errors(object):
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self.errors:
-            errors_msg = "\n\n".join(map(lambda x: "ERROR: " + x, self.errors))
+            errors_msg = "\n\n".join("ERROR: " + x for x in self.errors)
             final_msg = "{}\n{}\n{}".format(self.msg, '-' * 70, errors_msg)
             raise AssertionError(final_msg)
         if exc_type == self.exc_class:
@@ -386,8 +386,8 @@ def verify(model, args, backend, verbose=False, training=torch.onnx.TrainingMode
                                               "it had a different set of parameters.  Are you assigning Parameters\n"
                                               "in the forward() of your model definition?")
                     with errs.addErrCtxt(initializer_order_hint):
-                        errs.requireEqual(list(map(lambda x: x.name, proto.graph.initializer)),
-                                          list(map(lambda x: x.name, alt_proto.graph.initializer)),
+                        errs.requireEqual([x.name for x in proto.graph.initializer],
+                                          [x.name for x in alt_proto.graph.initializer],
                                           msg="Parameters list differs")
 
                     # Now check if the embedded parameters are actually the same
