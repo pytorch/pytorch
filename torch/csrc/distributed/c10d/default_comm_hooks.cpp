@@ -31,8 +31,8 @@ c10::intrusive_ptr<torch::jit::Future> fp16CompressHook(
 
   auto decompress_and_div_by_process_group_size = [allreduce_work,
                                                    process_group]() {
-    auto tensor = allreduce_work->result()[0] / process_group->getSize();
-    tensor.copy_(tensor.to(torch::kFloat));
+    auto tensor = allreduce_work->result()[0];
+    tensor.copy_(tensor.to(torch::kFloat) / process_group->getSize());
     return c10::IValue(tensor);
   };
 
