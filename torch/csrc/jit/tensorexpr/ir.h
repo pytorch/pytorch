@@ -765,12 +765,17 @@ class Intrinsics : public CallNode<Intrinsics> {
   IntrinsicsOp op_type_;
 };
 
+
 class Polynomial;
 class Term;
 class MaxTerm;
 class MinTerm;
 
 class FunctionCall;
+
+// ADDING NEW NODES TO THE IR:
+// If you add a new node to the IR, you must also add handling of it
+// to IRVisitor, IRMutator, IRPrinter, IRSerializer and IRDeserializer
 
 TORCH_API std::vector<const Expr*> ExprHandleVectorToExprVector(
     const std::vector<ExprHandle>&);

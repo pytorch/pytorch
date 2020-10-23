@@ -42,14 +42,6 @@ void checkRoundTrip(Stmt* stmt) {
   std::cout << originals;
 }
 
-// void checkRoundTrip(Stmt * stmt) {
-//   std::stringstream original;
-//   original << *stmt;
-//   std::stringstream round_trip;
-//   round_trip << *deserializeStmt(torch::jit::tensorexpr::serialize(stmt));
-//   ASSERT_EQ(original.str(), round_trip.str());
-// }
-
 void testIRSerializationBasicValueTest() {
   KernelScope kernel_scope;
   ExprHandle a = IntImm::make(2), b = IntImm::make(3);
@@ -58,7 +50,7 @@ void testIRSerializationBasicValueTest() {
   checkRoundTrip(c);
 }
 
-void testIRSerializationLetTest() {
+void testIRSerializationLetStoreTest() {
   KernelScope kernel_scope;
   Placeholder a_buf("a", kFloat, {1});
   Placeholder b_buf("b", kFloat, {1});
@@ -139,16 +131,6 @@ void testIRSerializationRampLoadBroadcast() {
       {Ramp::make(index * kVectorSize, 1, kVectorSize)},
       Broadcast::make(1, kVectorSize));
   checkRoundTrip(load_a);
-}
-
-void testIRSerializationStore() {
-  // KernelScope kernel_scope;
-  // const int N = 16;
-  // PaddedBuffer<float> a_v(N);
-  // Placeholder a_buf("a", kFloat, {N});
-  // VarHandle index = VarHandle("index", kInt);
-  // Stmt* assign_x2 = a_buf.store({index}, cast<float>(index) * 2);
-  // checkRoundTrip(assign_x2);
 }
 
 void testIRSerializationForBlock() {

@@ -45,7 +45,6 @@ namespace jit {
   _(IRSerializationBinOp)                   \
   _(IRSerializationCompareSelect)           \
   _(IRSerializationRampLoadBroadcast)       \
-  _(IRSerializationStore)                   \
   _(IRSerializationForBlock)                \
   _(IRSerializationIfThenElse)              \
   _(IRSerializationInstrinsic)              \
