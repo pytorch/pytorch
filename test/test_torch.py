@@ -6894,6 +6894,7 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @dtypesIfCUDA(torch.float32, torch.float64)
+    @tf32_on_and_off(5e-3)
     def test_pinverse(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
 
@@ -10163,6 +10164,7 @@ class TestTorchDeviceType(TestCase):
                                           upper, unitriangular, transpose)
 
 
+    @precisionOverride({torch.double: 5e-7})
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -15503,6 +15505,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @tf32_on_and_off(5e-3)
     @dtypes(torch.double, torch.cfloat, torch.cdouble)
     def test_lu(self, device, dtype):
         from torch.testing._internal.common_utils import random_matrix
