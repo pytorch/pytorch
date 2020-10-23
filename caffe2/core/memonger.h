@@ -8,6 +8,10 @@
 #include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
+
+// op schema check
+CAFFE2_API void run_schema_check(const NetDef& net);
+
 namespace memonger {
 
 CAFFE2_API NetDef optimize_inference_net(
