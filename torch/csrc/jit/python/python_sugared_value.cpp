@@ -282,13 +282,44 @@ void recurseThroughNestedModules(
     std::shared_ptr<ModuleValue> self,
     const std::string& prefix,
     const std::string& field) {
-  auto prefix_value =
-      std::make_shared<SimpleValue>(insertConstant(*m.graph(), prefix));
-
-  keys.push_back(prefix_value);
-  values.push_back(self);
-
   checkInterface(loc, m, self, field);
+
+  // The names returned by named_modules and named_parameters are qualified.
+  // submodule_prefix is the qualified name of self with a "." at the end, to
+  // which the names of the submodules or parameters of self will be appended.
+  std::string submodule_prefix = prefix;
+  if (prefix != "") {
+    submodule_prefix = prefix + ".";
+  }
+
+  if (field == "modules" || field == "named_modules") {
+    // If the requested field is modules or named_modules, add the qualified
+    // module name and module to keys and values.
+
+    // prefix is the fully qualified name of self in its module hierarchy.
+    auto prefix_value =
+        std::make_shared<SimpleValue>(insertConstant(*m.graph(), prefix));
+    keys.push_back(prefix_value);
+    values.push_back(self);
+  } else if (field == "named_parameters") {
+    // If the requested field is named_parameters, iterate through the
+    // parameters of self and add the parameter names and parameters (as Graph
+    // Value*'s rather than IValues) to keys and values.
+    auto params_dict = self->getSugaredNamedParameterDict(loc, m);
+    auto param_name_iter = params_dict->keys_;
+    auto param_iter = params_dict->modules_;
+    for (size_t j = 0; j < param_name_iter->tup_.size(); ++j) {
+      auto name = param_name_iter->tup_.at(j);
+      auto name_string = toIValue(name->asValue(loc, m))->toStringRef();
+      auto qual_name = submodule_prefix + name_string;
+      auto name_string_const =
+          std::make_shared<SimpleValue>(insertConstant(*m.graph(), qual_name));
+      keys.push_back(name_string_const);
+      values.push_back(param_iter->tup_.at(j));
+    }
+  }
+
+  // Recursively process the submodules of self.
   auto module_dict = self->getSugaredDict(loc, m);
   auto keys_iter = module_dict->keys_;
   auto module_values_iter = module_dict->modules_;
@@ -300,13 +331,9 @@ void recurseThroughNestedModules(
 
     auto keys_value = keys_iter->tup_.at(i);
     auto key_string = toIValue(keys_value->asValue(loc, m))->toStringRef();
-    std::string submodule_prefix = prefix;
-    if (prefix != "") {
-      submodule_prefix = prefix + ".";
-    }
-    submodule_prefix = submodule_prefix + key_string;
+    auto qual_name = submodule_prefix + key_string;
     recurseThroughNestedModules(
-        loc, m, keys, values, module_value, submodule_prefix, field);
+        loc, m, keys, values, module_value, qual_name, field);
   };
 }
 
@@ -328,6 +355,38 @@ std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedBufferDict(
     auto name_v =
         std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
     Value* tensor_v = m.graph()->insertGetAttr(self_, name);
+    values.push_back(tryGetAttr(loc, m, name));
+    keys.push_back(name_v);
+  }
+
+  return std::make_shared<SugaredDict>(
+      std::make_shared<ModuleValue>(self_, concreteType_),
+      std::make_shared<SugaredTupleValue>(keys),
+      std::make_shared<SugaredTupleValue>(values));
+}
+
+std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedParameterDict(
+    const SourceRange& loc,
+    Function& m) {
+  std::vector<std::string> param_names;
+
+  // Get the names of all parameters in self_.
+  const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
+  for (size_t i = 0; i < selfType->numAttributes(); ++i) {
+    if (selfType->is_parameter(i)) {
+      param_names.push_back(selfType->getAttributeName(i));
+    }
+  }
+
+  // keys contains graph constants containing all of the parameter names.
+  std::vector<SugaredValuePtr> keys;
+  // values contains the parameters of self_.
+  std::vector<SugaredValuePtr> values;
+
+  // Gather the names and parameters into keys and values.
+  for (const auto& name : param_names) {
+    auto name_v =
+        std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
     values.push_back(tryGetAttr(loc, m, name));
     keys.push_back(name_v);
   }
@@ -388,7 +447,9 @@ std::shared_ptr<SugaredValue> SugaredDict::attr(
     iterator->addChild(loc, m, keys_);
     iterator->addChild(loc, m, modules_);
     return std::make_shared<ModuleDictMethod>(iterator, field);
-  } else if (field == "named_modules" || field == "modules") {
+  } else if (
+      field == "named_modules" || field == "modules" ||
+      field == "named_parameters") {
     std::vector<SugaredValuePtr> keys;
     std::vector<SugaredValuePtr> values;
     recurseThroughNestedModules(loc, m, keys, values, self_, "", field);
@@ -485,6 +546,10 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
 
   if (field == "named_buffers") {
     return getSugaredNamedBufferDict(loc, m)->attr(loc, m, field);
+  }
+
+  if (field == "named_parameters") {
+    return getSugaredNamedParameterDict(loc, m)->attr(loc, m, field);
   }
 
   // 3. Check if this is the name of an overloaded method.

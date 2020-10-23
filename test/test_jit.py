@@ -14868,6 +14868,75 @@ dedent """
         for name in names:
             self.assertNotEqual('z', name)
 
+    def test_named_parameters_are_iterable(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+                self.mod = (torch.nn.ReLU())
+                self.mod2 = (torch.nn.Linear(2, 2))
+                self.mod3 = torch.nn.Sequential(torch.nn.Sequential(torch.nn.Linear(2, 2)))
+                self.register_parameter('x', nn.Parameter(torch.randn(3)))
+                self.register_parameter('y', nn.Parameter(torch.randn(3)))
+                self.z = nn.Parameter(torch.randn(3))
+
+            @torch.jit.export
+            def method(self):
+                names = [""]
+                vals = []
+                for name, parameter in self.named_parameters():
+                    names.append(name)
+                    vals.append(parameter + 2)
+
+                return names, vals
+
+            def forward(self, x):
+                return x
+
+        model = MyMod()
+        x = torch.jit.script(model)
+        z = self.getExportImportCopy(x)
+
+        self.assertEqual(z.method(), x.method())
+        self.assertEqual(z.method(), model.method())
+        self.assertEqual(x.method(), model.method())
+
+        names, _ = x.method()
+        self.assertTrue('z' in names)
+
+    def test_named_parameters_are_iterable_module_dict(self):
+        class MyMod(torch.nn.ModuleDict):
+            def __init__(self):
+                super(MyMod, self).__init__()
+                self["mod"] = (torch.nn.ReLU())
+                self["mod2"] = (torch.nn.Linear(2, 2))
+                self["mod3"] = torch.nn.Sequential(torch.nn.Sequential(torch.nn.Linear(2, 2)))
+                self.register_parameter('x', nn.Parameter(torch.randn(3)))
+                self.register_parameter('y', nn.Parameter(torch.randn(3)))
+                self.z = nn.Parameter(torch.randn(3))
+
+            @torch.jit.export
+            def method(self):
+                names = [""]
+                vals = []
+                for name, parameter in self.named_parameters():
+                    names.append(name)
+                    vals.append(parameter + 2)
+
+                return names, vals
+
+            def forward(self, x):
+                return x
+
+        model = MyMod()
+        x = torch.jit.script(model)
+        z = self.getExportImportCopy(x)
+
+        self.assertEqual(z.method(), x.method())
+        self.assertEqual(z.method(), model.method())
+        self.assertEqual(x.method(), model.method())
+
+        names, _ = x.method()
+        self.assertTrue('z' in names)
 
     def test_static_if_prop(self):
         class MaybeHasAttr(torch.nn.Module):
