@@ -27,6 +27,10 @@ class TestVmapAPI(TestCase):
         expected_msg = 'Expected all tensors to have the same size in the mapped dimension'
         with self.assertRaisesRegex(ValueError, expected_msg):
             vmap(torch.mul)(x, y)
+        with self.assertRaisesRegex(ValueError, expected_msg):
+            vmap(lambda z: z[0] + z[1], in_dims=((0, 0),))((x, y))
+        with self.assertRaisesRegex(ValueError, expected_msg):
+            vmap(lambda z: z['x'] + z['y'], in_dims=({'x': 0, 'y': 0},))({'x': x, 'y': y})
 
     def test_func_with_no_inputs(self):
         expected_msg = 'got no inputs'
@@ -350,51 +354,68 @@ class TestVmapAPI(TestCase):
         result = vmap(vmap(foo, 1, 1), 1, 1)(x)
         self.assertEqual(result, x * 2)
 
+    def test_accepts_nested_inputs(self):
+        B0 = 2
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+
+        # Single layer of nesting
+        out = vmap(lambda z: z[0] + z[1])((x, y))
+        self.assertEqual(out, x + y)
+        out = vmap(lambda z: z[0] + z[1], in_dims=(0,))((x, y))
+        self.assertEqual(out, x + y)
+        out = vmap(lambda z: z[0] + z[1], in_dims=((0, 0),))((x, y))
+        self.assertEqual(out, x + y)
+
+        out = vmap(lambda z: z[0] + z[1])([x, y])
+        self.assertEqual(out, x + y)
+        out = vmap(lambda z: z[0] + z[1], in_dims=(0,))([x, y])
+        self.assertEqual(out, x + y)
+        out = vmap(lambda z: z[0] + z[1], in_dims=([0, 0],))([x, y])
+        self.assertEqual(out, x + y)
+
+        out = vmap(lambda z: z['x'] + z['y'])({'x': x, 'y': y})
+        self.assertEqual(out, x + y)
+        out = vmap(lambda z: z['x'] + z['y'], in_dims=(0,))({'x': x, 'y': y})
+        self.assertEqual(out, x + y)
+        out = vmap(lambda z: z['x'] + z['y'], in_dims=({'x': 0, 'y': 0},))({'x': x, 'y': y})
+        self.assertEqual(out, x + y)
+
+        # Multiple layers of nesting
+        out_fn = vmap(lambda z: z['x'][0] + z['x'][1][0] + z['y'][0] + z['y'][1])
+        out = out_fn({'x': [x, (x,)], 'y': [y, y]})
+        self.assertEqual(out, x + x + y + y)
+
     def test_in_dims_wrong_type_err_msg(self):
         x = torch.randn(3)
         y = torch.randn(3)
-        msg = 'expected `in_dims` to be int or tuple'
+        msg = r'expected `in_dims` to be int or a \(potentially nested\) tuple'
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, [0, 0])(x, y)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, set({0, 0}))(x, y)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, 'lol')(x, y)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda z: z[0] + z[1], in_dims=[0, 0])([x, y])
         # The following should not throw
         vmap(torch.mul, (0, 0))(x, y)
 
     def test_not_enough_in_dims_err_msg(self):
         x = torch.randn(3)
         y = torch.randn(3)
-        msg = r'expected one `in_dim` per input \(got \w+ inputs\)'
+        msg = r'in_dims is not compatible with the structure of `inputs`'
 
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, (0,))(x, y)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, (0, 0, 0))(x, y)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda z: z[0] + z[1], in_dims=([0],))([x, y])
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda z: z[0] + z[1], in_dims=((0, 0),))([x, y])
         # The following should not throw
         vmap(torch.mul, (0, 0))(x, y)
-
-    def test_in_dims_must_be_flat_tuple_err_msg(self):
-        msg = 'in_dims must be a flat tuple containing ints and/or Nones'
-
-        x = torch.randn(3)
-        y = torch.randn(3)
-        z = torch.randn(3)
-
-        def foo(xy):
-            return xy[0] * xy[1]
-
-        def bar(x, yz):
-            return x * yz[0] * yz[1]
-
-        # NB: jax supports all of the following, we don't yet.
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo, ((0, 0),))((x, y))
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(bar, (0, (0, 0)))(x, (y, z))
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo, ({0: 0, 1: 0},))({0: x, 1: y})
 
     def test_integer_in_dim_but_not_tensor_input_err_msg(self):
         def foo(xy):
@@ -406,26 +427,14 @@ class TestVmapAPI(TestCase):
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
 
-        # jax supports these, we too can in the future.
-        msg = 'Got in_dim=0 for input 0, but input 0 is not a Tensor'
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo)((x, y))
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo, (0,))((x, y))
-
-        # jax supports these as well, we too can in the future.
-        msg = 'Got in_dim=0 for input 1, but input 1 is not a Tensor'
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo)(x, (x, y))
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo, (0, 0))(x, (x, y))
-
         # the following are errors in jax (and will always be errors)
-        msg = 'Got in_dim=0 for input 1, but input 1 is not a Tensor'
+        msg = 'Got in_dim=0 for an input but the input is of type'
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.sum)(x, 0)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.sum, (0, 0))(x, 0)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda z: z[0] + z[1], in_dims=([0, 0],))([x, 1])
         # The following should not throw
         vmap(torch.sum, (0, None))(x, 0)
 
@@ -433,15 +442,20 @@ class TestVmapAPI(TestCase):
         def foo(x):
             return x * x
 
-        msg = r'Got in_dim=-?\w for input 0, but input 0 is a Tensor of dimensionality \w'
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+
+        msg = r'Got in_dim=-?\w for some input, but that input is a Tensor of dimensionality \w'
         with self.assertRaisesRegex(ValueError, msg):
             vmap(foo)(torch.randn([]))
         with self.assertRaisesRegex(ValueError, msg):
             vmap(foo, in_dims=(0,))(torch.randn([]))
         with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo, in_dims=(-1,))(torch.randn(2, 3))
+            vmap(foo, in_dims=(-1,))(x)
         with self.assertRaisesRegex(ValueError, msg):
-            vmap(foo, in_dims=(2,))(torch.randn(2, 3))
+            vmap(foo, in_dims=(2,))(y)
+        with self.assertRaisesRegex(ValueError, msg):
+            vmap(lambda z: z[0] + z[1], in_dims=([3, 0],))([x, y])
         # the following should not throw
         vmap(foo, in_dims=(0,))(torch.randn(2, 3))
         vmap(foo, in_dims=(1,))(torch.randn(2, 3))
@@ -1250,6 +1264,31 @@ class TestVmapOperators(Namespace.TestVmapBase):
              (torch.rand(B1, 2, B0, 5), 1, 0, 0), in_dims=(2, None, None, None))
         test(vmap(vmap(op, in_dims=(2, None, None, None)), in_dims=(0, None, None, None)),
              (torch.rand(B1, 2, B0, 5, B2), -1, 2, 3), in_dims=(2, None, None, None))
+
+    def test_new_empty(self):
+        # Empty is non-deterministic so we just check that the shape of the
+        # output tensor is what we expect and that the vmap fallback isn't used.
+        op = Tensor.new_empty
+
+        B0, B1 = 7, 11
+
+        result = vmap(lambda x: op(x, [2, 3]))(torch.randn(B0))
+        self.assertEqual(result.shape, [B0, 2, 3])
+
+        result = vmap(lambda x: op(x, []))(torch.randn(B0))
+        self.assertEqual(result.shape, [B0])
+
+        result = vmap(vmap(lambda x: op(x, [2, 3])))(torch.randn(B0, B1))
+        self.assertEqual(result.shape, [B0, B1, 2, 3])
+
+    def test_new_zeros(self):
+        op = Tensor.new_zeros
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        B0, B1 = 7, 11
+
+        test(lambda x: op(x, 2, 3), (torch.rand(B0),))
+        test(lambda x: op(x, []), (torch.rand(B0),))
+        test(vmap(lambda x: op(x, 3, 5)), (torch.rand(B0, B1),))
 
     def test_select(self):
         op = torch.select

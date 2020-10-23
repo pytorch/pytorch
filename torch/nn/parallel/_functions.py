@@ -10,10 +10,10 @@ class Broadcast(Function):
 
     @staticmethod
     def forward(ctx, target_gpus, *inputs):
-        assert all(map(lambda i: i.device.type != 'cpu', inputs)), (
+        assert all(i.device.type != 'cpu' for i in inputs), (
             'Broadcast function not implemented for CPU tensors'
         )
-        target_gpus = list(map(lambda x: _get_device_index(x, True), target_gpus))
+        target_gpus = [_get_device_index(x, True) for x in target_gpus]
         ctx.target_gpus = target_gpus
         if len(inputs) == 0:
             return tuple()
@@ -52,13 +52,13 @@ class Gather(Function):
 
     @staticmethod
     def forward(ctx, target_device, dim, *inputs):
-        assert all(map(lambda i: i.device.type != 'cpu', inputs)), (
+        assert all(i.device.type != 'cpu' for i in inputs), (
             'Gather function not implemented for CPU tensors'
         )
         target_device = _get_device_index(target_device, True)
         ctx.target_device = target_device
         ctx.dim = dim
-        ctx.input_gpus = tuple(map(lambda i: i.get_device(), inputs))
+        ctx.input_gpus = tuple(i.get_device() for i in inputs)
         if all(t.dim() == 0 for t in inputs) and dim == 0:
             inputs = tuple(t.view(1) for t in inputs)
             warnings.warn('Was asked to gather along dimension 0, but all '
@@ -67,7 +67,7 @@ class Gather(Function):
             ctx.unsqueezed_scalar = True
         else:
             ctx.unsqueezed_scalar = False
-        ctx.input_sizes = tuple(map(lambda i: i.size(ctx.dim), inputs))
+        ctx.input_sizes = tuple(i.size(ctx.dim) for i in inputs)
         return comm.gather(inputs, ctx.dim, ctx.target_device)
 
     @staticmethod
@@ -82,7 +82,7 @@ class Scatter(Function):
 
     @staticmethod
     def forward(ctx, target_gpus, chunk_sizes, dim, input):
-        target_gpus = list(map(lambda x: _get_device_index(x, True), target_gpus))
+        target_gpus = [_get_device_index(x, True) for x in target_gpus]
         ctx.dim = dim
         ctx.input_device = input.get_device() if input.device.type != "cpu" else -1
         streams = None
