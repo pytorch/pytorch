@@ -446,6 +446,7 @@ class Quantizer:
                         observed_node_names_set.add(node.name)
                 elif (isinstance(obj, Add) or isinstance(obj, Mul)) and obj.num_node_args == 1:
                     input_node = matched_nodes[-1]  # first node in the sequence
+
                     def input_is_observed(arg):
                         return isinstance(arg, Node) and arg.name in observed_node_names_set
                     # This is checking if one of the argument of add/mul
