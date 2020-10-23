@@ -302,11 +302,15 @@ pytorch_ios_params: &pytorch_ios_params
     op_list:
       type: string
       default: ""
+    use_metal:
+      type: string
+      default: "0"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     IOS_ARCH: << parameters.ios_arch >>
     IOS_PLATFORM: << parameters.ios_platform >>
     SELECTED_OP_LIST: << parameters.op_list >>
+    USE_PYTORCH_METAL: << parameters.use_metal >>
 
 pytorch_windows_params: &pytorch_windows_params
   parameters:
@@ -486,7 +490,7 @@ jobs:
           if [ -z "${BUILD_ONLY}" ]; then
             # Note [Special build images]
             # The xla build uses the same docker image as
-            # pytorch-linux-trusty-py3.6-gcc5.4-build. In the push step, we have to
+            # pytorch_linux_bionic_py3_6_clang9_build. In the push step, we have to
             # distinguish between them so the test can pick up the correct image.
             output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
             if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
@@ -780,7 +784,7 @@ jobs:
           no_output_timeout: "30m"
           command: |
             set -e
-            export IN_CIRCLECI=1
+            export IN_CI=1
             set +x
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
@@ -1269,7 +1273,7 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CIRCLECI=1
+            export IN_CI=1
 
             # Install sccache
             sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
@@ -1305,7 +1309,7 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CIRCLECI=1
+            export IN_CI=1
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
@@ -1553,7 +1557,7 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CIRCLECI=1
+            export IN_CI=1
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             export TCLLIBPATH="/usr/local/lib"
@@ -1584,6 +1588,7 @@ jobs:
             chmod a+x ${PROJ_ROOT}/scripts/build_ios.sh
             echo "IOS_ARCH: ${IOS_ARCH}"
             echo "IOS_PLATFORM: ${IOS_PLATFORM}"
+            echo "USE_PYTORCH_METAL": "${USE_METAL}"
 
             #check the custom build flag
             echo "SELECTED_OP_LIST: ${SELECTED_OP_LIST}"
@@ -1592,6 +1597,9 @@ jobs:
             fi
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
+            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
+              export USE_PYTORCH_METAL=${USE_METAL}
+            fi
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
       - run:
           name: Run Build Test
@@ -6379,6 +6387,12 @@ workflows:
   build:
     jobs:
       - docker_build_job:
+          name: "docker-pytorch-linux-bionic-cuda11.1-cudnn8-py3.6-gcc9"
+          image_name: "pytorch-linux-bionic-cuda11.1-cudnn8-py3.6-gcc9"
+      - docker_build_job:
+          name: "docker-pytorch-linux-bionic-cuda11.1-cudnn8-py3.8-gcc9"
+          image_name: "pytorch-linux-bionic-cuda11.1-cudnn8-py3.8-gcc9"
+      - docker_build_job:
           name: "docker-pytorch-linux-bionic-cuda11.0-cudnn8-py3.6-gcc9"
           image_name: "pytorch-linux-bionic-cuda11.0-cudnn8-py3.6-gcc9"
       - docker_build_job:
@@ -6411,6 +6425,9 @@ workflows:
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7"
           image_name: "pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7"
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
           image_name: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
@@ -6974,6 +6991,13 @@ workflows:
           ios_arch: arm64
           ios_platform: OS
           name: pytorch_ios_12_0_0_arm64_build
+      - pytorch_ios_build:
+          build_environment: pytorch-ios-12.0.0-arm64_metal_build
+          context: org-member
+          ios_arch: arm64
+          ios_platform: OS
+          name: pytorch_ios_12_0_0_arm64_metal_build
+          use_metal: "1"
       - pytorch_ios_build:
           build_environment: pytorch-ios-12.0.0-arm64_custom_build
           context: org-member
