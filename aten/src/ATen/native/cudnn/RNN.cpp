@@ -730,7 +730,6 @@ namespace cudnn_rnn {
     // because to extract flat_buf_datatype from flat_buf_options, we'd need to say
     // auto flat_buf_datatype = getCudnnDataTypeFromScalarType(typeMetaToScalarType(options.dtype()));
     // typeMetaToScalarType is a surprisingly nontrivial function.  We should avoid it if we can.
-
     TORCH_CHECK(weight_arr.size() > 0,
                 "copy_weights_to_flat_buf_views: cannot flatten empty weight list");
 
@@ -757,7 +756,6 @@ namespace cudnn_rnn {
     std::vector<Tensor> params_arr;
     size_t params_stride0;
     std::tie(params_arr, params_stride0) = get_parameters(handle, rnn, rnn_desc, x_desc, w_desc, weight_buf, include_bias);
-
     MatrixRef<Tensor> weight{weight_arr, static_cast<size_t>(weight_stride0)},
                       params{params_arr, params_stride0};
 
@@ -765,7 +763,6 @@ namespace cudnn_rnn {
     // TODO (igor): this will probably break if projections + no biases are used
     // Copy weights
     _viewOrCopyParams(weight, params, /*copy=*/true, allow_type_change);
-
     if (set_orig_weights_to_flat_buf) {
       // Update the storage
       for (size_t i = 0; i < weight.size(0); i++) {
@@ -777,7 +774,6 @@ namespace cudnn_rnn {
         }
       }
     }
-
     return std::make_tuple(weight_buf, params_arr);
   }
 

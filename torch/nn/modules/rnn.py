@@ -558,7 +558,6 @@ class LSTM(RNNBase):
 
     def check_forward_args(self, input: Tensor, hidden: Tuple[Tensor, Tensor], batch_sizes: Optional[Tensor]):
         self.check_input(input, batch_sizes)
-
         self.check_hidden_size(hidden[0], self.get_expected_hidden_size(input, batch_sizes),
                                'Expected hidden[0] size {}, got {}')
         self.check_hidden_size(hidden[1], self.get_expected_cell_size(input, batch_sizes),

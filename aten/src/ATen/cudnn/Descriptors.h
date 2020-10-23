@@ -237,17 +237,11 @@ struct TORCH_CUDA_API RNNDescriptor
            cudnnRNNInputMode_t input_mode, cudnnDirectionMode_t bidirectional,
            cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnDataType_t input_type, cudnnRNNAlgo_t algo) {
     dropout_desc_ = std::move(dropout_desc);
-  
-    int unified_size = hidden_size;
-    bool use_projection = proj_size != 0 && hidden_size < proj_size;
-    if (use_projection) {
-      unified_size = proj_size;
-    }
 
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v6(
           handle,
           mut_desc(),
-          unified_size,
+          hidden_size,
           num_layers,
           dropout_desc_.desc(),
           input_mode,
@@ -255,11 +249,11 @@ struct TORCH_CUDA_API RNNDescriptor
           mode,
           algo,
           datatype));
-    if (use_projection) {
+    if (proj_size != 0 && proj_size != hidden_size) {
       AT_CUDNN_CHECK(cudnnSetRNNProjectionLayers(
             handle, 
             /*rnnDesc=*/mut_desc(),
-            /*recProjSize=*/hidden_size, 
+            /*recProjSize=*/proj_size,
             /*outProjSize=*/0));
     }
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
