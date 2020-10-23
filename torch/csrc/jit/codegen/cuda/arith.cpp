@@ -444,7 +444,8 @@ TensorView* reductionOp(
     BinaryOpType reduction_op_type,
     const std::vector<int>& axes,
     Val* init,
-    TensorView* tv) {
+    TensorView* tv,
+    bool keep_dim /*=false*/) {
   TORCH_CHECK(
       init->isConstScalar(),
       "Cannot create a reduction operation where the initial value is not a const scalar.");
@@ -477,11 +478,24 @@ TensorView* reductionOp(
   if (init->getDataType().value() != tv->getDataType().value())
     init = castOp(tv->getDataType().value(), init);
   new ReductionOp(reduction_op_type, init, out, tv);
+
+  if (keep_dim) {
+    auto tv_root = TensorDomain::noReductions(tv->getRootDomain());
+    std::vector<bool> is_broadcast(tv_root.size(), false);
+    for (int axis : axes) {
+      is_broadcast[axis] = true;
+    }
+
+    out = broadcast(out, is_broadcast);
+  }
   return out;
 }
 
-TensorView* sum(TensorView* v1, const std::vector<int>& axes) {
-  Val* init;
+TensorView* sum(
+    TensorView* v1,
+    const std::vector<int>& axes,
+    bool keep_dim /*=false*/) {
+  Val* init = nullptr;
   switch (v1->getDataType().value()) {
     case (DataType::Float):
       init = new Float(0.0);
@@ -496,7 +510,7 @@ TensorView* sum(TensorView* v1, const std::vector<int>& axes) {
           v1->getDataType().value());
   }
 
-  return reductionOp(BinaryOpType::Add, axes, init, v1);
+  return reductionOp(BinaryOpType::Add, axes, init, v1, keep_dim);
 }
 
 TensorView* broadcast(
@@ -730,6 +744,54 @@ Val* clamp(Val* in, Val* min_val, Val* max_val) {
 
 TensorView* clamp(TensorView* in, Val* min_val, Val* max_val) {
   return clamp(in->as<Val>(), min_val, max_val)->as<TensorView>();
+}
+
+// sum_to operator
+
+TensorView* sum_to(TensorView* in, const std::vector<Int*>& sum_to_size) {
+  const auto& root = TensorDomain::noReductions(in->getRootDomain());
+
+  TORCH_CHECK(
+      root.size() >= sum_to_size.size(),
+      "sum_to: Error trying to reduce",
+      in,
+      "into a shape of size",
+      sum_to_size.size());
+
+  // If no reduction is needed sum_to returns the input tv
+  TensorView* out = in;
+
+  const int64_t leading_dims = root.size() - sum_to_size.size();
+
+  // Generate reduction axes for leading dims
+  std::vector<int> reduce_dims(leading_dims);
+  std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
+
+  // Generate reduction axes for dims within sum_to_size
+  std::vector<bool> inner_red_dims(sum_to_size.size(), false);
+  bool reduction_within_shape = false;
+
+  // Reduce rest of the dims with keep_dim
+  for (int i = leading_dims; i < root.size(); i++) {
+    if (sum_to_size[i - leading_dims]->isOneInt() &&
+        !root[i]->rawExtent()->isOneInt()) {
+      inner_red_dims[i - leading_dims] = true;
+      reduce_dims.push_back(i);
+      reduction_within_shape = true;
+    }
+  }
+
+  // Reduction step
+  if (!reduce_dims.empty()) {
+    out = sum(in, reduce_dims);
+  }
+
+  // Broadcast back reduced dims within shape
+  if (reduction_within_shape) {
+    out = broadcast(out, inner_red_dims);
+  }
+
+  return out;
 }
 
 } // namespace cuda

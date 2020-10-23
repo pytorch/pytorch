@@ -319,6 +319,15 @@ class TORCH_CUDA_API IterDomain : public Val {
     return (isBlockDim() || isThreadDim());
   }
 
+  // Convert to strided broadcast, used for supporting broadcast on output
+  void toStridedBroadcast() {
+    TORCH_INTERNAL_ASSERT(
+        isBroadcast(),
+        "toStridedBroadCast: converting an non-broadcast iterdomain",
+        this);
+    iter_type_ = IterType::BroadcastWithStride;
+  }
+
   void parallelize(ParallelType t) {
     parallel_type_ = t;
 
