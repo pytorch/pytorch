@@ -248,6 +248,10 @@ Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
         input->setType(v_type);
       }
       return input;
+    } else if (v_n->kind() == ::c10::prim::PackPadded) {
+      auto input = n_graph->addInput();
+      input->copyMetadata(v_n->input(0));
+      return input;
     } else {
       // If the input is not constant, we cannot depend on its value
       // in shape inference. Set it to graph input in the new graph,
@@ -394,11 +398,20 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
         "ONNX graph to run shape inference: ", prettyPrint(*model_proto));
 
     // infer shape
-    onnx::shape_inference::InferShapes(*model_proto);
+    try {
+      GRAPH_DEBUG("Run shape inference under try catch.");
+      onnx::shape_inference::InferShapes(*model_proto);
+      UpdateOutputTypeByONNXProto(n, clone_node, *model_proto, symbol_map);
+    } catch (onnx::InferenceError& ex) {
+      // TODO: Improve the warning hanling.
+      GRAPH_DEBUG("ONNX shape inference fails with: ", ex.what());
+    }
+    // } catch (std::runtime_error& ex) {
+    //   // TODO: remove this once InferenceError is thrown instead of runtime_error from ONNX.
+    //   GRAPH_DEBUG("ONNX shape inference fails with node: ", n->kind().toDisplayString());
+    // }
     GRAPH_DEBUG(
         "ONNX graph after shape inference: ", prettyPrint(*model_proto));
-
-    UpdateOutputTypeByONNXProto(n, clone_node, *model_proto, symbol_map);
   }
 
   SpecialPostProcess(n);
