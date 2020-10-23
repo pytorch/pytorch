@@ -516,7 +516,7 @@ static PyMethodDef torch_functions[] = {
   {"range", castPyCFunctionWithKeywords(THPVariable_range), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"saddmm", castPyCFunctionWithKeywords(THPVariable_sspaddmm), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"sparse_coo_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_coo_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-{"sparse_gcs_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_gcs_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"sparse_gcs_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_gcs_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"_sparse_coo_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_coo_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"_validate_sparse_coo_tensor_args", castPyCFunctionWithKeywords(THPVariable__validate_sparse_coo_tensor_args), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"spmm", castPyCFunctionWithKeywords(THPVariable_mm), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},

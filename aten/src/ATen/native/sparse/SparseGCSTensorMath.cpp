@@ -75,6 +75,20 @@ Tensor& addmm_out_sparse_gcs_dense_cpu(
    return r;
 }
 
+Tensor _sparse_gcs_addmm(
+  const Tensor& t,
+  const SparseTensor& sparse,
+  const Tensor& dense,
+  Scalar beta,
+  Scalar alpha
+) {
+  // _sparse_addmm forward is functionally equivalent to addmm; it's
+  // just the backward that is different.  This technically does an
+  // unnecessary redispatch, I was too lazy to make it not do that
+  return at::addmm(t, sparse, dense, beta, alpha);
+}
+
+
 SparseTensor& _sparse_gcs_mm_out(
   SparseTensor& result,
   const SparseTensor& sparse,

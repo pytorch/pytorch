@@ -926,6 +926,7 @@ class Tensor(torch._C._TensorBase):
         # See Note [rename_ / rename API]
         return update_names(self, names, rename_map, inplace=False)
 
+    # Convert dense tensor to sparse GCS format.
     def to_sparse_gcs(self, reduction, fill_value):
         def make_strides(shape, dims=None):
             if dims is None:

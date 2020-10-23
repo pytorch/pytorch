@@ -4544,7 +4544,7 @@
 # sparse tensor.
 
 - func: sparse_gcs_tensor.pointers_indices(Tensor pointers, Tensor indices, Tensor values, Tensor reduction, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
-  use_c10_dispatcher: full
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   
 - func: sparse_coo_tensor.size(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
