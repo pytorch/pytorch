@@ -64,8 +64,7 @@ def _raise_not_supported(name):
 class _RemoteModule(nn.Module):
     def __init__(
         self,
-        on: str,
-        device: torch.device,
+        remote_device: str,
         module_cls: nn.Module,
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
@@ -100,8 +99,9 @@ class _RemoteModule(nn.Module):
         ``def forward_async(input: Tensor) -> Future[Tensor]:``.
 
         Arguments:
-            on (str or WorkerInfo): id or name of the destination worker.
-            device (torch.device): Device on the destination worker where we‘d like to place this module.
+            remote_device (str): Device on the destination worker where we‘d like to place this module.
+                The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
+                E.g., "trainer0/cpu", "ps0/cuda:0".
             module_cls (nn.Module): For example,
                 >>> class MyModule(nn.Module):
                 >>>     def forward(input):
@@ -132,7 +132,7 @@ class _RemoteModule(nn.Module):
             >>>
             >>> rpc.init_rpc("worker0", rank=0, world_size=2)
             >>> remote_linear_module = RemoteModule(
-            >>>     "worker1", "cpu", nn.Linear, args=(20, 30),
+            >>>     "worker1/cpu", nn.Linear, args=(20, 30),
             >>> )
             >>> input = torch.randn(128, 20)
             >>> ret_fut = remote_linear_module.forward_async(input)
@@ -155,18 +155,22 @@ class _RemoteModule(nn.Module):
         args = args if args is not None else ()
         kwargs = kwargs if kwargs is not None else {}
 
-        self.on = on
+        [self.on, self.device] = remote_device.split("/")
 
         if _module_interface_cls is not None:
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
             self.is_scriptable = True
 
             # Instantiate template on remote side.
-            fut = rpc.rpc_async(on, _instantiate_template, (_module_interface_cls,))
+            fut = rpc.rpc_async(
+                self.on, _instantiate_template, (_module_interface_cls,)
+            )
 
             # Instantiate template on local side.
-            generated_module = instantiator.instantiate_scriptable_remote_module_template(
-                _module_interface_cls
+            generated_module = (
+                instantiator.instantiate_scriptable_remote_module_template(
+                    _module_interface_cls
+                )
             )
             generated_methods = generated_module._generated_methods
 
@@ -178,9 +182,9 @@ class _RemoteModule(nn.Module):
 
         # Create the module on the remote side.
         self.module_rref = rpc.rpc_sync(
-            on,
+            self.on,
             _create_module,
-            (module_cls, args, kwargs, device, _module_interface_cls),
+            (module_cls, args, kwargs, self.device, _module_interface_cls),
         )
 
         # Install generated methods.
@@ -329,8 +333,9 @@ class RemoteModule(_RemoteModule):
         ``def forward_async(input: Tensor) -> Future[Tensor]:``.
 
     Arguments:
-        to (str or WorkerInfo): id or name of the destination worker.
-        device (torch.device): Device on the destination worker where we‘d like to place this module.
+        remote_device (str): Device on the destination worker where we‘d like to place this module.
+            The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
+            E.g., "trainer0/cpu", "ps0/cuda:0".
         module_cls (nn.Module): For example,
             >>> class MyModule(nn.Module):
             >>>     def forward(input):
@@ -357,7 +362,7 @@ class RemoteModule(_RemoteModule):
         >>>
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> remote_linear_module = RemoteModule(
-        >>>     "worker1", nn.Linear, args=(20, 30),
+        >>>     "worker1/cpu", nn.Linear, args=(20, 30),
         >>> )
         >>> input = torch.randn(128, 20)
         >>> ret_fut = remote_linear_module.forward_async(input)
@@ -374,10 +379,9 @@ class RemoteModule(_RemoteModule):
 
     def __init__(
         self,
-        on: str,
-        device: torch.device,
+        remote_device: str,
         module_cls: nn.Module,
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
     ):
-        super().__init__(on, device, module_cls, args, kwargs)
+        super().__init__(remote_device, module_cls, args, kwargs)

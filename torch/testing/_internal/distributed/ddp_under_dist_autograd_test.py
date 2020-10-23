@@ -20,7 +20,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm,
 )
-from torch.testing._internal.dist_utils import dist_init, INIT_METHOD_TEMPLATE
+from torch.testing._internal.dist_utils import INIT_METHOD_TEMPLATE, dist_init
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -620,7 +620,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
         )
 
         remote_layer1 = RemoteModule(
-            "worker0", device="cpu", module_cls=nn.Linear, args=(10, 5, False)
+            remote_device="worker0/cpu", module_cls=nn.Linear, args=(10, 5, False)
         )
         layer1 = nn.Linear(10, 5, False)
         # Start with the same parameters for remote and local
@@ -667,7 +667,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
         )
 
         remote_layer1 = RemoteModule(
-            "worker0", device="cpu", module_cls=nn.Linear, args=(10, 7, False)
+            remote_device="worker0/cpu", module_cls=nn.Linear, args=(10, 7, False)
         )
         layer1 = nn.Linear(10, 7, False)
         # Start with the same parameters for remote and local
@@ -677,7 +677,7 @@ class DdpComparisonTest(RpcAgentTestFixture):
         ddp_layer2 = DistributedDataParallel(layer2, device_ids=[self.rank])
 
         remote_layer3 = RemoteModule(
-            "worker0", device="cpu", module_cls=nn.Linear, args=(5, 3, False)
+            remote_device="worker0/cpu", module_cls=nn.Linear, args=(5, 3, False)
         )
         layer3 = nn.Linear(5, 3, False)
         # Start with the same parameters for remote and local

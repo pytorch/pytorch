@@ -84,17 +84,17 @@ class RemoteModuleTest(RpcAgentTestFixture):
 
         args = (1,)
         kwargs = dict(first_kwarg=2)
+        remote_device = "{}/{}".format(dst_worker_name, device)
 
         if ModuleCreationMode.MODULE_CTOR in modes:
             remote_module = RemoteModule(
-                dst_worker_name, device, MyModule, args, kwargs
+                remote_device, MyModule, args, kwargs
             )
             yield remote_module
 
         if ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE in modes:
             remote_module = _RemoteModule(
-                dst_worker_name,
-                device,
+                remote_device,
                 create_scripted_module,
                 args,
                 kwargs,
@@ -108,6 +108,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
         if self.rank != 0:
             return
         dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+        remote_device = "{}/cpu".format(dst_worker_name)
         args = (1,)
         kwargs = dict(first_kwarg=2)
 
@@ -115,13 +116,13 @@ class RemoteModuleTest(RpcAgentTestFixture):
             ValueError,
             r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
-            RemoteModule(dst_worker_name, "cpu", BadModule, args, kwargs)
+            RemoteModule(remote_device, BadModule, args, kwargs)
 
         with self.assertRaisesRegex(
             ValueError,
             r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
-            RemoteModule(dst_worker_name, "cpu", BadModule, args, kwargs)
+            RemoteModule(remote_device, BadModule, args, kwargs)
 
     @dist_utils.dist_init
     def test_forward_async(self):
