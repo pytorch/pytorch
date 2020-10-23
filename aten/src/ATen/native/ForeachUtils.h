@@ -168,8 +168,6 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2) {
 #endif
 }
 
-bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList tensors3) {
-
 bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList tensors3, Scalar scalar) {
   TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors2.size());
