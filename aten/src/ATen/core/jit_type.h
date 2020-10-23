@@ -1285,6 +1285,7 @@ using NumberTypePtr = std::shared_ptr<NumberType>;
 // Subtype hierarchy for Number Types (NumberType as the base type):
 // IntType <: NumberType
 // FloatType <: NumberType
+// ComplexDoubleType <:NumberType
 struct CAFFE2_API NumberType : public Type {
   static NumberTypePtr create() {
     return NumberTypePtr(new NumberType()); // NOLINT(modernize-make-shared)

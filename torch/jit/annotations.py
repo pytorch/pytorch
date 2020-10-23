@@ -359,6 +359,7 @@ __all__ = [
     'TensorType',
     'TupleType',
     'FloatType',
+    'ComplexDoubleType'
     'IntType',
     'ListType',
     'StringType',

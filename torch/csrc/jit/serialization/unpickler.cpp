@@ -56,6 +56,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case TensorType::Kind:
       case NumberType::Kind:
       case FloatType::Kind:
+      case ComplexDoubleType::Kind:
       case IntType::Kind:
       case NoneType::Kind:
       case GeneratorType::Kind:
@@ -511,6 +512,8 @@ void Unpickler::readGlobal(
         elem_type = TensorType::get();
       } else if (class_name == "build_doublelist") {
         elem_type = FloatType::get();
+      } else if (class_name == "build_complexdoublelist") {
+        elem_type = ComplexDoubleType::get();
       } else if (class_name == "build_boollist") {
         elem_type = BoolType::get();
       } else {

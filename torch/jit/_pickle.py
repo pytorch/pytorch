@@ -18,6 +18,8 @@ def build_tensorlist(data):
 def build_doublelist(data):
     return data
 
+def build_complexdoublelist(data):
+    return data
 
 def build_boollist(data):
     return data

@@ -77,6 +77,12 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
         pushDouble(item);
       }
     });
+  } else if (ivalue.isComplexDoubleList()) {
+    pushSpecializedList(ivalue, "build_complexdoublelist", [=](const IValue& ivalue) {
+      for (double item : ivalue.toComplexDoubleVector()) {
+        pushDouble(item);
+      }
+    });
   } else if (ivalue.isBoolList()) {
     pushSpecializedList(ivalue, "build_boollist", [=](const IValue& ivalue) {
       for (bool item : ivalue.toBoolList()) {

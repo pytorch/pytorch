@@ -558,6 +558,8 @@ inline IValue toIValue(
     }
     case TypeKind::FloatType:
       return py::cast<double>(obj);
+    case TypeKind::ComplexDoubleType:
+      return py::cast<c10::complex<double>>(obj);
     case TypeKind::IntType:
     // TODO(xintchen): Handling LayoutType and ScalarTypeType correctly.
     case TypeKind::LayoutType:
