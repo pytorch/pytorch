@@ -48,7 +48,7 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   // Computes equality closeness
   Tensor close = self == other;
   if (equal_nan && self.is_floating_point()) {
-      close.__ior__((~(self == self)).__iand__(~(other == other)));
+      close.__ior__((self != self).__iand__(other != other));
   }
 
   // Note [closeness error computation]
@@ -79,7 +79,7 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
 }
 
 Tensor isnan(const Tensor& self) {
-  return at::logical_not(self == self);
+  return self != self;
 }
 
 Tensor isreal(const Tensor& self) {

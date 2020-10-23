@@ -860,18 +860,6 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
     .build();
 }
 
-TensorIterator TensorIterator::comparison_op_skip_promote_output_types(
-    Tensor& out, const Tensor& a, const Tensor& b) {
-  return TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .add_output(out)
-    .add_input(a)
-    .add_input(b)
-    .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true)
-    .build();
-}
-
 TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
   return TensorIteratorConfig()
     .set_check_mem_overlap(true)

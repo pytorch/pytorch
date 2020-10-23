@@ -159,7 +159,6 @@ struct CAFFE2_API TensorIterator {
   static TensorIterator binary_float_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b);
-  static TensorIterator comparison_op_skip_promote_output_types(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator unary_op(Tensor& out, const Tensor& a);
   static TensorIterator unary_float_op(Tensor& out, const Tensor& a);
   static TensorIterator nullary_op(Tensor& out);
