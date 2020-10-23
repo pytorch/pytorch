@@ -663,7 +663,7 @@ Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tenso
     return mask * (grad / mask.sum());
   } else {
     auto mask = value.isnan().item<bool>() ? input.isnan() : input == value;
-    return at::zeros_like(input).masked_fill_(mask, grad / mask.sum());
+    return grad.new_zeros(input.sizes(), input.options()).masked_fill_(mask, grad / mask.sum());
   }
 }
 

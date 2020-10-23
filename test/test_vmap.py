@@ -1762,6 +1762,21 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(torch.log1p, (x,), {})
         self._batched_grad_grad_test(torch.log1p, (x,), {})
 
+    @allowVmapFallbackUsage
+    def test_max(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(torch.max, (x,), {})
+
+    @allowVmapFallbackUsage
+    def test_median(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(torch.median, (x,), {})
+
+    @allowVmapFallbackUsage
+    def test_min(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(torch.min, (x,), {})
+
     def test_permute(self, device):
         x = torch.randn(2, 3, 5, requires_grad=True, device=device)
 
