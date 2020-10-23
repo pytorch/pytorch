@@ -1008,7 +1008,7 @@ void Reducer::prepare_for_backward(
   for (const auto& it : gradAccToVariablesMap_) {
     // If the accumulator function is present in the graph, we know
     // a gradient will be computed for the corresponding parameter.
-    if (seen.count(it.first) <= 0) {
+    if (seen.count(it.first) == 0) {
       auto& indices = it.second;
       unused_parameters_.reserve(unused_parameters_.size() + indices.size());
       unused_parameters_.insert(
