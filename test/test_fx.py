@@ -4,11 +4,16 @@ import operator
 import numbers
 import pickle
 import copy
+import sys
+import functools
+import contextlib
 from pathlib import Path
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
 from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
 from torch.fx.experimental.subgraph_creation_example import split_module
+from torch.fx.immutable_collections import immutable_dict, immutable_list
+from copy import deepcopy
 
 from torch.fx.proxy import TraceError
 
@@ -109,6 +114,16 @@ class TestFX(JitTestCase):
 
         t = T()
         self.checkGraphModule(t, (torch.rand(1), torch.rand(1)), {'foo': torch.rand(1)})
+
+    def test_args_kwargs_no_self(self):
+        class T(torch.nn.Module):
+            def forward(*args, **kwargs):  # noqa: B902
+                self = args[0]
+                return torch.relu(args[1])
+
+        t = T()
+        with self.assertRaisesRegex(RuntimeError, r'cannot be part of \*args expansion'):
+            self.checkGraphModule(t, (torch.rand(1), torch.rand(1)), {'foo': torch.rand(1)})
 
     def test_fx_shifts(self):
         class MyModule(torch.nn.Module):
@@ -596,7 +611,7 @@ class TestFX(JitTestCase):
                 return self.sa(*x)
 
         ul = UnpacksList()
-        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be unpacked as function argument'):
+        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be iterated.'):
             symbolic_trace(ul)
 
     def test_unpack_dict_better_error(self):
@@ -613,7 +628,7 @@ class TestFX(JitTestCase):
                 return self.sk(**x)
 
         ud = UnpacksDict()
-        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be unpacked as function argument'):
+        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be iterated.'):
             symbolic_trace(ud)
 
     def test_torch_custom_ops(self):
@@ -782,6 +797,39 @@ class TestFX(JitTestCase):
         fxed_scripted = torch.jit.script(fxed)
         fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
 
+    def test_wrapped_method(self):
+        def wrap_with_relu(fn):
+            @functools.wraps(fn)
+            def wrapper(*args, **kwargs):
+                return torch.relu(fn(*args, **kwargs))
+            return wrapper
+
+        class Foo(torch.nn.Module):
+            @wrap_with_relu
+            def forward(self, x, w):
+                return torch.matmul(x, w)
+
+        f = Foo()
+        traced = symbolic_trace(f)
+        x, w = torch.rand(3, 4), torch.rand(4, 4)
+        self.assertTrue(any(n.target == torch.relu for n in traced.graph.nodes))
+
+    def test_ctx_mgr(self):
+        @contextlib.contextmanager
+        def do_nothing():
+            yield
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @do_nothing()
+            def forward(self, x):
+                return torch.relu(x)
+
+        m = M()
+        self.checkGraphModule(m, (torch.rand(3, 4),))
+
     def test_typename_print(self):
         graph : torch.fx.Graph = torch.fx.Graph()
         x : torch.fx.Node = graph.create_node('placeholder', 'x')
@@ -827,6 +875,27 @@ class TestFX(JitTestCase):
 
         self.assertEqual(orig_out, submodules_out)
 
+    def test_deepcopy_recursion_depth(self):
+        depth = sys.getrecursionlimit() + 20
+
+        g = torch.fx.Graph()
+        x = g.placeholder('x')
+        for i in range(depth):
+            x = g.call_function(torch.relu, (x,))
+        g.output(x)
+
+        copied_graph = copy.deepcopy(g)
+
+        val_map = {}
+        for orig_node, new_node in zip(g.nodes, copied_graph.nodes):
+            val_map[orig_node] = new_node
+
+        for orig_node, new_node in zip(g.nodes, copied_graph.nodes):
+            orig_users = set(orig_node.users.keys())
+            orig_users_equiv = set(val_map[u] for u in orig_users)
+            new_users = set(new_node.users.keys())
+            self.assertEqual(orig_users_equiv, new_users)
+
     @skipIfNoTorchVision
     def test_replace_uses(self):
         rn18 = resnet18()
@@ -842,7 +911,7 @@ class TestFX(JitTestCase):
         to_erase = []
         for node in rn18_traced.graph.nodes:
             if node.op == 'call_function' and node.target in [torch.relu, torch.nn.functional.relu]:
-                kwargs = node.kwargs
+                kwargs = node.kwargs.copy()
                 # Neg doesn't have in-place
                 kwargs.pop('inplace')
                 with rn18_traced.graph.inserting_before(node):
@@ -896,6 +965,13 @@ class TestFX(JitTestCase):
             if node.target in [operator.add, torch.relu]:
                 with self.assertRaisesRegex(RuntimeError, 'but it still had .* users in the graph'):
                     traced.graph.erase_node(node)
+
+    def test_copy_it(self):
+        d = immutable_dict([(3, 4), (5, 6)])
+        l = immutable_list([(3, 4), (5, 6)])
+
+        self.assertEqual(d, deepcopy(d))
+        self.assertEqual(l, deepcopy(l))
 
     def test_find_uses(self):
         graph = torch.fx.Graph()

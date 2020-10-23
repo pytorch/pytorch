@@ -7,6 +7,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/utils/python_arg_parsing.h"
+#include "torch/csrc/utils/pycfunction_helpers.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/structseq.h"
 
@@ -71,7 +72,8 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
 ${py_forwards}
 
 static PyMethodDef nn_functions[] = {
-  {"_parse_to", (PyCFunction)(void(*)(void))THPVariable__parse_to, METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_parse_to", castPyCFunctionWithKeywords(THPVariable__parse_to),
+    METH_VARARGS | METH_KEYWORDS, nullptr},
   ${py_method_defs}
   {NULL}
 };

@@ -16,20 +16,14 @@ from torch.quantization import (
 )
 
 from ..quantization_mappings import (
-    get_qat_module_mappings,
-)
-from ..custom_module_class_mappings import (
-    is_custom_module_class,
-    get_observed_custom_module_class,
-    mark_observed_custom_module,
-    is_observed_custom_module,
+    get_default_qat_module_mappings,
 )
 
 from ..quantize import _remove_qconfig
 
 from .pattern_utils import (
     is_match,
-    get_quant_patterns,
+    get_default_quant_patterns,
 )
 
 from .standalone_module import (
@@ -123,7 +117,6 @@ def graph_module_from_producer_nodes(root, producer_nodes):
     graph_module = GraphModule(root, graph)
     return graph_module
 
-
 def assert_and_get_unique_device(module):
     """
     Returns the unique device for a module, or None if no device is found.
@@ -140,7 +133,8 @@ def assert_and_get_unique_device(module):
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
-            isinstance(module, torch.quantization.FakeQuantize))
+            isinstance(module, torch.quantization.FakeQuantize) or
+            isinstance(module, torch.quantization.FakeQuantizeBase))
 
 def is_submodule_of_fake_quant(name, module, named_modules):
     parent_name, _ = _parent_name(name)
@@ -236,8 +230,11 @@ class Quantizer:
         self.patterns = None
 
 
-    def _qat_swap_modules(self, root):
-        convert(root, mapping=get_qat_module_mappings(), inplace=True, remove_qconfig=False)
+    def _qat_swap_modules(self, root, additional_qat_module_mapping):
+        all_mappings = get_default_qat_module_mappings().copy()
+        for k, v in additional_qat_module_mapping.items():
+            all_mappings[k] = v
+        convert(root, mapping=all_mappings, inplace=True, remove_qconfig=False)
 
     def _generate_qconfig_map(self,
                               root,
@@ -330,13 +327,14 @@ class Quantizer:
             prepare_custom_config_dict = {}
         if not inplace:
             model = copy.deepcopy(model)
-        self.patterns = get_quant_patterns()
+        self.patterns = get_default_quant_patterns()
 
         flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
         # TODO: support regex as well
         propagate_qconfig_(model, flattened_qconfig_dict)
         if model.training:
-            self._qat_swap_modules(model)
+            additional_qat_module_mapping = prepare_custom_config_dict.get("additioanl_qat_module_mapping", {})
+            self._qat_swap_modules(model, additional_qat_module_mapping)
 
         self.modules = dict(model.named_modules())
 
@@ -346,8 +344,9 @@ class Quantizer:
 
         # match the patterns that will get quantized
         standalone_module_names = prepare_custom_config_dict.get("standalone_module_name", None)
+        custom_module_class_mapping = prepare_custom_config_dict.get("float_to_observed_custom_module_class", None)
         matches = self._find_matches(
-            model.graph, self.modules, self.patterns, standalone_module_names)
+            model.graph, self.modules, self.patterns, standalone_module_names, custom_module_class_mapping)
 
         # find _inputs_ to matched nodes that are not quantized, these
         # have to be quantized, which requires measuring stats,
@@ -402,10 +401,9 @@ class Quantizer:
                 if isinstance(obj, CustomModuleQuantizeHandler):
                     custom_module = self.modules[node.target]
                     observed_custom_module_class = \
-                        get_observed_custom_module_class(type(custom_module))
+                        custom_module_class_mapping[type(custom_module)]
                     observed_custom_module = \
                         observed_custom_module_class.from_float(custom_module)
-                    mark_observed_custom_module(observed_custom_module, type(custom_module))
                     parent_name, name = _parent_name(node.target)
                     setattr(self.modules[parent_name], name, observed_custom_module)
 
@@ -568,7 +566,10 @@ class Quantizer:
         model.eval().cpu()
         self.modules = dict(model.named_modules())
 
-        matches = self._find_matches(model.graph, self.modules, self.patterns)
+        custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", None)
+        matches = self._find_matches(
+            model.graph, self.modules, self.patterns,
+            custom_module_class_mapping=custom_module_class_mapping)
 
         quants = self._find_quants(model.graph, matches)
 
@@ -671,7 +672,7 @@ class Quantizer:
                     result = self.quantized_graph.node_copy(node, load_non_quantized)
                     quantized = False
                 else:
-                    result = obj.convert(self, node, load_arg, debug=debug)
+                    result = obj.convert(self, node, load_arg, debug=debug, convert_custom_config_dict=convert_custom_config_dict)
                     if node.op == 'call_module' and is_observed_standalone_module(self.modules[node.target]):
                         quantized = self.modules[node.target]._output_is_observed
                     else:
@@ -812,7 +813,9 @@ class Quantizer:
             quantized = self._fold_weight(quantized)
         return quantized
 
-    def _find_matches(self, graph, modules, patterns, standalone_module_names=None):
+    def _find_matches(
+            self, graph, modules, patterns,
+            standalone_module_names=None, custom_module_class_mapping=None):
         """
         Matches the nodes in the input graph to quantization patterns, and
         outputs the information needed to quantize them in future steps.
@@ -833,6 +836,9 @@ class Quantizer:
           ...
         }
         """
+        if custom_module_class_mapping is None:
+            custom_module_class_mapping = {}
+
         match_map = {}
         all_matched = set()
 
@@ -861,8 +867,7 @@ class Quantizer:
         # add custom module instances to the match result
         for node in graph.nodes:
             if node.op == 'call_module' and \
-               (is_custom_module_class(type(self.modules[node.target])) or
-                    is_observed_custom_module(self.modules[node.target])):
+               type(self.modules[node.target]) in custom_module_class_mapping:
                 custom_module_qconfig = self.qconfig_map[node.name]
                 match_map[node.name] = (
                     node, [node], CustomModuleQuantizeHandler(self, node), custom_module_qconfig)

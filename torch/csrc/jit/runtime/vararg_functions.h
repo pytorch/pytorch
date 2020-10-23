@@ -11,6 +11,8 @@ void tupleUnpack(Stack& stack);
 
 void format(Stack& stack, size_t num_inputs);
 
+void percentFormat(Stack& stack, size_t num_inputs);
+
 void listUnpack(Stack& stack, size_t num_outputs);
 
 void tupleConstruct(Stack& stack, size_t num_inputs);

@@ -44,7 +44,7 @@ try:
 except ImportError:
     _GLOO_AVAILABLE = False
 
-# Some reduce ops are not supported by complex numbers.
+# Some reduce ops are not supported by complex numbers and will result in an error.
 # We currently provide complex support to the distributed API by viewing
 # complex tensors as real (torch.view_as_real), meaning that calling
 # these unsupported ops will return garbage values rather than error out.
@@ -52,7 +52,8 @@ except ImportError:
 # We'd like calls to unsupported ops to error out accordingly,
 # rather than returning garbage values.
 def supports_complex(reduceOp: ReduceOp) -> bool:
-    denyList = [ReduceOp.MAX, ReduceOp.MIN, ReduceOp.PRODUCT]
+    denyList = [ReduceOp.MAX, ReduceOp.MIN, ReduceOp.PRODUCT,
+                ReduceOp.BAND, ReduceOp.BOR, ReduceOp.BXOR]
     return reduceOp not in denyList
 
 
@@ -767,7 +768,7 @@ def recv(tensor,
     if src is None:
         work = pg.recv_anysource([tensor], tag)
         work.wait()
-        src_rank = work.source_rank()
+        src_rank = work._source_rank()
         if group == GroupMember.WORLD:
             return src_rank
         else:
