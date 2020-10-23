@@ -14,6 +14,7 @@ except ImportError:
 class ThresholdExceeded(Exception):
     pass
 
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Analyze pytorch unit test xunit output",
@@ -76,15 +77,27 @@ def main():
     options = parse_args()
     base = parse_junit_reports(options.base)
     compare_to = parse_junit_reports(options.compare_to)
-    # additive = set(compare_to.keys()).difference(base.keys())
-    # subtractive = set(base.keys()).difference(compare_to.keys())
     changed = calculate_changed(base, compare_to)
     over_threshold = {k: v for k, v in changed.items() if v > options.threshold}
     # TODO: Construct a junit xml for failed thresholds
     if over_threshold:
         raise ThresholdExceeded(
-            "Time increase threshold exceeded for the following testcases:\n"
+            "Test time increase threshold exceeded for the following testcases:\n"
             f"{over_threshold}"
+        )
+
+    additive = set(compare_to.keys()).difference(base.keys())
+    subtractive = set(base.keys()).difference(compare_to.keys())
+    total_time_base = sum([val for val in base.values()])
+    total_time_compare = sum([val for val in compare_to.values()])
+    total_percentage_changed = (
+        (total_time_compare - total_time_base) / total_time_base * 100
+    )
+    if total_percentage_changed > options.threshold:
+        added_time = {k: compare_to[k] for k in additive}
+        raise ThresholdExceeded(
+            "Total test time increase threshold exceeded, added tests:\n",
+            f"{added_time}",
         )
 
 
