@@ -231,7 +231,7 @@ def _is_fp(value):
             type = value.type().scalarType()
             if type is None:
                 warnings.warn("Type cannot be inferred, which might cause exported graph to produce incorrect results.")
-            return (type == 'Float') or (type == 'Double') or (type == 'Half') or (type is None)
+            return (type == 'Float') or (type == 'Double') or (type == 'Half')
     return False
 
 
