@@ -444,11 +444,8 @@ class Quantizer:
                     # propagate observed property from input
                     if is_observed(node.args[0]):
                         observed_node_names_set.add(node.name)
-                elif (isinstance(obj, Add) or isinstance(obj, Mul)) and not obj.all_nodes:
+                elif (isinstance(obj, Add) or isinstance(obj, Mul)) and obj.num_node_args == 1:
                     input_node = matched_nodes[-1]  # first node in the sequence
-                    is_node = [isinstance(x, Node) for x in input_node.args]
-                    assert is_node.count(True) == 1, " add_scalar/mul_scalar only " + \
-                        "with one Tensor input, got Tenosr inputs: {}".format(is_node.count(True))
                     def input_is_observed(arg):
                         return isinstance(arg, Node) and arg.name in observed_node_names_set
                     # This is checking if one of the argument of add/mul
@@ -462,7 +459,7 @@ class Quantizer:
                     output_is_observed = self.modules[node.target]._output_is_observed
                     if output_is_observed:
                         observed_node_names_set.add(node.name)
-                elif qconfig is not None and obj.all_nodes:
+                elif qconfig is not None and obj.all_node_args:
                     # observer for outputs
                     new_observer = qconfig.activation()
                     # respect device affinity when adding observers

@@ -42,7 +42,8 @@ class QuantizeHandler(ABC):
         # this is an indicator of whether all the inputs are Node or not
         # since some op might be quantized differently depending on whether
         # all inputs are tensors or not, e.g. add/mul
-        self.all_nodes = True
+        self.num_node_args = len(node.args)
+        self.all_node_args = True
 
     @abstractmethod
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
@@ -67,10 +68,10 @@ class Add(QuantizeHandler):
             node = node.args[0]
         assert node.op == 'call_function' and node.target in [operator.add, torch.add]
         self.add_node = node
-        self.all_nodes = all([isinstance(a, Node) for a in self.add_node.args[:2]])
+        self.num_node_args = len([a for a in self.add_node.args[:2] if isinstance(a, Node)])
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
-        if not self.all_nodes:
+        if self.num_node_args == 1:
             # add scalar
             if self.relu_node is not None:
                 op = torch.ops.quantized.add_relu
@@ -114,10 +115,10 @@ class Mul(QuantizeHandler):
             node = node.args[0]
         assert node.op == 'call_function' and node.target in [operator.mul, torch.mul]
         self.mul_node = node
-        self.all_nodes = all([isinstance(a, Node) for a in self.mul_node.args[:2]])
+        self.num_node_args = len([a for a in self.add_node.args[:2] if isinstance(a, Node)])
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
-        if not self.all_nodes:
+        if self.num_node_args == 1:
             # mul scalar
             if self.relu_node is not None:
                 op = torch.ops.quantized.mul_relu
@@ -140,7 +141,7 @@ class Mul(QuantizeHandler):
 @register_quant_pattern(torch.cat)
 class Cat(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
-        if not self.all_nodes:
+        if not self.all_node_args:
             return NotImplemented
         activation_post_process = quantizer.activation_post_process_map[node.name]
         scale, zero_point = activation_post_process.calculate_qparams()
@@ -417,7 +418,7 @@ class DefaultNode(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
-        if not self.all_nodes:
+        if not self.all_node_args:
             return NotImplemented
         assert node.op in ['call_module', 'call_function'], 'Only call_module and ' + \
             'call_function are handled in DefaultNode'
@@ -555,7 +556,7 @@ class CopyNode(QuantizeHandler):
 # of quantizable objects (e.g. modules and functionals)
 class DefaultQuant(QuantizeHandler):
     def convert(self, quantizer, node):
-        assert self.all_nodes
+        assert self.all_node_args
         root_module = quantizer.modules['']
         return quantize_node(
             root_module,
