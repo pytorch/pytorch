@@ -4894,8 +4894,7 @@ def add_test(
         dim_args_idx=(),
         skipTestIf=(),
         output_process_fn=lambda x: x,
-        kwargs=None,
-        match_scalar_dtype=False):
+        kwargs=None):
     kwargs = kwargs if kwargs else {}
     basic_test_name = 'test_' + name
     if variant_name != '':
@@ -4939,8 +4938,7 @@ def add_test(
                         self_variable.requires_grad = False
                     # need to record this because methods can change the size (e.g. unsqueeze)
                     args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace,
-                                                                  call_kwargs=kwargs, dtype=dtype,
-                                                                  match_scalar_dtype=match_scalar_dtype, device=device)
+                                                                  call_kwargs=kwargs, dtype=dtype, device=device)
                     self_tensor = deepcopy(self_variable)
                     args_tensor = deepcopy(unpack_variables(args_variable))
                     if not exclude_tensor_method(name, test_name):

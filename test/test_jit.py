@@ -15611,8 +15611,7 @@ def add_autograd_test(
         dim_args_idx=(),
         skipTestIf=(),
         output_process_fn=lambda x: x,
-        kwargs=None,
-        match_scalar_dtype=False):
+        kwargs=None):
 
     # Disable complex tests
     # TODO: Add complex support for jit
@@ -15656,8 +15655,7 @@ def add_autograd_test(
                 if is_inplace:
                     self_variable.requires_grad = False
                 # need to record this because methods can change the size (e.g. unsqueeze)
-                args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs,
-                                                              match_scalar_dtype=match_scalar_dtype)
+                args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
 

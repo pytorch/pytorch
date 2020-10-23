@@ -3896,20 +3896,17 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                        torch.logical_and, torch.logical_or, torch.logical_xor]:
                 self.assertEqual(op(torch.tensor([True]), torch.tensor([False])).dtype, torch.bool)
 
-        def test_out_comparison_ops_error_if_different_dtypes(self):
+        def test_out_comparison_ops_can_type_promotion_and_broadcasting(self):
+            # issue #42660
             for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne,
                        torch.logical_and, torch.logical_or, torch.logical_xor]:
-                input1_32 = torch.ones(1, dtype=torch.float32)
+                input1_16 = torch.ones(2, dtype=torch.bfloat16)
                 input2_32 = torch.ones(1, dtype=torch.float32)
+                output_64 = torch.zeros(1, dtype=torch.float64)
 
-                out_64 = torch.zeros(1, dtype=torch.float64)
-                with self.assertRaisesRegex(RuntimeError, 'The scalar types of the arguments do not match.'):
-                    op(input1_32, input2_32, out=out_64)
-
-                # Allowing types to mismatch if the out dtype is torch.bool, so the functional version
-                # of comparison ops will work with non-bool dtypes.
-                out_bool = torch.zeros(1, dtype=torch.bool)
-                op(input1_32, input2_32, out=out_bool)
+                op(input1_16, input2_32, out=output_64)
+                self.assertEqual(out.dtype, torch.float64)
+                self.assertEqual(out.shape, (2,))
 
         def test_inplace_comparison_ops_require_inputs_have_same_dtype(self):
             with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):

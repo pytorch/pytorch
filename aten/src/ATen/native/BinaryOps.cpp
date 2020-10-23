@@ -653,7 +653,7 @@ Tensor& __irshift__(Tensor& self, Scalar other) {
 }
 
 template <typename Stub>
-Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& other, Stub& stub) {
+Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& other, Stub& stub, bool promote_output_types = true) {
   // Validate that is possible to convert zero-dim tensor's dtype to other dtype without overflow
   if (self.scalar_type() != other.scalar_type()) {
     if (self.dim() != 0 && other.dim() == 0) {
@@ -662,13 +662,14 @@ Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& othe
       check_convert(self.item(), other.scalar_type());
     }
   }
-  if (result.scalar_type() != kBool) {
-    TORCH_CHECK(result.dtype() == self.dtype() && result.dtype() == other.dtype(),
-                "The scalar types of the arguments do not match. self.dtype() = ", self.dtype(),
-                ", other.dtype() = ", other.dtype(), ", result.dtype() = ", result.dtype());
+
+  if (promote_output_types) {
+    auto iter = TensorIterator::comparison_op(result, self, other);
+    stub(iter.device_type(), iter);
+  } else {
+    auto iter = TensorIterator::comparison_op_skip_promote_output_types(result, self, other);
+    stub(iter.device_type(), iter);
   }
-  auto iter = TensorIterator::comparison_op(result, self, other);
-  stub(iter.device_type(), iter);
   return result;
 }
 

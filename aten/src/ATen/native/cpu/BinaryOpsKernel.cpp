@@ -325,7 +325,7 @@ void lt_kernel(TensorIterator& iter) {
        });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "lt_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "lt_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
@@ -347,7 +347,7 @@ void le_kernel(TensorIterator& iter) {
        });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "le_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "le_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
@@ -369,7 +369,7 @@ void gt_kernel(TensorIterator& iter) {
        });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "gt_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "gt_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
@@ -391,7 +391,7 @@ void ge_kernel(TensorIterator& iter) {
        });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "ge_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "ge_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
@@ -413,7 +413,7 @@ void eq_kernel(TensorIterator& iter) {
        });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "eq_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.common_dtype(), "eq_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
@@ -435,7 +435,7 @@ void ne_kernel(TensorIterator& iter) {
        });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "ne_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "ne_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
