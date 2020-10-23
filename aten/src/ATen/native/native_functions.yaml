@@ -314,7 +314,7 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: conj(Tensor self) -> Tensor
+- func: conj(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function, method
 
@@ -388,19 +388,19 @@
     SparseCUDA: add_out_sparse_cuda
     MkldnnCPU: mkldnn_add_out
 
-- func: add_relu.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+- func: _add_relu.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU: add_relu
 
-- func: add_relu_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
+- func: _add_relu_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU: add_relu_
 
-- func: add_relu.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+- func: _add_relu.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: add_relu_out

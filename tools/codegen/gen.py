@@ -231,7 +231,7 @@ def compute_type_method(
                 assert dispatch is not None
                 impl_name = f"at::native::{f.dispatch[dispatch]}"
 
-            args_exprs_str = ', '.join(map(lambda a: a.name, args))
+            args_exprs_str = ', '.join(a.name for a in args)
 
             return_kw = "    return "
 
@@ -356,7 +356,7 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
             dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
             dispatcher_exprs = dispatcher.cpparguments_exprs(sig.argument_packs())
-            dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, dispatcher_exprs))
+            dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
 
             return f"""
 // aten::{f.func}
@@ -406,7 +406,7 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
             dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
             dispatcher_exprs = dispatcher.cpparguments_exprs(sig.argument_packs())
-            dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, dispatcher_exprs))
+            dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
 
             return f"""
 // aten::{f.func}
@@ -456,7 +456,7 @@ def compute_native_function_declaration(f: NativeFunction) -> List[str]:
         seen.add(n)
         returns_type = native.returns_type(f.func.returns)
         args = native.arguments(f.func)
-        rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(map(lambda a: a.str_with_default(), args))});")
+        rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(a.str_with_default() for a in args)});")
 
     return rs
 
@@ -763,6 +763,9 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     is_factory_method = any(isinstance(a.argument, TensorOptionsArguments) for a in cpp_args) \
         and Variant.method not in f.variants
 
+    # Having only Math in dispatch section is equivalent to no dispatch section.
+    is_abstract = f.dispatch is not None and set(f.dispatch.keys()) != set({'Math'})  # type ignore
+
     return OrderedDict([
         ('name', cpp.name(f.func)),
         ('operator_name', str(f.func.name.name)),
@@ -796,7 +799,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         # for the entry or not (as this affects whether or not the operation is
         # overrideable or not.)  Once this all gets cleaned up, this
         # property will be obsolete.
-        ('abstract', f.dispatch is not None),
+        ('abstract', is_abstract),
         ('device_guard', f.device_guard),
         ('with_gil', False),
         ('deprecated', False),
