@@ -1389,10 +1389,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
         // dim_ is a virtual call, don't repeat it
-        auto dim_ = dim();
+        const auto dim_ = dim();
         strides_.resize(dim_);
         if (dim_ > 0) {
-          int last_idx = dim_ - 1;
+          const auto last_idx = dim_ - 1;
           strides_[last_idx] = 1;
           for (auto i = last_idx - 1; i >= 0; --i) {
             strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
