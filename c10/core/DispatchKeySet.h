@@ -192,6 +192,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
   DispatchKey::AutogradCPU,
   DispatchKey::AutogradCUDA,
   DispatchKey::AutogradXLA,
+  DispatchKey::AutogradNestedTensor,
   DispatchKey::AutogradPrivateUse1,
   DispatchKey::AutogradPrivateUse2,
   DispatchKey::AutogradPrivateUse3,
