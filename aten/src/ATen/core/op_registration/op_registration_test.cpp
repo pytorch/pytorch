@@ -2251,6 +2251,22 @@ TEST(NewOperatorRegistrationTest, testDelayedListener) {
   EXPECT_EQ(initial_num_deregisters + 1, listener_ptr->num_deregisters_);
 }
 
+TEST(NewOperatorRegistrationTest, testImplNoDefGetsCaught) {
+  auto danglingImpls = Dispatcher::singleton().findDanglingImpls();
+  std::string error_str = "Discovered operators that have been registered through the dispatcher"
+                          " without explicitly specifying their schemas. Please do so using"
+                          " the TORCH_LIBRARY macro. Suspect operators:\n";
+  for (auto& op : danglingImpls) {
+      auto& op_name = op.operator_name();
+      error_str += "\t" + op_name.name;
+      if (op_name.overload_name != "") {
+          error_str += "." + op_name.overload_name;
+      }
+      error_str += "\n";
+  }
+  ASSERT_EQ(danglingImpls.size(), 0) << error_str;
+}
+
 }
 
 #pragma GCC diagnostic pop

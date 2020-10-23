@@ -6710,7 +6710,7 @@ class TestAutogradDeviceType(TestCase):
             self._test_rnn_mod(mod, inp)
 
     def test_copysign_subgradient(self, device):
-        # Input is 0.0
+        # Input is 0
         x = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float, device=device, requires_grad=True)
         y = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.float, device=device, requires_grad=True)
         out = torch.copysign(x, y)
@@ -6718,7 +6718,7 @@ class TestAutogradDeviceType(TestCase):
         self.assertEqual(x.grad.tolist(), [0.0, 0.0, 0.0])
         self.assertEqual(y.grad.tolist(), [0.0] * 3)
 
-        # Input is -0.0
+        # Input is -0
         x = torch.tensor([-0.0, -0.0, -0.0], dtype=torch.float, device=device, requires_grad=True)
         y = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.float, device=device, requires_grad=True)
         out = torch.copysign(x, y)
@@ -6726,7 +6726,7 @@ class TestAutogradDeviceType(TestCase):
         self.assertEqual(x.grad.tolist(), [0.0, 0.0, 0.0])
         self.assertEqual(y.grad.tolist(), [0.0] * 3)
 
-        # Other is 0.0
+        # Other is 0
         x = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.float, device=device, requires_grad=True)
         y = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float, device=device, requires_grad=True)
         out = torch.copysign(x, y)
@@ -6734,7 +6734,7 @@ class TestAutogradDeviceType(TestCase):
         self.assertEqual(x.grad.tolist(), [-1.0, 0.0, 1.0])
         self.assertEqual(y.grad.tolist(), [0.0] * 3)
 
-        # Other is -0.0
+        # Other is -0
         x = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.float, device=device, requires_grad=True)
         y = torch.tensor([-0.0, -0.0, -0.0], dtype=torch.float, device=device, requires_grad=True)
         out = torch.copysign(x, y)
@@ -7083,6 +7083,32 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(lambda x: x.logcumsumexp(2), a)
         gradgradcheck(lambda x: x.logcumsumexp(2), a)
+
+    @slowTest
+    def test_lu_backward(self, device):
+        def run_test(*sizes):
+            x = torch.rand(*sizes, device=device, dtype=torch.double).requires_grad_(True)
+
+            gradcheck(lambda x: x.lu(get_infos=True), x)
+            gradgradcheck(lambda x: x.lu(get_infos=True), x)
+
+            gradcheck(lambda x: x.lu(get_infos=False), x)
+            gradgradcheck(lambda x: x.lu(get_infos=False), x)
+
+            # there is no pivot-less LU factorization on CPU
+            if x.device.type == 'cuda':
+                gradcheck(lambda x: x.lu(pivot=False, get_infos=True), x)
+                gradgradcheck(lambda x: x.lu(pivot=False, get_infos=True), x)
+
+                gradcheck(lambda x: x.lu(pivot=False, get_infos=False), x)
+                gradgradcheck(lambda x: x.lu(pivot=False, get_infos=False), x)
+
+        run_test(3, 3)
+        run_test(3, 3, 3)
+        run_test(3, 3, 3, 3)
+        run_test(5, 5)
+        run_test(3, 5, 5)
+        run_test(3, 3, 5, 5)
 
     def test_strided_leaf_grad_layout(self, device):
         # (1) If leaf is non-overlapping and dense, grad's layout should match its leaf.

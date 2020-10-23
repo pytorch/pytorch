@@ -9,10 +9,10 @@ import torch.nn.intrinsic as nni
 import torch.nn.quantized as nnq
 import torch.nn.intrinsic.qat as nniqat
 
-from .quantization_mappings import (get_dynamic_quant_module_mappings,
-                                    get_static_quant_module_mappings,
-                                    get_qat_module_mappings,
-                                    get_qconfig_propagation_list)
+from .quantization_mappings import (get_default_dynamic_quant_module_mappings,
+                                    get_default_static_quant_module_mappings,
+                                    get_default_qat_module_mappings,
+                                    get_default_qconfig_propagation_list)
 
 from .stubs import DeQuantStub, QuantWrapper
 from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_dynamic_qconfig
@@ -37,7 +37,7 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
     """
     # TODO: Add test
     if allow_list is None:
-        allow_list = get_qconfig_propagation_list()
+        allow_list = get_default_qconfig_propagation_list()
 
     module_qconfig = qconfig_dict.get(type(module), qconfig_parent)
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
@@ -93,7 +93,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         None, module is modified inplace with added observer modules and forward_hooks
     """
     if qconfig_propagation_list is None:
-        qconfig_propagation_list = get_qconfig_propagation_list()
+        qconfig_propagation_list = get_default_qconfig_propagation_list()
 
     if custom_module_class_mapping is None:
         custom_module_class_mapping = {}
@@ -214,7 +214,7 @@ def prepare(model, inplace=False, allow_list=None,
 
     qconfig_propagation_list = allow_list
     if qconfig_propagation_list is None:
-        qconfig_propagation_list = get_qconfig_propagation_list()
+        qconfig_propagation_list = get_default_qconfig_propagation_list()
     propagate_qconfig_(model, qconfig_dict=None)
 
     # sanity check common API misusage
@@ -260,7 +260,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     """
     torch._C._log_api_usage_once("quantization_api.quantize.quantize")
     if mapping is None:
-        mapping = get_static_quant_module_mappings()
+        mapping = get_default_static_quant_module_mappings()
     if not inplace:
         model = copy.deepcopy(model)
     model.eval()
@@ -338,7 +338,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
         qconfig_spec = dict(zip(qconfig_spec, itertools.repeat(default_qconfig)))
 
     if mapping is None:
-        mapping = get_dynamic_quant_module_mappings()
+        mapping = get_default_dynamic_quant_module_mappings()
 
     if not inplace:
         model = copy.deepcopy(model)
@@ -364,7 +364,7 @@ def prepare_qat(model, mapping=None, inplace=False):
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare_qat")
     if mapping is None:
-        mapping = get_qat_module_mappings()
+        mapping = get_default_qat_module_mappings()
     if not inplace:
         model = copy.deepcopy(model)
 
@@ -450,7 +450,7 @@ def _convert(
 
     """
     if mapping is None:
-        mapping = get_static_quant_module_mappings()
+        mapping = get_default_static_quant_module_mappings()
     if convert_custom_config_dict is None:
         convert_custom_config_dict = {}
     custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", {})

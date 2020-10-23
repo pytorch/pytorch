@@ -16,14 +16,14 @@ from torch.quantization import (
 )
 
 from ..quantization_mappings import (
-    get_qat_module_mappings,
+    get_default_qat_module_mappings,
 )
 
 from ..quantize import _remove_qconfig
 
 from .pattern_utils import (
     is_match,
-    get_quant_patterns,
+    get_default_quant_patterns,
 )
 
 from .standalone_module import (
@@ -117,7 +117,6 @@ def graph_module_from_producer_nodes(root, producer_nodes):
     graph_module = GraphModule(root, graph)
     return graph_module
 
-
 def assert_and_get_unique_device(module):
     """
     Returns the unique device for a module, or None if no device is found.
@@ -134,7 +133,8 @@ def assert_and_get_unique_device(module):
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
-            isinstance(module, torch.quantization.FakeQuantize))
+            isinstance(module, torch.quantization.FakeQuantize) or
+            isinstance(module, torch.quantization.FakeQuantizeBase))
 
 def is_submodule_of_fake_quant(name, module, named_modules):
     parent_name, _ = _parent_name(name)
@@ -230,8 +230,11 @@ class Quantizer:
         self.patterns = None
 
 
-    def _qat_swap_modules(self, root):
-        convert(root, mapping=get_qat_module_mappings(), inplace=True, remove_qconfig=False)
+    def _qat_swap_modules(self, root, additional_qat_module_mapping):
+        all_mappings = get_default_qat_module_mappings().copy()
+        for k, v in additional_qat_module_mapping.items():
+            all_mappings[k] = v
+        convert(root, mapping=all_mappings, inplace=True, remove_qconfig=False)
 
     def _generate_qconfig_map(self,
                               root,
@@ -324,13 +327,14 @@ class Quantizer:
             prepare_custom_config_dict = {}
         if not inplace:
             model = copy.deepcopy(model)
-        self.patterns = get_quant_patterns()
+        self.patterns = get_default_quant_patterns()
 
         flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
         # TODO: support regex as well
         propagate_qconfig_(model, flattened_qconfig_dict)
         if model.training:
-            self._qat_swap_modules(model)
+            additional_qat_module_mapping = prepare_custom_config_dict.get("additioanl_qat_module_mapping", {})
+            self._qat_swap_modules(model, additional_qat_module_mapping)
 
         self.modules = dict(model.named_modules())
 

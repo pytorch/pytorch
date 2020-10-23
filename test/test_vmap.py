@@ -1265,6 +1265,31 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(op, in_dims=(2, None, None, None)), in_dims=(0, None, None, None)),
              (torch.rand(B1, 2, B0, 5, B2), -1, 2, 3), in_dims=(2, None, None, None))
 
+    def test_new_empty(self):
+        # Empty is non-deterministic so we just check that the shape of the
+        # output tensor is what we expect and that the vmap fallback isn't used.
+        op = Tensor.new_empty
+
+        B0, B1 = 7, 11
+
+        result = vmap(lambda x: op(x, [2, 3]))(torch.randn(B0))
+        self.assertEqual(result.shape, [B0, 2, 3])
+
+        result = vmap(lambda x: op(x, []))(torch.randn(B0))
+        self.assertEqual(result.shape, [B0])
+
+        result = vmap(vmap(lambda x: op(x, [2, 3])))(torch.randn(B0, B1))
+        self.assertEqual(result.shape, [B0, B1, 2, 3])
+
+    def test_new_zeros(self):
+        op = Tensor.new_zeros
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        B0, B1 = 7, 11
+
+        test(lambda x: op(x, 2, 3), (torch.rand(B0),))
+        test(lambda x: op(x, []), (torch.rand(B0),))
+        test(vmap(lambda x: op(x, 3, 5)), (torch.rand(B0, B1),))
+
     def test_select(self):
         op = torch.select
         test = self._vmap_view_test

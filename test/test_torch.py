@@ -34,14 +34,14 @@ from torch.testing._internal.common_utils import \
      wrapDeterministicFlagAPITest, make_tensor)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm, onlyCUDA, onlyCPU, \
+    skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCUDAIfNotRocm, \
+    onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA, expectedAlertNondeterministic
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, with_tf32_off, \
-    _get_torch_cuda_version, TEST_MAGMA
+from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, with_tf32_off
 
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -194,8 +194,6 @@ class AbstractTestCases:
             test_namespace(torch.randn(1),
                            'as_strided_',
                            re.compile('^clamp_(min|max)_?$'),
-                           'coalesce',
-                           'is_coalesced',
                            'is_distributed',
                            'is_nonzero',
                            'is_same_size',
@@ -208,14 +206,9 @@ class AbstractTestCases:
                            'prelu',
                            'resize',
                            'resize_as',
-                           'smm',
                            'softmax',
                            'split_with_sizes',
                            'unsafe_split_with_sizes',
-                           'sspaddmm',
-                           'to_dense',
-                           'sparse_resize_',
-                           'sparse_resize_and_clear_',
                            )
             test_namespace(torch.nn)
             test_namespace(torch.nn.functional, 'assert_int_or_pair')
@@ -4628,7 +4621,7 @@ def make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim=0):
             ndim = len(tensor_arg)
         ndim += extra_dim
 
-        n_dim_to_test = sum(map(lambda e: e is DIM_ARG, arg_constr()))
+        n_dim_to_test = sum(e is DIM_ARG for e in arg_constr())
 
         for dims_val in combinations(range(ndim), n_dim_to_test):
             arg = arg_constr()
@@ -6073,10 +6066,7 @@ class TestTorchDeviceType(TestCase):
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
 
-    @skipCUDAIf(
-        _get_torch_cuda_version() < [10, 0] and not TEST_MAGMA,
-        "On cuda 9.2, torch.inverse relies on magma"
-    )
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     def test_inverse(self, device):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
@@ -6143,6 +6133,20 @@ class TestTorchDeviceType(TestCase):
         matrices_inverse = torch.inverse(matrices)
         expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
         self.assertEqual(matrices_inverse, expected_inv.to(device))
+
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
+    def test_inverse_singular(self, device):
+        def helper(batch_dim, n):
+            x = torch.eye(3, 3, dtype=torch.float, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
+            x[n, -1, -1] = 0
+
+            with self.assertRaisesRegex(RuntimeError, rf'For batch {n}: U\(3,3\) is zero'):
+                torch.inverse(x)
+
+        for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
+            helper(*params)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
@@ -6870,7 +6874,7 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(t2.is_set_to(t1))
 
     @slowTest
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     def test_inverse_many_batches(self, device):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
@@ -7189,7 +7193,7 @@ class TestTorchDeviceType(TestCase):
             for i in range(num_matrices):
                 tensors_batch[i, ...] = tensors_list[i]
 
-            tensors_exp_map = map(lambda x: x.matrix_exp(), tensors_list)
+            tensors_exp_map = (x.matrix_exp() for x in tensors_list)
             tensors_exp_batch = tensors_batch.matrix_exp()
 
             for i, tensor_exp in enumerate(tensors_exp_map):
@@ -15383,7 +15387,7 @@ class TestTorchDeviceType(TestCase):
         ]
 
         incorrect_byteorder = '>' if sys.byteorder == 'little' else '<'
-        incorrect_dtypes = map(lambda t: incorrect_byteorder + t, ['d', 'f'])
+        incorrect_dtypes = [incorrect_byteorder + t for t in ['d', 'f']]
 
         for dtype in correct_dtypes:
             array = np.array([1, 2, 3, 4], dtype=dtype)
@@ -17232,7 +17236,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         x = torch.tensor([0, 0, 1, 1], device=device, dtype=torch.bool)
         y = torch.tensor([0, 1, 0, 1], device=device, dtype=torch.bool)
         expected = torch.tensor([0, 0, 1, 1], device=device, dtype=torch.float)
-        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)), 
+        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)),
                          torch.copysign(torch.tensor(1.0), expected))
 
     @dtypes(torch.half, torch.float, torch.double)
@@ -17241,48 +17245,48 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         x = torch.tensor([-1.0, 0.0, -0.0, 1.0], dtype=dtype)
         y = torch.tensor(-1.0)
         expected = torch.tensor([-1.0, -0.0, -0.0, -1.0], dtype=dtype)
-        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)), 
+        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)),
                          torch.copysign(torch.tensor(1.0), expected))
 
         x = torch.tensor([-1.0, 0.0, -0.0, 1.0], dtype=dtype)
         y = torch.tensor(0.0)
         expected = torch.tensor([1.0, 0.0, 0.0, 1.0], dtype=dtype)
-        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)), 
+        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)),
                          torch.copysign(torch.tensor(1.0), expected))
 
         x = torch.tensor([-1.0, 0.0, -0.0, 1.0], dtype=dtype)
         y = torch.tensor(-0.0)
         expected = torch.tensor([-1.0, -0.0, -0.0, -1.0], dtype=dtype)
-        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)), 
+        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)),
                          torch.copysign(torch.tensor(1.0), expected))
 
         x = torch.tensor(-1.0)
         y = torch.tensor([-1.0, 0.0, -0.0, 1.0], dtype=dtype)
         expected = torch.tensor([-1.0, 1.0, -1.0, 1.0], dtype=dtype)
-        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)), 
+        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)),
                          torch.copysign(torch.tensor(1.0), expected))
 
         # Constant
         x = torch.tensor([-1.0, 0.0, -0.0, 1.0], dtype=dtype)
         expected = torch.tensor([-1.0, -0.0, -0.0, -1.0], dtype=dtype)
-        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, -1.0)), 
+        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, -1.0)),
                          torch.copysign(torch.tensor(1.0), expected))
 
         x = torch.tensor([-1.0, 0.0, -0.0, 1.0], dtype=dtype)
         expected = torch.tensor([-1.0, -0.0, -0.0, -1.0], dtype=dtype)
-        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, -0.0)), 
+        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, -0.0)),
                          torch.copysign(torch.tensor(1.0), expected))
 
         x = torch.tensor([-1.0, 0.0, -0.0, 1.0], dtype=dtype)
         expected = torch.tensor([1.0, 0.0, 0.0, 1.0], dtype=dtype)
-        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, 0.0)), 
+        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, 0.0)),
                          torch.copysign(torch.tensor(1.0), expected))
 
         # Normal
         expected = torch.tensor([[1.0, 0.0, 0.0, 1.0] * 2, [-1.0, -0.0, -0.0, -1.0] * 2], dtype=dtype).reshape(-1)
         x = torch.tensor([-1.0, -0.0, 0.0, 1.0] * 4, dtype=dtype)
         y = torch.tensor([[0.0] * 4, [1.0] * 4, [-0.0] * 4, [-1.0] * 4], dtype=dtype).reshape(-1)
-        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)), 
+        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)),
                          torch.copysign(torch.tensor(1.0), expected))
 
     @dtypes(torch.int8, torch.short, torch.int, torch.long)
@@ -17292,21 +17296,24 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         x = torch.tensor([-1, 0, 1], dtype=dtype)
         y = torch.tensor(-1)
         expected = torch.tensor([-1.0, -0.0, -1.0], dtype=torch.float)
-        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)), 
+        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)),
                          torch.copysign(torch.tensor(1.0), expected))
 
         x = torch.tensor([-1, 0, 1], dtype=dtype)
         y = torch.tensor(1)
         expected = torch.tensor([1.0, 0.0, 1.0], dtype=torch.float)
-        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)), 
+        self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(x, y)),
                          torch.copysign(torch.tensor(1.0), expected))
 
     def _test_copysign_numpy(self, a, b):
         torch_result = torch.copysign(a, b)
-        numpy_result = np.copysign(a.cpu().numpy(), b.cpu().numpy())
-        expected = torch.from_numpy(numpy_result)
+        expected = torch.from_numpy(np.copysign(a.cpu().numpy(), b.cpu().numpy()))
+
         # To handle inconsistencies in our type promotion and numpy's type promotion
-        expected = expected.to(torch_result)
+        promoted_type = torch.promote_types(torch_result.dtype, expected.dtype)
+        torch_result = torch_result.to(promoted_type)
+        expected = expected.to(promoted_type)
+
         self.assertEqual(torch_result, expected)
 
     def _create_rand_tensor(self, size, dtype, device):
@@ -19155,12 +19162,12 @@ else:
 
                         # Compare sequence input
                         torch_sequence_x = (x,) * random.randint(3, 10)
-                        np_sequence_x = tuple(map(lambda x: np.array(x.detach().cpu().numpy()), torch_sequence_x))
+                        np_sequence_x = tuple(np.array(x.detach().cpu().numpy()) for x in torch_sequence_x)
                         torch_res = torch_fn(*torch_sequence_x)
                         np_res = np_fn(*np_sequence_x)
 
-                        torch_res = tuple(map(lambda x: x.cpu(), torch_res))
-                        np_res = tuple(map(lambda x: torch.from_numpy(x), np_res))
+                        torch_res = tuple(x.cpu() for x in torch_res)
+                        np_res = tuple(torch.from_numpy(x) for x in np_res)
                         self.assertEqual(np_res, torch_res)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -19372,6 +19379,57 @@ else:
                 e_msg = norm_error_msg if op == torch.norm else error_msg
                 with self.assertRaisesRegex(RuntimeError, e_msg):
                     op(x, dim=dim)
+
+    # Note: This test failed on XLA since its test cases are created by empty_strided which
+    #       doesn't support overlapping sizes/strides in XLA impl
+    @onlyOnCPUAndCUDA
+    def test_like_fn_stride_proparation_vs_tensoriterator_unary_op(self, device):
+        # Test like functions against tensoriterator based unary operator (exp) to
+        # make sure the returned tensor from like function follows the same stride propergation
+        # rule as what tensoriterator does for unary operator. The like function's  output strides
+        # is computed on CPU side always, no need to test GPU here.
+
+        def compare_helper_(like_fn, t):
+            te = torch.exp(t)
+            tl = like_fn(t)
+            self.assertEqual(te.stride(), tl.stride())
+            self.assertEqual(te.size(), tl.size())
+
+        like_fns = [
+            lambda t, **kwargs: torch.zeros_like(t, **kwargs),
+            lambda t, **kwargs: torch.ones_like(t, **kwargs),
+            lambda t, **kwargs: torch.randint_like(t, 10, 100, **kwargs),
+            lambda t, **kwargs: torch.randint_like(t, 100, **kwargs),
+            lambda t, **kwargs: torch.randn_like(t, **kwargs),
+            lambda t, **kwargs: torch.rand_like(t, **kwargs),
+            lambda t, **kwargs: torch.full_like(t, 7, **kwargs),
+            lambda t, **kwargs: torch.empty_like(t, **kwargs)]
+
+        # dense non-overlapping tensor,
+        # non-dense non-overlapping sliced tensor
+        # non-dense non-overlapping gapped tensor
+        # non-dense non-overlapping 0 strided tensor
+        # non-dense overlapping general tensor
+        # non-dense overlapping sliced tensor
+        # non-dense overlapping gapped tensor
+        # non-dense overlapping 0 strided tensor
+        # non-dense overlapping equal strides
+        tset = (
+            torch.randn(4, 3, 2, device=device),
+            torch.randn(4, 3, 2, device=device)[:, :, ::2],
+            torch.empty_strided((4, 3, 2), (10, 3, 1), device=device).fill_(1.0),
+            torch.empty_strided((4, 3, 2), (10, 0, 3), device=device).fill_(1.0),
+            torch.empty_strided((4, 3, 2), (10, 1, 2), device=device).fill_(1.0),
+            torch.empty_strided((4, 3, 2), (4, 2, 1), device=device)[:, :, ::2].fill_(1.0),
+            torch.empty_strided((4, 3, 2), (10, 1, 1), device=device).fill_(1.0),
+            torch.empty_strided((4, 1, 1, 2), (10, 0, 0, 2), device=device).fill_(1.0),
+            torch.empty_strided((4, 2, 3), (10, 3, 3), device=device).fill_(1.0))
+
+        for like_fn in like_fns:
+            for t in tset:
+                for p in permutations(range(t.dim())):
+                    tp = t.permute(p)
+                    compare_helper_(like_fn, tp)
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
