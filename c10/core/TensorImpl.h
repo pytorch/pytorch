@@ -1040,8 +1040,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return;
     }
     auto newCapacity = sizes_;
-    newCapacity[0] = std::max<size_t>(
-        newDims[0], std::ceil(sizes_[0] * (growthPct + 100) / 100));
+    newCapacity[0] = std::max(
+        newDims[0], static_cast<int64_t>(std::ceil(sizes_[0] * (1 + growthPct / 100))));
     auto oldData = std::move(storage_.data_ptr());
     auto oldSize = numel_;
     auto oldDims = sizes_;
