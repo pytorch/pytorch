@@ -118,6 +118,8 @@ allow_list = [
     ('aten::contiguous', datetime.date(2020, 12, 1)),
     ('aten::to', datetime.date(2020, 12, 1)),
     ("tensorexpr::Group", datetime.date(2020, 12, 1)),
+    ("aten::add_relu", datetime.date(2020, 12, 1)),
+    ("aten::add_relu_", datetime.date(2020, 12, 1)),
 ]
 
 
