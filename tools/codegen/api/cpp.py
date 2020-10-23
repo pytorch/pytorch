@@ -30,7 +30,7 @@ def name(func: FunctionSchema) -> str:
     return name
 
 # Translation of "value types" in JIT schema to C++ API type.  Value
-# types look the same no matter if they are argument types are return
+# types look the same no matter if they are argument types or return
 # types.  Returns None if the type in question is not a value type.
 def valuetype_type(t: Type) -> Optional[str]:
     if isinstance(t, BaseType):

@@ -615,17 +615,6 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64
   return at::where(mask, grad, grad_norm);
 }
 
-Tensor sum_tensorlist(TensorList tl) {
-  if (tl.size() == 0) {
-    throw std::runtime_error("Can't sum tensorlist of size 0");
-  }
-  Tensor sum = tl[0];
-  for(size_t i = 1; i < tl.size(); ++i) {
-    sum = sum + tl[i];
-  }
-  return sum;
-}
-
 Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape) {
   auto find_iter = std::find(repeats.cbegin(), repeats.cend(), 0);
   if (find_iter != repeats.cend()) {
@@ -637,7 +626,7 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
     grad = grad.sum(0, false);
   }
 
-  const auto grad_sizes = grad.sizes();
+  const auto & grad_sizes = grad.sizes();
   std::vector<int64_t> grad_sizes_(input_dims);
   std::copy(grad_sizes.begin(), grad_sizes.end(), grad_sizes_.begin());
   auto grad_iter_ = grad_sizes_.begin();
@@ -647,7 +636,41 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
       continue;
     }
     int64_t dim = j - num_unsqueezed;
-
+    // Reshape gradient
+    // Index:      [..., dim,   , ...]    [..., dim,    dim+1,        , ...]
+    // Shape: From [..., dimsize, ...] to [..., repeat, dimsize/repeat, ...]
+    // The gradient tensor at 'dim' is reshaped to 'repeat' times of input tensor. 
+    // Then, sum up gradients over repeated tensors along 'dim', and reduce shape 
+    // from 'repeat * dimsize/repeat' to 'dimsize/repeat' ('input_dimsize').
+    // Example:
+    //        Size(3, 2)                                             Size(6, 2)
+    //                                                             [[v1_0, v1_1],
+    //                                                              [v1_2, v1_3],
+    //        [[v0, v1],                   repeat(2, 1)             [v1_4, v1_5],
+    //         [v2, v3],                  ------------->            [v2_0, v2_1],
+    //         [v4, v5]]                                            [v2_2, v2_3],
+    //                                                              [v2_4, v2_5]]
+    //
+    //    input grad (3, 2)            reshape (2, 3, 2)         output grad (6, 2)
+    //                                  [[[g1_0, g1_1],            [[g1_0, g1_1],
+    //                                    [g1_2, g1_3],             [g1_2, g1_3],
+    // [[g1_0+g2_0, g1_1+g2_1],           [g1_4, g1_5]],            [g1_4, g1_5],
+    //  [g1_0+g2_0, g1_1+g2_1],                                     [g2_0, g2_1],
+    //  [g1_0+g2_0, g1_1+g2_1]]          [[g2_0, g2_1],             [g2_2, g2_3],
+    //                                    [g2_2, g2_3],             [g2_4, g2_5]]
+    //                                    [g2_4, g2_5]]]
+    // If gradient tensor is reshaped to [..., dimsize/repeat, repeat, ...] and then
+    // sum over 'dim+1'. The gradient for input is not correctly aligned with . 
+    // Example:
+    //     input grad (3, 2)            reshape (3, 2, 2)        output grad (6, 2)
+    //                                  [[[g1_0, g1_1],
+    //                                    [g1_2, g1_3]],           [[g1_0, g1_1],
+    //                                                              [g1_2, g1_3],
+    // [[g1_0+g1_2, g1_1+g1_3],          [[g1_4, g1_5],             [g1_4, g1_5],
+    //  [g1_4+g2_0, g1_5+g2_1],           [g2_0, g2_1]],            [g2_0, g2_1],
+    //  [g2_2+g2_4, g2_3+g2_5]]                                     [g2_2, g2_3],
+    //                                   [[g2_2, g2_3],             [g2_4, g2_5]]
+    //                                    [g2_4, g2_5]]]
     grad_iter_ = grad_sizes_.insert(grad_iter_, repeat);
     *(grad_iter_ + 1) /= repeat;
     grad = grad.reshape(grad_sizes_);
