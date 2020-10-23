@@ -52,8 +52,11 @@ class QuantizeHandler(ABC):
         return NotImplemented
 
 @register_quant_pattern(operator.add)
+@register_quant_pattern(torch.add)
 @register_quant_pattern((torch.nn.ReLU, operator.add))
+@register_quant_pattern((torch.nn.ReLU, torch.add))
 @register_quant_pattern((torch.nn.functional.relu, operator.add))
+@register_quant_pattern((torch.nn.functional.relu, torch.add))
 class Add(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
@@ -62,7 +65,7 @@ class Add(QuantizeHandler):
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
             node = node.args[0]
-        assert node.op == 'call_function' and node.target == operator.add
+        assert node.op == 'call_function' and node.target in [operator.add, torch.add]
         self.add_node = node
         self.all_nodes = all([isinstance(a, Node) for a in self.add_node.args[:2]])
 
@@ -90,8 +93,11 @@ class Add(QuantizeHandler):
                 'call_function', op, load_arg(quantized=True)(self.add_node.args), kwargs)
 
 @register_quant_pattern(operator.mul)
+@register_quant_pattern(torch.mul)
 @register_quant_pattern((torch.nn.ReLU, operator.mul))
+@register_quant_pattern((torch.nn.ReLU, torch.mul))
 @register_quant_pattern((torch.nn.functional.relu, operator.mul))
+@register_quant_pattern((torch.nn.functional.relu, torch.mul))
 class Mul(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
@@ -100,7 +106,7 @@ class Mul(QuantizeHandler):
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
             node = node.args[0]
-        assert node.op == 'call_function' and node.target == operator.mul
+        assert node.op == 'call_function' and node.target in [operator.mul, torch.mul]
         self.mul_node = node
         self.all_nodes = all([isinstance(a, Node) for a in self.mul_node.args[:2]])
 
@@ -384,6 +390,29 @@ class BatchNorm(QuantizeHandler):
             self.bn_node.target,
             load_arg(quantized=[0])(self.bn_node.args),
             load_arg(quantized=False)(self.bn_node.kwargs))
+
+@register_quant_pattern(torch.nn.Embedding)
+@register_quant_pattern(torch.nn.EmbeddingBag)
+class Embedding(QuantizeHandler):
+    def __init__(self, quantizer, node):
+        super().__init__(quantizer, node)
+
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
+        assert node.op == 'call_module'
+        emb_node = node
+        emb = quantizer.modules[emb_node.target]
+        qconfig = quantizer.qconfig_map[node.name]
+        assert not activation_is_statically_quantized(qconfig)
+        qemb = get_static_quant_module_class(type(emb))
+        quantized = qemb.from_float(emb)
+        parent_name, name = _parent_name(emb_node.target)
+        setattr(quantizer.modules[parent_name], name, quantized)
+        return quantizer.quantized_graph.create_node(
+            'call_module',
+            emb_node.target,
+            load_arg(quantized=False)(emb_node.args),
+            load_arg(quantized=False)(emb_node.kwargs))
+
 
 ARGS_TO_SKIP = {
     torch._ops.ops.quantized.hardswish: ['inplace'],

@@ -21,8 +21,8 @@ struct RecursiveMethodCallError : public std::exception {};
 TORCH_API void preoptimizeGraph(std::shared_ptr<Graph>& graph);
 
 // A Function is a pure Graph with no implicit `self` object bound.
-// It contains schema information, and the executor that manages the
-// execution of the function. Method is a wrapper around a
+// It contains schema information and the executor that manages the
+// execution of the function. Method is a wrapper around an
 // underlying Function that also provides a `self` object.
 struct TORCH_API Function {
   virtual bool isGraphFunction() const = 0;

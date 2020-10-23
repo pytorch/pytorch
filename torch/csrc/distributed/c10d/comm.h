@@ -41,7 +41,7 @@ class GradBucket {
 // into a tensor vector.
 class TORCH_API CommHookInterface {
  public:
-  virtual ~CommHookInterface(){};
+  virtual ~CommHookInterface() {}
 
   // Passes the input grad bucket to the registered communication hook.
   // Once the tensors in the bucket are ready, kicks off the hook asynchronously
