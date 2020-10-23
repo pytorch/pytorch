@@ -217,9 +217,8 @@ static Tensor safeStack(TensorList tensors) {
   }
   TORCH_CHECK(false,
       "vmap: slow fallback received a mix of undefined and defined tensors ",
-      "as the result of an operation. This is not supported. If this error ",
-      "message appears in framework code (e.g. autograd), please file us ",
-      "a bug report");
+      "as the result of an operation. This is not supported, please file us ",
+      "an issue on github.");
 }
 
 // The general flow of the algorithm is as follows.
