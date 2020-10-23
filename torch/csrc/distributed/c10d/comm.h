@@ -41,7 +41,7 @@ class GradBucket {
 // into a tensor vector.
 class TORCH_API CommHookInterface {
  public:
-  virtual ~CommHookInterface() = default;
+  virtual ~CommHookInterface(){};
 
   // Passes the input grad bucket to the registered communication hook.
   // Once the tensors in the bucket are ready, kicks off the hook asynchronously
@@ -66,7 +66,20 @@ class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
   PythonCommHook(py::object state, py::object hook)
       : state_(std::move(state)), hook_(std::move(hook)) {}
 
-  ~PythonCommHook();
+  // The implementation cannot be moved to cpp file, and otherwise it cannot be
+  // compiled on Windows platform. This is because the constructor/destructor
+  // of a TORCH_API class should only be used in libtorch_core, but this file
+  // belongs to libtorch_python_sources.
+  ~PythonCommHook() override {
+    py::gil_scoped_acquire ag;
+    state_.dec_ref();
+    hook_.dec_ref();
+    // Explicitly set state_ and hook_ to nullptr to prevent py::object's dtor
+    // to decref on the PyObject again.
+    // See Note [Destructing py::object] in python_ivalue.h
+    state_.ptr() = nullptr;
+    hook_.ptr() = nullptr;
+  }
 
   c10::intrusive_ptr<torch::jit::Future> runHook(
       const GradBucket& bucket) override;
