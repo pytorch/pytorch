@@ -2710,7 +2710,7 @@ struct to_ir {
               << why_not.str();
         }
 
-        // None is a subtype of Optional[T], but we want to remember what T is,
+        // None is a subtype of Optional[T], but we want to remember what T is
         // after annotation so that variables assigned to this None will still
         // get the right type. To do this, we make a None constant that
         // has the type Optional[T]
