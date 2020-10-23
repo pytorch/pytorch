@@ -237,7 +237,6 @@ def main():
         if os.path.exists(args.logdir):
             if not os.path.isdir(args.logdir):
                 raise ValueError("argument --logdir must be a path to a directory.")
-                args.logdir = None
         else:
             # create the relative directory
             os.mkdir(os.path.join(os.getcwd(), args.logdir))
