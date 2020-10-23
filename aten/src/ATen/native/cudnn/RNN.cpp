@@ -668,10 +668,14 @@ namespace {
   }
 
   std::vector<int64_t> _output_size(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors) {
+    auto out_size = rnn.hidden_size;
+    if (rnn.proj_size != 0 && rnn.proj_size != rnn.hidden_size) {
+      out_size = rnn.proj_size;
+    }
     if (tensors.is_input_packed()) {
-      return {tensors.batch_sizes_sum, rnn.hidden_size * rnn.num_directions()};
+      return {tensors.batch_sizes_sum, out_size * rnn.num_directions()};
     } else {
-      return {tensors.seq_length, tensors.mini_batch, rnn.hidden_size * rnn.num_directions()};
+      return {tensors.seq_length, tensors.mini_batch, out_size * rnn.num_directions()};
     }
   }
 
@@ -855,6 +859,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   }
 
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
+  auto cell_size = _cell_size(fn.rnn, fn.tensors);
   auto output_size = _output_size(fn.rnn, fn.tensors);
 
   TORCH_CHECK(hx.is_contiguous(),
@@ -867,7 +872,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   auto hy = at::empty(hidden_size, hx.options());
   Tensor cy;
   if (cx.defined()) {
-    auto cell_size = _cell_size(fn.rnn, fn.tensors);
     cy = at::empty(cell_size, cx.options());
   } else {
     cy = at::empty({0}, hx.options()); // NB: Not allowed to return undefined tensors
@@ -894,10 +898,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     w_desc.set(weight_buf, 3);
   }
 
-  if (fn_proj_size != 0 && fn_proj_size != fn_hidden_size) {
-    TORCH_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
-            "Expected cell size ", IntArrayRef{hidden_size}, ", got ", cx.sizes());
-  }
+  TORCH_CHECK(!cx.defined() || cx.sizes().equals(cell_size),
+          "Expected cell size ", IntArrayRef{cell_size}, ", got ", cx.sizes());
   size_t workspace_size;
   auto x_descs_arr = descs.get_x_descs();
   auto y_descs_arr = descs.get_y_descs();
@@ -909,7 +911,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
         &workspace_size
         ));
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
-
   Tensor reserve;
   // NB: Previously, the test was for fn.requires_grad, but we don't have
   // this information.  Use 'train' as a proxy.
