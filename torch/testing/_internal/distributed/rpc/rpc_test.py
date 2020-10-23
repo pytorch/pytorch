@@ -4488,6 +4488,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             raise ValueError("Wrong device affinity")
 
     def _test_device_maps_multi_gpu(self, dst):
+        torch.zeros(2).to(0).to(1)
         options = self.rpc_backend_options
         options.set_device_map(dst, {1: 0})
         options.set_device_map(dst, {0: 1})

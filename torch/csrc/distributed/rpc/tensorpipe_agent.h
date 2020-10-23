@@ -20,6 +20,11 @@
 namespace tensorpipe {
 
 class CpuBuffer;
+
+#ifdef USE_CUDA
+class CudaBuffer;
+#endif
+
 class Context;
 class Error;
 class Listener;
@@ -37,6 +42,11 @@ namespace channel {
 template <typename TBuffer>
 class Context;
 using CpuContext = Context<CpuBuffer>;
+
+#ifdef USE_CUDA
+using CudaContext = Context<CudaBuffer>;
+#endif
+
 } // namespace channel
 
 using DeviceMap = std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>;
@@ -58,12 +68,21 @@ struct TransportRegistration {
 
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
-struct ChannelRegistration {
+struct CpuChannelRegistration {
   std::shared_ptr<tensorpipe::channel::CpuContext> channel;
   int64_t priority;
 };
 
-C10_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
+C10_DECLARE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
+
+struct CudaChannelRegistration {
+#ifdef USE_CUDA
+  std::shared_ptr<tensorpipe::channel::CudaContext> channel;
+#endif
+  int64_t priority;
+};
+
+C10_DECLARE_REGISTRY(TensorPipeCudaChannelRegistry, CudaChannelRegistration);
 
 constexpr auto kDefaultNumWorkerThreads = 16;
 
@@ -97,7 +116,8 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
     if (channels.has_value()) {
       for (const std::string& channelName : channels.value()) {
         TORCH_CHECK(
-            TensorPipeChannelRegistry()->Has(channelName),
+            TensorPipeCudaChannelRegistry()->Has(channelName) ||
+                TensorPipeCpuChannelRegistry()->Has(channelName),
             "Unknown channel: ",
             channelName);
       }

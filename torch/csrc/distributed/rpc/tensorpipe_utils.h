@@ -41,7 +41,8 @@ struct DevicesContext {
       auto deviceNum = at::cuda::device_count();
       streams_.reserve(deviceNum);
       for (c10::DeviceIndex idx = 0; idx < deviceNum; ++idx) {
-        streams_.emplace_back(at::cuda::getStreamFromPool(idx));
+        streams_.emplace_back(at::cuda::getStreamFromPool(
+          /* isHighPriority */ false, /* device */ idx));
       }
     }
   }
