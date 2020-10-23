@@ -21,8 +21,6 @@ using SparseType = Type;
 // This may be called repeatedly, so make sure it's pretty cheap.
 template <typename SparseType=SparseTensorImpl>
 inline SparseType* get_sparse_impl(const SparseTensor& self) {
-  // TODO: uncomment when GCS gets support for autograd.
-  // TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   AT_ASSERTM(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
   return static_cast<SparseType*>(self.unsafeGetTensorImpl());
 }

@@ -80,7 +80,7 @@ class OpInfo(object):
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
         if op is None:
-            assert hasattr(torch, self.name)
+            assert hasattr(torch, self.name), f"Can't find torch.{self.name}"
         self.op = op if op else getattr(torch, self.name)
         self.method_variant = getattr(torch.Tensor, name) if hasattr(torch.Tensor, name) else None
         inplace_name = name + "_"
@@ -174,6 +174,7 @@ class UnaryUfuncInfo(OpInfo):
                  handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
+                 promotes_integers_to_float=False,  # whether op promotes unary output to float or not
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
@@ -186,6 +187,7 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_large_floats = handles_large_floats
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
+        self.promotes_integers_to_float = promotes_integers_to_float
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
@@ -342,8 +344,12 @@ op_db = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16)),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    handles_large_floats=False,
                    handles_complex_extremals=False,
+                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
@@ -395,7 +401,7 @@ op_db = [
                    dtypesIfCUDA=None),
     UnaryUfuncInfo('nan_to_num',
                    ref=np.nan_to_num,
-                   dtypes=all_types_and(torch.half),
+                   dtypes=all_types_and(torch.half, torch.bool),
                    dtypesIfCPU=None,
                    dtypesIfCUDA=None)
 ]
@@ -586,12 +592,13 @@ def method_tests():
         ('transpose', (S, S, S), (2, 0), '3d', (False,)),
         ('t', (1, 2), NO_ARGS, '', (False,)),
         ('view', (S, S, S), (S * S, S), '', (False,)),
-        ('view', (S, S, S), (torch.Size([S * S, S]),), 'size', (False,)),
+        ('view', (torch.Size([S * S, S]),), (S, S, S), 'size', (False,)),
         ('view', (S,), (S,), '1d', (False,)),
         ('view', (), (dont_convert(()),), 'scalar_to_scalar', (False,)),
         ('view', (), (1,), 'scalar_to_1d', (False,)),
+        ('ravel', (S, S, S), NO_ARGS, '', (False,)),
         ('reshape', (S, S, S), (S * S, S), '', (False,)),
-        ('reshape', (S, S, S), (torch.Size([S * S, S]),), 'size', (False,)),
+        ('reshape', (torch.Size([S * S, S]),), (S, S, S), 'size', (False,)),
         ('reshape', (S,), (S,), '1d', (False,)),
         ('reshape', (), (dont_convert(()),), 'scalar_to_scalar', (False,)),
         ('reshape', (), (1,), 'scalar_to_1d', (False,)),
@@ -818,10 +825,14 @@ def method_tests():
         ('median', (S, S, S), (1,), 'dim', (), [0]),
         ('median', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
         ('median', (), NO_ARGS, 'scalar'),
-        # TODO: https://github.com/pytorch/pytorch/issues/30818
-        ('median', (), (0,), 'scalar_dim', (), [0], [expectedFailureCUDA]),
-        ('median', (), (0, True,), 'scalar_keepdim_dim', (), [0], [expectedFailureCUDA]),
-        # END TODO
+        ('median', (), (0,), 'scalar_dim', (), [0]),
+        ('median', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
+        ('nanmedian', (S, S, S), NO_ARGS),
+        ('nanmedian', (S, S, S), (1,), 'dim', (), [0]),
+        ('nanmedian', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
+        ('nanmedian', (), NO_ARGS, 'scalar'),
+        ('nanmedian', (), (0,), 'scalar_dim', (), [0]),
+        ('nanmedian', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
         ('mode', (S, S, S), NO_ARGS),
         ('mode', (S, S, S), (1,), 'dim', (), [0]),
         ('mode', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
@@ -1321,6 +1332,10 @@ def method_tests():
         ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), '', (True,)),
         ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3), 0],), 'size_0', (True, )),
         ('split_with_sizes', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), 'dim', (True, ), [1]),
+        ('tensor_split', (S, S, S), (3,), 'sections', (False,)),
+        ('tensor_split', (S, S, S), (3, 1), 'sections_dim', (False,), [1]),
+        ('tensor_split', (S, S, S), ([2, 4],), 'indices', (False,)),
+        ('tensor_split', (S, S, S), ([2, 4], 1), 'indices_dim', (False,), [1]),
         ('gather', (M, S), (0, gather_variable((S, S), 1, M, True)), 'dim0', (), [0]),
         ('gather', (M, S), (1, gather_variable((M, S // 2), 0, S, True)), 'dim1', (), [0]),
         ('gather', (), (0, torch.tensor([0], dtype=torch.int64)), 'scalar_input', (), [0]),

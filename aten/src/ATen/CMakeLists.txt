@@ -65,7 +65,19 @@ file(GLOB native_cpp "native/*.cpp")
 file(GLOB native_mkl_cpp "native/mkl/*.cpp")
 file(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
 file(GLOB vulkan_cpp "vulkan/*.cpp")
-file(GLOB native_vulkan_cpp "native/vulkan/api/*.cpp" "native/vulkan/*.cpp")
+file(GLOB native_vulkan_cpp "native/vulkan/*.cpp")
+file(GLOB native_vulkan_api_cpp "native/vulkan/api/*.cpp" "native/vulkan/ops/*.cpp")
+
+# Metal
+file(GLOB metal_h "metal/*.h")
+file(GLOB metal_cpp "metal/*.cpp")
+file(GLOB_RECURSE native_metal_h "native/metal/*.h")
+file(GLOB metal_test_srcs "native/metal/mpscnn/tests/*.mm")
+file(GLOB_RECURSE native_metal_srcs "native/metal/*.mm", "native/metal/*.cpp")
+EXCLUDE(native_metal_srcs "${native_metal_srcs}" ${metal_test_srcs})
+file(GLOB metal_prepack_h "native/metal/MetalPrepackOpContext.h")
+file(GLOB metal_prepack_cpp "native/metal/MetalPrepackOpRegister.cpp")
+
 file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
@@ -113,8 +125,23 @@ if(AT_MKLDNN_ENABLED)
 endif()
 if(USE_VULKAN)
   set(all_cpu_cpp ${all_cpu_cpp} ${vulkan_cpp} ${native_vulkan_cpp} ${vulkan_generated_cpp})
+  if(USE_VULKAN_API)
+    set(all_cpu_cpp ${all_cpu_cpp} ${native_vulkan_api_cpp})
+  endif()
 else()
   set(all_cpu_cpp ${all_cpu_cpp} ${vulkan_cpp})
+endif()
+
+# Metal
+if(USE_PYTORCH_METAL)
+  if(IOS)
+    set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${native_metal_srcs})
+  else()
+    # Add files needed from optimized_for_mobile
+    set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${metal_prepack_cpp})
+  endif()
+else()
+  set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp})
 endif()
 
 if(USE_CUDA AND USE_ROCM)
@@ -375,6 +402,14 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
   list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${miopen_h})
+else()
+  if(USE_PYTORCH_METAL)
+    if(IOS)
+      list(APPEND INSTALL_HEADERS ${metal_h} ${native_metal_h})
+    else()
+      list(APPEND INSTALL_HEADERS ${metal_h} ${metal_prepack_h})
+    endif()
+  endif()
 endif()
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake

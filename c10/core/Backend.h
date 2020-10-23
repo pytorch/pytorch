@@ -39,6 +39,7 @@ enum class Backend {
   MSNPU,
   XLA,
   Vulkan,
+  Metal,
   QuantizedCPU,
   QuantizedCUDA,
   Undefined,
@@ -109,6 +110,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::XLA;
   } else if (t == DispatchKey::Vulkan) {
     return Backend::Vulkan;
+  } else if (t == DispatchKey::Metal) {
+    return Backend::Metal;
   } else if (t == DispatchKey::SparseCPU) {
     return Backend::SparseCPU;
   } else if (t == DispatchKey::SparseCUDA) {
@@ -160,6 +163,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::MkldnnCPU;
     case Backend::Vulkan:
       return DispatchKey::Vulkan;
+    case Backend::Metal:
+      return DispatchKey::Metal;
     case Backend::QuantizedCPU:
       return DispatchKey::QuantizedCPU;
     case Backend::QuantizedCUDA:
@@ -202,6 +207,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CUDA;
     case Backend::Vulkan:
       return DeviceType::Vulkan;
+    case Backend::Metal:
+      return DeviceType::Metal;
     case Backend::Undefined:
       AT_ERROR("Undefined backend is not a valid device type");
     default:
@@ -306,6 +313,8 @@ static inline const char* toString(Backend b) {
       return "MkldnnCPU";
     case Backend::Vulkan:
       return "Vulkan";
+    case Backend::Metal:
+      return "Metal";
     case Backend::QuantizedCPU:
       return "QuantizedCPU";
     case Backend::QuantizedCUDA:

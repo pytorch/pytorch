@@ -360,9 +360,8 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
 void check_legacy_ctor_device(c10::DispatchKey dispatch_key, c10::optional<Device> device) {
   if (device.has_value()) {
     TORCH_CHECK(computeDeviceType(dispatch_key) == device.value().type(),
-             "legacy constructor for device type: ", computeDeviceType(dispatch_key),
-             " was passed device type: ", device.value().type(),
-             ", but device type must be: ", computeDeviceType(dispatch_key));
+             "legacy constructor expects device type: ", computeDeviceType(dispatch_key),
+             "but device type: ", device.value().type(), " was passed");
   }
 }
 
