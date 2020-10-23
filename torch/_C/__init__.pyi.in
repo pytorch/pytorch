@@ -599,9 +599,6 @@ class _CudaDeviceProperties:
     is_integrated: _int
     is_multi_gpu_board: _int
 
-class Stream:
-    ...
-
 # Defined in torch/csrc/cuda/python_comm.cpp
 def _broadcast(tensor: Tensor, devices: List[_int]) -> List[Tensor]: ...
 def _broadcast_out(tensor: Tensor, out_tensors: List[Tensor]) -> List[Tensor]: ...
