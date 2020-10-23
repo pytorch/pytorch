@@ -14,11 +14,15 @@ from torch.quantization import (
     prepare_qat_fx,
     default_qconfig,
     default_dynamic_qconfig,
-    float16_dynamic_qconfig,
+    default_dynamic_quant_observer,
     default_qat_qconfig,
+    float16_dynamic_qconfig,
+    float_qparams_dynamic_qconfig,
     prepare,
     prepare_qat,
     convert,
+    PerChannelMinMaxObserver,
+    QConfigDynamic,
     FixedQParamsFakeQuantize,
 )
 
@@ -1620,6 +1624,56 @@ class TestQuantizeFxOps(QuantizationTestCase):
             ref_m(data)
             ref_m = convert(ref_m)
             self.assertEqual(m(data), ref_m(data))
+
+    def test_qembedding_module(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
+
+            def forward(self, indices):
+                return self.emb(indices)
+
+        model = M().eval()
+        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        quantized_node = ns.call_module(nnq.Embedding)
+        self.checkGraphModeFxOp(
+            model,
+            [[indices]],
+            QuantType.DYNAMIC,
+            quantized_node,
+            custom_qconfig=float_qparams_dynamic_qconfig
+        )
+
+    def test_qembedding_bag_module(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12, include_last_offset=True)
+
+            def forward(self, indices, offsets):
+                return self.emb(indices, offsets)
+
+        model = M().eval()
+        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        offsets = torch.tensor([0, 19, 20, 28, 28, 32])
+        quantized_node = ns.call_module(nnq.EmbeddingBag)
+        inputs = (indices, offsets)
+
+        for dtype in [torch.quint8, torch.quint4x2]:
+            float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=dtype,
+                                                                        qscheme=torch.per_channel_affine_float_qparams,
+                                                                        ch_axis=0)
+            float_qparams_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+                                                   weight=float_qparams_observer)
+            self.checkGraphModeFxOp(
+                model,
+                inputs,
+                QuantType.DYNAMIC,
+                quantized_node,
+                custom_qconfig=float_qparams_qconfig
+            )
+
 
 class TestQuantizeFxModels(QuantizationTestCase):
     def _test_model_impl(
