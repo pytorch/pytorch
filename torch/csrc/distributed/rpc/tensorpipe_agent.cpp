@@ -327,7 +327,6 @@ void TensorPipeAgent::startImpl() {
   for (auto& key : TensorPipeCudaChannelRegistry()->Keys()) {
     std::unique_ptr<CudaChannelRegistration> reg =
         TensorPipeCudaChannelRegistry()->Create(key);
-    std::cout << "=== registering one cuda channel\n" << std::flush;
     context_->registerChannel(
         reg->priority, std::move(key), std::move(reg->channel));
   }
