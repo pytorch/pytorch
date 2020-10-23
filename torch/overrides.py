@@ -156,8 +156,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.is_deterministic,
         torch.set_deterministic,
         torch.unify_type_list,
-        torch.valgrind_supported_platform,
-        torch.valgrind_toggle,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,
@@ -1073,7 +1071,7 @@ def handle_torch_function(
     func_name = '{}.{}'.format(public_api.__module__, public_api.__name__)
     raise TypeError("no implementation found for '{}' on types that implement "
                     '__torch_function__: {}'
-                    .format(func_name, list(map(type, overloaded_args))))
+                    .format(func_name, [type(arg) for arg in overloaded_args]))
 
 def has_torch_function(relevant_args: Iterable[Any]) -> bool:
     """Check for __torch_function__ implementations in the elements of an iterable

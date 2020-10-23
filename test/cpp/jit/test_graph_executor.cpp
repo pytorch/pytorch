@@ -47,7 +47,7 @@ TEST(GraphExecutorTest, runAsync_executor) {
   */
   std::string filePath(__FILE__);
   auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  testModelFile.append("test_interpreter_async.pth");
+  testModelFile.append("test_interpreter_async.pt");
   auto module = load(testModelFile);
   module.to(at::kCPU);
   auto graph = module.get_method("forward").graph();
