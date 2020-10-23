@@ -268,7 +268,7 @@ static const char* ternary_op_type2string(TernaryOpType t) {
     case TernaryOpType::Where:
       return "where";
     default:
-      TORCH_INTERNAL_ASSERT(false, "No string found for ternary op type.");
+      TORCH_INTERNAL_ASSERT(false, "Unexpected TernaryOpType", t);
   }
 }
 
@@ -293,7 +293,7 @@ static const char* parallel_type2string(ParallelType t) {
     case ParallelType::Serial:
       return "S";
     default:
-      TORCH_INTERNAL_ASSERT(false, "No string found for parallel type.");
+      TORCH_INTERNAL_ASSERT(false, "Unexpected ParallelType", t);
   }
 }
 
@@ -306,7 +306,7 @@ static const char* memory_type2string(MemoryType t) {
     case MemoryType::Global:
       return "global";
     default:
-      TORCH_INTERNAL_ASSERT(false, "No string found for memory type.");
+      TORCH_INTERNAL_ASSERT(false, "Unexpected MemoryType", t);
   }
 }
 
@@ -321,7 +321,7 @@ static const char* iter_type2string(IterType t) {
     case IterType::BroadcastWithoutStride:
       return "b";
     default:
-      TORCH_INTERNAL_ASSERT(false, "No string found for IterDomain type.");
+      TORCH_INTERNAL_ASSERT(false, "Unexpected IterType", t);
   }
 }
 

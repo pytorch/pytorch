@@ -484,7 +484,7 @@ std::vector<bool> IndexCompute::contiguityPasC(
       p_ind++;
     } else if (
         c_root[c_ind]->isBroadcast() &&
-        p_root[p_ind]->getIterType() != c_root[c_ind]->getIterType()) {
+        p_root[p_ind]->iterType() != c_root[c_ind]->iterType()) {
       c_ind++;
       as_consumer_contiguity.push_back(false);
     } else {
@@ -1230,7 +1230,7 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
     bool within_unroll = false;
     const auto one = ir_builder.create<kir::Int>(1);
     for (auto loop : loops) {
-      if (loop->iter_domain()->getParallelType() == ParallelType::Unroll) {
+      if (loop->iter_domain()->parallelType() == ParallelType::Unroll) {
         within_unroll = true;
       }
 

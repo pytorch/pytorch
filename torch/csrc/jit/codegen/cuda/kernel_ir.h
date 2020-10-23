@@ -154,6 +154,9 @@ class TORCH_CUDA_API Node : public NonCopyable, public PolymorphicBase {
   //! IR Visitor double-dispatch interface
   //! (https://en.wikipedia.org/wiki/Visitor_pattern)
   virtual void accept(IrVisitor* visitor) const = 0;
+
+  //! Debug helper, prints the textual representation of an IR node
+  void print() const;
 };
 
 //! Generic value (scalar or tensor)
@@ -461,7 +464,7 @@ class TORCH_CUDA_API IterDomain final : public Val {
   }
 
   bool isReduction() const {
-    return getIterType() == IterType::Reduction;
+    return iterType() == IterType::Reduction;
   }
 
   bool isRFactorProduct() const {
@@ -469,28 +472,26 @@ class TORCH_CUDA_API IterDomain final : public Val {
   }
 
   bool isBroadcast() const {
-    return getIterType() == IterType::BroadcastWithStride ||
-        getIterType() == IterType::BroadcastWithoutStride;
+    return iterType() == IterType::BroadcastWithStride ||
+        iterType() == IterType::BroadcastWithoutStride;
   }
 
   bool isParallelized() const {
-    return getParallelType() != ParallelType::Serial;
+    return parallelType() != ParallelType::Serial;
   }
 
   // Return if this iter domain is mapped to a grid dimension
   bool isBlockDim() const {
-    return (
-        getParallelType() == ParallelType::BIDz ||
-        getParallelType() == ParallelType::BIDy ||
-        getParallelType() == ParallelType::BIDx);
+    return parallelType() == ParallelType::BIDz ||
+        parallelType() == ParallelType::BIDy ||
+        parallelType() == ParallelType::BIDx;
   }
 
   // Return if this iter domain is mapped to a block dimension
   bool isThreadDim() const {
-    return (
-        getParallelType() == ParallelType::TIDz ||
-        getParallelType() == ParallelType::TIDy ||
-        getParallelType() == ParallelType::TIDx);
+    return parallelType() == ParallelType::TIDz ||
+        parallelType() == ParallelType::TIDy ||
+        parallelType() == ParallelType::TIDx;
   }
 
   // Return if this iter domain is either mapped to a block or grid dimension
@@ -498,11 +499,11 @@ class TORCH_CUDA_API IterDomain final : public Val {
     return isBlockDim() || isThreadDim();
   }
 
-  ParallelType getParallelType() const {
+  ParallelType parallelType() const {
     return parallel_type_;
   }
 
-  IterType getIterType() const {
+  IterType iterType() const {
     return iter_type_;
   }
 

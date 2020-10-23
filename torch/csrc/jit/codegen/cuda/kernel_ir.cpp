@@ -2,15 +2,24 @@
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
+
+#include <iostream>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
 namespace kir {
+
+void Node::print() const {
+  std::cout << "\n";
+  IrPrinter(std::cout).printNode(this);
+  std::cout << "\n";
+}
 
 Val::Val(Passkey passkey, DataType dtype) : Node(passkey), dtype_(dtype) {
   id_ = passkey.kernel->newValueId(passkey);
@@ -89,7 +98,7 @@ Val* IterDomain::extent() const {
     if (extent_->isScalar() && extent_->isConst()) {
       return extent_;
     }
-    return NamedScalar::getParallelDim(getParallelType());
+    return NamedScalar::getParallelDim(parallelType());
   }
   return extent_;
 }
@@ -264,7 +273,7 @@ std::unordered_map<ParallelType, IterDomain*, TypeHash> ReductionOp::
   std::unordered_map<ParallelType, IterDomain*, TypeHash> parallel_domains;
   for (auto d : getReductionDomains()) {
     if (d->isThread()) {
-      parallel_domains.insert(std::make_pair(d->getParallelType(), d));
+      parallel_domains.insert(std::make_pair(d->parallelType(), d));
     }
   }
   return parallel_domains;

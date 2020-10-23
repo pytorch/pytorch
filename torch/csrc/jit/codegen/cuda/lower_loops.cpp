@@ -190,7 +190,7 @@ void LoopNestGenerator::initReduction(
     if (id->isThread()) {
       // If based on a thread, make sure we get the named Int right
       std::stringstream ss;
-      ss << id->getParallelType();
+      ss << id->parallelType();
       new_fl = ir_builder_.create<kir::ForLoop>(
           ir_builder_.create<kir::NamedScalar>(ss.str(), DataType::Int),
           id,

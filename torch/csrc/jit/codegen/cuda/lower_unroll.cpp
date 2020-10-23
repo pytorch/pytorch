@@ -75,7 +75,7 @@ void UnrollPass::handle(kir::Expr* expr) {
 void UnrollPass::handle(kir::ForLoop* fl) {
   // Setup for loop scoping
   const bool is_unroll =
-      fl->iter_domain()->getParallelType() == ParallelType::Unroll;
+      fl->iter_domain()->parallelType() == ParallelType::Unroll;
 
   // If we're not looking for an unroll loop, or didn't find one, process as
   // normal.

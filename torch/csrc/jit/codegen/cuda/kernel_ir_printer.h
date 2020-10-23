@@ -6,7 +6,9 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 
 #include <iostream>
+#include <sstream>
 #include <string>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
@@ -27,13 +29,22 @@ class TORCH_CUDA_API IrPrinter : private kir::IrVisitor {
   explicit IrPrinter(std::ostream& os) : os_(os) {}
 
   //! Print a single Kernel IR node
-  void printNode(const kir::Node* stmt);
+  void printNode(const kir::Node* node);
 
   //! Print a complete Kernel definition
   void printKernel(const Kernel* kernel);
 
  private:
-  static std::string gen(const kir::Node* stmt);
+  // Generates a string representation of an IR node
+  //
+  // If `top_level` is true, all the value uses are tracked and
+  // their definitions are implicitly printed before the node itself
+  //
+  std::string gen(const kir::Node* node, bool top_level = false);
+
+  // Generate a string representation of an used value
+  // (this helps automatically tracking the value uses)
+  std::string use(const kir::Val* val);
 
   std::ostream& indent();
 
@@ -66,7 +77,21 @@ class TORCH_CUDA_API IrPrinter : private kir::IrVisitor {
 
  private:
   std::ostream& os_;
+
+  // Current indentation level
   int indent_level_ = 0;
+
+  // Internal IR generation stream
+  std::stringstream ir_str_;
+
+  // Tracks the set of nodes which have been printed
+  std::unordered_set<const kir::Node*> visited_;
+
+  // Optional left margin printed after the indentation
+  const char* margin_ = "";
+
+  // The set of values used by the current top-level IR node
+  std::unordered_set<const kir::Val*> uses_;
 };
 
 //! Returns the string representation of a Kernel IR node

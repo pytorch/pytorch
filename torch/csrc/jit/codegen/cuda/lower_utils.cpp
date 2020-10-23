@@ -295,7 +295,7 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
     loops_it =
         std::find_if(loops_it, loops.end(), [&kir_ca_id](const auto& loop) {
           return kir_ca_id == loop->iter_domain() ||
-              loop->iter_domain()->getParallelType() == ParallelType::Unroll;
+              loop->iter_domain()->parallelType() == ParallelType::Unroll;
         });
 
     if (loops_it == loops.end()) {
@@ -309,7 +309,7 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
         "Could not find all required axes for indexing when trying to index into ",
         tv);
 
-    if (kir_ca_id->getParallelType() == ParallelType::Unroll) {
+    if (kir_ca_id->parallelType() == ParallelType::Unroll) {
       return {alloc_loop, tv_i};
     }
 
