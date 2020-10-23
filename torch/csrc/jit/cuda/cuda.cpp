@@ -13,6 +13,7 @@ public:
   CUDAStream(int64_t device=-1, int64_t priority=0) {
     stream_ = std::make_unique<c10::cuda::CUDAStream>(c10::cuda::getStreamFromPool(priority > 50, device));
   }
+
   bool query() {
     return stream_->query();
   }

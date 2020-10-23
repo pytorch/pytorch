@@ -317,12 +317,10 @@ def stream(stream):
     """
     if stream is None:
         return
-    #src_prev_stream = current_stream()
 
-    src_prev_stream = Stream(_cdata=torch.cuda_getCurrentStream(0))
-    print("In Stream:::",src_prev_stream.device,"This is Stream:::", stream)
+    src_prev_stream = torch.cuda_getCurrentStream(0)
 
-    if src_prev_stream.device != stream.device():
+    if src_prev_stream.device != stream.device:
         # The given stream is on a different device; have to restore the
         # current_stream on that device on exit as well
         with device(stream.device):
@@ -403,7 +401,6 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
             (default).
     """
     _lazy_init()
-    print("In current Stream::::",device)
     return Stream(_cdata=torch._C._cuda_getCurrentStream(
         _get_device_index(device, optional=True)))
 
@@ -418,7 +415,7 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
     """
     _lazy_init()
     return Stream(_cdata=torch._C._cuda_getDefaultStream(
-        _get_device_index(device, optional=False)))
+        _get_device_index(device, optional=True)))
 
 
 def current_blas_handle():
