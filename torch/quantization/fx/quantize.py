@@ -426,7 +426,8 @@ class Quantizer:
                 if not activation_is_statically_quantized(qconfig):
                     continue
 
-                if isinstance(obj, FixedQParamsOpQuantizeHandler):
+                if isinstance(obj, FixedQParamsOpQuantizeHandler) and model.training:
+                    # we only insert fake quantize module in qat
                     activation_post_process_ctr = \
                         get_default_output_activation_post_process_map().get(pattern, None)
                     assert activation_post_process_ctr is not None, \
@@ -434,7 +435,8 @@ class Quantizer:
                         'pattern:' + str(pattern)
                     device = assert_and_get_unique_device(model)
                     insert_observer(node, activation_post_process_ctr(), device)
-                elif isinstance(obj, CopyNode):
+                elif (isinstance(obj, FixedQParamsOpQuantizeHandler) and not model.training) \
+                     or isinstance(obj, CopyNode):
                     # inserting observers for output of observed module, or mark the output
                     # as observed
                     assert node.op in [

@@ -1509,17 +1509,19 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 m.eval()
                 qconfig = default_qconfig
                 prepare = prepare_fx
+                fq_count = 0
             else:
                 m.train()
                 qconfig = default_qat_qconfig
                 prepare = prepare_qat_fx
+                fq_count = 13
 
             # nothing to fuse so skipping the fuse step
             qconfig_dict = {'': qconfig}
             prepared = prepare(m, qconfig_dict)
             # check the correct number of activation_post_process is inserted
             count_check = {
-                ns.call_module(FixedQParamsFakeQuantize) : 13,
+                ns.call_module(FixedQParamsFakeQuantize) : fq_count,
             }
             self.checkGraphModuleNodes(
                 prepared,
