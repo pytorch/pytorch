@@ -165,49 +165,6 @@ std::string getNcclAbortedCommStoreKey(const std::string ncclIdStr) {
   return std::string(kNCCLAbortedCommStoreKey) + ":" + ncclIdStr;
 }
 
-#ifdef ENABLE_NCCL_P2P_SUPPORT
-
-ncclResult_t ncclAlltoallv(
-    void* sendbuff,
-    const size_t* sendcounts,
-    const size_t* senddispls,
-    void* recvbuff,
-    const size_t* recvcounts,
-    const size_t* recvdispls,
-    size_t size,
-    ncclDataType_t type,
-    ncclComm_t comm,
-    cudaStream_t stream) {
-  int numranks;
-  C10D_NCCL_CHECK(ncclCommCount(comm, &numranks));
-  C10D_NCCL_CHECK(ncclGroupStart());
-  for (int r = 0; r < numranks; r++) {
-    // NCCL uses 0 byte message for synchronization
-    // Avoid send/recv when message size is zero
-    if (sendcounts[r] != 0) {
-      C10D_NCCL_CHECK(ncclSend(
-          ((char*)sendbuff) + senddispls[r] * size,
-          sendcounts[r],
-          type,
-          r,
-          comm,
-          stream));
-    }
-    if (recvcounts[r] != 0) {
-      C10D_NCCL_CHECK(ncclRecv(
-          ((char*)recvbuff) + recvdispls[r] * size,
-          recvcounts[r],
-          type,
-          r,
-          comm,
-          stream));
-    }
-  }
-  C10D_NCCL_CHECK(ncclGroupEnd());
-  return ncclSuccess;
-}
-#endif
-
 } // namespace
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
@@ -1438,7 +1395,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
         // See [Sync Streams].
         c10::cuda::CUDACachingAllocator::recordStream(
               output.storage().data_ptr(), stream);
-        torch::cuda::nccl::all2all(
+        torch::cuda::nccl::all2all_single_equal_split(
               input,
               output,
               this->getSize(),
@@ -1470,7 +1427,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
           // See [Sync Streams].
           c10::cuda::CUDACachingAllocator::recordStream(
               output.storage().data_ptr(), stream);
-          return ncclAlltoallv(
+          torch::cuda::nccl::all2all_single_unequal_split(
               input.data_ptr(),
               send_lengths.data(),
               send_offsets.data(),
@@ -1478,12 +1435,39 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
               recv_lengths.data(),
               recv_offsets.data(),
               input.element_size(),
-              getNcclDataType(input.scalar_type()),
+              input.scalar_type(),
               comm,
-              stream.stream());
+              stream);
+          return ncclSuccess;
         },
         OpType::ALLTOALL_BASE);
   }
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<at::Tensor>& inputTensors,
+    const AllToAllOptions& /* unused */) {
+  auto device = outputTensors[0].device();
+  for (size_t r = 0; r < outputTensors.size(); r++) {
+    check_gpu_single_tensor(outputTensors[r]);
+    check_gpu_single_tensor(inputTensors[r]);
+    TORCH_CHECK(device == outputTensors[r].device() && device == inputTensors[r].device(),
+      "Tensors must be on the same device")
+  }
+  std::vector<at::Tensor> inputTensor0 = {inputTensors[0]};
+  std::vector<at::Tensor> outputTensor0 = {outputTensors[0]};
+  return collective(
+    inputTensor0,
+    outputTensor0,
+    [&](at::Tensor& /* unused */,
+        at::Tensor& /* unused */,
+        ncclComm_t comm,
+        at::cuda::CUDAStream& stream) {
+      torch::cuda::nccl::all2all(outputTensors, inputTensors, comm, stream);
+      return ncclSuccess;
+    },
+    OpType::ALLTOALL);
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
@@ -1534,6 +1518,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
       "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
+    std::vector<at::Tensor>& /* unused */,
+    std::vector<at::Tensor>& /* unused */,
+    const AllToAllOptions& /* unused */) {
+  throw std::runtime_error(
+      "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
+}
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */,
@@ -1563,13 +1555,6 @@ void ProcessGroupNCCL::groupEnd() {
   C10D_NCCL_CHECK(ncclGroupEnd());
 #endif
   --ncclActiveGroupCounter_;
-}
-
-std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
-    std::vector<at::Tensor>& /* unused */,
-    std::vector<at::Tensor>& /* unused */,
-    const AllToAllOptions& /* unused */) {
-  throw std::runtime_error("ProcessGroupNCCL does not support alltoall");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
