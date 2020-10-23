@@ -43,11 +43,7 @@ class RNNEltwise(benchmark.Benchmark):
         hy = outgate * torch.tanh(cy)
 
         return hy, cy
-    
-    @staticmethod
-    def input_iterable() :
-        return True
-    
+
     def config(self):
         return [self.b, self.hs]
 
