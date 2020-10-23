@@ -33,9 +33,9 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     new_code = CodeType(*co_args)  # type: ignore
     return FunctionType(new_code, fn.__globals__, fn.__name__, fn.__defaults__, fn.__closure__)
 
-    # we need to insert placeholder nodes for *args, and **kwargs,
-    # so we can't call this function normally, otherwise it would try to unpack them
-    # instead, let's make python think that args and kwargs are normay variables
+    # we need to insert placeholder nodes for *args and **kwargs
+    # we can't call this function normally, otherwise it would try to unpack them
+    # instead, let's make python think that args and kwargs are normal variables
 
 class Tracer(TracerBase):
     def __init__(self):
