@@ -429,6 +429,14 @@ list(APPEND ATen_MOBILE_BENCHMARK_SRCS
 list(APPEND ATen_MOBILE_BENCHMARK_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/stateful_conv1d.cpp)
 
+if(LINUX OR ANDROID)
+  # NNAPI is primarily for Android, but also build on Linux
+  # to allow easy experimentation when a host build of libneuralnetworks
+  # is available.  We don't have any build-time dependencies on NNAPI,
+  # so this should be safe.
+  add_subdirectory(nnapi)
+endif()
+
 # Pass source, includes, and libs to parent
 set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
