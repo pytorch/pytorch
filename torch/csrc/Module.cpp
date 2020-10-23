@@ -828,7 +828,7 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
 
   py_module.def(
-    "valgrind_supported_platform", [](){
+    "_valgrind_supported_platform", [](){
       #if defined(NVALGRIND)
       return false;
       #else
@@ -838,7 +838,7 @@ Call this whenever a new thread is created in order to propagate values from
   );
 
   py_module.def(
-    "valgrind_toggle", [](){
+    "_valgrind_toggle", [](){
       #if defined(NVALGRIND)
       TORCH_CHECK(false, "Valgrind is not supported.");
       #else
