@@ -116,7 +116,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         )
         device = next(iter(devices)) if len(devices) > 0 else None
 
-    def get_activation_post_process(qconfig, device, special_act_post_process):
+    def get_activation_post_process(qconfig, device, special_act_post_process=None):
         activation = qconfig.activation() if special_act_post_process is None else special_act_post_process()
         if device is not None:
             activation.to(device)
