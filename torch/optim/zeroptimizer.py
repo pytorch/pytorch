@@ -503,6 +503,16 @@ class ZeROptimizer(Optimizer):
                         dist.broadcast(tensor=p.data, src=global_src_rank, group=self.group, async_op=True)
                     )
 
+            # Catch a trailing bucket
+            if not bucket_sent:
+                bucket_requests.append(
+                    (
+                        dist.broadcast(tensor=buffer, src=global_src_rank, group=self.group, async_op=True),
+                        src_rank,
+                        bucket_params,
+                    )
+                )
+
         # Unroll the initial packed small parameters
         for work_handle, src_rank, bucket_params in bucket_requests:
             work_handle.wait()
