@@ -11,7 +11,7 @@ from .conv import ConvTranspose1d, ConvTranspose2d
 from .linear import Linear
 from .embedding_ops import Embedding, EmbeddingBag
 
-from .functional_modules import FloatFunctional, QFunctional
+from .functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
 
 
 class Quantize(torch.nn.Module):
@@ -92,23 +92,24 @@ __all__ = [
     'ConvTranspose1d',
     'ConvTranspose2d',
     'DeQuantize',
+    'ELU',
+    'Embedding',
+    'EmbeddingBag',
+    'GroupNorm',
+    'Hardswish',
+    'InstanceNorm1d',
+    'InstanceNorm2d',
+    'InstanceNorm3d',
+    'LayerNorm',
+    'LeakyReLU',
     'Linear',
     'MaxPool2d',
     'Quantize',
     'ReLU',
     'ReLU6',
-    'Hardswish',
-    'ELU',
-    'LeakyReLU',
     'Sigmoid',
-    'LayerNorm',
-    'GroupNorm',
-    'InstanceNorm1d',
-    'InstanceNorm2d',
-    'InstanceNorm3d',
-    'Embedding',
-    'EmbeddingBag',
     # Wrapper modules
     'FloatFunctional',
+    'FXFloatFunctional',
     'QFunctional',
 ]

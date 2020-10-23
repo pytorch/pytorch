@@ -2966,7 +2966,9 @@ class TestQuantizedEmbeddingOps(TestCase):
 
     def embedding_bag_rowwise_offsets_run(
             self, bit_rate, num_embeddings,
-            embedding_dim, num_offsets, enable_per_sample_weights,
+            embedding_dim, num_offsets,
+            use_32bit_indices, use_32bit_offsets,
+            enable_per_sample_weights,
             include_last_offset, atol, rtol):
         pt_op = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
         pt_prepack_op = torch.ops.quantized.embedding_bag_byte_prepack
@@ -3027,8 +3029,8 @@ class TestQuantizedEmbeddingOps(TestCase):
             per_sample_weights, indices, offsets)
         result = pt_op(
             q_weights,
-            indices,
-            offsets,
+            indices.int() if use_32bit_indices else indices,
+            offsets.int() if use_32bit_offsets else offsets,
             mode=0,
             per_sample_weights=per_sample_weights,
             include_last_offset=include_last_offset,
@@ -3065,14 +3067,19 @@ class TestQuantizedEmbeddingOps(TestCase):
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_offsets=st.integers(1, 20),
+           use_32bit_indices=st.booleans(),
+           use_32bit_offsets=st.booleans(),
            enable_per_sample_weights=st.booleans(),
            include_last_offset=st.booleans())
     def test_embedding_bag_byte(self, num_embeddings,
                                 embedding_dim, num_offsets,
+                                use_32bit_indices,
+                                use_32bit_offsets,
                                 enable_per_sample_weights,
                                 include_last_offset):
         self.embedding_bag_rowwise_offsets_run(
             8, num_embeddings, embedding_dim, num_offsets,
+            use_32bit_indices, use_32bit_offsets,
             enable_per_sample_weights, include_last_offset,
             atol=0.005, rtol=1e-3)
 
@@ -3080,14 +3087,19 @@ class TestQuantizedEmbeddingOps(TestCase):
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_offsets=st.integers(1, 20),
+           use_32bit_indices=st.booleans(),
+           use_32bit_offsets=st.booleans(),
            enable_per_sample_weights=st.booleans(),
            include_last_offset=st.booleans())
     def test_embedding_bag_4bit(self, num_embeddings,
                                 embedding_dim, num_offsets,
+                                use_32bit_indices,
+                                use_32bit_offsets,
                                 enable_per_sample_weights,
                                 include_last_offset):
         self.embedding_bag_rowwise_offsets_run(4, num_embeddings,
                                                embedding_dim, num_offsets,
+                                               use_32bit_indices, use_32bit_offsets,
                                                enable_per_sample_weights,
                                                include_last_offset, atol=0.1,
                                                rtol=1e-2)
@@ -3134,12 +3146,14 @@ class TestQuantizedConv(TestCase):
 
         W = torch.from_numpy(W).float()
         bias = torch.from_numpy(bias).float()
-
+        if channelwise and transposed:
+            # currently transposed conv and per-channel per quantization does not work
+            return
         if channelwise:
             if transposed:
-                output_channels = W.shape[1]
+                output_channels = W.shape[1]  # IC OC/G
             else:
-                output_channels = W.shape[0]
+                output_channels = W.shape[0]  # OC IC/G
             W_scale = torch.tensor([W_scale] * output_channels)
             W_zero_point = torch.tensor([W_zero_point] * output_channels)
             W_q = torch.quantize_per_channel(
@@ -3540,8 +3554,6 @@ class TestQuantizedConv(TestCase):
             Y_scale,
             Y_zero_point,
             use_bias):
-        if not qengine_is_qnnpack():
-            return  # Currently only QNNPACK is supported
         if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
             return  # QNNPACK doesn't support these
         assume(o_pad_h < stride_h or o_pad_h < dilation)
@@ -3667,8 +3679,6 @@ class TestQuantizedConv(TestCase):
             return
         if qengine == 'qnnpack':
             assume(not channelwise)  # QNNPACK doesn't support channelwise
-        else:
-            assume(not transposed)  # Only QNNPACK supports transposed conv
         if transposed:
             qconv_prepack = torch.ops.quantized.conv_transpose2d_prepack
             qconv_unpack = torch.ops.quantized.conv_transpose2d_unpack
