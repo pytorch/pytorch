@@ -1273,9 +1273,9 @@ class TestTEFuser(JitTestCase):
             torch.expm1,
             torch.erf,
             torch.erfc,
-            # torch.cos, Note: Reference https://github.com/pytorch/pytorch/issues/46458
-            # torch.sin, Note: Reference https://github.com/pytorch/pytorch/issues/46458
-            # torch.tan, Note: Reference https://github.com/pytorch/pytorch/issues/46458
+            torch.cos,
+            torch.sin,
+            torch.tan,
             torch.acos,
             torch.asin,
             torch.cosh,
