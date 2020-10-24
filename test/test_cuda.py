@@ -1,15 +1,15 @@
-import collections
-import io
-import tempfile
-from typing import NamedTuple
-import unittest
-import sys
 from itertools import repeat, chain, product
-import os
+from typing import NamedTuple
+import collections
 import gc
-import threading
-import queue
+import io
+import os
 import pickle
+import queue
+import sys
+import tempfile
+import threading
+import unittest
 
 import torch
 import torch.cuda
@@ -287,10 +287,10 @@ class TestCuda(TestCase):
         self.assertFalse(t.is_pinned())
         cudart = torch.cuda.cudart()
         r = cudart.cudaHostRegister(t.data_ptr(), t.numel() * t.element_size(), 0)
-        self.assertEquals(r, 0)
+        self.assertEqual(r, 0)
         self.assertTrue(t.is_pinned())
         r = cudart.cudaHostUnregister(t.data_ptr())
-        self.assertEquals(r, 0)
+        self.assertEqual(r, 0)
         self.assertFalse(t.is_pinned())
 
     def test_memory_stats(self):
@@ -1545,7 +1545,6 @@ class TestCuda(TestCase):
         counted = t.bincount(minlength=65536)
         self.assertEqual(torch.sum(counted), 10)
 
-    @skipIfRocm
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
         a /= 100000000

@@ -410,7 +410,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   ctx_id starting from the owner of the RRef. In this case,
                   :meth:`~torch.distributed.autograd.get_gradients` should be
                   used to retrieve the gradients. If ``dist_autograd_ctx_id``
-                  is None, it is assumed that this is a local autograd graph
+                  is ``None``, it is assumed that this is a local autograd graph
                   and we only perform a local backward pass. The value of the
                   RRef is expected to be a scalar Tensor.
 
@@ -418,11 +418,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                     dist_autograd_ctx_id (int, optional): The distributed
                         autograd context id for which we should retrieve the
                         gradients (default: -1).
-                    retain_graph(bool, optional): If False, the graph used to
+                    retain_graph(bool, optional): If ``False``, the graph used to
                         compute the grad will be freed. Note that in nearly all
-                        cases setting this option to True is not needed and
+                        cases setting this option to ``True`` is not needed and
                         often can be worked around in a much more efficient way.
-                        Usually, you need to set this to True to run backward
+                        Usually, you need to set this to ``True`` to run backward
                         multiple times (default: False).
 
                 Example::
