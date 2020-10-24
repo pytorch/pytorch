@@ -488,6 +488,25 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
   AT_ASSERTM(false, "Unsupported impl_index in _batch_norm_impl_index_backward: ", impl_index);
 }
 
+std::vector<int64_t> make_reduce_dims(int64_t input_dim) {
+  std::vector<int64_t> result;
+  result.push_back(0);
+  for (int64_t i = 2; i < input_dim; i++) {
+    result.push_back(i);
+  }
+  return result;
+}
+
+std::vector<int64_t> make_scalar_shape(int64_t input_dim, int64_t n_input) {
+  std::vector<int64_t> result;
+  result.push_back(1);
+  result.push_back(n_input);
+  for (int64_t i = 2; i < input_dim; i++) {
+    result.push_back(1);
+  }
+  return result;
+}
+
 Tensor batch_norm(
     const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
@@ -499,8 +518,69 @@ Tensor batch_norm(
     if (bias.defined()) out = out + bias[0];
     return out;
   }
-  return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
-                                                training, momentum, eps, cudnn_enabled));
+
+  auto num_features = input.sizes()[1];
+  if (running_mean.defined()) {
+    check_dims_match_num_input_features("running_mean", num_features, running_mean.numel());
+  } else if (!training) {
+    AT_ERROR("running_mean must be defined in evaluation mode");
+  }
+  if (running_var.defined()) {
+    check_dims_match_num_input_features("running_var", num_features, running_var.numel());
+  } else if (!training) {
+    AT_ERROR("running_var must be defined in evaluation mode");
+  }
+  if (weight.defined()) {
+    check_dims_match_num_input_features("weight", num_features, weight.numel());
+  }
+  if (bias.defined()) {
+    check_dims_match_num_input_features("bias", num_features, bias.numel());
+  }
+
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+
+  int64_t n_input = input.size(1);
+  auto scalar_shape = make_scalar_shape(input.dim(), n_input);
+
+  at::Tensor mean;
+  at::Tensor invstd;
+  at::Tensor save_mean;
+  at::Tensor save_invstd;
+
+  if (training) {
+    auto reduce_dims = make_reduce_dims(input.dim());
+    save_mean = at::mean(input, IntArrayRef(reduce_dims));
+
+    save_invstd = 1 / at::sqrt(
+        at::var(input, IntArrayRef(reduce_dims), false) + eps);
+
+    if (running_mean.defined()) {
+      running_mean.copy_(momentum * save_mean + (1 - momentum) * running_mean);
+    }
+
+    if (running_var.defined()) {
+      Tensor unbiased_var = at::var(input, IntArrayRef(reduce_dims));
+      running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var);
+    }
+
+    mean = save_mean;
+    invstd = save_invstd;
+  } else {
+    mean = running_mean;
+    invstd = 1 / at::sqrt(running_var + eps);
+  }
+
+  output = input;
+  output = output - mean.reshape(IntArrayRef(scalar_shape));
+  output = output * invstd.reshape(IntArrayRef(scalar_shape));
+
+  if (weight.defined()) {
+    output = output * weight.reshape(IntArrayRef(scalar_shape));
+  }
+  if (bias.defined()) {
+    output = output + bias.reshape(IntArrayRef(scalar_shape));
+  }
+  return output;
 }
 
 Tensor instance_norm(
