@@ -935,13 +935,15 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::log: {
-      return computeOneOperand(
-          "aten_log", v, [](const ExprHandle& a) { return log(a); });
+      return computeOneOperand("aten_log", v, [](const ExprHandle& a) {
+        return log(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::log10: {
-      return computeOneOperand(
-          "aten_log10", v, [](const ExprHandle& a) { return log10(a); });
+      return computeOneOperand("aten_log10", v, [](const ExprHandle& a) {
+        return log10(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::log1p: {
@@ -950,8 +952,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::log2: {
-      return computeOneOperand(
-          "aten_log2", v, [](const ExprHandle& a) { return log2(a); });
+      return computeOneOperand("aten_log2", v, [](const ExprHandle& a) {
+        return log2(promoteIntegerToFloat(a));
+      });
     } break;
 
     case aten::exp: {
