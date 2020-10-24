@@ -146,7 +146,7 @@ linalg.tensorsolve(input, other, dims=None, *, out=None) -> Tensor
 
 Computes a tensor ``x`` such that ``tensordot(input, x, dims=x.ndim) = other``.
 The resulting tensor ``x`` has the shape equal to ``input[other.ndim:]``.
-Before computing ``x``, dimensions of `:attr:`input` can be moved using :attr:`dims` to match the shape requirements.
+Before computing ``x``, dimensions of :attr:`input` can be moved using :attr:`dims` to match the shape requirements.
 
 Supports real-valued and, only on the CPU, complex-valued inputs.
 
@@ -158,8 +158,8 @@ Args:
     input (Tensor): left-hand-side tensor, it must satisfy the requirement
                     ``prod(input.shape[other.ndim:]) == prod(input.shape[:other.ndim])``.
     other (Tensor): right-hand-side tensor of shape ``input.shape[other.ndim]``.
-    dims (Tuple[int]): dimensions of `:attr:`input` to be moved to the end keeping the order,
-                       i.e. ``movedim(input, dims, range(len(dims) - input.ndim, 0)), before solve.
+    dims (Tuple[int]): dimensions of :attr:`input` to be moved to the end keeping the order,
+                       i.e. ``movedim(input, dims, range(len(dims) - input.ndim, 0))``, before solve.
                        If None (default), no moving of dimensions is done.
 
 Keyword args:
