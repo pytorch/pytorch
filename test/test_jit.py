@@ -35,6 +35,7 @@ from jit.test_profiler import TestProfiler  # noqa: F401
 from jit.test_slice import TestSlice  # noqa: F401
 from jit.test_warn import TestWarn  # noqa: F401
 from jit.test_isinstance import TestIsinstance  # noqa: F401
+from jit.test_hash import TestHash  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -15440,7 +15441,7 @@ EXCLUDE_SCRIPT_AD_CHECK = {
     'test_tensor_indices_sections_dim_neg0',
     'test_tensor_split_sections',
     'test_tensor_split_sections_dim',
-    'test_tensor_split_sections_dim_neg0',
+    'test_tensor_split_sections_dim_neg0'
 }
 
 EXCLUDE_PYTHON_PRINT = {
@@ -15457,6 +15458,10 @@ EXCLUDE_PYTHON_PRINT = {
 EXCLUDE_ALIAS = {
     # aliases, which may appear in method_tests but are tested elsewhere
     'true_divide',
+
+    # Disable tests for lu from common_methods_invocations.py
+    # TODO(@nikitaved) Enable jit tests once autograd.Function does support scripting
+    'lu'
 }
 
 def check_alias_annotation(method_name, args, kwargs):
