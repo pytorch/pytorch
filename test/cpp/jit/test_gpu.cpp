@@ -7905,6 +7905,50 @@ TEST(NVFuserTest, FusionDisjointSet_CUDA) {
   }
 }
 
+TEST(NVFuserTest, FusionNonUniqueBroadcastSize_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeDummyTensor(1);
+  auto tv1 = makeDummyTensor(2);
+  auto tv2 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addInput(tv2);
+
+  auto tv3 = broadcast(tv0, {false, true});
+  auto tv4 = add(tv3, tv1);
+  auto tv5 = add(tv3, tv2);
+
+  fusion.addOutput(tv4);
+  fusion.addOutput(tv5);
+
+  tv3->computeAt(tv4, -1);
+
+  const int numel_x = 100;
+  const int numel_y = 200;
+  const int numel_z = 300;
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::rand({numel_x}, options);
+  at::Tensor t1 = at::rand({numel_x, numel_y}, options);
+  at::Tensor t2 = at::rand({numel_x, numel_z}, options);
+
+  at::Tensor cg_output_tv4 = at::empty_like(t1, options);
+  at::Tensor cg_output_tv5 = at::empty_like(t2, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  fe.runFusion({t0, t1, t2}, {cg_output_tv4, cg_output_tv5});
+
+  auto t4 = t0.unsqueeze(-1).expand({numel_x, numel_y}) + t1;
+  auto t5 = t0.unsqueeze(-1).expand({numel_x, numel_z}) + t2;
+
+  // Validation fails as the generated kernel is not correct.
+  // TODO: do TORCH_CHECK.
+  t4.allclose(cg_output_tv4);
+  t5.allclose(cg_output_tv5);
+}
+
 } // namespace jit
 } // namespace torch
 
