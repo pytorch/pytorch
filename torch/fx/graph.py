@@ -137,6 +137,20 @@ class Graph:
             val_map[node] = self.node_copy(node, lambda n : val_map[n])
         return None
 
+    def __deepcopy__(self, memo=None) -> 'Graph':
+        """
+        Explicitly implement __deepcopy__ to prevent excessive recursion depth
+        from the default implementation. This uses graph_copy to copy the nodes
+        in an iterative way, rather than recursive. It also populates the
+        memoization table to prevent unnecessary copies (e.g. references to
+        nodes or other parts of the Graph from a custom GraphModule implementation
+        """
+        memo = memo if memo else {}
+        g = Graph()
+        output_val = g.graph_copy(self, val_map=memo)
+        g.output(output_val)
+        return g
+
     def create_node(self, op: str, target: Target,
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None,
