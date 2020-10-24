@@ -19,8 +19,6 @@ EPOCH_DEPRECATION_WARNING = (
     "https://github.com/pytorch/pytorch/issues/new/choose."
 )
 
-SAVE_STATE_WARNING = "Please also save or load the state of the optimizer when saving or loading the scheduler."
-
 class _LRScheduler(object):
 
     def __init__(self, optimizer, last_epoch=-1, verbose=False):
@@ -206,6 +204,7 @@ class LambdaLR(_LRScheduler):
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
+        NOTE: When saving or loading the scheduler, make sure to also save / load the state of the optimizer.
 
         It contains an entry for every variable in self.__dict__ which
         is not the optimizer.
@@ -213,7 +212,6 @@ class LambdaLR(_LRScheduler):
         and not if they are functions or lambdas.
         """
 
-        warnings.warn(SAVE_STATE_WARNING, UserWarning)
         state_dict = {key: value for key, value in self.__dict__.items() if key not in ('optimizer', 'lr_lambdas')}
         state_dict['lr_lambdas'] = [None] * len(self.lr_lambdas)
 
@@ -225,13 +223,13 @@ class LambdaLR(_LRScheduler):
 
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
+        NOTE: When saving or loading the scheduler, make sure to also save / load the state of the optimizer.
 
         Arguments:
             state_dict (dict): scheduler state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
 
-        warnings.warn(SAVE_STATE_WARNING, UserWarning)
         lr_lambdas = state_dict.pop('lr_lambdas')
         self.__dict__.update(state_dict)
         # Restore state_dict keys in order to prevent side effects
