@@ -22,7 +22,7 @@ from torch.distributed.rpc.internal import (
     _internal_rpc_pickler,
     _build_rpc_profiling_key,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu, captured_output
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -313,8 +313,9 @@ def my_script_func(tensor):
     return torch.add(tensor, tensor)
 
 
+expected_err = "Expected error"
 def raise_func():
-    raise ValueError("Expected error")
+    raise ValueError(expected_err)
 
 
 global_rref = None
@@ -1955,11 +1956,23 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_py_raise_in_user_func(self):
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        fut = rpc.rpc_async(worker_name(dst_rank), raise_func)
-        with self.assertRaises(ValueError):
-            fut.wait()
+        with captured_output() as (_, err):
+            # This barrier prevents a race condition where the main thread has
+            # not entered the context manager when the remote function runs.
+            initialize_pg(self.init_method, self.rank, self.world_size)
+            dist.barrier()
+            n = self.rank + 1
+            dst_rank = n % self.world_size
+            fut = rpc.rpc_async(worker_name(dst_rank), raise_func)
+            with self.assertRaisesRegex(ValueError, expected_err):
+                fut.wait()
+            # This barrier prevents a race condition where the main thread exits
+            # context manager before the remote function has ran.
+            dist.barrier()
+
+        # Validate that trainers log errors when running functions.
+        stderr_lines = err.getvalue()
+        self.assertTrue(expected_err in stderr_lines)
 
     @dist_init
     def test_nested_rpc(self):
@@ -3637,26 +3650,32 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_owner_rref_backward(self):
-        t = torch.rand(10, 10, requires_grad=True)
-        rref = rpc.RRef(t.sum())
+        dst = worker_name((self.rank + 1) % self.world_size)
+        t1 = torch.rand(10, 10, requires_grad=True)
+        rref = rpc.RRef(t1.sum() + t1.sum())
         rref.backward()
-        self.assertEqual(torch.ones_like(t), t.grad)
+        expected_grad = torch.ones_like(t1) * 2
+        self.assertEqual(expected_grad, t1.grad)
 
         with dist_autograd.context() as context_id:
+            t2 = rpc.rpc_sync(dst, torch.add, args=(t1, t1))
+            rref = rpc.RRef(t2.sum())
             rref.backward(context_id)
-            self.assertEqual(torch.ones_like(t), dist_autograd.get_gradients(context_id)[t])
+            self.assertEqual(expected_grad, dist_autograd.get_gradients(context_id)[t1])
 
         # Double backward.
         with dist_autograd.context() as context_id:
+            t2 = rpc.rpc_sync(dst, torch.add, args=(t1, t1))
+            rref = rpc.RRef(t2.sum())
             rref.backward(context_id, retain_graph=True)
             rref.backward(context_id)
-            self.assertEqual(torch.ones_like(t) * 2, dist_autograd.get_gradients(context_id)[t])
+            self.assertEqual(expected_grad * 2, dist_autograd.get_gradients(context_id)[t1])
 
         # Test errors.
-        with self.assertRaisesRegex(RuntimeError, "requires_grad not set on RRef's value"):
+        with self.assertRaisesRegex(RuntimeError, "tensors does not require grad and does not have a grad_fn"):
             rpc.RRef(torch.rand(10)).backward()
 
-        with self.assertRaisesRegex(RuntimeError, "RRef does not contain a scalar, all roots need to be scalar"):
+        with self.assertRaisesRegex(RuntimeError, "grad can be implicitly created only for scalar outputs"):
             rpc.RRef(torch.rand(10, requires_grad=True)).backward()
 
         with self.assertRaisesRegex(RuntimeError, "Could not find autograd context with id: 100"):
