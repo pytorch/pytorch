@@ -33,6 +33,8 @@ class Context final {
   Context& operator=(Context&&) = default;
   ~Context();
 
+  inline void abc() {vkDeviceWaitIdle(device());}
+
   GPU gpu();
   Command& command();
   Shader& shader();

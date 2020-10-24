@@ -9,8 +9,11 @@ namespace {
 VkFormat convert(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
-      // VK_FORMAT_R32G32B32A32_SFLOAT?
+#ifdef VULKAN_FP16_INFERENCE
       return VK_FORMAT_R16G16B16A16_SFLOAT;
+#else
+      return VK_FORMAT_R32G32B32A32_SFLOAT;
+#endif /* VULKAN_FP16_INFERENCE */
 
     default:
       TORCH_CHECK(
