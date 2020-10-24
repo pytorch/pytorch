@@ -4398,6 +4398,7 @@ class TestNN(NNTestCase):
         losses = {
             'mse_loss': lambda x, y: F.mse_loss(x, y),
             'l1_loss': lambda x, y: F.l1_loss(x, y),
+            'q1_loss': lambda x, y: F.q1_loss(x, y, q=0.5),
             'smooth_l1_loss': lambda x, y: F.smooth_l1_loss(x, y),
             'kl_div': lambda x, y: F.kl_div(x, y),
             'poisson_nll_loss': lambda x, y: F.poisson_nll_loss(x, y),
@@ -7055,6 +7056,7 @@ class TestNN(NNTestCase):
         losses = {
             'mse_loss': lambda x, y, r: F.mse_loss(x, y, reduction=r),
             'l1_loss': lambda x, y, r: F.l1_loss(x, y, reduction=r),
+            'q1_loss': lambda x, y, r: F.q1_loss(x, y, q=0.5, reduction=r),
             'smooth_l1_loss': lambda x, y, r: F.smooth_l1_loss(x, y, reduction=r),
         }
 
@@ -7077,6 +7079,14 @@ class TestNN(NNTestCase):
             self.assertEqual(
                 torch.nn.L1Loss()(input, torch.zeros_like(input)),
                 input.abs().mean())
+            
+    # q1_loss is the same as l1_loss when q=0.5            
+    def test_q1_loss_correct(self):
+        for N in range(1, 50, 10):
+            input = torch.rand(N, 3, 1024, 1024)
+            self.assertEqual(
+                torch.nn.Q1Loss(q=0.5)(input, torch.zeros_like(input)),
+                input.abs().mean())            
 
     def test_smoothl1loss_negative_beta_not_supported(self):
         with self.assertRaises(RuntimeError):
@@ -10453,6 +10463,7 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.kl_div(input, input, reduction=reduction))
             v(lambda: F.smooth_l1_loss(input, input, reduction=reduction))
             v(lambda: F.l1_loss(input, input, reduction=reduction))
+            v(lambda: F.q1_loss(input, input, q=0.5, reduction=reduction))
             v(lambda: F.mse_loss(input, input, reduction=reduction))
             v(lambda: F.hinge_embedding_loss(input, input, reduction=reduction))
             v(lambda: F.poisson_nll_loss(input, input, reduction=reduction))

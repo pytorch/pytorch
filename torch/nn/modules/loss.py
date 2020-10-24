@@ -92,6 +92,65 @@ class L1Loss(_Loss):
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         return F.l1_loss(input, target, reduction=self.reduction)
+    
+
+
+class Q1Loss(_Loss):
+    r"""Creates a criterion that measures the quantile loss between each element in
+    the input :math:`x` and target :math:`y` with quantile :math:`q`.
+
+    For scalar :math:`q`, the unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
+    
+    .. math::
+        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
+        l_n = \operatorname{max}(q \cdot (y_n - x_n), (q-1) \cdot(y_n - x_n)),
+        
+    where :math:`N` is the batch size. If :attr:`reduction` is not ``'none'``
+    (default ``'mean'``), then:    
+    
+    .. math::
+        \ell(x, y) =
+        \begin{cases}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
+        \end{cases}
+
+    The sum operation still operates over all the elements, and divides by :math:`n`.
+
+    The division by :math:`n` can be avoided if one sets ``reduction = 'sum'``.
+
+    Args:
+        q : Specifies the quantile for quantile loss
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+
+    Shape:
+        - Input: :math:`(N, *)` where :math:`*` means, any number of additional
+          dimensions
+        - Target: :math:`(N, *)`, same shape as the input
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then
+          :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> loss = nn.Q1Loss(q=0.3)
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> output = loss(input, target)
+        >>> output.backward()
+    """
+    __constants__ = ['reduction']
+
+    def __init__(self, q, size_average=None, reduce=None, reduction: str = 'mean') -> None:
+        super(Q1Loss, self).__init__(size_average, reduce, reduction)
+        self.q = q
+
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        return F.q1_loss(input, target, self.q, reduction=self.reduction)
 
 
 class NLLLoss(_WeightedLoss):

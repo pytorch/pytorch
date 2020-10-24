@@ -2605,6 +2605,44 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     return torch._C._nn.l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
 
 
+#def q1_loss(input, target, q, size_average=None, reduce=None, reduction='mean'):
+def q1_loss(input, target, q, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
+    r"""q1_loss(input, target, q, reduction='mean') -> Tensor
+
+    Function that takes the mean element-wise q-quantile loss.
+
+    See :class:`~torch.nn.Q1Loss` for details.
+    """
+    #if not torch.jit.is_scripting():
+    #    tens_ops = (input, target)
+    #    if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+    #        return handle_torch_function(
+    #            l1_loss, tens_ops, input, target, size_average=size_average, reduce=reduce,
+    #            reduction=reduction)
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
+    #if size_average is not None or reduce is not None:
+    #    reduction = _Reduction.legacy_get_string(size_average, reduce)
+
+    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+    
+    e = expanded_target - expanded_input
+    loss = torch.max(q*e, (q-1)*e)
+    if reduction =='none':
+        return loss
+    elif reduction == 'mean':
+        return torch.mean(loss)
+    elif reduction == 'sum':
+        return torch.sum(loss)
+    else:
+        raise NotImplementedError("Unknown Reduction. Only one of 'none', 'mean', 'sum' are available.")    
+    #return torch._C._nn.l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
+
+
 def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor

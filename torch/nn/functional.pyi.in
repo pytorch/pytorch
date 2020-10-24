@@ -251,6 +251,9 @@ def l1_loss(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., r
             reduction: str = ...) -> Tensor: ...
 
 
+def q1_loss(input: Tensor, target: Tensor, q: float, reduction: str = ...) -> Tensor: ...                  
+
+
 def mse_loss(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,
              reduction: str = ...) -> Tensor: ...
 
