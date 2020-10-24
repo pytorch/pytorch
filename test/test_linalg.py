@@ -1004,7 +1004,7 @@ class TestLinalg(TestCase):
             # check non-contiguous out
             out = torch.empty(2 * result.shape[0], *result.shape[1:], dtype=dtype, device=device)[::2]
             self.assertFalse(out.is_contiguous())
-            ans = torch.linalg.tensorsolve(a, b, out=out)
+            ans = torch.linalg.tensorsolve(a, b, dims=dims, out=out)
             self.assertEqual(ans, out)
             self.assertEqual(ans, result)
 
@@ -1031,6 +1031,7 @@ class TestLinalg(TestCase):
 
         # if non-empty out tensor with wrong shape is passed a warning is given
         out = torch.empty_like(a)
+        b = torch.randn(6, 4)
         with warnings.catch_warnings(record=True) as w:
             # Trigger warning
             torch.linalg.tensorsolve(a, b, out=out)
