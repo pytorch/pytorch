@@ -131,6 +131,7 @@ allow_list = [
     ("aten::conj", datetime.date(2020, 11, 10)),
     ("aten::add_relu", datetime.date(2020, 10, 28)),
     ("aten::add_relu_", datetime.date(2020, 10, 28)),
+    ("aten::hash", datetime.date(2020, 11, 15)),
 ]
 
 def allow_listed(schema, allow_list):
