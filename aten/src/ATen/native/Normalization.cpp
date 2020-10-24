@@ -555,12 +555,16 @@ Tensor batch_norm(
         at::var(input, IntArrayRef(reduce_dims), false) + eps);
 
     if (running_mean.defined()) {
-      running_mean.copy_(momentum * save_mean + (1 - momentum) * running_mean);
+      at::Tensor running_mean_(running_mean.getIntrusivePtr());
+      running_mean_ = running_mean_.detach();
+      running_mean_.copy_(momentum * save_mean + (1 - momentum) * running_mean);
     }
 
     if (running_var.defined()) {
       Tensor unbiased_var = at::var(input, IntArrayRef(reduce_dims));
-      running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var);
+      at::Tensor running_var_(running_var.getIntrusivePtr());
+      running_var_ = running_var_.detach();
+      running_var_.copy_(momentum * unbiased_var + (1 - momentum) * running_var);
     }
 
     mean = save_mean;
