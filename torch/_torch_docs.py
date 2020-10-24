@@ -3602,12 +3602,12 @@ Computes the Kronecker product, denoted by :math:`\otimes`, of :attr:`input` and
 
 If :attr:`input` is a :math:`(m \times n)` tensor and :attr:`other` is a
 :math:`(p \times q)` tensor, the result will be a :math:`(p*m \times q*n)` block tensor:
+
 .. math::
-    \mathbf{A} \otimes \mathbf{B}=\left[\begin{array}{ccc}
+    \mathbf{A} \otimes \mathbf{B}=\begin{bmatrix}
     a_{11} \mathbf{B} & \cdots & a_{1 n} \mathbf{B} \\
     \vdots & \ddots & \vdots \\
-    a_{m 1} \mathbf{B} & \cdots & a_{m n} \mathbf{B}
-    \end{array}\right],
+    a_{m 1} \mathbf{B} & \cdots & a_{m n} \mathbf{B} \end{bmatrix}
 
 where :attr:`input` is :math:`\mathbf{A}` and :attr:`other` is :math:`\mathbf{B}`.
 
