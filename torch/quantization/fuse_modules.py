@@ -64,7 +64,6 @@ def fuse_known_modules(mod_list, additional_fuser_method_mapping=None):
 
     return new_mod
 
-# TODO: remove fuser_func?
 def _fuse_modules(model, modules_to_fuse, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
     if fuse_custom_config_dict is None:
         fuse_custom_config_dict = {}
