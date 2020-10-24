@@ -212,6 +212,7 @@ def prepare(model, inplace=False, allow_list=None,
     if not inplace:
         model = copy.deepcopy(model)
 
+    # TODO: remove allow_list
     qconfig_propagation_list = allow_list
     if qconfig_propagation_list is None:
         qconfig_propagation_list = get_default_qconfig_propagation_list()
@@ -365,6 +366,7 @@ def prepare_qat(model, mapping=None, inplace=False):
     torch._C._log_api_usage_once("quantization_api.quantize.prepare_qat")
     if mapping is None:
         mapping = get_default_qat_module_mappings()
+
     if not inplace:
         model = copy.deepcopy(model)
 
