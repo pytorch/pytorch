@@ -87,6 +87,7 @@ void print_unsupported_ops_and_throw(
       false,
       "Following ops cannot be found. ",
       "May need to add them explicitly to the selective build operator whitelist, ",
+      "(for Facebook internal users please follow https://www.internalfb.com/intern/wiki/PyTorch/PyTorchDev/Mobile/Common_Error_Messages/#errors-related-to-missin) ",
       "or re-run the export_opnames to update the whitelist:",
       error_message);
 }
