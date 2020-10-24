@@ -201,6 +201,17 @@ def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=No
         "additional_qat_module_mapping": {
            FloatModule: QATModule
         },
+
+        # Additional fusion patterns
+        "additional_fusion_pattern": {
+           (torch.nn.BatchNorm2d, torch.nn.Conv2d): ConvReluFusionhandler
+        },
+
+        # Additional quantization patterns
+        "additional_quant_pattern": {
+           torch.nn.Conv2d: ConvReluQuantizeHandler,
+           (torch.nn.ReLU, torch.nn.Conv2d): ConvReluQuantizeHandler,
+        }
       }
 
 
