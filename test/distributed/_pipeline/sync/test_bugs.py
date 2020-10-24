@@ -37,7 +37,7 @@ def test_python_autograd_function():
             return Identity.apply(input)
 
     model = nn.Sequential(M(), M())
-    model = Pipe(model, [1, 1], devices=["cpu", "cpu"], checkpoint="always")
+    model = Pipe(model, checkpoint="always")
 
     x = torch.rand(42)
     y = model(x)
@@ -62,7 +62,7 @@ def test_exception_no_hang():
             raise ExpectedException()
 
     model = nn.Sequential(Pass(), Pass(), Raise())
-    model = Pipe(model, [1, 1, 1], devices=["cpu", "cpu", "cpu"], chunks=3)
+    model = Pipe(model, chunks=3)
 
     with pytest.raises(ExpectedException):
         model(torch.rand(3))
@@ -86,18 +86,26 @@ def test_tuple_wait(cuda_sleep):
             return grad
 
     class Layer1(nn.Module):
+        def __init__(self):
+            nn.Module.__init__(self)
+            self.foo = nn.Linear(10, 5)
+
         def forward(self, pair):
             a, b = pair
             return a * 1, b * 2, b * 3
 
     class Layer2(nn.Module):
+        def __init__(self):
+            nn.Module.__init__(self)
+            self.foo = nn.Linear(10, 5)
+
         def forward(self, triple):
             a, b, c = triple
             b = Sleep.apply(b)
             return a + b + c
 
-    model = nn.Sequential(Layer1(), Layer2())
-    model = Pipe(model, [1, 1], devices=[0, 1], chunks=32, checkpoint="never")
+    model = nn.Sequential(Layer1().cuda(0), Layer2().cuda(1))
+    model = Pipe(model, chunks=32, checkpoint="never")
 
     a = torch.rand(1024, 3, 32, 32, device=0, requires_grad=True)
     b = torch.rand(1024, 3, 32, 32, device=0, requires_grad=True)
@@ -121,7 +129,7 @@ def test_parallel_randoms():
     model = nn.Sequential(Dropouts(), Dropouts())
 
     x = torch.rand(10, 10, requires_grad=True)
-    model = Pipe(model, [1, 1], devices=["cpu", "cpu"], chunks=10, checkpoint="always")
+    model = Pipe(model, chunks=10, checkpoint="always")
     y = model(x)
     y.norm().backward()
 
