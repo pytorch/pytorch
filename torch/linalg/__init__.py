@@ -144,7 +144,7 @@ Using the :attr:`dim` argument to compute matrix norms::
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
 linalg.tensorinv(input, ind=2, *, out=None) -> Tensor
 
-Computes a tensor ``input_inv`` such that ``tensordot(input_inv, input, ind) == I_n``,
+Computes a tensor ``input_inv`` such that ``tensordot(input_inv, input, ind) == I_n`` (inverse tensor equation),
 where ``I_n`` is the n-dimensional identity tensor and ``n`` is equal to ``input.ndim``.
 The resulting tensor ``input_inv`` has shape equal to ``input.shape[ind:] + input.shape[:ind]``.
 
@@ -159,7 +159,8 @@ Supports real-valued and, only on the CPU, complex-valued inputs.
 
 Args:
     input (Tensor): A tensor to invert. Its shape must satisfy ``prod(input.shape[:ind]) == prod(input.shape[ind:])``.
-    ind (int): A positive integer that affects the result's shape. Default: 2.
+    ind (int): A positive integer that describes the inverse tensor equation. See :func:`torch.tensordot` for details.
+               Default: 2.
 
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
