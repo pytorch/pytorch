@@ -417,6 +417,12 @@ PickleOpCode Unpickler::readInstruction() {
           /*resizable=*/false); // NB: we didn't set any allocator for the
                                 // tensor
       auto options = at::CPU(type).options();
+
+      if (use_storage_device_) {
+        options = options.device(storage.device());
+        device = storage.device();
+      }
+
       at::Tensor tensor;
       if (options.backend() == c10::Backend::QuantizedCPU) {
         tensor = at::_empty_affine_quantized({}, options, 0, 0)
