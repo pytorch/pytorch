@@ -1148,7 +1148,7 @@ Tensor dist(const Tensor &self, const Tensor& other, Scalar p){
 }
 
 Tensor count_nonzero(const Tensor& self, IntArrayRef dims){
-  auto mask = self != 0;
+  auto mask = (self != 0);
   return mask.sum(dims);
 }
 
