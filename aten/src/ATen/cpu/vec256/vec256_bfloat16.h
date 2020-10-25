@@ -446,7 +446,7 @@ Vec256<BFloat16> inline Vec256<BFloat16>::operator==(const Vec256<BFloat16>& oth
 }
 Vec256<BFloat16> inline Vec256<BFloat16>::operator!=(const Vec256<BFloat16>& other) const {
   return bfloat16_binary_op_as_fp32(*this, other, [](__m256 x, __m256 y) {
-    return _mm256_cmp_ps(x, y, _CMP_NEQ_OQ);
+    return _mm256_cmp_ps(x, y, _CMP_NEQ_UQ);
   });
 }
 

@@ -317,142 +317,81 @@ void rshift_kernel(TensorIterator& iter) {
 }
 
 void lt_kernel(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
-    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "lt_cpu", [&]() {
-      cpu_kernel(iter,
-       [](scalar_t a, scalar_t b) -> bool {
-         return a < b;
-       });
-    });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "lt_cpu", [&]() {
-      cpu_kernel_vec(
-        iter,
-        [](scalar_t a, scalar_t b) -> scalar_t {
-          return a < b;
-        },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
-          return a.lt(b);
-        });
+  AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "lt_cpu", [&]() {
+    cpu_kernel_vec(
+      iter,
+      [](scalar_t a, scalar_t b) -> scalar_t {
+        return a < b;
+      },
+      [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+        return a.lt(b);
       });
-  }
+    });
 }
 
 void le_kernel(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
-    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "le_cpu", [&]() {
-      cpu_kernel(iter,
-       [](scalar_t a, scalar_t b) -> bool {
-         return a <= b;
-       });
-    });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "le_cpu", [&]() {
-      cpu_kernel_vec(
-        iter,
-        [](scalar_t a, scalar_t b) -> scalar_t {
-          return a <= b;
-        },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
-          return a.le(b);
-        });
+  AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "le_cpu", [&]() {
+    cpu_kernel_vec(
+      iter,
+      [](scalar_t a, scalar_t b) -> scalar_t {
+        return a <= b;
+      },
+      [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+        return a.le(b);
       });
-  }
+    });
 }
 
 void gt_kernel(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
-    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "gt_cpu", [&]() {
-      cpu_kernel(iter,
-       [=](scalar_t a, scalar_t b) -> bool {
-         return a > b;
-       });
-    });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "gt_cpu", [&]() {
-      cpu_kernel_vec(
-        iter,
-        [](scalar_t a, scalar_t b) -> scalar_t {
-          return a > b;
-        },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
-          return a.gt(b);
-        });
+  AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "gt_cpu", [&]() {
+    cpu_kernel_vec(
+      iter,
+      [](scalar_t a, scalar_t b) -> scalar_t {
+        return a > b;
+      },
+      [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+        return a.gt(b);
       });
-  }
+    });
 }
 
 void ge_kernel(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
-    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "ge_cpu", [&]() {
-      cpu_kernel(iter,
-       [](scalar_t a, scalar_t b) -> bool {
-         return a >= b;
-       });
-    });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "ge_cpu", [&]() {
-      cpu_kernel_vec(
-        iter,
-        [](scalar_t a, scalar_t b) -> scalar_t {
-          return a >= b;
-        },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
-          return a.ge(b);
-        });
+  AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "ge_cpu", [&]() {
+    cpu_kernel_vec(
+      iter,
+      [](scalar_t a, scalar_t b) -> scalar_t {
+        return a >= b;
+      },
+      [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+        return a.ge(b);
       });
-  }
+    });
 }
 
 void eq_kernel(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "eq_cpu", [&]() {
-      cpu_kernel(iter,
-       [](scalar_t a, scalar_t b) -> bool {
-         return a == b;
-       });
-    });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.common_dtype(), "eq_cpu", [&]() {
-      cpu_kernel_vec(
-        iter,
-        [](scalar_t a, scalar_t b) -> scalar_t {
-          return a == b;
-        },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
-          return a.eq(b);
-        });
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "eq_cpu", [&]() {
+    cpu_kernel_vec(
+      iter,
+      [](scalar_t a, scalar_t b) -> scalar_t {
+        return a == b;
+      },
+      [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+        return a.eq(b);
       });
-  }
+    });
 }
 
 void ne_kernel(TensorIterator& iter) {
-  if (iter.common_dtype() == ScalarType::Double) {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.dtype(), "ne_cpu", [&]() {
-      cpu_kernel(iter,
-       [](double a, double b) -> scalar_t {
-         return a != b;
-       });
-    });
-  } else if (iter.dtype() == ScalarType::Bool) {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "ne_cpu", [&]() {
-      cpu_kernel(iter,
-       [](scalar_t a, scalar_t b) -> bool {
-         return a != b;
-       });
-    });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "ne_cpu", [&]() {
-      cpu_kernel_vec(
-        iter,
-        [](scalar_t a, scalar_t b) -> scalar_t {
-          return a != b;
-        },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
-          return a.ne(b);
-        });
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "ne_cpu", [&]() {
+    cpu_kernel_vec(
+      iter,
+      [](scalar_t a, scalar_t b) -> scalar_t {
+        return a != b;
+      },
+      [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t> {
+        return a.ne(b);
       });
-  }
+    });
 }
 
 void maximum_kernel(TensorIterator& iter) {
