@@ -57,7 +57,7 @@ class _ConvNd(Module):
     groups: int
     padding_mode: str
     weight: Tensor
-    bias: bool
+    bias: Optional[Tensor]
 
     def __init__(self,
                  in_channels: int,
