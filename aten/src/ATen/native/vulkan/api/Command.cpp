@@ -1,5 +1,6 @@
 #include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Adapter.h>
+#include <ATen/native/vulkan/api/Utils.h>
 
 namespace at {
 namespace native {
@@ -261,19 +262,15 @@ void Command::Buffer::dispatch(
       "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
-  static const auto div_round_up = [](const uint32_t n, const uint32_t d) {
-    return (n + d - 1u) / d;
-  };
-
   vkCmdDispatch(
       command_buffer_,
-      div_round_up(
+      div_up(
           global_work_group.width,
           bound_.pipeline.local_work_group.width),
-      div_round_up(
+      div_up(
           global_work_group.height,
           bound_.pipeline.local_work_group.height),
-      div_round_up(
+      div_up(
           global_work_group.depth,
           bound_.pipeline.local_work_group.depth));
 }

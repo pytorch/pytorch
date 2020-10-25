@@ -37,9 +37,6 @@ Tensor add_scalar(
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           VK_KERNEL(add_scalar),
-          {
-            8, 8, 1,
-          },
           v_output.extents(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
@@ -87,9 +84,6 @@ Tensor& add_scalar_(
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           VK_KERNEL(add_scalar_),
-          {
-            8, 8, 1,
-          },
           v_self.extents(),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
@@ -149,9 +143,6 @@ Tensor add_tensor(
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           VK_KERNEL(add),
-          {
-            8, 8, 1,
-          },
           v_output.extents(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
@@ -206,9 +197,6 @@ Tensor& add_tensor_(
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           VK_KERNEL(add_),
-          {
-            8, 8, 1,
-          },
           v_self.extents(),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
