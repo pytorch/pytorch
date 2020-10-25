@@ -7081,12 +7081,12 @@ class TestNN(NNTestCase):
                 input.abs().mean())
             
     # q1_loss is the same as 1/2*l1_loss when q=0.5            
-    #def test_q1_loss_correct(self):
-    #    for N in range(1, 50, 10):
-    #        input = torch.rand(N, 3, 1024, 1024)
-    #        self.assertEqual(
-    #            torch.nn.Q1Loss(q=0.5)(input, torch.zeros_like(input)),
-    #            1/2*input.abs().mean())            
+    def test_q1_loss_correct(self):
+        for N in range(1, 50, 10):
+            input = torch.rand(N, 3, 1024, 1024)
+            self.assertEqual(
+                torch.nn.Q1Loss(q=0.5)(input, torch.zeros_like(input)),
+                input.abs().mean()/2)            
 
     def test_smoothl1loss_negative_beta_not_supported(self):
         with self.assertRaises(RuntimeError):
