@@ -239,11 +239,18 @@ Message tensorpipeDeserialize(
   // No need to pass typeResolver here, as it always processes string and
   // tensors only
   torch::jit::Unpickler unpickler(
-      pickleReadFunc, nullptr, nullptr, tensorReadFunc, {});
+      pickleReadFunc,
+      nullptr,
+      nullptr,
+      tensorReadFunc,
+      {},
+      /* use_storage_device*/ true);
   auto ival = unpickler.parse_ivalue();
   for (auto&& t : ival.toTensorList()) {
     tensors.emplace_back(std::move(t));
   }
+
+  // TODO: need to call record_stream accordingly on these tensors
 
   // NB: This is a temporary solution. When TensorPipe Tensor.data can point to
   // a CUDA memory address, we should directly use CUDACachingAllocator to
