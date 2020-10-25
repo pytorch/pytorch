@@ -6,6 +6,32 @@ namespace vulkan {
 namespace ops {
 namespace {
 
+VkDeviceSize bytes(
+    const IntArrayRef sizes,
+    const caffe2::TypeMeta dtype) {
+  VkDeviceSize size = c10::elementSize(c10::typeMetaToScalarType(dtype));
+
+  // Forward declaration
+  bool requires_image(IntArrayRef);
+
+  if (requires_image(sizes)) {
+    // Forward declaration
+    VkExtent3D image_extents(IntArrayRef);
+
+    const VkExtent3D extents = image_extents(sizes);
+    size *= extents.width * extents.height * (4u * extents.depth);
+  }
+  else {
+    size = std::accumulate(
+        sizes.cbegin(),
+        sizes.cend(),
+        size,
+        std::multiplies<int64_t>());
+  }
+
+  return size;
+}
+
 VkFormat convert(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
@@ -58,7 +84,7 @@ vTensor::Buffer allocate_buffer(
   TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
   verify(options);
 
-  // Forward function declaration
+  // Forward declaration
   bool requires_staging(api::Context*);
 
   const VkFlags usage = [context]() {
@@ -90,11 +116,7 @@ vTensor::Buffer allocate_buffer(
 
   return context->resource().pool.buffer(
       vTensor::Buffer::Descriptor{
-        std::accumulate(
-            sizes.cbegin(),
-            sizes.cend(),
-            1,
-            std::multiplies<int64_t>()),
+        bytes(sizes, options.dtype()),
         // Usage
         {
           usage,
@@ -143,7 +165,7 @@ VkExtent3D image_extents(const IntArrayRef sizes) {
   return {
     width,
     height,
-    depth,
+    api::div_up(depth, 4u),
   };
 }
 
@@ -189,11 +211,7 @@ vTensor::Buffer allocate_staging(
 
   return context->resource().pool.buffer(
       vTensor::Buffer::Descriptor{
-        std::accumulate(
-            sizes.cbegin(),
-            sizes.cend(),
-            1,
-            std::multiplies<int64_t>()),
+        bytes(sizes, options.dtype()),
         // Usage
         {
           VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
@@ -678,9 +696,6 @@ void vTensor::View::CMD::copy_buffer_to_image(
         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
       VK_KERNEL(nchw_to_image),
-      {
-        8, 8, 1,
-      },
       view_.extents(),
       image,
       buffer,
@@ -730,9 +745,6 @@ void vTensor::View::CMD::copy_image_to_buffer(
         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
       VK_KERNEL(image_to_nchw),
-      {
-        8, 8, 1,
-      },
       view_.extents(),
       image,
       buffer,
@@ -928,7 +940,7 @@ vTensor::Buffer& vTensor::View::staging() const {
 vTensor::Buffer& vTensor::View::staging(const Access::Flags access) const {
   CMD command_buffer(*this);
   Buffer& staging = this->staging(command_buffer, access);
-  command_buffer.submit();
+  command_buffer.submit(fence());
 
   return staging;
 }
