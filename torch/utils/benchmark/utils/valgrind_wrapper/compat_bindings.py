@@ -20,7 +20,7 @@ bindings = load_inline(
     cpp_sources=textwrap.dedent("""
     #include <valgrind/callgrind.h>
 
-    bool valgrind_supported_platform() {
+    bool _valgrind_supported_platform() {
         #if defined(NVALGRIND)
         return false;
         #else
@@ -28,7 +28,7 @@ bindings = load_inline(
         #endif
     }
 
-    void valgrind_toggle() {
+    void _valgrind_toggle() {
         #if defined(NVALGRIND)
         TORCH_CHECK(false, "Valgrind is not supported.");
         #else
@@ -37,5 +37,5 @@ bindings = load_inline(
     }
     """),
     extra_include_paths=extra_include_paths,
-    functions=["valgrind_supported_platform", "valgrind_toggle"],
+    functions=["_valgrind_supported_platform", "_valgrind_toggle"],
 )

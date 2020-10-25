@@ -14,9 +14,9 @@ from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig, \
     get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic
 from torch.quantization.quantization_mappings import (
-    get_dynamic_quant_module_mappings,
-    get_qconfig_propagation_list,
-    get_qat_module_mappings,
+    get_default_dynamic_quant_module_mappings,
+    get_default_qconfig_propagation_list,
+    get_default_qat_module_mappings,
 )
 # symbolic trace
 from torch.fx import symbolic_trace
@@ -186,7 +186,7 @@ def run_ddp(rank, world_size, prepared):
 
 
 def convert_dynamic(module):
-    convert(module, get_dynamic_quant_module_mappings(), inplace=True)
+    convert(module, get_default_dynamic_quant_module_mappings(), inplace=True)
 
 def prepare_dynamic(model, qconfig_dict=None):
     propagate_qconfig_(model, qconfig_dict)
@@ -342,7 +342,7 @@ class QuantizationTestCase(TestCase):
             have observers in preperation for quantization
         """
         if propagate_qconfig_list is None:
-            propagate_qconfig_list = get_qconfig_propagation_list()
+            propagate_qconfig_list = get_default_qconfig_propagation_list()
         if prepare_custom_config_dict is None:
             prepare_custom_config_dict = {}
         float_to_observed_module_class_mapping = prepare_custom_config_dict.get("float_to_observed_custom_module_class", {})
@@ -363,7 +363,7 @@ class QuantizationTestCase(TestCase):
                             'module: ' + str(type(module)) + ' do not have observer')
         # we don't need to check observers for child modules of the
         # qat modules
-        if type(module) not in get_qat_module_mappings().values() and \
+        if type(module) not in get_default_qat_module_mappings().values() and \
            type(module) not in float_to_observed_module_class_mapping.values():
             for child in module.children():
                 self.checkObservers(child, propagate_qconfig_list, prepare_custom_config_dict)
@@ -604,7 +604,8 @@ class QuantizationTestCase(TestCase):
                            expected_node_occurrence=None,
                            expected_node_list=None,
                            debug=False,
-                           print_debug_info=False):
+                           print_debug_info=False,
+                           custom_qconfig=None):
         """ Quantizes model with graph mode quantization on fx and check if the
         quantized model contains the quantized_node
 
@@ -627,14 +628,19 @@ class QuantizationTestCase(TestCase):
         # TODO: make img_data a single example instead of a list
         if type(inputs) == list:
             inputs = inputs[0]
-        if quant_type == QuantType.QAT:
-            qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
-            model.train()
-        elif quant_type == QuantType.STATIC:
-            qconfig = get_default_qconfig(torch.backends.quantized.engine)
-            model.eval()
+        if custom_qconfig is None:
+            if quant_type == QuantType.QAT:
+                qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
+            elif quant_type == QuantType.STATIC:
+                qconfig = get_default_qconfig(torch.backends.quantized.engine)
+            else:
+                qconfig = default_dynamic_qconfig
         else:
-            qconfig = default_dynamic_qconfig
+            qconfig = custom_qconfig
+
+        if quant_type == QuantType.QAT:
+            model.train()
+        else:
             model.eval()
 
         original = symbolic_trace(model)
@@ -645,10 +651,10 @@ class QuantizationTestCase(TestCase):
 
         qconfig_dict = {'': qconfig}
         prepared = prepare(original, qconfig_dict)
-        prepared(*inputs)
+        if not quant_type == QuantType.DYNAMIC:
+            prepared(*inputs)
         qgraph = convert_fx(prepared)
         qgraph_debug = convert_fx(prepared, debug=True)
-
         result = qgraph(*inputs)
         result_debug = qgraph_debug(*inputs)
 
