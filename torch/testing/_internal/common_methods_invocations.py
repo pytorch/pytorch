@@ -1429,8 +1429,7 @@ def method_tests():
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
     ]
 
-def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None,
-                 dtype=torch.double, device=None):
+def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
     if not isinstance(call_args, tuple):
         call_args = (call_args,)
 
