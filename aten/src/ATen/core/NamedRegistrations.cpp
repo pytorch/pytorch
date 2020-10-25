@@ -65,6 +65,7 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("arccosh.out", CppFunction::makeFallthrough());
   m.impl("arccosh_", CppFunction::makeFallthrough());
   m.impl("as_strided", CppFunction::makeFallthrough());
+  m.impl("as_strided_", CppFunction::makeFallthrough());
   m.impl("asin", CppFunction::makeFallthrough());
   m.impl("asin.out", CppFunction::makeFallthrough());
   m.impl("asin_", CppFunction::makeFallthrough());
