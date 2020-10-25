@@ -7,7 +7,7 @@
 namespace {
 
 TEST(VulkanAPITest, empty) {
-  ASSERT_NO_THROW(at::empty({1, 3, 64, 64}, at::device(at::kVulkan).dtype(at::kFloat)));
+  ASSERT_NO_THROW(at::empty({1, 17, 41, 53}, at::device(at::kVulkan).dtype(at::kFloat)));
 }
 
 } // namespace
