@@ -1,18 +1,13 @@
-#include <torch/csrc/jit/cuda/cuda.h>
+#pragma once
 
-namespace torch {
-namespace jit {
-
-/*
 #include <aten/src/ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/custom_class.h>
-
-
-
+namespace torch {
+namespace jit {
 
 class CUDAEvent;
-class CUDAStream final : public torch::CustomClassHolder {
+class CUDAStream final : public CustomClassHolder {
 public:
   CUDAStream(int64_t device=-1, int64_t priority=0) {
     stream_ = std::make_unique<c10::cuda::CUDAStream>(c10::cuda::getStreamFromPool(priority > 50, device));
@@ -32,7 +27,6 @@ private:
   std::unique_ptr<c10::cuda::CUDAStream> stream_;
   friend class CUDAEvent;
 };
-
 
 class CUDAEvent final : public CustomClassHolder {
 public:
@@ -73,56 +67,6 @@ private:
   std::unique_ptr<at::cuda::CUDAEvent> event_;
 
   friend class CUDAStream;
-};*/
-
-c10::intrusive_ptr<CUDAEvent> CUDAStream::recordEvent(c10::intrusive_ptr<CUDAEvent> event) {
-  if (!event) {
-    event = c10::make_intrusive<CUDAEvent>();
-  }
-
-  event->recordInternal(this);
-  return event;
-}
-
-void CUDAStream::waitEvent(c10::intrusive_ptr<CUDAEvent> event) {
-  event->event_->block(*stream_);
-}
-
-void CUDAStream::waitStream(c10::intrusive_ptr<CUDAStream> stream) {
-  auto ev = c10::make_intrusive<CUDAEvent>();
-  stream->recordEvent(ev);
-  waitEvent(ev);
-}
-
-void CUDAEvent::record(c10::intrusive_ptr<CUDAStream> stream) {
-  event_->record(*stream->stream_);
-}
-
-void CUDAEvent::recordInternal(CUDAStream *stream) {
-  event_->record(*stream->stream_);
-}
-
-void CUDAEvent::wait(c10::intrusive_ptr<CUDAStream> stream) {
-  event_->block(*stream->stream_);
-}
-
-/*
-TORCH_LIBRARY(cuda, m) {
-  auto stream_class = m.class_<torch::jit::CUDAStream>("Stream").def(torch::init<int64_t, int64_t>());
-  auto event_class = m.class_<torch::jit::CUDAEvent>("Event").def(torch::init<bool, bool, bool>());
-
-  stream_class.def("query", &CUDAStream::query)
-    .def("record_event", &CUDAStream::recordEvent)
-    .def("synchronize", &CUDAStream::synchronize)
-    .def("wait_event", &CUDAStream::waitEvent)
-    .def("wait_stream", &CUDAStream::waitStream);
-
-  event_class.def("elapsed_time", &CUDAEvent::elapsedTime)
-    .def("ipc_handle", &CUDAEvent::ipcHandle)
-    .def("query", &CUDAEvent::query)
-    .def("record", &CUDAEvent::record)
-    .def("synchronize", &CUDAEvent::synchronize)
-    .def("wait", &CUDAEvent::wait);
-};*/
+};
 }
 }
