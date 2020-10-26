@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 try:
     from torch._C import _nvtx
 except ImportError:
@@ -12,7 +14,7 @@ except ImportError:
 
     _nvtx = _NVTXStub()  # type: ignore[assignment]
 
-__all__ = ['range_push', 'range_pop', 'mark']
+__all__ = ['range_push', 'range_pop', 'mark', 'range']
 
 
 def range_push(msg):
@@ -42,3 +44,18 @@ def mark(msg):
         msg (string): ASCII message to associate with the event.
     """
     return _nvtx.markA(msg)
+
+
+@contextmanager
+def range(msg, *args, **kwargs):
+    """
+    Context manager / decorator that pushes an NVTX range at the beginning
+    of its scope, and pops it at the end. If extra arguments are given,
+    they are passed as arguments to msg.format().
+
+    Arguments:
+        msg (string): message to associate with the range
+    """
+    range_push(msg.format(*args, **kwargs))
+    yield
+    range_pop()

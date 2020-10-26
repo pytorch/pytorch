@@ -231,7 +231,7 @@ def compute_type_method(
                 assert dispatch is not None
                 impl_name = f"at::native::{f.dispatch[dispatch]}"
 
-            args_exprs_str = ', '.join(map(lambda a: a.name, args))
+            args_exprs_str = ', '.join(a.name for a in args)
 
             return_kw = "    return "
 
@@ -356,7 +356,7 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
             dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
             dispatcher_exprs = dispatcher.cpparguments_exprs(sig.argument_packs())
-            dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, dispatcher_exprs))
+            dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
 
             return f"""
 // aten::{f.func}
@@ -406,7 +406,7 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
             dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
             dispatcher_exprs = dispatcher.cpparguments_exprs(sig.argument_packs())
-            dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, dispatcher_exprs))
+            dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
 
             return f"""
 // aten::{f.func}
@@ -456,7 +456,7 @@ def compute_native_function_declaration(f: NativeFunction) -> List[str]:
         seen.add(n)
         returns_type = native.returns_type(f.func.returns)
         args = native.arguments(f.func)
-        rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(map(lambda a: a.str_with_default(), args))});")
+        rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(a.str_with_default() for a in args)});")
 
     return rs
 
