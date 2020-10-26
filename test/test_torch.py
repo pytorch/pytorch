@@ -15614,10 +15614,11 @@ class TestTorchDeviceType(TestCase):
     def test_lu_unpack(self, device, dtype):
         def run_test(pivot):
             for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3)):
-                a = torch.randn(*shape, dtype=dtype, device=device)
-                a_lu, p = torch.lu(a, pivot=pivot)
-                p_ref, l_ref, u_ref = torch.lu_unpack(a_lu, p)
-                self.assertEqual(p_ref.matmul(l_ref.matmul(u_ref)), a)
+                for lu_unpack in [torch.lu_unpack, torch._lu_unpack]:
+                    a = torch.randn(*shape, dtype=dtype, device=device)
+                    a_lu, p = torch.lu(a, pivot=pivot)
+                    p_ref, l_ref, u_ref = lu_unpack(a_lu, p)
+                    self.assertEqual(p_ref.matmul(l_ref.matmul(u_ref)), a)
 
         run_test(True)
 

@@ -15,6 +15,7 @@
 #include <vector>
 #include <limits>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/TensorIterator.h>
 
 namespace at {
 namespace native {
@@ -1687,6 +1688,90 @@ Tensor chain_matmul(TensorList matrices) {
     // We use the result from the algorithm to compute the matrix chain product via recursion
     return _chain_matmul_general(matrices, s, 0, n - 1);
   }
+}
+
+DEFINE_DISPATCH(unpack_pivots_stub);
+
+std::tuple<Tensor, Tensor, Tensor> _lu_unpack(
+    const Tensor& LU_data,
+    const Tensor& LU_pivots,
+    bool pivots_as_permutation_matrix
+    ) {
+  // In the generalized LU factorization, the following shape relations hold:
+  // A.shape[-2:] == (m, n),
+  // P.shape[-2:] == (m, m),
+  // U.shape[-2:] == (m, k),
+  // L.shape[-2:] == (k, n),
+  // where k = min(m, n)
+  int64_t m = LU_data.size(-2);
+  int64_t n = LU_data.size(-1);
+  int64_t k = std::min(m, n);
+
+  auto U = LU_data.triu();
+  if (m != k) {
+    U = U.narrow(-2, 0, k);
+  }
+
+  auto L = LU_data.tril();
+  if (k != n) {
+    L = L.narrow(-1, 0, k);
+  }
+  L.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+
+  auto unpacked_pivots_sizes = LU_pivots.sizes().vec();
+  unpacked_pivots_sizes[LU_pivots.dim() - 1] = m;
+  auto unpacked_pivots = at::zeros(
+    unpacked_pivots_sizes,
+    LU_pivots.options().memory_format(at::MemoryFormat::Contiguous)
+  );
+
+  // Fill `unpacked_pivots` with identity permutation
+  auto id_perm = at::arange(m, LU_pivots.options());
+  unpacked_pivots.copy_(id_perm);
+
+  // WARNING: we assume that unchanged LAPACK pivots are provided.
+  // Since LAPACK relies on the FORTRAN's 1-based indexing,
+  // we subtract 1 to convert the pivots to the C-style 0-based indexing.
+  // This behaviour could change in the future.
+  auto LU_pivots_zero_idx = LU_pivots - 1;
+
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .declare_static_shape(LU_pivots.sizes(), /*squash_dim=*/LU_pivots.dim() - 1)
+    .add_output(unpacked_pivots)
+    .add_input(LU_pivots_zero_idx)
+    .build();
+  // }
+
+  unpack_pivots_stub(
+    LU_pivots.device().type(),
+    iter,
+    LU_pivots.size(-1)
+  );
+
+  if (!pivots_as_permutation_matrix) {
+    return std::tie(unpacked_pivots, L, U);
+  }
+
+  unpacked_pivots_sizes.push_back(m);
+  auto permutation_matrix = at::zeros(
+    unpacked_pivots_sizes,
+    LU_pivots.options().memory_format(at::MemoryFormat::Contiguous)
+  );
+
+  // now that we know the final permutation,
+  // scatter 1s at proper locations.
+  // The resulting matrix is converted to LU_data.dtype
+  // because `matmul` does not work with integer matrices.
+  permutation_matrix = permutation_matrix.scatter_add_(
+    -2,
+    unpacked_pivots.unsqueeze(-2).to(at::kLong),
+    at::ones(permutation_matrix.sizes(), permutation_matrix.options())
+  ).to(LU_data.dtype());
+
+  return std::tie(permutation_matrix, L, U);
 }
 
 } // namespace native

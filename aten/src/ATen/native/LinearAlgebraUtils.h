@@ -8,7 +8,18 @@
 #include <sstream>
 #include <cstring>
 
+#include <ATen/Dispatch.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/TensorIterator.h>
+
 namespace at { namespace native {
+
+using unpack_pivots_fn = void(*)(
+  TensorIterator& iter,
+  int64_t dim_size
+);
+
+DECLARE_DISPATCH(unpack_pivots_fn, unpack_pivots_stub);
 
 /*
  * Clones a Tensor so that the following conditions hold:
