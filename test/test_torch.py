@@ -1,6 +1,7 @@
 import sys
 import io
 import inspect
+import itertools
 import math
 import random
 import re
@@ -3889,65 +3890,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                        torch.logical_and, torch.logical_or, torch.logical_xor]:
                 self.assertEqual(op(torch.tensor([True]), torch.tensor([False])).dtype, torch.bool)
 
-        def test_out_comparison_ops_type_promotion_and_broadcasting(self):
-            # issue #42660
-            input1_16 = torch.ones((2, 2), dtype=torch.bfloat16)
-            input2_32 = torch.ones(2, dtype=torch.float32)
-            output_64 = torch.zeros(1, dtype=torch.float64)
-
-            expected_ones = torch.ones((2, 2,), dtype=torch.float64)
-            expected_zeros = torch.zeros((2, 2,), dtype=torch.float64)
-            op_map = {
-                    torch.lt: expected_zeros,
-                    torch.le: expected_ones,
-                    torch.gt: expected_zeros,
-                    torch.ge: expected_ones,
-                    torch.eq: expected_ones,
-                    torch.ne: expected_zeros,
-                    torch.logical_and: expected_ones,
-                    torch.logical_or: expected_ones,
-                    torch.logical_xor: expected_zeros
-                    }
-            for op, expected_output in op_map.items():
-                op(input1_16, input2_32, out=output_64)
-                self.assertEqual(output_64, expected_output)
-
-
-        def test_functional_comparison_ops_return_bool_outputs(self):
-            complex_op_denylist = [torch.lt, torch.le, torch.gt, torch.ge]
-            for dtype in torch.testing.get_all_dtypes():
-                for op in [torch.lt, torch.le, torch.gt, torch.ge, torch.eq, torch.ne,
-                        torch.logical_and, torch.logical_or, torch.logical_xor]:
-                    if dtype.is_complex and op in complex_op_denylist:
-                        continue
-                    input1 = torch.ones(8, dtype=dtype)
-                    self.assertEqual(op(input1, input1).dtype, torch.bool)
-
-        def test_ne_eq_vectorized_treats_nan_properly(self):
-            # issue #42660
-            # use a large enough tensor to call vec256::ne
-            shape = (32, 32)
-
-            for dtype in [torch.bfloat16, torch.float32, torch.float64,
-                    torch.complex64, torch.complex128]:
-                input_nan = torch.full(shape, np.nan, dtype=dtype)
-                input_not_nan = torch.zeros(shape, dtype=dtype)
-                output = torch.zeros(0, dtype=dtype)
-
-                # nan != nan returns true
-                torch.ne(input_nan, input_nan, out=output)
-                self.assertTrue(output.to(bool).all())
-                # nan != <anything> returns true
-                torch.ne(input_nan, input_not_nan, out=output)
-                self.assertTrue(output.to(bool).all())
-                # nan == nan returns false
-                torch.eq(input_nan, input_nan, out=output)
-                self.assertFalse(output.to(bool).any())
-                # nan == <anything> returns false
-                torch.eq(input_nan, input_not_nan, out=output)
-                self.assertFalse(output.to(bool).any())
-
-
         def test_inplace_comparison_ops_require_inputs_have_same_dtype(self):
             with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
                 for op in ['lt_', 'le_', 'gt_', 'ge_', 'eq_', 'ne_', 'logical_xor_', 'logical_and_', 'logical_or_']:
@@ -5958,6 +5900,54 @@ class TestTorchDeviceType(TestCase):
     def test_isinf_type(self, device):
         with self.assertRaises(TypeError):
             torch.isinf(1)  # Parameter must be a tensor
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(*tuple(itertools.combinations_with_replacement(torch.testing.get_all_dtypes(include_bfloat16=False), 2)))
+    def test_comparison_ops_type_promotion_and_broadcasting(self, device, dtypes):
+        # issue #42660
+        # testing all combinations of broadcasting and type promotion
+        # with a range of dtypes and input shapes, and with extremal values
+        def compare_with_numpy_bin_op(torch_fn, np_fn, x, y, out=None):
+            y_np = y.cpu().numpy()
+            self.compare_with_numpy(lambda inp: torch_fn(inp, y, out=out) if out else torch_fn(inp, y),
+                                    lambda inp: np_fn(inp, y_np, out=out) if out else np_fn(inp, y_np),
+                                    x)
+
+        complex_op_denylist = [torch.lt, torch.le, torch.gt, torch.ge] # complex not supported
+        input_sizes = [
+            (1,),
+            (10,),
+            (10, 1),
+            (1, 10),
+            (4, 10),
+            (12, 3)]
+        op_pairs = [(torch.lt, np.less),
+                    (torch.le, np.less_equal),
+                    (torch.gt, np.greater),
+                    (torch.ge, np.greater_equal),
+                    (torch.eq, np.equal),
+                    (torch.ne, np.not_equal),
+                    (torch.logical_and, np.logical_and),
+                    (torch.logical_or, np.logical_or),
+                    (torch.logical_xor, np.logical_xor)]
+
+        for size1 in input_sizes:
+            size2 = (2,) + size1 # perform broadcasting
+            for with_extremal in [False, True]:
+                a = self._generate_input(size1, dtypes[0], device, with_extremal)
+                b = self._generate_input(size2, dtypes[1], device, with_extremal)
+                for torch_op, numpy_op in op_pairs:
+                    if (dtypes[0].is_complex or dtypes[1].is_complex) and torch_op in complex_op_denylist:
+                        continue
+                    # functional version of op
+                    compare_with_numpy_bin_op(torch_op, numpy_op, a, b)
+
+                    # functional comparison ops always return bool tensors
+                    self.assertEqual(torch_op(a,b).dtype, torch.bool)
+
+                    # out version of op
+                    out = torch.zeros(1, dtype=torch.complex128) # all casts to complex128 are safe
+                    compare_with_numpy_bin_op(torch_op, numpy_op, a, b, out=out)
 
     @onlyCPU
     @dtypes(torch.float)
@@ -18789,6 +18779,9 @@ else:
                     x[torch.randn(*shape) > 0.5] = complex('nan')
                     x[torch.randn(*shape) > 0.5] = complex('inf')
                     x[torch.randn(*shape) > 0.5] = complex('-inf')
+            elif dtype == torch.bool:
+                x = torch.zeros(shape, dtype=dtype, device=device)
+                x[torch.randn(*shape) > 0.5] = True
             else:
                 x = torch.randint(15, 100, shape, dtype=dtype, device=device)
 
