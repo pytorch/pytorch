@@ -85,6 +85,8 @@ class TORCH_API CppCommHookInterface : public CommHookInterface {
  public:
   explicit CppCommHookInterface(T* state = nullptr) : state_(state) {}
 
+  ~CppCommHookInterface() override {}
+
   std::vector<at::Tensor> parseHookResult(const c10::IValue& result) override {
     TORCH_INTERNAL_ASSERT(
         result.isTensor() || result.isTensorList(),
@@ -97,7 +99,7 @@ class TORCH_API CppCommHookInterface : public CommHookInterface {
     return result.toTensorVector();
   }
 
- private:
+ protected:
   T* state_; // Not owned.
 };
 
