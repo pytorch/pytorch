@@ -110,12 +110,12 @@ class TestConversion(TestCase):
             [node_def],
             "test",
             [helper.make_tensor_value_info("X", TensorProto.FLOAT, (2, 3)),
-             helper.make_tensor_value_info("W", TensorProto.FLOAT, (1, 2))],
-            [helper.make_tensor_value_info("Y", TensorProto.FLOAT, (2, 2))],
+             helper.make_tensor_value_info("W", TensorProto.FLOAT, (1, 3))],
+            [helper.make_tensor_value_info("Y", TensorProto.FLOAT, (2, 3))],
             initializer=[helper.make_tensor("W",
                                             TensorProto.FLOAT,
-                                            [1, 2],
-                                            np.zeros((1, 2)).flatten().astype(float))])
+                                            [1, 3],
+                                            np.zeros((1, 3)).flatten().astype(float))])
         model_def = helper.make_model(graph_def, producer_name='onnx-to-caffe2-test')
         onnx_model.write(model_def.SerializeToString())
         onnx_model.flush()
