@@ -435,6 +435,8 @@ of 16
 Third-party backends
 --------------------
 
+.. note::  This is a  **Prototype** function.
+
 Besides the GLOO/MPI/NCCL backends, PyTorch distributed supports third-party backends
 through a run-time register mechanism.
 For references on how to develop a third-party backend through C++ Extension,
