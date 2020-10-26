@@ -733,6 +733,25 @@ class TestVmapAPI(TestCase):
         result = vmap(model)(tensor)
         self.assertEqual(result, model(tensor))
 
+    def test_fallback_with_undefined_grad(self):
+        B0 = 7
+        x = torch.randn(2, 3, 4, 5, requires_grad=True)
+        weight = torch.randn(3, 3, 1, 1)
+        v = torch.randn(B0, 2, 3, 4, 5)
+
+        def get_vjp(v):
+            result = torch.nn.functional.conv2d(x, weight)
+            grad_x, = torch.autograd.grad(result, x, v)
+            return grad_x
+
+        # Runs vmap(get_vjp)(v), which should not error out.
+        # The backward formula for convolution returns an undefined
+        # Tensor for grad_bias because the original bias does not exist.
+        #
+        # In the future we'll probably add a batching rule for convolution
+        # backward. When this happens, we should modify this test to use a
+        # different op (and/or create and use a dummy operator) to avoid bitrot.
+        self._assert_uses_vmap_fallback([get_vjp], [v])
 
 def slice_inputs(inputs, bdims, i):
     result = []
@@ -1265,6 +1284,31 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(op, in_dims=(2, None, None, None)), in_dims=(0, None, None, None)),
              (torch.rand(B1, 2, B0, 5, B2), -1, 2, 3), in_dims=(2, None, None, None))
 
+    def test_new_empty(self):
+        # Empty is non-deterministic so we just check that the shape of the
+        # output tensor is what we expect and that the vmap fallback isn't used.
+        op = Tensor.new_empty
+
+        B0, B1 = 7, 11
+
+        result = vmap(lambda x: op(x, [2, 3]))(torch.randn(B0))
+        self.assertEqual(result.shape, [B0, 2, 3])
+
+        result = vmap(lambda x: op(x, []))(torch.randn(B0))
+        self.assertEqual(result.shape, [B0])
+
+        result = vmap(vmap(lambda x: op(x, [2, 3])))(torch.randn(B0, B1))
+        self.assertEqual(result.shape, [B0, B1, 2, 3])
+
+    def test_new_zeros(self):
+        op = Tensor.new_zeros
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        B0, B1 = 7, 11
+
+        test(lambda x: op(x, 2, 3), (torch.rand(B0),))
+        test(lambda x: op(x, []), (torch.rand(B0),))
+        test(vmap(lambda x: op(x, 3, 5)), (torch.rand(B0, B1),))
+
     def test_select(self):
         op = torch.select
         test = self._vmap_view_test
@@ -1717,6 +1761,21 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(torch.log1p, (x,), {})
         self._batched_grad_grad_test(torch.log1p, (x,), {})
+
+    @allowVmapFallbackUsage
+    def test_max(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(torch.max, (x,), {})
+
+    @allowVmapFallbackUsage
+    def test_median(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(torch.median, (x,), {})
+
+    @allowVmapFallbackUsage
+    def test_min(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(torch.min, (x,), {})
 
     def test_permute(self, device):
         x = torch.randn(2, 3, 5, requires_grad=True, device=device)

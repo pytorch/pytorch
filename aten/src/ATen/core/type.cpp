@@ -1211,19 +1211,21 @@ InterfaceType::~InterfaceType() = default;
 ClassTypePtr ClassType::create(
     c10::optional<QualifiedName> qualifiedName,
     std::weak_ptr<CompilationUnit> cu,
-    bool is_module) {
+    bool is_module,
+    std::string doc_string) {
   return ClassTypePtr(
-      new ClassType(std::move(qualifiedName), std::move(cu), is_module));
+      new ClassType(std::move(qualifiedName), std::move(cu), is_module, std::move(doc_string)));
 }
 
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
-    bool is_module = false)
+    bool is_module = false,
+    std::string doc_string = "")
     : NamedType(TypeKind::ClassType, std::move(name)),
       compilation_unit_(std::move(cu)),
-      isModule_(is_module) {
-}
+      isModule_(is_module),
+      doc_string_(std::move(doc_string)) {}
 
 const std::vector<torch::jit::Function*>& ClassType::methods() const {
   return methods_;
