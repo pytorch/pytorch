@@ -181,7 +181,6 @@ class ProcessContext:
         # Assume failure. Terminate processes that are still alive.
         for process in self.processes:
             if process.is_alive():
-                process_errors.update(self._try_retrieve_errors())
                 process.terminate()
             self._busy_join(process)
 
@@ -208,8 +207,8 @@ class ProcessContext:
                     exit_code=exitcode
                 )
 
+        self._try_populate_process_errors()
         original_trace = process_errors[error_index]
-        # original_trace = self.error_queues[error_index].get()
         msg = "\n\n-- Process %d terminated with the following error:\n" % error_index
         msg += original_trace
         raise ProcessRaisedException(msg, error_index, failed_process.pid)

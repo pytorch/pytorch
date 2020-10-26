@@ -63,7 +63,7 @@ def test_process_exit(idx):
     sys.exit(12)
 
 
-def raise_excepiton(char_size: int):
+def raise_exception(char_size: int):
     msg = "x" * char_size
     raise RuntimeError(f"Raising exception with message: {msg}")
 
@@ -147,7 +147,7 @@ class _TestMultiProcessing(object):
         size = 250000
         with self.assertRaisesRegex(RuntimeError, "Raising exception with message"):
             mp.start_processes(
-                raise_excepiton, args=(size,), nprocs=2, start_method=self.start_method
+                raise_exception, args=(size,), nprocs=2, start_method=self.start_method
             )
 
     def test_terminate_exit(self):
