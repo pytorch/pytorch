@@ -26,7 +26,7 @@ Tensor add_scalar(
   command_buffer.begin();
   {
     if (v_output.has_image() && v_self.has_image()) {
-      struct {
+      const struct {
         uint32_t width, height, channels;
         float other;
       } block {
@@ -81,7 +81,7 @@ Tensor& add_scalar_(
   command_buffer.begin();
   {
     if (v_self.has_image()) {
-      struct {
+      const struct {
         uint32_t width, height, channels;
         float other;
       } block {
@@ -138,7 +138,7 @@ Tensor add_tensor(
   command_buffer.begin();
   {
     if (v_self.has_image() && v_other.has_image()) {
-      struct {
+      const struct {
         uint32_t width, height, channels;
         float alpha;
       } block {
@@ -200,7 +200,7 @@ Tensor& add_tensor_(
   command_buffer.begin();
   {
     if (v_self.has_image() && v_other.has_image()) {
-      struct {
+      const struct {
         uint32_t width, height, channels;
         float alpha;
       } block {
