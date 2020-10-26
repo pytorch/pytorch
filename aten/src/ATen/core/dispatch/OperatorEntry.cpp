@@ -85,8 +85,8 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
     if (cpp_signature_.has_value()) {
       TORCH_INTERNAL_ASSERT(*cpp_signature == *cpp_signature_,
         "Tried to register a kernel (", debug, ") for operator ", name_," for dispatch key ", toString(dispatch_key),
-        ", but the C++ function signature ", cpp_signature->name(), " mismatched with a previous kernel that had the signature ",
-        cpp_signature_->name()
+        ", but the C++ function signature ", cpp_signature->name(), " mismatched with a previous kernel (", this->debug(),
+        ") that had the signature ", cpp_signature_->name()
       );
     } else {
       cpp_signature_ = *cpp_signature;
@@ -103,7 +103,9 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
   auto& k = dispatch_key.has_value() ? kernels_[*dispatch_key] : kernels_[DispatchKey::Math];
 
   if (k.size() > 0) {
-    TORCH_WARN("Registering a kernel (", debug, ") for operator ", name_, " for dispatch key ", toString(dispatch_key), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
+    TORCH_WARN("Registering a kernel (", debug, ") for operator ", name_, " for dispatch key ",
+              toString(dispatch_key), " that overwrote a previously registered kernel (", this->debug(),
+              ") with the same dispatch key for the same operator.");
   }
 
   if (manuallyBoxedKernel_.has_value()) {
