@@ -80,6 +80,25 @@ void TestAdd(DeprecatedTypeProperties& type) {
   }
 }
 
+void TestZeros(DeprecatedTypeProperties& type) {
+  auto begin = std::chrono::high_resolution_clock::now();
+  Tensor a = zeros({1024, 1024}, type);
+  for (int i = 1; i < 1000; ++i) {
+    a = zeros({1024, 1024}, type);
+  }
+  auto end = std::chrono::high_resolution_clock::now();
+  std::cout << std::dec << "   "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(
+                   end - begin)
+                   .count()
+            << " ms" << std::endl;
+
+   std::srand(std::time(nullptr));
+   for (auto l = 0; l < 100; ++l) {
+     ASSERT_EQ(a[std::rand() % 1024][std::rand() % 1024].item<double>(), 0.0);
+   }
+}
+
 void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
@@ -309,6 +328,7 @@ void test(DeprecatedTypeProperties& type) {
   TestSort(type);
   TestRandperm(type);
   TestAdd(type);
+  TestZeros(type);
   TestLoadsOfAdds(type);
   TestLoadOfAddsWithCopy(type);
   TestIsContiguous(type);
