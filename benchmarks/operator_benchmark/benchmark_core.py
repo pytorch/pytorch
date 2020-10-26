@@ -119,6 +119,12 @@ def _build_test(configs, bench_op, OperatorTestCase, run_backward, op_name_funct
         op._set_backward_test(run_backward)
         op.init(**init_dict)
 
+        if not run_backward:
+            for _, attr in vars(op).items():
+                if isinstance(attr, torch.nn.Module):
+                    for param in attr.parameters():
+                        param.requires_grad = False
+
         input_name = None
 
         # _num_inputs_require_grads is used to track the number of tensors

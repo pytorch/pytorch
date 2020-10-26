@@ -135,16 +135,4 @@ std::vector<at::Tensor> PythonCommHook::parseHookResult(
   return result.toTensorVector();
 }
 
-std::vector<at::Tensor> CppCommHook::parseHookResult(const c10::IValue& result) {
-  TORCH_INTERNAL_ASSERT(
-      result.isTensor() || result.isTensorList(),
-      "expected the hook result is either a Tensor or a TensorList");
-
-  if (result.isTensor()) {
-    return {result.toTensor()};
-  }
-
-  return result.toTensorVector();
-}
-
 } // namespace c10d

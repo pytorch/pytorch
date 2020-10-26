@@ -39,7 +39,7 @@ class GradBucket {
 // Requires implementing 1) `runHook` method that communicates gradients
 // asynchronously, and 2) `parseHookResult` method that converts the hook result
 // into a tensor vector.
-class TORCH_API CommHookInterface {
+class TORCH_PYTHON_API CommHookInterface {
  public:
   virtual ~CommHookInterface() {}
 
@@ -78,29 +78,27 @@ class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
   py::object hook_;
 };
 
-class TORCH_API CppCommHook : public CommHookInterface {
+// This CppCommHook interface only requires implementing runHook method that
+// potentially uses a state.
+template <typename T>
+class TORCH_API CppCommHookInterface : public CommHookInterface {
  public:
-  explicit CppCommHook(
-      std::function<c10::intrusive_ptr<
-          torch::jit::Future>(ProcessGroup*, GradBucket&)>& hook,
-      ProcessGroup* process_group = nullptr)
-      : process_group_(process_group), hook_(std::move(hook)) {}
+  explicit CppCommHookInterface(T* state = nullptr) : state_(state) {}
 
-  c10::intrusive_ptr<torch::jit::Future> runHook(GradBucket& bucket) override {
-    return hook_(process_group_, bucket);
+  std::vector<at::Tensor> parseHookResult(const c10::IValue& result) override {
+    TORCH_INTERNAL_ASSERT(
+        result.isTensor() || result.isTensorList(),
+        "expected the hook result is either a Tensor or a TensorList");
+
+    if (result.isTensor()) {
+      return {result.toTensor()};
+    }
+
+    return result.toTensorVector();
   }
 
-  std::vector<at::Tensor> parseHookResult(const c10::IValue& result) override;
-
  private:
-  // This can be a more generic state if needed.
-  // Note that std::optional<ProcessGroup> cannot be used, since ProcessGroup is
-  // an abstract class.
-  ProcessGroup* process_group_; // Not owned.
-  std::function<c10::intrusive_ptr<torch::jit::Future>(
-      ProcessGroup* process_group,
-      GradBucket&)>
-      hook_;
+  T* state_; // Not owned.
 };
 
 } // namespace c10d
