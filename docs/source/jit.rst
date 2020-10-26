@@ -725,8 +725,7 @@ TorchScript Classes
 ^^^^^^^^^^^^^^^^^^^
 
 .. warning::
-
-    TorchScript class support is experimental. Currently it is best suited
+    TorchScript class support is a **Prototype** feature. Currently it is best suited
     for simple record-like types (think a ``NamedTuple`` with methods
     attached).
 
