@@ -275,7 +275,7 @@ class Timer(object):
     ) -> common.Measurement:
         """Measure many replicates while keeping timer overhead to a minimum.
 
-        At a high level, blocked_autorange executes the following pseudo-code:::
+        At a high level, blocked_autorange executes the following pseudo-code::
 
             `setup`
 
