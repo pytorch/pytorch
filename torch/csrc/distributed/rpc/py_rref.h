@@ -55,7 +55,7 @@ class PYBIND11_EXPORT PyRRef {
   void backward(int64_t autogradContextId, bool retainGraph);
 
   // Helper static function to run backward on a given rref.
-  static void backward(int64_t autogradContextId, bool retainGraph, c10::intrusive_ptr<RRef> rref);
+  static void backward(int64_t autogradContextId, bool retainGraph, const c10::intrusive_ptr<RRef>& rref);
 
  private:
   c10::intrusive_ptr<RRef> rref_;

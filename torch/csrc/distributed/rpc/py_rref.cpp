@@ -293,7 +293,7 @@ void PyRRef::backward(int64_t autogradContextId, bool retainGraph) {
 void PyRRef::backward(
     int64_t autogradContextId,
     bool retainGraph,
-    c10::intrusive_ptr<RRef> rref) {
+    const c10::intrusive_ptr<RRef>& rref) {
   if (rref->isOwner()) {
     auto value =
         c10::static_intrusive_pointer_cast<const OwnerRRef>(rref)->getValue();
@@ -303,7 +303,7 @@ void PyRRef::backward(
       py::gil_scoped_acquire gil;
       py::object obj = torch::jit::toPyObject(value);
       try {
-        value = std::move(torch::jit::toIValue(obj, c10::TensorType::get()));
+        value = torch::jit::toIValue(obj, c10::TensorType::get());
       } catch (py::cast_error& e) {
         throw std::runtime_error(
             "RRef should contain a tensor for .backward()");
