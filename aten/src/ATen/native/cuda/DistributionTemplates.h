@@ -578,11 +578,7 @@ template<typename scalar_t, typename prob_t>
 void bernoulli_tensor_cuda_kernel(
     at::Tensor& ret, const at::Tensor& p,
     PhiloxCudaState philox_args) {
-  // The template argument `4` below indicates that we want to operate on four
-  // element at each time. See NOTE [ CUDA_tensor_applyN helpers ] for details.
-  at::cuda::CUDA_tensor_apply2<scalar_t, prob_t, 4>(
-      ret, p,
-      [philox_args] __device__(
+  auto functor = [philox_args] __device__(
           int n, scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4,
           const prob_t& p1, const prob_t& p2, const prob_t& p3, const prob_t& p4) {
         auto seeds = at::cuda::philox::unpack(philox_args);
@@ -615,8 +611,12 @@ void bernoulli_tensor_cuda_kernel(
             v1 = static_cast<scalar_t>(rand.x <= p1);
           }
         }
-      }
-    );
+      };
+  // The template argument `4` below indicates that we want to operate on four
+  // element at each time. See NOTE [ CUDA_tensor_applyN helpers ] for details.
+  at::cuda::CUDA_tensor_apply2<scalar_t, prob_t, 4, decltype(functor),
+                               /*max_threads_per_block=*/512,
+                               /*min_blocks_per_sm==*/2>(ret, p, functor);
 }
 
 template<typename RNG>

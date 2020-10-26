@@ -50,10 +50,7 @@ void poisson_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& lambda,
     at::PhiloxCudaState philox_args) {
-  at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t>(
-      ret,
-      lambda,
-      [philox_args] __device__(
+  auto functor = [philox_args] __device__(
           scalar_t & ret_val, const scalar_t& lambda) {
         auto seeds = at::cuda::philox::unpack(philox_args);
         curandStatePhilox4_32_10_t state;
@@ -62,7 +59,10 @@ void poisson_cuda_kernel(
                     std::get<2>(seeds),
                     &state);
         ret_val = static_cast<scalar_t>(curand_poisson(&state, lambda));
-      });
+      };
+  at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t, decltype(functor),
+                               /*max_threads_per_block=*/512,
+                               /*min_blocks_per_sm==*/2>(ret, lambda, functor);
 }
 
 struct curand_uniform_wrapper {
@@ -110,10 +110,7 @@ void gamma_cuda_kernel(
     const at::Tensor& alpha,
     at::PhiloxCudaState philox_args) {
   using accscalar_t = at::acc_type<scalar_t, true>;
-  at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t>(
-      ret,
-      alpha,
-      [philox_args] __device__(
+  auto functor = [philox_args] __device__(
           scalar_t & ret_val, const scalar_t& alpha) {
         auto seeds = at::cuda::philox::unpack(philox_args);
         curandStatePhilox4_32_10_t state;
@@ -134,7 +131,10 @@ void gamma_cuda_kernel(
         auto sample = sample_gamma<scalar_t, accscalar_t, decltype(uniform_lambda), decltype(normal_lambda)>(alpha, standard_uniform, standard_normal);
         auto min_value = std::numeric_limits<scalar_t>::min();
         ret_val = (min_value > sample) ? min_value : sample;
-      });
+      };
+  at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t, decltype(functor),
+                               /*max_threads_per_block=*/512,
+                               /*min_blocks_per_sm==*/2>(ret, alpha, functor);
 }
 
 template<typename scalar_t>
