@@ -141,7 +141,7 @@ TEST(TensorIteratorTest, ComparisonLoopBinary_##name) {                         
   }                                                                                        \
   auto expected = diff.clamp_min(0).to(kBool);                                             \
   auto iter = TensorIterator::comparison_op(out, in1, in2);                                \
-  at::native::cpu_serial_kernel(iter, [=](ctype a, ctype b) -> bool { return a < b; });   \
+  at::native::cpu_serial_kernel(iter, [=](ctype a, ctype b) -> bool { return a < b; });    \
   EXPECT_TRUE(out.equal(expected));                                                        \
 }
 

@@ -6425,9 +6425,6 @@ class TestTorchDeviceType(TestCase):
         b = torch.tensor(b_, dtype=dtypes[1], device=device)
 
         # new tensor
-        x1 = expected_res.bool()
-        x2 = getattr(a, op)(b)
-        self.assertEqual(x1, x2)
         self.assertEqual(expected_res.bool(), getattr(a, op)(b))
         # out
         c = torch.empty(0, dtype=torch.bool, device=device)
@@ -18781,7 +18778,7 @@ else:
                                             exact_dtype=True, with_keepdim=False):
         # Test 0-d to 3-d tensors.
         for ndims in range(0, 4):
-            shape = self._rand_shape(ndims, min_size=2, max_size=2)
+            shape = self._rand_shape(ndims, min_size=5, max_size=10)
             for n in range(ndims + 1):
                 for c in combinations(list(range(ndims)), n):
                     for count_dim in permutations(c):
