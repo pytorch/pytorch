@@ -1,7 +1,8 @@
 #include <torch/csrc/jit/passes/utils/onnx_utils.h>
 #include <onnx/onnx_pb.h>
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 
 namespace onnx = ::ONNX_NAMESPACE;
 
@@ -36,4 +37,5 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
   }
 }
 
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch

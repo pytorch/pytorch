@@ -6,10 +6,13 @@ namespace ONNX_NAMESPACE {
 enum TensorProto_DataType : int;
 }
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 
 // Utility functions for PyTorch to ONNX conversion.
 
-TORCH_API ONNX_NAMESPACE::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type);
+TORCH_API ONNX_NAMESPACE::TensorProto_DataType ATenTypeToOnnxType(
+    at::ScalarType at_type);
 
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch

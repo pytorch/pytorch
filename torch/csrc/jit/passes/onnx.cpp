@@ -318,7 +318,12 @@ void NodeToONNX(
     WithInsertPoint insert_point_guard(new_block);
     WithCurrentScope scope_guard(*new_block->owningGraph(), n->scope());
     py::object raw_output = onnx.attr("_run_symbolic_function")(
-        new_block->owningGraph(), new_block, n, py_inputs, env, operator_export_type);
+        new_block->owningGraph(),
+        new_block,
+        n,
+        py_inputs,
+        env,
+        operator_export_type);
 
     // TODO: Assert it's an ATen identifier???
     // (Sometimes it's not...)
@@ -386,7 +391,6 @@ void NodeToONNX(
   } else {
     callPySymbolicFunction(old_node);
   }
-
 }
 
 } // namespace jit

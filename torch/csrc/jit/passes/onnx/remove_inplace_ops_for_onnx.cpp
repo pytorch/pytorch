@@ -9,7 +9,8 @@ namespace jit {
 namespace {
 
 void ReplaceCopyWithIndexPut(Block* block) {
-  for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end; ++it) {
+  for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
+       ++it) {
     auto node = *it;
     for (auto block : node->blocks()) {
       ReplaceCopyWithIndexPut(block);
@@ -25,15 +26,24 @@ void ReplaceCopyWithIndexPut(Block* block) {
       // Tracing aten::copy_ broadcasts the rhs values.
       // 3. Apply broadcasting for scripting.
       auto graph = node->owningGraph();
-      auto dummy_list = graph->createList(OptionalType::ofTensor(), {})->insertBefore(node)->output();
+      auto dummy_list = graph->createList(OptionalType::ofTensor(), {})
+                            ->insertBefore(node)
+                            ->output();
 
-      auto expanded_value = graph->create(aten::expand_as, {node->input(1), node->input(0)})->insertBefore(node)->output();
+      auto expanded_value =
+          graph->create(aten::expand_as, {node->input(1), node->input(0)})
+              ->insertBefore(node)
+              ->output();
       expanded_value->node()->setSourceRange(node->sourceRange());
       expanded_value->copyMetadata(node->input(1));
 
-      auto index_put = graph->create(
-          aten::index_put_,
-          {node->input(0), dummy_list, expanded_value, node->input(2)})->insertBefore(node)->output();
+      auto index_put =
+          graph
+              ->create(
+                  aten::index_put_,
+                  {node->input(0), dummy_list, expanded_value, node->input(2)})
+              ->insertBefore(node)
+              ->output();
 
       index_put->node()->setSourceRange(node->sourceRange());
       index_put->copyMetadata(node->output());
