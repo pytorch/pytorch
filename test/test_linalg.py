@@ -5,7 +5,7 @@ from math import inf, nan, isnan
 from random import randrange
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, TEST_WITH_ASAN, make_tensor)
+    (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, slowTest, TEST_WITH_ASAN, make_tensor)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
@@ -916,7 +916,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_lu_solve_batched_non_contiguous(self, device, dtype):
         from numpy.linalg import solve
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
@@ -942,13 +942,15 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4,
+                        torch.float64: 1e-12, torch.complex128: 1e-12})
     def test_lu_solve(self, device, dtype):
         def sub_test(pivot):
             for k, n in zip([2, 3, 5], [3, 5, 7]):
                 b, A, LU_data, LU_pivots = self.lu_solve_test_helper((n,), (n, k), pivot, device, dtype)
                 x = torch.lu_solve(b, LU_data, LU_pivots)
-                self.assertLessEqual(b.dist(A.mm(x)), 1e-12)
+                self.assertLessEqual(abs(b.dist(A.mm(x), p=1)), self.precision)
 
         sub_test(True)
         if self.device_type == 'cuda':
@@ -956,7 +958,9 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4,
+                        torch.float64: 1e-12, torch.complex128: 1e-12})
     def test_lu_solve_batched(self, device, dtype):
         def sub_test(pivot):
             def lu_solve_batch_test_helper(A_dims, b_dims, pivot):
@@ -967,7 +971,7 @@ class TestLinalg(TestCase):
                 x_exp = torch.stack(x_exp_list)  # Stacked output
                 x_act = torch.lu_solve(b, LU_data, LU_pivots)  # Actual output
                 self.assertEqual(x_exp, x_act)  # Equality check
-                self.assertLessEqual(b.dist(torch.matmul(A, x_act)), 1e-12)  # Correctness check
+                self.assertLessEqual(abs(b.dist(torch.matmul(A, x_act), p=1)), self.precision)  # Correctness check
 
             for batchsize in [1, 3, 4]:
                 lu_solve_batch_test_helper((5, batchsize), (batchsize, 5, 10), pivot)
@@ -985,7 +989,7 @@ class TestLinalg(TestCase):
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_lu_solve_batched_many_batches(self, device, dtype):
         def run_test(A_dims, b_dims):
             b, A, LU_data, LU_pivots = self.lu_solve_test_helper(A_dims, b_dims, True, device, dtype)
@@ -998,7 +1002,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_lu_solve_batched_broadcasting(self, device, dtype):
         from numpy.linalg import solve
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
