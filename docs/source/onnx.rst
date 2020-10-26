@@ -440,7 +440,7 @@ The following operators are supported:
 * true_divide
 * type_as
 * unbind
-* unfold (experimental support with ATen-Caffe2 integration)
+* unfold (Prototype support with ATen-Caffe2 integration)
 * unique
 * unsqueeze
 * upsample_nearest1d
@@ -597,7 +597,7 @@ There are more examples in
 `symbolic_opset10.py <https://github.com/pytorch/pytorch/blob/master/torch/onnx/symbolic_opset10.py>`_.
 
 
-The interface for specifying operator definitions is experimental;
+The interface for specifying operator definitions is a Prototype feature;
 adventurous users should note that the APIs will probably
 change in a future interface.
 
