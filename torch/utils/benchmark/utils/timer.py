@@ -54,9 +54,15 @@ class Timer(object):
         In addition to wall times, Timer can run a statement under Callgrind
         and report instructions executed.
 
+    Directly analogous to `timeit.Timer` constructor arguments:
+
+        `stmt`, `setup`, `timer`, `globals`
+
+    PyTorch Timer specific constructor arguments:
+
+        `label`, `sub_label`, `description`, `env`, `num_threads`
+
     Arguments:
-        Directly analogous to `timeit.Timer` constructor arguments:
-        -----------------------------------------------------------------------
         stmt: Code snippet to be run in a loop and timed.
         setup: Optional setup code. Used to define variables used in `stmt`
         timer:
@@ -70,8 +76,6 @@ class Timer(object):
             executed. This is the other method for providing variables which
             `stmt` needs.
 
-        PyTorch Timer specific constructor arguments:
-        -----------------------------------------------------------------------
         label:
             String which summarizes `stmt`. For instance, if `stmt` is
               "torch.nn.functional.relu(torch.add(x, 1, out=out))"
@@ -83,6 +87,7 @@ class Timer(object):
             above sub_label might be "float" or "int", so that it is easy
             to differentiate:
                 "ReLU(x + 1): (float)"
+
                 "ReLU(x + 1): (int)"
             when printing Measurements or summarizing using `Compare`.
 
@@ -90,12 +95,13 @@ class Timer(object):
             String to distinguish measurements with identical label and
             sub_label. The principal use of `description` is to signal to
             `Compare` the columns of data. For instance one might set it
-            based on the input size  to create a table of the form:
+            based on the input size  to create a table of the form: ::
 
-                                    | n=1 | n=4 | ...
-                                    ------------- ...
-            ReLU(x + 1): (float)    | ... | ... | ...
-            ReLU(x + 1): (int)      | ... | ... | ...
+                                        | n=1 | n=4 | ...
+                                        ------------- ...
+                ReLU(x + 1): (float)    | ... | ... | ...
+                ReLU(x + 1): (int)      | ... | ... | ...
+
 
             using `Compare`. It is also included when printing a Measurement.
 
@@ -269,17 +275,16 @@ class Timer(object):
     ) -> common.Measurement:
         """Measure many replicates while keeping timer overhead to a minimum.
 
-        At a high level, blocked_autorange executes the following pseudo-code:
-        ```
-        `setup`
+        At a high level, blocked_autorange executes the following pseudo-code:::
 
-        total_time = 0
-        while total_time < min_run_time
-            start = timer()
-            for _ in range(block_size):
-                `stmt`
-            total_time += (timer() - start)
-        ```
+            `setup`
+
+            total_time = 0
+            while total_time < min_run_time
+                start = timer()
+                for _ in range(block_size):
+                    `stmt`
+                total_time += (timer() - start)
 
         Note the variable `block_size` in the inner loop. The choice of block
         size is important to measurement quality, and must balance two
