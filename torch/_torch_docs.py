@@ -3602,7 +3602,7 @@ Computes the Kronecker product, denoted by :math:`\otimes`, of :attr:`input` and
 
 If :attr:`input` is a :math:`(a_0 \times a_1 \times \dots \times a_n)` tensor and :attr:`other` is a
 :math:`(b_0 \times b_1 \times \dots \times b_n)` tensor, the result will be a
-:math:`(a_0*b_0 \times a_1*b_1 \times \dots \times a_n*b_n)` block tensor with the following entries:
+:math:`(a_0*b_0 \times a_1*b_1 \times \dots \times a_n*b_n)` tensor with the following entries:
 
 .. math::
     (\text{input} \otimes \text{other})_{k_0, k_1, \dots, k_n} = \text{input}_{i_0, i_1, \dots, i_n} * \text{other}_{j_0, j_1, \dots, j_n},
