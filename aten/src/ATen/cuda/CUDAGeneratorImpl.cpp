@@ -372,6 +372,8 @@ PhiloxCudaState CUDAGeneratorImplDevState::philox_cuda_state(uint64_t increment)
   // After freezing for_kernel, swaps current and next so "next" becomes "current" for
   // the kernel after the caller's kernel.
   std::swap(state.offset_.ptr, state.next_offset_ptr_);
+  TORCH_INTERNAL_ASSERT((state.offset_.ptr == for_kernel.next_offset_ptr_) &&
+                        (state.next_offset_ptr_ == for_kernel.offset_.ptr));
 
   return for_kernel;
 }
