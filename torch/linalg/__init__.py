@@ -158,9 +158,9 @@ Args:
     input (Tensor): "left-hand-side" tensor, it must satisfy the requirement
                     ``prod(input.shape[other.ndim:]) == prod(input.shape[:other.ndim])``.
     other (Tensor): "right-hand-side" tensor of shape ``input.shape[other.ndim]``.
-    dims (Tuple[int]): dimensions of :attr:`input` to be moved to the end keeping the order,
-                       i.e. ``movedim(input, dims, range(len(dims) - input.ndim, 0))``, before solve.
-                       If None (default), no moving of dimensions is done.
+    dims (Tuple[int]): dimensions of :attr:`input` to be moved before the computation.
+                       Equivalent to calling ``input = movedim(input, dims, range(len(dims) - input.ndim, 0))``.
+                       If None (default), no dimensions are moved.
 
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
