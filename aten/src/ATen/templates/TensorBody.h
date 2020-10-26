@@ -494,7 +494,7 @@ class CAFFE2_API Tensor {
   /// // f requires grad, has no operation creating it
   /// @endcode
 
-  /// \fn void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false) const;
+  /// \fn void backward(const Tensor & inputs={}, const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false) const;
   ///
   /// Computes the gradient of current tensor with respect to graph leaves.
   ///

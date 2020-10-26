@@ -22,6 +22,7 @@ namespace autograd {
 /// before calling it.
 ///
 /// \param tensors Tensors of which the derivative will be computed.
+/// \param inputs Inputs w.r.t. which the gradient will be computed.
 /// \param grad_tensors The "vector" in the Jacobian-vector product, usually gradients
 ///     w.r.t. each element of corresponding tensors. `torch::Tensor()` values can be
 ///     specified for scalar Tensors or ones that don't require grad. If a `torch::Tensor()` value
@@ -34,6 +35,7 @@ namespace autograd {
 ///     to compute higher order derivative products. Defaults to `false`.
 TORCH_API void backward(
     const variable_list& tensors,
+    const variable_list& inputs = {},
     const variable_list& grad_tensors = {},
     c10::optional<bool> retain_graph = c10::nullopt,
     bool create_graph = false);
