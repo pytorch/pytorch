@@ -421,26 +421,67 @@ class DataLoader(Generic[T_co]):
         #     To lower the max total number of therad that will be created by DataLoader, there
         #     are 2 ways. One is to use torch.set_num_threads() to adjust the max thread number of
         #     each worker, the other way is to make number of worker smaller.
+        #
+        # [Note] Please note that this function repects `cpuset` only when os.sched_getaffinity is
+        #        available (available in most of Linux system, but not OSX and Windows).
+        #        When os.sched_getaffinity is not available, os.cpu_count() is called instead, but
+        #        it doesn't repect cpuset.
+        def _create_warning_msg(max_td_created, max_td_per_worker, max_td_suggest, num_workers, cpuset_checked):
+
+            suggested_max_thread_msg = ((
+                "Our suggested max number of thread in current system is {}{}, which is smaller "
+                "than what this DataLoader might create.").format(
+                    max_td_suggest,
+                    ("" if cpuset_checked else " (`cpuset` is not taken into account)"))) if max_td_suggest else (
+                "DataLoader is not able to compute a suggested max number of thread in current system.")
+
+            warn_msg = (
+                "This DataLoader might create a max of {} threads in total "
+                "(max number of thread in each worker {} multiply number of workers {}). {} "
+                "Please be aware that excessive threads might get DataLoader running slow or even freeze, "
+                "adjust the max number of thread for each worker through torch.set_num_threads(<num of thread>), "
+                "or adjust number of workers to avoid potential slowness/freeze if necessary.").format(
+                    max_td_created,
+                    max_td_per_worker,
+                    num_workers,
+                    suggested_max_thread_msg)
+            return warn_msg
+
         if not self.num_workers or self.num_workers == 0:
             return
 
-        max_num_thread_in_worker = torch.get_num_threads()
-        max_total_thread_created = max_num_thread_in_worker * self.num_workers
-        max_total_thread_allowed = len(os.sched_getaffinity(0)) * 2
-        if max_total_thread_created > max_total_thread_allowed:
-            warn_msg = (
-                "This DataLoader might create a max of {} threads in total "
-                "(max number of thread in each worker {} multiply number of workers {}). "
-                "Our suggested max number of thread in this system is {}, which is smaller "
-                "than what this DataLoader might create, excessive threads might get DataLoader "
-                "running slow or even freeze, please adjust the max number of thread for each "
-                "worker through torch.set_num_threads(<num of thread>), or adjust number of workers "
-                "to avoid potential slowness/freeze if necessary.").format(
-                    max_total_thread_created,
-                    max_num_thread_in_worker,
-                    self.num_workers,
-                    max_total_thread_allowed)
-            warnings.warn(warn_msg)
+        max_num_thread_per_worker = torch.get_num_threads()
+        max_total_thread_created = max_num_thread_per_worker * self.num_workers
+        # try to compute a suggested max number of thread based on system's resource
+        max_total_thread_suggest = None
+        cpuset_checked = False
+        if hasattr(os, 'sched_getaffinity'):
+            try:
+                max_total_thread_suggest = len(os.sched_getaffinity(0)) * 2
+                cpuset_checked = True
+            except Exception:
+                pass
+        if not max_total_thread_suggest:
+            try:
+                max_total_thread_suggest = os.cpu_count() * 2
+            except Exception:
+                pass
+        if not max_total_thread_suggest:
+            warnings.warn(_create_warning_msg(
+                max_total_thread_created,
+                max_num_thread_per_worker,
+                max_total_thread_suggest,
+                self.num_workers,
+                cpuset_checked))
+            return
+
+        if max_total_thread_created > max_total_thread_suggest:
+            warnings.warn(_create_warning_msg(
+                max_total_thread_created,
+                max_num_thread_per_worker,
+                max_total_thread_suggest,
+                self.num_workers,
+                cpuset_checked))
 
 
 class _BaseDataLoaderIter(object):
