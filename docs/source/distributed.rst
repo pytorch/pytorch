@@ -364,6 +364,8 @@ Collective functions
 
 .. autofunction:: reduce_scatter
 
+.. note::  `all_to_all` is a  **Prototype** function.
+
 .. autofunction:: all_to_all
 
 .. autofunction:: barrier
@@ -451,6 +453,8 @@ of 16
 
 Third-party backends
 --------------------
+
+.. note::  This is a  **Prototype** function.
 
 Besides the GLOO/MPI/NCCL backends, PyTorch distributed supports third-party backends
 through a run-time register mechanism.
