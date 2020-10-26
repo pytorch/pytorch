@@ -345,6 +345,8 @@ Collective functions
 
 .. autofunction:: reduce_scatter
 
+.. note::  `all_to_all` is a  **Prototype** function.
+
 .. autofunction:: all_to_all
 
 .. autofunction:: barrier
