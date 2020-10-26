@@ -3,7 +3,6 @@
 #include <c10/core/Scalar.h>
 #include <ATen/Tensor.h>
 #include <ATen/Functions.h>
-#include <ATen/FastPass.h>
 
 namespace at {
 template <typename scalar_t>

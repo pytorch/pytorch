@@ -7,6 +7,7 @@
 #endif
 
 #include <ATen/ScalarOps.h>
+#include <ATen/ATen.h>
 
 namespace at {
 
