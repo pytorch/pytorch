@@ -29,6 +29,10 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
     return self;
   }
 
+  if (non_blocking && self.is_cuda() && options.device().is_cpu()) {
+    options.pinned_memory(true);
+  }
+
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
       // Copy all strides
