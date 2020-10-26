@@ -1210,6 +1210,14 @@ struct to_ir {
               return emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
             }
           }
+          auto sv = emitSugaredExpr(apply.callee(), 1);
+          auto loc = apply.callee().range();
+          if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
+            if (special_form->form() == prim::isinstance) {
+              checkApplyNumInputs(apply, 2);
+              return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+            }
+          }
         }
         auto expr_out = emitToBool(expr.range(), emitExpr(expr));
         c10::optional<bool> static_if = c10::nullopt;
@@ -1267,7 +1275,8 @@ struct to_ir {
 
     // comprehension introduces it's own scope. no variable assigned
     // leaks into the rest of the graph
-    Node* n = graph->insertNode(create(prim::ListComprehension, lc.range(), 0));
+    Node* n =
+        graph->insertNode(create(prim::ListComprehensionScope, lc.range(), 0));
     auto* comprehension_block = n->addBlock();
     pushFrame(comprehension_block);
     WithInsertPoint guard(comprehension_block);
@@ -2715,7 +2724,7 @@ struct to_ir {
               << why_not.str();
         }
 
-        // None is a subtype of Optional[T], but we want to remember what T is,
+        // None is a subtype of Optional[T], but we want to remember what T is
         // after annotation so that variables assigned to this None will still
         // get the right type. To do this, we make a None constant that
         // has the type Optional[T]
@@ -3140,6 +3149,22 @@ struct to_ir {
     return std::make_shared<SimpleValue>(rpc_node_output);
   }
 
+  Value* emitBinaryOp(const TreeRef& tree) {
+    const auto& inputs = tree->trees();
+    auto kind = getNodeKind(tree->kind(), inputs.size());
+    auto overload = getOperatorOverload(tree->kind(), inputs.size());
+    auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+    if (tree->kind() == TK_IN) {
+      // For `in` the arguments are in reverse order (the object being
+      // checked is second)
+      std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
+    }
+    return asSimple(
+        makeMagic(
+            overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
+            ->call(tree->range(), method, named_values, {}, 0));
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree,
       const TypePtr& type_hint = nullptr) {
@@ -3151,6 +3176,21 @@ struct to_ir {
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
         return emitBuiltinCall(
             tree->range(), *method.graph(), kind, named_values, {});
+      }
+      case '%': {
+        auto lhs = emitSugaredExpr(Expr(tree->tree(0)), 0)
+                       ->asValue(tree->tree(0)->range(), method);
+        auto const& lhs_type = lhs->type();
+        if (lhs_type == StringType::get()) {
+          auto values = getValues(tree->trees(), /*maybe_unpack=*/false);
+          auto node = graph->create(aten::percentFormat, values, 1)
+                          ->setSourceRange(tree->range());
+          Value* output = graph->insertNode(node)->output();
+          output->setType(StringType::get());
+          return output;
+        } else {
+          return emitBinaryOp(tree);
+        }
       }
       case TK_IN:
       case TK_POW:
@@ -3164,28 +3204,12 @@ struct to_ir {
       case '/':
       case '+':
       case '-':
-      case '%':
       case '&':
       case '|':
       case '^':
       case TK_LSHIFT:
-      case TK_RSHIFT: {
-        const auto& inputs = tree->trees();
-        auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto overload = getOperatorOverload(tree->kind(), inputs.size());
-        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-
-        if (tree->kind() == TK_IN) {
-          // For `in` the arguments are in reverse order (the object being
-          // checked is second)
-          std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
-        }
-
-        return asSimple(
-            makeMagic(
-                overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
-                ->call(tree->range(), method, named_values, {}, 0));
-      }
+      case TK_RSHIFT:
+        return emitBinaryOp(tree);
       case TK_IS:
       case TK_ISNOT:
       case TK_AND:

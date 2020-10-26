@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
 #include <torch/csrc/jit/codegen/cuda/executor_kernel_arg.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -15,6 +14,8 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
+
+#include <cstdlib>
 
 namespace torch {
 namespace jit {
@@ -33,7 +34,7 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   code += std::string("namespace ") + FusionExecutor::kernelNamespace() +
       " {\n" + executor_utils::kernelPreamble() + kernel + "}\n";
 
-  const char* debug_env = getenv("PYTORCH_CUDA_FUSER_DEBUG");
+  const char* debug_env = std::getenv("PYTORCH_CUDA_FUSER_DEBUG");
   if (debug_env && atoi(debug_env)) {
     std::cout << "\n==== codegen output for kernel: " << kernelName()
               << " ====" << std::endl
@@ -55,7 +56,7 @@ void FusionExecutor::debugCompileFusionFromStr(
   FusionGuard fg(&fusion_);
   options_ = options;
 
-  const char* debug_env = getenv("PYTORCH_CUDA_FUSER_DEBUG");
+  const char* debug_env = std::getenv("PYTORCH_CUDA_FUSER_DEBUG");
   if (debug_env && atoi(debug_env)) {
     std::cout << "\n==== codegen output for kernel: " << kernelName()
               << " ====" << std::endl
@@ -64,8 +65,30 @@ void FusionExecutor::debugCompileFusionFromStr(
               << std::endl;
   }
 
+  setUsedTVs();
+
   fusion_id_ = id;
   lowered_ = GpuLower(&fusion_);
+  const auto kernel = lowered_.kernel();
+
+  const char* dump_kir_env = std::getenv("PYTORCH_CUDA_FUSER_DUMP_KIR");
+  if (dump_kir_env && atoi(dump_kir_env)) {
+    kernel->print();
+  }
+
+  const auto& kernel_summary = kernel->summary();
+  has_block_reductions = kernel_summary.has_block_reductions;
+  has_grid_reductions = kernel_summary.has_grid_reductions;
+  has_block_broadcasts = kernel_summary.has_block_broadcasts;
+
+  if (!kernel_summary.static_smem_allocations.empty()) {
+    StatefulExpressionEvaluator static_evaluator(&fusion_);
+    unsigned static_smem_size = computeSharedMemory(
+        static_evaluator, kernel_summary.static_smem_allocations);
+    TORCH_INTERNAL_ASSERT(
+        static_smem_size < max_device_smem,
+        "The static shared memory allocation is larger than available memory.");
+  }
 
   compiled_kernel_ = executor_utils::nvrtcCompile(code, name, fusion_id_);
   TORCH_INTERNAL_ASSERT(
@@ -99,6 +122,12 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
   fusion_id_ = ++fusion_id_counter_;
   lowered_ = GpuLower(&fusion_);
   const auto kernel = lowered_.kernel();
+
+  const char* dump_kir_env = std::getenv("PYTORCH_CUDA_FUSER_DUMP_KIR");
+  if (dump_kir_env && atoi(dump_kir_env)) {
+    kernel->print();
+  }
+
   const auto kernel_code = codegen::generateCudaKernel(kernel, kernelName());
   const auto structured_code = getStructuredCode(kernel_code);
 
@@ -169,21 +198,25 @@ uint64_t FusionExecutor::computeSharedMemory(
     uint64_t total) {
   FUSER_PERF_SCOPE("computeSharedMemory");
   for (auto smem_alloc : buffers) {
-    auto inferred_val = see.inferValue(smem_alloc->size());
-    if (inferred_val.has_value()) {
-      const uint64_t data_size = dataTypeSize(smem_alloc->buffer_type());
-      // Add padding to align dynamic shared memory
-      if (align_padding) {
-        total = ceilDiv(total, data_size) * data_size;
+    // If this buffer aliases another buffer,
+    // then do not allocate memory for this buffer.
+    if (smem_alloc->alias() == nullptr) {
+      auto inferred_val = see.inferValue(smem_alloc->size());
+      if (inferred_val.has_value()) {
+        const uint64_t data_size = dataTypeSize(smem_alloc->buffer_type());
+        // Add padding to align dynamic shared memory
+        if (align_padding) {
+          total = ceilDiv(total, data_size) * data_size;
+        }
+        total += inferred_val.value() * data_size;
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false,
+            "Failed to evaluate the size ",
+            smem_alloc->size(),
+            " of shared memory buffer - T",
+            smem_alloc->buffer()->name());
       }
-      total += inferred_val.value() * data_size;
-    } else {
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "Failed to evaluate the size ",
-          smem_alloc->size(),
-          " of shared memory buffer - T",
-          smem_alloc->buffer()->name());
     }
   }
   return total;

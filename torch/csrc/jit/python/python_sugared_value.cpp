@@ -706,10 +706,10 @@ std::shared_ptr<SugaredValue> PythonExceptionValue::call(
     std::vector<Value*> message_values;
     message_values.reserve(args.size() + kwargs.size());
 
-    for (auto inp : args) {
+    for (const auto& inp : args) {
       message_values.push_back(inp.value(*caller.graph()));
     }
-    for (auto kwarg_inp : kwargs) {
+    for (const auto& kwarg_inp : kwargs) {
       message_values.push_back(kwarg_inp.value(*caller.graph()));
     }
     error_message =
@@ -918,6 +918,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return SpecialFormValue::create(prim::annotate);
+  } else if (
+      obj.ptr() == py::module::import("torch.jit").attr("isinstance").ptr()) {
+    return SpecialFormValue::create(prim::isinstance);
 #ifdef USE_RPC
     // RPC module is only avaialble when build flag "USE_DISTRIBUTED" is on.
   } else if (
