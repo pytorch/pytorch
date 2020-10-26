@@ -45,7 +45,7 @@ class TORCH_API Unpickler {
       ObjLoader obj_loader,
       std::function<at::DataPtr(const std::string&)> read_record,
       c10::optional<at::Device> device,
-      bool use_storage_device=false)
+      bool use_storage_device = false)
       : reader_(reader),
         tensor_table_(nullptr),
         type_resolver_(std::move(type_resolver)),
