@@ -4,10 +4,10 @@
 layout(std430) buffer;
 layout(std430) uniform;
 
-/* Qualifiers: layout - precision - memory - invariance - precise */
+/* Qualifiers: layout - storage - precision - memory */
 
-layout(set = 0, binding = 0, rgba16f) PRECISION uniform image3D uOutput;
-layout(set = 0, binding = 1)                    uniform Block {
+layout(set = 0, binding = 0, rgba16f) uniform PRECISION          image3D uOutput;
+layout(set = 0, binding = 1)          uniform           restrict Block {
   ivec3 WHC;
   float other;
 } block;
