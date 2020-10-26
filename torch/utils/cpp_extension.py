@@ -1089,6 +1089,9 @@ def load_inline(name,
         cuda_sources = [cuda_sources]
 
     cpp_sources.insert(0, '#include <torch/extension.h>')
+    cpp_sources.append('''#define PYBIND11_COMPILER_TYPE ""''')
+    cpp_sources.append('''#define PYBIND11_STDLIB ""''')
+    cpp_sources.append('''#define PYBIND11_BUILD_ABI ""''')
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
@@ -1560,7 +1563,7 @@ def _import_module_from_library(module_name, path, is_python_module):
     # Close the .so file after load.
     with file:
         if is_python_module:
-            return imp.load_module(module_name, file, path, description)
+            return imp.load_module(module_name, file, path, description)  # type: ignore
         else:
             torch.ops.load_library(path)
 

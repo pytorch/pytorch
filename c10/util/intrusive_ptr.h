@@ -19,6 +19,9 @@ namespace raw {
   namespace intrusive_ptr {
     inline void incref(intrusive_ptr_target * self);
   }
+
+  // constructor tag used by intrusive_ptr constructors
+  struct DontIncreaseRefcount {};
 }
 /**
  * intrusive_ptr<T> is an alternative to shared_ptr<T> that has better
@@ -229,14 +232,15 @@ class intrusive_ptr final {
   // This constructor will not increase the ref counter for you.
   // We use the tagged dispatch mechanism to explicitly mark this constructor
   // to not increase the refcount
-  static struct DontIncreaseRefcount {} dont_increase_refcount;
-  explicit intrusive_ptr(TTarget* target, DontIncreaseRefcount) noexcept : target_(target) {}
+  explicit intrusive_ptr(TTarget* target, raw::DontIncreaseRefcount) noexcept
+      : target_(target) {}
 
   // This constructor will increase the ref counter for you.
   // This constructor will be used by the make_intrusive(), and also pybind11, which
   // wrap the intrusive_ptr holder around the raw pointer and incref correspondingly
   // (pybind11 requires raw pointer constructor to incref by default).
-  explicit intrusive_ptr(TTarget* target): intrusive_ptr(target, dont_increase_refcount) {
+  explicit intrusive_ptr(TTarget* target)
+      : intrusive_ptr(target, raw::DontIncreaseRefcount{}) {
     // We can't use retain_(), because we also have to increase weakcount
     // and because we allow raising these values from 0, which retain_()
     // has an assertion against.
@@ -247,7 +251,8 @@ class intrusive_ptr final {
  public:
   using element_type = TTarget;
 
-  intrusive_ptr() noexcept : intrusive_ptr(NullType::singleton(), dont_increase_refcount) {}
+  intrusive_ptr() noexcept
+      : intrusive_ptr(NullType::singleton(), raw::DontIncreaseRefcount{}) {}
 
   intrusive_ptr(intrusive_ptr&& rhs) noexcept : target_(rhs.target_) {
     rhs.target_ = NullType::singleton();
@@ -378,9 +383,14 @@ class intrusive_ptr final {
    * passed in *must* have been created using intrusive_ptr::release().
    */
   static intrusive_ptr reclaim(TTarget* owning_ptr) {
-    return intrusive_ptr(owning_ptr, dont_increase_refcount);
+    return intrusive_ptr(owning_ptr, raw::DontIncreaseRefcount{});
   }
 
+  /**
+   * Allocate a heap object with args and wrap it inside a intrusive_ptr and
+   * incref. This is a helper function to let make_intrusive() access private
+   * intrusive_ptr constructors.
+   */
   template <class... Args>
   static intrusive_ptr make(Args&&... args) {
     return intrusive_ptr(new TTarget(std::forward<Args>(args)...));
@@ -624,7 +634,8 @@ class weak_intrusive_ptr final {
           return intrusive_ptr<TTarget, NullType>(NullType::singleton());
         }
       } while (!target_->refcount_.compare_exchange_weak(refcount, refcount + 1));
-      return intrusive_ptr<TTarget, NullType>(target_, intrusive_ptr<TTarget, NullType>::dont_increase_refcount);
+      return intrusive_ptr<TTarget, NullType>(
+          target_, raw::DontIncreaseRefcount{});
     }
   }
 
