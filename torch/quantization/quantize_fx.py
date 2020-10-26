@@ -178,16 +178,11 @@ def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=No
         # user will manually define the corresponding observed
         # module class which has a from_float class method that converts
         # float custom module to observed custom module
+        # (only needed for static quantization)
         "float_to_observed_custom_module_class": {
            "static": {
                CustomModule: ObservedCustomModule
-           },
-           "dynamic": {
-               CustomModule: DynamicObservedCustomModule
-           },
-           "weight_only": {
-               CustomModule: WeightOnlyObservedCustomModule
-           },
+           }
         },
 
         # the qualified names for the submodule that are not symbolically traceable
@@ -196,19 +191,31 @@ def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=No
         ],
 
         # the module classes that are not symbolically traceable
+        # we'll also put dynamic/weight_only custom module here
         "non_traceable_module_class": [
            NonTraceableModule
         ],
 
         # Additional fuser_method mapping
         "additional_fuser_method_mapping": {
-           (ModuleClass1, ModuleClass2): fuse_module1_module2
+           (torch.nn.Conv2d, torch.nn.BatchNorm2d): fuse_conv_bn
         },
 
         # Additioanl module mapping for qat
         "additional_qat_module_mapping": {
-           FloatModule: QATModule
+           torch.nn.intrinsic.ConvBn2d: torch.nn.qat.ConvBn2d
         },
+
+        # Additional fusion patterns
+        "additional_fusion_pattern": {
+           (torch.nn.BatchNorm2d, torch.nn.Conv2d): ConvReluFusionhandler
+        },
+
+        # Additional quantization patterns
+        "additional_quant_pattern": {
+           torch.nn.Conv2d: ConvReluQuantizeHandler,
+           (torch.nn.ReLU, torch.nn.Conv2d): ConvReluQuantizeHandler,
+        }
       }
 
 

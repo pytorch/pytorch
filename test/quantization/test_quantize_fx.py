@@ -724,20 +724,35 @@ class TestQuantizeFx(QuantizationTestCase):
             key = quant_type_to_str(quant_type)
             qconfig, quantized_module_class, num_observers = test_configs[key]
             qconfig_dict = {"": qconfig}
-            prepare_custom_config_dict = {
-                "float_to_observed_custom_module_class": {
-                    key: {
-                        CustomModule: ObservedCustomModule
+            if key == "static":
+                prepare_custom_config_dict = {
+                    "float_to_observed_custom_module_class": {
+                        "static": {
+                            CustomModule: ObservedCustomModule
+                        }
                     }
                 }
-            }
-            convert_custom_config_dict = {
-                "observed_to_quantized_custom_module_class": {
-                    key: {
-                        ObservedCustomModule: quantized_module_class
+                convert_custom_config_dict = {
+                    "observed_to_quantized_custom_module_class": {
+                        "static": {
+                            ObservedCustomModule: quantized_module_class
+                        }
                     }
                 }
-            }
+            else:
+                prepare_custom_config_dict = {
+                    "non_traceable_module_class": [
+                        CustomModule
+                    ]
+                }
+                convert_custom_config_dict = {
+                    "observed_to_quantized_custom_module_class": {
+                        "dynamic": {
+                            CustomModule: quantized_module_class
+                        }
+                    }
+                }
+
             # check prepared model
             m = prepare_fx(
                 original_m,
