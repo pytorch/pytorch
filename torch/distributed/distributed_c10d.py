@@ -393,7 +393,12 @@ def init_process_group(backend,
             the process group. Default value equals 30 minutes.
             This is applicable for the ``gloo`` backend. For ``nccl``, this is
             applicable only if the environment variable ``NCCL_BLOCKING_WAIT``
-            or ``NCCL_ASYNC_ERROR_HANDLING`` is set to 1.
+            or ``NCCL_ASYNC_ERROR_HANDLING`` is set to 1. When
+            ``NCCL_BLOCKING_WAIT`` is set, this is the duration for which the
+            process will block and wait for collectives to complete before
+            throwing an exception. When ``NCCL_ASYNC_ERROR_HANDLING`` is set,
+            this is the duration after which collectives will be aborted
+            asynchronously and the process will crash.
         group_name (str, optional, deprecated): Group name.
 
     To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
