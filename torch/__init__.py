@@ -1,12 +1,12 @@
 
 r"""
 The torch package contains data structures for multi-dimensional
-tensors and defines mathematical operations over these tensors.
-Additionally, it provides many utilities for efficient serializing of
-Tensors and arbitrary types, and other useful utilities.
+tensors; it defines mathematical operations over these tensors.
+In addition, it provides many utilities for efficient serializing of
+Tensors and arbitrary types together with other useful utilities.
 
-It has a CUDA counterpart, that enables you to run your tensor computations
-on an NVIDIA GPU with compute capability >= 3.0.
+It has a CUDA counterpart which enables you to run your tensor computations
+on an NVIDIA GPU with a compute capability of >= 3.0.
 """
 
 import os
@@ -16,7 +16,7 @@ import textwrap
 import ctypes
 
 if sys.version_info < (3,):
-    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+    raise Exception("Python 2 has reached its end-of-life and is no longer supported by PyTorch.")
 
 from ._utils import _import_dotted_name
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
@@ -101,7 +101,7 @@ if sys.platform == 'win32':
         if cuda_version not in ('9.2', '10.0'):
             ctypes.CDLL('vcruntime140_1.dll')
     except OSError:
-        print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
+        print('''Microsoft Visual C++ Redistributable is not installed and may lead to the DLL load failure.
                  It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
 
     dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
