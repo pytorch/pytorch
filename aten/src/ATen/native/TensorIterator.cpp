@@ -863,7 +863,8 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
     .add_input(a)
     .add_input(b)
     .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true);
+    .promote_inputs_to_common_dtype(true)
+    .build();
   } else {
     return TensorIteratorConfig()
     .set_check_mem_overlap(true)
@@ -872,7 +873,8 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
     .add_input(b)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true);
+    .cast_common_dtype_to_outputs(true)
+    .build();
   }
 }
 
