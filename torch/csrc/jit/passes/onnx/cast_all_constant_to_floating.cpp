@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
+#include <torch/csrc/jit/passes/utils/onnx_utils.h>
+#include <onnx/onnx_pb.h>
 
 namespace torch {
 namespace jit {
@@ -36,12 +38,12 @@ void CastAllConstantToFloating(Block* block) {
           case at::ScalarType::Int:
           case at::ScalarType::Short:
           case at::ScalarType::Bool:
-            to_type = 6; // ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
+            to_type = ATenTypeToOnnxType(val.scalar_type());
             val = val.to(at::ScalarType::Float);
             break;
 
           case at::ScalarType::Long:
-            to_type = 7; // ::ONNX_NAMESPACE::TensorProto_DataType_INT64;
+            to_type = ATenTypeToOnnxType(val.scalar_type());
             val = val.to(at::ScalarType::Double);
             break;
 

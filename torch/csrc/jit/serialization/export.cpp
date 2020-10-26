@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/onnx.h>
+#include <torch/csrc/jit/passes/utils/onnx_utils.h>
 #include <torch/csrc/onnx/onnx.h>
 
 #include <ATen/core/functional.h>
@@ -263,37 +264,6 @@ class EncoderBase {
   // place so as not to create too many external files.
   const size_t ParamSizeThresholdForExternalStorage = 1024;
 };
-
-onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
-  switch (at_type) {
-    case at::kDouble:
-      return onnx::TensorProto_DataType_DOUBLE;
-    case at::kFloat:
-      return onnx::TensorProto_DataType_FLOAT;
-    case at::kHalf:
-      return onnx::TensorProto_DataType_FLOAT16;
-    case at::kByte:
-      return onnx::TensorProto_DataType_UINT8;
-    case at::kChar:
-      return onnx::TensorProto_DataType_INT8;
-    case at::kShort:
-      return onnx::TensorProto_DataType_INT16;
-    case at::kInt:
-      return onnx::TensorProto_DataType_INT32;
-    case at::kLong:
-      return onnx::TensorProto_DataType_INT64;
-    case at::kBool:
-      return onnx::TensorProto_DataType_BOOL;
-    case at::kQInt8:
-      return onnx::TensorProto_DataType_INT8;
-    case at::kQUInt8:
-      return onnx::TensorProto_DataType_UINT8;
-    case at::kQInt32:
-      return onnx::TensorProto_DataType_INT32;
-    default:
-      AT_ERROR("unexpected tensor scalar type");
-  }
-}
 
 EncoderBase::EncoderBase(
     onnx_torch::OperatorExportTypes operator_export_type,

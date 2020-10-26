@@ -200,6 +200,9 @@ static void ReplaceIndexPutWithMaskedScatter(Block* b) {
     }
     if (it->kind() == aten::index_put_) {
       auto* lc_node = it->input(1)->node();
+      if (lc_node->inputs().size() == 0) {
+        continue;
+      }
       TensorTypePtr mask_tensor = lc_node->input(0)->type()->cast<TensorType>();
       if (!(mask_tensor) || !(mask_tensor->scalarType().has_value()) ||
           (mask_tensor->scalarType().value()) != c10::ScalarType::Bool) {

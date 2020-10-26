@@ -189,6 +189,21 @@ void ConvertSequenceDependencies(Block* block, int opset_version) {
     ConvertSequenceDependencies(node, opset_version);
   }
 }
+
+void FixupONNXSubblockOutputs(Node* n) {
+  for (Block* block : n->blocks()) {
+    for (Value* output : block->outputs()) {
+      if (output->node()->owningBlock() != block) {
+        Node* id_node = block->owningGraph()->create(onnx::Identity);
+        id_node->insertBefore(block->return_node());
+        id_node->addInput(output);
+        id_node->output()->copyMetadata(output);
+        block->return_node()->replaceInputWith(output, id_node->output());
+      }
+    }
+  }
+}
+
 } // anonymous namespace
 
 void FixupONNXLoopNodeInputs(Node* node) {
@@ -221,7 +236,11 @@ void FixupONNXLoopNodeInputs(Node* node) {
 std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   auto output_size = node->outputs().size();
   FixupONNXLoopNodeInputs(node);
+  FixupONNXSubblockOutputs(node);
+  // NOTE: the output order is deliberately changed to match expected order
+  //       since onnx loop requires scan outputs to be the last outputs.
   auto new_outputs = ConvertSequenceDependencies(node, opset_version);
+
   TORCH_INTERNAL_ASSERT(output_size == new_outputs.size());
   return new_outputs;
 }
@@ -245,6 +264,7 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
       block->return_node()->replaceInputWith(output, id_node->output());
     }
   }
+  FixupONNXSubblockOutputs(if_node);
   GRAPH_DUMP("Graph after fixing controlflow: ", node->owningGraph());
   return if_node->outputs().vec();
 }
