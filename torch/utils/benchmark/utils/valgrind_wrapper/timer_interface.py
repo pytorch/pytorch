@@ -445,8 +445,8 @@ class GlobalsBridge:
 class _ValgrindWrapper(object):
     def __init__(self) -> None:
         self._bindings_module: Optional[ModuleType] = None
-        if hasattr(torch._C, "valgrind_supported_platform"):
-            self._supported_platform: bool = torch._C.valgrind_supported_platform()
+        if hasattr(torch._C, "_valgrind_supported_platform"):
+            self._supported_platform: bool = torch._C._valgrind_supported_platform()
 
         else:
             print("Callgrind bindings are not present in `torch._C`. JIT-ing bindings.")
@@ -454,14 +454,10 @@ class _ValgrindWrapper(object):
             # invoke unless we know we'll need it.
             from torch.utils.benchmark.utils.valgrind_wrapper.compat_bindings import bindings
             self._bindings_module = bindings
-            self._supported_platform = bindings.valgrind_supported_platform()
+            self._supported_platform = bindings._valgrind_supported_platform()
 
         self._commands_available: Dict[str, bool] = {}
-<<<<<<< HEAD
         if self._supported_platform:
-=======
-        if torch._C._valgrind_supported_platform():
->>>>>>> release/1.7
             # Only bother checking on supported platforms.
             for cmd in ("valgrind", "callgrind_control", "callgrind_annotate"):
                 self._commands_available[cmd] = not subprocess.run(
@@ -478,11 +474,7 @@ class _ValgrindWrapper(object):
         self._baseline_cache: Dict[Tuple[int, int], Tuple[FunctionCounts, FunctionCounts]] = {}
 
     def _validate(self) -> None:
-<<<<<<< HEAD
         if not self._supported_platform:
-=======
-        if not torch._C._valgrind_supported_platform():
->>>>>>> release/1.7
             raise OSError("Valgrind is not supported on this platform.")
 
         missing_cmds = [cmd for cmd, available in self._commands_available.items() if not available]
@@ -751,21 +743,13 @@ class _ValgrindWrapper(object):
             # =============================================================================
             # == User code block ==========================================================
             # =============================================================================
-<<<<<<< HEAD
-            callgrind_bindings.valgrind_toggle()
-=======
-            torch._C._valgrind_toggle()
->>>>>>> release/1.7
+            callgrind_bindings._valgrind_toggle()
             {blocked_stmt}
 
             # Sleep is to allow the interpreter to catch up before we stop collecting in
             # order to reduce jitter.
             time.sleep(0.01)
-<<<<<<< HEAD
-            callgrind_bindings.valgrind_toggle()
-=======
-            torch._C._valgrind_toggle()
->>>>>>> release/1.7
+            callgrind_bindings._valgrind_toggle()
         """).strip().format(
             indented_stmt=textwrap.indent(task_spec.stmt, " " * 4),
             blocked_stmt=blocked_stmt,
