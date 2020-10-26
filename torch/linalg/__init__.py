@@ -155,9 +155,9 @@ Supports real-valued and, only on the CPU, complex-valued inputs.
           after (optionally) moving the dimensions using :attr:`dims`, then a RuntimeError will be thrown.
 
 Args:
-    input (Tensor): left-hand-side tensor, it must satisfy the requirement
+    input (Tensor): "left-hand-side" tensor, it must satisfy the requirement
                     ``prod(input.shape[other.ndim:]) == prod(input.shape[:other.ndim])``.
-    other (Tensor): right-hand-side tensor of shape ``input.shape[other.ndim]``.
+    other (Tensor): "right-hand-side" tensor of shape ``input.shape[other.ndim]``.
     dims (Tuple[int]): dimensions of :attr:`input` to be moved to the end keeping the order,
                        i.e. ``movedim(input, dims, range(len(dims) - input.ndim, 0))``, before solve.
                        If None (default), no moving of dimensions is done.
