@@ -83,7 +83,7 @@ class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
 template <typename T>
 class TORCH_API CppCommHookInterface : public CommHookInterface {
  public:
-  explicit CppCommHookInterface(T* state = nullptr) : state_(state) {}
+  explicit CppCommHookInterface(T& state) : state_(state) {}
 
   virtual ~CppCommHookInterface() {}
 
@@ -100,7 +100,7 @@ class TORCH_API CppCommHookInterface : public CommHookInterface {
   }
 
  protected:
-  T* state_; // Not owned.
+  T state_; // Not owned.
 };
 
 } // namespace c10d
