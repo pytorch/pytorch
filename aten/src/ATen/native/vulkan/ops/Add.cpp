@@ -27,7 +27,15 @@ Tensor add_scalar(
   {
     if (v_output.has_image() && v_self.has_image()) {
       struct {
-      } block;
+        uint32_t width, height, channels, unused;
+        float alpha;
+      } block {
+        v_output.extents().width,
+        v_output.extents().height,
+        v_output.extents().depth,
+        0u,
+        other.to<float>() * alpha.to<float>(),
+      };
 
       context->dispatch(
           command_buffer,
@@ -75,7 +83,14 @@ Tensor& add_scalar_(
   {
     if (v_self.has_image()) {
       struct {
-      } block;
+        uint32_t width, height, channels;
+        float alpha;
+      } block {
+        v_self.extents().width,
+        v_self.extents().height,
+        v_self.extents().depth,
+        other.to<float>() * alpha.to<float>(),
+      };
 
       context->dispatch(
           command_buffer,
@@ -187,7 +202,14 @@ Tensor& add_tensor_(
   {
     if (v_self.has_image() && v_other.has_image()) {
       struct {
-      } block;
+        uint32_t width, height, channels;
+        float alpha;
+      } block {
+        v_self.extents().width,
+        v_self.extents().height,
+        v_self.extents().depth,
+        alpha.to<float>(),
+      };
 
       context->dispatch(
           command_buffer,
