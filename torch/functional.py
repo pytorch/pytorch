@@ -1410,6 +1410,10 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     .. note::
         The pivots returned by the function are 1-indexed. If :attr:`pivot` is ``False``,
         then the returned pivots is a tensor filled with zeros of the appropriate size.
+        Given the resulting ``pivots``, the final permutation could be reconstructed by
+        applying :math:`swap(perm[i], perm[pivots[i]])` for :math:`i = 0, \ldots, pivots.size(-1) - 1`,
+        where ``perm`` is initially the identity permutation of :math:`m` elements
+        (essentially this is what :func:`torch.lu_unpack` is doing).
 
     .. note::
         LU factorization with :attr:`pivot` = ``False`` is not available for CPU, and attempting
@@ -1449,7 +1453,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 
             - **factorization** (*Tensor*): the factorization of size :math:`(*, m, n)`
 
-            - **pivots** (*IntTensor*): the pivots of size :math:`(*, m)`
+            - **pivots** (*IntTensor*): the pivots of size :math:`(*, min(m, n))`.
 
             - **infos** (*IntTensor*, *optional*): if :attr:`get_infos` is ``True``, this is a tensor of
               size :math:`(*)` where non-zero values indicate whether factorization for the matrix or
