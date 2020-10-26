@@ -143,8 +143,7 @@ class ProcessContext:
 
         deadline = self._get_deadline(timeout)
         period = 1  # one second
-        ready = []
-        process_errors = {}
+        ready = set()
         while True:
             self._try_populate_process_errors()
             # Wait for any process to fail or all of them to succeed.
@@ -152,7 +151,8 @@ class ProcessContext:
                 self.sentinels.keys(),
                 timeout=period,
             )
-            ready += period_ready
+            for sentinel in period_ready:
+                ready.add(sentinel)
             if len(ready) == len(self.processes):
                 # All processes finished
                 break
@@ -184,9 +184,10 @@ class ProcessContext:
                 process.terminate()
             self._busy_join(process)
 
-        # There won't be an error on the queue if the process crashed.
+        self._try_populate_process_errors()
         failed_process = self.processes[error_index]
-        if self.error_queues[error_index].empty():
+        # There won't be an error on the queue if the process crashed.
+        if error_index not in self.process_errors:
             exitcode = self.processes[error_index].exitcode
             if exitcode < 0:
                 name = signal.Signals(-exitcode).name
@@ -207,8 +208,7 @@ class ProcessContext:
                     exit_code=exitcode
                 )
 
-        self._try_populate_process_errors()
-        original_trace = process_errors[error_index]
+        original_trace = self.process_errors[error_index]
         msg = "\n\n-- Process %d terminated with the following error:\n" % error_index
         msg += original_trace
         raise ProcessRaisedException(msg, error_index, failed_process.pid)
