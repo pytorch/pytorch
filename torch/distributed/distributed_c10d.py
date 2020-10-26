@@ -398,8 +398,15 @@ def init_process_group(backend,
             process will block and wait for collectives to complete before
             throwing an exception. When ``NCCL_ASYNC_ERROR_HANDLING`` is set,
             this is the duration after which collectives will be aborted
-            asynchronously and the process will crash. Only one of these two
-            environment variables should be set.
+            asynchronously and the process will crash. ``NCCL_BLOCKING_WAIT``
+            will provide errors to the user which can be caught and handled,
+            but due to its blocking nature, it has a performance overhead. On
+            the other hand, ``NCCL_ASYNC_ERROR_HANDLING`` has little
+            performance overhead, but crashes the process on errors. This is
+            done since CUDA execution is async and it is no longer safe to
+            continue executing user code since failed async NCCL operations
+            might result in subsequent CUDA operations to run on corrupted
+            data. Only one of these two environment variables should be set.
         group_name (str, optional, deprecated): Group name.
 
     To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
