@@ -237,9 +237,7 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   auto* graph = if_node->owningGraph();
   for (Block* block : node->blocks()) {
     for (Value* output : block->outputs()) {
-      auto it = std::find(
-          block->nodes().begin(), block->nodes().end(), output->node());
-      if (it == block->nodes().end()) {
+      if (output->node()->owningBlock() != block) {
         Node* id_node = graph->create(onnx::Identity);
         id_node->insertBefore(block->return_node());
         id_node->addInput(output);
