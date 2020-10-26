@@ -941,7 +941,7 @@ class TestLinalg(TestCase):
             # Additional correctness tests, check matrix*matrix_inverse == identity
             identity = torch.eye(n, dtype=dtype, device=device)
             # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
-            if 'cuda' in device and dtype.is_complex:
+            if self.device_type == 'cuda' and dtype.is_complex:
                 result_identity_list1 = []
                 result_identity_list2 = []
                 p = int(np.prod(batches))  # use `p` instead of -1, so that the test works for empty input as well
@@ -969,7 +969,7 @@ class TestLinalg(TestCase):
                 for mat in matrix.contiguous().view(p, n, n):
                     expected_inv_list.append(torch.inverse(mat))
                 expected_inv = torch.stack(expected_inv_list).view(*batches, n, n)
-                if 'cuda' in device and dtype in [torch.float32, torch.complex64]:
+                if self.device_type == 'cuda' and dtype in [torch.float32, torch.complex64]:
                     # single-inverse is done using cuSOLVER, while batched inverse is done using MAGMA
                     # individual values can be significantly different for fp32, hence rather high rtol is used
                     # the important thing is that torch.inverse passes above checks with identity
