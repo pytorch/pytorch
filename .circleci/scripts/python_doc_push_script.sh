@@ -52,7 +52,10 @@ rm -rf pytorch || true
 
 # Get all the documentation sources, put them in one place
 pushd "$pt_checkout"
+checkout_install_torchvision
 pushd docs
+rm -rf source/torchvision
+cp -a ../vision/docs/source source/torchvision
 
 # Build the docs
 pip -q install -r requirements.txt
