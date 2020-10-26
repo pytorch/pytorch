@@ -3605,7 +3605,8 @@ If :attr:`input` is a :math:`(a_0 \times a_1 \times \dots \times a_n)` tensor an
 :math:`(a_0*b_0 \times a_1*b_1 \times \dots \times a_n*b_n)` tensor with the following entries:
 
 .. math::
-    (\text{input} \otimes \text{other})_{k_0, k_1, \dots, k_n} = \text{input}_{i_0, i_1, \dots, i_n} * \text{other}_{j_0, j_1, \dots, j_n},
+    (\text{input} \otimes \text{other})_{k_0, k_1, \dots, k_n} =
+        \text{input}_{i_0, i_1, \dots, i_n} * \text{other}_{j_0, j_1, \dots, j_n},
 
 where :math:`k_t = i_t * b_t + j_t` for :math:`0 \leq t \leq n`.
 If one tensor has fewer dimensions than the other it is unsqueezed until it has the same number of dimensions.
