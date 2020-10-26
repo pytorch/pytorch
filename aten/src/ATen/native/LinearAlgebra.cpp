@@ -1694,7 +1694,7 @@ Calculates the Kronecker product between two Tensors.
 */
 Tensor kron(const Tensor& self, const Tensor& other) {
   /*
-  We can obtain the kron result using tensordot or einsum.
+  We can obtain the kron result using tensordot or einsum. The implementation below uses tensordot.
   In einsum notation suppose we have `self` with dim 4 and `other` with dim 2
   the result of below tensordot is in einsum 0123, 45 -> 012345.
   To obtain the correct kron we need to permute and reshape the array.
