@@ -400,7 +400,6 @@ protected:
 
   // From TensorIteratorConfig
   bool is_reduction_ = false;
-  bool special_case_bool_outputs_ = false;
 };
 
 class CAFFE2_API TensorIteratorConfig final {
@@ -468,16 +467,7 @@ public:
   //   These temporaries are then copied to the original outputs after
   //   the operation is performed (see cast_outputs()).
   // Setting this flag to true sets check_all_same_dtype_ to false.
-  //
-  // Note [special_case_bool_outputs]
-  // Also sets the special_case_bool_outputs flag, which is false by default
-  // If true, any output tensors with bool dtype will not have any temporaries made.
-  // This is purely a performance optimization, since all comparison/logical ops have tensors
-  // with bool output tensors and we'd like to avoid an unnecessary copy in those cases.
-  // However, note that any kernels using this flag need to special-case when the output
-  // tensor has bool dtype, and provide a lambda of type (scalar_t, scalar_t -> bool).
-  // Setting this flag only has any meaning when cast_common_dtype_to_outputs_ is also set.
-  TensorIteratorConfig& cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs, const bool _special_case_bool_outputs = false);
+  TensorIteratorConfig& cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs);
   TensorIteratorConfig& resize_outputs(bool resize_outputs);
 
   // Bypass output dtype/device computation and fix the dtype/device as specified here.
@@ -508,7 +498,6 @@ private:
   bool promote_inputs_to_common_dtype_ = false;
   bool promote_integer_inputs_to_float_ = false;
   bool cast_common_dtype_to_outputs_ = false;
-  bool special_case_bool_outputs_ = false;
 };
 
 

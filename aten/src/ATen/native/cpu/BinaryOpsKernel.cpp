@@ -234,7 +234,7 @@ void lshift_kernel(TensorIterator& iter) {
 }
 
 void logical_and_kernel(TensorIterator& iter) {
-  // See Note [special_case_bool_outputs]
+  // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "ge_cpu", [&]() {
       cpu_kernel(
@@ -254,7 +254,7 @@ void logical_and_kernel(TensorIterator& iter) {
 }
 
 void logical_or_kernel(TensorIterator& iter) {
-  // See Note [special_case_bool_outputs]
+  // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "ge_cpu", [&]() {
       cpu_kernel(
@@ -274,7 +274,7 @@ void logical_or_kernel(TensorIterator& iter) {
 }
 
 void logical_xor_kernel(TensorIterator& iter) {
-  // See Note [special_case_bool_outputs]
+  // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "ge_cpu", [&]() {
       cpu_kernel(
@@ -317,7 +317,7 @@ void rshift_kernel(TensorIterator& iter) {
 }
 
 void lt_kernel(TensorIterator& iter) {
-  // See Note [special_case_bool_outputs]
+  // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "ge_cpu", [&]() {
       cpu_kernel(
@@ -341,7 +341,7 @@ void lt_kernel(TensorIterator& iter) {
 }
 
 void le_kernel(TensorIterator& iter) {
-  // See Note [special_case_bool_outputs]
+  // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "ge_cpu", [&]() {
       cpu_kernel(
@@ -365,7 +365,7 @@ void le_kernel(TensorIterator& iter) {
 }
 
 void gt_kernel(TensorIterator& iter) {
-  // See Note [special_case_bool_outputs]
+  // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "ge_cpu", [&]() {
       cpu_kernel(
@@ -389,7 +389,7 @@ void gt_kernel(TensorIterator& iter) {
 }
 
 void ge_kernel(TensorIterator& iter) {
-  // See Note [special_case_bool_outputs]
+  // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "ge_cpu", [&]() {
       cpu_kernel(
@@ -413,7 +413,7 @@ void ge_kernel(TensorIterator& iter) {
 }
 
 void eq_kernel(TensorIterator& iter) {
-  // See Note [special_case_bool_outputs]
+  // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "eq_cpu", [&]() {
       cpu_kernel(
@@ -437,7 +437,7 @@ void eq_kernel(TensorIterator& iter) {
 }
 
 void ne_kernel(TensorIterator& iter) {
-  // See Note [special_case_bool_outputs]
+  // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "eq_cpu", [&]() {
       cpu_kernel(
