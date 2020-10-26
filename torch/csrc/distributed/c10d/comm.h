@@ -85,7 +85,7 @@ class TORCH_API CppCommHookInterface : public CommHookInterface {
  public:
   explicit CppCommHookInterface(T* state = nullptr) : state_(state) {}
 
-  ~CppCommHookInterface() override {}
+  virtual ~CppCommHookInterface() {}
 
   std::vector<at::Tensor> parseHookResult(const c10::IValue& result) override {
     TORCH_INTERNAL_ASSERT(
