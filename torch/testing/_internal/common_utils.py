@@ -1044,6 +1044,7 @@ class TestCase(expecttest.TestCase):
                 rtol, atol = 0, 0
         rtol = cast(float, rtol)
         atol = cast(float, atol)
+        assert atol is not None
         atol = max(atol, self.precision)
 
         return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
