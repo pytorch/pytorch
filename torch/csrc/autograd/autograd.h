@@ -35,10 +35,10 @@ namespace autograd {
 ///     to compute higher order derivative products. Defaults to `false`.
 TORCH_API void backward(
     const variable_list& tensors,
-    const variable_list& inputs = {},
     const variable_list& grad_tensors = {},
     c10::optional<bool> retain_graph = c10::nullopt,
-    bool create_graph = false);
+    bool create_graph = false,
+    const variable_list& inputs = {});
 
 /// Computes and returns the sum of gradients of outputs with respect to the inputs.
 ///

@@ -31,7 +31,7 @@ TEST(AutogradAPITests, BackwardSimpleTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
   auto res = simple_fn(x, y);
-  backward({}, {res.sum()}, {});
+  backward({res.sum()}, {});
 
   ASSERT_VARIABLE_EQ(x.grad(), y + torch::ones({2, 2}));
   ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({2, 2})*2);
@@ -41,9 +41,9 @@ TEST(AutogradAPITests, BackwardTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
   auto res = simple_fn(x, y);
-  backward({}, {res}, {torch::ones({2, 2})}, {}, true);
+  backward({res}, {torch::ones({2, 2})}, {}, true);
 
-  backward({}, {res}, {torch::ones({2, 2})});
+  backward({res}, {torch::ones({2, 2})});
 
   ASSERT_VARIABLE_EQ(x.grad(), 2* (y + torch::ones({2, 2})));
   ASSERT_VARIABLE_EQ(y.grad(), 2 * (x + torch::ones({2, 2})*2));
@@ -64,7 +64,7 @@ TEST(AutogradAPITests, GradTest) {
   Variable x = torch::randn({2, 2}, torch::requires_grad());
   Variable y = torch::randn({2, 2}, torch::requires_grad());
   auto res = simple_fn(x, y);
-  res.backward({}, torch::ones({2, 2}), false, true);
+  res.backward(torch::ones({2, 2}), false, true);
 
   Variable x_grad = y + torch::ones({2, 2});
   Variable y_grad = x + torch::ones({2, 2}) * 2;
@@ -100,7 +100,7 @@ TEST(AutogradAPITests, GradNonLeafTest) {
   float val_final = simple_fn(x, y).sum().item().toFloat();
   ASSERT_TRUE(val_final > val_init);
 
-  x.backward({}, grad_output, false, true);
+  x.backward(grad_output, false, true);
   ASSERT_TRUE(x_init.grad().defined());
   ASSERT_TRUE(y.grad().defined());
 }
@@ -138,9 +138,9 @@ TEST(AutogradAPITests, RetainGrad) {
   h1.retain_grad();
 
   // Gradient should be accumulated
-  out.backward({}, {}, /*keep_graph=*/true);
+  out.backward({}, /*keep_graph=*/true);
   ASSERT_VARIABLE_EQ(h1 * 2, h1.grad());
-  out.backward({}, {}, /*keep_graph=*/true);
+  out.backward({}, /*keep_graph=*/true);
   ASSERT_VARIABLE_EQ(h1 * 4, h1.grad());
 
   {
@@ -176,7 +176,7 @@ TEST(CustomAutogradTest, CustomFunction) {
   Variable y = torch::randn({5,5}, torch::requires_grad());
   auto res = MyFunction::apply(x,2,y);
   auto go = torch::ones({}, torch::requires_grad());
-  res.sum().backward({}, go, false, true);
+  res.sum().backward(go, false, true);
 
   ASSERT_VARIABLE_EQ(x.grad(), y + torch::ones({5,5}));
   ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5,5})*2);
@@ -194,7 +194,7 @@ TEST(CustomAutogradTest, FunctionReturnsInput) {
   };
 
   Variable x(torch::ones(1, torch::requires_grad()));
-  MyFunction::apply(x).backward({}, torch::ones(1) , true, true);
+  MyFunction::apply(x).backward(torch::ones(1) , true, true);
   ASSERT_VARIABLE_EQ(x.grad(), torch::full(1, 2.));
 }
 
@@ -532,7 +532,7 @@ TEST(CustomAutogradTest, DepNoGrad) {
   ASSERT_FALSE(b.requires_grad());
 
   auto c = F2::apply(a,b);
-  c.backward({}, torch::ones(c.sizes()), false, false);
+  c.backward(torch::ones(c.sizes()), false, false);
   ASSERT_VARIABLE_EQ(x.grad(), torch::ones(x.sizes()));
 }
 
@@ -667,17 +667,17 @@ TEST(CustomAutogradTest, Hooks) {
   auto hook_1 = z.register_hook([&bw_hook](Variable grad){
     bw_hook(1, grad);
   });
-  z.backward({}, torch::ones({5,5}), true, true);
+  z.backward(torch::ones({5,5}), true, true);
   ASSERT_EQ(counter, 1);
 
   auto hook_2 = z.register_hook([&bw_hook](Variable grad){
     bw_hook(2, grad);
   });
-  z.backward({}, torch::ones({5,5}), true, true);
+  z.backward(torch::ones({5,5}), true, true);
   ASSERT_EQ(counter, 4);
 
   z.remove_hook(hook_2);
-  z.backward({}, torch::ones({5,5}), true, true);
+  z.backward(torch::ones({5,5}), true, true);
   ASSERT_EQ(counter, 5);
 
   std::function<Variable(Variable)> bw_hook_modify([](Variable grad){
@@ -687,12 +687,12 @@ TEST(CustomAutogradTest, Hooks) {
   z.remove_hook(hook_1);
   z.register_hook(bw_hook_modify);
   y.grad().zero_();
-  z.backward({}, torch::ones({5,5}), true, false);
+  z.backward(torch::ones({5,5}), true, false);
   ASSERT_VARIABLE_EQ(y.grad(), (x+1)*2);
 
   y.register_hook(bw_hook_modify);
   y.grad().zero_();
-  z.backward({}, torch::ones({5,5}), false, false);
+  z.backward(torch::ones({5,5}), false, false);
   ASSERT_VARIABLE_EQ(y.grad(), (x+1)*4);
 
   ASSERT_THROWS_WITH(y.remove_hook(3), "Invalid index");

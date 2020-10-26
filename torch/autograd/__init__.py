@@ -67,11 +67,11 @@ def _tensor_or_tensors_to_tuple(tensors: Optional[_TensorOrTensors], length: int
 
 def backward(
     tensors: _TensorOrTensors,
-    inputs: Optional[_TensorOrTensors] = None,
     grad_tensors: Optional[_TensorOrTensors] = None,
     retain_graph: Optional[bool] = None,
     create_graph: bool = False,
     grad_variables: Optional[_TensorOrTensors] = None,
+    inputs: Optional[_TensorOrTensors] = None,
 ) -> None:
     r"""Computes the sum of gradients of given tensors w.r.t. graph leaves.
 

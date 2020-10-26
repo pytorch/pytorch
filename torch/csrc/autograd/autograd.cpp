@@ -122,10 +122,10 @@ variable_list run_backward(
 
 void backward(
     const variable_list& tensors,
-    const variable_list& inputs,
     const variable_list& grad_tensors,
     c10::optional<bool> retain_graph,
-    bool create_graph) {
+    bool create_graph,
+    const variable_list& inputs) {
   variable_list gradients = _make_grads(tensors, grad_tensors);
   if (!retain_graph) {
     retain_graph = create_graph;
