@@ -262,7 +262,7 @@ void logical_or_kernel(TensorIterator& iter) {
         });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.common_dtype(), "logical_or_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "logical_or_cpu", [&]() {
       cpu_kernel(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
           return static_cast<scalar_t>(a || b);
@@ -408,6 +408,7 @@ void ge_kernel(TensorIterator& iter) {
 void eq_kernel(TensorIterator& iter) {
   // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
+      std::cout << "bool case. common_dtype=" << iter.common_dtype() << std::endl;
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "eq_cpu", [&]() {
       cpu_kernel(iter,
         [](scalar_t a, scalar_t b) -> bool {
@@ -415,6 +416,7 @@ void eq_kernel(TensorIterator& iter) {
         });
     });
   } else {
+      std::cout << "non-bool case. common_dtype=" << iter.common_dtype() << std::endl;
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.common_dtype(), "eq_cpu", [&]() {
       cpu_kernel_vec(
         iter,
