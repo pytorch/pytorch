@@ -52,8 +52,11 @@ class QuantizeHandler(ABC):
         return NotImplemented
 
 @register_quant_pattern(operator.add)
+@register_quant_pattern(torch.add)
 @register_quant_pattern((torch.nn.ReLU, operator.add))
+@register_quant_pattern((torch.nn.ReLU, torch.add))
 @register_quant_pattern((torch.nn.functional.relu, operator.add))
+@register_quant_pattern((torch.nn.functional.relu, torch.add))
 class Add(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
@@ -62,7 +65,7 @@ class Add(QuantizeHandler):
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
             node = node.args[0]
-        assert node.op == 'call_function' and node.target == operator.add
+        assert node.op == 'call_function' and node.target in [operator.add, torch.add]
         self.add_node = node
         self.all_nodes = all([isinstance(a, Node) for a in self.add_node.args[:2]])
 
@@ -90,8 +93,11 @@ class Add(QuantizeHandler):
                 'call_function', op, load_arg(quantized=True)(self.add_node.args), kwargs)
 
 @register_quant_pattern(operator.mul)
+@register_quant_pattern(torch.mul)
 @register_quant_pattern((torch.nn.ReLU, operator.mul))
+@register_quant_pattern((torch.nn.ReLU, torch.mul))
 @register_quant_pattern((torch.nn.functional.relu, operator.mul))
+@register_quant_pattern((torch.nn.functional.relu, torch.mul))
 class Mul(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
@@ -100,7 +106,7 @@ class Mul(QuantizeHandler):
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
             node = node.args[0]
-        assert node.op == 'call_function' and node.target == operator.mul
+        assert node.op == 'call_function' and node.target in [operator.mul, torch.mul]
         self.mul_node = node
         self.all_nodes = all([isinstance(a, Node) for a in self.mul_node.args[:2]])
 
@@ -174,6 +180,9 @@ class ConvRelu(QuantizeHandler):
             # note that relu should already be fused into conv module in the fusion step
             assert self.relu_node is None, 'conv module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
+            if convert_custom_config_dict is None:
+                convert_custom_config_dict = {}
+            additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
             # 1. attach activation post process to module
             if type(self.conv) in [
                     torch.nn.intrinsic.ConvReLU1d,
@@ -184,7 +193,8 @@ class ConvRelu(QuantizeHandler):
             else:
                 self.conv.activation_post_process = quantizer.activation_post_process_map[node.name]
             # 2. select quantized class
-            qconv_cls = get_static_quant_module_class(type(self.conv))
+            qconv_cls = get_static_quant_module_class(
+                type(self.conv), additional_static_quant_mapping)
             quantized = qconv_cls.from_float(self.conv)
             parent_name, name = _parent_name(self.conv_node.target)
             setattr(quantizer.modules[parent_name], name, quantized)
@@ -360,6 +370,9 @@ class BatchNorm(QuantizeHandler):
         self.bn = quantizer.modules[self.bn_node.target]
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
+        if convert_custom_config_dict is None:
+            convert_custom_config_dict = {}
+        additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
         # 1. attach activation post process to module
         activation_post_process = quantizer.activation_post_process_map[node.name]
         if type(self.bn) in \
@@ -368,7 +381,7 @@ class BatchNorm(QuantizeHandler):
             self.bn[1].activation_post_process = activation_post_process
         else:
             self.bn.activation_post_process = activation_post_process
-        qbn_cls = get_static_quant_module_class(type(self.bn))
+        qbn_cls = get_static_quant_module_class(type(self.bn), additional_static_quant_mapping)
         quantized = qbn_cls.from_float(self.bn)
         parent_name, name = _parent_name(self.bn_node.target)
         setattr(quantizer.modules[parent_name], name, quantized)
@@ -377,6 +390,29 @@ class BatchNorm(QuantizeHandler):
             self.bn_node.target,
             load_arg(quantized=[0])(self.bn_node.args),
             load_arg(quantized=False)(self.bn_node.kwargs))
+
+@register_quant_pattern(torch.nn.Embedding)
+@register_quant_pattern(torch.nn.EmbeddingBag)
+class Embedding(QuantizeHandler):
+    def __init__(self, quantizer, node):
+        super().__init__(quantizer, node)
+
+    def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
+        assert node.op == 'call_module'
+        emb_node = node
+        emb = quantizer.modules[emb_node.target]
+        qconfig = quantizer.qconfig_map[node.name]
+        assert not activation_is_statically_quantized(qconfig)
+        qemb = get_static_quant_module_class(type(emb))
+        quantized = qemb.from_float(emb)
+        parent_name, name = _parent_name(emb_node.target)
+        setattr(quantizer.modules[parent_name], name, quantized)
+        return quantizer.quantized_graph.create_node(
+            'call_module',
+            emb_node.target,
+            load_arg(quantized=False)(emb_node.args),
+            load_arg(quantized=False)(emb_node.kwargs))
+
 
 ARGS_TO_SKIP = {
     torch._ops.ops.quantized.hardswish: ['inplace'],
@@ -402,11 +438,15 @@ class DefaultNode(QuantizeHandler):
             return NotImplemented
         assert node.op in ['call_module', 'call_function'], 'Only call_module and ' + \
             'call_function are handled in DefaultNode'
+        if convert_custom_config_dict is None:
+            convert_custom_config_dict = {}
+        additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
         activation_post_process = quantizer.activation_post_process_map[node.name]
         if node.op == 'call_module':
             module = quantizer.modules[node.target]
             module.activation_post_process = activation_post_process
-            quantized_module_cls = get_static_quant_module_class(type(module))
+            quantized_module_cls = get_static_quant_module_class(
+                type(module), additional_static_quant_mapping)
             quantized_module = quantized_module_cls.from_float(module)
             parent_name, name = _parent_name(node.target)
             setattr(quantizer.modules[parent_name], name, quantized_module)

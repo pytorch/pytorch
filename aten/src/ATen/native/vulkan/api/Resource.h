@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Allocator.h>
 #include <ATen/native/vulkan/api/Cache.h>
@@ -375,3 +377,5 @@ inline VkFence Resource::Fence::handle(const bool add_to_waitlist) const {
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN_API */

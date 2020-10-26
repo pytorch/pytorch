@@ -37,9 +37,9 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("add.out", CppFunction::makeFallthrough());
   m.impl("add_.Scalar", CppFunction::makeFallthrough());
   m.impl("add_.Tensor", CppFunction::makeFallthrough());
-  m.impl("add_relu.Tensor", CppFunction::makeFallthrough());
-  m.impl("add_relu.out", CppFunction::makeFallthrough());
-  m.impl("add_relu_.Tensor", CppFunction::makeFallthrough());
+  m.impl("_add_relu.Tensor", CppFunction::makeFallthrough());
+  m.impl("_add_relu.out", CppFunction::makeFallthrough());
+  m.impl("_add_relu_.Tensor", CppFunction::makeFallthrough());
   m.impl("addcdiv", CppFunction::makeFallthrough());
   m.impl("addcdiv.out", CppFunction::makeFallthrough());
   m.impl("addcdiv_", CppFunction::makeFallthrough());
@@ -113,10 +113,6 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("conj.out", CppFunction::makeFallthrough());
   m.impl("contiguous", CppFunction::makeFallthrough());
   m.impl("copy_", CppFunction::makeFallthrough());
-  m.impl("copy_imag", CppFunction::makeFallthrough());
-  m.impl("copy_imag.out", CppFunction::makeFallthrough());
-  m.impl("copy_real", CppFunction::makeFallthrough());
-  m.impl("copy_real.out", CppFunction::makeFallthrough());
   m.impl("cos", CppFunction::makeFallthrough());
   m.impl("cos.out", CppFunction::makeFallthrough());
   m.impl("cos_", CppFunction::makeFallthrough());
@@ -506,6 +502,5 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("is_leaf", CppFunction::makeFallthrough());
   m.impl("_version", CppFunction::makeFallthrough());
   m.impl("requires_grad_", CppFunction::makeFallthrough());
-  m.impl("requires_grad", CppFunction::makeFallthrough());
   m.impl("retain_grad", CppFunction::makeFallthrough());
 }

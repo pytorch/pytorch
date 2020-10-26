@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/autograd.h>
 #include <ATen/TracerMode.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 
 using namespace at;
 using namespace torch::autograd::generated;

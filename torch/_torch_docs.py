@@ -440,8 +440,8 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 
 Args:
     input (Tensor): matrix to be added
-    mat1 (Tensor): the first matrix to be multiplied
-    mat2 (Tensor): the second matrix to be multiplied
+    mat1 (Tensor): the first matrix to be matrix multiplied
+    mat2 (Tensor): the second matrix to be matrix multiplied
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -457,6 +457,39 @@ Example::
     tensor([[-4.8716,  1.4671, -1.3746],
             [ 0.7573, -3.9555, -2.8681]])
 """.format(**common_args, **tf32_notes))
+
+add_docstr(torch.sspaddmm,
+           r"""
+sspaddmm(input, mat1, mat2, *, beta=1, alpha=1, out=None) -> Tensor
+
+Matrix multiplies a sparse tensor :attr:`mat1` with a dense tensor
+:attr:`mat2`, then adds the sparse tensor :attr:`input` to the result.
+
+Note: This function is equivalent to :func:`torch.addmm`, except
+:attr:`input` and :attr:`mat1` are sparse.
+
+Args:
+    input (Tensor): a sparse matrix to be added
+    mat1 (Tensor): a sparse matrix to be matrix multiplied
+    mat2 (Tensor): a dense matrix to be matrix multiplied
+
+Keyword args:
+    beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
+    {out}
+""".format(**common_args))
+
+add_docstr(torch.smm,
+           r"""
+smm(input, mat) -> Tensor
+
+Performs a matrix multiplication of the sparse matrix :attr:`input`
+with the dense matrix :attr:`mat`.
+
+Args:
+    input (Tensor): a sparse matrix to be matrix multiplied
+    mat (Tensor): a dense matrix to be matrix multiplied
+""")
 
 add_docstr(torch.addmv,
            r"""
@@ -485,8 +518,8 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 
 Args:
     input (Tensor): vector to be added
-    mat (Tensor): matrix to be multiplied
-    vec (Tensor): vector to be multiplied
+    mat (Tensor): matrix to be matrix multiplied
+    vec (Tensor): vector to be matrix multiplied
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -5030,11 +5063,14 @@ If :attr:`input` is a :math:`(n \times m)` tensor, :attr:`mat2` is a
 .. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
           For broadcasting matrix products, see :func:`torch.matmul`.
 
+Supports strided and sparse 2-D tensors as inputs, autograd with
+respect to strided inputs.
+
 {tf32_note}
 
 Args:
-    input (Tensor): the first matrix to be multiplied
-    mat2 (Tensor): the second matrix to be multiplied
+    input (Tensor): the first matrix to be matrix multiplied
+    mat2 (Tensor): the second matrix to be matrix multiplied
 
 Keyword args:
     {out}
@@ -5047,6 +5083,23 @@ Example::
     tensor([[ 0.4851,  0.5037, -0.3633],
             [-0.0760, -3.6705,  2.4784]])
 """.format(**common_args, **tf32_notes))
+
+add_docstr(torch.hspmm,
+           r"""
+hspmm(mat1, mat2, *, out=None) -> Tensor
+
+Performs a matrix multiplication of a :ref:`sparse COO matrix
+<sparse-coo-docs>` :attr:`mat1` and a strided matrix :attr:`mat2`. The
+result is a (1 + 1)-dimensional :ref:`hybrid COO matrix
+<sparse-hybrid-coo-docs>`.
+
+Args:
+    mat1 (Tensor): the first sparse matrix to be matrix multiplied
+    mat2 (Tensor): the second strided matrix to be matrix multiplied
+
+Keyword args:
+    {out}
+""")
 
 add_docstr(torch.matmul,
            r"""
@@ -6979,10 +7032,13 @@ add_docstr(torch.sparse_coo_tensor,
            r"""
 sparse_coo_tensor(indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
 
-Constructs a sparse tensors in COO(rdinate) format with non-zero elements at the given :attr:`indices`
-with the given :attr:`values`. A sparse tensor can be `uncoalesced`, in that case, there are duplicate
-coordinates in the indices, and the value at that index is the sum of all duplicate value entries:
-`torch.sparse`_.
+Constructs a :ref:`sparse tensor in COO(rdinate) format
+<sparse-coo-docs>` with specified values at the given
+:attr:`indices`.
+
+.. note::
+
+   This function returns an :ref:`uncoalesced tensor <sparse-uncoalesced-coo-docs>`.
 
 Args:
     indices (array_like): Initial data for the tensor. Can be a list, tuple,
