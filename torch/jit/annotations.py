@@ -199,7 +199,7 @@ def get_type_line(source):
             parameter_type_lines.append(line)
     if return_line is None:
         raise RuntimeError(
-            "Return type line '# type: (...) -> ...' not found on multiline "
+            "Return type line '# type: (...) -> ...' not found on multiline " +
             "type annotation\nfor type lines:\n" +
             '\n'.join([line[1] for line in type_lines]) +
             "\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
