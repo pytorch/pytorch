@@ -230,8 +230,11 @@ class Quantizer:
         self.patterns = None
 
 
-    def _qat_swap_modules(self, root):
-        convert(root, mapping=get_default_qat_module_mappings(), inplace=True, remove_qconfig=False)
+    def _qat_swap_modules(self, root, additional_qat_module_mapping):
+        all_mappings = get_default_qat_module_mappings().copy()
+        for k, v in additional_qat_module_mapping.items():
+            all_mappings[k] = v
+        convert(root, mapping=all_mappings, inplace=True, remove_qconfig=False)
 
     def _generate_qconfig_map(self,
                               root,
@@ -324,13 +327,17 @@ class Quantizer:
             prepare_custom_config_dict = {}
         if not inplace:
             model = copy.deepcopy(model)
-        self.patterns = get_default_quant_patterns()
+        additional_quant_patterns = prepare_custom_config_dict.get("additional_quant_pattern", {})
+        self.patterns = get_default_quant_patterns().copy()
+        for k, v in additional_quant_patterns.items():
+            self.patterns[k] = v
 
         flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
         # TODO: support regex as well
         propagate_qconfig_(model, flattened_qconfig_dict)
         if model.training:
-            self._qat_swap_modules(model)
+            additional_qat_module_mapping = prepare_custom_config_dict.get("additioanl_qat_module_mapping", {})
+            self._qat_swap_modules(model, additional_qat_module_mapping)
 
         self.modules = dict(model.named_modules())
 
