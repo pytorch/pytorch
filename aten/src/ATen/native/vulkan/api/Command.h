@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
@@ -31,7 +33,7 @@ struct Command final {
     void bind(const Pipeline::Object& pipeline);
     void bind(const Descriptor::Set& set);
     void copy(Resource::Buffer::Object source, Resource::Buffer::Object destination);
-    void dispatch(const Shader::WorkGroup& work_group);
+    void dispatch(const Shader::WorkGroup& global_work_group);
     void submit(VkQueue queue, Resource::Fence fence = {});
 
    private:
@@ -93,3 +95,5 @@ inline Command::Buffer& Command::Buffer::operator=(Buffer&& buffer) {
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN_API */

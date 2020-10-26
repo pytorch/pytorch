@@ -1703,15 +1703,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 6, 180, 180)
         self.run_test(model, x)
 
-    def test_std(self):
-        class StandardDeviation(torch.nn.Module):
-            def forward(self, input):
-                return torch.std(input, unbiased=False)
-
-        x = torch.randn(2, 3, 4)
-        model = StandardDeviation()
-        self.run_test(model, x)
-
     def test_pow(self):
         class PowModule(torch.nn.Module):
             def forward(self, x, y):
@@ -1733,6 +1724,22 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randint(10, (2, 3, 4))
         self.run_test(PowModule(), (x, y))
 
+    def test_std(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
+        class StandardDeviationUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, unbiased=True)
+
+        model = StandardDeviationUnbiased()
+        self.run_test(model, x)
+
     def test_std_along_dims(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -1742,6 +1749,14 @@ class TestONNXRuntime(unittest.TestCase):
         model = StandardDeviation()
         self.run_test(model, x)
 
+        class StandardDeviationUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), unbiased=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviationUnbiased()
+        self.run_test(model, x)
+
     def test_std_keepdim(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -1749,6 +1764,164 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         model = StandardDeviation()
+        self.run_test(model, x)
+
+        class StandardDeviationUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.std(input, dim=(0, 1), unbiased=True, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviationUnbiased()
+        self.run_test(model, x)
+
+    def test_var(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var(input, unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
+        self.run_test(model, x)
+
+        class VarianceUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.var(input, unbiased=True)
+
+        model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_var_along_dims(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var(input, dim=(0, 1), unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
+        self.run_test(model, x)
+
+        class VarianceUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.var(input, dim=(0, 1), unbiased=True)
+
+        x = torch.randn(2, 3, 4)
+        model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_var_keepdim(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var(input, dim=(0, 1), unbiased=False, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
+        self.run_test(model, x)
+
+        class VarianceUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.var(input, dim=(0, 1), unbiased=True, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_var_mean(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
+        self.run_test(model, x)
+
+        class VarianceUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, unbiased=True)
+
+        model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_var_mean_along_dims(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 1), unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
+        self.run_test(model, x)
+
+        class VarianceUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 1), unbiased=True)
+
+        x = torch.randn(2, 3, 4)
+        model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_var_mean_keepdim(self):
+        class Variance(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 1), unbiased=False, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = Variance()
+        self.run_test(model, x)
+
+        class VarianceUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 1), unbiased=True, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_std_mean(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std_mean(input, unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
+        class StandardDeviationUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.std_mean(input, unbiased=True)
+
+        model = StandardDeviationUnbiased()
+        self.run_test(model, x)
+
+    def test_std_mean_along_dims(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std_mean(input, dim=(0, 1), unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
+        class VarianceUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.std_mean(input, dim=(0, 1), unbiased=True)
+
+        x = torch.randn(2, 3, 4)
+        model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_std_mean_keepdim(self):
+        class StandardDeviation(torch.nn.Module):
+            def forward(self, input):
+                return torch.std_mean(input, dim=(0, 1), unbiased=False, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviation()
+        self.run_test(model, x)
+
+        class StandardDeviationUnbiased(torch.nn.Module):
+            def forward(self, input):
+                return torch.std_mean(input, dim=(0, 1), unbiased=True, keepdim=True)
+
+        x = torch.randn(2, 3, 4)
+        model = StandardDeviationUnbiased()
         self.run_test(model, x)
 
     def test_bitshift(self):

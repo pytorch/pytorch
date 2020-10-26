@@ -174,6 +174,7 @@ class UnaryUfuncInfo(OpInfo):
                  handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
+                 promotes_integers_to_float=False,  # whether op promotes unary output to float or not
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
@@ -186,6 +187,7 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_large_floats = handles_large_floats
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
+        self.promotes_integers_to_float = promotes_integers_to_float
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
@@ -342,8 +344,12 @@ op_db = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16)),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    handles_large_floats=False,
                    handles_complex_extremals=False,
+                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
@@ -570,6 +576,15 @@ def method_tests():
             (True, [], ['aten::mul', 'aten::reciprocal'])),
         ('__rdiv__', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant',
             (True, [], ['aten::mul', 'aten::reciprocal'])),
+        ('div', (S, S, S), (torch.rand(S, S, S, dtype=torch.cdouble) + 0.1,), 'complex', (True,)),
+        ('div', (S, S, S), (torch.rand(S, S, dtype=torch.cdouble) + 0.1,), 'complex_broadcast_rhs', (True,)),
+        ('div', (S, S), (torch.rand(S, S, S, dtype=torch.cdouble) + 0.1,), 'complex_broadcast_lhs', (True,)),
+        ('div', (S, 1, S), (torch.rand(M, S, dtype=torch.cdouble) + 0.1,), 'complex_broadcast_all', (True,)),
+        ('div', (), (uniform_scalar(0.1j),), 'complex_scalar', (True,)),
+        ('div', (S, S, S), (uniform_scalar(0.1j),), 'complex_scalar_broadcast_rhs', (True,)),
+        ('div', (), (uniform_scalar(0.1j),), 'complex_scalar_broadcast_lhs', (True,)),
+        ('div', torch.rand(S, S, S, dtype=torch.cdouble) + 1e-1, (3.14j,), 'complex_constant', (True,)),
+        ('div', uniform_scalar(1e-1j, requires_grad=True), (3.14j,), 'complex_scalar_constant', (True,)),
         ('pow', torch.rand(S, S, S) + 1e-3, (torch.rand(S, S, S) + 0.1,), '', (True,)),
         ('pow', torch.rand(S, S, S) + 1e-3, (torch.rand(1,) + 0.1,), 'broadcast_rhs', (True,)),
         ('pow', torch.rand(1,) + 1e-3, (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs', (True,)),
@@ -578,8 +593,11 @@ def method_tests():
         ('pow', torch.rand(S, S, S) + 1e-3, (uniform_scalar(0.1),), 'scalar_broadcast_rhs', (True,)),
         ('pow', uniform_scalar(1e-3, requires_grad=True), (torch.rand(S, S, S) + 0.1,), 'scalar_broadcast_lhs', (True,)),
         ('pow', torch.rand(S, S, S) + 1e-3, (3.14,), 'constant', (True,)),
+        ('pow', torch.rand(S, S, S, dtype=torch.cdouble) + 1e-3 * (1 + 1j), (3.14,), 'complex_constant', (True,)),
         ('__rpow__', torch.rand(S, S, S) + 1e-3, (3.14,), 'constant', (True, 'aten::pow')),
         ('pow', uniform_scalar(1e-3, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
+        ('pow', uniform_scalar(1e-3 * (1 + 1j), requires_grad=True), (3.14,), 'complex_scalar_constant', (True,)),
+        ('pow', uniform_scalar(1e-3 * (1 + 1j), requires_grad=True), (3.14j,), 'complex_imaginary_exponent', (True,)),
         ('__rpow__', uniform_scalar(1e-3, requires_grad=True), (3.14,), 'scalar_constant', (True, 'aten::pow')),
         ('transpose', (1, 2, 3), (1, 2), 'dim', (False,), [0, 1]),
         ('transpose', (), (0, 0), 'scalar', (False,)),
@@ -588,13 +606,13 @@ def method_tests():
         ('transpose', (S, S, S), (2, 0), '3d', (False,)),
         ('t', (1, 2), NO_ARGS, '', (False,)),
         ('view', (S, S, S), (S * S, S), '', (False,)),
-        ('view', (S, S, S), (torch.Size([S * S, S]),), 'size', (False,)),
+        ('view', (torch.Size([S * S, S]),), (S, S, S), 'size', (False,)),
         ('view', (S,), (S,), '1d', (False,)),
         ('view', (), (dont_convert(()),), 'scalar_to_scalar', (False,)),
         ('view', (), (1,), 'scalar_to_1d', (False,)),
         ('ravel', (S, S, S), NO_ARGS, '', (False,)),
         ('reshape', (S, S, S), (S * S, S), '', (False,)),
-        ('reshape', (S, S, S), (torch.Size([S * S, S]),), 'size', (False,)),
+        ('reshape', (torch.Size([S * S, S]),), (S, S, S), 'size', (False,)),
         ('reshape', (S,), (S,), '1d', (False,)),
         ('reshape', (), (dont_convert(()),), 'scalar_to_scalar', (False,)),
         ('reshape', (), (1,), 'scalar_to_1d', (False,)),
@@ -651,13 +669,12 @@ def method_tests():
         ('log1p', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('log2', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
         ('log2', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition.
-        # ('log', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
-        # ('log', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
-        # ('log10', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
-        # ('log10', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
-        # ('log2', torch.randn(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
-        # ('log2', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
+        ('log', torch.randn(S, S, S, dtype=torch.cdouble) + 1e-2, NO_ARGS, 'complex', (True,)),
+        ('log', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
+        ('log10', torch.randn(S, S, S, dtype=torch.cdouble) + 1e-2, NO_ARGS, 'complex', (True,)),
+        ('log10', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
+        ('log2', torch.randn(S, S, S, dtype=torch.cdouble) + 1e-2, NO_ARGS, 'complex', (True,)),
+        ('log2', uniform_scalar(1e-2j, requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
         ('tanh', (S, S, S), NO_ARGS, '', (True,)),
         ('tanh', (), NO_ARGS, 'scalar', (True,)),
         ('sigmoid', (S, S, S), NO_ARGS, '', (True,)),
@@ -678,6 +695,8 @@ def method_tests():
         ('complex', (S, S, S), ((S, S, S),), ''),
         ('abs', (S, S, S), NO_ARGS, '', (True,)),
         ('abs', (), NO_ARGS, 'scalar', (True,)),
+        ('angle', (S, S, S), NO_ARGS, '', (True,)),
+        ('angle', (), NO_ARGS, 'scalar', (True,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
         ('clamp', (S, S, S), (None, 0.5), 'min', (True,)),
         ('clamp', (S, S, S), (0.5, None), 'max', (True,)),
@@ -692,8 +711,7 @@ def method_tests():
         ('cos', (S, S, S), NO_ARGS, '', (True,)),
         ('cos', (), NO_ARGS, 'scalar', (True,)),
         ('tan', torch.randn(S, S, S).clamp(-1, 1), NO_ARGS, '', (True,)),
-        # TODO(@anjali411): add the commented test back after updating the formula based on tensorflow definition.
-        # ('tan', (S, S, S), NO_ARGS, 'complex', (True,)),
+        ('tan', (S, S, S), NO_ARGS, 'complex', (True,)),
         ('asin', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
         ('acos', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS, '', (True,)),
         ('atan', (S, S, S), NO_ARGS, '', (True,)),
@@ -705,9 +723,8 @@ def method_tests():
         ('atan2', (S, 1, S), ((S, S),), 'broadcast_all'),
         ('reciprocal', torch.rand(S, S, S) + 0.1, NO_ARGS, '', (True,)),
         ('reciprocal', uniform_scalar(0.1, requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        # TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition.
-        # ('reciprocal', torch.randn(S, S, S, dtype=torch.cdouble) + 0.1, NO_ARGS, 'complex', (True,)),
-        # ('reciprocal', uniform_scalar(0.1j), NO_ARGS, 'complex_scalar', (True,)),
+        ('reciprocal', torch.randn(S, S, S, dtype=torch.cdouble) + 0.1, NO_ARGS, 'complex', (True,)),
+        ('reciprocal', uniform_scalar(0.1j), NO_ARGS, 'complex_scalar', (True,)),
         ('round', (S, S, S), NO_ARGS, '', (True,)),
         ('round', (), NO_ARGS, 'scalar', (True,)),
         ('sign', (S, S, S), NO_ARGS),
@@ -724,6 +741,8 @@ def method_tests():
         ('deg2rad', (S, S, S), NO_ARGS),
         ('rsqrt', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
         ('rsqrt', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
+        ('rsqrt', torch.rand(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
+        ('rsqrt', uniform_scalar(1e-2 * (1 + 1j), requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
         ('frac', (S, S, S), NO_ARGS, '', (True,)),
         ('frac', (), NO_ARGS, 'scalar', (True,)),
         ('fmod', (S, S, S), (1.5,), '', (True,)),
@@ -1251,6 +1270,12 @@ def method_tests():
         ('qr', (3, 2, S, S), (False,), 'square_many_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('qr', (3, 2, S, S - 2), (True,), 'tall_many_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('qr', (3, 2, S - 2, S), (True,), 'wide_many_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('lu', (S, S), (True, False), 'square_single_no_info', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('lu', (S, S), (True, True), 'square_single_with_info', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('lu', (3, S, S), (True, False), 'square_batch_no_info', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('lu', (3, S, S), (True, True), 'square_batch_with_info', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('lu', (3, 3, S, S), (True, False), 'square_many_batches_no_info', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('lu', (3, 3, S, S), (True, True), 'square_many_batches_with_info', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('solve', (S, S), (random_fullrank_matrix_distinct_singular_value(
             S, silent=True),), '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('solve', (S, S, S), (random_fullrank_matrix_distinct_singular_value(S, S, silent=True),),
