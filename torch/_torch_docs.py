@@ -3600,18 +3600,30 @@ kron(input, other, *, out=None) -> Tensor
 
 Computes the Kronecker product, denoted by :math:`\otimes`, of :attr:`input` and :attr:`other`.
 
-If :attr:`input` is a :math:`(m \times n)` tensor and :attr:`other` is a
-:math:`(p \times q)` tensor, the result will be a :math:`(p*m \times q*n)` block tensor:
+If :attr:`input` is a :math:`(a_0 \times a_1 \times \dots \times a_n)` tensor and :attr:`other` is a
+:math:`(b_0 \times b_1 \times \dots \times b_n)` tensor, the result will be a
+:math:`(a_0*b_0 \times a_1*b_1 \times \dots \times a_n*b_n)` block tensor with the following entries:
 
 .. math::
-    \mathbf{A} \otimes \mathbf{B}=\begin{bmatrix}
-    a_{11} \mathbf{B} & \cdots & a_{1 n} \mathbf{B} \\
-    \vdots & \ddots & \vdots \\
-    a_{m 1} \mathbf{B} & \cdots & a_{m n} \mathbf{B} \end{bmatrix}
+    (\text{input} \otimes \text{other})_{k_0, k_1, \dots, k_n} = \text{input}_{i_0, i_1, \dots, i_n} * \text{other}_{j_0, j_1, \dots, j_n},
 
-where :attr:`input` is :math:`\mathbf{A}` and :attr:`other` is :math:`\mathbf{B}`.
+where :math:`k_t = i_t * b_t + j_t` for :math:`0 \leq t \leq n`.
+If one tensor has fewer dimensions than the other it is unsqueezed until it has the same number of dimensions.
 
 Supports real-valued and complex-valued inputs.
+
+.. note::
+    The Kronecker product is commonly defined only for matrices.
+    If :attr:`input` is a :math:`(m \times n)` matrix and :attr:`other` is a
+    :math:`(p \times q)` matrix, the result will be a :math:`(p*m \times q*n)` block matrix:
+
+    .. math::
+        \mathbf{A} \otimes \mathbf{B}=\begin{bmatrix}
+        a_{11} \mathbf{B} & \cdots & a_{1 n} \mathbf{B} \\
+        \vdots & \ddots & \vdots \\
+        a_{m 1} \mathbf{B} & \cdots & a_{m n} \mathbf{B} \end{bmatrix}
+
+    where :attr:`input` is :math:`\mathbf{A}` and :attr:`other` is :math:`\mathbf{B}`.
 
 Arguments:
     input (Tensor)
