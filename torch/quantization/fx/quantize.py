@@ -438,8 +438,8 @@ class Quantizer:
                         'pattern:' + str(pattern)
                     device = assert_and_get_unique_device(model)
                     insert_observer(node, activation_post_process_ctr(), device)
-                elif (isinstance(obj, FixedQParamsOpQuantizeHandler) and not model.training) \
-                     or isinstance(obj, CopyNode):
+                elif (isinstance(obj, FixedQParamsOpQuantizeHandler) and
+                      not model.training) or isinstance(obj, CopyNode):
                     # inserting observers for output of observed module, or mark the output
                     # as observed
                     assert node.op in [
