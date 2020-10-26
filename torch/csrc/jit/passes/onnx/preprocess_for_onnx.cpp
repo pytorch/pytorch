@@ -241,7 +241,7 @@ static void ReplaceIndexPutWithMaskedScatter(Block* b) {
 void PreprocessForONNX(std::shared_ptr<Graph>& graph) {
   FuseWithListUnpack(graph->block());
   ReplaceAddWithConcat(graph->block());
-  ReplaceIndexPutWithMaskedScatter(graph->block());
+  // ReplaceIndexPutWithMaskedScatter(graph->block());
 }
 
 } // namespace jit

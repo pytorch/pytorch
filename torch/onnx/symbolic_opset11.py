@@ -80,6 +80,13 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         ]
         index = g.op("Concat", *indices_list, axis_i=-1)
     else:
+        bool_inp = list(index.node().inputs())[0]
+        if bool_inp.type().scalarType() == 'Bool':
+            if values.node().kind() == 'onnx::Constant':
+                if len(values.node()['value'].size()) == 0:
+                    from torch.onnx.symbolic_opset9 import masked_fill
+                    return masked_fill(g, self, bool_inp, values)
+                return masked_scatter(g, self, bool_inp, values)
         broadcast_index_shape = g.op("Shape", index)
         index = g.op("Unsqueeze", index, axes_i=[-1])
     sub_data_shape = sym_help._slice_helper(
