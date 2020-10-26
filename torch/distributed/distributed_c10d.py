@@ -398,7 +398,8 @@ def init_process_group(backend,
             process will block and wait for collectives to complete before
             throwing an exception. When ``NCCL_ASYNC_ERROR_HANDLING`` is set,
             this is the duration after which collectives will be aborted
-            asynchronously and the process will crash.
+            asynchronously and the process will crash. Only one of these two
+            environment variables should be set.
         group_name (str, optional, deprecated): Group name.
 
     To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
