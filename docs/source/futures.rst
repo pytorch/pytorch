@@ -6,7 +6,7 @@ torch.futures
 =============
 
 .. warning::
-  The ``torch.futures`` package is experimental and subject to change.
+  The ``torch.futures`` package is a **Prototype** feature and subject to change.
 
 
 This package provides a :class:`~torch.futures.Future` type that encapsulates
