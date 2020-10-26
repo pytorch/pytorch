@@ -152,7 +152,7 @@ Supports real-valued and, only on the CPU, complex-valued inputs.
 
 .. note:: If :attr:`input` does not satisfy the requirement
           ``prod(input.shape[other.ndim:]) == prod(input.shape[:other.ndim])``
-          after (optionally) moving the dimensions using using :attr:`dims`, then a RuntimeError will be thrown.
+          after (optionally) moving the dimensions using :attr:`dims`, then a RuntimeError will be thrown.
 
 Args:
     input (Tensor): left-hand-side tensor, it must satisfy the requirement
