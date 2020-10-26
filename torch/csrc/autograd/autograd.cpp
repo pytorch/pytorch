@@ -130,7 +130,7 @@ void backward(
   if (!retain_graph) {
     retain_graph = create_graph;
   }
-  run_backward(tensors, gradients, retain_graph.value(), create_graph, {}, /*allow_unused=*/true);
+  run_backward(tensors, gradients, retain_graph.value(), create_graph, inputs, /*allow_unused=*/true);
 }
 
 variable_list grad(
