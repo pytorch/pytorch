@@ -73,8 +73,9 @@ TensorIteratorConfig& TensorIteratorConfig::allow_cpu_scalars(const bool _allow_
   return *this;
 }
 
-TensorIteratorConfig& TensorIteratorConfig::cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs) {
+TensorIteratorConfig& TensorIteratorConfig::cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs, const bool _special_case_bool_outputs /*=false*/) {
   cast_common_dtype_to_outputs_ = _cast_common_dtype_to_outputs;
+  special_case_bool_outputs_ = _special_case_bool_outputs;
   if (_cast_common_dtype_to_outputs) {
     check_all_same_dtype_ = false;
   }
@@ -400,7 +401,8 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
     // TODO: reuse temporaries when possible (e.g. for inplace operations)
     if (common_device == kCPU) {
       // Casts to outputs by creating temporaries of the correct dtype (if needed)
-      if (config.cast_common_dtype_to_outputs_ && op.is_output && op.current_dtype != common_dtype_) {
+      if (config.cast_common_dtype_to_outputs_ && op.is_output && op.current_dtype != common_dtype_ &&
+        !(config.special_case_bool_outputs_ && op.current_dtype == c10::kBool)) {
         op.original_tensor = op.tensor;
         op.tensor = at::empty_like(op.tensor,
                                    op.tensor.options().dtype(common_dtype_),
@@ -773,7 +775,8 @@ bool TensorIterator::is_cpu_scalar(int arg) const {
 void TensorIterator::cast_outputs() {
   for (auto& op : operands_) {
     if (op.is_output && op.original_tensor.defined() &&
-        op.original_tensor.scalar_type() != op.current_dtype) {
+        op.original_tensor.scalar_type() != op.current_dtype &&
+      !(special_case_bool_outputs_ && op.current_dtype == c10::kBool)) {
       if (op.original_tensor.sizes() != op.tensor.sizes()){
         op.original_tensor.resize_as_(op.tensor).as_strided_(op.tensor.sizes(), op.tensor.strides());
       }
@@ -856,7 +859,7 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
     .add_input(b)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
+    .cast_common_dtype_to_outputs(true, /*_special_case_bool_outputs =*/ true)
     .build();
 }
 
@@ -1245,6 +1248,7 @@ TensorIterator::TensorIterator(TensorIteratorConfig& config) {
 void TensorIterator::build(TensorIteratorConfig& config) {
   // populate some persistent configuration fields
   is_reduction_ = config.is_reduction_;
+  special_case_bool_outputs_ = config.special_case_bool_outputs_;
 
   // fill in operands_ based on configuration
   populate_operands(config);

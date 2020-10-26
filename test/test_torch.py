@@ -3901,6 +3901,32 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 self.assertEqual(output_64.dtype, torch.float64)
                 self.assertEqual(output_64.shape, (2,))
 
+        def test_functional_comparison_ops_return_bool_outputs(self):
+            for dtype in torch.testing.get_all_dtypes():
+                for op in [torch.eq, torch.ne,
+                        torch.logical_and, torch.logical_or, torch.logical_xor]:
+                    input1 = torch.ones(8, dtype=dtype)
+                    self.assertEqual(op(input1, input1).dtype, torch.bool)
+
+        def test_ne_eq_vectorized_treats_nan_properly(self):
+            # issue #42660
+            # use a large enough tensor to call vec256::ne
+            shape = (32, 32)
+
+            for dtype in [torch.bfloat16, torch.float32, torch.float64,
+                    torch.complex64, torch.complex128]:
+                input_nan = torch.full(shape, np.nan, dtype=dtype)
+                input_not_nan = torch.zeros(shape, dtype=dtype)
+                # nan != nan returns true
+                self.assertTrue((input_nan != input_nan).all())
+                # nan != <anything> returns true
+                self.assertTrue((input_nan != input_not_nan).all())
+                # nan == nan returns false
+                self.assertFalse((input_nan == input_nan).any())
+                # nan == <anything> returns false
+                self.assertFalse((input_nan == input_not_nan).any())
+
+
         def test_inplace_comparison_ops_require_inputs_have_same_dtype(self):
             with self.assertRaisesRegex(RuntimeError, 'Expected object of scalar type'):
                 for op in ['lt_', 'le_', 'gt_', 'ge_', 'eq_', 'ne_', 'logical_xor_', 'logical_and_', 'logical_or_']:
@@ -6399,6 +6425,9 @@ class TestTorchDeviceType(TestCase):
         b = torch.tensor(b_, dtype=dtypes[1], device=device)
 
         # new tensor
+        x1 = expected_res.bool()
+        x2 = getattr(a, op)(b)
+        self.assertEqual(x1, x2)
         self.assertEqual(expected_res.bool(), getattr(a, op)(b))
         # out
         c = torch.empty(0, dtype=torch.bool, device=device)
@@ -18752,7 +18781,7 @@ else:
                                             exact_dtype=True, with_keepdim=False):
         # Test 0-d to 3-d tensors.
         for ndims in range(0, 4):
-            shape = self._rand_shape(ndims, min_size=5, max_size=10)
+            shape = self._rand_shape(ndims, min_size=2, max_size=2)
             for n in range(ndims + 1):
                 for c in combinations(list(range(ndims)), n):
                     for count_dim in permutations(c):

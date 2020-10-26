@@ -306,7 +306,7 @@ public:
     return _mm256_cmp_pd(values, other.values, _CMP_EQ_OQ);
   }
   Vec256<c10::complex<double>> operator!=(const Vec256<c10::complex<double>>& other) const {
-    return _mm256_cmp_pd(values, other.values, _CMP_NEQ_OQ);
+    return _mm256_cmp_pd(values, other.values, _CMP_NEQ_UQ);
   }
   Vec256<c10::complex<double>> operator<(const Vec256<c10::complex<double>>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
