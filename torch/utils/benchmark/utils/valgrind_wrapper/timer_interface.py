@@ -457,7 +457,11 @@ class _ValgrindWrapper(object):
             self._supported_platform = bindings.valgrind_supported_platform()
 
         self._commands_available: Dict[str, bool] = {}
+<<<<<<< HEAD
         if self._supported_platform:
+=======
+        if torch._C._valgrind_supported_platform():
+>>>>>>> release/1.7
             # Only bother checking on supported platforms.
             for cmd in ("valgrind", "callgrind_control", "callgrind_annotate"):
                 self._commands_available[cmd] = not subprocess.run(
@@ -474,7 +478,11 @@ class _ValgrindWrapper(object):
         self._baseline_cache: Dict[Tuple[int, int], Tuple[FunctionCounts, FunctionCounts]] = {}
 
     def _validate(self) -> None:
+<<<<<<< HEAD
         if not self._supported_platform:
+=======
+        if not torch._C._valgrind_supported_platform():
+>>>>>>> release/1.7
             raise OSError("Valgrind is not supported on this platform.")
 
         missing_cmds = [cmd for cmd, available in self._commands_available.items() if not available]
@@ -743,13 +751,21 @@ class _ValgrindWrapper(object):
             # =============================================================================
             # == User code block ==========================================================
             # =============================================================================
+<<<<<<< HEAD
             callgrind_bindings.valgrind_toggle()
+=======
+            torch._C._valgrind_toggle()
+>>>>>>> release/1.7
             {blocked_stmt}
 
             # Sleep is to allow the interpreter to catch up before we stop collecting in
             # order to reduce jitter.
             time.sleep(0.01)
+<<<<<<< HEAD
             callgrind_bindings.valgrind_toggle()
+=======
+            torch._C._valgrind_toggle()
+>>>>>>> release/1.7
         """).strip().format(
             indented_stmt=textwrap.indent(task_spec.stmt, " " * 4),
             blocked_stmt=blocked_stmt,

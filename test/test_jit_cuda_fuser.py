@@ -804,5 +804,5 @@ class TestPassManagerCudaFuser(JitTestCase):
 
 
 if __name__ == '__main__':
-    if not TEST_WITH_ROCM:
+    if not TEST_WITH_ROCM and GRAPH_EXECUTOR != ProfilingMode.PROFILING:
         run_tests()
