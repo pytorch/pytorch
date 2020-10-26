@@ -145,7 +145,7 @@ tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
 linalg.tensorsolve(input, other, dims=None, *, out=None) -> Tensor
 
 Computes a tensor ``x`` such that ``tensordot(input, x, dims=x.ndim) = other``.
-The resulting tensor ``x`` has the shape equal to ``input[other.ndim:]``.
+The resulting tensor ``x`` has the same shape as ``input[other.ndim:]``.
 Before computing ``x``, dimensions of :attr:`input` can be moved using :attr:`dims` to match the shape requirements.
 
 Supports real-valued and, only on the CPU, complex-valued inputs.
