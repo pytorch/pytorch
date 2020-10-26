@@ -14,7 +14,7 @@ import torch
 import torch.distributed as dist
 from torch.nn import Parameter
 from torch._six import container_abcs
-from .optimizer import Optimizer
+from torch.optim import Optimizer
 
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -27,8 +27,7 @@ def _broadcast_object(
     obj: Any, src_rank: int, group: object = dist.group.WORLD, dist_device: torch.device = torch.device("cpu")
 ) -> Any:
     """
-    Either broadcast from master to the fleet (default),
-    or use the src setting as the original rank.
+    Either broadcast from master to the fleet (default), or use the src setting as the original rank.
     """
 
     if dist.get_rank() == src_rank:
@@ -57,7 +56,7 @@ def _recursive_copy_to_device(value: Any, non_blocking: bool, device: torch.devi
     Recursively searches lists, tuples, dicts and copies tensors to device if
     possible. Non-tensor values are passed as-is in the result.
 
-    NOTE:  These are all copies, so if there are two objects that reference
+    .. note:  These are all copies, so if there are two objects that reference
     the same object, then after this call, there will be two different objects
     referenced on the device.
     """
@@ -78,11 +77,7 @@ def _recursive_copy_to_device(value: Any, non_blocking: bool, device: torch.devi
 
 
 def _get_global_rank(group: Any, rank: int) -> int:
-    if group is dist.group.WORLD:
-        return rank
-    else:
-        global_rank = dist.distributed_c10d._get_global_rank(group, rank)  # type: ignore
-    return global_rank
+    return rank if group is dist.group.WORLD else dist.distributed_c10d._get_global_rank(group, rank)  # type: ignore
 
 
 class ZeROptimizer(Optimizer):
@@ -90,19 +85,19 @@ class ZeROptimizer(Optimizer):
     optimizer and shards its state as described by ZeRO_.
     ::
 
-        opt = ShardedOptimizer(params, optim=torch.optim.Adam, lr=0.01)
+        opt = ZeROptimizer(params, optim=torch.optim.Adam, lr=0.01)
 
     .. _ZeRO: https://arxiv.org/abs/1910.02054
 
-    We use a greedy algorithm to pack a number of parameters
-    at each rank. Each parameter belongs to a single rank and
-    is not divided among rank.
+    We use a greedy algorithm to pack a number of parameters at each rank.
+    Each parameter belongs to a single rank and is not divided among ranks.
+    The partition is arbitrary and does not correspond to the information flow for instance.
 
     After each rank completed their parameter update, they broadcast
     the new version of the parameters to all other ranks to synchronize
     the parameters for next round forward/backward computation.
 
-    Args:
+    Arguments:
         params (list of tensors):
             parameters to be optimized
     Keyword Args:
@@ -110,21 +105,16 @@ class ZeROptimizer(Optimizer):
             optimizer to shard
         group (group):
             torch.distributed group (default: group.WORLD)
-        broadcast_buffer_size (int):
-            the size of the buffer used to batch the small parameter tensors (default 128k).
+        bucket_cap_kb (int):
+            the size of the buffer used to batch the small parameter tensors, in kilobytes (default 128k).
     """
-
-    #: The optimizer used for a given shard
-    optim: Optimizer
-
-    in_super_constructor: bool
 
     def __init__(
         self,
         params: _params_t,
         optim: Type[Optimizer],
         group: Optional[Any] = None,
-        broadcast_buffer_size: int = 2 ** 17,
+        bucket_cap_kb: int = 2 ** 7,
         **default: Any,
     ):
         # Hold all the model params in the root .param_groups
@@ -137,7 +127,7 @@ class ZeROptimizer(Optimizer):
             torch.device, List[List[Parameter]]
         ] = OrderedDict()  # device, rank, params
         self._param_rank: Dict[torch.Tensor, int] = {}
-        self._partition_parameters: List[List[dict]] = []
+        self._partition_parameters: List[List[Dict]] = []
 
         # Build the wrapped optimizer, responsible for a shard of the params
         self.group = group if group is not None else dist.group.WORLD
@@ -162,18 +152,18 @@ class ZeROptimizer(Optimizer):
         for device, per_device in self.per_device_params.items():
             # Allocate one buffer per rank and per device to group the small parameters
             self._broadcast_buffers[device] = [
-                torch.zeros(broadcast_buffer_size, dtype=per_device[0][0].dtype, device=device)
+                torch.zeros(bucket_cap_kb * (2 ** 10), dtype=per_device[0][0].dtype, device=device)
                 for _ in range(len(per_device))
             ]
 
     # Partition helpers
-    def partition_parameters(self) -> List[List[dict]]:
+    def partition_parameters(self) -> List[List[Dict]]:
         """Partitions parameters across distributed data parallel ranks.
 
-        Returns a list of param_groups (which is a list of dict) where each
+        Returns: a list of ``param_groups`` (which is a list of dict) where each
         element of the list contains the param_groups for a rank. Element 0
         corresponds to rank 0, etc. We need all the ranks for the broadcast
-        inside step().
+        inside ``step()``.
         """
         if len(self._partition_parameters) == 0:
             self._partition_parameters = [list() for _ in range(self.world_size)]
@@ -233,6 +223,8 @@ class ZeROptimizer(Optimizer):
         Arguments:
             closure (callable): A closure that reevaluates the model and
                 returns the loss. Optional for most optimizers.
+        Returns:
+            optional loss, depends on the underlying optimizer
 
         .. note: Any extra parameter is passed to the base optimizer as-is"""
 
@@ -266,8 +258,8 @@ class ZeROptimizer(Optimizer):
 
         return loss
 
-    def local_state_dict(self) -> dict:
-        """Gets this rank's state_dict.
+    def local_state_dict(self) -> Dict:
+        """Gets this rank's ``state_dict``.
 
         Returns:
             The state of the optimizer as a :class:`dict`.
@@ -297,7 +289,9 @@ class ZeROptimizer(Optimizer):
             self._broadcast_state_dict()
 
     def state_dict(self) -> Dict[str, Any]:
-        """Return the last known global optimizer state, which consist of a list of the shards.
+        """
+        Returns:
+            the last known global optimizer state, which consist of a list of the shards.
 
         .. warning:
             If the state has not been consolidated, this returns a shard's worth, not the global state.
@@ -332,8 +326,8 @@ class ZeROptimizer(Optimizer):
             "local_state_dict": False,
         }
 
-    def load_local_state_dict(self, state_dict: dict) -> None:
-        """Loads this rank's state_dict.
+    def load_local_state_dict(self, state_dict: Dict) -> None:
+        """Loads this rank's ``state_dict``.
 
         .. warning: This is not meant to load the global state dict.
         """
@@ -378,8 +372,8 @@ class ZeROptimizer(Optimizer):
             # Dispatch this rank's state dictionary to the wrapped shard optimizer
             self.load_local_state_dict({"state": state_dict["state"][self.rank], "param_groups": param_groups})
 
-    def add_param_group(self, param_group: dict) -> None:
-        """Add a param group to the :class:`Optimizer` s `param_groups`.
+    def add_param_group(self, param_group: Dict) -> None:
+        """Add a param group to the :class:`Optimizer` s ``param_groups``.
 
         This can be useful when fine tuning a pre-trained network as frozen layers can be made
         trainable and added to the :class:`Optimizer` as training progresses.
