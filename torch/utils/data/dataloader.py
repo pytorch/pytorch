@@ -5,6 +5,7 @@ functions to be run in multiprocessing. E.g., the data loading worker loop is
 in `./_utils/worker.py`.
 """
 
+import os
 import threading
 import itertools
 import warnings
@@ -290,10 +291,13 @@ class DataLoader(Generic[T_co]):
 
         self._iterator = None
 
+        self.check_thread_number_rationality()
+
     def _get_iterator(self) -> '_BaseDataLoaderIter':
         if self.num_workers == 0:
             return _SingleProcessDataLoaderIter(self)
         else:
+            self.check_thread_number_rationality()
             return _MultiProcessingDataLoaderIter(self)
 
     @property
@@ -398,6 +402,45 @@ class DataLoader(Generic[T_co]):
             return length
         else:
             return len(self._index_sampler)
+
+    def check_thread_number_rationality(self):
+        # This function check whether the dataloader's threading setup is rational based on
+        # current system's resource. Current rule is that if the max number of thread this
+        # Dataloader can create is bigger than 2X number of logical cpus that is allowed to
+        # use, than we will pop up a warning to let user pay attention.
+        #
+        # eg. If current system has 2 physical CPUs with 16 cores each. And each core support 2
+        #     threads, then the total logical cpus here is 2 * 16 * 2 = 64. Let's say current
+        #     DataLoader process can use half of them which is 32, then the rational max number of
+        #     thread that initiated from this process is 32 * 2 = 64.
+        #     Now, let's say the created DataLoader has num_works = 4, and each worker is allowed
+        #     to create a max of 24 threads (get/set by torch.get/set_num_threads()), so the max
+        #     number of threads which can be created by this DataLoader process is 4 * 24 = 96
+        #     which is bigger than 64. So the warning message is triggered in this case.
+        #
+        #     To lower the max total number of therad that will be created by DataLoader, there
+        #     are 2 ways. One is to use torch.set_num_threads() to adjust the max thread number of
+        #     each worker, the other way is to make number of worker smaller.
+        if not self.num_workers or self.num_workers == 0:
+            return
+
+        max_num_thread_in_worker = torch.get_num_threads()
+        max_total_thread_created = max_num_thread_in_worker * self.num_workers
+        max_total_thread_allowed = len(os.sched_getaffinity(0)) * 2
+        if max_total_thread_created > max_total_thread_allowed:
+            warn_msg = (
+                "This DataLoader might create a max of {} threads in total "
+                "(max number of thread in each worker {} multiply number of workers {}). "
+                "Our suggested max number of thread in this system is {}, which is smaller "
+                "than what this DataLoader might create, excessive threads might get DataLoader "
+                "running slow or even freeze, please adjust the max number of thread for each "
+                "worker through torch.set_num_threads(<num of thread>), or adjust number of workers "
+                "to avoid potential slowness/freeze if necessary.").format(
+                    max_total_thread_created,
+                    max_num_thread_in_worker,
+                    self.num_workers,
+                    max_total_thread_allowed)
+            warnings.warn(warn_msg)
 
 
 class _BaseDataLoaderIter(object):
@@ -843,7 +886,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # contains all `True`s if not using an iterable-style dataset
         # (i.e., if kind != Iterable).
         # Not that this indicates that a worker still has work to do *for this epoch*.
-        # It does not mean that a worker is dead. In case of `_persistent_workers`, 
+        # It does not mean that a worker is dead. In case of `_persistent_workers`,
         # the worker will be reset to available in the next epoch.
         self._workers_status = [True for i in range(self._num_workers)]
         # We resume the prefetching in case it was enabled

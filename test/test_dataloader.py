@@ -1564,7 +1564,7 @@ except RuntimeError as e:
             # In all cases, all processes should end properly.
             if use_workers:
                 exit_methods = [None, 'loader_error', 'loader_kill', 'worker_error', 'worker_kill']
-                persistent_workers = self.persistent_workers 
+                persistent_workers = self.persistent_workers
             else:
                 exit_methods = [None, 'loader_error', 'loader_kill']
                 persistent_workers = False
@@ -1839,6 +1839,15 @@ except RuntimeError as e:
             self.assertEqual(_utils.collate.default_collate([n_in]).is_shared(), True)
         finally:
             _utils.worker._worker_info = old
+
+    def test_excessive_thread_creation_warning(self):
+        with self.assertWarnsRegex(
+            UserWarning,
+            r"excessive threads might get DataLoader running slow or even freeze"):
+            num_thread = torch.get_num_threads();
+            torch.set_num_threads(200)
+            dataloader = DataLoader(self.dataset, batch_size=2, num_workers=50)
+            torch.set_num_threads(num_thread)
 
 
 class StringDataset(Dataset):
