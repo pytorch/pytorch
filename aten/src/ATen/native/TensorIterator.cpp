@@ -851,13 +851,11 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
     const Tensor& b) {
   // Note [special-case bool outputs]
   // We explicitly don't call `cast_common_dtype_to_outputs` when the output tensor
-  // has `bool` dtype. This is purely a performance optimization: the functional
+  // has `bool` dtype. This is a performance optimization: the functional
   // version of all comparison/logical ops uses a bool output tensor, and we'd like to
   // avoid creating a temporary copy of the output.
   // However, note that all kernels using this TensorIterator will need to special-case when
   // the output tensor has bool dtype, and provide a lambda of type (scalar_t, scalar_t -> bool).
-  // to avoid creating a
-  // temporary output tensor in the common case for comparison/logical ops
   if (out.scalar_type() == kBool) {
     return TensorIteratorConfig()
     .set_check_mem_overlap(true)
