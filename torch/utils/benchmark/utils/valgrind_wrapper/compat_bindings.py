@@ -1,12 +1,4 @@
-"""Allow Timer.collect_callgrind to be used on earlier versions of PyTorch
-
-FIXME: Remove this module once we no longer need to back test.
-"""
-import os
-import textwrap
-from typing import List
-
-from torch.utils.cpp_extension import load_inline
+"""Compat bindings are for nightly only."""
 
 raise NotImplementedError(
     "Compat bindings should not be needed for a stable release. If you "
