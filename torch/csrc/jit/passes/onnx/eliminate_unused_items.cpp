@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
-#include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/jit/passes/utils/onnx_utils.h>
 
 #include <c10/util/Optional.h>
 #include <algorithm>

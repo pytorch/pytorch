@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/jit/passes/utils/onnx_utils.h>
 
 namespace torch {
 namespace jit {

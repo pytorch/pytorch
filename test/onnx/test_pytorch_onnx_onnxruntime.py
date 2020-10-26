@@ -472,6 +472,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = {"test_key_in": torch.randn(1, 2, 3)}
         self.run_test(MyModel(), (x,))
 
+    @disableScriptTest()
     def test_none_as_input(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -482,6 +483,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3)
         self.run_test(Model(), (x, None))
 
+    @disableScriptTest()
     def test_none_as_tuple_input(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -495,6 +497,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(2, 3)
         self.run_test(Model(), (x, (None, y)))
 
+    @disableScriptTest()
     def test_none_as_named_input(self):
         class Model(torch.nn.Module):
             def forward(self, x, y=None, z=None):
@@ -1526,11 +1529,12 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(CopyModel(), (x, update))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    # TODO: Limited scripting support with ellipsis indexing.
-    #       Due to dependency on input tensor rank being known.
     def test_copy_ellipsis_tracing(self):
         class CopyModel(torch.nn.Module):
             def forward(self, x, update):
+                # Insert reshape node to ensure no shape/type info for
+                # x in scripting, without onnx shape inference.
+                x = x.reshape(4, 3, 5, 6)
                 x[2, ..., 1:3] = update
                 return x
 
@@ -1800,7 +1804,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 6, 180, 180)
         self.run_test(model, x)
 
-    @disableScriptTest()
     def test_groupnorm_noaffine(self):
         model = torch.nn.GroupNorm(4, 8, 0.002, affine=False)
         x = torch.randn(3, 8, 224, 224)

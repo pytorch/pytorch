@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
+#include <torch/csrc/jit/passes/utils/onnx_utils.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/onnx.h>
 
