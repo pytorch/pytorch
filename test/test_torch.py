@@ -5902,16 +5902,19 @@ class TestTorchDeviceType(TestCase):
             torch.isinf(1)  # Parameter must be a tensor
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @dtypes(*tuple(itertools.combinations_with_replacement(torch.testing.get_all_dtypes(include_bfloat16=False), 2)))
+    @dtypes(*tuple(itertools.combinations_with_replacement(torch.testing.get_all_dtypes(), 2)))
     def test_comparison_ops_type_promotion_and_broadcasting(self, device, dtypes):
         # issue #42660
         # testing all combinations of broadcasting and type promotion
         # with a range of dtypes and input shapes, and with extremal values
         def compare_with_numpy_bin_op(torch_fn, np_fn, x, y, out=None):
-            y_np = y.cpu().numpy()
+            # working around the fact that numpy doesn't support bfloat16
+            # by letting numpy treat them as float32's
+            x_np = x if x.dtype != torch.bfloat16 else x.to(torch.float32)
+            y_np = y.cpu().numpy() if y.dtype != torch.bfloat16 else y.to(torch.float32).cpu().numpy()
             self.compare_with_numpy(lambda inp: torch_fn(inp, y, out=out) if out else torch_fn(inp, y),
                                     lambda inp: np_fn(inp, y_np, out=out) if out else np_fn(inp, y_np),
-                                    x)
+                                    x_np)
 
         complex_op_denylist = [torch.lt, torch.le, torch.gt, torch.ge] # complex not supported
         input_sizes = [
@@ -18768,7 +18771,12 @@ else:
             x = torch.tensor((), dtype=dtype, device=device)
         else:
             if dtype.is_floating_point or dtype.is_complex:
-                x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(30, 100)
+                # work around torch.randn not being implemented for bfloat16
+                if dtype == torch.bfloat16:
+                    x = torch.randn(*shape, device=device) * random.randint(30, 100)
+                    x = x.to(torch.bfloat16)
+                else:
+                    x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(30, 100)
                 x[torch.randn(*shape) > 0.5] = 0
                 if with_extremal and dtype.is_floating_point:
                     # Use extremal values
