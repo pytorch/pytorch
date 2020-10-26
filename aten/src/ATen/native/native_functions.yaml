@@ -6140,14 +6140,14 @@
     CUDA: legacy::cuda::_th_eig
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
-  dispatch:
-    DefaultBackend: svd_out
+  # dispatch:
+  #   DefaultBackend: svd_out
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   use_c10_dispatcher: full
   variants: method, function
-  dispatch:
-    DefaultBackend: svd
+  # dispatch:
+  #   DefaultBackend: svd
 
 - func: _svd_helper(Tensor self, bool some, bool compute_uv, bool apply_conj) -> (Tensor U, Tensor S, Tensor V)
   use_c10_dispatcher: full
