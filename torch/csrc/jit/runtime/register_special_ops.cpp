@@ -1,6 +1,6 @@
+#include <torch/csrc/jit/cuda/cuda.h>
 #include <aten/src/ATen/Context.h>
 #include <torch/library.h>
-
 #include <ATen/core/jit_type.h>
 #include <aten/src/ATen/ExpandUtils.h>
 #include <c10/core/DefaultDtype.h>
@@ -10,13 +10,11 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
-#include <torch/csrc/jit/cuda/cuda.cpp>
-#include <c10/cuda/CUDAStream.h>
-#include <c10/util/intrusive_ptr.h>
 
 #include <aten/src/ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/cuda/cuda.h>
 
 #include <regex>
 #include <sstream>
@@ -25,6 +23,25 @@ namespace torch {
 namespace jit {
 
 namespace {
+
+
+TORCH_LIBRARY(cuda, m) {
+  auto stream_class = m.class_<torch::jit::CUDAStream>("Stream").def(torch::init<int64_t, int64_t>());
+  auto event_class = m.class_<torch::jit::CUDAEvent>("Event").def(torch::init<bool, bool, bool>());
+
+  stream_class.def("query", &CUDAStream::query)
+    .def("record_event", &CUDAStream::recordEvent)
+    .def("synchronize", &CUDAStream::synchronize)
+    .def("wait_event", &CUDAStream::waitEvent)
+    .def("wait_stream", &CUDAStream::waitStream);
+
+  event_class.def("elapsed_time", &CUDAEvent::elapsedTime)
+    .def("ipc_handle", &CUDAEvent::ipcHandle)
+    .def("query", &CUDAEvent::query)
+    .def("record", &CUDAEvent::record)
+    .def("synchronize", &CUDAEvent::synchronize)
+    .def("wait", &CUDAEvent::wait);
+};
 
 c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
@@ -436,13 +453,17 @@ RegisterOperators reg({
         "aten::set_grad_enabled(bool val) -> ()",
         [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
+
     Operator(
-        "aten::cuda_getCurrentStream(int64_t val) -> intrusive_ptr",
+        "aten::cuda_getCurrentStream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
         [](Stack* stack) {
           int64_t idx;
           pop(stack, idx);
-          IValue cur_stream = torch::make_custom_class<torch::jit::CUDAStream>(idx);
-          push(stack, cur_stream.toCustomClass<torch::jit::CUDAStream>());
+          std::cout<<"The idx is:"<<idx<<std::endl;
+          auto v = make_custom_class<torch::jit::CUDAStream>(idx);
+          //std::cout<<"The v is:"<<v.isCustomClass()<<std::endl;
+          // push(stack, v.toCustomClass<torch::jit::CUDAStream>());
+          push(stack, v);
         },
         aliasAnalysisFromSchema()),
 });
