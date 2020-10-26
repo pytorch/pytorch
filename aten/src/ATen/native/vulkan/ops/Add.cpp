@@ -27,13 +27,12 @@ Tensor add_scalar(
   {
     if (v_output.has_image() && v_self.has_image()) {
       struct {
-        uint32_t width, height, channels, unused;
-        float alpha;
+        uint32_t width, height, channels;
+        float other;
       } block {
         v_output.extents().width,
         v_output.extents().height,
         v_output.extents().depth,
-        0u,
         other.to<float>() * alpha.to<float>(),
       };
 
@@ -84,7 +83,7 @@ Tensor& add_scalar_(
     if (v_self.has_image()) {
       struct {
         uint32_t width, height, channels;
-        float alpha;
+        float other;
       } block {
         v_self.extents().width,
         v_self.extents().height,

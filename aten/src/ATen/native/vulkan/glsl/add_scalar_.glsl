@@ -1,10 +1,13 @@
 #version 450 core
 #define PRECISION $precision
+
 layout(std430) buffer;
 layout(std430) uniform;
 
+/* Qualifiers: layout - precision - memory - invariance - precise */
+
 layout(set = 0, binding = 0, rgba16f) PRECISION uniform image3D uOutput;
-layout(set = 0, binding = 1) uniform Block {
+layout(set = 0, binding = 1)                    uniform Block {
   ivec3 WHC;
   float other;
 } block;
