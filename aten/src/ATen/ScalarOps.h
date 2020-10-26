@@ -5,6 +5,17 @@
 #include <ATen/Functions.h>
 #include <ATen/FastPass.h>
 
+namespace at {
+template <typename scalar_t>
+inline void fill_inplace(Tensor& self, Scalar value_scalar) {
+  auto value = value_scalar.to<scalar_t>();
+  scalar_t * dptr = static_cast<scalar_t *>(self.data_ptr());
+  *dptr = value;
+}
+Tensor& scalar_fill(Tensor& self, Scalar value);
+TORCH_API Tensor scalar_tensor_static(Scalar s, const TensorOptions& options);
+} //namespace at
+
 // This is in the c10 namespace because we use ADL to find the functions in it.
 namespace c10 {
 
@@ -14,14 +25,12 @@ inline at::Tensor scalar_to_tensor(Scalar s, const Device device = at::kCPU) {
   // This is the fast track we have for CPU scalar tensors.
   if (device == at::kCPU && !s.isComplex()) {
     if (s.isFloatingPoint()) {
-      return at::scalar_tensor_fast(s, at::device(at::kCPU).dtype(at::kDouble));
+      return at::scalar_tensor_static(s, at::device(at::kCPU).dtype(at::kDouble));
     } else if (s.isBoolean()) {
-      return at::scalar_tensor_fast(s, at::device(at::kCPU).dtype(at::kBool));
-    } else if (s.isComplex()) {
-      return at::scalar_tensor_fast(s, at::device(at::kCPU).dtype(at::kComplexDouble));
+      return at::scalar_tensor_static(s, at::device(at::kCPU).dtype(at::kBool));
     } else {
       AT_ASSERT(s.isIntegral(false));
-      return at::scalar_tensor_fast(s, at::device(at::kCPU).dtype(at::kLong));
+      return at::scalar_tensor_static(s, at::device(at::kCPU).dtype(at::kLong));
     }
   }
   if (s.isFloatingPoint()) {

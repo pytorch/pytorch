@@ -166,44 +166,7 @@ Tensor polar(const Tensor& abs, const Tensor& angle) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<c10::MemoryFormat> optional_memory_format) {
-
-  TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
-  TensorOptions options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
-
-  AT_ASSERT(options.device().type() == DeviceType::CPU);
-  check_size_nonnegative(size);
-
-  c10::Allocator* allocator;
-  if (options.pinned_memory()) {
-    allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
-  } else {
-    allocator = at::getCPUAllocator();
-  }
-
-  int64_t nelements = prod_intlist(size);
-  auto dtype = options.dtype();
-  int64_t size_bytes = nelements * dtype.itemsize();
-  auto storage_impl = c10::make_intrusive<StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
-      size_bytes,
-      allocator->allocate(size_bytes),
-      allocator,
-      /*resizeable=*/true);
-
-  auto tensor = detail::make_tensor<TensorImpl>(
-      std::move(storage_impl), at::DispatchKey::CPU, dtype);
-  // Default TensorImpl has size [0]
-  if (size.size() != 1 || size[0] != 0) {
-    tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
-  }
-
-  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
-  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
-
-  return tensor;
+  return at::empty_cpu(size, options_, optional_memory_format);
 }
 
 Tensor empty(
@@ -348,6 +311,12 @@ Tensor empty_like(
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
       result = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
+    } else if (self.unsafeGetTensorImpl()->support_as_strided() && self.layout() == kStrided) {
+      // If input tensor is not dense and non-overlapping but strided, we will infer an output strides
+      // which keeps the layout permutation of the input tensor.
+      std::vector<int64_t> strides = infer_dense_strides(self.sizes(), self.strides());
+      // See Note [Explicit nullopt MemoryFormat argument]
+      result = at::empty_strided(self.sizes(), strides, options.memory_format(c10::nullopt));
     } else {
       // See Note [Explicit nullopt MemoryFormat argument]
       result = at::empty(self.sizes(), options.memory_format(self.suggest_memory_format()), c10::nullopt);

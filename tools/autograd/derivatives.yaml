@@ -188,7 +188,7 @@
 
 - name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta)
-  mat1: mm_mat1_backward(grad, mat2, mat1, alpha)
+  mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
   mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
 
 - name: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
@@ -735,7 +735,7 @@
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
 
 - name: mm(Tensor self, Tensor mat2) -> Tensor
-  self: mm_mat1_backward(grad, mat2, self, 1)
+  self: mm_mat1_backward(grad, mat2, self.sizes(), self.strides(), 1)
   mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), 1)
 
 - name: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
