@@ -711,6 +711,7 @@ struct to_ir {
   }
 
   FunctionSchema emitDef(const Def& def, const Self* self, Block* block) {
+    std::cout<<"Enter emitDef:::"<<def.name().name()<<std::endl;
     auto schema = typeParser_.parseSchemaFromDef(def, bool(self));
     // TODO need guards on init returning none
     if (schema.returns().size() == 1) {
@@ -724,6 +725,7 @@ struct to_ir {
     emitStatements(stmts_list.begin(), stmts_list.end());
     handleMaybeNoReturn(def, block);
     std::vector<Argument> returns = {emitOutput(def.range(), schema, block)};
+    std::cout<<"Exit emitDef:::"<<def.name().name()<<std::endl;
     return {def.name().name(), "", std::move(arguments), std::move(returns)};
   }
 
@@ -1032,6 +1034,7 @@ struct to_ir {
     for (; begin != end; ++begin) {
       auto stmt = *begin;
       ErrorReport::CallStack::update_pending_range(stmt.range());
+      std::cout<<"Emit Statements  "<<kindToString(stmt.kind())<<std::endl;
       switch (stmt.kind()) {
         case TK_IF:
           emitIf(If(stmt));
@@ -2665,8 +2668,10 @@ struct to_ir {
     if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
       return emitApplySpecialForm(special_form->form(), apply, type_hint);
     }
+
     auto inputs = getNamedValues(apply.inputs(), true);
     auto attributes = emitAttributes(apply.attributes());
+    std::cout<<"In EmitApplyExpr"<<std::endl;
     return sv->call(loc, method, inputs, attributes, n_binders);
   }
 
@@ -2929,6 +2934,7 @@ struct to_ir {
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
+        std::cout<<"return from emitSugared"<<std::endl;
         return emitApplyExpr(apply, n_binders, type_hint);
       } break;
       case TK_SUBSCRIPT: {

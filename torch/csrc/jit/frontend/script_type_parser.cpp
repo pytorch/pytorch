@@ -25,6 +25,7 @@ std::string collectQualname(const Select& select) {
 TypePtr ScriptTypeParser::subscriptToType(
     const std::string& typeName,
     const Subscript& subscript) const {
+  std::cout << "TypeName " << typeName << std::endl;
   if (typeName == "Tuple") {
     std::vector<TypePtr> subscript_expr_types;
     for (auto expr : subscript.subscript_exprs()) {
@@ -171,6 +172,7 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
   // the resolver needs to recursively resolve the expression, so to avoid
   // resolving all type expr subtrees we only use it for the top level
   // expression and base type names.
+  std::cout << "parseTypeFromExpr " << kindToString(expr.kind()) << std::endl;
   if (resolver_) {
     if (auto typePtr =
             resolver_->resolveType(expr.range().text(), expr.range())) {
@@ -181,6 +183,7 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
 }
 
 TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
+  std::cout << "Expression of type " << kindToString(expr.kind()) << std::endl;
   if (expr.kind() == TK_SUBSCRIPT) {
     auto subscript = Subscript(expr);
     auto value_name = parseBaseTypeName(subscript.value());
@@ -191,6 +194,14 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
     return subscriptToType(*value_name, subscript);
 
   } else if (auto name = parseBaseTypeName(expr)) {
+    std::cout << " type name " << *name << std::endl;
+
+    if (*name == "torch.classes.cuda.Stream") {
+        std::cout << " In custom Class " << *name << std::endl;
+        auto custom_class_type = getCustomClass(std::string("__torch__.torch.classes.cuda.Stream"));
+        return custom_class_type;
+    }
+
     auto itr = string_to_type_lut().find(*name);
     if (itr != string_to_type_lut().end()) {
       return itr->second;

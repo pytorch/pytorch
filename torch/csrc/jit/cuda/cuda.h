@@ -1,9 +1,10 @@
 #pragma once
 
 #include <aten/src/ATen/cuda/CUDAEvent.h>
+#include <c10/core/Device.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/custom_class.h>
-namespace torch {
+/*namespace torch {
 namespace jit {
 
 class CUDAEvent;
@@ -69,4 +70,4 @@ private:
   friend class CUDAStream;
 };
 }
-}
+}*/

@@ -142,7 +142,7 @@ static Value* tryMatchArgument(
     bool allow_conversions,
     TypeEnv& type_env) {
   Value* value = named_value.value(graph);
-
+  std::cout<<"arg.type "<<arg.type()->repr_str()<<" value: "<<value->type()->repr_str()<<std::endl;
   // Some functions that take lists of integers or floats for fixed size arrays
   // also allow single ints/floats to be passed in their place. The single
   // int/float is then repeated to the length of the list
@@ -459,7 +459,9 @@ MatchedSchema matchSchema(
           self,
           &failure_messages,
           /*allow_conversions=*/true)) {
+    std::cout<<"result returned from matchSchema"<<std::endl;
     return *result;
+
   }
   throw ErrorReport(loc) << failure_messages.str();
 }
@@ -501,6 +503,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
   // if there is only one schema, we do not need to try without conversions
   // first. this is faster and puts less dead code in the graph.
   if (schemas.size() == 1) {
+    std::cout<<"Return from matchin Schemas"<<std::endl;
     return std::make_pair(
         0, matchSchema(*schemas.at(0), loc, graph, args, kwargs, self));
   }
@@ -519,6 +522,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
           render_errors ? &failure_messages : nullptr,
           allow_conversions);
       if (matched_schema) {
+        std::cout<<"Return from matchin Schemas"<<std::endl;
         return std::make_pair(i, std::move(*matched_schema));
       }
     }
@@ -589,7 +593,7 @@ Value* emitBuiltinCall(
     const c10::optional<NamedValue>& self) {
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
-
+  std::cout<<"name.toQualString()::"<<name.toQualString()<<std::endl;
   std::stringstream failure_messages;
   std::vector<const FunctionSchema*> schemas;
   for (const std::shared_ptr<Operator>& op : variants) {

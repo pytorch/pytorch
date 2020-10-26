@@ -14,7 +14,7 @@
 #include <aten/src/ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/frontend/error_report.h>
-#include <torch/csrc/jit/cuda/cuda.h>
+#include <torch/csrc/jit/cuda/cuda.cpp>
 
 #include <regex>
 #include <sstream>
@@ -30,10 +30,22 @@ TORCH_LIBRARY(cuda, m) {
   auto event_class = m.class_<torch::jit::CUDAEvent>("Event").def(torch::init<bool, bool, bool>());
 
   stream_class.def("query", &CUDAStream::query)
+    .def_pickle([](const c10::intrusive_ptr<torch::jit::CUDAStream>& self)
+      -> c10::IValue { // __getstate__
+      auto idx = self->device_index();
+      return make_custom_class<torch::jit::CUDAStream>(idx);
+      },
+      [](c10::IValue v) -> c10::intrusive_ptr<torch::jit::CUDAStream> { // __setstate__
+      return v.toCustomClass<torch::jit::CUDAStream>();
+    })
     .def("record_event", &CUDAStream::recordEvent)
     .def("synchronize", &CUDAStream::synchronize)
     .def("wait_event", &CUDAStream::waitEvent)
-    .def("wait_stream", &CUDAStream::waitStream);
+    .def("wait_stream", &CUDAStream::waitStream)
+    .def("device_index", &CUDAStream::device_index)
+    .def("device", &CUDAStream::device)
+    .def("pack", &CUDAStream::pack)
+    .def("id", &CUDAStream::id);
 
   event_class.def("elapsed_time", &CUDAEvent::elapsedTime)
     .def("ipc_handle", &CUDAEvent::ipcHandle)
@@ -453,19 +465,54 @@ RegisterOperators reg({
         "aten::set_grad_enabled(bool val) -> ()",
         [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
-
     Operator(
-        "aten::cuda_getCurrentStream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
+        "aten::getCudaStream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
         [](Stack* stack) {
           int64_t idx;
           pop(stack, idx);
-          std::cout<<"The idx is:"<<idx<<std::endl;
           auto v = make_custom_class<torch::jit::CUDAStream>(idx);
-          //std::cout<<"The v is:"<<v.isCustomClass()<<std::endl;
-          // push(stack, v.toCustomClass<torch::jit::CUDAStream>());
           push(stack, v);
         },
         aliasAnalysisFromSchema()),
+    Operator(
+        "aten::get_device() -> int",
+        [](Stack* stack) {
+          auto v = c10::cuda::current_device();
+          push(stack, v);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::set_device(int64_t val) -> ()",
+        [](Stack* stack) {
+          int64_t idx;
+          pop(stack, idx);
+          c10::cuda::set_device(idx);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::get_device_index(Device device) -> int",
+        [](Stack* stack) {
+          auto device = pop(stack);
+          auto idx = device.toDevice().index();
+          push(stack, idx);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::get_device_count() -> int",
+        [](Stack* stack) {
+          push(stack, at::cuda::device_count());
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::setCudaStream(__torch__.torch.classes.cuda.Stream stream) -> ()",
+        [](Stack* stack) {
+          auto v = pop(stack);
+          auto s = v.toCustomClass<torch::jit::CUDAStream>();
+          auto packed = s->pack();
+          auto unpacked = c10::cuda::CUDAStream::unpack(packed);
+          c10::cuda::setCurrentCUDAStream(unpacked);
+        },
+        aliasAnalysisConservative()),
 });
 } // namespace
 } // namespace jit

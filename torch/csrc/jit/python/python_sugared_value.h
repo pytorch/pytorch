@@ -90,6 +90,15 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
       const std::string& field) override;
 };
 
+struct VISIBILITY_HIDDEN CUDAPythonModuleValue : public PythonValue {
+  explicit CUDAPythonModuleValue(py::object mod) : PythonValue(std::move(mod)) {}
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) override;
+};
+
 // Represents all the parameters of a module as a List[Tensor]
 struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
   ConstantParameterList(Value* the_list) : the_list_(the_list) {}

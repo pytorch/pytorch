@@ -83,6 +83,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
+  std::cout<<"Builtin type::"<<value_->type()->repr_str()<<std::endl;
   // Allow method-style casts on Tensor types. e.g. x.int()
   if (value_->type()->isSubtypeOf(TensorType::get())) {
     if (builtin_cast_method_to_scalar_type().count(field)) {

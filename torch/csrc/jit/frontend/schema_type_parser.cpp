@@ -284,6 +284,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
   TypePtr value;
   c10::optional<AliasInfo> alias_info;
   // Tuple type
+  std::cout<<"In parseType::"<<L.cur().text()<<std::endl;
   if (L.cur().kind == '(') {
     std::vector<TypePtr> types;
     parseList('(', ',', ')', [&] {
@@ -323,6 +324,11 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     L.expect(')');
     alias_info = parseAliasAnnotation();
     value = DictType::create(key_type, value_type);
+  } else if( L.cur().text() == "torch.classes.cuda.Stream") {
+    std::cout<<"L.cur.text::"<<L.cur().text()<<std::endl;
+    value = getCustomClass(std::string("__torch__.torch.classes.cuda.Stream"));
+    std::cout<<"Value is::"<<value<<std::endl;
+    //alias_info = parseAliasAnnotation();
   } else if (
       complete_tensor_types && L.cur().kind == TK_IDENT &&
       parseTensorDType(L.cur().text())) {
@@ -349,6 +355,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     value = getCustomClass(
         std::string("__torch__.torch.classes.") + ns_tok.text() + "." +
         class_tok.text());
+    std::cout<<"ns_tok"<<ns_tok.text()<<"class_tok::"<<class_tok.text()<<std::endl;
     if (!value) {
       throw ErrorReport(class_tok.range)
           << "Unknown custom class type "
@@ -375,6 +382,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
       break;
     }
   }
+
   return std::make_pair(std::move(value), std::move(alias_info));
 }
 
