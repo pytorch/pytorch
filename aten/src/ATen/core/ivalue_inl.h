@@ -678,6 +678,9 @@ inline const ivalue::Object& IValue::toObjectRef() const {
   inline type IValue::to<type>() const& {  \
     return this->method_name();            \
   }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
 DEFINE_TO(at::Tensor, toTensor)
 DEFINE_TO(c10::Stream, toStream)
 DEFINE_TO(float, toDouble)
@@ -715,6 +718,7 @@ DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 DEFINE_TO(at::QScheme, toQScheme)
 DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
+#pragma GCC diagnostic pop
 
 template <class T>
 struct _fake_type {};
