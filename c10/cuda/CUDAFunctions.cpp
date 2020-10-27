@@ -40,7 +40,7 @@ int device_count_impl() {
       } else {
         TORCH_CHECK(
             false,
-            "The NVIDIA driver on your system is too old (found version ",
+            "The Test NVIDIA driver on your system is too old (found version ",
             version,
             "). Please update your GPU driver by downloading and installing "
             "a new version from the URL: "
