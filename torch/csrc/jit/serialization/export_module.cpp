@@ -104,7 +104,7 @@ void setModulePath(Node* node, const std::string& root_scope_string) {
   }
 }
 
-void reconstructScopes(
+void setModulePaths(
     std::shared_ptr<Graph> graph,
     const std::string& root_scope_string) {
   std::stack<Block*> blocks_to_visit;
@@ -130,7 +130,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   Inline(*graph);
   if (save_mobile_debug_info) {
     std::string root_scope_string = getModuleTypeName(module, "top");
-    reconstructScopes(graph, root_scope_string);
+    setModulePaths(graph, root_scope_string);
   }
 
   torch::jit::Code code(graph, func.name());
