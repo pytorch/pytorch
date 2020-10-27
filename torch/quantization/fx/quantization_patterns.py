@@ -600,7 +600,8 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
             assert node.name in quantizer.activation_post_process_map
             observed_custom_module.activation_post_process = \
                 quantizer.activation_post_process_map[node.name]
-        quantized_custom_module_class = get_swapped_custom_module_class(observed_custom_module, custom_module_class_mapping, qconfig)
+        quantized_custom_module_class = get_swapped_custom_module_class(
+            observed_custom_module, custom_module_class_mapping, qconfig)
         quantized_custom_module = \
             quantized_custom_module_class.from_observed(observed_custom_module)
         parent_name, name = _parent_name(node.target)

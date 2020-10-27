@@ -225,7 +225,8 @@ def get_quant_type(qconfig):
         if activation.dtype == torch.float:
             return QuantType.WEIGHT_ONLY
 
-    raise Exception("Unrecognized dtype combination in get_quant_type: activation({}), weight({})".format(activation.dtype, weight.dtype))
+    raise Exception("Unrecognized dtype combination in get_quant_type: activation({}),"
+                    "weight({})".format(activation.dtype, weight.dtype))
 
 def get_linear_prepack_op_for_dtype(dtype):
     if dtype == torch.float16:

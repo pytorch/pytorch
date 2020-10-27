@@ -572,7 +572,8 @@ class Quantizer:
         model.eval().cpu()
         self.modules = dict(model.named_modules())
 
-        custom_module_classes = get_custom_module_class_keys(convert_custom_config_dict, "observed_to_quantized_custom_module_class")
+        custom_module_classes = get_custom_module_class_keys(
+            convert_custom_config_dict, "observed_to_quantized_custom_module_class")
         matches = self._find_matches(
             model.graph, self.modules, self.patterns,
             custom_module_classes=custom_module_classes)

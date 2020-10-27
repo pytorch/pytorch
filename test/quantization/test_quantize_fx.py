@@ -773,7 +773,7 @@ class TestQuantizeFx(QuantizationTestCase):
             if quant_type == QuantType.STATIC:
                 count_check = {
                     ns.call_function(torch.quantize_per_tensor) : 1,
-                    ns.call_module(nnq.Conv2d) : 1,
+                    ns.call_module(nnq.Linear) : 1,
                     ns.call_method('dequantize') : 1,
                 }
                 self.checkGraphModuleNodes(m, expected_node_occurrence=count_check)

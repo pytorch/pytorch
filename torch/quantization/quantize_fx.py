@@ -75,7 +75,8 @@ forward graph of the parent module,
         # standalone module and custom module config are applied in top level module
         standalone_module_names = prepare_custom_config_dict.get('standalone_module_name', [])
         skipped_module_names += standalone_module_names
-        float_custom_module_classes = get_custom_module_class_keys(prepare_custom_config_dict, "float_to_observed_custom_module_class")
+        float_custom_module_classes = get_custom_module_class_keys(
+            prepare_custom_config_dict, "float_to_observed_custom_module_class")
         skipped_module_classes += float_custom_module_classes
     tracer = CustomTracer(skipped_module_names, skipped_module_classes)
     graph_module = GraphModule(model, tracer.trace(model))
