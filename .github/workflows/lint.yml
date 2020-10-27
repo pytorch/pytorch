@@ -31,6 +31,10 @@ jobs:
       - name: Ensure canonical include
         run: |
           (! git grep -I -l $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above files have include with quotes; please convert them to #include <xxxx>"; false))
+      # note that this next step depends on a clean shallow checkout;
+      # if you run it locally in a deep checkout then it will complain
+      # about android/libs/fbjni/gradlew (in a submodule),
+      # as well as all the generated files in torch/test
       - name: Ensure C++ source files are not executable
         run: |
           (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit|git-clang-format)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
@@ -62,9 +66,9 @@ jobs:
       - name: Run flake8
         run: |
           set -eux
-          pip install flake8==3.8.2 flake8-mypy flake8-bugbear flake8-comprehensions flake8-executable flake8-pyi==20.5.0 mccabe pycodestyle==2.6.0 pyflakes==2.2.0
+          pip install flake8==3.8.2 flake8-bugbear flake8-comprehensions flake8-executable flake8-pyi==20.5.0 mccabe pycodestyle==2.6.0 pyflakes==2.2.0
           flake8 --version
-          flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8-output.txt
+          flake8 > ${GITHUB_WORKSPACE}/flake8-output.txt
           cat ${GITHUB_WORKSPACE}/flake8-output.txt
       - name: Add annotations
         uses: pytorch/add-annotations-github-action@master
