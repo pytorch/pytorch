@@ -1,7 +1,5 @@
 #pragma once
 
-#include <functional>
-
 #include <ATen/ATen.h>
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/utils/pybind.h>
