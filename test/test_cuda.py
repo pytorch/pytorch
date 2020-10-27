@@ -507,13 +507,14 @@ class TestCuda(TestCase):
 
     @skipIfRocm
     def test_to_non_blocking(self):
+        stream = torch.cuda.current_stream()
+
         def _test_to_non_blocking(a, non_blocking, dst):
-            stream = torch.cuda.current_stream()
             torch.cuda.synchronize()
             # Pushes an 0.1 second spin to stream so if the copy is non blocking,
             # stream will almost surely be active when we query().
             torch.cuda._sleep(int(100 * get_cycles_per_ms()))
-            b = a.to(dst, non_blocking=non_blocking)
+            b = a.to(device=dst, non_blocking=non_blocking)
             self.assertEqual(stream.query(), not non_blocking)
             stream.synchronize()
             self.assertEqual(a, b)
@@ -523,6 +524,15 @@ class TestCuda(TestCase):
             # Creates source on the opposite device from destination.
             src = torch.randn(1000000, device="cuda" if dst == "cpu" else "cpu")
             _test_to_non_blocking(src, try_non_blocking, dst)
+
+        # Ensures device to host copy chooses "safe" behavior (blocking copy to non-pinned memory) by default.
+        src = torch.randn(1000000, device="cuda")
+        torch.cuda.synchronize()
+        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+        dst = src.to(device="cpu")
+        self.assertEqual(stream.query(), True)
+        self.assertEqual(src, dst)
+        self.assertFalse(dst.is_pinned())
 
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).cuda()
