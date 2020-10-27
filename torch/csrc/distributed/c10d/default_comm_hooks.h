@@ -5,12 +5,16 @@
 
 namespace c10d {
 
-c10::intrusive_ptr<torch::jit::Future> allReduceHook(
-    ProcessGroup* process_group,
-    GradBucket& bucket);
+class AllReduceCommHook : public CppCommHookInterface<ProcessGroup*> {
+  ~AllReduceCommHook() override {}
 
-c10::intrusive_ptr<torch::jit::Future> fp16CompressHook(
-    ProcessGroup* process_group,
-    GradBucket& bucket);
+  c10::intrusive_ptr<torch::jit::Future> runHook(GradBucket& bucket) override;
+};
+
+class FP16CompressCommHook : public CppCommHookInterface<ProcessGroup*> {
+  ~FP16CompressCommHook() override {}
+
+  c10::intrusive_ptr<torch::jit::Future> runHook(GradBucket& bucket) override;
+};
 
 } // namespace c10d

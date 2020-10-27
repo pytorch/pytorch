@@ -6,13 +6,12 @@
 
 namespace c10d {
 
-c10::intrusive_ptr<torch::jit::Future> allReduceHook(
-    ProcessGroup* process_group,
+c10::intrusive_ptr<torch::jit::Future> AllReduceCommHook::runHook(
     GradBucket& bucket) {
-  auto allreduce_work = process_group->allreduce(*bucket.getTensorsRef());
+  auto allreduce_work = state_->allreduce(bucket.getTensorsRef());
 
-  auto div_by_process_group_size = [allreduce_work, process_group]() {
-    auto tensor = allreduce_work->result()[0] / process_group->getSize();
+  auto div_by_process_group_size = [allreduce_work, this]() {
+    auto tensor = allreduce_work->result()[0] / state_->getSize();
     return c10::IValue(tensor);
   };
 
@@ -20,19 +19,17 @@ c10::intrusive_ptr<torch::jit::Future> allReduceHook(
   return fut->then(div_by_process_group_size, fut->elementType());
 }
 
-c10::intrusive_ptr<torch::jit::Future> fp16CompressHook(
-    ProcessGroup* process_group,
+c10::intrusive_ptr<torch::jit::Future> FP16CompressCommHook::runHook(
     GradBucket& bucket) {
-  auto* tensors = bucket.getTensorsRef();
-  for (auto& tensor : *tensors) {
+  auto& tensors = bucket.getTensorsRef();
+  for (auto& tensor : tensors) {
     tensor.copy_(tensor.to(torch::kFloat16));
   }
-  auto allreduce_work = process_group->allreduce(*tensors);
+  auto allreduce_work = state_->allreduce(tensors);
 
-  auto decompress_and_div_by_process_group_size = [allreduce_work,
-                                                   process_group]() {
+  auto decompress_and_div_by_process_group_size = [allreduce_work, this]() {
     auto tensor = allreduce_work->result()[0];
-    tensor.copy_(tensor.to(torch::kFloat) / process_group->getSize());
+    tensor.copy_(tensor.to(torch::kFloat) / state_->getSize());
     return c10::IValue(tensor);
   };
 
