@@ -416,8 +416,8 @@ def _log_api_usage_once(str) -> None: ...  # LogAPIUsageOnceFromPython
 def _demangle(str) -> str: ...  # c10::demangle
 
 # Defined in `valgrind.h` and `callgrind.h` respecitively.
-def valgrind_supported_platform() -> _bool: ...  # NVALGRIND
-def valgrind_toggle() -> None: ...  # CALLGRIND_TOGGLE_COLLECT
+def _valgrind_supported_platform() -> _bool: ...  # NVALGRIND
+def _valgrind_toggle() -> None: ...  # CALLGRIND_TOGGLE_COLLECT
 
 has_openmp: _bool
 has_mkl: _bool

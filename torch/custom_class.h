@@ -58,14 +58,16 @@ class class_ {
   /// see this class exposed as in Python and TorchScript. For example, if
   /// you pass `foo` as the namespace name and `Bar` as the className, the
   /// class will appear as `torch.classes.foo.Bar` in Python and TorchScript
-  explicit class_(const std::string& namespaceName, const std::string& className) {
+  explicit class_(const std::string& namespaceName, const std::string& className, std::string doc_string = "") {
     detail::checkValidIdent(namespaceName, "Namespace name");
     detail::checkValidIdent(className, "Class name");
     qualClassName = std::string("__torch__.torch.classes.") + namespaceName + "." + className;
 
     classTypePtr = at::ClassType::create(
         c10::QualifiedName(qualClassName),
-        std::weak_ptr<jit::CompilationUnit>());
+        std::weak_ptr<jit::CompilationUnit>(),
+        /*is_module=*/false,
+        std::move(doc_string));
     classTypePtr->addAttribute("capsule", at::CapsuleType::get());
 
     c10::getCustomClassTypeMap().insert(
@@ -81,7 +83,7 @@ class class_ {
   /// `torch::init<int, std::string>()` would register a two-argument constructor
   /// taking an `int` and a `std::string` as argument.
   template <typename... Types>
-  class_& def(detail::types<void, Types...>) { // Used in combination with
+  class_& def(detail::types<void, Types...>, std::string doc_string = "") { // Used in combination with
                                                // torch::init<...>()
     auto func = [](c10::tagged_capsule<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
@@ -89,7 +91,7 @@ class class_ {
       object->setSlot(0, c10::IValue::make_capsule(std::move(classObj)));
     };
 
-    defineMethod("__init__", std::move(func));
+    defineMethod("__init__", std::move(func), std::move(doc_string));
     return *this;
   }
 
@@ -112,18 +114,18 @@ class class_ {
   ///       // do something
   ///     })
   template <typename Func>
-  class_& def(std::string name, Func f) {
+  class_& def(std::string name, Func f, std::string doc_string = "") {
     auto wrapped_f = detail::wrap_func<CurClass, Func>(std::move(f));
-    defineMethod(std::move(name), std::move(wrapped_f));
+    defineMethod(std::move(name), std::move(wrapped_f), std::move(doc_string));
     return *this;
   }
 
   /// This is an unsafe method registration API added for adding custom JIT backend support via custom
   /// C++ classes. It is not for general purpose use.
-  class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema) {
+  class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema, std::string doc_string = "") {
     auto qualMethodName = qualClassName + "." + name;
     auto method = std::make_unique<jit::BuiltinOpFunction>(
-        qualMethodName, std::move(schema), std::move(func));
+        qualMethodName, std::move(schema), std::move(func), std::move(doc_string));
     classTypePtr->addMethod(method.get());
     registerCustomClassMethod(std::move(method));
     return *this;
@@ -228,7 +230,7 @@ class class_ {
 
  private:
   template <typename Func>
-  void defineMethod(std::string name, Func func) {
+  void defineMethod(std::string name, Func func, std::string doc_string = "") {
     auto qualMethodName = qualClassName + "." + name;
     auto schema = c10::inferFunctionSchemaSingleReturn<Func>(std::move(name), "");
 
@@ -241,7 +243,7 @@ class class_ {
       detail::BoxedProxy<RetType, Func>()(stack, func);
     };
     auto method = std::make_unique<jit::BuiltinOpFunction>(
-        qualMethodName, std::move(schema), std::move(wrapped_func));
+        qualMethodName, std::move(schema), std::move(wrapped_func), std::move(doc_string));
 
     // Register the method here to keep the Method alive.
     // ClassTypes do not hold ownership of their methods (normally it
