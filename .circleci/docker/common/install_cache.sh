@@ -68,7 +68,7 @@ if [ -n "$CUDA_VERSION" ]; then
   # where CUDA is installed.  Instead, we install an nvcc symlink outside
   # of the PATH, and set CUDA_NVCC_EXECUTABLE so that we make use of it.
 
-  write_sscache_stub nvcc
+  write_sccache_stub nvcc
   mv /opt/cache/bin/nvcc /opt/cache/lib/
 fi
 
