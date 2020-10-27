@@ -9719,7 +9719,7 @@ class TestTorchDeviceType(TestCase):
 
             if eigenvectors:
                 x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute.to(dtype))), outv.transpose(-2, -1).conj())
-                self.assertEqual(x, x_recon, atol=recon_tol, rtol=0)#, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
+                self.assertEqual(x, x_recon, atol=recon_tol, rtol=0, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
             else:
                 eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
                 self.assertEqual(eigvals, oute, msg='Eigenvalues mismatch')
@@ -9738,7 +9738,7 @@ class TestTorchDeviceType(TestCase):
             rese, resv = torch.symeig(x, eigenvectors=eigenvectors, upper=upper)
             if eigenvectors:
                 x_recon = torch.matmul(torch.matmul(resv, torch.diag_embed(rese.to(dtype))), resv.transpose(-2, -1).conj())
-                self.assertEqual(x, x_recon, atol=recon_tol, rtol=0)#, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
+                self.assertEqual(x, x_recon, atol=recon_tol, rtol=0, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
             else:
                 eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
                 self.assertEqual(eigvals, rese, msg='Eigenvalues mismatch')
