@@ -1388,6 +1388,13 @@ std::tuple<Tensor&, Tensor&> eig_cuda_out(Tensor& e, Tensor& v, const Tensor& se
       at::native::resize_output(v, self.sizes());
   }
 
+  // optimization: if self is empty, we can immediately return the empty
+  // GPU tensors, instead of getting empty CPU tensors from eig_cuda_helper
+  // and copying them to GPU
+  if (self.numel() == 0) {
+      return std::tuple<Tensor&, Tensor&>(e, v);
+  }
+
   Tensor cpu_vals, cpu_vecs;
   std::tie(cpu_vals, cpu_vecs) = eig_cuda_helper(self, n, eigenvectors);
   e.copy_(cpu_vals);
@@ -1402,22 +1409,13 @@ std::tuple<Tensor,Tensor> eig_cuda(const Tensor& self, bool eigenvectors) {
   squareCheckInputs(self);
   int64_t n = self.size(-1);
 
-  // optimization: if self is empty, we can immediately allocate&return empty
-  // GPU tensors, instead of getting empty CPU tensors from eig_cuda_helper
-  // and copying them to GPU
-  if (self.numel() == 0) {
-    auto eigvals = at::empty({n, 2}, self.options());
-    return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
-  }
-
-  Tensor cpu_vals, cpu_vecs;
-  std::tie(cpu_vals, cpu_vecs) = eig_cuda_helper(self, n, eigenvectors);
-
+  Tensor e, v;
+  e = at::empty({n, 2}, self.options());
   if (eigenvectors) {
-      return std::tuple<Tensor, Tensor>(cpu_vals.to(self.device()), cpu_vecs.to(self.device()));
-  } else {
-      return std::tuple<Tensor, Tensor>(cpu_vals.to(self.device()), at::empty({0}, self.options()));
+      v = at::empty({n, n}, self.options());
   }
+  eig_cuda_out(e, v, self, eigenvectors);
+  return std::tuple<Tensor, Tensor>(e, v);
 }
 
 
