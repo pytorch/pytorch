@@ -1,5 +1,9 @@
 #include <ATen/native/cuda/Normalization.cuh>
 
+inline bool batch_norm_use_channels_last_kernels(const at::Tensor& self) {
+  return self.is_contiguous(at::MemoryFormat::ChannelsLast) || self.ndimension() == 2;
+}
+
 namespace at { namespace native {
 
 std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(Tensor& output, Tensor& save_mean, Tensor& save_invstd, const Tensor& self, const Tensor& weight, const Tensor& bias,
@@ -78,7 +82,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
 }
 
 std::tuple<Tensor, Tensor> batch_norm_stats_cuda(const Tensor& self, double epsilon) {
-  bool use_channels_last_kernel = (self.is_contiguous(at::MemoryFormat::ChannelsLast) || self.ndimension() == 2);
+  bool use_channels_last_kernel = batch_norm_use_channels_last_kernels(self);
 
   return AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "batch_norm_stats_cuda", [&] {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "batch_norm_stats_cuda", [&] {
@@ -97,13 +101,19 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda(const Tensor& self, double epsi
 
 Tensor batch_norm_elemt_cuda(const Tensor& self, const Tensor& weight, const Tensor& bias,
                              const Tensor& mean, const Tensor& invstd, double epsilon) {
-  auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto output = at::empty_like(self, self.suggest_memory_format());
   batch_norm_elemt_cuda_out(output, self, weight, bias, mean, invstd, epsilon);
   return output;
 }
 
 Tensor& batch_norm_elemt_cuda_out(Tensor& output, const Tensor& self, const Tensor& weight, const Tensor& bias,
                              const Tensor& mean, const Tensor& invstd, double epsilon) {
+  if (at::cuda::detail::canUse32BitIndexMath(self) && batch_norm_use_channels_last_kernels(self)){
+    batch_norm_elemt_channels_last_cuda_template(output, self, weight, bias, mean, invstd, epsilon,
+      /* (bias after BN) z = */ c10::nullopt, /* fuse_relu = */ false);
+    return output;
+  }
+
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "batch_norm_elemt", [&] {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "batch_norm_elemt", [&] {
       auto mean_st = mean.dtype();

@@ -17,8 +17,6 @@ class SyncBatchNorm(Function):
         # calculate mean/invstd for input.
         mean, invstd = torch.batch_norm_stats(input, eps)
 
-        input = input.contiguous()  #TODO: remove this after batch_norm_gather_stats_with_counts channels_last
-
         num_channels = input.shape[1]
         # C, C, 1 -> (2C + 1)
         combined = torch.cat([mean, invstd, count], dim=0)

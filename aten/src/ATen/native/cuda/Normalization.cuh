@@ -958,7 +958,7 @@ template
     typename accscalar_t,
     int PARALLEL_LOADS>
 __global__ void
-welford_kernel_c_last(
+welford_kernel_channels_last(
       const scalar_t* __restrict__ input,
       accscalar_t* __restrict__ out_mean,
       accscalar_t* __restrict__ out_invstd,
@@ -1096,6 +1096,56 @@ welford_kernel_c_last(
   }
 }
 
+// elementwise BN kernel
+template <
+    typename scalar_t,
+    typename accscalar_t,
+    typename layerscalar_t,
+    int PARALLEL_LOADS>
+__global__ void batchnorm_forward_channels_last_kernel(
+      const scalar_t* __restrict__ input,
+      const scalar_t* __restrict__ z,
+      const accscalar_t* __restrict__ mean,
+      const accscalar_t* __restrict__ inv_std,
+      const layerscalar_t* __restrict__ weight,
+      const layerscalar_t* __restrict__ shift,
+      scalar_t* __restrict__ out,
+      const int reduction_size,
+      const int stride,
+      const bool fuse_relu) {
+  // tensor dimension (m,c)
+  // loop along m dimension
+  int inner_loop_stride = blockDim.y * gridDim.y;
+
+  // offset along m dimension
+  int m_offset = blockIdx.y * blockDim.y + threadIdx.y;
+  int c_offset = blockIdx.x * blockDim.x + threadIdx.x;
+
+  auto m_c = mean[c_offset];
+  auto inv_std_c = static_cast<accscalar_t>(inv_std[c_offset]);
+  auto w_c = weight == nullptr ? accscalar_t(1.0) : static_cast<accscalar_t>(weight[c_offset]);
+  auto s_c = shift == nullptr ? accscalar_t(0.0) : static_cast<accscalar_t>(shift[c_offset]);
+
+  int loop_count = 1 + (reduction_size - 1) / (inner_loop_stride * PARALLEL_LOADS);
+  int address_base = m_offset * stride + c_offset;
+  int address_increment = inner_loop_stride * stride;
+
+  for (int i = 0; i < loop_count; i++) {
+#pragma unroll
+    for (int j = 0; j < PARALLEL_LOADS; j++) {
+      if (c_offset < stride && m_offset < reduction_size) {
+        auto tmp = w_c * (static_cast<accscalar_t>(input[address_base]) - m_c ) * inv_std_c + s_c;
+        if (z != nullptr) {
+          tmp += z[address_base];
+        }
+        out[address_base] = (fuse_relu && tmp <= accscalar_t(0.0) ? scalar_t(0.0) : static_cast<scalar_t>(tmp));
+      }
+      m_offset += inner_loop_stride;
+      address_base += address_increment;
+    }
+  }
+}
+
 template<typename scalar_t>
 std::tuple<Tensor, Tensor> batch_norm_stats_channels_last_cuda_template(const Tensor& input, double epsilon) {
   using accscalar_t = at::acc_type<scalar_t, true>;
@@ -1122,7 +1172,7 @@ std::tuple<Tensor, Tensor> batch_norm_stats_channels_last_cuda_template(const Te
 
   accscalar_t* staging_data_ptr = grid.y > 1 ? staging_data.data_ptr<accscalar_t>() : nullptr;
   int* semaphores_ptr = grid.y > 1 ? semaphores.data_ptr<int>() : nullptr;
-  welford_kernel_c_last<InvStd, scalar_t, accscalar_t, ELEMENTS_PER_ITER>
+  welford_kernel_channels_last<InvStd, scalar_t, accscalar_t, ELEMENTS_PER_ITER>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
       input.data_ptr<scalar_t>(),
       out_mean.data_ptr<accscalar_t>(),
@@ -1134,6 +1184,64 @@ std::tuple<Tensor, Tensor> batch_norm_stats_channels_last_cuda_template(const Te
       epsilon);
 
   return std::make_tuple(out_mean, out_invstd);
+}
+
+void batch_norm_elemt_channels_last_cuda_template(
+    at::Tensor& output,
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& shift,  // bias of BN
+    const at::Tensor& mean,
+    const at::Tensor& inv_std,
+    double epsilon,
+    const at::optional<at::Tensor>& z,  // bias after BN
+    const bool fuse_relu) {
+  const auto stride = input.size(1);
+  const auto reduction_size = input.numel() / stride;
+
+  dim3 block;
+  dim3 grid;
+  flexible_launch_configs(reduction_size, stride, block, grid);
+
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  if (input.scalar_type() == at::kHalf && weight.defined() && weight.scalar_type() == at::kFloat) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "batchnorm_forward", [&]{
+      using accscalar_t = at::acc_type<scalar_t, true>;
+      batchnorm_forward_channels_last_kernel<scalar_t, accscalar_t, accscalar_t, ELEMENTS_PER_ITER>
+          <<<grid, block, 0, stream>>>(
+          input.data_ptr<scalar_t>(),
+          z.has_value() ? z.value().data_ptr<scalar_t>() : nullptr,
+          mean.data_ptr<accscalar_t>(),
+          inv_std.data_ptr<accscalar_t>(),
+          weight.defined() ? weight.data_ptr<accscalar_t>() : nullptr,
+          shift.defined() ? shift.data_ptr<accscalar_t>() : nullptr,
+          output.data_ptr<scalar_t>(),
+          reduction_size,
+          stride,
+          fuse_relu);
+    });
+  } else {
+    if (weight.defined()){
+      TORCH_CHECK(input.scalar_type() == weight.scalar_type(), "input.scalar_type() ", input.scalar_type(),
+        " is not supported with weight.scalar_type() ", weight.scalar_type());
+    }
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "batchnorm_forward", [&]{
+      using accscalar_t = at::acc_type<scalar_t, true>;
+      batchnorm_forward_channels_last_kernel<scalar_t, accscalar_t, scalar_t, ELEMENTS_PER_ITER>
+          <<<grid, block, 0, stream>>>(
+          input.data_ptr<scalar_t>(),
+          z.has_value() ? z.value().data_ptr<scalar_t>() : nullptr,
+          mean.data_ptr<accscalar_t>(),
+          inv_std.data_ptr<accscalar_t>(),
+          weight.defined() ? weight.data_ptr<scalar_t>() : nullptr,
+          shift.defined() ? shift.data_ptr<scalar_t>(): nullptr,
+          output.data_ptr<scalar_t>(),
+          reduction_size,
+          stride,
+          fuse_relu);
+    });
+  }
 }
 
 } } // namespace at::native
