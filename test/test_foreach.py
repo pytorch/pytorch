@@ -709,9 +709,9 @@ class TestForeach(TestCase):
             tensors2 = []
 
             # Empty lists
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
                 bin_op(tensors1, tensors2)
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
                 bin_op_(tensors1, tensors2)
 
             # One empty list
@@ -747,7 +747,7 @@ class TestForeach(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                     bin_op_([tensor1], [tensor2])
 
-            # Coresponding tensors with different sizes
+            # Corresponding tensors with different sizes
             tensors1 = [torch.zeros(10, 10, device=device) for _ in range(10)]
             tensors2 = [torch.ones(11, 11, device=device) for _ in range(10)]
             with self.assertRaisesRegex(RuntimeError, "Corresponding tensors in lists must have the same size"):
