@@ -1768,6 +1768,11 @@ The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
 
+.. note::
+    If :attr:`index` contains duplicate entries, multiple elements from
+    :attr:`tensor` will be copied to the same index of :attr:`self`. The result
+    is nondeterministic since it depends on which copy occurs last.
+
 Args:
     dim (int): dimension along which to index
     index (LongTensor): indices of :attr:`tensor` to select from
