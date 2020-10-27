@@ -780,16 +780,55 @@ class TestAutograd(TestCase):
         sparse = torch.sparse_coo_tensor(size, requires_grad=True)
         dense = torch.randn(size, requires_grad=True)
 
-        z = sparse.mm(dense)
-        with self.assertRaisesRegex(RuntimeError,
-                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
-            z.sum().backward()
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "The backward pass for this operation requires the 'mat1' tensor to be strided,"):
+            z = dense.addmm(sparse, dense)
 
-        z = dense.addmm(sparse, dense)
-        with self.assertRaisesRegex(RuntimeError,
-                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
-            z.sum().backward()
+        mm_test_cases = [
+            # a requires grad, a is sparse, b requires grad, b is sparse, error message
+            (False, True, True, False, None),
+            (False, False, True, True, "The backward pass for this operation requires the 'mat2'"),
+            (False, True, True, True, "The backward pass for this operation requires the 'mat2'"),
+            (True, False, True, True, "The backward pass for this operation requires the 'mat2'"),
+            (True, True, False, False, "The backward pass for this operation requires the 'self'"),
+            (True, True, True, False, "The backward pass for this operation requires the 'self'"),
+            (True, True, True, True, "The backward pass for this operation requires the 'mat2'"),
+        ]
+        for a_req_grad, a_is_sparse, b_req_grad, b_is_sparse, err_msg in mm_test_cases:
+            # We should only be testing cases with sparse inputs, and at least one
+            # input needs to require grad so we can call a backward pass
+            assert a_is_sparse or b_is_sparse
+            assert a_req_grad or b_req_grad
 
+            a = torch.randn(size, requires_grad=a_req_grad)
+            if a_is_sparse:
+                a = a.to_sparse()
+            b = torch.randn(size, requires_grad=b_req_grad)
+            if b_is_sparse:
+                b = b.to_sparse()
+
+            # If no error expected, check that sparse and dense cases match
+            if err_msg is None:
+                r = a.mm(b)
+                r.sum().backward()
+                a_grad = None if a.grad is None else a.grad.clone().detach()
+                b_grad = None if b.grad is None else b.grad.clone().detach()
+
+                # Redo with only dense tensors
+                a = (a.to_dense() if a.is_sparse else a).clone().detach()
+                a.requires_grad = a_req_grad
+                b = (b.to_dense() if b.is_sparse else b).clone().detach()
+                b.requires_grad = b_req_grad
+                r = a.mm(b)
+                r.sum().backward()
+
+                self.assertEqual(a_grad, a.grad)
+                self.assertEqual(b_grad, b.grad)
+
+            else:
+                with self.assertRaisesRegex(RuntimeError, err_msg):
+                    a.mm(b)
 
     def test_multi_backward(self):
         x = torch.randn(5, 5, requires_grad=True)
@@ -3481,6 +3520,16 @@ class TestAutograd(TestCase):
         test()
         self.assertEqual(dealloc[0], 1)
 
+    def test_inplace_view_leaf_errors(self):
+        # Issue #21875: Fail faster (when we try to modify the view vs. in backward())
+        x = torch.zeros(1, requires_grad=True)
+        y = x.view_as(x)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "a view of a leaf Variable that "
+                                    "requires grad is being used in "
+                                    "an in-place operation."):
+            y.add_(1)
+
     def test_inplace_view_backward(self):
         # Issue #10532: Make sure that this does not raise RuntimeError.
         net = nn.Sequential(
@@ -3525,13 +3574,10 @@ class TestAutograd(TestCase):
         s.backward()
         self.assertEqual(s, torch.tensor(1.0))
 
-        # Issue 23502: Ensure RuntimeError for modification of SavedVariable.
+        # Issue #21875: Fail faster (when we try to modify the view vs. in backward())
         a = torch.rand(10, requires_grad=True).narrow(0, 0, 10)
-        b = a.relu_()
-        c = b.add_(100)
-        del b
         with self.assertRaises(RuntimeError):
-            c.sum().backward(torch.ones(1, requires_grad=True))
+            b = a.relu_()
 
     def test_mul_out(self):
         a = torch.randn(2, 2, requires_grad=True)
@@ -4226,6 +4272,49 @@ for shape in [(1,), ()]:
         run_test(grad_mode=False, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
 
+    def test_inplace_not_requires_grad(self):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.view_as(inp)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        # Original Tensor does not require grad
+        a = torch.rand(1, 2)
+
+        # Tensor being written does require grad
+        b = torch.rand(1, requires_grad=True)
+
+        # Take an invalid view on a that should raise an error
+        view_a = MyFn.apply(a)
+
+        with self.assertRaisesRegex(RuntimeError, 'Output 0 of a function created in no_grad mode is a view'):
+            view_a += b
+
+        # Extra test for copy_ that is a manual implementation and could be easily
+        # forgotten when the codegen is updated
+        a = torch.rand(1, 2)
+        b = torch.rand(1, requires_grad=True)
+        view_a = MyFn.apply(a)
+
+        with self.assertRaisesRegex(RuntimeError, 'Output 0 of a function created in no_grad mode is a view'):
+            view_a.copy_(b)
+
+        # Functions that should throw must properly throw
+        a = torch.rand(1, 2)
+        b = torch.rand(1, requires_grad=True)
+        view_a = a.unbind()[0]
+        with self.assertRaisesRegex(RuntimeError, 'Output 0 of a function created in no_grad mode is a view'):
+            view_a.copy_(b)
+
+        # Sanity check that views that should work still work
+        a = torch.rand(1, 2)
+        b = torch.rand(1, requires_grad=True)
+        a.select(1, 0).copy_(b)
+
     def _do_test_autograd_simple_views_python(self, dtype):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
@@ -4339,7 +4428,9 @@ for shape in [(1,), ()]:
                                 if fn_id == "view_of_temp":
                                     # This will be fixed after the deprecation cycle and the warning becomes
                                     # an error.
-                                    with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0"):
+                                    with self.assertRaisesRegex(RuntimeError,
+                                                                "a view of a leaf Variable that requires grad "
+                                                                "is being used in an in-place operation."):
                                         gradcheck(fn, (a, b))
                                 else:
                                     # This works but the custom backward is not called (or called with partial)
@@ -4353,7 +4444,13 @@ for shape in [(1,), ()]:
                         bw_called[0] = 0
                         ga_nz[0] = True  # For the case where the backward is called
                         with warnings.catch_warnings(record=True) as w:
-                            fn(a, b).backward()
+                            if inplace and output_is_a_view and fn_id != "one_output":
+                                with self.assertRaisesRegex(RuntimeError,
+                                                            "a view of a leaf Variable that requires grad "
+                                                            "is being used in an in-place operation."):
+                                    fn(a, b).backward()
+                            else:
+                                fn(a, b).backward()
 
                         expected_called = 1
                         expected_ga_nz = True
@@ -4820,8 +4917,8 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
 
-# TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition
-separate_complex_tests = ['view_as_real', 'real', 'imag', 'asin', 'acos']  # ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
+separate_complex_tests = ['view_as_real', 'real', 'imag', 'asin', 'acos', 'div', 'log',
+                          'log10', 'log1p', 'log2', 'pow', 'tan', 'reciprocal', 'rsqrt', '__rdiv__']
 
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
@@ -4832,15 +4929,11 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
-                'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split',
-                'matmul', 'bmm', 'mv', 'ger', 'diagonal', ] + separate_complex_tests
+                'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
+                'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub'] + separate_complex_tests
 
 # this list corresponds to cases that are not currently implemented
 skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex']
-
-# TODO(@anjali411): add tests for 'sub', 'div
-# TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition - @anjali411
-# complex_list += ['fill_', 't', '__rdiv__', 'tanh']
 
 def add_test(
         name,
@@ -6953,6 +7046,32 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(lambda x: x.logcumsumexp(2), a)
         gradgradcheck(lambda x: x.logcumsumexp(2), a)
+
+    @slowTest
+    def test_lu_backward(self, device):
+        def run_test(*sizes):
+            x = torch.rand(*sizes, device=device, dtype=torch.double).requires_grad_(True)
+
+            gradcheck(lambda x: x.lu(get_infos=True), x)
+            gradgradcheck(lambda x: x.lu(get_infos=True), x)
+
+            gradcheck(lambda x: x.lu(get_infos=False), x)
+            gradgradcheck(lambda x: x.lu(get_infos=False), x)
+
+            # there is no pivot-less LU factorization on CPU
+            if x.device.type == 'cuda':
+                gradcheck(lambda x: x.lu(pivot=False, get_infos=True), x)
+                gradgradcheck(lambda x: x.lu(pivot=False, get_infos=True), x)
+
+                gradcheck(lambda x: x.lu(pivot=False, get_infos=False), x)
+                gradgradcheck(lambda x: x.lu(pivot=False, get_infos=False), x)
+
+        run_test(3, 3)
+        run_test(3, 3, 3)
+        run_test(3, 3, 3, 3)
+        run_test(5, 5)
+        run_test(3, 5, 5)
+        run_test(3, 3, 5, 5)
 
     def test_strided_leaf_grad_layout(self, device):
         # (1) If leaf is non-overlapping and dense, grad's layout should match its leaf.

@@ -101,17 +101,17 @@ DONT_PROFILE = {
     'size', 'storage_offset', 'stride',
 }
 
-# Note [Manual catchAll kernels]
-# For these ops, we want to manually register to dispatch key catchAll and
-# skip codegen-ed registeration to all keys before catchAll.
+# Note [Manual Backend kernels]
+# For these ops, we want to manually register to dispatch key Backend and
+# skip codegen-ed registeration to all keys before Backend.
 # For codegen this means:
 #   - op set below must match ops with manual_kernel_registration=True in native_functions.yaml
-#     where we skip codegen catchall kernels
+#     where we skip codegen backend kernels
 #   - all ops below are part of MANUAL_AUTOGRAD to skip codegen Autograd kernel registration
 #   - all ops below are part of MANUAL_TRACER to skip codegen Tracer kernel registration
 # Note: we still register to dispatch key Profiler for these ops, keeping it untouched for now.
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_CATCHALL = set([
+MANUAL_BACKEND = set([
     'options', 'data', 'set_data', 'is_leaf', 'output_nr', '_version', 'retain_grad',
     'backward', 'requires_grad_',
 ])
@@ -123,9 +123,9 @@ MANUAL_AUTOGRAD_AND_TRACER = set([
 ])
 
 # Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
-#   union(MANUAL_CATCHALL, MANUAL_AUTOGRAD_AND_TRACER)
+#   union(MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER)
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
-MANUAL_AUTOGRAD = MANUAL_TRACER = MANUAL_CATCHALL | MANUAL_AUTOGRAD_AND_TRACER
+MANUAL_AUTOGRAD = MANUAL_TRACER = MANUAL_BACKEND | MANUAL_AUTOGRAD_AND_TRACER
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
@@ -165,7 +165,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
-    'bmm', 'diagonal'
+    'bmm', 'diagonal', 'cholesky', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
+    'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -392,12 +393,6 @@ RUN_ONLY_IN_DEBUG_MODE = CodeTemplate("""\
 #ifndef NDEBUG
 ${statements}
 #endif
-""")
-
-# Generate a file that lists all functions and their schema string. Used for XLA
-REGISTRATION_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${declaration_formals}); \
-// {"schema": "${schema_string}", "compound": "${compound}", "has_math_kernel": "${has_math_kernel}"}
 """)
 
 # TraceType templates
@@ -691,31 +686,6 @@ def gen_variable_type(out, aten_declarations, template_path):
         gen_variable_type_shard(out, shard, template_path, '_%d' % i, False)
     gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False)
 
-    REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(template_path + "/RegistrationDeclarations.h")
-    registration_declarations = []
-
-    for declaration in aten_declarations:
-        if declaration['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']:
-            declaration_formals = declaration['schema_order_formals']
-        else:
-            assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-            declaration_formals = declaration['formals']
-        if dispatch_strategy(declaration) == 'use_derived':
-            registration_declarations.append(
-                REGISTRATION_DECLARATION.substitute(declaration,
-                                                    declaration_formals=declaration_formals,
-                                                    compound='False'))
-        else:
-            registration_declarations.append(
-                REGISTRATION_DECLARATION.substitute(declaration,
-                                                    declaration_formals=declaration_formals,
-                                                    compound='True'))
-
-    env = {
-        'registration_declarations': registration_declarations,
-    }
-    write(out, 'RegistrationDeclarations.h', REGISTRATION_DECLARATIONS_H, env)
-
 
 def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
@@ -749,13 +719,16 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                     declaration, class_type='VariableType'))
 
-        # See Note [Manual catchAll kernels]
-        assert (declaration['name'] in MANUAL_CATCHALL) == declaration['manual_kernel_registration']
+        # See Note [Manual Backend kernels]
+        assert (declaration['name'] in MANUAL_BACKEND) == declaration['manual_kernel_registration']
         # If you want to register a kernel to Autograd, you must make the op abstract.
         # In other words, this op must have dispatch section in native_functions.yaml.
         if declaration['name'] in MANUAL_AUTOGRAD_AND_TRACER or declaration['derivative']:
-            msg = (f'Did you add a formula for {declaration["name"]}(or its functional variant) in derivatives.yaml?'
-                   f'If so please add a dispatch section for it with DefaultBackend in native_functions.yaml.')
+            msg = (f'There\'s a formula for {declaration["name"]}(or its functional variant) in derivatives.yaml. '
+                   f'It\'s required to add a dispatch section for it with explicit supported backends e.g CPU/CUDA '
+                   f'or DefaultBackend in native_functions.yaml. Please see '
+                   f'https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword '
+                   f'for instructions to choose the right dispatch keyword.')
             assert declaration['abstract'], msg
 
         # Emit TraceType code

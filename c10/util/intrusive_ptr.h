@@ -518,6 +518,12 @@ class weak_intrusive_ptr final {
     return operator=<TTarget, NullType>(rhs);
   }
 
+  weak_intrusive_ptr& operator=(const intrusive_ptr<TTarget, NullType>& rhs) & noexcept {
+    weak_intrusive_ptr tmp(rhs);
+    swap(tmp);
+    return *this;
+  }
+
   template <class From, class FromNullType>
       weak_intrusive_ptr& operator=(
           const weak_intrusive_ptr<From, NullType>& rhs) & {
@@ -583,15 +589,19 @@ class weak_intrusive_ptr final {
   }
 
   intrusive_ptr<TTarget, NullType> lock() const noexcept {
-    auto refcount = target_->refcount_.load();
-    do {
-      if (refcount == 0) {
-        // Object already destructed, no strong references left anymore.
-        // Return nullptr.
-        return intrusive_ptr<TTarget, NullType>(NullType::singleton());
-      }
-    } while (!target_->refcount_.compare_exchange_weak(refcount, refcount + 1));
-    return intrusive_ptr<TTarget, NullType>(target_);
+    if (expired()) {
+      return intrusive_ptr<TTarget, NullType>(NullType::singleton());
+    } else {
+      auto refcount = target_->refcount_.load();
+      do {
+        if (refcount == 0) {
+          // Object already destructed, no strong references left anymore.
+          // Return nullptr.
+          return intrusive_ptr<TTarget, NullType>(NullType::singleton());
+        }
+      } while (!target_->refcount_.compare_exchange_weak(refcount, refcount + 1));
+      return intrusive_ptr<TTarget, NullType>(target_);
+    }
   }
 
   /**

@@ -103,8 +103,9 @@ Tensor pinverse(const Tensor& self, double rcond) {
   Tensor U, S, V;
   std::tie(U, S, V) = self.svd();
   Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);
-  Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, self.options()));
-  return at::matmul(V, at::matmul(S_pseudoinv.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1), U.transpose(-2, -1)));
+  Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, S.options())).to(self.dtype());
+  // computes V.conj() @ diag(S_pseudoinv) @ U.T.conj()
+  return at::matmul(V.conj() * S_pseudoinv.unsqueeze(-2), U.transpose(-2, -1).conj());
 }
 
 static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
@@ -1390,9 +1391,8 @@ static std::vector<int64_t> make_dim_list(int64_t ndim) {
 }
 
 // Checks for valid arguments to linalg_norm when type(ord) == str
-static void check_str_ord_valid(const std::string& str_ord, optional<IntArrayRef> opt_dim, int64_t ndim, optional<ScalarType> opt_dtype) {
+static void check_str_ord_valid(const std::string& str_ord, optional<IntArrayRef> opt_dim, int64_t ndim) {
   TORCH_CHECK((str_ord == "nuc") || (str_ord == "fro"), "Invalid norm order: ", str_ord);
-  TORCH_CHECK(!opt_dtype.has_value(), "ord=\'", str_ord, "\' does not yet support the dtype argument");
   bool dims_valid = (ndim == 2 && !opt_dim.has_value()) || (opt_dim.has_value() && opt_dim.value().size() == 2);
   TORCH_CHECK(dims_valid, "order \"", str_ord,
     "\" can only be used if either len(dim) == 2 or (self.dim() == 2 and dim is None)");
@@ -1552,14 +1552,15 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, optional
   if (opt_str_ord.has_value()) {
     // 'ord' is string
     auto str_ord = opt_str_ord.value();
-    check_str_ord_valid(str_ord, opt_dim, ndim, opt_dtype);
+    check_str_ord_valid(str_ord, opt_dim, ndim);
+    Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
     if (str_ord == "fro") {
-      at::frobenius_norm_out(result, self, opt_dim.value_or(IntArrayRef({0, 1})), keepdim);
+      at::frobenius_norm_out(result, self_, opt_dim.value_or(IntArrayRef({0, 1})), keepdim);
     } else if (str_ord == "nuc") {
       if (opt_dim.has_value()) {
-        at::nuclear_norm_out(result, self, opt_dim.value(), keepdim);
+        at::nuclear_norm_out(result, self_, opt_dim.value(), keepdim);
       } else {
-        at::nuclear_norm_out(result, self, keepdim);
+        at::nuclear_norm_out(result, self_, keepdim);
       }
     }
   } else {

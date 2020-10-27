@@ -3,6 +3,7 @@ import inspect
 import textwrap
 import copy
 from types import FunctionType
+from torch.jit.frontend import normalize_source_lines
 
 class AST_Rewriter(ast.NodeTransformer):
     '''
@@ -17,32 +18,10 @@ class AST_Rewriter(ast.NodeTransformer):
 
     def rewrite(self, fn: FunctionType):
 
-        def remove_prefix(text, prefix):
-            return text[text.startswith(prefix) and len(prefix):]
-
-        # Get the source string
+        # Normalize the source lines
         sourcelines, _ = inspect.getsourcelines(fn)
-
-        # Find the line and line number containing the function definition
-        for i, l in enumerate(sourcelines):
-            if l.lstrip()[:3] == "def":
-                idx = i
-                break
-        fn_def = sourcelines[idx]
-
-        # Get a string representing the amount of leading whitespace
-        whitespace = fn_def.split("def")[0]
-
-        # Add this leading whitespace to all lines before and after the `def`
-        aligned_prefix = [whitespace + remove_prefix(s, whitespace) for s in sourcelines[:idx]]
-        aligned_suffix = [whitespace + remove_prefix(s, whitespace) for s in sourcelines[idx + 1:]]
-
-        # Put it together again
-        aligned_prefix.append(fn_def)
-        aligned_source = aligned_prefix + aligned_suffix
-
-        # Remove common leading whitespace
-        source = ''.join(aligned_source)
+        sourcelines = normalize_source_lines(sourcelines)
+        source = ''.join(sourcelines)
         normalized_str = textwrap.dedent(source)
 
         # Rewrite the original AST
