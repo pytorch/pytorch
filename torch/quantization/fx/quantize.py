@@ -26,7 +26,8 @@ from .pattern_utils import (
     get_default_quant_patterns,
 )
 
-from .standalone_module import (
+from .observed_module import (
+    mark_observed_module,
     mark_observed_standalone_module,
     is_observed_standalone_module,
 )
@@ -496,6 +497,7 @@ class Quantizer:
 
         model = GraphModule(model, observed_graph)
         self.save_state(model)
+        model = mark_observed_module(model)
         if is_standalone_module:
             assert result_node is not None
             assert isinstance(result_node.args[0], Node), \
