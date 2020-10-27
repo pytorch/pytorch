@@ -466,6 +466,37 @@ class TestVmapAPI(TestCase):
             self.assertEqual(len(wa), 2)
             self.assertRegex(str(wa[-1].message), FALLBACK_REGEX)
 
+    def test_fallback_zero_dim(self):
+        # NB: One day we will implement a batching rule for torch.atan2.
+        # If/when we do, this test should be replaced to test the fallback
+        # path on another operator to avoid bitrot.
+        op = torch.atan2
+        x = torch.randn(11)
+        y = torch.randn(11)
+        self._assert_uses_vmap_fallback((op,), (x, y))
+
+        B0, B1 = 0, 3
+        x = torch.randn(B0, 11)
+        y = torch.randn(11)
+
+        msg = 'The fallback path does not support vmap over dims of size 0'
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (0, None))(x, y)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (None, 0))(y, x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op)(x, x)
+
+        x = torch.randn(B0, B1, 11)
+        y = torch.randn(B1, 11)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (0, None))(x, y)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (None, 0))(y, x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op)(x, x)
+
     def test_fallback_atan2(self):
         # NB: One day we will implement a batching rule for torch.atan2.
         # If/when we do, this test should be replaced to test the fallback
