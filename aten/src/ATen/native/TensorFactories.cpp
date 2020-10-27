@@ -166,7 +166,7 @@ Tensor polar(const Tensor& abs, const Tensor& angle) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  return at::empty_cpu(size, options_, optional_memory_format);
+  return at::detail::empty_cpu(size, options_, optional_memory_format);
 }
 
 Tensor empty(

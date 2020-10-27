@@ -5,12 +5,6 @@
 #include <ATen/Functions.h>
 
 namespace at {
-template <typename scalar_t>
-inline void fill_inplace(Tensor& self, Scalar value_scalar) {
-  auto value = value_scalar.to<scalar_t>();
-  scalar_t * dptr = static_cast<scalar_t *>(self.data_ptr());
-  *dptr = value;
-}
 Tensor& scalar_fill(Tensor& self, Scalar value);
 TORCH_API Tensor scalar_tensor_static(Scalar s, const TensorOptions& options);
 } //namespace at

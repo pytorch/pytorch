@@ -14,12 +14,18 @@ int _crash_if_asan(int arg) {
   return x[0];
 }
 
-Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<c10::MemoryFormat> optional_memory_format) {
+namespace detail {
+// empty_cpu is used in ScalarOps.h, which can be referenced by other ATen files. Since we want to decouple direct referencing native symbols and only access native symbols through dispatching, we move its implementation here.
+Tensor empty_cpu(
+    IntArrayRef size,
+    const TensorOptions& options_,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
       !(options_.has_memory_format() && optional_memory_format.has_value()),
       "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
       "the redundant setter.");
-  TensorOptions options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
+  TensorOptions options =
+      options_.merge_in(TensorOptions().memory_format(optional_memory_format));
 
   AT_ASSERT(options.device().type() == DeviceType::CPU);
   check_size_nonnegative(size);
@@ -48,10 +54,12 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
 
-  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
+  auto memory_format =
+      options.memory_format_opt().value_or(MemoryFormat::Contiguous);
   tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
 
   return tensor;
 }
+} // namespace detail
 
 } // at

@@ -126,7 +126,12 @@ inline void check_size_nonnegative(IntArrayRef size) {
   }
 }
 
+namespace detail {
 CAFFE2_API
-Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<c10::MemoryFormat> optional_memory_format);
+Tensor empty_cpu(
+    IntArrayRef size,
+    const TensorOptions& options = {},
+    c10::optional<MemoryFormat> memory_format = c10::nullopt);
+} // namespace detail
 
 } // at

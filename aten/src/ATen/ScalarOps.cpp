@@ -8,9 +8,17 @@
 
 #include <ATen/ScalarOps.h>
 #include <ATen/ATen.h>
+#include <ATen/Utils.h>
 
 namespace at {
-
+namespace {
+template <typename scalar_t>
+inline void fill_inplace(Tensor& self, Scalar value_scalar) {
+  auto value = value_scalar.to<scalar_t>();
+  scalar_t* dptr = static_cast<scalar_t*>(self.data_ptr());
+  *dptr = value;
+}
+}
 // When filling a number to 1-element CPU tensor, we want to skip
 // everything but manipulate data ptr directly.
 // Ideally this fast pass should be implemented in TensorIterator,
@@ -26,7 +34,7 @@ Tensor scalar_tensor_static(Scalar s, const TensorOptions& options) {
   TORCH_CHECK(options.device() == kCPU);
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   at::AutoNonVariableTypeMode non_var_type_mode(true);
-  auto result = native::empty_cpu({}, options);
+  auto result = at::detail::empty_cpu({}, options);
   scalar_fill(result, s);
   return result;
 }
