@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
@@ -2283,28 +2284,70 @@ TEST(NVFuserTest, FusionBCastConcretizeRfactor_CUDA) {
 
 namespace {
 
-void checkIdProvedEquivalent(
+void checkIdMapped(
+    ComputeAtRootDomainMap& root_map,
     TensorView* v0,
-    int a0,
+    IterDomain* id0,
     TensorView* v1,
-    int a1,
-    bool should_prove) {
-  if (should_prove) {
-    TORCH_CHECK(IterDomain::proveEquivalent(v0->axis(a0), v1->axis(a1)));
+    IterDomain* id1,
+    bool should_map) {
+  if (should_map) {
+    TORCH_CHECK(root_map.canMap(v0->domain(), id0, v1->domain(), id1));
   } else {
-    TORCH_CHECK(!IterDomain::proveEquivalent(v0->axis(a0), v1->axis(a1)));
+    TORCH_CHECK(!root_map.canMap(v0->domain(), id0, v1->domain(), id1));
   }
+}
+
+void checkIdMapped(
+    TensorView* v0,
+    const std::vector<IterDomain*>& root0,
+    const std::vector<bool> should_map0,
+    TensorView* v1,
+    const std::vector<IterDomain*>& root1,
+    const std::vector<bool> should_map1) {
+  ComputeAtRootDomainMap map;
+  map.build();
+  TORCH_INTERNAL_ASSERT(root0.size() == should_map0.size());
+  TORCH_INTERNAL_ASSERT(root1.size() == should_map1.size());
+  size_t idx0 = 0;
+  for (size_t i = 0; i < root0.size(); ++i) {
+    size_t idx1 = 0;
+    for (size_t j = 0; j < root1.size(); ++j) {
+      if (should_map0[i] && should_map1[j] && idx0 == idx1) {
+        checkIdMapped(map, v0, root0[i], v1, root1[j], true);
+      } else {
+        checkIdMapped(map, v0, root0[i], v1, root1[j], false);
+      }
+      if (should_map1[j])
+        ++idx1;
+    }
+    if (should_map0[i])
+      ++idx0;
+  }
+}
+
+void checkIdMapped(
+    TensorView* v0,
+    const std::vector<IterDomain*>& root0,
+    TensorView* v1,
+    const std::vector<IterDomain*>& root1) {
+  checkIdMapped(
+      v0,
+      root0,
+      std::vector<bool>(root0.size(), true),
+      v1,
+      root1,
+      std::vector<bool>(root1.size(), true));
 }
 
 } // namespace
 
-TEST(NVFuserTest, FusionProveIdEqBasic_CUDA) {
+TEST(NVFuserTest, FusionRootMappingBasic_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
   TensorView* tv0 = makeDummyTensor(2);
   TensorView* tv1 = makeDummyTensor(2);
-  TensorView* tv2 = makeDummyTensor(3);
 
   fusion.addInput(tv0);
   fusion.addInput(tv1);
@@ -2313,17 +2356,47 @@ TEST(NVFuserTest, FusionProveIdEqBasic_CUDA) {
   auto tv5 = add(tv3, tv4);
   fusion.addOutput(tv5);
 
-  checkIdProvedEquivalent(tv0, 0, tv4, 1, true);
-  checkIdProvedEquivalent(tv1, 0, tv4, 0, true);
-  checkIdProvedEquivalent(tv1, 1, tv0, 1, true);
-  checkIdProvedEquivalent(tv0, 0, tv5, 1, true);
-  checkIdProvedEquivalent(tv1, 1, tv5, 2, true);
-  checkIdProvedEquivalent(tv0, 0, tv1, 0, false);
-  checkIdProvedEquivalent(tv0, 1, tv1, 0, false);
-  checkIdProvedEquivalent(tv0, 0, tv1, 1, false);
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true, true},
+      tv4,
+      tv4->getRootDomain(),
+      {false, true, true});
+  checkIdMapped(
+      tv1,
+      tv1->getRootDomain(),
+      {true, true},
+      tv4,
+      tv4->getRootDomain(),
+      {true, false, true});
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {false, true},
+      tv1,
+      tv1->getRootDomain(),
+      {false, true});
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true, true},
+      tv5,
+      tv5->getRootDomain(),
+      {false, true, true});
+  checkIdMapped(
+      tv1,
+      tv1->getRootDomain(),
+      {true, true},
+      tv5,
+      tv5->getRootDomain(),
+      {true, false, true});
+  checkIdMapped(tv3, tv3->getRootDomain(), tv4, tv4->getRootDomain());
+  checkIdMapped(tv3, tv3->getRootDomain(), tv5, tv5->getRootDomain());
+  checkIdMapped(tv4, tv4->getRootDomain(), tv5, tv5->getRootDomain());
 }
 
-TEST(NVFuserTest, FusionProveIdEqRfactor_CUDA) {
+TEST(NVFuserTest, FusionRootMappingRfactor_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2334,23 +2407,318 @@ TEST(NVFuserTest, FusionProveIdEqRfactor_CUDA) {
 
   //[I,I,R]
   auto tv2 = sum(tv1, {2});
-
-  auto tv5 = add(tv2, tv0);
+  auto tv3 = add(tv2, tv0);
 
   fusion.addInput(tv0);
   fusion.addInput(tv1);
-  fusion.addOutput(tv5);
+  fusion.addOutput(tv3);
 
   // scheduling:
   //[B,I,R0,R1=128], root = [B,I,R]
   tv2->split(2, 128);
 
   // root=[B,I,Irf], rfactor=[B,I,Irf,Rrf]
-  auto tv3 = tv2->rFactor({3});
+  auto tv4 = tv2->rFactor({3});
 
-  checkIdProvedEquivalent(tv1, 0, tv0, 0, true);
-  checkIdProvedEquivalent(tv2, 0, tv0, 0, true);
-  checkIdProvedEquivalent(tv3, 0, tv0, 0, true);
+  checkIdMapped(tv1, tv1->getRootDomain(), tv4, tv4->getRootDomain());
+  checkIdMapped(
+      tv4,
+      tv4->getRFactorDomain(),
+      {true, true, true, false},
+      tv2,
+      tv2->getRootDomain(),
+      {true, true, true});
+  checkIdMapped(
+      tv1,
+      tv1->getRootDomain(),
+      {true, true, false},
+      tv2,
+      tv2->getRootDomain(),
+      {true, true, false});
+  checkIdMapped(
+      tv1,
+      tv1->getRootDomain(),
+      {true, true, false},
+      tv3,
+      tv3->getRootDomain(),
+      {true, true});
+  checkIdMapped(
+      tv2,
+      tv2->getRootDomain(),
+      {true, true, false},
+      tv3,
+      tv3->getRootDomain(),
+      {true, true});
+  checkIdMapped(tv0, tv0->getRootDomain(), tv3, tv3->getRootDomain());
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true, true},
+      tv1,
+      tv1->getRootDomain(),
+      {true, true, false});
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true, true},
+      tv2,
+      tv2->getRootDomain(),
+      {true, true, false});
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true, true},
+      tv4,
+      tv4->getRFactorDomain(),
+      {true, true, false, false});
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true, true},
+      tv4,
+      tv4->getRootDomain(),
+      {true, true, false});
+}
+
+TEST(NVFuserTest, FusionRootMappingReductionDependency_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeDummyTensor(2);
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+  fusion.addOutput(tv2);
+
+  // The second dimension cannot be mapped as it would require recomputation.
+  checkIdMapped(tv0, tv0->getRootDomain(), tv1, tv1->getRootDomain());
+  checkIdMapped(
+      tv1,
+      tv1->getRootDomain(),
+      {true, false},
+      tv2,
+      tv2->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true, false},
+      tv2,
+      tv2->getRootDomain(),
+      {true, false});
+}
+
+TEST(NVFuserTest, FusionRootMappingMultipleBroadcast_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeDummyTensor(1);
+  auto tv1 = broadcast(tv0, {false, true});
+  auto tv2 = broadcast(tv0, {true, false});
+  auto tv3 = add(tv1, tv2);
+  fusion.addOutput(tv3);
+
+  // tv0 cannot be mapped with the consumers as it would mean its only
+  // domain would be mapped to both the first and second domains of
+  // the two consumers, thus computing tv0 at both corresponding loops.
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {false},
+      tv1,
+      tv1->getRootDomain(),
+      {false, false});
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {false},
+      tv2,
+      tv2->getRootDomain(),
+      {false, false});
+  checkIdMapped(tv1, tv1->getRootDomain(), tv3, tv3->getRootDomain());
+  checkIdMapped(tv2, tv2->getRootDomain(), tv3, tv3->getRootDomain());
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {false},
+      tv3,
+      tv3->getRootDomain(),
+      {false, false});
+}
+
+TEST(NVFuserTest, FusionRootMappingMultipleBroadcastWithNoCommonConsumer_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeDummyTensor(1);
+  auto tv1 = broadcast(tv0, {false, true});
+  auto tv2 = broadcast(tv0, {true, false});
+  fusion.addOutput(tv1);
+  fusion.addOutput(tv2);
+
+  // If there is no common consumer, there is no recomputation constraint.
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true},
+      tv1,
+      tv1->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true},
+      tv2,
+      tv2->getRootDomain(),
+      {false, true});
+  checkIdMapped(
+      tv1,
+      tv1->getRootDomain(),
+      {true, false},
+      tv2,
+      tv2->getRootDomain(),
+      {false, true});
+}
+
+TEST(NVFuserTest, FusionRootMappingBroadcastNonUniqueSize_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeDummyTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeDummyTensor(2);
+  fusion.addInput(tv1);
+  auto tv2 = makeDummyTensor(2);
+  fusion.addInput(tv2);
+  auto tv3 = broadcast(tv0, {false, true});
+  auto tv4 = add(tv1, tv3);
+  fusion.addOutput(tv4);
+  auto tv5 = add(tv2, tv3);
+  fusion.addOutput(tv5);
+
+  // Broadcast domains can be used with multiple domains with
+  // different sizes. In this test, the broadcast domain of tv3 has
+  // two consumers, tv4 and tv5, which may have different sizes. Each
+  // of the consumers is used with the broadcast domain of tv3, but
+  // the two consumers may not have the same size, it is not possible
+  // to map those domains.
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true},
+      tv3,
+      tv3->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true},
+      tv1,
+      tv1->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true},
+      tv2,
+      tv2->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv1,
+      tv1->getRootDomain(),
+      {true, false},
+      tv2,
+      tv2->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv1,
+      tv1->getRootDomain(),
+      {true, false},
+      tv3,
+      tv3->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv2,
+      tv2->getRootDomain(),
+      {true, false},
+      tv3,
+      tv3->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv3,
+      tv3->getRootDomain(),
+      {true, false},
+      tv4,
+      tv4->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv3,
+      tv3->getRootDomain(),
+      {true, false},
+      tv5,
+      tv5->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv4,
+      tv4->getRootDomain(),
+      {true, false},
+      tv5,
+      tv5->getRootDomain(),
+      {true, false});
+}
+
+TEST(NVFuserTest, FusionRootMappingBroadcast_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeDummyTensor(1);
+  // tv0[I0]
+  fusion.addInput(tv0);
+  auto tv1 = broadcast(tv0, {true, false});
+  // tv1[B1, I0]
+  auto tv2 = broadcast(tv1, {true, false, false});
+  // tv2[B2, B1, I0]
+  fusion.addOutput(tv2);
+
+  // In this case, tv1 and tv2 has one and two broadcast domains,
+  // respectively. It is the second broadcast domain that is mapped to
+  // the broadcast of tv1.
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true},
+      tv1,
+      tv1->getRootDomain(),
+      {false, true});
+  checkIdMapped(
+      tv1,
+      tv1->getRootDomain(),
+      {true, true},
+      tv2,
+      tv2->getRootDomain(),
+      {false, true, true}); // Not {true, false, true}
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true},
+      tv2,
+      tv2->getRootDomain(),
+      {false, false, true});
+}
+
+TEST(NVFuserTest, FusionComputeAtFailDueToRootMapping_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeDummyTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Float(1));
+  auto tv2 = broadcast(tv1, {true, false});
+  auto tv3 = broadcast(tv1, {false, true});
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  // computeAt should fail as there is no valid root mapping.
+  ASSERT_ANY_THROW(tv1->computeAt(tv4, 1));
 }
 
 TEST(NVFuserTest, FusionScalarInputs_CUDA) {
@@ -2981,99 +3349,6 @@ TEST(NVFuserTest, FusionCastOps_CUDA) {
       "\nABS MAX DIFF: ",
       outputs[0].sub(ref_output).abs().max(),
       "\n");
-}
-
-// We want split/merge/reorder all tested both on and off rfactor domains, also
-// want compute at into the rfactor domain, and into its consumer
-TEST(NVFuserTest, FusionRFactorReplay_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  // Set up your input tensor views
-  TensorView* tv0 = makeDummyTensor(2);
-
-  // Register your inputs
-  fusion.addInput(tv0);
-
-  // Do math with it, it returns a `Val*` but can be static_casted back to
-  // TensorView
-  TensorView* tv1 = sum(tv0, {1});
-  // tv1[I0, R1]
-  tv1->split(0, 32);
-  // tv1[I0o, I0i{32}, R1]
-  tv1->split(0, 16);
-  // tv1[I0oo, I0oi{16}, I0i{32}, R1]
-  tv1->split(-1, 8);
-  // tv1[I0oo, I0oi{16}, I0i{32}, R1o, R1i{8}]
-  tv1->split(-2, 4);
-  // tv1[I0oo, I0oi{16}, I0i{32}, R1oo, R1oi{4}, R1i{8}]
-  tv1->reorder({{0, -2}, {2, -1}, {-3, 0}, {-1, 1}});
-  // tv1[R1oo, R1i{8}, I0oi{16}, R1oi{4}, I0oo, I0i{32}]
-
-  tv1->merge(0);
-  tv1->merge(-2);
-
-  // tv1[R1oo*R1i{8}, I0oi{16}, R1oi{4}, I0oo*I0i{32}]
-  TensorDomain* new_domain = TransformRFactor::runReplay(tv1->domain(), {0});
-  // new_domain[r(R1oo*R1i{8})rf, I0oi{16}, ir1oi{4}rf, I0oo*I0i{32}]
-
-  TensorDomain* new_domain2 = TransformRFactor::runReplay2(tv1->domain(), {0});
-  // new_domain2[                 I0oi{16},           , I0oo*I0i{32}, R1oi{4}]
-
-  // Move rfactor axis to end, keep iter rfactor axis
-  new_domain->reorder({{0, -1}, {2, 2}});
-
-  // Replay casp, replay new_domain2 as new_domain
-  // reordered_new_domain[I0oi{16}, I0oo*I0i{32}, ir1oi{4}rf, R(R1oo*R1i{8})rf]
-  auto replay_casp = TransformReplay::replayCasP(new_domain2, new_domain, 2);
-  TensorDomain* casp = replay_casp.first;
-  // new_domain[I0oi{16}, I0oo*I0i{32}, ir1oi{4}rf, R(R1oo*R1i{8})rf]
-  //       casp[I0oi{16}, I0oo*I0i{32},  R1oi{4}]
-
-  casp->split(1, new Int(2));
-  // casp      [I0oi{16}, (I0oo*I0i{32})o, I(Ioo*I0i)i{2}, ir1oi{4} ]
-  // new_domain[I0oi{16},  I0oo*I0i{32}  ,                 ir1oi{4}rf,
-  // R(R1oo*R1i{8})rf]
-
-  auto replay_pasc = TransformReplay::replayPasC(new_domain, casp, 2);
-  TensorDomain* pasc = replay_pasc.first;
-  // pasc      [I0oi{16}, (I0oo*I0i{32})o, I(Ioo*I0i)i{2}, ir1oi{4}rf,
-  // R(R1oo*R1i{8})rf]
-
-  TORCH_CHECK(
-      new_domain->nDims() - 1 == new_domain2->nDims(),
-      casp->nDims() == new_domain2->nDims() + 1,
-      pasc->nDims() == new_domain->nDims() + 1,
-      "Error in rfactor, number of dimensions is not correct.");
-
-  TORCH_CHECK(
-      !casp->sameAs(new_domain2) && !pasc->sameAs(new_domain) &&
-          !new_domain->sameAs(new_domain2) &&
-          !tv1->domain()->sameAs(new_domain) &&
-          !tv1->domain()->sameAs(new_domain2),
-      "Error in rfactor, number of dimensions is not correct.");
-
-  auto dom = new_domain->getRootDomain();
-  TORCH_CHECK(
-      !dom[0]->isReduction() &&
-          std::any_of(
-              dom.begin(),
-              dom.end(),
-              [](IterDomain* id) { return id->isReduction(); }) &&
-          std::any_of(
-              dom.begin(),
-              dom.end(),
-              [](IterDomain* id) { return id->isRFactorProduct(); }),
-      "Error in rFactor, there seems to be something wrong in root domain.");
-
-  auto dom2 = new_domain2->getRootDomain();
-  TORCH_CHECK(
-      !dom2[0]->isReduction() &&
-          std::any_of(
-              dom2.begin(),
-              dom2.end(),
-              [](IterDomain* id) { return id->isReduction(); }),
-      "Error in rFactor, there seems to be something wrong in root domain.");
 }
 
 // Start off simple, block on the outer dim
@@ -4984,14 +5259,19 @@ TEST(NVFuserTest, FusionComputeAtExprOrder1_CUDA) {
     auto tv1 = add(tv0, new Float(1));
     auto tv2 = add(tv0, new Float(1));
     TensorView* tv3 = add(tv1, tv2);
+    // Set outputs tv2 or tv1 and then tv3
     if (i == 0) {
-      tv1->computeAt(tv3, -1);
       fusion.addOutput(tv2);
     } else {
-      tv2->computeAt(tv3, -1);
       fusion.addOutput(tv1);
     }
     fusion.addOutput(tv3);
+
+    if (i == 0) {
+      tv1->computeAt(tv3, -1);
+    } else {
+      tv2->computeAt(tv3, -1);
+    }
 
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
     at::Tensor input = at::rand({100}, options);
@@ -7686,7 +7966,8 @@ TEST(NVFuserTest, FusionComputeAtMultiBCast_CUDA) {
   TensorView* tv4 = add(tv2, tv3);
   fusion.addOutput(tv4);
 
-  // This is not supported and should throw an exception.
+  // Not possible to do computeAt at position -1 as recomputation
+  // would be required. An exception should be thrown.
   ASSERT_ANY_THROW(tv1->computeAt(tv3, -1));
 }
 
@@ -8000,30 +8281,9 @@ TEST(NVFuserTest, FusionNonUniqueBroadcastSize_CUDA) {
   fusion.addOutput(tv4);
   fusion.addOutput(tv5);
 
-  tv3->computeAt(tv4, -1);
-
-  const int numel_x = 100;
-  const int numel_y = 200;
-  const int numel_z = 300;
-  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor t0 = at::rand({numel_x}, options);
-  at::Tensor t1 = at::rand({numel_x, numel_y}, options);
-  at::Tensor t2 = at::rand({numel_x, numel_z}, options);
-
-  at::Tensor cg_output_tv4 = at::empty_like(t1, options);
-  at::Tensor cg_output_tv5 = at::empty_like(t2, options);
-
-  FusionExecutor fe;
-  fe.compileFusion(&fusion);
-  fe.runFusion({t0, t1, t2}, {cg_output_tv4, cg_output_tv5});
-
-  auto t4 = t0.unsqueeze(-1).expand({numel_x, numel_y}) + t1;
-  auto t5 = t0.unsqueeze(-1).expand({numel_x, numel_z}) + t2;
-
-  // Validation fails as the generated kernel is not correct.
-  // TODO: do TORCH_CHECK.
-  t4.allclose(cg_output_tv4);
-  t5.allclose(cg_output_tv5);
+  // In order to do this, tv1->axis(1) and tv2->axis(1) must have the
+  // same size, but we can't prove it, so this should throw an error.
+  ASSERT_ANY_THROW(tv3->computeAt(tv4, -1));
 }
 
 } // namespace jit

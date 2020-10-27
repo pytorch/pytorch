@@ -111,7 +111,7 @@ class DisjointSet {
     for (const auto& kv : fixedPointMap) {
       os << "\t{ ";
       for (const auto& val : kv.second) {
-        os << val << " ";
+        os << toString(val) << " ";
       }
       os << "}\n";
     }

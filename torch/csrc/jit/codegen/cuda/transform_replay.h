@@ -119,6 +119,7 @@ namespace cuda {
 
 class TensorDomain;
 class TensorView;
+class RootDomainMap;
 
 class TORCH_CUDA_API TransformReplay {
  public:
@@ -126,25 +127,37 @@ class TORCH_CUDA_API TransformReplay {
   static std::pair<TensorDomain*, unsigned int> replayPasC(
       const TensorDomain* producer,
       const TensorDomain* consumer,
-      int consumer_compute_at_axis);
+      int consumer_compute_at_axis,
+      const RootDomainMap& root_map);
 
   // Replay producer as consumer, returns {producer, producer_compute_at_axis}.
   static std::pair<TensorView*, unsigned int> replayPasC(
       TensorView* producer,
       TensorView* consumer,
       int consumer_compute_at_axis);
+  static std::pair<TensorView*, unsigned int> replayPasC(
+      TensorView* producer,
+      TensorView* consumer,
+      int consumer_compute_at_axis,
+      const RootDomainMap& root_map);
 
   // Replay producer as consumer, returns {consumer, consumer_compute_at_axis}.
   static std::pair<TensorDomain*, unsigned int> replayCasP(
       const TensorDomain* consumer,
       const TensorDomain* producer,
-      int producer_compute_at_axis);
+      int producer_compute_at_axis,
+      const RootDomainMap& root_map);
 
   // Replay producer as consumer, returns {consumer, consumer_compute_at_axis}.
   static std::pair<TensorView*, unsigned int> replayCasP(
       TensorView* consumer,
       TensorView* producer,
       int producer_compute_at_axis);
+  static std::pair<TensorView*, unsigned int> replayCasP(
+      TensorView* consumer,
+      TensorView* producer,
+      int producer_compute_at_axis,
+      const RootDomainMap& root_map);
 
   // Self replay.
   static TensorDomain* fullSelfReplay(

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -105,6 +107,7 @@ class ComputeAt {
   TensorView* producer_;
   TensorView* consumer_;
   unsigned int consumer_position_;
+  ComputeAtRootDomainMap root_map_;
 
   // Runs replayPasC and sets producer computeAt settings. Returns
   // producer_compute_at_axis.

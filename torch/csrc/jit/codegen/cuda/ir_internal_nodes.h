@@ -278,9 +278,6 @@ class TORCH_CUDA_API IterDomain : public Val {
   // Run concretization pass and return the concretized domain of broadcast id
   static const IterDomain* concretizeDomain(IterDomain* bcast_dom);
 
-  // Attempt to prove 2 IterDomains are equal in start and rawExtent
-  static bool proveEquivalent(IterDomain* a, IterDomain* b);
-
   bool isReduction() const {
     return getIterType() == IterType::Reduction;
   }

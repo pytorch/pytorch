@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
@@ -217,9 +218,14 @@ unsigned int ComputeAt::backwardComputeAt_impl(
 
   auto& producer_entry = tv_data.at(producer);
 
+  const TensorDomain* current_domain = producer->domain();
+
   // Use TensorDomain interface so it doesn't set computeAt automatically
   auto replay = TransformReplay::replayPasC(
-      producer, consumer, (int)consumer_compute_at_axis);
+      producer, consumer, (int)consumer_compute_at_axis, root_map_);
+
+  const TensorDomain* new_domain = producer->domain();
+  root_map_.setAlias(current_domain, new_domain);
 
   producer_entry.setPassPosition(replay.second);
 
@@ -241,8 +247,13 @@ unsigned int ComputeAt::forwardComputeAt_impl(
   auto& consumer_entry = tv_data.at(consumer);
   const auto& producer_entry = tv_data.at(producer);
 
+  const TensorDomain* current_domain = consumer->domain();
+
   auto replay = TransformReplay::replayCasP(
-      consumer, producer, (int)producer_compute_at_axis);
+      consumer, producer, (int)producer_compute_at_axis, root_map_);
+
+  const TensorDomain* new_domain = consumer->domain();
+  root_map_.setAlias(current_domain, new_domain);
 
   if (producer_entry.shouldSetComputeAt(producer_compute_at_axis)) {
     producer->setComputeAt(consumer, replay.second);
@@ -476,6 +487,8 @@ ComputeAt::ComputeAt(
   // consumer for all chains at or after the consumer specified in the computeAt
   // call.
   setCommonConsumer();
+
+  root_map_.build();
 }
 
 } // namespace cuda
