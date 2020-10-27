@@ -36,31 +36,60 @@ static inline void reduction128(char** data, int64_t n, int64_t stride, func_t o
   VEC_LOOP_HEADER(func_t, data)
   const char* in1_ptr = data[1];
   Vec acc[4];
-  for  (int j = 0; j < 4; j++) {
-    acc[j] = Vec::loadu(in1_ptr + j * Vec::size() * sizeof(scalar_t));
+  uint64_t block_size = 256;
+  // Batch the reduction to avoid precission issues in some routines
+  for (int64_t start = 0; start < n; start += block_size) {
+    for  (int j = 0; j < 4; j++) {
+      acc[j] = Vec::loadu(in1_ptr + stride * start + j * Vec::size() * sizeof(scalar_t));
+    }
+    int64_t end = (start + block_size > n ? n : start + block_size);
+    for (int64_t i = start + 1; i < end; i++) {
+      const char* ptr = in1_ptr + stride * i;
+      acc[0] = vop(acc[0], Vec::loadu(ptr + (0 * Vec::size() * sizeof(scalar_t))));
+      acc[1] = vop(acc[1], Vec::loadu(ptr + (1 * Vec::size() * sizeof(scalar_t))));
+      acc[2] = vop(acc[2], Vec::loadu(ptr + (2 * Vec::size() * sizeof(scalar_t))));
+      acc[3] = vop(acc[3], Vec::loadu(ptr + (3 * Vec::size() * sizeof(scalar_t))));
+    }
+    if (reduce) {
+      scalar_t buffer[Vec::size()];
+      acc[0] = vop(vop(acc[0], acc[1]), vop(acc[2], acc[3]));
+      acc[0].store(buffer);
+      for (int j = 1; j < Vec::size(); j++) {
+        buffer[0] = op(buffer[0], buffer[j]);
+      }
+      auto dst = (scalar_t*)out_ptr;
+      *dst = op(*dst, buffer[0]);
+    } else {
+      for (int j = 0; j < 4; j++) {
+        auto dst = out_ptr + j * Vec::size() * sizeof(scalar_t);
+        acc[j] = vop(acc[j], Vec::loadu(dst));
+        acc[j].store(dst);
+      }
+    }
   }
-  for (int64_t i = 1; i < n; i++) {
-    const char* ptr = in1_ptr + stride * i;
-    acc[0] = vop(acc[0], Vec::loadu(ptr + (0 * Vec::size() * sizeof(scalar_t))));
-    acc[1] = vop(acc[1], Vec::loadu(ptr + (1 * Vec::size() * sizeof(scalar_t))));
-    acc[2] = vop(acc[2], Vec::loadu(ptr + (2 * Vec::size() * sizeof(scalar_t))));
-    acc[3] = vop(acc[3], Vec::loadu(ptr + (3 * Vec::size() * sizeof(scalar_t))));
-  }
-  if (reduce) {
-    scalar_t buffer[Vec::size()];
-    acc[0] = vop(vop(acc[0], acc[1]), vop(acc[2], acc[3]));
-    acc[0].store(buffer);
-    for (int j = 1; j < Vec::size(); j++) {
-      buffer[0] = op(buffer[0], buffer[j]);
+}
+
+template <typename func_t>
+static inline void reduction(char** data, int64_t start, int64_t n, int64_t stride, func_t op) {
+
+  using scalar_t = typename function_traits<func_t>::result_type;
+
+  char* out_ptr = data[0];
+  const char* in1_ptr = data[1];
+
+  scalar_t acc = 0;
+  uint64_t block_size = 256;
+
+  // Batch the reduction to avoid precission issues in some routines
+  for (; start < n; start += block_size) {
+    acc = *((scalar_t*)(in1_ptr + stride * start));
+    int64_t end = (start + block_size > n ? n : start + block_size);
+    for (int64_t i = start + 1; i < end; i++) {
+      const char* ptr = in1_ptr + stride * i;
+      acc = op(acc, *((scalar_t*)ptr));
     }
     auto dst = (scalar_t*)out_ptr;
-    *dst = op(*dst, buffer[0]);
-  } else {
-    for (int j = 0; j < 4; j++) {
-      auto dst = out_ptr + j * Vec::size() * sizeof(scalar_t);
-      acc[j] = vop(acc[j], Vec::loadu(dst));
-      acc[j].store(dst);
-    }
+    *dst = op(*dst, acc);
   }
 }
 
@@ -82,9 +111,7 @@ static inline void vectorized_inner_reduction(char** data, int64_t n, func_t op,
   if (count > 0) {
     reduction128(data, count, vector_stride, op, vop, /*reduce=*/true);
   }
-  char* ptrs[3] = { data[0], data[0], data[1] };
-  int64_t strides[] = { 0, 0, sizeof(scalar_t) };
-  basic_loop(ptrs, strides, count * 4 * Vec::size(), n, op);
+  reduction(data, count * 4 * Vec::size(), n, sizeof(scalar_t), op);
 }
 
 // computes the reduction out = op(out, in)
@@ -102,9 +129,7 @@ static inline void vectorized_outer_reduction(char** data, int64_t inner_stride,
   int64_t step[] = { sizeof(scalar_t), sizeof(scalar_t) };
   int64_t remaining = size1 % (4 * Vec::size());
   UNARY_OUTER_LOOP(data, step, remaining, [&] {
-    char* ptrs[3] = { data[0], data[0], data[1] };
-    int64_t strides[] = { 0, 0, inner_stride };
-    basic_loop(ptrs, strides, 0, size0, op);
+    reduction(data, 0, size0, inner_stride, op);
   });
 }
 
@@ -246,6 +271,7 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
 template <typename func_t, typename vec_func_t>
 void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, double ident = 0) {
   using traits = binary_function_traits<func_t>;
+  using scalar_t = typename function_traits<func_t>::result_type;
   static_assert(
     all_same<
       typename traits::result_type,
@@ -267,9 +293,15 @@ void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, d
       vectorized_outer_reduction(data, inner_stride, size0, size1, op, vop);
     } else {
       UNARY_OUTER_LOOP(data, outer_strides, size1, [&] {
-        char* ptrs[3] = { data[0], data[0], data[1] };
-        int64_t inner_strides[3] = { strides[0], strides[0], strides[1] };
-        basic_loop(ptrs, inner_strides, 0, size0, op);
+        if (strides[0] > 0) {
+            // In this case data is accomulated in different output positions
+            // So we are not operating in a single value
+            char* ptrs[3] = { data[0], data[0], data[1] };
+            int64_t inner_strides[3] = { strides[0], strides[0], strides[1] };
+            basic_loop(ptrs, inner_strides, 0, size0, op);
+        } else {
+            reduction(data, 0, size0, strides[1], op);
+        }
       });
     }
   });
