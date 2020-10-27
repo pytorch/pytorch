@@ -8,7 +8,7 @@ import sys
 import functools
 import contextlib
 from pathlib import Path
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph, wrap
 from torch.fx.experimental import GraphManipulation
 from torch.fx.experimental import shape_prop
 from torch.fx.experimental.subgraph_creation_example import split_module
@@ -36,6 +36,10 @@ class SimpleTest(torch.nn.Module):
 
 def a_non_torch_leaf(a, b):
     return a + b
+
+@wrap
+def a_lifted_leaf(a, b):
+    return a[0] + a[1] + b
 
 class Pair(NamedTuple):
     x : torch.Tensor
@@ -206,6 +210,16 @@ class TestFX(JitTestCase):
         for node in sym.nodes:
             self.assertNotEqual(node.op, 'call_module')
         sym.lint(sym)
+
+    def test_wrap(self):
+        self.assertEqual(3 + 4 + 5, a_lifted_leaf((3, 4), 5))
+
+        def to_trace(y):
+            return a_lifted_leaf((4, y), 3) + a_lifted_leaf((3, 4), 5) + a_lifted_leaf((y, y), y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('a_lifted_leaf', m.code)
+        self.assertEqual(27, m(2))
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):

@@ -3,10 +3,10 @@ from types import CodeType, FunctionType
 from typing import Any, Optional, List, Callable, Union
 import torch
 
-from .node import Argument
+from .node import Argument, map_aggregate
 from .graph import Graph
 from .graph_module import GraphModule
-from .proxy import TracerBase
+from .proxy import TracerBase, Proxy
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -187,6 +187,38 @@ class Tracer(TracerBase):
         finally:
             torch.nn.Module.__call__ = orig_call
         return self.graph
+
+def wrap(orig_function):
+    """
+    A decorator that can be put on existing functions to use them in fx.
+
+        @torch.fx.wrap
+        def my_custom_function(x, y):
+            return x * x + y * y
+
+        sqrt = torch.fx.wrap(math.sqrt)
+
+    When called during symbolic tracing, the function will be inserted in the
+    graph rather than tracing it. When called outside of tracing,
+    the function will execute normally.
+    """
+
+    def wrapped(*args, **kwargs):
+        proxy = None
+
+        def find_proxy(x):
+            nonlocal proxy
+            if isinstance(x, Proxy):
+                proxy = x
+
+        map_aggregate(args, find_proxy)
+        map_aggregate(kwargs, find_proxy)
+        if proxy is not None:
+            return proxy.tracer.create_proxy('call_function', orig_function, args, kwargs)
+        else:
+            return orig_function(*args, **kwargs)
+    return wrapped
+
 
 # Symbolic tracing API
 #
