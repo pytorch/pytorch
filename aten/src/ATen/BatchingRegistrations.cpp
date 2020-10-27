@@ -512,7 +512,7 @@ Tensor to_dtype_layout_batching_rule(
     const optional<Device>& device,
     const optional<bool>& pin_memory,
     bool non_blocking, bool copy,
-    optional<MemoryFormat> memory_format) {
+    const optional<MemoryFormat>& memory_format) {
   auto options = TensorOptions()
     .dtype(dtype)
     .layout(layout)
@@ -527,10 +527,10 @@ Tensor to_dtype_layout_batching_rule(
 Tensor new_zeros_batching_rule(
     const Tensor& self,
     IntArrayRef size,
-    optional<ScalarType> dtype,
-    optional<Layout> layout,
-    optional<Device> device,
-    optional<bool> pin_memory) {
+    const optional<ScalarType>& dtype,
+    const optional<Layout>& layout,
+    const optional<Device>& device,
+    const optional<bool>& pin_memory) {
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_size = physical_view.getPhysicalShape(size);
   auto options = TensorOptions()
@@ -545,10 +545,13 @@ Tensor new_zeros_batching_rule(
 Tensor new_empty_batching_rule(
     const Tensor& self,
     IntArrayRef size,
-    const TensorOptions& options) {
+    const c10::optional<ScalarType>& dtype,
+    const c10::optional<Layout>& layout,
+    const c10::optional<Device>& device,
+    const c10::optional<bool>& pin_memory) {
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_size = physical_view.getPhysicalShape(size);
-  auto result = physical_view.tensor().new_empty(physical_size, options);
+  auto result = physical_view.tensor().new_empty(physical_size, TensorOptions().dtype(dtype).layout(layout).device(device).pin_memory(pin_memory));
   return physical_view.newLogicalFromPhysical(result);
 }
 
