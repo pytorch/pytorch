@@ -115,6 +115,7 @@ class ProcessContext:
         method follows: check_data(), join(period) pattern in comparison to:
         join(timeout), check_data().  The second pattern will deadlock the
         writer thread.
+
         """
         deadline = self._get_deadline(timeout)
         period = 1  # one second
