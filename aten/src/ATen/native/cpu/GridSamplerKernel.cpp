@@ -797,6 +797,10 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   const ComputeLocation<scalar_t, padding, align_corners> compute_W;
   const bool must_in_bound = padding != GridSamplerPadding::Zeros;
 
+  // constant used in cubic convolution
+  // could be -0.5 or -0.75, use the same value in UpSampleBicubic2d.h
+  const Vec A = Vec(-0.75);
+
   ApplyGridSample(const TensorAccessor<scalar_t, 4>& input)
     : inp_H(input.size(2))
     , inp_W(input.size(3))
@@ -807,32 +811,29 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     , compute_H(input.size(2))
     , compute_W(input.size(3)) {}
 
-  inline Vec cubic_convolution1(const Vec& tx, const Vec& A) const {
-    return ((A + Vec(2)) * tx - (A + Vec(3))) * tx * tx + Vec(1);
-  }
-
-  inline Vec cubic_convolution2(const Vec& tx, const Vec& A) const {
-    return ((A * tx - Vec(5) * A) * tx + Vec(8) * A) * tx - Vec(4) * A;
-  }
-
+  // Calculate the cubic convolution coefficient
   inline void get_cubic_coefficients(Vec coeffs[4], const Vec& tx) const {
-    Vec A = Vec(-0.75);
-    coeffs[0] = cubic_convolution2(tx + Vec(1), A);
-    coeffs[1] = cubic_convolution1(tx, A);
-    coeffs[2] = cubic_convolution1(Vec(1) - tx, A);
-    coeffs[3] = cubic_convolution2(Vec(2) - tx, A);
+    Vec x;
+    x = tx + Vec(1);  // 1 < x = |-1 - tx| < 2
+    coeffs[0] = ((A * x - Vec(5) * A) * x + Vec(8) * A) * x - Vec(4) * A;
+    x = tx;           // x = |0 - tx| <= 1
+    coeffs[1] = ((A + Vec(2)) * x - (A + Vec(3))) * x * x + Vec(1);
+    x = Vec(1) - tx;  // x = |1 - tx| <= 1
+    coeffs[2] = ((A + Vec(2)) * x - (A + Vec(3))) * x * x + Vec(1);
+    x = Vec(2) - tx;  // 1 < x = |2 - tx| < 2
+    coeffs[3] = ((A * x - Vec(5) * A) * x + Vec(8) * A) * x - Vec(4) * A;
   }
 
+  // Calculate the differential of the cubic convolution, i.e. `d coeff / d x`
   inline void get_cubic_coefficients_grad(Vec coeffs[4], const Vec& tx) const {
-    Vec A = Vec(-0.75);
     Vec x;
-    x = Vec(-1) - tx;
+    x = Vec(-1) - tx; // 1 < x = |-1 - tx| < 2
     coeffs[0] = (Vec(-3) * A * x - Vec(10) * A ) * x - Vec(8) * A;
-    x = Vec(0) - tx;
+    x = Vec(0) - tx;  // x = |0 - tx| <= 1
     coeffs[1] = (Vec(-3) * (A + Vec(2)) * x - Vec(2) * (A + Vec(3))) * x;
-    x = Vec(1) - tx;
+    x = Vec(1) - tx;  // x = |1 - tx| <= 1
     coeffs[2] = (Vec(3) * (A + Vec(2)) * x - Vec(2) * (A + Vec(3))) * x;
-    x = Vec(2) - tx;
+    x = Vec(2) - tx;  // 1 < x = |2 - tx| < 2
     coeffs[3] = (Vec(3) * A * x - Vec(10) * A) * x + Vec(8) * A;
   }
 
