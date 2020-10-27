@@ -1310,6 +1310,11 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+// magmaEig uses a hybrid CPU-GPU algorithm, which takes and return CPU
+// memory. So, we accept a GPU tensor, copy it to CPU memory, and later copy
+// the returned values from CPU to GPU. See also magmaSymeig, which uses a
+// similar approach.
+
 template <typename scalar_t>
 static void apply_eig(const Tensor& self, bool eigenvectors, Tensor& out_eigvals, Tensor& out_eigvecs,
                       int64_t *info_ptr) {
@@ -1352,7 +1357,8 @@ TORCH_CHECK(false, "Calling torch.eig on a CUDA tensor requires compiling PyTorc
 /*
  * Internal helper; like eig_cuda but:
  *   1. assume that self is a square matrix of side "n"
- *   2. return CPU tensors, which will be copied to GPU memory by the caller
+ *   2. return CPU tensors (because this is what magmaEig returns), which will be copied to GPU memory
+ *      by the caller
  */
 static std::tuple<Tensor,Tensor> eig_cuda_helper(const Tensor& self, int64_t n, bool eigenvectors) {
   // copy self to pinned CPU memory
