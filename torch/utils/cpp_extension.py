@@ -1089,9 +1089,9 @@ def load_inline(name,
         cuda_sources = [cuda_sources]
 
     cpp_sources.insert(0, '#include <torch/extension.h>')
-    cpp_sources.append('''#define PYBIND11_COMPILER_TYPE ""''')
-    cpp_sources.append('''#define PYBIND11_STDLIB ""''')
-    cpp_sources.append('''#define PYBIND11_BUILD_ABI ""''')
+    cpp_sources.insert(0, '''#define PYBIND11_COMPILER_TYPE ""''')
+    cpp_sources.insert(0, '''#define PYBIND11_STDLIB ""''')
+    cpp_sources.insert(0, '''#define PYBIND11_BUILD_ABI ""''')
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
