@@ -415,7 +415,6 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(graph, except_for={'aten::div', 'prim::Constant'})
 
     def test_add_bool(self):
-        torch._C._debug_set_fusion_group_inlining(False)
         for device in self.devices:
             def f(x, y, z):
                 return x + y
