@@ -1910,12 +1910,10 @@ copysign(input, other, *, out=None) -> Tensor
 Create a new float tensor with the magnitude of :attr:`input` and the sign of :attr:`other`, elementwise.
 
 .. math::
-$$
-\text{out}_i = \begin{cases}
-        -|\text{input}_i| & \text{if} \text{other}_i \leq -0.0 \\
-        |\text{input}_i| & \text{if} \text{other}_i \geq 0.0 \\
+    \text{out}_{i} = \begin{cases}
+        -|\text{input}_{i}| & \text{if} \text{other}_{i} \leq -0.0 \\
+        |\text{input}_{i}| & \text{if} \text{other}_{i} \geq 0.0 \\
     \end{cases}
-$$
 """ + r"""
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,

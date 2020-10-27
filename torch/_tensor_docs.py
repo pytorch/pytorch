@@ -947,7 +947,7 @@ See :func:`torch.copysign`
 """)
 
 add_docstr_all('copysign_', r"""
-copysign_(value) -> Tensor
+copysign_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.copysign`
 """)
