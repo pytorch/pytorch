@@ -46,7 +46,7 @@ class SyncBatchNorm(Function):
             count_all.view(-1)
         )
 
-        self.save_for_backward(input, weight, mean, invstd, count_all)
+        self.save_for_backward(input, weight, mean, invstd, count_all.to(torch.int32))
         self.process_group = process_group
 
         # apply element-wise normalization
@@ -73,20 +73,14 @@ class SyncBatchNorm(Function):
             self.needs_input_grad[2]
         )
 
-        grad_output = grad_output.contiguous()  # TODO: remove this after batch_norm_backward_elemt is ported
-
         if self.needs_input_grad[0]:
             # synchronizing stats used to calculate input gradient.
-            # TODO: move div_ into batch_norm_backward_elemt kernel
             num_channels = sum_dy.shape[0]
             combined = torch.cat([sum_dy, sum_dy_xmu], dim=0)
             torch.distributed.all_reduce(
                 combined, torch.distributed.ReduceOp.SUM, process_group, async_op=False)
             sum_dy, sum_dy_xmu = torch.split(combined, num_channels)
 
-            divisor = count_tensor.sum()
-            mean_dy = sum_dy / divisor
-            mean_dy_xmu = sum_dy_xmu / divisor
             # backward pass for gradient calculation
             grad_input = torch.batch_norm_backward_elemt(
                 grad_output,
@@ -94,8 +88,9 @@ class SyncBatchNorm(Function):
                 mean,
                 invstd,
                 weight,
-                mean_dy,
-                mean_dy_xmu
+                sum_dy,
+                sum_dy_xmu,
+                count_tensor
             )
 
         # synchronizing of grad_weight / grad_bias is not needed as distributed

@@ -196,7 +196,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda(const
 }
 
 Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, const Tensor& mean, const Tensor& invstd,
-                                      const Tensor& weight, const Tensor& mean_dy, const Tensor& mean_dy_xmu) {
+                                      const Tensor& weight, const Tensor& sum_dy, const Tensor& sum_dy_xmu, const Tensor& count) {
+  if (at::cuda::detail::canUse32BitIndexMath(self) && batch_norm_use_channels_last_kernels(self)){
+    return batch_norm_backward_elemt_channels_last_cuda_template(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
+  }
+
   return AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "batch_norm_backward_elemt", [&] {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "batch_norm_backward_elemt", [&] {
       auto mean_st = mean.dtype();
@@ -206,15 +210,15 @@ Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, c
       bool is_bfloat16_float = std::is_same<scalar_t, at::BFloat16>::value && mean_st == at::kFloat;
       if (cuda::detail::canUse32BitIndexMath(self)) {
         if (is_half_float || is_bfloat16_float) {
-          return batch_norm_backward_elemt_cuda_template<scalar_t, float, int32_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
+          return batch_norm_backward_elemt_cuda_template<scalar_t, float, int32_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
         } else {
-          return batch_norm_backward_elemt_cuda_template<scalar_t, scalar_t, int32_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
+          return batch_norm_backward_elemt_cuda_template<scalar_t, scalar_t, int32_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
         }
       } else {
         if (is_half_float || is_bfloat16_float) {
-          return batch_norm_backward_elemt_cuda_template<scalar_t, float, int64_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
+          return batch_norm_backward_elemt_cuda_template<scalar_t, float, int64_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
         } else {
-          return batch_norm_backward_elemt_cuda_template<scalar_t, scalar_t, int64_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
+          return batch_norm_backward_elemt_cuda_template<scalar_t, scalar_t, int64_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
         }
       }
     });
