@@ -15613,7 +15613,9 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.double)
     def test_lu_unpack(self, device, dtype):
         def run_test(pivot):
-            for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3)):
+            for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3),
+                          (3, 5), (5, 3), (3, 3, 5), (3, 5, 3),
+                          (7, 5, 3, 5, 3), (7, 5, 3, 3, 5)):
                 for lu_unpack in [torch.lu_unpack, torch._lu_unpack]:
                     a = torch.randn(*shape, dtype=dtype, device=device)
                     a_lu, p = torch.lu(a, pivot=pivot)
