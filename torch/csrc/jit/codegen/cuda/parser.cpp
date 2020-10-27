@@ -500,6 +500,28 @@ class IrParser {
           },
           true);
     }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::type_as(Tensor self, Tensor other) -> Tensor");
+      registerParseRule(
+          ptr_op,
+          [](const Node* node,
+             std::unordered_map<size_t, CgValue>& value_map) -> void {
+            auto self = value_map[node->inputs()[0]->unique()];
+
+            // TODO: switch to PyTorch dtype as it's closer to truth.
+            // For now, reality is that PyTorch IR profiling information could
+            // be missing even with profiling executor, due to upstream
+            // transformations between profiling runs to fusion pass.
+            auto opt_dtype =
+                value_map[node->inputs()[1]->unique()]->getDataType();
+            TORCH_INTERNAL_ASSERT(opt_dtype.has_value());
+
+            auto out = castOp(opt_dtype.value(), self);
+            value_map.emplace(node->output()->unique(), out);
+          });
+    }
   }
 
   void processJitNode(const JitOp* node) {

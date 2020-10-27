@@ -166,6 +166,15 @@ class NaiveTypePropagator {
             unary_reduce_type(out_type, dims->vec(), keepdim.value()));
         break;
       }
+      case aten::type_as: {
+        const auto type0 = node->input(0)->type()->cast<TensorType>();
+        const auto type1 = node->input(1)->type()->cast<TensorType>();
+        TORCH_CHECK(
+            type0 != nullptr && type1 != nullptr,
+            "input to type_as needs to be a tensor");
+        node->output()->setType(type0->withScalarType(type1->scalarType()));
+        break;
+      }
       default:
         TORCH_CHECK(
             false,

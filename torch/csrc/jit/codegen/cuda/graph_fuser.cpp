@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/partition.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -1043,12 +1044,16 @@ void guardFusionGroups(Block* block) {
 
 void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   FUSER_PERF_SCOPE("CudaFuseGraph");
+  GRAPH_DUMP("Before Fusion: ", graph);
   // TODO: we need to properly restore shape information after fusion.
   // shamelessly use tool from NNC.
   RemoveProfileNodesAndSpecializeTypes(graph);
 
+  GRAPH_DUMP("After Profiling Nodes Removed: ", graph);
   CudaGraphFuser(graph->block(), graph).run();
   guardFusionGroups(graph->block());
+  GRAPH_DUMP("After Fusion: ", graph);
+
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
   // We might have emitted a fair amount of useless shape propagating code, so
@@ -1061,6 +1066,7 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   // shamelessly use tool from NNC.
   RemoveTensorTypeSpecializations(graph);
 
+  GRAPH_DUMP("Before Compilation: ", graph);
   // Compile CudaFusionGroup
   compileFusionRecursive(graph->block());
 }

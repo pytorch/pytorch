@@ -406,6 +406,23 @@ class TestCudaFuser(JitTestCase):
             self._binary_test_helper(op)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_type_as_op(self):
+        def t(x: torch.Tensor, y: torch.Tensor, z: float):
+            o = torch.lt(x, z)
+            o = o.type_as(y)
+            return o
+        t_jit = torch.jit.script(t)
+        x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+        y = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
+        jit_o = t_jit(x, y, 0.5)
+        jit_o = t_jit(x, y, 0.5)
+        o = t(x, y, 0.5)
+        self.assertEqual(o, jit_o)
+        self.assertGraphContains(t_jit.graph_for(x, y, 0.5), FUSION_GUARD)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     # legacy fuser does not work for rand_like, see issue #34361
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "Requires fusion optimization pass to be effective")
     def test_ternary_ops(self):
