@@ -9697,7 +9697,7 @@ class TestTorchDeviceType(TestCase):
     @tf32_on_and_off()
     def test_symeig(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
-        
+
         is_tf32 = (dtype == torch.float32 and tf32_is_not_fp32() and torch.backends.cuda.matmul.allow_tf32)
         recon_tol = 5e-3 if is_tf32 else 1e-8
 
