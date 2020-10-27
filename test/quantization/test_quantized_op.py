@@ -3980,11 +3980,11 @@ class TestQuantizedConv(TestCase):
         pad_d=st.integers(1, 2), pad_h=st.integers(1, 2),
         pad_w=st.integers(1, 2),
         o_pad=st.integers(0, 2),
-        channelwise=st.booleans(),
-        qengine=st.sampled_from(["fbgemm"]))
+        channelwise=st.booleans())
+    @override_qengines
     def test_qconv3d_unpack(
         self, inputs, stride_d, stride_h, stride_w, pad_d, pad_h, pad_w, o_pad,
-        channelwise, qengine
+        channelwise
     ):
         if qengine_is_qnnpack():
             return  # QNNPACK doesn't support this
