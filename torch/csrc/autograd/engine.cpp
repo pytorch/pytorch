@@ -1092,8 +1092,8 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
     } else {
       if (!info.captures_) {
         info.captures_ = make_unique<std::vector<ExecInfo::Capture>>();
-        info.captures_->emplace_back(output_edge.input_nr, output_idx++);
       }
+      info.captures_->emplace_back(output_edge.input_nr, output_idx++);
     }
   }
   captured_vars_.resize(output_idx);

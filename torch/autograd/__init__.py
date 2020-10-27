@@ -128,7 +128,7 @@ def backward(
                                "use 'grad_tensors'.")
 
     tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tuple(tensors)
-    inputs = (inputs,) if isinstance(inputs, torch.Tensor) else tuple(inputs)
+    inputs = tuple(inputs) if inputs is not None else tuple()
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
     grad_tensors_ = _make_grads(tensors, grad_tensors_)
