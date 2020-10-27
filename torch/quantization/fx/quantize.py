@@ -308,7 +308,7 @@ class Quantizer:
                 self.modules[node.target].qconfig = module_qconfig
                 self.qconfig_map[node.name] = module_qconfig
 
-    def _prepare(self, model, qconfig_dict, inplace, prepare_custom_config_dict, is_standalone_module):
+    def _prepare(self, model, qconfig_dict, prepare_custom_config_dict, is_standalone_module):
         """ standalone_module means it a submodule that is not inlined in parent module,
         and will be quantized separately as one unit.
 
@@ -324,8 +324,6 @@ class Quantizer:
         """
         if prepare_custom_config_dict is None:
             prepare_custom_config_dict = {}
-        if not inplace:
-            model = copy.deepcopy(model)
         additional_quant_patterns = prepare_custom_config_dict.get("additional_quant_pattern", {})
         self.patterns = get_default_quant_patterns().copy()
         for k, v in additional_quant_patterns.items():
@@ -534,8 +532,8 @@ class Quantizer:
         self.patterns = observed._patterns
         self.qconfig_map = observed._qconfig_map
 
-    def prepare(self, model, qconfig_dict, inplace=False, prepare_custom_config_dict=None, is_standalone_module=False):
-        return self._prepare(model, qconfig_dict, inplace, prepare_custom_config_dict, is_standalone_module)
+    def prepare(self, model, qconfig_dict, prepare_custom_config_dict=None, is_standalone_module=False):
+        return self._prepare(model, qconfig_dict, prepare_custom_config_dict, is_standalone_module)
 
     def _run_weight_observers(self, observed):
         r''' Extract the subgraph that produces the weight for dynamic quant
