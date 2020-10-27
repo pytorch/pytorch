@@ -26,6 +26,7 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/comm.h>
+#include <torch/csrc/distributed/c10d/default_comm_hooks.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -123,19 +124,25 @@ class PythonStore : public ::c10d::Store {
   }
 };
 
-// This method is called from DDP's Python API. Its inputs are
-// a c10d reducer object, state, and callable comm_hook. State and
-// comm_hook inputs are Python objects and this function creates a
-// c10d PythonCommHook object using these inputs. It later calls
-// register_comm_hook function of the reducer input to register that
-// PythonCommHook object.
+// Called from DDP's Python API to create a c10d Python comm hook object.
+// The input state and callable comm_hook are Python objects. It later calls
+// register_comm_hook function of the reducer input to register the hook.
 void _register_comm_hook(
     ::c10d::Reducer& reducer,
     py::object state,
     py::object comm_hook) {
   reducer.register_comm_hook(std::make_unique<::c10d::PythonCommHook>(
       std::move(state), std::move(comm_hook)));
-};
+}
+
+// Called from DDP's Python API to create a c10d C++ comm hook.
+// The input is an enum hook type. It later calls register_builtin_comm_hook
+// function of the reducer input to set the hook type.
+void _register_builtin_comm_hook(
+    ::c10d::Reducer& reducer,
+    ::c10d::BuiltinCommHookType comm_hook_type) {
+  reducer.register_builtin_comm_hook(comm_hook_type);
+}
 
 PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
@@ -146,12 +153,19 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
 
   auto module = py::handle(c10d_module).cast<py::module>();
 
-  module.def(
-      "_register_comm_hook",
-      &_register_comm_hook,
-      py::arg("reducer"),
-      py::arg("state"),
-      py::arg("comm_hook"));
+  module
+      .def(
+          "_register_comm_hook",
+          &_register_comm_hook,
+          py::arg("reducer"),
+          py::arg("state"),
+          py::arg("comm_hook"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_register_builtin_comm_hook",
+          &_register_builtin_comm_hook,
+          py::arg("reducer"),
+          py::arg("comm_hook_type"));
 
   shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
       .def(py::init<std::vector<Tensor>&>(), py::arg("tensors"))
@@ -166,6 +180,12 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
             the single process single device mode, this list would consist of only
             a single tensor.
            )");
+
+  py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
+An enum-like class for built-in communication hooks: ``NONE``, ``ALLREDUCE``, and ``FP16_COMPRESS``.)")
+      .value("NONE", ::c10d::BuiltinCommHookType::NONE)
+      .value("ALLREDUCE", ::c10d::BuiltinCommHookType::ALLREDUCE)
+      .value("FP16_COMPRESS", ::c10d::BuiltinCommHookType::FP16_COMPRESS);
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(

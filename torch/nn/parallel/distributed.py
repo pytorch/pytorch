@@ -975,7 +975,7 @@ class DistributedDataParallel(Module):
 
     def _register_comm_hook(self, state: object, hook: callable):
         r"""
-        Register a communication hook which is an enhancement that provides a
+        Registers a communication hook which is an enhancement that provides a
         flexible hook to users where they can specify how DDP aggregates gradients
         across multiple workers.
 
@@ -1059,6 +1059,39 @@ class DistributedDataParallel(Module):
         """
         self._check_comm_hook(hook)
         dist._register_comm_hook(self.reducer, state, hook)
+
+    def _register_builtin_comm_hook(
+        self, comm_hook_type: dist.BuiltinCommHookType
+    ):
+        r"""
+        Registers a built-in communication hook that specifies how DDP
+        aggregates gradients across multiple workers.
+
+        Arguments:
+            comm_hook_type (dist.BuiltinCommHookType): enum that corresponds
+                to a C++ comm hook implementation predefined in
+                torch/csrc/distributed/c10d/default_comm_hooks.h.
+
+        .. warning ::
+            DDP communication hook can only be registered once and should be registered
+            before calling backward.
+
+        .. warning ::
+            DDP communication hook does not support single-process multiple-device mode.
+            Gradbucket tensors should consist of only a single tensor.
+
+        .. warning ::
+            DDP communication hook is experimental and subject to change.
+
+        Example::
+            Below is an example of a FP16 compression where gradients are
+            compressed into 16-bit floating-point numbers before allreduce, and
+            then decompressed after allreduce.
+
+            >>> ddp._register_builtin_comm_hook(dist.BuiltinCommHookType.FP16_COMPRESS)
+
+        """
+        dist._register_builtin_comm_hook(self.reducer, comm_hook_type)
 
     def _distributed_broadcast_coalesced(
         self, tensors, buffer_size, authoritative_rank=0

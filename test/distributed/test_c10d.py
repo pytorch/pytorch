@@ -3398,6 +3398,21 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         return gpu_model
 
+    def _gpu_model_with_builtin_ddp_comm_hook(self, process_group, hook=None, gradient_as_bucket_view=False):
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        gpu_model = DistributedDataParallel(
+            ModuleForDdpCommHook().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+            gradient_as_bucket_view=gradient_as_bucket_view,
+        )
+
+        # Register a built-in DDP communication hook if defined
+        if hook is not None:
+            gpu_model._register_builtin_comm_hook(hook)
+
+        return gpu_model
+
     def _run_and_verify_hook(self, model, input, expected_grad):
         # Run forward
         output = model(input, self.rank)
@@ -3474,11 +3489,32 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # check whether the grads are equal to what DDP without hook would return.
         self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
+    def _test_builtin_ddp_comm_hook_allreduce_hook_nccl(self, gradient_as_bucket_view=False):
+        """
+        This unit test verifies whether a built-in DDP communication hook that just calls
+        allreduce gives the same result result with the case of no hook registered.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        # Get GPU model with the built-in allreduce communication hook.
+        gpu_model = self._gpu_model_with_builtin_ddp_comm_hook(
+            process_group, dist.BuiltinCommHookType.ALLREDUCE, gradient_as_bucket_view)
+
+        # check whether the grads are equal to what DDP without hook would return.
+        self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm
     def test_ddp_comm_hook_allreduce_hook_nccl(self):
         self._test_ddp_comm_hook_allreduce_hook_nccl()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_builtin_ddp_comm_hook_allreduce_hook_nccl(self):
+        self._test_builtin_ddp_comm_hook_allreduce_hook_nccl()
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

@@ -14,6 +14,8 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAStream.h>
 
 namespace c10d {
 
@@ -302,8 +304,29 @@ class ProcessGroupNCCL : public ProcessGroup {
 
       // Do not free the underlying data storage of value_ before its
       // usage on futureNCCLCallbackStream_ finish.
-      TORCH_INTERNAL_ASSERT(record_stream_cb_);
-      record_stream_cb_(value_, futureNCCLCallbackStream_->unwrap());
+      if (record_stream_cb_ != nullptr) {
+        // If a Python communication hook is used, record_stream_cb_ will be
+        // set in torch/csrc/jit/python/pybind_utils.h, which allows Python
+        // dependency to be imported.
+        record_stream_cb_(value_, futureNCCLCallbackStream_->unwrap());
+      } else {
+        // If a C++ communication hook is used, create and set a record stream
+        // callback.
+        TORCH_INTERNAL_ASSERT(
+            value_.isTensorList() || value_.isTensor(),
+            "the future value must be either a tensor list or a tensor.");
+        at::Tensor tensor;
+        if (value_.isTensorList()) {
+          const auto tensors = value_.toTensorVector();
+          TORCH_INTERNAL_ASSERT(
+              tensors.size() == 1, "expected exactly 1 tensor");
+          tensor = tensors[0];
+        } else {
+          tensor = value_.toTensor();
+        }
+        c10::cuda::CUDACachingAllocator::recordStream(
+            tensor.storage().data_ptr(), *futureNCCLCallbackStream_);
+      }
 
       // Use the dedicated callback stream to run callback.
       // Cannot move capture std::function in lambda, because it cannot deduce
@@ -558,7 +581,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   // This function iterates through the list of WorkNCCL objects in the
   // workList_ corresponding to incomplete collectives and then aborts NCCL
   // communicators associated with timed out collectives.
-  void abortTimedOutCollectives(std::unordered_set<std::string>& abortedCommIds);
+  void abortTimedOutCollectives(
+      std::unordered_set<std::string>& abortedCommIds);
 
   void workCleanupLoop();
 
@@ -703,6 +727,6 @@ class ProcessGroupNCCL : public ProcessGroup {
   // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()
   // is called.
   static thread_local uint64_t ncclActiveGroupCounter_;
-};
+}; // namespace c10d
 
 } // namespace c10d
