@@ -194,13 +194,24 @@ def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=No
 
         # Additional fuser_method mapping
         "additional_fuser_method_mapping": {
-           (ModuleClass1, ModuleClass2): fuse_module1_module2
+           (torch.nn.Conv2d, torch.nn.BatchNorm2d): fuse_conv_bn
         },
 
         # Additioanl module mapping for qat
         "additional_qat_module_mapping": {
-           FloatModule: QATModule
+           torch.nn.intrinsic.ConvBn2d: torch.nn.qat.ConvBn2d
         },
+
+        # Additional fusion patterns
+        "additional_fusion_pattern": {
+           (torch.nn.BatchNorm2d, torch.nn.Conv2d): ConvReluFusionhandler
+        },
+
+        # Additional quantization patterns
+        "additional_quant_pattern": {
+           torch.nn.Conv2d: ConvReluQuantizeHandler,
+           (torch.nn.ReLU, torch.nn.Conv2d): ConvReluQuantizeHandler,
+        }
       }
 
 
