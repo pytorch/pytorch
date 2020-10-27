@@ -7,7 +7,7 @@ from math import inf, nan, isnan
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, skipCUDAIfNoMagma, skipCPUIfNoLapack)
+    (instantiate_device_type_tests, dtypes, skipCUDAIfNoMagma, skipCPUIfNoLapack, onlyCPU)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck
 
@@ -567,6 +567,113 @@ class TestLinalg(TestCase):
         result = torch.linalg.norm(x, 3, 1)
         expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
         self.assertEqual(result, expected)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
+    @dtypes(torch.double)
+    def test_eig_basic(self, device, dtype):
+        a = torch.Tensor(((1.96, 0.00, 0.00, 0.00, 0.00),
+                          (-6.49, 3.80, 0.00, 0.00, 0.00),
+                          (-0.47, -6.39, 4.17, 0.00, 0.00),
+                          (-7.20, 1.50, -1.51, 5.70, 0.00),
+                          (-0.65, -6.34, 2.67, 1.80, -7.10))).t().contiguous().to(dtype=dtype, device=device)
+        e = torch.eig(a)[0]
+        ee, vv = torch.eig(a, True)
+        te = torch.tensor((), dtype=dtype, device=device)
+        tv = torch.tensor((), dtype=dtype, device=device)
+        eee, vvv = torch.eig(a, True, out=(te, tv))
+        self.assertEqual(e, ee, atol=1e-12, rtol=0)
+        self.assertEqual(ee, eee, atol=1e-12, rtol=0)
+        self.assertEqual(ee, te, atol=1e-12, rtol=0)
+        self.assertEqual(vv, vvv, atol=1e-12, rtol=0)
+        self.assertEqual(vv, tv, atol=1e-12, rtol=0)
+
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_eig_reuse(self, device, dtype):
+        X = torch.randn(4, 4, dtype=dtype, device=device)
+        X = torch.mm(X.t(), X)
+        e = torch.zeros(4, 2, dtype=dtype, device=device)
+        v = torch.zeros(4, 4, dtype=dtype, device=device)
+        torch.eig(X, True, out=(e, v))
+        Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
+        self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
+        self.assertFalse(v.is_contiguous(), 'V is contiguous')
+
+        torch.eig(X, True, out=(e, v))
+        Xhat = torch.mm(v, torch.mm(e.select(1, 0).diag(), v.t()))
+        self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
+        self.assertFalse(v.is_contiguous(), 'V is contiguous')
+
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_eig_non_contiguous(self, device, dtype):
+        X = torch.randn(4, 4, dtype=dtype, device=device)
+        X = torch.mm(X.t(), X)
+        e = torch.zeros(4, 2, 2, dtype=dtype, device=device)[:, 1]
+        v = torch.zeros(4, 2, 4, dtype=dtype, device=device)[:, 1]
+        self.assertFalse(v.is_contiguous(), 'V is contiguous')
+        self.assertFalse(e.is_contiguous(), 'E is contiguous')
+        torch.eig(X, True, out=(e, v))
+        Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
+        self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
+    @dtypes(torch.double)
+    def test_eig_invalid_input(self, device, dtype):
+        # test invalid input
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should be 2 dimensional',
+            lambda: torch.eig(torch.ones((2))))
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should be square',
+            lambda: torch.eig(torch.ones((2, 3))))
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should not contain infs or NaNs',
+            lambda: torch.eig(np.inf * torch.ones((2, 2))))
+        self.assertRaisesRegex(
+            RuntimeError,
+            'A should not contain infs or NaNs',
+            lambda: torch.eig(np.nan * torch.ones((2, 2))))
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_eig_out(self, device, dtype):
+        # the out version of torch.eig needs to be tested manually: we can't
+        # use the "test_out=True" parameter to tensor_op_tests because the
+        # signature is irregular (since we have *two* output vectors)
+        t = torch.randn(10, 10, dtype=dtype, device=device)
+        evals, evecs = torch.eig(t, eigenvectors=True)
+        #
+        # check that the out= version computes the same values as the normal one
+        out_evals = torch.empty_like(evals)
+        out_evecs = torch.empty_like(evecs)
+        evals2, evecs2 = torch.eig(t, eigenvectors=True, out=(out_evals, out_evecs))
+        # check that the out tensors were used in-place
+        self.assertEqual(evals2.data_ptr(), out_evals.data_ptr())
+        self.assertEqual(evecs2.data_ptr(), out_evecs.data_ptr())
+        # check that the result is the same as the non-out version
+        self.assertEqual(evals, out_evals)
+        self.assertEqual(evecs, out_evecs)
+        #
+        # check what happens in the eigenvectors=False case
+        out_evals = torch.empty_like(evals)
+        out_evecs = torch.tensor([1, 2, 3], dtype=dtype, device=device)
+        evals2, evecs2 = torch.eig(t, eigenvectors=False, out=(out_evals, out_evecs))
+        # check that the out_evals was used in-place
+        self.assertEqual(evals2.data_ptr(), out_evals.data_ptr())
+        self.assertEqual(evals, out_evals)
+        # check that out_evecs was NOT touched at all
+        assert out_evecs.tolist() == [1, 2, 3]
+
+
 
 instantiate_device_type_tests(TestLinalg, globals())
 
