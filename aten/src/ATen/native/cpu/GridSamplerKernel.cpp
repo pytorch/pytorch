@@ -812,7 +812,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     , compute_W(input.size(3)) {}
 
   // Calculate the cubic convolution coefficient
-  inline void get_cubic_coefficients(Vec coeffs[4], const Vec& tx) const {
+  inline void get_cubic_coefficients(Vec (&coeffs)[4], const Vec& tx) const {
     Vec x;
     x = tx + Vec(1);  // 1 < x = |-1 - tx| < 2
     coeffs[0] = ((A * x - Vec(5) * A) * x + Vec(8) * A) * x - Vec(4) * A;
@@ -825,7 +825,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   }
 
   // Calculate the differential of the cubic convolution, i.e. `d coeff / d x`
-  inline void get_cubic_coefficients_grad(Vec coeffs[4], const Vec& tx) const {
+  inline void get_cubic_coefficients_grad(Vec (&coeffs)[4], const Vec& tx) const {
     Vec x;
     x = Vec(-1) - tx; // 1 < x = |-1 - tx| < 2
     coeffs[0] = (Vec(-3) * A * x - Vec(10) * A ) * x - Vec(8) * A;
