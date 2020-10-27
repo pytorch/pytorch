@@ -243,6 +243,20 @@ Tensor fftn_c2c(
   return at::_fft_c2c(x, dim, static_cast<int64_t>(norm), forward);
 }
 
+Tensor fftn_r2c(
+    Tensor input, IntArrayRef shape, IntArrayRef dim,
+    c10::optional<std::string> norm_str, bool onesided) {
+  TORCH_CHECK(!input.is_complex(), "Expected a real input tensor to FFT");
+  input = promote_tensor_fft(input, /*require_complex=*/false);
+  if (dim.empty()) {
+    TORCH_CHECK(!onesided, "rfftn must transform at least one axis");
+    return input.to(c10::toComplexType(input.scalar_type()));
+  }
+  input = resize_fft_input(input, dim, shape);
+  const auto norm = norm_from_string(norm_str, /*forward=*/true);
+  return at::_fft_r2c(input, dim, static_cast<int64_t>(norm), onesided);
+}
+
 }  // namespace (anonymous)
 
 // torch.fft.fft, analogous to NumPy's numpy.fft.fft
@@ -284,9 +298,9 @@ Tensor fft_fftn(const Tensor& self, c10::optional<IntArrayRef> s,
                 c10::optional<IntArrayRef> dim,
                 c10::optional<std::string> norm) {
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
-  // TODO: For real input, perform rfftn then mirror with conjugate symmetry
-  Tensor input = promote_tensor_fft(self, /*require_complex=*/true);
-  return fftn_c2c(input, desc.shape, desc.dim, norm, /*forward=*/true);
+  return self.is_complex() ?
+    fftn_c2c(self, desc.shape, desc.dim, norm, /*forward=*/true) :
+    fftn_r2c(self, desc.shape, desc.dim, norm, /*onesided=*/false);
 }
 
 Tensor fft_ifftn(const Tensor& self, c10::optional<IntArrayRef> s,
@@ -299,14 +313,9 @@ Tensor fft_ifftn(const Tensor& self, c10::optional<IntArrayRef> s,
 
 Tensor fft_rfftn(const Tensor& self, c10::optional<IntArrayRef> s,
                 c10::optional<IntArrayRef> dim,
-                c10::optional<std::string> norm_str) {
-  TORCH_CHECK(!self.is_complex(), "Expected a real input tensor to rfftn");
+                c10::optional<std::string> norm) {
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
-  TORCH_CHECK(desc.shape.size() > 0, "rfftn must transform at least one axis");
-  Tensor input = promote_tensor_fft(self, /*require_complex=*/false);
-  Tensor x = resize_fft_input(input, desc.dim, desc.shape);
-  const auto norm = norm_from_string(norm_str, /*forward=*/true);
-  return at::_fft_r2c(x, desc.dim, static_cast<int64_t>(norm), /*onesided=*/true);
+  return fftn_r2c(self, desc.shape, desc.dim, norm, /*onesided=*/true);
 }
 
 Tensor fft_irfftn(const Tensor& self, c10::optional<IntArrayRef> s,
