@@ -28,6 +28,7 @@ from .pattern_utils import (
 
 from .observed_module import (
     mark_observed_module,
+    is_observed_module,
     mark_observed_standalone_module,
     is_observed_standalone_module,
 )
@@ -515,13 +516,7 @@ class Quantizer:
         observed._qconfig_map = self.qconfig_map
 
     def restore_state(self, observed):
-        err_msg = 'please make sure the model is produced by prepare'
-        assert hasattr(observed, '_activation_post_process_map'), 'did not found ' + \
-            '_activation_post_process attribute ' + err_msg
-        assert hasattr(observed, '_patterns'), 'did not found ' + \
-            '_patterns attribute ' + err_msg
-        assert hasattr(observed, '_qconfig_map'), 'did not found ' + \
-            '_qconfig_map attribute ' + err_msg
+        assert is_observed_module(observed), 'incoming model must be produced by prepare_fx'
         self.activation_post_process_map = observed._activation_post_process_map
         self.patterns = observed._patterns
         self.qconfig_map = observed._qconfig_map

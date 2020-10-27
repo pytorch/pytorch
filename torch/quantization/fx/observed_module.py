@@ -28,6 +28,9 @@ class ObservedGraphModule(GraphModule):
 def mark_observed_module(module):
     return ObservedGraphModule(module, module.graph)
 
+def is_observed_module(module):
+    return isinstance(module, ObservedGraphModule)
+
 class ObservedStandaloneGraphModule(ObservedGraphModule):
 
     def get_preserved_attr_names(self):
