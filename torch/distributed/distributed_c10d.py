@@ -44,7 +44,7 @@ try:
 except ImportError:
     _GLOO_AVAILABLE = False
 
-# Some reduce ops are not supported by complex numbers.
+# Some reduce ops are not supported by complex numbers and will result in an error.
 # We currently provide complex support to the distributed API by viewing
 # complex tensors as real (torch.view_as_real), meaning that calling
 # these unsupported ops will return garbage values rather than error out.
@@ -166,7 +166,7 @@ _pg_group_ranks = {}
 _default_pg = None
 _default_pg_init_method = None
 
-# Process group counter for default naming
+# Process group count for default naming
 _group_count = 0
 
 
@@ -393,7 +393,20 @@ def init_process_group(backend,
             the process group. Default value equals 30 minutes.
             This is applicable for the ``gloo`` backend. For ``nccl``, this is
             applicable only if the environment variable ``NCCL_BLOCKING_WAIT``
-            is set to 1.
+            or ``NCCL_ASYNC_ERROR_HANDLING`` is set to 1. When
+            ``NCCL_BLOCKING_WAIT`` is set, this is the duration for which the
+            process will block and wait for collectives to complete before
+            throwing an exception. When ``NCCL_ASYNC_ERROR_HANDLING`` is set,
+            this is the duration after which collectives will be aborted
+            asynchronously and the process will crash. ``NCCL_BLOCKING_WAIT``
+            will provide errors to the user which can be caught and handled,
+            but due to its blocking nature, it has a performance overhead. On
+            the other hand, ``NCCL_ASYNC_ERROR_HANDLING`` has little
+            performance overhead, but crashes the process on errors. This is
+            done since CUDA execution is async and it is no longer safe to
+            continue executing user code since failed async NCCL operations
+            might result in subsequent CUDA operations to run on corrupted
+            data. Only one of these two environment variables should be set.
         group_name (str, optional, deprecated): Group name.
 
     To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
@@ -486,9 +499,9 @@ def _new_process_group_helper(world_size,
     global _group_count
     global _pg_names
 
-    group_name_ = group_name
     if not group_name:
         group_name = str(_group_count)
+        _group_count += 1
 
     if group_name in _pg_names.values():
         raise RuntimeError("The specified group name has already been "
@@ -552,9 +565,6 @@ def _new_process_group_helper(world_size,
                 timeout)
             _pg_map[pg] = (backend, store)
             _pg_names[pg] = group_name
-
-    if not group_name_:
-        _group_count += 1
 
     return pg
 

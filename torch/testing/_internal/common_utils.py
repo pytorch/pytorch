@@ -620,7 +620,6 @@ def is_iterable(obj):
 
 class CudaNonDefaultStream():
     def __enter__(self):
-        print("HEY CudaNonDefaultStream.__enter__ top", file=sys.stderr)
         # Before starting CUDA test save currently active streams on all
         # CUDA devices and set new non default streams to all CUDA devices
         # to ensure CUDA tests do not use default stream by mistake.
@@ -631,17 +630,14 @@ class CudaNonDefaultStream():
             deviceStream = torch.cuda.Stream(device=d)
             torch._C._cuda_setStream(deviceStream._cdata)
         torch._C._cuda_setDevice(beforeDevice)
-        print("HEY CudaNonDefaultStream.__enter__ bot", file=sys.stderr)
 
     def __exit__(self, exec_type, exec_value, traceback):
         # After completing CUDA test load previously active streams on all
         # CUDA devices.
-        print("HEY CudaNonDefaultStream.__exit__ top", file=sys.stderr)
         beforeDevice = torch.cuda.current_device()
         for d in range(torch.cuda.device_count()):
             torch._C._cuda_setStream(self.beforeStreams[d]._cdata)
         torch._C._cuda_setDevice(beforeDevice)
-        print("HEY CudaNonDefaultStream.__exit__ bot", file=sys.stderr)
 
 class CudaMemoryLeakCheck():
     def __init__(self, testcase, name=None):
@@ -662,16 +658,12 @@ class CudaMemoryLeakCheck():
         return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
 
     def __enter__(self):
-        print("HEY CudaMemoryLeakCheck.__enter__ top", file=sys.stderr)
         self.befores = self.get_cuda_memory_usage()
-        print("HEY CudaMemoryLeakCheck.__enter__ bot", file=sys.stderr)
 
     def __exit__(self, exec_type, exec_value, traceback):
         # Don't check for leaks if an exception was thrown
         if exec_type is not None:
             return
-
-        print("HEY CudaMemoryLeakCheck.__exit__ top")
 
         afters = self.get_cuda_memory_usage()
 
@@ -679,8 +671,6 @@ class CudaMemoryLeakCheck():
             self.testcase.assertEqual(
                 before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
                     self.name, after - before, i))
-
-        print("HEY CudaMemoryLeakCheck.__exit__ bot")
 
 #  "min_satisfying_examples" setting has been deprecated in hypythesis
 #  3.56.0 and removed in hypothesis 4.x
@@ -848,7 +838,7 @@ class TestCase(expecttest.TestCase):
 
 
     def setUp(self):
-        print("HEY common_utils.TestCase.setUp top", file=sys.stderr)
+
 
         if TEST_SKIP_FAST:
             if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
@@ -856,7 +846,6 @@ class TestCase(expecttest.TestCase):
         check_disabled(str(self))
 
         set_rng_seed(SEED)
-        print("HEY common_utils.TestCase.setUp bot", file=sys.stderr)
 
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device='cpu'):
         # Assert not given impossible combination, where the sparse dims have
@@ -1055,6 +1044,7 @@ class TestCase(expecttest.TestCase):
                 rtol, atol = 0, 0
         rtol = cast(float, rtol)
         atol = cast(float, atol)
+        assert atol is not None
         atol = max(atol, self.precision)
 
         return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)

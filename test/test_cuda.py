@@ -1,15 +1,15 @@
-import collections
-import io
-import tempfile
-from typing import NamedTuple
-import unittest
-import sys
 from itertools import repeat, chain, product
-import os
+from typing import NamedTuple
+import collections
 import gc
-import threading
-import queue
+import io
+import os
 import pickle
+import queue
+import sys
+import tempfile
+import threading
+import unittest
 
 import torch
 import torch.cuda
@@ -23,7 +23,7 @@ from test_torch import AbstractTestCases
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
-    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_SANDCASTLE, \
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
@@ -287,10 +287,10 @@ class TestCuda(TestCase):
         self.assertFalse(t.is_pinned())
         cudart = torch.cuda.cudart()
         r = cudart.cudaHostRegister(t.data_ptr(), t.numel() * t.element_size(), 0)
-        self.assertEquals(r, 0)
+        self.assertEqual(r, 0)
         self.assertTrue(t.is_pinned())
         r = cudart.cudaHostUnregister(t.data_ptr())
-        self.assertEquals(r, 0)
+        self.assertEqual(r, 0)
         self.assertFalse(t.is_pinned())
 
     def test_memory_stats(self):
@@ -1545,7 +1545,6 @@ class TestCuda(TestCase):
         counted = t.bincount(minlength=65536)
         self.assertEqual(torch.sum(counted), 10)
 
-    @skipIfRocm
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
         a /= 100000000
@@ -2152,6 +2151,7 @@ t2.start()
 
         self._run_scaling_case(run, unskipped=3, skipped=1)
 
+    @unittest.skipIf(IS_WINDOWS, 'FIXME: fix this test for Windows')
     def test_grad_scaling_penalty(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             for i, (input, target) in enumerate(data):
@@ -2497,12 +2497,8 @@ t2.start()
         if add_kwargs is None:
             add_kwargs = {}
 
-        print(f"HEY _run_autocast_outofplace top op {op}", file=sys.stderr)
         self.assertFalse(torch.is_autocast_enabled())
-
         with torch.cuda.amp.autocast():
-
-            print(f"HEY _run_autocast_outofplace inside with op {op}", file=sys.stderr)
             self.assertTrue(torch.is_autocast_enabled())
 
             out_type = out_type if out_type is not None else run_as_type
@@ -2510,14 +2506,7 @@ t2.start()
 
             # Try module.* variant, if requested:
             if module is not None and hasattr(module, op):
-
-                print(f"HEY before module getattr {module}", file=sys.stderr)
-                module_op = getattr(module, op)
-
-                print(f"HEY before module op call {module}", file=sys.stderr)
-                output = module_op(*args, **add_kwargs)
-
-                print(f"HEY after module op call {module}", file=sys.stderr)
+                output = getattr(module, op)(*args, **add_kwargs)
                 if isinstance(output, torch.Tensor):
                     self.assertTrue(out_type == output.dtype,
                                     "autocast for torch.{} produced {}, should produce {}"
@@ -2525,11 +2514,7 @@ t2.start()
 
             # Try Tensor.* variant:
             if hasattr(torch.Tensor, op):
-
-                print("HEY Tensor", file=sys.stderr)
                 output_method = getattr(args[0], op)(*args[1:], **add_kwargs)
-
-                print("HEY done Tensor", file=sys.stderr)
                 if isinstance(output_method, torch.Tensor):
                     self.assertTrue(out_type == output_method.dtype,
                                     "autocast for torch.{} produced {}, should produce torch.{}"
@@ -2570,7 +2555,6 @@ t2.start()
                 self.assertTrue(comparison, "torch.{} result did not match control".format(op))
             self.assertTrue(torch.is_autocast_enabled())
         self.assertFalse(torch.is_autocast_enabled())
-        print(f"HEY _run_autocast_outofplace bot op {op}", file=sys.stderr)
 
     def args_maybe_kwargs(self, op_with_args):
         if len(op_with_args) == 2:
@@ -2580,19 +2564,14 @@ t2.start()
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp16(self):
-        print("HEY test_autocast_torch_fp16 top", file=sys.stderr)
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
-            print("HEY test_autocast_torch_fp16 before loop", file=sys.stderr)
             for op_with_args in self.autocast_lists.torch_fp16:
                 skip_test = False
                 op, args = op_with_args[0], op_with_args[1]
-                print("HEY test_autocast_torch_fp16 in loop op {op}", file=sys.stderr)
                 if len(op_with_args) == 3:
                     skip_test = op_with_args[2]  # TEST_WITH_ROCM
                 if not skip_test:
                     self._run_autocast_outofplace(op, args, torch.float16)
-            print("HEY test_autocast_torch_fp16 after loop", file=sys.stderr)
-        print("HEY test_autocast_torch_fp16 bot", file=sys.stderr)
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp32(self):
