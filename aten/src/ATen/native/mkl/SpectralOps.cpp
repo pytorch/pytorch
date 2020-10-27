@@ -15,7 +15,15 @@ Tensor _fft_mkl(const Tensor& input, int64_t signal_ndim,
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
-const Tensor& _fft_fill_with_conjugate_symmetry_cpu_(const Tensor& input, IntArrayRef dim) {
+Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
+  AT_ERROR("fft: ATen not compiled with MKL support");
+}
+
+Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
+  AT_ERROR("fft: ATen not compiled with MKL support");
+}
+
+Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
