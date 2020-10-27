@@ -132,7 +132,6 @@ std::vector<InlinedCallStackEntry> InlinedCallStack::vec() {
 ModuleInstanceInfo::ModuleInstanceInfo(
     c10::ClassTypePtr module_type,
     std::string instance_name)
-    : module_type_(std::move(module_type)),
-      instance_name_(std::move(instance_name)) {}
+    : module_type_(module_type), instance_name_(std::move(instance_name)) {}
 } // namespace jit
 } // namespace torch

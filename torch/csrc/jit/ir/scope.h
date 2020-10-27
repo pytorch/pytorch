@@ -103,7 +103,7 @@ struct ModuleInstanceInfo {
 using InlinedCallStackPtr = c10::intrusive_ptr<InlinedCallStack>;
 using InlinedCallStackEntry = std::pair<Function*, SourceRange>;
 using InlinedCallStackWithModuleInfo =
-    std::tuple<Function*, SourceRange, c10::optional<ModuleInstanceInfo>>;
+std::tuple<Function*, SourceRange, c10::optional<ModuleInstanceInfo>>;
 
 struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
  private:
