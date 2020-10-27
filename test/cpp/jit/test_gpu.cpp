@@ -14,6 +14,9 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
@@ -87,6 +90,15 @@ void checkIntValue(
     Int::ScalarType expected_value) {
   TORCH_CHECK(val->isAnInt());
   const auto actual_value = evaluator.inferValue(val);
+  TORCH_CHECK(actual_value.has_value());
+  TORCH_CHECK(actual_value.value() == expected_value);
+}
+
+void checkIntValue(
+    kir::ExpressionEvaluator& evaluator,
+    const kir::Val* val,
+    kir::Int::ScalarType expected_value) {
+  const auto actual_value = evaluator.evaluate(val);
   TORCH_CHECK(actual_value.has_value());
   TORCH_CHECK(actual_value.value() == expected_value);
 }
@@ -392,6 +404,71 @@ TEST(NVFuserTest, FusionExprEvalPostLower_CUDA) {
 
   checkIntValue(evaluator, bid_x, 2);
   checkIntValue(evaluator, tid_x, 128);
+}
+
+// Kernel IR: Evaluate basic scalar operations with constant values
+TEST(NVFuserTest, KernelExprEvalConstants_CUDA) {
+  kir::Kernel kernel;
+  kir::IrBuilder ir_builder(&kernel);
+
+  auto a = ir_builder.create<kir::Int>(7);
+  auto b = ir_builder.create<kir::Int>(3);
+  auto c = ir_builder.subExpr(a, b);
+  auto d = ir_builder.divExpr(a, b);
+  auto e = ir_builder.mulExpr(c, d);
+
+  kir::ExpressionEvaluator evaluator;
+
+  checkIntValue(evaluator, ir_builder.negExpr(a), -7);
+  checkIntValue(evaluator, ir_builder.addExpr(a, b), 10);
+  checkIntValue(evaluator, ir_builder.negExpr(e), -8);
+  checkIntValue(evaluator, ir_builder.modExpr(a, b), 1);
+  checkIntValue(evaluator, ir_builder.ceilDivExpr(a, b), 3);
+}
+
+// Kernel IR: Evaluate basic scalar operations with bound values
+TEST(NVFuserTest, KernelExprEvalBindings_CUDA) {
+  kir::Kernel kernel;
+  kir::IrBuilder ir_builder(&kernel);
+
+  kir::ExpressionEvaluator evaluator;
+
+  auto a = ir_builder.create<kir::Int>(c10::nullopt);
+  auto b = ir_builder.create<kir::Int>(c10::nullopt);
+  auto c = ir_builder.addExpr(a, b);
+  auto d = ir_builder.negExpr(ir_builder.ceilDivExpr(c, b));
+  auto e = ir_builder.create<kir::Int>(0);
+
+  // trying to evaluate before binding should give empty results
+  TORCH_CHECK(!evaluator.evaluate(a).has_value());
+  TORCH_CHECK(!evaluator.evaluate(d).has_value());
+
+  evaluator.bind(a, 7);
+  evaluator.bind(b, 3);
+
+  // can't bind to the results of expressions
+  ASSERT_ANY_THROW(evaluator.bind(c, 100));
+
+  // can't bind to concrete values
+  ASSERT_ANY_THROW(evaluator.bind(e, 100));
+
+  checkIntValue(evaluator, c, 10);
+  checkIntValue(evaluator, ir_builder.subExpr(a, b), 4);
+  checkIntValue(evaluator, ir_builder.modExpr(a, b), 1);
+  checkIntValue(evaluator, ir_builder.ceilDivExpr(a, b), 3);
+  checkIntValue(evaluator, d, -4);
+
+  // Reset the evaluation context
+  evaluator = kir::ExpressionEvaluator();
+
+  evaluator.bind(a, 2);
+  evaluator.bind(b, 5);
+
+  checkIntValue(evaluator, c, 7);
+  checkIntValue(evaluator, ir_builder.subExpr(a, b), -3);
+  checkIntValue(evaluator, ir_builder.modExpr(a, b), 2);
+  checkIntValue(evaluator, ir_builder.ceilDivExpr(a, b), 1);
+  checkIntValue(evaluator, d, -2);
 }
 
 TEST(NVFuserTest, FusionClear_CUDA) {

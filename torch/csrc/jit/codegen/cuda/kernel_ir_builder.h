@@ -35,7 +35,7 @@ namespace kir {
 //!   auto new_node = ir_builder.create<kir::Int>(1));
 //!   auto result = ir_builder.mulExpr(lhs, rhs);
 //!
-class IrBuilder {
+class TORCH_CUDA_API IrBuilder {
  public:
   explicit IrBuilder(Kernel* kernel) : kernel_(kernel) {}
 
@@ -49,7 +49,10 @@ class IrBuilder {
     return node;
   }
 
-  // Binary expressions
+  // Unary operations
+  Val* negExpr(Val* val);
+
+  // Binary operations
   Val* andExpr(Val* lhs, Val* rhs);
   Val* eqExpr(Val* lhs, Val* rhs);
   Val* ltExpr(Val* lhs, Val* rhs);
@@ -61,7 +64,7 @@ class IrBuilder {
   Val* modExpr(Val* lhs, Val* rhs);
 
  private:
-  Val* newResult(const Val* lhs, const Val* rhs);
+  Val* newResult(DataType dtype);
   Val* newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
   Val* newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
 

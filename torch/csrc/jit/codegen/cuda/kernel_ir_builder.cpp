@@ -6,11 +6,8 @@ namespace fuser {
 namespace cuda {
 namespace kir {
 
-Val* IrBuilder::newResult(const Val* lhs, const Val* rhs) {
-  TORCH_CHECK(lhs->dtype() == rhs->dtype());
-
-  // Allocate a compatible result value
-  switch (lhs->dtype()) {
+Val* IrBuilder::newResult(DataType dtype) {
+  switch (dtype) {
     case DataType::Bool:
       return create<Bool>(c10::nullopt);
     case DataType::Float:
@@ -25,7 +22,8 @@ Val* IrBuilder::newResult(const Val* lhs, const Val* rhs) {
 }
 
 Val* IrBuilder::newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
-  auto result = newResult(lhs, rhs);
+  TORCH_CHECK(lhs->dtype() == rhs->dtype(), "Incompatible operand types");
+  auto result = newResult(lhs->dtype());
   create<BinaryOp>(op_type, result, lhs, rhs);
   return result;
 }
@@ -33,6 +31,12 @@ Val* IrBuilder::newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
 Val* IrBuilder::newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
   auto result = create<Bool>(c10::nullopt);
   create<BinaryOp>(op_type, result, lhs, rhs);
+  return result;
+}
+
+Val* IrBuilder::negExpr(Val* val) {
+  auto result = newResult(val->dtype());
+  create<UnaryOp>(UnaryOpType::Neg, result, val);
   return result;
 }
 

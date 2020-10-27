@@ -56,7 +56,7 @@ void ExpressionEvaluator::print() const {
   std::cout << "\nEvaluation context\n";
   std::cout << "--------------------\n";
   for (const auto& kv : known_values_) {
-    std::cout << toString(kv.first) << " = " << kv.second;
+    std::cout << toString(kv.first) << " = " << kv.second << "\n";
   }
   std::cout << "--------------------\n\n";
 }
