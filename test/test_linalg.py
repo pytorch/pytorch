@@ -570,7 +570,8 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
-    @dtypes(torch.double)
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(torch.double, torch.float)
     def test_eig_basic(self, device, dtype):
         a = torch.Tensor(((1.96, 0.00, 0.00, 0.00, 0.00),
                           (-6.49, 3.80, 0.00, 0.00, 0.00),
@@ -587,10 +588,16 @@ class TestLinalg(TestCase):
         self.assertEqual(ee, te, atol=1e-12, rtol=0)
         self.assertEqual(vv, vvv, atol=1e-12, rtol=0)
         self.assertEqual(vv, tv, atol=1e-12, rtol=0)
+        #
+        # compare with numpy
+        np_e, np_v = np.linalg.eig(a.cpu().numpy())
+        self.assertEqual(ee[:, 0], np_e)
+        self.assertEqual(ee[:, 1], torch.zeros(ee.shape[0], dtype=dtype))
+        self.assertEqual(vv, np_v)
 
     @onlyCPU
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.float)
     def test_eig_reuse(self, device, dtype):
         X = torch.randn(4, 4, dtype=dtype, device=device)
         X = torch.mm(X.t(), X)
@@ -598,17 +605,18 @@ class TestLinalg(TestCase):
         v = torch.zeros(4, 4, dtype=dtype, device=device)
         torch.eig(X, True, out=(e, v))
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
-        self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
+        rtol = 1e-5 if dtype is torch.float else 0
+        self.assertEqual(X, Xhat, atol=1e-8, rtol=rtol, msg='VeV\' wrong')
         self.assertFalse(v.is_contiguous(), 'V is contiguous')
 
         torch.eig(X, True, out=(e, v))
         Xhat = torch.mm(v, torch.mm(e.select(1, 0).diag(), v.t()))
-        self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
+        self.assertEqual(X, Xhat, atol=1e-8, rtol=rtol, msg='VeV\' wrong')
         self.assertFalse(v.is_contiguous(), 'V is contiguous')
 
     @onlyCPU
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.float)
     def test_eig_non_contiguous(self, device, dtype):
         X = torch.randn(4, 4, dtype=dtype, device=device)
         X = torch.mm(X.t(), X)
@@ -618,11 +626,12 @@ class TestLinalg(TestCase):
         self.assertFalse(e.is_contiguous(), 'E is contiguous')
         torch.eig(X, True, out=(e, v))
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
-        self.assertEqual(X, Xhat, atol=1e-8, rtol=0, msg='VeV\' wrong')
+        rtol = 1e-5 if dtype is torch.float else 0
+        self.assertEqual(X, Xhat, atol=1e-8, rtol=rtol, msg='VeV\' wrong')
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.float)
     def test_eig_invalid_input(self, device, dtype):
         # test invalid input
         self.assertRaisesRegex(
@@ -644,7 +653,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.float)
     def test_eig_out(self, device, dtype):
         # the out version of torch.eig needs to be tested manually: we can't
         # use the "test_out=True" parameter to tensor_op_tests because the
