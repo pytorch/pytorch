@@ -7673,7 +7673,7 @@ TEST(NVFuserTest, FusionInputsIdLookup_CUDA) {
   at::Tensor t2 = at::randn({6, 4}, options);
 
   // create a cache with max size 2;
-  auto inputs_id_lookup = InputsIdLookup(2);
+  torch::jit::fuser::cuda::InputsIdLookup inputs_id_lookup(2);
 
   // testing basic function, same encoding for identical inputs
   auto id_0 = inputs_id_lookup.lookupId({t0, t1, 5.0});

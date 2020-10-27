@@ -204,35 +204,45 @@ at::DimVector inversePermutation(
   }
 }
 
+void encodeBuffer(size_t value, std::string& buffer) {
+  const char* v = reinterpret_cast<char*>(&value);
+  for (int i = 0; i < sizeof(size_t); i++) {
+    buffer.push_back(*(v++));
+  }
+}
+
 } // namespace
 
 InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
     const at::ArrayRef<IValue>& inputs) {
   IdLookupReturn ret;
-  std::stringstream encoded_inputs;
+
+  // lock mutex_ because we are touching encoding_
+  std::lock_guard<std::mutex> guard(mutex_);
+  encoding_.clear();
   for (const auto& input : inputs) {
     if (input.isTensor()) {
       auto input_tensor = input.toTensor();
 
-      encoded_inputs << ";";
-      auto sep = "";
       for (auto size : input_tensor.sizes()) {
-        encoded_inputs << sep << size;
-        sep = ",";
+        encodeBuffer(size, encoding_);
+        encoding_.push_back(' ');
       }
-      encoded_inputs << "@";
-      sep = "";
+      encoding_.push_back('X');
+      encoding_.push_back(' ');
       for (auto stride : input_tensor.strides()) {
-        encoded_inputs << sep << stride;
-        sep = ",";
+        encodeBuffer(stride, encoding_);
+        encoding_.push_back(' ');
       }
-      encoded_inputs << "@" << input_tensor.device().str();
+      encoding_.push_back('d');
+      encodeBuffer(input_tensor.device().index(), encoding_);
     } else {
       // encode s for scalar;
-      encoded_inputs << ";s";
+      encoding_.push_back('s');
     }
+    encoding_.push_back(';');
   }
-  auto& id_iter_pair = encoding_lookup_[encoded_inputs.str()];
+  auto& id_iter_pair = encoding_lookup_[encoding_];
 
   // short-cut to leave LRU entry as is;
   if (id_iter_pair.lru_iter == used_entry_.begin()) {
@@ -256,8 +266,7 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
   }
 
   ret.id = id_iter_pair.id;
-  id_iter_pair.lru_iter =
-      used_entry_.insert(used_entry_.begin(), encoded_inputs.str());
+  id_iter_pair.lru_iter = used_entry_.insert(used_entry_.begin(), encoding_);
   return ret;
 }
 
@@ -266,11 +275,42 @@ FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion>&& fusion)
   FUSER_PERF_SCOPE("FusionExecutorCache::FusionExecutorCache");
   // avoid putting `has_reduction_` in the initializer list
   has_reduction_ = fusion_->hasReduction();
+
+  if (has_reduction_) {
+    FusionGuard fg(fusion_.get());
+
+    // Use dependency check to find the reduction tv as it returns used values
+    // instead of exprs.
+
+    // The call is relatively heavy weight, consider caching
+    auto used_vals = DependencyCheck::getAllValsBetween(
+        {fusion_->inputs().begin(), fusion_->inputs().end()},
+        fusion_->outputs());
+
+    // Find the reduction tensor view, make sure there's only one
+    for (auto val : used_vals) {
+      if (val->getValType().value() == ValType::TensorView) {
+        auto tv = val->as<TensorView>();
+        if (tv->hasReduction()) {
+          TORCH_INTERNAL_ASSERT(
+              reduction_tv_ == nullptr,
+              "Already found a reduction tensorview, cannot handle fusion of multiple reductions.");
+          reduction_tv_ = tv;
+        }
+      }
+    }
+
+    TORCH_INTERNAL_ASSERT(
+        reduction_tv_ != nullptr,
+        "Could not find the reduction tensor view in the fusion.");
+  }
 }
 
 std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("runFusionWithInputs");
+
+  LaunchParams launch_params;
 
   // get unique id `unique_id` for given input set `inputs`;
   auto id_lookup_ret = inputs_id_lookup_.lookupId(inputs);
@@ -282,45 +322,15 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
   const int device_index = getCommonDeviceCUDA(inputs);
   TORCH_CHECK(device_index >= 0, "device is not coherent for fusion inputs");
 
-  LaunchParams launch_params;
   if (code_to_fe_lookup_.count(unique_id) == 0) {
     // enter when we get a new input set. We need to search for compatible
     // entries in cached `FusionExecutor` or compile new one as needed.
 
     // caching strategy is different for pw-fusion and reduction-fusion.
     if (has_reduction_) {
-      // Grab the fusion to analyze for heuristics
-      FusionGuard fg(fusion_.get());
-
-      TensorView* reduction_tv = nullptr;
-      // Use dependency check to find the reduction tv as it returns used values
-      // instead of exprs.
-
-      // The call is relatively heavy weight, consider caching
-      auto used_vals = DependencyCheck::getAllValsBetween(
-          {fusion_->inputs().begin(), fusion_->inputs().end()},
-          fusion_->outputs());
-
-      // Find the reduction tensor view, make sure there's only one
-      for (auto val : used_vals) {
-        if (val->getValType().value() == ValType::TensorView) {
-          auto tv = val->as<TensorView>();
-          if (tv->hasReduction()) {
-            TORCH_INTERNAL_ASSERT(
-                reduction_tv == nullptr,
-                "Already found a reduction tensorview, cannot handle fusion of multiple reductions.");
-            reduction_tv = tv;
-          }
-        }
-      }
-
-      TORCH_INTERNAL_ASSERT(
-          reduction_tv != nullptr,
-          "Could not find the reduction tensor view in the fusion.");
-
       // Generate the reduction parameters
       auto reduction_params =
-          getReductionHeuristics(fusion_.get(), inputs, reduction_tv);
+          getReductionHeuristics(fusion_.get(), inputs, reduction_tv_);
 
       TORCH_INTERNAL_ASSERT(
           reduction_params.has_value(),
@@ -333,6 +343,9 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
 
       if (!fusion_executor->compiled()) {
         // HEURISTIC NOT COMPILED, COMPILE A KERNEL
+
+        // We clone *fusion_ to fusion so we can leave the unscheduled
+        // computational graph intact for future compilation.
         Fusion fusion = *fusion_;
 
         FusionGuard fg(&fusion);

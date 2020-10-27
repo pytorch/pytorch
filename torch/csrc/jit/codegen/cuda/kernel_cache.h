@@ -7,6 +7,7 @@
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+#include <mutex>
 #include <type_traits>
 #include <unordered_map>
 
@@ -26,7 +27,7 @@ namespace cuda {
 //! \note the uniqueness of the ide generated for a given input set is only
 //!   local to the instance of `InputsIdLookup`.
 //!
-class TORCH_CUDA_API InputsIdLookup {
+class TORCH_CUDA_API InputsIdLookup : public NonCopyable {
  public:
   //! constructor where maximum cache size is fixed during init
   explicit InputsIdLookup(size_t max_cache_size = 10)
@@ -52,6 +53,13 @@ class TORCH_CUDA_API InputsIdLookup {
   }
 
  private:
+  // string to store encoded input meta information. Reuse the buffer instead of
+  // stringtream gives few us perf gain.
+  std::string encoding_; // Note: shared state, guarded by mutex_
+
+  // mutex_ used to guard reused encoding_
+  std::mutex mutex_;
+
   //! entry stored in `encoding_lookup_` to implement LRU
   struct EncodingEntry {
     size_t id;
@@ -158,7 +166,10 @@ class FusionExecutorCache {
   // is controled by the order of declaration instead of their order in the list
   //
   //! cache fusion->hasReduction() because it's expensive;
-  bool has_reduction_;
+  bool has_reduction_ = false;
+
+  //! cache reduction_tv_ to avoid searching repetitively at runtime
+  TensorView* reduction_tv_ = nullptr;
 
   //! TODO: ugly logic for now. We should integrate the hashing of cache for
   //!       different kernels. (alternatively we could do so in scheduler).
