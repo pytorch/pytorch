@@ -10,6 +10,10 @@ class SyncBatchNorm(Function):
         if not input.is_contiguous(memory_format=torch.channels_last):
             input = input.contiguous()
 
+        size = int(input.numel() / input.size(1))
+        if size == 1 and world_size < 2:
+            raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+
         count = torch.empty(1,
                             dtype=running_mean.dtype,
                             device=input.device).fill_(input.numel() // input.size(1))
@@ -29,10 +33,6 @@ class SyncBatchNorm(Function):
         combined = torch.stack(combined_list, dim=0)
         # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
         mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
-
-        size = count_all.view(-1).long().sum()
-        if size == 1:
-            raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
 
         # calculate global mean & invstd
         mean, invstd = torch.batch_norm_gather_stats_with_counts(
