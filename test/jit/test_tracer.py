@@ -1538,7 +1538,7 @@ class TestTracer(JitTestCase):
                 x[i, :] = torch.zeros(4)
             return x
 
-        self.checkTrace(foo, (torch.rand(3, 4),))
+        self.checkTrace(foo, (torch.rand(3, 4),), inputs_require_grads=False)
 
     def test_trace_checker_inplace_on_view(self):
         def foo(x):

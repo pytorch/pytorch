@@ -12,6 +12,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 class TORCH_CUDA_API IndexLowering : public OptInDispatch {
  public:
@@ -67,6 +68,7 @@ class TORCH_CUDA_API IndexLowering : public OptInDispatch {
   kir::IrBuilder ir_builder_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

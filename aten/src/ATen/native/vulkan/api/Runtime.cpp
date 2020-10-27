@@ -10,7 +10,7 @@ namespace api {
 namespace {
 
 struct Configuration final {
-#ifndef DEBUG
+#ifdef DEBUG
   static constexpr Runtime::Type kRuntime = Runtime::Type::Debug;
 #else
   static constexpr Runtime::Type kRuntime = Runtime::Type::Release;
@@ -321,10 +321,6 @@ Runtime* initialize() {
   }());
 
   return runtime.get();
-}
-
-bool available() {
-  return initialize();
 }
 
 Runtime* runtime() {
