@@ -591,8 +591,10 @@ class TestLinalg(TestCase):
         #
         # compare with numpy
         np_e, np_v = np.linalg.eig(a.cpu().numpy())
-        self.assertEqual(ee[:, 0], np_e)
-        self.assertEqual(ee[:, 1], torch.zeros(ee.shape[0], dtype=dtype))
+        # np_e.shape == (n, 2), where each column contain the real and
+        # imaginary parts of the result
+        self.assertEqual(ee[:, 0], np_e) # real part
+        self.assertEqual(ee[:, 1], torch.zeros(ee.shape[0], dtype=dtype)) # imaginary part
         self.assertEqual(vv, np_v)
 
     @onlyCPU
