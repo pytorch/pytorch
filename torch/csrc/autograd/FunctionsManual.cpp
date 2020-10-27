@@ -654,7 +654,7 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
   }
 
   const auto & grad_sizes = grad.sizes();
-  DimVector grad_sizes_(input_dims);
+  at::DimVector grad_sizes_(input_dims);
   std::copy(grad_sizes.begin(), grad_sizes.end(), grad_sizes_.begin());
   auto grad_iter_ = grad_sizes_.begin();
   for (size_t j = num_unsqueezed; j < repeats.size(); ++j, ++grad_iter_) {
