@@ -194,7 +194,7 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
         ::caffe2::detail::make_function_schema_for_c10(OperatorSchema);       \
     return schema;                                                            \
   }                                                                           \
-  TORCH_LIBRARY_FRAGMENT(_caffe2, m, OperatorName) {                          \
+  TORCH_LIBRARY_FRAGMENT_UNIQUE(_caffe2, m, OperatorName) {                   \
       m.def(OperatorSchema);                                                  \
   }                                                                           \
   }                                                                           \

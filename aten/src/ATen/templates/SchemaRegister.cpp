@@ -5,6 +5,6 @@
 
 using namespace at;
 
-TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY(aten, m) {
+TORCH_LIBRARY_FRAGMENT(aten, m) {
   ${schema_registrations}
 }
