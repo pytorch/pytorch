@@ -10358,7 +10358,7 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_qr(self, device, dtype):
         def run_test(tensor_dims, some):
-            A = torch.randn(*tensor_dims, device=device)
+            A = torch.randn(*tensor_dims, dtype=dtype, device=device)
             Q, R = torch.qr(A, some=some)
 
             # Check0: Q[-2:] = (m, n_columns), R[-2:] = (n_columns, n)
