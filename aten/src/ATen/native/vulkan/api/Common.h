@@ -1,12 +1,22 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/ATen.h>
+
+#ifdef USE_VULKAN_SHADERC_RUNTIME
+#include <ATen/native/vulkan/glsl.h>
+#define VK_KERNEL(name) { name##_glsl, }
+#else
+#include <ATen/native/vulkan/spv.h>
+#define VK_KERNEL(name) { name##_spv, name##_spv_len, }
+#endif /* USE_VULKAN_SHADERC_RUNTIME */
 
 #ifdef USE_VULKAN_WRAPPER
 #include <vulkan_wrapper.h>
 #else
 #include <vulkan/vulkan.h>
-#endif
+#endif /* USE_VULKAN_WRAPPER */
 
 #define VK_CHECK(function)                                  \
   {                                                         \
@@ -173,3 +183,5 @@ inline void Handle<Type, Deleter>::reset(Type payload) {
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN_API */

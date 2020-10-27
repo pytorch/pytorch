@@ -44,7 +44,7 @@ try:
 except ImportError:
     _GLOO_AVAILABLE = False
 
-# Some reduce ops are not supported by complex numbers.
+# Some reduce ops are not supported by complex numbers and will result in an error.
 # We currently provide complex support to the distributed API by viewing
 # complex tensors as real (torch.view_as_real), meaning that calling
 # these unsupported ops will return garbage values rather than error out.
