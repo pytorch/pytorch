@@ -890,7 +890,7 @@ if __name__ == '__main__':
             'Topic :: Software Development :: Libraries :: Python Modules',
             'Programming Language :: C++',
             'Programming Language :: Python :: 3',
-        ] + ['Programming Language :: Python :: 3.{}' for i in range(python_min_version[1], 9)],
+        ] + [f'Programming Language :: Python :: 3.{}' for i in range(python_min_version[1], max(sys.version_info[1], 8) + 1)],
         license='BSD-3',
         keywords='pytorch machine learning',
     )
