@@ -10352,7 +10352,6 @@ class TestTorchDeviceType(TestCase):
         torch.lstsq(b, a, out=(tb, ta))
         self.assertEqual((torch.mm(a, tb) - b).norm(), expectedNorm, atol=1e-8, rtol=0)
 
-    @precisionOverride({torch.double: 5e-3, torch.cdouble: 5e-3})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @tf32_on_and_off(0.05)
