@@ -18,8 +18,6 @@ from torch.quantization.quantization_mappings import (
     get_default_qconfig_propagation_list,
     get_default_qat_module_mappings,
 )
-# symbolic trace
-from torch.fx import symbolic_trace
 
 # graph mode quantization based on fx
 from torch.quantization import (
