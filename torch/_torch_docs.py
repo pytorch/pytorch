@@ -1907,24 +1907,24 @@ add_docstr(torch.copysign,
            r"""
 copysign(input, other, *, out=None) -> Tensor
 
-Returns a new tensor with the magnitude of :attr:`input` and the sign of :attr:`other` elementwise.
+Create a new float tensor with the magnitude of :attr:`input` and the sign of :attr:`other`, elementwise.
 
 .. math::
-    \text{out}_{i} = \begin{cases}
-        -|\text{input}_{i}| & \text{if } \text{other}_{i} < 0 \text{or} \text{other}_{i} == -0.0 \\
-        |\text{input}_{i}| & \text{if } \text{other}_{i} \gt 0 \text{or} \text{other}_{i} == 0.0\\
+$$
+\text{out}_i = \begin{cases}
+        -|\text{input}_i| & \text{if} \text{other}_i \leq -0.0 \\
+        |\text{input}_i| & \text{if} \text{other}_i \geq 0.0 \\
     \end{cases}
+$$
 """ + r"""
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
-and integer, float inputs. Always promotes integral/boolean/half/float16 types to the float type.
+and integer and float inputs.
 
 Args:
-    input (Tensor): value with the magnitude of output value.
-    other (Tensor or Number): value with the sign of output value.
-        If the shape of :attr:`input` is different from the shape of
-        :attr:`other`, they must be broadcastable to a common shape
-        (which becomes the shape of the output).
+    input (Tensor): magnitudes.
+    other (Tensor or Number): contains value(s) whose signbit(s) are
+        applied to the magnitudes in :attr:`input`.
 
 Keyword args:
     {out}

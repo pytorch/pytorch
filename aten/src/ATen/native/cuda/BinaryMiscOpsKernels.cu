@@ -118,7 +118,7 @@ void heaviside_kernel_cuda(TensorIterator& iter) {
 }
 
 void copysign_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "copysign_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "copysign_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return c10::cuda::compat::copysign(a, b);
     });

@@ -135,8 +135,16 @@ Tensor copysign(const Tensor& self, const Tensor& other) {
   return iter.output();
 }
 
+Tensor& copysign_(Tensor& self, const Tensor& other) {
+  return native::copysign_out(self, self, other);
+}
+
 Tensor copysign(const Tensor& self, Scalar other) {
-  return at::copysign(self, wrapped_scalar_tensor(other));
+  return native::copysign(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& copysign_(Tensor& self, Scalar other) {
+  return native::copysign_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
