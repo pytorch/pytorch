@@ -1314,8 +1314,8 @@ template <typename scalar_t>
 static void apply_eig(const Tensor& self, bool eigenvectors, Tensor& out_eigvals, Tensor& out_eigvecs,
                       int64_t *info_ptr) {
 #ifndef USE_MAGMA
-AT_ERROR("symeig: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
+TORCH_CHECK(false, "Calling torch.eig on a CUDA tensor requires compiling PyTorch with MAGMA. "
+                   "Either transfer the tensor to the CPU before calling torch.eig or recompile with MAGMA.");
 #else
   magma_vec_t jobvr = eigenvectors ? MagmaVec : MagmaNoVec;
   magma_int_t n = magma_int_cast(self.size(-1), "n");
@@ -1379,7 +1379,7 @@ static std::tuple<Tensor,Tensor> eig_cuda_helper(const Tensor& self, int64_t n, 
 }
 
 std::tuple<Tensor&, Tensor&> eig_cuda_out(Tensor& e, Tensor& v, const Tensor& self, bool eigenvectors) {
-  TORCH_CHECK(self.dim() == 2, "A should be 2 dimensional");
+  TORCH_CHECK(self.dim() == 2, "Expected a two-dimensional input but got ", self.dim(), " dimensions");
   squareCheckInputs(self);
   int64_t n = self.size(-1);
 
@@ -1405,7 +1405,7 @@ std::tuple<Tensor&, Tensor&> eig_cuda_out(Tensor& e, Tensor& v, const Tensor& se
 }
 
 std::tuple<Tensor,Tensor> eig_cuda(const Tensor& self, bool eigenvectors) {
-  TORCH_CHECK(self.dim() == 2, "A should be 2 dimensional");
+  TORCH_CHECK(self.dim() == 2, "Expected a two-dimensional input but got ", self.dim(), " dimensions");
   squareCheckInputs(self);
   int64_t n = self.size(-1);
 
