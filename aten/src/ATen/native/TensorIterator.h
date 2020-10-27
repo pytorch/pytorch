@@ -473,7 +473,7 @@ public:
   // Bypass output dtype/device computation and fix the dtype/device as specified here.
   TensorIteratorConfig& declare_static_dtype_and_device(ScalarType dtype, Device device);
   TensorIteratorConfig& declare_static_shape(IntArrayRef shape);
-  TensorIteratorConfig& declare_static_shape(IntArrayRef shape, const int64_t squash_dim);
+  TensorIteratorConfig& declare_static_shape(IntArrayRef shape, IntArrayRef squash_dims);
 
   // It would be better if this was && qualified, but this would be at the cost
   // of a lot of boilerplate above
