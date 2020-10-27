@@ -3700,6 +3700,41 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_backend_options=rpc_backend_options,
             )
 
+    @dist_init
+    def test_local_rref_backward(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        t1 = torch.rand(10, 10, requires_grad=True)
+        rref = rpc.RRef(t1.sum() + t1.sum())
+        rref.backward()
+        expected_grad = torch.ones_like(t1) * 2
+        self.assertEqual(expected_grad, t1.grad)
+
+        with dist_autograd.context() as context_id:
+            t2 = rpc.rpc_sync(dst, torch.add, args=(t1, t1))
+            rref = rpc.RRef(t2.sum())
+            rref.backward(context_id)
+            self.assertEqual(expected_grad, dist_autograd.get_gradients(context_id)[t1])
+
+        # Double backward.
+        with dist_autograd.context() as context_id:
+            t2 = rpc.rpc_sync(dst, torch.add, args=(t1, t1))
+            rref = rpc.RRef(t2.sum())
+            rref.backward(context_id, retain_graph=True)
+            rref.backward(context_id)
+            self.assertEqual(expected_grad * 2, dist_autograd.get_gradients(context_id)[t1])
+
+        # Test errors.
+        with self.assertRaisesRegex(RuntimeError, "tensors does not require grad and does not have a grad_fn"):
+            rpc.RRef(torch.rand(10)).backward()
+
+        with self.assertRaisesRegex(RuntimeError, "grad can be implicitly created only for scalar outputs"):
+            rpc.RRef(torch.rand(10, requires_grad=True)).backward()
+
+        with self.assertRaisesRegex(RuntimeError, "Could not find autograd context with id: 100"):
+            rpc.RRef(torch.rand(10, requires_grad=True).sum()).backward(100)
+
+        with self.assertRaisesRegex(RuntimeError, "RRef should contain a tensor for .backward()"):
+            rpc.RRef("foo").backward()
 
 class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 
