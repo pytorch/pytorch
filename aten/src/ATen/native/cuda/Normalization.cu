@@ -166,6 +166,11 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cuda(const Tensor
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda(const Tensor& self, const Tensor& input, const Tensor& mean, const Tensor& invstd,
                                                                            const Tensor& weight, bool input_g, bool weight_g, bool bias_g) {
+  // self is grad_output
+  if (at::cuda::detail::canUse32BitIndexMath(self) && batch_norm_use_channels_last_kernels(self)){
+    return batch_norm_backward_reduce_cuda_channels_last_template(self, input, mean, invstd, weight, input_g, weight_g, bias_g);
+  }
+
   return AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "batch_norm_backward_reduce", [&] {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "batch_norm_backward_reduce", [&] {
       auto mean_st = mean.dtype();

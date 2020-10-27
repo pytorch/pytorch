@@ -1146,6 +1146,184 @@ __global__ void batchnorm_forward_channels_last_kernel(
   }
 }
 
+template<typename T>
+__device__ __forceinline__ void merge_block_vertical_backward(T& sum_dy,
+    T& sum_dy_xmu,
+    T* shmem_sum_dy,
+    T* shmem_sum_dy_xmu) {
+  // write to shared memory
+  auto address_base = threadIdx.x + threadIdx.y * blockDim.x;
+  shmem_sum_dy[address_base] = sum_dy;
+  shmem_sum_dy_xmu[address_base] = sum_dy_xmu;
+
+#pragma unroll
+  for (int offset = blockDim.y/2; offset > 0; offset >>= 1) {
+    __syncthreads();
+    if (threadIdx.y < offset && threadIdx.y + offset < blockDim.y) {
+      auto address = address_base + offset * blockDim.x;
+
+      sum_dy += shmem_sum_dy[address];
+      sum_dy_xmu += shmem_sum_dy_xmu[address];
+
+      // last write is not necessary
+      shmem_sum_dy[address_base] = sum_dy;
+      shmem_sum_dy_xmu[address_base] = sum_dy_xmu;
+    }
+  }
+}
+
+template
+   <typename scalar_t,
+    typename accscalar_t,
+    typename layerscalar_t,
+    int PARALLEL_LOADS>
+__global__ void reduce_bn_channels_last_kernel(
+      const scalar_t* __restrict__ input,
+      const scalar_t* __restrict__ grad_output,
+      const accscalar_t* __restrict__ mean,
+      const accscalar_t* __restrict__ inv_std,
+      accscalar_t* __restrict__ sum_dy_o,
+      accscalar_t* __restrict__ sum_dy_xmu_o,
+      layerscalar_t* __restrict__ grad_weight,
+      layerscalar_t* __restrict__ grad_bias,
+      volatile accscalar_t* staging_data,
+      int* semaphores,
+      const int reduction_size,
+      const int stride) {
+
+  // hide latency with concurrency
+  accscalar_t sum_dy[PARALLEL_LOADS];
+  accscalar_t sum_dy_xmu[PARALLEL_LOADS];
+
+#pragma unroll
+  for (int i = 0; i < PARALLEL_LOADS; i++) {
+    sum_dy[i] = accscalar_t(0);
+    sum_dy_xmu[i] = accscalar_t(0);
+  }
+  // tensor dimension (m,c)
+
+  // loop along m dimension
+  int inner_loop_stride = blockDim.y * gridDim.y;
+
+  // offset along m dimension
+  int m_offset = blockIdx.y * blockDim.y + threadIdx.y;
+  int c_offset = blockIdx.x * blockDim.x + threadIdx.x;
+
+  int loop_count = 1 + (reduction_size - 1) / (inner_loop_stride * PARALLEL_LOADS);
+  int address_base = m_offset * stride + c_offset;
+  int address_increment = inner_loop_stride * stride;
+
+  auto r_mean = mean[c_offset];
+  auto factor = inv_std[c_offset];
+
+  for (int i = 0; i < loop_count; i++) {
+    accscalar_t x_input[PARALLEL_LOADS];
+    accscalar_t x_grad_output[PARALLEL_LOADS];
+
+    // load multiple data in
+#pragma unroll
+    for (int j = 0; j < PARALLEL_LOADS; j++) {
+      if (c_offset < stride && m_offset < reduction_size) {
+        x_input[j] = input[address_base];
+        x_grad_output[j] = grad_output[address_base];
+      } else {
+        x_input[j] = accscalar_t(0);
+        x_grad_output[j] = accscalar_t(0);
+      }
+      m_offset += inner_loop_stride;
+      address_base += address_increment;
+    }
+
+    // calculate sum_dy / sum_dy_xmu
+#pragma unroll
+    for (int j = 0; j < PARALLEL_LOADS; j++) {
+      sum_dy[j] += x_grad_output[j];
+      sum_dy_xmu[j] += x_grad_output[j] * (x_input[j] - r_mean);
+    }
+  }
+
+  // thread reduction to accumulate sum_dy / sum_dy_xmu between PARALLEL_LOADS
+#pragma unroll
+  for (int j = 1; j < PARALLEL_LOADS; j++) {
+    sum_dy[0] += sum_dy[j];
+    sum_dy_xmu[0] += sum_dy_xmu[j];
+  }
+
+  // release array of registers
+  auto sum_dy_th = sum_dy[0];
+  auto sum_dy_xmu_th = sum_dy_xmu[0];
+
+  // block-wise reduction with shared memory (since reduction cannot be done within a warp)
+  static __shared__ accscalar_t shmem_sum_dy[MAX_BLOCK_SIZE];
+  static __shared__ accscalar_t shmem_sum_dy_xmu[MAX_BLOCK_SIZE];
+
+  merge_block_vertical_backward(sum_dy_th, sum_dy_xmu_th, shmem_sum_dy, shmem_sum_dy_xmu);
+
+  // grid reduction if needed (coop launch used at the first place)
+  if (gridDim.y > 1) {
+    volatile accscalar_t* staging_sum_dy = staging_data;
+    volatile accscalar_t* staging_sum_dy_xmu = &staging_data[stride*gridDim.y];
+
+    address_base = c_offset + blockIdx.y * stride;
+    // write data to staging_data;
+    if (threadIdx.y == 0 && c_offset < stride) {
+      staging_sum_dy[address_base] = sum_dy_th;
+      staging_sum_dy_xmu[address_base] = sum_dy_xmu_th;
+    }
+
+    __threadfence();
+    __syncthreads(); // ensuring writes to staging_ is visible to all blocks
+
+    __shared__ bool is_last_block_done;
+    // mark block done
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+      int old = atomicAdd(&semaphores[blockIdx.x], 1);
+      is_last_block_done = (old == (gridDim.y-1));
+    }
+
+    __syncthreads();
+
+    // check that all data is now available in global memory
+    if (is_last_block_done) {
+      sum_dy_th = accscalar_t(0.0);
+      sum_dy_xmu_th = accscalar_t(0.0);
+
+      for (int y = threadIdx.y; y < gridDim.y; y += blockDim.y) {
+        address_base = c_offset + y * stride;
+        sum_dy_th += (c_offset < stride ? staging_sum_dy[address_base] : accscalar_t(0.0));
+        sum_dy_xmu_th += (c_offset < stride ? staging_sum_dy_xmu[address_base] : accscalar_t(0.0));
+      }
+
+      merge_block_vertical_backward(sum_dy_th, sum_dy_xmu_th, shmem_sum_dy, shmem_sum_dy_xmu);
+      if (threadIdx.y == 0 && c_offset < stride) {
+        if (grad_bias != NULL) {
+          grad_bias[c_offset] = static_cast<layerscalar_t>(sum_dy_th);
+        }
+        if (grad_weight != NULL) {
+          grad_weight[c_offset] = static_cast<layerscalar_t>(sum_dy_xmu_th * factor);
+        }
+        //mean_dy[c_offset] = sum_dy_th / reduction_size;
+        //mean_dy_xmu[c_offset] = sum_dy_xmu_th / reduction_size;
+        sum_dy_o[c_offset] = sum_dy_th;
+        sum_dy_xmu_o[c_offset] = sum_dy_xmu_th;
+      }
+    }
+  } else {
+    if (blockIdx.y == 0 && threadIdx.y == 0 && c_offset < stride) {
+      if (grad_bias != NULL) {
+        grad_bias[c_offset] = static_cast<layerscalar_t>(sum_dy_th);
+      }
+      if (grad_weight != NULL) {
+        grad_weight[c_offset] = static_cast<layerscalar_t>(sum_dy_xmu_th * factor);
+      }
+      //mean_dy[c_offset] = sum_dy_th / reduction_size;
+      //mean_dy_xmu[c_offset] = sum_dy_xmu_th / reduction_size;
+      sum_dy_o[c_offset] = sum_dy_th;
+      sum_dy_xmu_o[c_offset] = sum_dy_xmu_th;
+    }
+  }
+}
+
 template<typename scalar_t>
 std::tuple<Tensor, Tensor> batch_norm_stats_channels_last_cuda_template(const Tensor& input, double epsilon) {
   using accscalar_t = at::acc_type<scalar_t, true>;
@@ -1223,7 +1401,7 @@ void batch_norm_elemt_channels_last_cuda_template(
     });
   } else {
     if (weight.defined()){
-      TORCH_CHECK(input.scalar_type() == weight.scalar_type(), "batch norm: input.scalar_type() ", input.scalar_type(),
+      TORCH_CHECK(input.scalar_type() == weight.scalar_type(), "batchnorm_forward: input.scalar_type() ", input.scalar_type(),
         " is not supported with weight.scalar_type() ", weight.scalar_type());
     }
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "batchnorm_forward", [&]{
@@ -1242,6 +1420,92 @@ void batch_norm_elemt_channels_last_cuda_template(
           fuse_relu);
     });
   }
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+batch_norm_backward_reduce_cuda_channels_last_template(const at::Tensor& grad_output,
+    const at::Tensor& input,
+    const at::Tensor& mean,
+    const at::Tensor& inv_std,
+    const at::Tensor& weight,
+    const bool input_g, const bool weight_g, const bool bias_g) {
+  const auto stride = input.size(1);
+  const auto reduction_size = input.numel() / stride;
+
+  at::Tensor sumn_dy = at::empty({stride}, mean.options());
+  at::Tensor sum_dy_xmu = at::empty({stride}, mean.options());
+
+  at::Tensor grad_weight;
+  at::Tensor grad_bias;
+  if (weight.defined()) {
+    grad_weight = at::empty({stride}, weight.options());
+    grad_bias = at::empty({stride}, weight.options());
+  } else {
+    // because I cannot return an uninitialized at::Tensor
+    grad_weight = at::empty({0}, mean.options());
+    grad_bias = at::empty({0}, mean.options());
+  }
+
+  dim3 block;
+  dim3 grid;
+  flexible_launch_configs(reduction_size, stride, block, grid, true);
+
+  at::Tensor staging_data;
+  at::Tensor semaphores;
+  if (grid.y > 1) {
+    staging_data = at::empty({2*stride*grid.y}, mean.options());
+    semaphores = at::zeros({grid.x}, input.options().dtype(at::kInt));
+  }
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  if (input.scalar_type() == at::kHalf && weight.defined() && weight.scalar_type() == at::kFloat) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "batchnorm_backward_reduce", [&] {
+      using accscalar_t = at::acc_type<scalar_t, true>;
+      accscalar_t* staging_data_ptr = grid.y > 1 ? staging_data.data_ptr<accscalar_t>() : nullptr;
+      int* semaphores_ptr = grid.y > 1 ? semaphores.data_ptr<int>() : nullptr;
+      reduce_bn_channels_last_kernel<scalar_t, accscalar_t, accscalar_t, ELEMENTS_PER_ITER>
+          <<<grid, block, 0, stream>>>(
+          input.data_ptr<scalar_t>(),
+          grad_output.data_ptr<scalar_t>(),
+          mean.data_ptr<accscalar_t>(),
+          inv_std.data_ptr<accscalar_t>(),
+          sumn_dy.data_ptr<accscalar_t>(),
+          sum_dy_xmu.data_ptr<accscalar_t>(),
+          weight.defined() ? grad_weight.data_ptr<accscalar_t>() : nullptr,
+          weight.defined() ?grad_bias.data_ptr<accscalar_t>() : nullptr,
+          staging_data_ptr,
+          semaphores_ptr,
+          reduction_size,
+          stride);
+    });
+  } else {
+    if (weight.defined()) {
+      TORCH_CHECK(input.scalar_type() == weight.scalar_type(), "batchnorm_backward_reduce: input.scalar_type() ", input.scalar_type(),
+        " is not supported with weight.scalar_type() ", weight.scalar_type());
+    }
+    using namespace at;
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "batchnorm_backward_reduce", [&] {
+      using accscalar_t = at::acc_type<scalar_t, true>;
+      accscalar_t* staging_data_ptr = grid.y > 1 ? staging_data.data_ptr<accscalar_t>() : nullptr;
+      int* semaphores_ptr = grid.y > 1 ? semaphores.data_ptr<int>() : nullptr;
+      reduce_bn_channels_last_kernel<scalar_t, accscalar_t, scalar_t, ELEMENTS_PER_ITER>
+          <<<grid, block, 0, stream>>>(
+          input.data_ptr<scalar_t>(),
+          grad_output.data_ptr<scalar_t>(),
+          mean.data_ptr<accscalar_t>(),
+          inv_std.data_ptr<accscalar_t>(),
+          sumn_dy.data_ptr<accscalar_t>(),
+          sum_dy_xmu.data_ptr<accscalar_t>(),
+          weight.defined() ? grad_weight.data_ptr<scalar_t>() : nullptr,
+          weight.defined() ? grad_bias.data_ptr<scalar_t>() : nullptr,
+          staging_data_ptr,
+          semaphores_ptr,
+          reduction_size,
+          stride);
+    });
+  }
+
+  return std::make_tuple(sumn_dy, sum_dy_xmu, grad_weight, grad_bias);
 }
 
 } } // namespace at::native

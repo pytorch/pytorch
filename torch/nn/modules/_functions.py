@@ -55,7 +55,8 @@ class SyncBatchNorm(Function):
 
     @staticmethod
     def backward(self, grad_output):
-        grad_output = grad_output.contiguous()
+        if not grad_output.is_contiguous(memory_format=torch.channels_last):
+            grad_output = grad_output.contiguous()
         saved_input, weight, mean, invstd, count_tensor = self.saved_tensors
         grad_input = grad_weight = grad_bias = None
         process_group = self.process_group
@@ -71,6 +72,8 @@ class SyncBatchNorm(Function):
             self.needs_input_grad[1],
             self.needs_input_grad[2]
         )
+
+        grad_output = grad_output.contiguous()  # TODO: remove this after batch_norm_backward_elemt is ported
 
         if self.needs_input_grad[0]:
             # synchronizing stats used to calculate input gradient.
