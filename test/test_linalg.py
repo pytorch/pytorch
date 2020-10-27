@@ -969,9 +969,17 @@ class TestLinalg(TestCase):
                                            transpose=transpose)[0]  # Actual output
             self.assertEqual(x_act, x_exp)  # Equality check
             if transpose:
-                self.assertEqual(b, torch.matmul(A.transpose(-2, -1), x_act))
+                A = A.transpose(-2, -1)
+
+            # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
+            if self.device_type == 'cuda' and dtype.is_complex:
+                Ax = torch.empty_like(x_act).view(-1, *b_dims[-2:])
+                for A_i, x_i, Ax_i in zip(A.contiguous().view(-1, *A_dims[-2:]), x_act.contiguous().view(-1, *b_dims[-2:]), Ax):
+                    torch.matmul(A_i, x_i, out=Ax_i)
+                Ax = Ax.view(*x_act.shape)
             else:
-                self.assertEqual(b, torch.matmul(A, x_act))
+                Ax = torch.matmul(A, x_act)
+            self.assertEqual(b, Ax)
 
         for (upper, unitriangular, transpose), batchsize in itertools.product(itertools.product([True, False], repeat=3), [1, 3, 4]):
             triangular_solve_batch_helper((batchsize, 5, 5), (batchsize, 5, 10),
