@@ -70,7 +70,8 @@ std::string getModuleTypeName(const Module& module, const std::string& prefix) {
 void setModulePath(Node* node, const std::string& root_scope_string) {
   if (!node->callstack()) {
     std::string root = root_scope_string + ".forward";
-    InlinedCallStackPtr inlineCallStack = c10::make_intrusive<InlinedCallStack>();
+    InlinedCallStackPtr inlineCallStack =
+        c10::make_intrusive<InlinedCallStack>();
     node->setCallStack(inlineCallStack);
     node->setModulePathStr(root);
   } else {
