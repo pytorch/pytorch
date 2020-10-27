@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCPU, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
-from torch.autograd import gradcheck
+from torch.autograd import gradcheck, gradgradcheck
 
 if TEST_NUMPY:
     import numpy as np
@@ -1070,6 +1070,26 @@ class TestLinalg(TestCase):
         err_str = r"triangular_solve_cpu: U\(3,3\) is zero, singular U\."
         with self.assertRaisesRegex(RuntimeError, err_str):
             torch.triangular_solve(b, A)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float64, torch.complex128)
+    def test_triangular_solve_autograd(self, device, dtype):
+        def run_test(A_dims, B_dims):
+            A = torch.rand(*A_dims, dtype=dtype).requires_grad_()
+            b = torch.rand(*B_dims, dtype=dtype).requires_grad_()
+
+            for upper, transpose, unitriangular in itertools.product((True, False), repeat=3):
+                def func(A, b):
+                    return torch.triangular_solve(b, A, upper, transpose, unitriangular)
+
+                gradcheck(func, [A, b])
+                gradgradcheck(func, [A, b])
+
+        run_test((3, 3), (3, 4))
+        run_test((3, 3), (3, 2))
+        run_test((2, 3, 3), (2, 3, 4))
+        run_test((2, 3, 3), (2, 3, 2))
 
 instantiate_device_type_tests(TestLinalg, globals())
 

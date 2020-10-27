@@ -2719,25 +2719,6 @@ class TestAutograd(TestCase):
         for upper, dims in product([True, False], [(3, 3), (5, 5)]):
             _test_with_size(upper, dims)
 
-    @skipIfNoLapack
-    def test_triangular_solve(self):
-        def run_test(A_dims, B_dims, dtype):
-            A = torch.rand(*A_dims, dtype=dtype).requires_grad_()
-            b = torch.rand(*B_dims, dtype=dtype).requires_grad_()
-
-            for upper, transpose, unitriangular in product((True, False), repeat=3):
-                def func(A, b):
-                    return torch.triangular_solve(b, A, upper, transpose, unitriangular)
-
-                gradcheck(func, [A, b])
-                gradgradcheck(func, [A, b])
-
-        for dtype in (torch.double, torch.cdouble):
-            run_test((3, 3), (3, 4), dtype)
-            run_test((3, 3), (3, 2), dtype)
-            run_test((2, 3, 3), (2, 3, 4), dtype)
-            run_test((2, 3, 3), (2, 3, 2), dtype)
-
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_fft_ifft_rfft_irfft(self):
         def _test_complex(sizes, signal_ndim):
