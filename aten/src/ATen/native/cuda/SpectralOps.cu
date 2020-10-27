@@ -405,6 +405,258 @@ void cufft_clear_plan_cache_impl(int64_t device_index) {
 
 } // namespace at::native::detail
 
+namespace {
+constexpr int64_t cufft_max_ndim = 3;
+
+// Execute a general fft operation (can be c2c, onesided r2c or onesided c2r)
+void _exec_fft(const Tensor& input, const Tensor& output, IntArrayRef dims, bool forward) {
+  // Use TensorIterator to coalesce batch dimensions
+  auto iter = TensorIteratorConfig()
+      .add_output(output)
+      .add_input(input)
+      .resize_outputs(false)
+      .check_all_same_dtype(false)
+      .declare_static_shape(input.sizes(), dims)
+      .build();
+
+  DimVector in_strides(dims.size() + 1);
+  DimVector out_strides(dims.size() + 1);
+  DimVector signal_size(dims.size() + 1);
+
+  // Convert batch strides from byte stride to element stride
+  const auto in_element_size = iter.element_size(1);
+  const auto out_element_size = iter.element_size(0);
+  in_strides[0] = iter.strides(1)[0] / in_element_size;
+  out_strides[0] = iter.strides(0)[0] / out_element_size;
+  const auto batch_size = iter.shape()[0];
+  signal_size[0] = batch_size;
+
+  const int64_t signal_ndim = dims.size();
+  for (int64_t i = 0; i < signal_ndim; ++i) {
+    auto idim = dims[signal_ndim - i - 1];
+    in_strides[i + 1] = input.strides()[idim];
+    out_strides[i + 1] = output.strides()[idim];
+
+    auto in_size = input.sizes()[idim];
+    auto out_size = output.sizes()[idim];
+    signal_size[i + 1] = std::max(in_size, out_size);
+    TORCH_INTERNAL_ASSERT(in_size == signal_size[i + 1] ||
+                          in_size == (signal_size[i + 1] / 2) + 1);
+    TORCH_INTERNAL_ASSERT(out_size == signal_size[i + 1] ||
+                          out_size == (signal_size[i + 1] / 2) + 1);
+  }
+
+  // Create the transform plan (either from cache or locally)
+  auto fft_type = GetCuFFTTransformType(input.is_complex(), output.is_complex());
+  CuFFTParams Params(in_strides, out_strides, signal_size, fft_type,
+                     c10::toValueType(input.scalar_type()));
+  CuFFTParamsLRUCache& plan_cache = cufft_get_plan_cache(input.device().index());
+  std::unique_lock<std::mutex> guard(plan_cache.mutex, std::defer_lock);
+  c10::optional<CuFFTConfig> uncached_plan;
+  const CuFFTConfig * config = nullptr;
+
+  if (plan_cache.max_size() > 0) {
+    guard.lock();
+    if (plan_cache.max_size() > 0) {  // check again after acquiring the lock
+      config = &plan_cache.lookup(Params);
+    }
+  }
+
+  if (config == nullptr) {
+    uncached_plan.emplace(Params);
+    config = &uncached_plan.value();
+  }
+
+  auto & plan = config->plan();
+
+  // dims should always be chosen so a valid embedding is possible
+  TORCH_INTERNAL_ASSERT(!config->should_clone_input());
+
+  // prepare cufft for execution
+  CUFFT_CHECK(cufftSetStream(plan, at::cuda::getCurrentCUDAStream()));
+  auto workspace = at::empty({ config->workspace_size() }, at::device(at::kCUDA).dtype(at::kByte));
+  CUFFT_CHECK(cufftSetWorkArea(plan, workspace.data_ptr()));
+
+  // execute transform plan (potentially many times)
+  iter.serial_for_each([&](char** data, const int64_t* strides, int64_t size) {
+        // Execute one batch of FFTs
+        TORCH_INTERNAL_ASSERT(size == batch_size);
+        TORCH_INTERNAL_ASSERT(strides[0] == out_strides[0] * out_element_size);
+        TORCH_INTERNAL_ASSERT(strides[1] == in_strides[0] * in_element_size);
+        exec_cufft_plan(*config, data[1], data[0], forward);
+      }, {0, iter.numel()});
+}
+
+// Returns n s.t. the first n sorted_dims can be represented as a
+// cufft embedding. See NOTE [ cuFFT Embedded Strides ]
+int64_t num_embeddable_dims(IntArrayRef strides, IntArrayRef sorted_dims) {
+  const int64_t max_dims = std::min(
+      cufft_max_ndim, static_cast<int64_t>(sorted_dims.size()));
+  for (int64_t i = 1; i < max_dims; ++i) {
+    auto dim = sorted_dims[i];
+    auto dim_prev = sorted_dims[i - 1];
+    if (strides[dim] % strides[dim_prev] != 0) {
+      return i;
+    }
+  }
+  return max_dims;
+}
+
+// Calculates the normalization constant and applies it in-place to self
+// sizes is the sizes of a twosided tensor and dims are all transformed dims
+void _fft_apply_normalization(const Tensor& self, int64_t normalization, IntArrayRef sizes, IntArrayRef dims) {
+  auto norm = static_cast<fft_norm_mode>(normalization);
+  if (norm == fft_norm_mode::none) {
+    return;
+  }
+
+  int64_t signal_numel = 1;
+  for (auto dim : dims) {
+    signal_numel *= sizes[dim];
+  }
+  const double scale_denom = (norm == fft_norm_mode::by_root_n) ?
+    std::sqrt(signal_numel) : static_cast<double>(signal_numel);
+  self.div_(scale_denom);
+}
+
+}  // namespace (anonymous)
+
+Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
+  TORCH_CHECK(self.is_floating_point());
+  auto input_sizes = self.sizes();
+  DimVector out_sizes(input_sizes.begin(), input_sizes.end());
+  auto last_dim = dim.back();
+  auto last_dim_halfsize = (input_sizes[last_dim]) / 2 + 1;
+  if (onesided) {
+    out_sizes[last_dim] = last_dim_halfsize;
+  }
+
+  auto input_strides = self.strides();
+  bool has_broadcasted_dims = false;
+  for (int64_t i = 0; i < input_strides.size(); ++i) {
+    if (input_strides[i] == 0 && input_sizes[i] > 1) {
+      has_broadcasted_dims = true;
+    }
+  }
+
+  auto input = self;
+  if (has_broadcasted_dims) {
+    input = self.clone(MemoryFormat::Contiguous);
+  }
+
+  auto output = at::empty(out_sizes, self.options().dtype(c10::toComplexType(self.scalar_type())));
+  // Onesided slice view of output
+  auto out_slice = output.slice(last_dim, 0, last_dim_halfsize);
+
+  // Do a 1D R2C transform first
+  // TODO: could transform up to 2 other dims in the same cuFFT operation
+  _exec_fft(input, out_slice, dim.back(), /*forward=*/true);
+
+  // Any subsequent C2C transforms are done in-place
+  // Sort dimensions to make valid embeddings
+  DimVector sorted_dims(dim.begin(), dim.end() - 1);
+  auto output_strides = output.strides();
+  std::sort(sorted_dims.begin(), sorted_dims.end(),
+            [&](int64_t a, int64_t b) { return output_strides[a] < output_strides[b]; });
+
+  IntArrayRef remaining_dims = sorted_dims;
+
+  while (!remaining_dims.empty()) {
+    auto ndim = num_embeddable_dims(output_strides, remaining_dims);
+    _exec_fft(out_slice, out_slice, remaining_dims.slice(0, ndim), /*forward=*/true);
+    remaining_dims = remaining_dims.slice(ndim);
+  }
+
+  _fft_apply_normalization(out_slice, normalization, input.sizes(), dim);
+
+  if (!onesided) {
+    _fft_fill_with_conjugate_symmetry_cuda_(output, dim);
+  }
+  return output;
+}
+
+Tensor _fft_c2r_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t lastdim) {
+  TORCH_CHECK(self.is_complex());
+  auto in_sizes = self.sizes();
+  DimVector out_sizes(in_sizes.begin(), in_sizes.end());
+  out_sizes[dim.back()] = lastdim;
+
+  // First complete any C2C transforms
+  Tensor temp;
+  if (dim.size() > 1) {
+    temp = _fft_c2c_cufft(
+        self, dim.slice(0, dim.size() - 1),
+        static_cast<int64_t>(fft_norm_mode::none), false);
+  } else {
+    // Complex to real FFTs may overwrite the input buffer, so must always clone (gh-34551)
+    temp = self.clone(MemoryFormat::Contiguous);
+  }
+
+  // Finally, do a 1D C2R transform
+  // TODO: could transform up to 2 other dims in the same cuFFT operation
+  auto output = at::empty(out_sizes, self.options().dtype(c10::toValueType(self.scalar_type())));
+  _exec_fft(temp, output, dim.back(), /*forward=*/false);
+
+  _fft_apply_normalization(output, normalization, out_sizes, dim);
+  return output;
+}
+
+Tensor _fft_c2c_cufft(const Tensor& self, IntArrayRef dims_, int64_t normalization, bool forward) {
+  TORCH_CHECK(self.is_complex());
+  if (dims_.empty()) {
+    return self.clone();
+  }
+
+  Tensor input = self;
+  auto input_strides = input.strides();
+  auto input_sizes = input.sizes();
+  bool has_broadcasted_dims = false;
+  for (int64_t i = 0; i < input_strides.size(); ++i) {
+    if (input_strides[i] == 0 && input_sizes[i] > 1) {
+      has_broadcasted_dims = true;
+    }
+  }
+
+  // Broadcasted dims cannot be represented as a cuFFT embedding so must clone
+  Tensor output;
+  if (has_broadcasted_dims) {
+    input = input.clone(MemoryFormat::Contiguous);
+    output = input;
+  } else {
+    output = at::empty_like(input);
+  }
+
+  DimVector sorted_dims(dims_.begin(), dims_.end());
+  std::sort(sorted_dims.begin(), sorted_dims.end(),
+            [&](int64_t a, int64_t b) { return input_strides[a] < input_strides[b]; });
+
+  auto output_strides = output.strides();
+  // First pass may be out-of-place, can only transform dimensions
+  // that can be embedded in both input and output
+  if (!input.is_same(output)) {
+    const int64_t transform_ndims = std::min(num_embeddable_dims(input_strides, sorted_dims),
+                                             num_embeddable_dims(output_strides, sorted_dims));
+    _exec_fft(input, output, IntArrayRef{sorted_dims}.slice(0, transform_ndims), forward);
+    sorted_dims.erase(sorted_dims.begin(), sorted_dims.begin() + transform_ndims);
+  }
+
+  // Any subsequent passes are done in-place in the output
+  std::sort(sorted_dims.begin(), sorted_dims.end(),
+            [&](int64_t a, int64_t b) { return output_strides[a] < output_strides[b]; });
+  IntArrayRef dims = sorted_dims;
+
+
+  // Any subsequent passes are in-place
+  while (!dims.empty()) {
+    auto ndim = num_embeddable_dims(output_strides, dims);
+    _exec_fft(output, output, dims.slice(0, ndim), forward);
+    dims = dims.slice(ndim);
+  }
+
+  _fft_apply_normalization(output, normalization, output.sizes(), dims_);
+  return output;
+}
+
 // cuFFT
 // Currently not utilizing multi GPUs so this can be potentially sped up.
 Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,

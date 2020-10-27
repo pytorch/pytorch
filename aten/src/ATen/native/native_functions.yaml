@@ -1999,6 +1999,30 @@
     CPU: _fft_mkl
     CUDA: _fft_cufft
 
+# Real to complex forward FFT
+- func: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _fft_r2c_mkl
+    CUDA: _fft_r2c_cufft
+
+# Complex to real inverse FFT
+- func: _fft_c2r(Tensor self, int[] dim, int normalization, int last_dim_size) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _fft_c2r_mkl
+    CUDA: _fft_c2r_cufft
+
+# Standard complex to complex FFT (forward or backward)
+- func: _fft_c2c(Tensor self, int[] dim, int normalization, bool forward) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _fft_c2c_mkl
+    CUDA: _fft_c2c_cufft
+
 - func: _cufft_get_plan_cache_size(int device_index) -> int
   use_c10_dispatcher: full
 

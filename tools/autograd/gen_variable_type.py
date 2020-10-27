@@ -165,7 +165,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
-    'bmm', 'diagonal'
+    'bmm', 'diagonal', '_fft_c2c', '_fft_r2c'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.

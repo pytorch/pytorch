@@ -350,6 +350,113 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
   return output;
 }
 
+static void _exec_fft(const Tensor& input, const Tensor& output, IntArrayRef dims, int64_t normalization, bool forward) {
+  // Create plan
+  auto iter = TensorIteratorConfig()
+      .add_output(output)
+      .add_input(input)
+      .resize_outputs(false)
+      .check_all_same_dtype(false)
+      .declare_static_shape(input.sizes(), dims)
+      .build();
+
+  DimVector in_strides(dims.size() + 1);
+  DimVector out_strides(dims.size() + 1);
+  DimVector signal_size(dims.size() + 1);
+
+  // NOTE: TensorIterator strides are in bytes
+  const auto in_element_size = iter.element_size(1);
+  const auto out_element_size = iter.element_size(0);
+  in_strides[0] = iter.strides(1)[0] / in_element_size;
+  out_strides[0] = iter.strides(0)[0] / out_element_size;
+  const auto batch_size = iter.shape()[0];
+  signal_size[0] = batch_size;
+
+  const int64_t signal_ndim = dims.size();
+  for (int64_t i = 0; i < signal_ndim; ++i) {
+    auto idim = dims[i];
+    in_strides[i + 1] = input.strides()[idim];
+    out_strides[i + 1] = output.strides()[idim];
+
+    auto in_size = input.sizes()[idim];
+    auto out_size = output.sizes()[idim];
+    signal_size[i + 1] = std::max(in_size, out_size);
+    TORCH_INTERNAL_ASSERT(in_size == signal_size[i + 1] ||
+                          in_size == (signal_size[i + 1] / 2) + 1);
+    TORCH_INTERNAL_ASSERT(out_size == signal_size[i + 1] ||
+                          out_size == (signal_size[i + 1] / 2) + 1);
+  }
+
+  auto descriptor = _plan_mkl_fft(
+      in_strides, out_strides, signal_size, input.is_complex(), output.is_complex(),
+      normalization, forward, c10::toValueType(input.scalar_type()));
+
+  // run
+  iter.serial_for_each([&](char** data, const int64_t* strides, int64_t size) {
+    // Execute one batch of FFTs
+    TORCH_INTERNAL_ASSERT(size == batch_size);
+    TORCH_INTERNAL_ASSERT(strides[0] == out_strides[0] * out_element_size);
+    TORCH_INTERNAL_ASSERT(strides[1] == in_strides[0] * in_element_size);
+    if (forward) {
+      MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), data[1], data[0]));
+    } else {
+      MKL_DFTI_CHECK(DftiComputeBackward(descriptor.get(), data[1], data[0]));
+    }
+  }, {0, iter.numel()});
+}
+
+Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
+  TORCH_CHECK(self.is_complex());
+  // NOTE: Multi-dimensional C2R transforms don't agree with numpy in cases
+  // where the input isn't strictly Hermitian-symmetric. Instead, we use a
+  // multi-dim C2C transform followed by a 1D C2R transform.
+  //
+  // Such inputs are technically out of contract though, so maybe a disagreement
+  // is okay.
+  auto input = self;
+  if (dim.size() > 1) {
+    auto temp = at::empty(self.sizes(), self.options());
+    _exec_fft(self, temp, dim.slice(0, dim.size() - 1), normalization, /*forward=*/false);
+    input = temp;
+    dim = dim.slice(dim.size() - 1);
+  }
+
+  auto in_shape = input.sizes();
+  DimVector out_shape(in_shape.begin(), in_shape.end());
+  out_shape[dim.back()] = last_dim_size;
+  auto output = at::empty(out_shape, self.options().dtype(c10::toValueType(self.scalar_type())));
+  _exec_fft(input, output, dim, normalization, /*forward=*/false);
+  return output;
+}
+
+Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
+  TORCH_CHECK(self.is_floating_point());
+  auto input_shape = self.sizes();
+  DimVector out_shape(input_shape.begin(), input_shape.end());
+  auto last_dim = dim.back();
+  auto last_dim_halfsize = (input_shape[last_dim]) / 2 + 1;
+  if (onesided) {
+    out_shape[last_dim] = last_dim_halfsize;
+  }
+
+  auto output = at::empty(out_shape, self.options().dtype(c10::toComplexType(self.scalar_type())));
+  // Onesided slice view of output
+  auto out_slice = output.slice(last_dim, 0, last_dim_halfsize);
+  _exec_fft(self, out_slice, dim, normalization, /*forward=*/true);
+
+  if (!onesided) {
+    _fft_fill_with_conjugate_symmetry_cpu_(output, dim);
+  }
+  return output;
+}
+
+Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
+  TORCH_CHECK(self.is_complex());
+  auto output = at::empty(self.sizes(), self.options());
+  _exec_fft(self, output, dim, normalization, forward);
+  return output;
+}
+
 }} // namespace at::native
 
 #endif
