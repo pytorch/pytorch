@@ -650,6 +650,15 @@ public:
   ); \
   void TORCH_LIBRARY_init_ ## ns (torch::Library& m)
 
+#define TORCH_LIBRARY_FRAGMENT(ns, m, uid) \
+  static void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## uid (torch::Library&); \
+  static torch::detail::TorchLibraryInit TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _ ## uid ( \
+    torch::Library::FRAGMENT, \
+    &TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## uid, \
+    #ns, c10::nullopt, __FILE__, __LINE__ \
+  ); \
+  void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## uid (torch::Library& m)
+
 /// \private
 ///
 /// This macro is a version of TORCH_LIBRARY() that doesn't enforce that there
@@ -716,6 +725,19 @@ public:
     __FILE__, __LINE__ \
   ); \
   void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library& m)
+
+#define TORCH_LIBRARY_IMPL_FRAGMENT(ns, k, m, uid) \
+  static void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## uid (torch::Library&); \
+  static torch::detail::TorchLibraryInit TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ## uid ( \
+    torch::Library::IMPL, \
+    c10::guts::if_constexpr<c10::impl::dispatch_key_whitelist_check(c10::DispatchKey::k)>( \
+      []() { return & TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## uid; }, \
+      []() { return [](torch::Library&) -> void {}; } \
+    ), \
+    #ns, c10::make_optional(c10::DispatchKey::k), \
+    __FILE__, __LINE__ \
+  ); \
+  void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## uid (torch::Library& m)
 
 
 // These are variants of the macros above which are to be used for testing (they

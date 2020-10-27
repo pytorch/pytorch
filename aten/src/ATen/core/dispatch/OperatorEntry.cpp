@@ -104,6 +104,9 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
 
   if (k.size() > 0) {
     TORCH_WARN("Registering a kernel (", debug, ") for operator ", name_, " for dispatch key ", toString(dispatch_key), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
+    for(auto& prevKernel : k) {
+        std::cout << " previous kernel registration = (" << prevKernel.debug << ")" << std::endl;
+    }
   }
 
   if (manuallyBoxedKernel_.has_value()) {

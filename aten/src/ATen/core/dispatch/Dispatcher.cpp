@@ -134,13 +134,20 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::strin
   OperatorName op_name = schema.operator_name();
   auto op = findOrRegisterName_(op_name);
 
-  if (op.operatorIterator_->def_count == 0) {
-    // NB: registerSchema is not idempotent! Only do it once!
+//std::stringstream ss;
+//ss << schema;
+//if (ss.str().find("AliasWithName") != std::string::npos) std::cout << "FOUND AliasWithName. schema=" << schema << std::endl;
+
+  TORCH_CHECK(op.operatorIterator_->def_count == 0, "Tried to register an operator (", schema, ") with the same name and overload name multiple times.",
+                                                    " Each overload's schema should only be registered with a single call to def().",
+                                                    " Duplicate registration: ", debug, ". Original registration: ", op.operatorIterator_->op.debug());
+  //if (op.operatorIterator_->def_count != 0) {
+      //std::cout << "\n\n\t\tDUPLICATE DEF. SCHEMA=" << schema << "\n\n" << std::endl;
+      //checkSchemaCompatibility(op, schema, debug);
+  //}
+    //checkSchemaCompatibility(op, schema, debug);
     op.operatorIterator_->op.registerSchema(std::move(schema), std::move(debug));
     listeners_->callOnOperatorRegistered(op);
-  } else {
-    checkSchemaCompatibility(op, schema, debug);
-  }
 
   // NB: do not increment the counts until AFTER error checking
   ++op.operatorIterator_->def_count;
