@@ -211,7 +211,11 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
       const auto output_nr = input_var->cdata.output_nr();
       auto grad_fn = input_var->cdata.grad_fn();
       if (!grad_fn) {
-          grad_fn = torch::autograd::impl::try_get_grad_accumulator(input_var->cdata);
+        grad_fn = torch::autograd::impl::try_get_grad_accumulator(input_var->cdata);
+      }
+      if (accumulate_grad) {
+        THPUtils_assert(input_var->cdata.is_leaf(),
+          "One of the differentiated Tensors is not a leaf Tensor");
       }
       THPUtils_assert(input_var->cdata.requires_grad(),
           "One of the differentiated Tensors does not require grad");
