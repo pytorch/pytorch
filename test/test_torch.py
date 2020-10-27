@@ -4112,16 +4112,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             pass
 
         def test_is_nonzero(self):
-            self.assertExpectedRaisesInline(
-                RuntimeError,
-                lambda: torch.tensor([]).is_nonzero(),
-                "Boolean value of Tensor with no values is ambiguous",
-            )
-            self.assertExpectedRaisesInline(
-                RuntimeError,
-                lambda: torch.tensor([0, 0]).is_nonzero(),
-                "Boolean value of Tensor with more than one value is ambiguous",
-            )
+            with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
+                torch.tensor([]).is_nonzero()
+            with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with more than one value is ambiguous"):
+                torch.tensor([0, 0]).is_nonzero()
             self.assertFalse(torch.tensor(0).is_nonzero())
             self.assertTrue(torch.tensor(1).is_nonzero())
             self.assertFalse(torch.tensor([0]).is_nonzero())
