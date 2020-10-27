@@ -316,7 +316,11 @@ Tensor& rsqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor rsqrt(const Tensor& self) { return unary_op_impl(self, at::rsqrt_out); }
 Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
 
-Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sign_stub); }
+Tensor& sign_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(),
+              "Unlike NumPy, torch.sign is not intended to support complex numbers. Please use torch.sgn instead.");
+  return unary_op_impl_out(result, self, sign_stub);
+}
 Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
 Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
 
