@@ -3,6 +3,7 @@ import torch
 from torch.cuda import nccl
 from torch._utils import _take_tensors, _flatten_dense_tensors, \
     _unflatten_dense_tensors, _reorder_tensors_as, _get_device_index
+from typing import List
 
 
 def broadcast(tensor, devices=None, *, out=None):
@@ -121,7 +122,7 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
     """
     # TODO: When `len(inputs) == 1` and all inputs are on `destination`, just
     #       return `inputs`.
-    dense_tensors = [[] for _ in inputs]  # shape (num_gpus, num_tensors)
+    dense_tensors: List[List] = [[] for _ in inputs]  # shape (num_gpus, num_tensors)
     output = []
     ref_order = []
     # process sparse ones first since they may have different sizes on different gpus
