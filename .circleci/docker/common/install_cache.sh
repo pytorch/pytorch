@@ -46,7 +46,7 @@ fi
 chmod a+x /opt/cache/bin/sccache
 
 function write_sccache_stub() {
-  printf "#!/bin/sh\nexec sccache $(which $1) \"\$@\"" > "/opt/cache/bin/$1"
+  printf "#!/bin/sh\nif [ \$(ps -p \$PPID -o comm=) != sccache ]; then\n  exec sccache $(which $1) \"\$@\"\nelse\n  exec $(which $1) \"\$@\"\nfi" > "/opt/cache/bin/$1"
   chmod a+x "/opt/cache/bin/$1"
 }
 
@@ -68,8 +68,8 @@ if [ -n "$CUDA_VERSION" ]; then
   # where CUDA is installed.  Instead, we install an nvcc symlink outside
   # of the PATH, and set CUDA_NVCC_EXECUTABLE so that we make use of it.
 
-  printf "#!/bin/sh\nexec sccache $(which nvcc) \"\$@\"" > /opt/cache/lib/nvcc
-  chmod a+x /opt/cache/lib/nvcc
+  write_sscache_stub nvcc
+  mv /opt/cache/bin/nvcc /opt/cache/lib/
 fi
 
 if [ -n "$ROCM_VERSION" ]; then
