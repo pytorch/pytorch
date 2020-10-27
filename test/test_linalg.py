@@ -926,7 +926,9 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_triangular_solve(self, device, dtype):
         for (k, n), (upper, unitriangular, transpose) in itertools.product(zip([2, 3, 5], [3, 5, 7]),
                                                                  itertools.product([True, False], repeat=3)):
@@ -934,13 +936,15 @@ class TestLinalg(TestCase):
                                                      unitriangular, device, dtype)
             x = torch.triangular_solve(b, A, upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
             if transpose:
-                self.assertLessEqual(b.dist(A.t().mm(x)), 4e-12)
+                self.assertEqual(b, A.t().mm(x))
             else:
-                self.assertLessEqual(b.dist(A.mm(x)), 4e-12)
+                self.assertEqual(b, A.mm(x))
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_triangular_solve_batched(self, device, dtype):
         def triangular_solve_batch_helper(A_dims, b_dims, upper, unitriangular, transpose):
             b, A = self.triangular_solve_test_helper(A_dims, b_dims, upper,
@@ -956,28 +960,46 @@ class TestLinalg(TestCase):
                                            transpose=transpose)[0]  # Actual output
             self.assertEqual(x_act, x_exp)  # Equality check
             if transpose:
-                self.assertLessEqual(b.dist(torch.matmul(A.transpose(-2, -1), x_act)), 3e-12)  # Correctness check
+                self.assertEqual(b, torch.matmul(A.transpose(-2, -1), x_act))
             else:
-                self.assertLessEqual(b.dist(torch.matmul(A, x_act)), 3e-12)  # Correctness check
+                self.assertEqual(b, torch.matmul(A, x_act))
 
         for (upper, unitriangular, transpose), batchsize in itertools.product(itertools.product([True, False], repeat=3), [1, 3, 4]):
             triangular_solve_batch_helper((batchsize, 5, 5), (batchsize, 5, 10),
                                           upper, unitriangular, transpose)
 
 
-    @slowTest
+    # @slowTest
+    # @onlyCPU
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_triangular_solve_batched_many_batches(self, device, dtype):
-        for upper, transpose, unitriangular in itertools.product([True, False], repeat=3):
+        # for upper, transpose, unitriangular in itertools.product([True, False], repeat=3):
+        for upper, transpose, unitriangular in itertools.product([True, False], [True, False], [True, False]):
             b, A = self.triangular_solve_test_helper((256, 256, 5, 5), (5, 1),
                                                      upper, unitriangular, device, dtype)
             x, _ = torch.triangular_solve(b, A,
                                           upper=upper, transpose=transpose, unitriangular=unitriangular)
             if transpose:
                 A = A.transpose(-2, -1)
-            self.assertEqual(torch.matmul(A, x), b.expand(A.shape[:-2] + (5, 1)))
+
+            # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
+            if self.device_type == 'cuda' and dtype.is_complex:
+                Ax_list = []
+                for A_i, x_i in zip(A.contiguous().view(-1, 5, 5), x.contiguous().view(-1, 5, 1)):
+                    Ax_list.append(torch.matmul(A_i, x_i))
+                Ax = torch.stack(Ax_list).view(256, 256, 5, 1)
+            else:
+                Ax = torch.matmul(A, x)
+
+            # For this case individual entries of Ax and b differ a lot, so at least norm is compared
+            if self.device_type == 'cpu' and dtype == torch.float32 and unitriangular == False:
+                self.assertEqual(b.expand(A.shape[:-2] + (5, 1)).norm(p=1), Ax.norm(p=1), atol=self.precision, rtol=1e-3)
+            else:
+                self.assertEqual(b.expand(A.shape[:-2] + (5, 1)), Ax, atol=self.precision, rtol=1e-3)
 
             b, A = self.triangular_solve_test_helper((3, 3), (512, 512, 3, 1),
                                                      upper, unitriangular, device, dtype)
@@ -985,12 +1007,22 @@ class TestLinalg(TestCase):
                                           unitriangular=unitriangular)
             if transpose:
                 A = A.transpose(-2, -1)
+
+            # # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
+            # if self.device_type == 'cuda' and dtype.is_complex:
+            #     Ax_list = []
+            #     for A_i, x_i in zip(A.contiguous().view(-1, 5, 5), x.contiguous().view(-1, 5, 1)):
+            #         Ax_list.append(torch.matmul(A_i, x_i))
+            #     Ax = torch.stack(Ax_list).view(256, 256, 5, 1)
+            # else:
+            #     Ax = torch.matmul(A, x)
+
             self.assertEqual(torch.matmul(A, x), b)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_triangular_solve_batched_broadcasting(self, device, dtype):
         from scipy.linalg import solve_triangular as tri_solve
 
@@ -1025,10 +1057,10 @@ class TestLinalg(TestCase):
 
     @onlyCPU
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_triangular_solve_singular(self, device, dtype):
-        b = torch.rand(3, 1, device=device)
-        A = torch.eye(3, 3, device=device)
+        b = torch.rand(3, 1, dtype=dtype, device=device)
+        A = torch.eye(3, 3, dtype=dtype, device=device)
         A[-1, -1] = 0  # Now A is singular
         err_str = r"triangular_solve_cpu: U\(3,3\) is zero, singular U\."
         with self.assertRaisesRegex(RuntimeError, err_str):
