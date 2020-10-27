@@ -778,6 +778,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
   }
 };
 
+// Use bicubic convolution algorithm. Based on
+// https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
 template<typename scalar_t, GridSamplerPadding padding, bool align_corners>
 struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
                        padding, align_corners> {
@@ -893,6 +895,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     for (int64_t c = 0; c < C; ++c) {
       auto inp_slice_C_ptr = inp_slice[c].data();
 
+      // Interpolate the 4 values in the x direction
       Vec interp_x[4];
       for (int64_t i = 0; i < 4; i++) {
         interp_x[i] = 
@@ -902,6 +905,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
           coeff_x[3] * get_value_bounded(inp_slice_C_ptr, ix + Vec(2), iy + Vec(-1 + i));
       }
 
+      // Interpolate the 4 values in the y direction
       auto interpolated = coeff_y[0] * interp_x[0] + coeff_y[1] * interp_x[1] +
                           coeff_y[2] * interp_x[2] + coeff_y[3] * interp_x[3];
       interpolated.store(out_slice[c].data() + offset, len);

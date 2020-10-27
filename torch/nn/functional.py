@@ -3297,7 +3297,8 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
             ``'bilinear'`` | ``'nearest'`` | ``'bicubic'``. Default: ``'bilinear'``
             Note: When ``mode='bilinear'`` and the input is 5-D, the interpolation mode
             used internally will actually be trilinear. However, when the input is 4-D,
-            the interpolation mode will legitimately be bilinear.
+            the interpolation mode will legitimately be bilinear. 
+            Besides, ``mode=''bicubic`` supports only 4-D input.
         padding_mode (str): padding mode for outside grid values
             ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
@@ -3325,6 +3326,14 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         The default behavior up to version 1.2.0 was ``align_corners = True``.
         Since then, the default behavior has been changed to ``align_corners = False``,
         in order to bring it in line with the default for :func:`interpolate`.
+
+    .. note::
+        ``mode='bicubic'`` is implemented by
+        [cubic covolution algorithm](https://en.wikipedia.org/wiki/Bicubic_interpolation) 
+        with `\alpha=-0.75`. It's possible to cause overshoot, in other words it can produce
+        negative values or values greater than 255 for images.
+        Explicitly call ``result.clamp(min=0, max=255)`` if you want to reduce the overshoot
+        when displaying the image.
     """
     if not torch.jit.is_scripting():
         tens_ops = (input, grid)

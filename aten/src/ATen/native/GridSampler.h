@@ -139,6 +139,8 @@ static inline scalar_t reflect_coordinates_set_grad(scalar_t in, int64_t twice_l
   }
 }
 
+// Mapping the out-of-boundary points back into boundary
+// This would only affect padding_mode=border or reflection
 template<typename scalar_t>
 static inline scalar_t compute_coordinates(scalar_t coord, int64_t size,
                                            GridSamplerPadding padding_mode,
@@ -275,6 +277,7 @@ static inline void add_value_bounded(
   safe_add_2d(data, iy, ix, sH, sW, H, W, delta);
 }
 
+// Calculate the differential of the cubic convolution, i.e. `d coeff / d x`
 template<typename scalar_t>
 static inline void get_cubic_coefficients_grad(
     scalar_t coeffs[4],
@@ -285,13 +288,13 @@ static inline void get_cubic_coefficients_grad(
   scalar_t A = -0.75;
 
   scalar_t x;
-  x = -1 - t;
+  x = -1 - t; // 1 < x = |-1 - tx| < 2
   coeffs[0] = (-3 * A * x - 10 * A ) * x - 8 * A;
-  x = -t;
+  x = -t;     // x = |0 - tx| <= 1
   coeffs[1] = (-3 * (A + 2) * x - 2 * (A + 3)) * x;
-  x = 1 - t;
+  x = 1 - t;  // x = |1 - tx| <= 1
   coeffs[2] = (3 * (A + 2) * x - 2 * (A + 3)) * x;
-  x = 2 - t;
+  x = 2 - t;  // 1 < x = |2 - tx| < 2
   coeffs[3] = (3 * A * x - 10 * A) * x + 8 * A;
 }
 

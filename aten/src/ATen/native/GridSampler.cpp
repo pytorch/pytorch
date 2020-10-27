@@ -503,7 +503,7 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
             for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
               scalar_t coefficients[4];
 
-              // Interpolate 4 values the in the x directon
+              // Interpolate 4 values in the x directon
               for (int64_t i = 0; i < 4; i++) {
                 coefficients[i] = cubic_interp1d<scalar_t>(
                   get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
@@ -513,7 +513,7 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
                   tx);
               }
 
-              // Interpolate in y direction
+              // Interpolate in the y direction
               *out_ptr_NCHW = cubic_interp1d<scalar_t>(
                 coefficients[0],
                 coefficients[1],
@@ -848,7 +848,7 @@ Tensor grid_sampler(const Tensor& input, const Tensor& grid,
     "dimension, but got grid with sizes ", grid.sizes());
   TORCH_CHECK(
     !(input.dim() == 5 && static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Bicubic),
-    "grid_sampler(): bicubic interpolation only support 4D input"
+    "grid_sampler(): bicubic interpolation only supports 4D input"
   );
   for (int64_t i = 2; i < input.dim(); i++) {
     TORCH_CHECK(input.size(i) > 0,
