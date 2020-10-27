@@ -11,8 +11,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/Dimname.h>
 
-$extra_cuda_headers
-
 namespace c10 {
 struct Storage;
 }

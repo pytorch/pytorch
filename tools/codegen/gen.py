@@ -1000,13 +1000,11 @@ def main() -> None:
     cuda_fm = make_file_manager(options.install_dir)
 
     extra_cuda_headers = '''\
-#include <ATen/DeviceGuard.h>
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <ATen/cuda/CUDADevice.h>
 #include <ATen/cuda/CUDAContext.h>'''
     if options.rocm:
         extra_cuda_headers = '''\
-#include <ATen/DeviceGuard.h>
 #include <ATen/hip/ATenHIPGeneral.h>
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>'''
@@ -1026,15 +1024,11 @@ def main() -> None:
     for dispatch in backends:
         h_template = 'TypeDerived.h'
         cpp_template = 'TypeDerived.cpp'
-        # TODO: delete this special case
-        if 'Sparse' in dispatch:
-            cpp_template = 'SparseTypeDerived.cpp'
 
         fm = cuda_fm if 'CUDA' in dispatch else cpu_fm
 
         fm.write_with_template(f'{dispatch}Type.h', h_template, lambda: {
             'Type': f'{dispatch}Type',
-            'extra_cuda_headers': extra_cuda_headers if 'CUDA' in dispatch else '',  # TODO: remove this
             'type_derived_method_declarations': list(mapMaybe(
                 compute_type_method(dispatch, target=Target.DECLARATION, selector=selector),
                 native_functions
@@ -1042,12 +1036,7 @@ def main() -> None:
         })
         fm.write_with_template(f'{dispatch}Type.cpp', cpp_template, lambda: {
             'Type': f'{dispatch}Type',
-            # TODO: remove this
             'extra_cuda_headers': extra_cuda_headers if 'CUDA' in dispatch else '',
-            # TODO: remove this
-            'storage_tensor_headers': '#include <c10/core/TensorImpl.h>',
-            # TODO: remove this
-            'Generator': 'CUDAGeneratorImpl' if 'CUDA' in dispatch else 'CPUGeneratorImpl',
             'legacy_th_headers':
                 '#include <ATen/LegacyTHFunctionsCPU.h>' if dispatch == "CPU" else
                 '#include <ATen/LegacyTHFunctionsCUDA.h>' if dispatch == "CUDA" else
