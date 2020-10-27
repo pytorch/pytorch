@@ -294,7 +294,7 @@ public:
           case CuFFTTransformType::C2R: return HIPFFT_C2R;
         }
       } else if (dtype == kDouble) {
-        switch (type) {
+        switch (fft_type) {
           case CuFFTTransformType::C2C: return HIPFFT_Z2Z;
           case CuFFTTransformType::R2C: return HIPFFT_D2Z;
           case CuFFTTransformType::C2R: return HIPFFT_Z2D;
