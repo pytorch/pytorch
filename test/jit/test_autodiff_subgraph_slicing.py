@@ -157,8 +157,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         # add moved down
         g_str = str(graph)
         FileCheck().check_not("aten::add").run(g_str[0:g_str.find("return")])
-        num_diff_nodes = 2 if GRAPH_EXECUTOR == ProfilingMode.PROFILING else 1
-        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', num_diff_nodes)
+        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
 
     def test_respects_lexical_scoping(self):
         def fn(x, k):

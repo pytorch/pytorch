@@ -104,14 +104,12 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
 #endif // AT_CUDNN_ENABLED()
 }
 
-#ifndef USE_STATIC_DISPATCH
 namespace {
 TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   m.impl("_cudnn_rnn",
          TORCH_FN((&at::autocast::_cudnn_rnn_cast_reflatten)));
 }
 } // anonymous namespace
-#endif
 
 } // namespace autocast
 } // namespace at

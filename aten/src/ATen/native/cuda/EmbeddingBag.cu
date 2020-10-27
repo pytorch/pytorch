@@ -343,6 +343,7 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
                                    int64_t num_weights,
                                    bool scale_grad_by_freq, int64_t mode,
                                    const Tensor& per_sample_weights) {
+  // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_embedding_bag_dense_backward_cuda");
 
@@ -447,6 +448,13 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
   dim3 grid((num_samples + warps_per_block - 1) / warps_per_block);
 
   auto output = at::empty({num_samples}, grad.options());
+
+  // Early return when there is no samples in the batch. This saves unnecesary kernel
+  // launch, but also prevents cudaGetLastError() to complain about invalid launch args
+  if (num_samples == 0) {
+    return output;
+  }
+
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     grad.scalar_type(), "_embedding_bag_per_sample_weights_backward_cuda", [&]() {
       _embedding_bag_per_sample_weights_backward_kernel<scalar_t>
@@ -458,6 +466,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
           num_samples,
           embedding_features,
           output.data_ptr<scalar_t>());
+      AT_CUDA_CHECK(cudaGetLastError());
     }
   );
   return output;

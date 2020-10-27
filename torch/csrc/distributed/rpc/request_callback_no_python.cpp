@@ -192,7 +192,7 @@ bool RequestCallbackNoPython::processScriptRemoteCallOp(
     } catch (const std::exception& e) {
       // Don't throw in this call, but rather transfer the exception
       // to the rref.
-      ownerRRef->setError(e.what());
+      ownerRRef->setError(std::current_exception());
       postProcessing();
       return true;
     }
@@ -321,7 +321,8 @@ void RequestCallbackNoPython::processRpc(
         whenValueSet->addCallback(
             [responseFuture, messageId, rref, whenValueSet]() {
               if (whenValueSet->hasError()) {
-                responseFuture->setError(whenValueSet->error()->what());
+                responseFuture->setError(
+                    whenValueSet->tryRetrieveErrorMessage());
                 return;
               }
               try {
@@ -455,16 +456,15 @@ void RequestCallbackNoPython::processRpc(
           autogradContext, sendFunction, gradientsCall.retainGraph());
 
       // Our response is satisfied when the rpcs come back.
-      execFuture->addCallback(
-          [responseFuture, messageId](const FutureMessage& execFuture) {
-            if (!execFuture.hasError()) {
-              Message m = std::move(PropagateGradientsResp()).toMessage();
-              m.setId(messageId);
-              responseFuture->markCompleted(std::move(m));
-            } else {
-              responseFuture->setError(*(execFuture.error()));
-            }
-          });
+      execFuture->addCallback([responseFuture, messageId, execFuture]() {
+        if (!execFuture->hasError()) {
+          Message m = std::move(PropagateGradientsResp()).toMessage();
+          m.setId(messageId);
+          responseFuture->markCompleted(std::move(m));
+        } else {
+          responseFuture->setError(execFuture->tryRetrieveErrorMessage());
+        }
+      });
       return;
     };
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
@@ -482,97 +482,37 @@ void RequestCallbackNoPython::processRpc(
     case MessageType::RUN_WITH_PROFILING_REQ: {
       auto& rpcWithProfilingReq = static_cast<RpcWithProfilingReq&>(rpc);
       auto wrappedMsgType = rpcWithProfilingReq.wrappedMessageType();
-      const auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
+      auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
+      // If requested with CUDA from caller but CUDA is not available on this
+      // machine, fallback to CPU and log a warning instead of crashing.
+      if (profilingConfig.state ==
+              torch::autograd::profiler::ProfilerState::CUDA &&
+          !this->cudaAvailable()) {
+        profilingConfig = torch::autograd::profiler::ProfilerConfig(
+            torch::autograd::profiler::ProfilerState::CPU,
+            profilingConfig.report_input_shapes,
+            profilingConfig.profile_memory);
+
+        LOG(WARNING)
+            << "Profiler was requested to be enabled with CUDA on this node, but CUDA is not available. "
+            << "Falling back to CPU profiling only.";
+      }
+      TORCH_INTERNAL_ASSERT(
+          profilingConfig.state !=
+                  torch::autograd::profiler::ProfilerState::CUDA ||
+              this->cudaAvailable(),
+          "Profiler state set to CUDA but CUDA not available.");
       const auto profilingKeyId = rpcWithProfilingReq.getProfilingId();
       auto wrappedRpcResponseFuture = std::make_shared<FutureMessage>();
       // Enable the profiler with the config from the sender.
-      std::vector<torch::autograd::profiler::Event> profiledEvents;
+      // When enabling on the main thread, ensure profiler states are cleaned
+      // up, but defer consolidation of all profiled events to the continuation
+      // below.
+      torch::autograd::profiler::ProfilerDisableOptions requestThreadOptions(
+          true /* cleanup TLS state */, false /* consolidate events */);
       {
         torch::autograd::profiler::TLSProfilerGuard g(
-            profilingConfig,
-            [&profiledEvents, profilingConfig](
-                const std::vector<std::vector<
-                    torch::autograd::profiler::Event>>& event_lists) {
-              // Gather all events into a vector
-              for (auto& l : event_lists) {
-                for (auto& e : l) {
-                  profiledEvents.push_back(e);
-                }
-              }
-              // find __start_profile event and __cuda_start_event.
-              bool cuda_profiling_enabled = profilingConfig.state ==
-                  torch::autograd::profiler::ProfilerState::CUDA;
-              bool found_cpu_start = false;
-              const torch::autograd::profiler::Event* profilerStart = nullptr;
-              // Each device has its own cudaProfilerStart, so we must take
-              // care to use the correct one depending on the device the
-              // operation ran on.
-              std::unordered_map<int, const torch::autograd::profiler::Event*>
-                  cudaProfilerStarts;
-              for (auto& e : profiledEvents) {
-                if (!found_cpu_start &&
-                    0 == strcmp(e.name(), "__start_profile")) {
-                  profilerStart = &e;
-                  found_cpu_start = true;
-                }
-                if (cuda_profiling_enabled &&
-                    0 == strcmp(e.name(), "__cuda_start_event")) {
-                  e.setCudaUs(e.cpu_us());
-                  auto device = e.device();
-                  TORCH_CHECK(
-                      device != -1,
-                      "CUDA profiling was enabled but could not find CUDA device.");
-                  TORCH_CHECK(
-                      cudaProfilerStarts.find(device) ==
-                          cudaProfilerStarts.end(),
-                      c10::str(
-                          "Duplicate __cuda_start_event found for ", device));
-                  cudaProfilerStarts[device] = &e;
-                }
-                // TODO: determine no. of CUDA devices and break here if we have
-                // a cudaProfilerStart for all of them, in the case of cuda
-                // profiling.
-                if (found_cpu_start && !cuda_profiling_enabled) {
-                  break;
-                }
-              }
-              // We should always find __start_profile.
-              TORCH_CHECK(
-                  profilerStart != nullptr,
-                  "Expected to find __start_profile event.");
-              // Should have >= 1 CUDA start event.
-              // TODO: we can enhance this assert by ensuring we have found a
-              // start for every available CUDA device.
-              TORCH_CHECK(
-                  !cuda_profiling_enabled || cudaProfilerStarts.size() > 0,
-                  "Profiler was enabled with CUDA recording, but did not find __cuda_start_event.");
-
-              if (cuda_profiling_enabled) {
-                // Compute and set global time for when this CUDA kernel was
-                // launched/ended, since deserialized event will not have a
-                // corresponding CUDA event.
-                for (auto& e : profiledEvents) {
-                  if (e.has_cuda()) {
-                    auto cuda_device = e.device();
-                    TORCH_CHECK(
-                        cuda_device != -1,
-                        "CUDA profiling was enabled but could not find CUDA device.");
-                    auto it = cudaProfilerStarts.find(cuda_device);
-                    TORCH_CHECK(
-                        it != cudaProfilerStarts.end(),
-                        c10::str(
-                            "Failed to find __cuda_start_event for device ",
-                            cuda_device));
-                    auto cudaProfilerStartEvent = it->second;
-                    double cuda_elapsed_us =
-                        cudaProfilerStartEvent->cuda_elapsed_us(e);
-                    int64_t cuda_us =
-                        cuda_elapsed_us + cudaProfilerStartEvent->cpu_us();
-                    e.setCudaUs(cuda_us);
-                  }
-                }
-              }
-            });
+            profilingConfig, c10::nullopt, requestThreadOptions);
         TORCH_INTERNAL_ASSERT(
             torch::autograd::profiler::profilerEnabled(),
             "Expected profiler to be enabled!");
@@ -583,25 +523,48 @@ void RequestCallbackNoPython::processRpc(
             wrappedMsgType,
             messageId,
             wrappedRpcResponseFuture);
-      }
-      wrappedRpcResponseFuture->addCallback([wrappedRpcResponseFuture,
+
+        wrappedRpcResponseFuture->addCallback(
+            at::wrapPropagateTLSState<void>([wrappedRpcResponseFuture,
                                              responseFuture,
-                                             profiledEvents =
-                                                 std::move(profiledEvents),
-                                             profilingKeyId] {
-        if (wrappedRpcResponseFuture->hasError()) {
-          // Propagate error
-          responseFuture->setError(wrappedRpcResponseFuture->error()->what());
-        } else {
-          auto rpcWithProfilingResp = std::make_unique<RpcWithProfilingResp>(
-              MessageType::RUN_WITH_PROFILING_RESP,
-              std::move(*wrappedRpcResponseFuture).moveValue(),
-              profiledEvents,
-              profilingKeyId);
-          responseFuture->markCompleted(
-              std::move(*rpcWithProfilingResp).toMessage());
-        }
-      });
+                                             profilingKeyId,
+                                             profilingConfig] {
+              std::vector<torch::autograd::profiler::Event> profiledEvents;
+              // Defer consolidation of profiler events until async work has
+              // completed (such as async UDF)
+
+              TORCH_INTERNAL_ASSERT(
+                  torch::autograd::profiler::profilerEnabled(),
+                  "Expected profiler to be enabled!");
+
+              // On continuation thread, don't clean up profiler states, since
+              // they will be cleaned up by main thread, and consolidate all
+              // events so we obtain asynchronously run events.
+              torch::autograd::profiler::ProfilerDisableOptions opts(
+                  false, true);
+              auto event_lists =
+                  torch::autograd::profiler::disableProfiler(opts);
+              if (wrappedRpcResponseFuture->hasError()) {
+                // Propagate error
+                // No need to propagate remote events in the case of an error.
+                responseFuture->setError(
+                    wrappedRpcResponseFuture->error()->what());
+              } else {
+                populateRemoteProfiledEvents(
+                    profiledEvents, profilingConfig, event_lists);
+                auto rpcWithProfilingResp =
+                    std::make_unique<RpcWithProfilingResp>(
+                        MessageType::RUN_WITH_PROFILING_RESP,
+                        std::move(*wrappedRpcResponseFuture).moveValue(),
+                        profiledEvents,
+                        profilingKeyId);
+                responseFuture->markCompleted(
+                    std::move(*rpcWithProfilingResp).toMessage());
+              }
+            }));
+        // Exiting the scope will disable the profiler on this thread with the
+        // options specified above.
+      }
       return;
     }
     default: {
@@ -625,6 +588,14 @@ Message RequestCallbackNoPython::handleError(
       ": ",
       e.what());
   return createExceptionResponse(errorMsg, messageId);
+}
+
+bool RequestCallbackNoPython::cudaAvailable() const {
+#ifdef USE_CUDA
+  return true;
+#else
+  return false;
+#endif
 }
 
 } // namespace rpc

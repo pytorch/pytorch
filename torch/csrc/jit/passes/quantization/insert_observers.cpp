@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 
@@ -163,6 +164,14 @@ class ModuleCloneHelper {
       for (auto& fn : type->methods()) {
         clone_method(module, r, *fn, module_qconfig_map, type_remap);
       }
+      // Execute __setstate__(__getstate__()) to initialize custom class
+      // members.
+      if (auto setstate_method = r.find_method("__setstate__")) {
+        auto getstate_method = r.find_method("__getstate__");
+        TORCH_INTERNAL_ASSERT(getstate_method, "expect __getstate__");
+        auto state = (*getstate_method)(Stack{});
+        (*setstate_method)(Stack{state});
+      }
     }
     return r;
   }
@@ -187,7 +196,7 @@ class ModuleCloneHelper {
     }
     for (Node* node : block->nodes()) {
       // remapping type for module instance
-      if (node->kind() == prim::CallMethod) {
+      if (node->kind() == prim::CallMethod || node->kind() == prim::GetAttr) {
         Value* instance = node->inputs()[0];
         auto child_opt = getInvokedModuleOpt(source, node, self);
         if (child_opt.has_value()) {
@@ -1133,6 +1142,8 @@ void InsertObserversHelper::preprocess(
 
   Method method = module.get_method(method_name);
   auto graph = method.graph();
+  // Inline fork-wait calls
+  InlineForkWait(graph);
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
   replaceConvolutionWithAtenConv(graph);
@@ -1162,14 +1173,16 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(
     const QConfig& qconfig) {
   if (isBiasOfConvOrLinear(v) ||
       !(v->type()->isSubtypeOf(TensorType::get()) ||
-        v->type()->isSubtypeOf(ListType::ofTensors()))) {
+        v->type()->isSubtypeOf(ListType::ofTensors())) ||
+      isEmbeddingBagNonInput(v)) {
     return false;
   }
   // For dynamic quantization we only insert observers at the input
   // of the quantizable function.
   if (quant_type_ == QuantType::STATIC) {
     // Check whether producer is quantizable
-    if (nodeQuantizable(v->node()) || isPropagateQuantOp(v->node())) {
+    if (!isWeightOnlyStaticQuantOp(v->node()) &&
+        (nodeQuantizable(v->node()) || isPropagateQuantOp(v->node()))) {
       return true;
     }
   }

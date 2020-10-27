@@ -72,6 +72,7 @@ net models. In particular, TorchScript supports:
    "``Optional[T]``", "A value which is either None or type ``T``"
    "``Dict[K, V]``", "A dict with key type ``K`` and value type ``V``. Only ``str``, ``int``, and ``float`` are allowed as key types."
    "``T``", "A `TorchScript Class`_"
+   "``E``", "A `TorchScript Enum`_"
    "``NamedTuple[T0, T1, ...]``", "A :func:`collections.namedtuple <collections.namedtuple>` tuple type"
 
 Unlike Python, each variable in TorchScript function must have a single static type.
@@ -102,16 +103,19 @@ Example (a type mismatch)
      @torch.jit.script
      def an_error(x):
          if x:
-         ~~~~~...  <--- HERE
+         ~~~~~
              r = torch.rand(1)
+             ~~~~~~~~~~~~~~~~~
          else:
+         ~~~~~
+             r = 4
+             ~~~~~ <--- HERE
+         return r
      and was used here:
          else:
              r = 4
          return r
-                ~ <--- HERE
-     ...
-
+                ~ <--- HERE...
 
 Unsupported Typing Constructs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -268,6 +272,7 @@ Example (refining types on parameters and locals):
     module = torch.jit.script(M(2))
     module = torch.jit.script(M(None))
 
+
 .. _TorchScript Class:
 .. _TorchScript Classes:
 .. _torchscript-classes:
@@ -341,6 +346,37 @@ like any other TorchScript type:
 
     p = Pair(torch.rand(2, 3), torch.rand(2, 3))
     print(sum_pair(p))
+
+
+.. _TorchScript Enum:
+.. _TorchScript Enums:
+.. _torchscript-enums:
+
+TorchScript Enums
+^^^^^^^^^^^^^^^^^^^
+
+Python enums can be used in TorchScript without any extra annotation or code:
+
+::
+
+    from enum import Enum
+
+
+    class Color(Enum):
+        RED = 1
+        GREEN = 2
+
+    @torch.jit.script
+    def enum_fn(x: Color, y: Color) -> bool:
+        if x == Color.RED:
+            return True
+
+        return x == y
+
+After an enum is defined, it can be used in both TorchScript and Python interchangeably
+like any other TorchScript type. The type of the values of an enum must be ``int``,
+``float``, or ``str``. All values must be of the same type; heterogenous types for enum
+values are not supported.
 
 
 Named Tuples
@@ -738,10 +774,15 @@ Example:
      @torch.jit.script...
      def foo(x):
          if x < 0:
-         ~~~~~~~~~...  <--- HERE
+         ~~~~~~~~~
+             y = 4
+             ~~~~~ <--- HERE
+         print(y)
+     and was used here:
+         if x < 0:
              y = 4
          print(y)
-     ...
+               ~ <--- HERE...
 
 Non-local variables are resolved to Python values at compile time when the
 function is defined. These values are then converted into TorchScript values using

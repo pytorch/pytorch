@@ -14,12 +14,18 @@ from torch.quantization import (
     fuse_modules,
     quantize_dynamic,
     QuantWrapper,
+    QuantStub,
+    DeQuantStub,
     QConfig,
     default_qconfig,
     default_qat_qconfig,
     default_dynamic_qconfig,
     per_channel_dynamic_qconfig,
     float16_dynamic_qconfig,
+    float_qparams_dynamic_qconfig,
+    PerChannelMinMaxObserver,
+    QConfigDynamic,
+    default_dynamic_quant_observer
 )
 
 from torch.testing._internal.common_quantization import (
@@ -47,7 +53,9 @@ from torch.testing._internal.common_quantization import (
     prepare_dynamic,
     convert_dynamic,
     skipIfNoFBGEMM,
+    EmbeddingBagModule,
     EmbeddingModule,
+    EmbeddingWithLinear,
 )
 
 # annotated models
@@ -504,6 +512,196 @@ class TestPostTrainingStatic(QuantizationTestCase):
         torch.quantization.convert(model, inplace=True)
         checkHooksIsPresent(model, False)
 
+    @skipIfNoFBGEMM
+    def test_quantized_embedding(self):
+        r""" Test the post-training quantization flow, serialization and scripting
+        of embedding modules
+        """
+        model = EmbeddingModule().eval()
+        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        weights = torch.randn(10, 12, dtype=torch.float32)
+        model.qconfig = float_qparams_dynamic_qconfig
+        prepare(model, inplace=True)
+        convert(model, inplace=True)
+        self.assertTrue('QuantizedEmbedding' in str(model))
+        self.assertEqual(type(model.emb), torch.nn.quantized.Embedding)
+        self.checkScriptable(model, [[indices]], check_save_load=True)
+
+        model = EmbeddingWithLinear().eval()
+        prepare(model, inplace=True)
+        convert(model, inplace=True)
+        self.assertTrue('QuantizedEmbedding' in str(model))
+        self.assertTrue('QuantizedLinear' in str(model))
+        self.checkQuantizedLinear(model.fc)
+
+
+    def test_quantized_embedding_bag(self):
+        r""" Test the post-training quantization flow, serialization and scripting
+        of embedding_bag modules
+        """
+        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        offsets = torch.tensor([0, 19, 20, 28, 28, 32])
+        weights = torch.randn(10, 12, dtype=torch.float32)
+
+        for dtype in [torch.quint8, torch.quint4x2]:
+            model = EmbeddingBagModule().eval()
+            float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=dtype,
+                                                                        qscheme=torch.per_channel_affine_float_qparams,
+                                                                        ch_axis=0)
+            float_qparams_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+                                                   weight=float_qparams_observer)
+            model.qconfig = float_qparams_qconfig
+
+            prepare(model, inplace=True)
+            quantized_model = convert(model)
+
+            per_sample_weights = torch.from_numpy(np.random.uniform(
+                low=0.01, high=0.5, size=[len(indices)]).astype(np.float32))
+
+            # Test to make sure module is quantized correctly.
+            self.assertTrue('QuantizedEmbeddingBag' in str(quantized_model))
+            self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.EmbeddingBag, torch.quint8)
+            self.checkScriptable(quantized_model, [[indices, offsets, per_sample_weights]], check_save_load=True)
+
+            class EmbeddingBagWithLinear(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
+                                                     include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+                    self.fc = torch.nn.Linear(5, 5)
+
+                def forward(self, indices, offsets, per_sample_weights, linear_in):
+                    return self.emb(indices, offsets, per_sample_weights), self.fc(linear_in)
+
+            # Test quantization of embedding_bag layer only
+            model2 = EmbeddingBagWithLinear().eval()
+            model2.emb.qconfig = float_qparams_qconfig
+            prepare(model2, inplace=True)
+            quantized_model = convert(model2)
+
+            self.assertTrue('QuantizedEmbeddingBag' in str(quantized_model))
+            self.checkLinear(model2.fc)
+            self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.EmbeddingBag, torch.quint8)
+
+    @skipIfNoFBGEMM
+    def test_custom_module_class(self):
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        class ObservedCustomModule(torch.nn.Module):
+            def __init__(self, conv):
+                super().__init__()
+                self.conv = conv
+
+            def forward(self, x):
+                return self.conv(x)
+
+            @classmethod
+            def from_float(cls, float_module):
+                assert hasattr(float_module, 'qconfig')
+                observed = cls(float_module.conv)
+                observed.qconfig = float_module.qconfig
+                return observed
+
+        class QuantizedCustomModule(torch.nn.Module):
+            def __init__(self, conv):
+                super().__init__()
+                self.conv = conv
+
+            def forward(self, x):
+                return self.conv(x)
+
+            @classmethod
+            def from_observed(cls, observed_module):
+                assert hasattr(observed_module, 'qconfig')
+                assert hasattr(observed_module, 'activation_post_process')
+                observed_module.conv.activation_post_process = \
+                    observed_module.activation_post_process
+                quantized = cls(nnq.Conv2d.from_float(observed_module.conv))
+                return quantized
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = QuantStub()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.custom = CustomModule()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv(x)
+                x = self.custom(x)
+                x = self.dequant(x)
+                return x
+
+        class RefM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = QuantStub()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv1(x)
+                x = self.conv2(x)
+                x = self.dequant(x)
+                return x
+
+        data = torch.randn(1, 1, 1, 1)
+        # instantiate M and RefM and align the parameters
+        original_m = M()
+        original_ref_m = RefM()
+        original_ref_m.conv1.weight = torch.nn.Parameter(original_m.conv.weight.detach())
+        original_ref_m.conv1.bias = torch.nn.Parameter(original_m.conv.bias.detach())
+        original_ref_m.conv2.weight = torch.nn.Parameter(original_m.custom.conv.weight.detach())
+        original_ref_m.conv2.bias = torch.nn.Parameter(original_m.custom.conv.bias.detach())
+
+        original_m.qconfig = default_qconfig
+        prepare_custom_config_dict = {
+            "float_to_observed_custom_module_class": {
+                CustomModule: ObservedCustomModule
+            }
+        }
+        convert_custom_config_dict = {
+            "observed_to_quantized_custom_module_class": {
+                ObservedCustomModule: QuantizedCustomModule
+            }
+        }
+        m = prepare(
+            original_m,
+            prepare_custom_config_dict=prepare_custom_config_dict)
+        self.checkObservers(m, None, prepare_custom_config_dict)
+        # calibration
+        m(data)
+        # all activation observers are inserted in the top level module
+
+        # check converted/quantized model
+        m = convert(
+            m,
+            convert_custom_config_dict=convert_custom_config_dict)
+        # check if the module is properly quantized
+        self.assertEqual(type(m.quant), nnq.Quantize)
+        self.assertEqual(type(m.conv), nnq.Conv2d)
+        self.assertEqual(type(m.custom.conv), nnq.Conv2d)
+        self.assertEqual(type(m.dequant), nnq.DeQuantize)
+        res = m(data)
+
+        # quantize the reference model
+        original_ref_m.eval()
+        original_ref_m.qconfig = default_qconfig
+        ref_m = prepare(original_ref_m)
+        ref_m(data)
+        ref_m = convert(ref_m)
+        ref_res = ref_m(data)
+        self.assertEqual(res, ref_res)
 
 
 @skipIfNoFBGEMM
@@ -861,42 +1059,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
             convert_dynamic(model)
             checkHooksIsPresent(model)
 
-    def test_quantized_embedding(self):
-        r""" Test the post-training dynamic quantization flow, serialization and scripting
-        of embedding modules
-        """
-        model = EmbeddingModule().eval()
-        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
-        offsets = torch.tensor([0, 19, 20, 28, 28, 32])
-        weights = torch.randn(10, 12, dtype=torch.float32)
 
-        quantized_model = quantize_dynamic(model, dtype=torch.quint8)
-
-        per_sample_weights = torch.from_numpy(np.random.uniform(
-            low=0.01, high=0.5, size=[len(indices)]).astype(np.float32))
-
-        # Test to make sure module is quantized correctly.
-        self.assertTrue('DynamicQuantizedEmbeddingBag' in str(quantized_model))
-        self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.dynamic.EmbeddingBag, torch.quint8)
-        self.checkScriptable(quantized_model, [[indices, offsets, per_sample_weights]], check_save_load=True)
-
-        class EmbeddingWithLinear(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
-                                                 include_last_offset=True, scale_grad_by_freq=False, mode='sum')
-                self.fc = torch.nn.Linear(5, 5)
-
-            def forward(self, indices, offsets, per_sample_weights, linear_in):
-                return self.emb(indices, offsets, per_sample_weights), self.fc(linear_in)
-
-        # Test set API
-        model = EmbeddingWithLinear().eval()
-        quantized_model = quantize_dynamic(model, set([nn.EmbeddingBag]), dtype=torch.quint8)
-
-        self.assertTrue('DynamicQuantizedEmbeddingBag' in str(quantized_model))
-        self.checkLinear(model.fc)
-        self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.dynamic.EmbeddingBag, torch.quint8)
 
 class TestQuantizationAwareTraining(QuantizationTestCase):
     def test_manual(self):
@@ -1053,6 +1216,36 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         model(x)
         torch.quantization.convert(model, inplace=True)
         checkHooksIsPresent(model, False)
+
+class TestEagerModeOps(QuantizationTestCase):
+    def _test_activation_op_impl(
+            self, float_module_class, quantized_module_class, extra_module_kwargs):
+        """ Implementation for testing common activation ops like leaky relu
+        Args:
+            extra_module_kwargs: keyword args to instantiate the float module
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.activation_op = float_module_class(**extra_module_kwargs)
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.activation_op(x)
+                x = self.dequant(x)
+                return x
+
+        m = M().eval()
+        m.qconfig = default_qconfig
+        m = prepare(m)
+        self.checkObservers(m)
+        m = convert(m)
+        self.assertEqual(type(m.activation_op), quantized_module_class)
+
+    def test_leaky_relu(self):
+        self._test_activation_op_impl(nn.LeakyReLU, nnq.LeakyReLU, {'negative_slope': 0.1, 'inplace': False})
 
 class TestFunctionalModule(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out

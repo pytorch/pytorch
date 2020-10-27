@@ -12,7 +12,7 @@ void backward(const Tensor& self, const Tensor& gradient, c10::optional<bool> ke
   AT_ERROR("backward is not implemented for Tensor");
 }
 
-void set_data(const Tensor& self, const Tensor& new_data) {
+void set_data(Tensor& self, const Tensor& new_data) {
   AT_ERROR("set_data is not implemented for Tensor");
 }
 
@@ -36,7 +36,7 @@ Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
   AT_ERROR("requires_grad_ is not implemented for Tensor");
 }
 
-void retain_grad(const Tensor& self) {
+void retain_grad(Tensor& self) {
   AT_ERROR("retain_grad is not implemented for Tensor");
 }
 

@@ -1,0 +1,5 @@
+--config
+user.ndk_cxxflags='-g1'
+--config
+pt.disable_per_op_profiling=0
+@fbsource//fbandroid/mode/ndk_libcxx

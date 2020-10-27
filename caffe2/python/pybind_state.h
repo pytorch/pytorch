@@ -52,6 +52,9 @@ void addObjectMethods(pybind11::module& m);
 // Get current workspace
 Workspace* GetCurrentWorkspace();
 
+// Get workspace by name. Returns nullptr if none exists by name.
+Workspace* GetWorkspaceByName(const std::string &name);
+
 class C10_EXPORT BlobFetcherBase {
  public:
   struct FetchedBlob {

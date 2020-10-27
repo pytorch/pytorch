@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <torch/csrc/jit/tensorexpr/buffer.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
@@ -33,6 +32,10 @@ class TORCH_API CodeGen {
     return stmt_;
   }
 
+  void set_stmt(Stmt* s) {
+    stmt_ = s;
+  }
+
   void apply_mutator(IRMutator* mutator) {
     stmt_ = stmt_->accept_mutator(mutator);
   }
@@ -49,6 +52,14 @@ class TORCH_API CodeGen {
     return device_;
   }
 
+  // This function returns the generated code as
+  // a string. Currently only implemented for Block.
+  // TODO. Rename this, as we can return other than string
+  // and implement for other backends.
+  virtual std::string getCodeText() {
+    return ("");
+  }
+
   virtual void call(const std::vector<CallArg>& args) = 0;
 
  private:
@@ -59,20 +70,10 @@ class TORCH_API CodeGen {
 
 class CodeGen::BufferArg {
  public:
-  BufferArg(const Buffer& buffer)
+  BufferArg(const Placeholder& buffer)
       : var_(buffer.data()->base_handle()), dtype_(buffer.dtype()) {}
   BufferArg(Tensor* tensor)
-      : var_(tensor->function()
-                 ->func_var(tensor->output_index())
-                 ->base_handle()),
-        dtype_(tensor->function()->body(tensor->output_index())->dtype()) {}
-  BufferArg(const Function& func)
-      : var_(func.func_var(0)->base_handle()), dtype_(func.body(0)->dtype()) {
-    // TODO: Support multiple-output functions
-    if (func.func_vars().size() != 1) {
-      throw unimplemented_lowering();
-    }
-  }
+      : var_(tensor->buf()->base_handle()), dtype_(tensor->body()->dtype()) {}
   BufferArg(const VarHandle& var)
       : var_(var.node()), dtype_(var.dtype()), isVar_(true) {}
 

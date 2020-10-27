@@ -92,8 +92,10 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       at::Tensor bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
+      torch::List<int64_t> output_padding,
       torch::List<int64_t> dilation,
       int64_t groups,
+      bool transpose,
       c10::optional<double> input_scale,
       std::vector<int64_t> kernel,
       at::Tensor w_scale,
@@ -104,8 +106,10 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
         bias(std::move(bias)),
         stride_(std::move(stride)),
         padding_(std::move(padding)),
+        output_padding_(std::move(output_padding)),
         dilation_(std::move(dilation)),
         groups_(groups),
+        transpose_(transpose),
         input_scale(input_scale),
         kernel_(std::move(kernel)),
         w_scales(w_scale),
@@ -116,12 +120,19 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
             {(uint32_t)dilation_[1], (uint32_t)dilation_[0]},
             {(uint32_t)padding_[0], (uint32_t)padding_[1],
              (uint32_t)padding_[0], (uint32_t)padding_[1]},
-            /*adjustment=*/{0, 0},
+            {(uint32_t)output_padding_[1], (uint32_t)output_padding_[0]},
             groups_,
-            groups_ * this->orig_weight.size(1),
-            this->orig_weight.size(0),
-            /*transpose=*/false,
+            transpose ? this->orig_weight.size(0)
+                      : this->orig_weight.size(1) * groups_,
+            transpose ? this->orig_weight.size(1) * groups_
+                      : this->orig_weight.size(0),
+            transpose_,
             is_per_channel) {
+
+          if (conv_p.per_channel && conv_p.ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
+            TORCH_INTERNAL_ASSERT(
+              "Per channel quantized weights are not supported for XZP kernels");
+          }
 
           pytorch_qnnp_operator_t convolution{nullptr};
           // Initially all the params are set to zero.
@@ -150,53 +161,67 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
           convolution->input_padding_bottom = conv_p.padding[2];
           convolution->input_padding_right = conv_p.padding[3];
 
-          const bool any_padding = (conv_p.padding[0]| conv_p.padding[1]
-              |conv_p.padding[2] | conv_p.padding[3]) != 0;
+          // const size_t group_input_channels = conv_p.group_input_channels;
+          const uint32_t kr = pytorch_qnnp_params.q8conv.kr;
+          const size_t k_stride = (conv_p.group_input_channels + (kr - 1)) & -kr;
 
-          zero_buffer_size = 0;
-          if (any_padding) {
-            size_t zero_size = 0, zero_offset = 0;
-            if (conv_p.ukernel_type == pytorch_qnnp_ukernel_type_dwconv) {
-              const uint32_t cr = pytorch_qnnp_params.q8dw9.cr;
-              const size_t group_stride = (groups + (cr - 1)) & -cr;
-              if (groups >= 8) {
-                zero_size = sizeof(uint8_t) * group_stride;
-                zero_offset = 0;
-              } else {
-                zero_size = sizeof(uint8_t) * group_stride + 8;
-                zero_offset = sizeof(uint8_t) * 8;
-              }
-            } else if (conv_p.ukernel_type == pytorch_qnnp_ukernel_type_conv ||
-                conv_p.ukernel_type == pytorch_qnnp_ukernel_type_gemm) {
-              const size_t group_input_channels = conv_p.group_input_channels;
-              const uint32_t kr = pytorch_qnnp_params.q8conv.kr;
-              const size_t k_stride = (group_input_channels + (kr - 1)) & -kr;
-              if (conv_p.group_input_channels >= 8) {
-                zero_size = sizeof(uint8_t) * k_stride;
-                zero_offset = 0;
-              } else {
-                zero_size = sizeof(uint8_t) * k_stride + 8;
-                zero_offset = 8;
+          size_t zero_size = sizeof(uint8_t) * k_stride;
+          size_t zero_offset = 0;
+
+          if (transpose_) {
+            convolution->adjustment_width = conv_p.adjustment_dims[0];
+            convolution->adjustment_height = conv_p.adjustment_dims[1];
+
+            // const uint32_t kr = pytorch_qnnp_params.q8conv.kr;
+            // const size_t k_stride = (conv_p.group_input_channels + (kr - 1)) & -kr;
+
+            if (conv_p.group_input_channels < 8) {
+              zero_size += 8;
+              zero_offset = 8;
+            }
+          } else {
+            const bool any_padding = (conv_p.padding[0]| conv_p.padding[1]
+                |conv_p.padding[2] | conv_p.padding[3]) != 0;
+
+            zero_buffer_size = 0;
+            if (any_padding) {
+              zero_size = 0;
+              zero_offset = 0;
+              if (conv_p.ukernel_type == pytorch_qnnp_ukernel_type_dwconv) {
+                const uint32_t cr = pytorch_qnnp_params.q8dw9.cr;
+                const size_t group_stride = (groups + (cr - 1)) & -cr;
+                if (groups >= 8) {
+                  zero_size = sizeof(uint8_t) * group_stride;
+                  zero_offset = 0;
+                } else {
+                  zero_size = sizeof(uint8_t) * group_stride + 8;
+                  zero_offset = sizeof(uint8_t) * 8;
+                }
+              } else if (conv_p.ukernel_type == pytorch_qnnp_ukernel_type_conv ||
+                  conv_p.ukernel_type == pytorch_qnnp_ukernel_type_gemm) {
+                if (conv_p.group_input_channels >= 8) {
+                  zero_size = sizeof(uint8_t) * k_stride;
+                  zero_offset = 0;
+                } else {
+                  zero_size = sizeof(uint8_t) * k_stride + 8;
+                  zero_offset = 8;
+                }
               }
             }
-
-            void* zero_buffer = malloc(zero_size);
-            if (zero_buffer == nullptr) {
-              TORCH_INTERNAL_ASSERT(
-                  "failed to allocate bytes for zero padding:", zero_size);
-            }
-            // Need to set to input zero point
-            //memset(zero_buffer, input_zero_point, zero_size);
-            zero_buffer_size = zero_size;
-            convolution->zero_buffer = zero_buffer;
-            convolution->zero_pointer =
-                (void*)((uintptr_t)zero_buffer + zero_offset);
           }
 
-          if (conv_p.per_channel && conv_p.ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
-            TORCH_INTERNAL_ASSERT(
-                "Per channel quantized weights are not supported for XZP kernels");
+          void* zero_buffer = malloc(zero_size);
+          if (zero_buffer == NULL) {
+            pytorch_qnnp_delete_operator(convolution);
+            pytorch_qnnp_log_error(
+                "failed to allocate %zu bytes for zero padding", zero_size);
           }
+          // Need to set to input zero point
+          // memset(zero_buffer, input_zero_point, zero_size);
+          zero_buffer_size = zero_size;
+          convolution->zero_buffer = zero_buffer;
+          convolution->zero_pointer =
+            (void*)((uintptr_t)zero_buffer + zero_offset);
         }
 
   std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter> convolution_op;
@@ -205,8 +230,10 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   at::Tensor bias;
   torch::List<int64_t> stride_;
   torch::List<int64_t> padding_;
+  torch::List<int64_t> output_padding_;
   torch::List<int64_t> dilation_;
   int64_t groups_;
+  bool transpose_;
   c10::optional<double> input_scale;
   std::vector<int64_t> kernel_;
   at::Tensor w_scales;
@@ -232,8 +259,10 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       c10::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
+      torch::List<int64_t> output_padding,
       torch::List<int64_t> dilation,
-      int64_t groups);
+      int64_t groups,
+      bool transpose);
 
   torch::List<int64_t> stride() const override {
     return stride_;
@@ -243,12 +272,20 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
     return padding_;
   }
 
+  torch::List<int64_t> output_padding() const override {
+    return output_padding_;
+  }
+
   torch::List<int64_t> dilation() const override {
     return dilation_;
   }
 
   int64_t groups() const override {
     return groups_;
+  }
+
+  bool transpose() const override {
+    return transpose_;
   }
 
  private:
@@ -346,11 +383,14 @@ std::vector<float> generate_requantization_scales(
 }
 
 std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
-    const at::Tensor& weight_contig
-    ) {
-  auto num_output_channels = weight_contig.size(0);
+    const at::Tensor& weight_contig,
+    bool transpose = false,
+    uint32_t groups = 1
+  ) {
+  const int out_ch_idx = transpose ? 1 : 0;
+  auto num_output_channels = weight_contig.size(out_ch_idx) * (transpose ? groups : 1);
   // Add 8 to account for bufferring needed by QNNPACK.
-  auto num_output_channels_padded = weight_contig.size(0) + 8;
+  auto num_output_channels_padded = num_output_channels + 8;
   const auto qtype = weight_contig.qscheme();
   std::vector<uint8_t> weight_zp(num_output_channels_padded, 0);
   // Adjust weight zero point, similar to weight data.

@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <c10/util/Exception.h>
@@ -6,6 +5,12 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
+
+// Common Functions
+constexpr int64_t ceilDiv(int64_t a, int64_t b) {
+  return (a + b - 1) / b;
+}
 
 // Simple mixin for suppressing copy & move operations, ex:
 //
@@ -53,12 +58,23 @@ class PolymorphicBase {
     return downcast_ptr;
   }
 
+  // Check if the runtime time is T (or derived from T)
+  //
+  // NOTE: Don't use this for conditional casts. Use:
+  //
+  //  if (auto t = dynamic_cast<T>(p)) { ... }
+  //
+  // instead of:
+  //
+  //  if (p->isA<T>()) { auto t = p->as<T>(); ... }
+  //
   template <class T>
   bool isA() const {
     return dynamic_cast<const T*>(this) != nullptr;
   }
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

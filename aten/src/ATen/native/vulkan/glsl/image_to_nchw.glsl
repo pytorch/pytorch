@@ -1,7 +1,8 @@
 #version 450 core
+#define PRECISION $precision
 layout(std430) buffer;
 layout(std430) uniform;
-layout(set = 0, binding = 0) uniform highp sampler3D uInput;
+layout(set = 0, binding = 0) uniform PRECISION sampler3D uInput;
 layout(set = 0, binding = 1) writeonly buffer destBuffer {
   float data[];
 }

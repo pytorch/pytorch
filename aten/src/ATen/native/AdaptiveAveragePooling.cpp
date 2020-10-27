@@ -329,14 +329,17 @@ namespace {
       return at::mkldnn_adaptive_avg_pool2d(input, output_size);
     }
 
-    // TODO: fastpath for Channels_last should be explored later;
-    if (input.suggest_memory_format() == at::MemoryFormat::Contiguous && !input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {
+    if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {
       // in this case, adaptive pooling is just computing mean over hw
       // dimensions, which can be done more efficiently
-      int64_t mean_size = input.size(-1) * input.size(-2);
-      Tensor out = input.contiguous().view({-1, mean_size}).mean(-1);
-      return input.dim() == 3 ? out.view({input.size(0), 1, 1})
-                              : out.view({input.size(0), input.size(1), 1, 1});
+      Tensor out = input.mean({-1, -2}, /* keepdim = */ true);
+      if (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
+        // assert ndim == 4, since ndim = 3 doesn't give channels_last
+        const int n = input.size(0);
+        const int c = input.size(1);
+        out.as_strided_({n, c, 1, 1}, {c, 1, c, c});
+      }
+      return out;
     } else {
       return _adaptive_avg_pool2d(input, output_size);
     }

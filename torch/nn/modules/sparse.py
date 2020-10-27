@@ -50,6 +50,23 @@ class Embedding(Module):
         output. The gradient for this vector from :class:`~torch.nn.Embedding`
         is always zero.
 
+    .. note::
+        When :attr:`max_norm` is not ``None``, :class:`Embedding`'s forward method will modify the
+        :attr:`weight` tensor in-place. Since tensors needed for gradient computations cannot be
+        modified in-place, performing a differentiable operation on ``Embedding.weight`` before
+        calling :class:`Embedding`'s forward method requires cloning ``Embedding.weight`` when        
+        :attr:`max_norm` is not ``None``. For example::
+
+            n, d, m = 3, 5, 7
+            embedding = nn.Embedding(n, d, max_norm=True)
+            W = torch.randn((m, d), requires_grad=True)
+            idx = torch.tensor([1, 2])
+            a = embedding.weight.clone() @ W.t()  # weight must be cloned for this to be differentiable
+            b = embedding(idx) @ W.t()  # modifies weight in-place 
+            out = (a.unsqueeze(0) + b.unsqueeze(1))
+            loss = out.sigmoid().prod()
+            loss.backward()
+
     Examples::
 
         >>> # an Embedding module containing 10 tensors of size 3
@@ -186,11 +203,11 @@ class EmbeddingBag(Module):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
     intermediate embeddings.
 
-    For bags of constant length and no :attr:`per_sample_weights`, this class
+    For bags of constant length and no :attr:`per_sample_weights` and 2D inputs, this class
 
-        * with ``mode="sum"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.sum(dim=0)``,
-        * with ``mode="mean"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.mean(dim=0)``,
-        * with ``mode="max"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.max(dim=0)``.
+        * with ``mode="sum"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.sum(dim=1)``,
+        * with ``mode="mean"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.mean(dim=1)``,
+        * with ``mode="max"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.max(dim=1)``.
 
     However, :class:`~torch.nn.EmbeddingBag` is much more time and memory efficient than using a chain of these
     operations.

@@ -55,7 +55,6 @@ Tensor& glu_backward_out(Tensor& grad_input,
   at::sigmoid_out(gradInputfirstHalf, secondHalf);
   // for second gradinput half, can get a better performance by fusion
   auto iter = at::TensorIteratorConfig()
-    .set_check_mem_overlap(true)
     .add_output(gradInputsecondHalf)
     .add_input(gradInputfirstHalf)
     .add_input(firstHalf)

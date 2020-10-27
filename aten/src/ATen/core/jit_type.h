@@ -47,6 +47,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(OptionalType)           \
   _(VarType)                \
   _(DeviceObjType)          \
+  _(StreamObjType)          \
   _(FunctionType)           \
   _(ClassType)              \
   _(PyObjectType)           \
@@ -238,7 +239,7 @@ inline bool operator!=(const Type& lhs, const Type& rhs) {
 }
 
 // common base for all types that have a single sub element
-// e.g. Future[T], Option[T], List[T]
+// e.g. Future[T], Optional[T], List[T]
 template <TypeKind K, typename T>
 struct SingleElementType : public Type {
   static const TypeKind Kind = K;
@@ -263,7 +264,12 @@ struct SingleElementType : public Type {
   }
 
  protected:
-  SingleElementType(TypePtr elem) : Type(Kind), elem(std::move(elem)) {}
+  SingleElementType(TypePtr elem) : Type(Kind), elem(std::move(elem)) {
+    if (!this->elem) {
+      throw std::runtime_error(c10::str(
+            "Can not create ", typeKindToString(Kind), " with None type"));
+    }
+  }
 
  private:
   TypePtr elem;
@@ -458,6 +464,20 @@ struct CAFFE2_API SymbolicShape {
     dims_ = shape_symbols;
   }
 
+  // Mix of known and unknown ranks
+  SymbolicShape(const std::vector<c10::optional<int64_t>> dims) {
+    std::vector<ShapeSymbol> shape_symbols;
+    shape_symbols.reserve(dims.size());
+    for(c10::optional<int64_t> dim: dims) {
+      if(!dim) {
+        shape_symbols.push_back(ShapeSymbol::newSymbol());
+      } else {
+        shape_symbols.push_back(ShapeSymbol::fromStaticSize(*dim));
+      }
+    }
+    dims_ = shape_symbols;
+  }
+
   SymbolicShape(const std::vector<ShapeSymbol> dims) : dims_(dims) {}
 
   SymbolicShape(c10::IntArrayRef dims) {
@@ -467,6 +487,13 @@ struct CAFFE2_API SymbolicShape {
       shape_symbols.push_back(ShapeSymbol::fromStaticSize(dim));
     }
     dims_ = shape_symbols;
+  }
+
+  ShapeSymbol operator[](size_t i) const {
+    if (!dims_) {
+      throw std::runtime_error("Rank isn't fixed");
+    }
+    return (*dims_).at(i);
   }
 
   // Returns rank or nullopt in case of unranked shape.
@@ -507,7 +534,7 @@ struct CAFFE2_API SymbolicShape {
 };
 
 template <typename T>
-struct CAFFE2_API VaryingShape {
+struct VaryingShape {
   using ListOfOptionalElements = std::vector<c10::optional<T>>;
   VaryingShape(const std::vector<T>& vec)
       : VaryingShape(ListOfOptionalElements(vec.begin(), vec.end())) {}
@@ -529,7 +556,7 @@ struct CAFFE2_API VaryingShape {
     return dims_ == other.dims_;
   }
 
-  const c10::optional<T>& operator[](int i) const {
+  const c10::optional<T> &operator[](size_t i) const {
     if (!dims_) {
       throw std::runtime_error("Rank isn't fixed");
     }
@@ -548,7 +575,7 @@ struct CAFFE2_API VaryingShape {
     return dims_;
   }
 
-  VaryingShape merge(const VaryingShape& other) const;
+  CAFFE2_API VaryingShape merge(const VaryingShape& other) const;
 
   c10::optional<std::vector<T>> concrete_sizes() const {
     if (!dims_) {
@@ -975,6 +1002,16 @@ struct CAFFE2_API FutureType
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
     return create(contained_types.at(0));
+  }
+
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override {
+    if (Type::isSubtypeOfExt(rhs, why_not)) {
+      return true;
+    }
+    if (auto rhs_ = rhs->cast<FutureType>()) {
+      return getElementType()->isSubtypeOfExt(rhs_->getElementType(), why_not);
+    }
+    return false;
   }
 
  private:
@@ -1514,6 +1551,28 @@ struct CAFFE2_API DeviceObjType : public Type {
   DeviceObjType() : Type(TypeKind::DeviceObjType) {}
 };
 
+struct StreamObjType;
+using StreamObjTypePtr = std::shared_ptr<StreamObjType>;
+// This type represents a Generator
+struct CAFFE2_API StreamObjType : public Type {
+  static StreamObjTypePtr create() {
+    return StreamObjTypePtr(
+      new StreamObjType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Stream";
+  }
+  static const TypeKind Kind = TypeKind::StreamObjType;
+  // global singleton
+  static StreamObjTypePtr get();
+
+private:
+  StreamObjType() : Type(TypeKind::StreamObjType) {}
+};
+
 struct VarType;
 using VarTypePtr = std::shared_ptr<VarType>;
 // This type represents a type variable, used in FunctionSchema
@@ -1647,14 +1706,16 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
 }
 
 // Attempt to find the correct supertype of t1 and t2. If none is found then
-// nullopt will be returned. If t1 == t2, or t1 is a type refinement of t2,
+// nullopt will be returned if default_to_any is false, and Any will be returned
+// if it is true. If t1 == t2, or t1 is a type refinement of t2,
 // then t2 will be returned (and vice versa).
 // Two different tensortypes will return dynamic.
 // Currently we chose not to support returning a NumberType for a float & int
 // input because of a lack of operator support for NumberType
 CAFFE2_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
-    const TypePtr& t2);
+    const TypePtr& t2,
+    bool default_to_any = false);
 
 CAFFE2_API c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
@@ -1686,6 +1747,12 @@ template <>
 struct getTypePtr_<at::Tensor> final {
   static TypePtr call() {
     return TensorType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::Stream> final {
+  static TypePtr call() {
+    return StreamObjType::get();
   }
 };
 template <>
@@ -1922,7 +1989,8 @@ struct CAFFE2_API ClassType : public NamedType {
   static ClassTypePtr create(
       c10::optional<QualifiedName> qualifiedName,
       std::weak_ptr<CompilationUnit> cu,
-      bool is_module = false);
+      bool is_module = false,
+      std::string doc_string = "");
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
@@ -2108,6 +2176,9 @@ struct CAFFE2_API ClassType : public NamedType {
     return constantNames_[slot];
   }
 
+  const std::string& doc_string() const {
+    return doc_string_;
+  }
 
   IValue getConstant(const std::string& name) const;
 
@@ -2204,7 +2275,8 @@ struct CAFFE2_API ClassType : public NamedType {
   ClassType(
       c10::optional<QualifiedName> name,
       std::weak_ptr<CompilationUnit> cu,
-      bool is_module);
+      bool is_module,
+      std::string doc_string);
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     const auto& n = name().value();
@@ -2239,6 +2311,9 @@ struct CAFFE2_API ClassType : public NamedType {
   std::vector<Property> properties_;
 
   bool isModule_ = false;
+
+  // Doc string of class.
+  std::string doc_string_ = "";
 };
 
 struct InterfaceType;

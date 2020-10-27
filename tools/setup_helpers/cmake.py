@@ -1,6 +1,6 @@
 "Manages CMake."
 
-from __future__ import print_function
+
 
 import multiprocessing
 import os
@@ -245,6 +245,7 @@ class CMake:
              'MKL_THREADING',
              'MKLDNN_CPU_RUNTIME',
              'MSVC_Z7_OVERRIDE',
+             'CAFFE2_USE_MSVC_STATIC_RUNTIME',
              'Numa_INCLUDE_DIR',
              'Numa_LIBRARIES',
              'ONNX_ML',

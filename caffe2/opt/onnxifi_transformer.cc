@@ -842,7 +842,9 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   int onnxifi_op_id = onnxifi_op_id_;
   if (opts_.debug) {
     WriteProtoToTextFile(
-        net, "debug_original_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt");
+        net,
+        "debug_original_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt",
+        false);
   }
   if (opts_.min_ops > net.op_size()) {
     return net;
@@ -970,10 +972,12 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   if (opts_.debug) {
     WriteProtoToTextFile(
         onnxifi_net,
-        "debug_onnxifi_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt");
+        "debug_onnxifi_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt",
+        false);
     WriteProtoToTextFile(
         net_opt,
-        "debug_optimized_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt");
+        "debug_optimized_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt",
+        false);
   }
   return net_opt;
 }
@@ -1087,8 +1091,8 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
 
   // Debugging stuff
   if (opts_.debug) {
-    WriteProtoToTextFile(onnx_model, "debug_onnxifi_net.onnx_txt");
-    WriteProtoToTextFile(net_opt, "debug_optimized_net.pb_txt");
+    WriteProtoToTextFile(onnx_model, "debug_onnxifi_net.onnx_txt", false);
+    WriteProtoToTextFile(net_opt, "debug_optimized_net.pb_txt", false);
   }
   return net_opt;
 }
@@ -1102,7 +1106,7 @@ bool OnnxifiTransformer::supportOpOnnx(
     int pos =
         ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
     if (blocklisted_ops.count(pos)) {
-      LOG(INFO) << "Skipping blocklisted op " << op.type() << " at pos " << pos;
+      LOG(INFO) << "Skipping blacklisted op " << op.type() << " at pos " << pos;
       return false;
     }
     const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
@@ -1467,7 +1471,7 @@ void OnnxifiTransformer::transform(
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
 
   if (opts_.debug) {
-    WriteProtoToTextFile(*pred_net, "debug_pre_ssa_net.pb_txt");
+    WriteProtoToTextFile(*pred_net, "debug_pre_ssa_net.pb_txt", false);
   }
 
   // Get model id and reset Onnxifi op id to 0
@@ -1548,7 +1552,7 @@ void OnnxifiTransformer::transform(
 
   addShapeToNet(*pred_net, shape_hints);
   if (opts_.debug) {
-    WriteProtoToTextFile(*pred_net, "debug_full_opt_net.pb_txt");
+    WriteProtoToTextFile(*pred_net, "debug_full_opt_net.pb_txt", false);
   }
 }
 

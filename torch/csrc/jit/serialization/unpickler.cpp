@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
 #include <torch/csrc/jit/api/function_impl.h>
@@ -67,6 +67,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case StringType::Kind:
       case FunctionType::Kind:
       case DeviceObjType::Kind:
+      case StreamObjType::Kind:
       case QSchemeType::Kind:
       case LayoutType::Kind:
       case ScalarTypeType::Kind:
@@ -549,7 +550,7 @@ void Unpickler::readGlobal(
     stack_.emplace_back(int64_t(globals_.size() - 1));
     return;
   } else if (module_name == "torch.distributed.rpc" && class_name == "rref") {
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
     return rebuildRRef();
 #else
     TORCH_INTERNAL_ASSERT(
@@ -593,12 +594,28 @@ void Unpickler::readGlobal(
     AT_ASSERT(type_resolver_);
     at::StrongTypePtr type =
         type_resolver_(c10::QualifiedName(module_name, class_name));
-    globals_.emplace_back([this, type] {
-      auto val = stack_.back();
-      stack_.pop_back();
-      auto obj = obj_loader_(type, val);
-      stack_.emplace_back(std::move(obj));
-    });
+    if (auto enum_type = type.type_->cast<c10::EnumType>()) {
+      globals_.emplace_back([this, enum_type] {
+        auto val = stack_.back();
+        stack_.pop_back();
+        for (const auto& p : enum_type->enumNamesValues()) {
+          if (p.second == val) {
+            auto enum_holder = c10::make_intrusive<at::ivalue::EnumHolder>(
+                enum_type, p.first, p.second);
+            stack_.emplace_back(std::move(enum_holder));
+            return;
+          }
+        }
+      });
+    } else {
+      // Otherwise, global is a class/object type.
+      globals_.emplace_back([this, type] {
+        auto val = stack_.back();
+        stack_.pop_back();
+        auto obj = obj_loader_(type, val);
+        stack_.emplace_back(std::move(obj));
+      });
+    }
   }
   stack_.emplace_back(int64_t(globals_.size() - 1));
 }
@@ -653,7 +670,7 @@ void Unpickler::rebuildTensor(bool quantized) {
   });
 }
 
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
 void Unpickler::rebuildRRef() {
   globals_.emplace_back([this] {
     // It is the same as how rref is unpickled in python,

@@ -49,7 +49,7 @@ for (int i = 0; i < W; i++) {
 One can apply various loop transformations on a loop nest. The transformations mutate statements in the loop nest and loop nest can record the history of the transformations.
 
 ## Step 4: Prepare loop nest for codegen
-After all desired loop transformations are applied, a final transformation is carried out on the loop nest's root statement. A result of this transformation is also a statement, but it now can include a lower-level statements like `Allocate` and `Free`, which are not allowed to exist during the loop transformation phase.
+After all desired loop transformations are applied, a final transformation is carried out on the loop nest's root statement. A result of this transformation is also a statement, but it now can include lower-level statements like `Allocate` and `Free`, which are not allowed to exist during the loop transformation phase.
 
 ## Step 5: Pass the final statement for codegen (LLVM/CUDA/IREval)
 Codegen is implemented as an IR visitor over the statements produced in the previous step.
@@ -68,7 +68,7 @@ Expr represents a node in the abstract syntax tree of a tensor expression. Leaf 
 4) a computational expression `body` (of `Expr` type)
 
 ## Buffer
-`Buffer`s are essentially `Tensor`s without a `body` - they represent an indexed access to "tensors" that is outsied the tensor-expression system.
+`Buffer`s are essentially `Tensor`s without a `body` - they represent an indexed access to "tensors" that is outside of the tensor-expression system.
 `Buffer` is a bundle of
 1) a `Var` defining which buffer this `Buffer` expression is defining
 2) a list of indices `args` (each of them is `Var`)

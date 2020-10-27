@@ -171,6 +171,16 @@ public:
     auto angle = _mm256_permute_ps(angle_(), 0xB1); // angle    90-angle
     return _mm256_and_ps(angle, real_mask);         // angle    0
   }
+  Vec256<c10::complex<float>> sgn() const {
+    auto abs = abs_();
+    auto zero = _mm256_setzero_ps();
+    auto mask = _mm256_cmp_ps(abs, zero, _CMP_EQ_OQ);
+    auto abs_val = Vec256(abs);
+
+    auto div = values / abs_val.values;       // x / abs(x)
+
+    return _mm256_blendv_ps(div, zero, mask);
+  }
   __m256 real_() const {
     const __m256 real_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
                                                                    0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000));
@@ -444,32 +454,6 @@ Vec256<c10::complex<float>> inline minimum(const Vec256<c10::complex<float>>& a,
   // Exploit the fact that all-ones is a NaN.
   auto isnan = _mm256_cmp_ps(abs_a, abs_b, _CMP_UNORD_Q);
   return _mm256_or_ps(min, isnan);
-}
-
-template <>
-Vec256<c10::complex<float>> inline clamp(const Vec256<c10::complex<float>>& a, const Vec256<c10::complex<float>>& min, const Vec256<c10::complex<float>>& max) {
-  auto abs_a = a.abs_2_();
-  auto abs_min = min.abs_2_();
-  auto max_mask = _mm256_cmp_ps(abs_a, abs_min, _CMP_LT_OQ);
-  auto abs_max = max.abs_2_();
-  auto min_mask = _mm256_cmp_ps(abs_a, abs_max, _CMP_GT_OQ);
-  return _mm256_blendv_ps(_mm256_blendv_ps(a, min, max_mask), max, min_mask);
-}
-
-template <>
-Vec256<c10::complex<float>> inline clamp_min(const Vec256<c10::complex<float>>& a, const Vec256<c10::complex<float>>& min) {
-  auto abs_a = a.abs_2_();
-  auto abs_min = min.abs_2_();
-  auto max_mask = _mm256_cmp_ps(abs_a, abs_min, _CMP_LT_OQ);
-  return _mm256_blendv_ps(a, min, max_mask);
-}
-
-template <>
-Vec256<c10::complex<float>> inline clamp_max(const Vec256<c10::complex<float>>& a, const Vec256<c10::complex<float>>& max) {
-  auto abs_a = a.abs_2_();
-  auto abs_max = max.abs_2_();
-  auto min_mask = _mm256_cmp_ps(abs_a, abs_max, _CMP_GT_OQ);
-  return _mm256_blendv_ps(a, max, min_mask);
 }
 
 template <>
