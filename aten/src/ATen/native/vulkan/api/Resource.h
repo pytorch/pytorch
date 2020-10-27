@@ -274,7 +274,10 @@ struct Resource final {
     Buffer buffer(const Buffer::Descriptor& descriptor);
     Image image(const Image::Descriptor& descriptor);
     Fence fence();
+
     void purge();
+    void release(const Buffer& buffer);
+    void release(const Image& image);
 
     // Helper
 

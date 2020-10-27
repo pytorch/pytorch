@@ -241,7 +241,14 @@ Resource::Pool::~Pool() {
   try {
     purge();
   }
+  catch (const std::exception& e) {
+    LOG(WARNING)
+        << "Vulkan: Resource pool destructor raised an exception!  Error: "
+        << e.what();
+  }
   catch (...) {
+    LOG(WARNING)
+        << "Vulkan: Resource pool destructor raised an unknown exception!";
   }
 }
 
@@ -473,6 +480,24 @@ void Resource::Pool::purge() {
   fence_.in_use = 0u;
   image_.pool.clear();
   buffer_.pool.clear();
+}
+
+void Resource::Pool::release(const Buffer& buffer) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && allocator_,
+      "This resource pool is in an invalid state! ",
+      "Potential reason: This resource pool is moved from.");
+
+  release_buffer(buffer);
+}
+
+void Resource::Pool::release(const Image& image) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && allocator_,
+      "This resource pool is in an invalid state! ",
+      "Potential reason: This resource pool is moved from.");
+
+  release_image(image);
 }
 
 } // namespace api
