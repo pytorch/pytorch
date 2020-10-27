@@ -9700,8 +9700,12 @@ class TestTorchDeviceType(TestCase):
     @skipCPUIfNoLapack
     @dtypesIfCPU(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @dtypesIfCUDA(torch.float32, torch.float64)
+    @tf32_on_and_off()
     def test_symeig(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
+        
+        is_tf32 = (dtype == torch.float32 and tf32_is_not_fp32() and torch.backends.cuda.matmul.allow_tf32)
+        recon_tol = 5e-3 if is_tf32 else 1e-8
 
         def run_test(dims, eigenvectors, upper):
             x = random_hermitian_matrix(*dims, dtype=dtype, device=device)
@@ -9715,7 +9719,7 @@ class TestTorchDeviceType(TestCase):
 
             if eigenvectors:
                 x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute.to(dtype))), outv.transpose(-2, -1).conj())
-                self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
+                self.assertEqual(x, x_recon, atol=recon_tol, rtol=0)#, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
             else:
                 eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
                 self.assertEqual(eigvals, oute, msg='Eigenvalues mismatch')
@@ -9734,7 +9738,7 @@ class TestTorchDeviceType(TestCase):
             rese, resv = torch.symeig(x, eigenvectors=eigenvectors, upper=upper)
             if eigenvectors:
                 x_recon = torch.matmul(torch.matmul(resv, torch.diag_embed(rese.to(dtype))), resv.transpose(-2, -1).conj())
-                self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
+                self.assertEqual(x, x_recon, atol=recon_tol, rtol=0)#, msg='Incorrect reconstruction using V @ diag(e) @ V.T')
             else:
                 eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
                 self.assertEqual(eigvals, rese, msg='Eigenvalues mismatch')
