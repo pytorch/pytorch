@@ -105,28 +105,6 @@ std::vector<float> NC4_to_NCHW(
   return output;
 }
 
-std::vector<float> permuteWeights(
-    const float* src,
-    const std::vector<int64_t>& sizes) {
-  const int64_t M = sizes[0];
-  const int64_t Cf = sizes[1];
-  const int64_t kH = sizes[2];
-  const int64_t kW = sizes[3];
-  std::vector<float> packedWeights(M * kH * kW * Cf);
-  for (auto m = 0; m < M; ++m) {
-    for (auto c = 0; c < Cf; ++c) {
-      for (auto kh = 0; kh < kH; ++kh) {
-        for (auto kw = 0; kw < kW; ++kw) {
-          int64_t oc = m * kH * kW * Cf + kh * kW * Cf + kw * Cf + c;
-          int64_t ic = m * Cf * kH * kW + c * kH * kW + kh * kW + kw;
-          packedWeights[oc] = src[ic];
-        }
-      }
-    }
-  }
-  return packedWeights;
-}
-
 }
 }
 }

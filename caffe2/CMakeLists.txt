@@ -391,11 +391,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     COMMAND
     "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
+      --native-functions-path "aten/src/ATen/native/native_functions.yaml"
       --nn-path "aten/src"
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
       --force_schema_registration
     DEPENDS
+    "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
@@ -530,7 +532,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_cache.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir_builder.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir_printer.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_index.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_alias_memory.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_insert_syncs.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_loops.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_thread_predicate.cpp

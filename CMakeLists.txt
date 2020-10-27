@@ -166,7 +166,8 @@ option(USE_GLOG "Use GLOG" OFF)
 option(USE_LEVELDB "Use LEVELDB" OFF)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_LMDB "Use LMDB" OFF)
-option(USE_METAL "Use Metal for iOS build" OFF)
+option(USE_METAL "Use Metal for Caffe2 iOS build" ON)
+option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(
     USE_NCCL "Use NCCL" ON
@@ -203,6 +204,7 @@ cmake_dependent_option(
     USE_VALGRIND "Use Valgrind. Only available on Linux." ON
     "LINUX" OFF)
 option(USE_VULKAN "Use Vulkan GPU backend" OFF)
+option(USE_VULKAN_API "Use Vulkan GPU backend v2" OFF)
 option(USE_VULKAN_WRAPPER "Use Vulkan wrapper" ON)
 option(USE_VULKAN_SHADERC_RUNTIME "Use Vulkan Shader compilation runtime(Needs shaderc lib)" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Use Vulkan relaxed precision(mediump)" OFF)
@@ -555,6 +557,10 @@ if(USE_VULKAN)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN")
 endif()
 
+if(USE_VULKAN_API)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_API")
+endif()
+
 if(USE_VULKAN_WRAPPER)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_WRAPPER")
 endif()
@@ -565,6 +571,10 @@ endif()
 
 if(USE_VULKAN_RELAXED_PRECISION)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
+endif()
+
+if(USE_PYTORCH_METAL)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_METAL")
 endif()
 
 # ---[ Allowlist file if allowlist is specified
@@ -656,6 +666,10 @@ if(NOT MSVC)
   check_cxx_compiler_flag("-Werror=format" HAS_WERROR_FORMAT)
   if(HAS_WERROR_FORMAT)
     string(APPEND CMAKE_CXX_FLAGS " -Werror=format")
+  endif()
+  check_cxx_compiler_flag("-Werror=cast-function-type" HAS_WERROR_CAST_FUNCTION_TYPE)
+  if(HAS_WERROR_CAST_FUNCTION_TYPE)
+    string(APPEND CMAKE_CXX_FLAGS " -Werror=cast-function-type")
   endif()
 endif()
 
