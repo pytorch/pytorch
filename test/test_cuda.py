@@ -525,12 +525,12 @@ class TestCuda(TestCase):
             src = torch.randn(1000000, device="cuda" if dst == "cpu" else "cpu")
             _test_to_non_blocking(src, try_non_blocking, dst)
 
-        # Ensures device to host copy chooses "safe" behavior (blocking copy to non-pinned memory) by default.
+    def test_to_cpu_blocking_by_default(self):
         src = torch.randn(1000000, device="cuda")
         torch.cuda.synchronize()
         torch.cuda._sleep(int(100 * get_cycles_per_ms()))
         dst = src.to(device="cpu")
-        self.assertEqual(stream.query(), True)
+        self.assertEqual(torch.cuda.current_stream().query(), True)
         self.assertEqual(src, dst)
         self.assertFalse(dst.is_pinned())
 
