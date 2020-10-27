@@ -1563,17 +1563,6 @@ void _qavg_pool_nhwc_kernel(
           float multiplier = input_scale / output_scale / divide_factor;
           int input_zero_point_m_size = -input_zero_point * size;
 
-          if (size == 0) {
-            for (int c = 0; c < nInputPlane; ++c) {
-              o_p[c] = at::native::quantize_val<scalar_t>(
-                           1.0f / multiplier,
-                           output_zero_point,
-                           input_zero_point_m_size)
-                           .val_;
-            }
-            continue;
-          }
-
           int c_start = 0;
 
           // For int8 quantization, we implicitly use int32 as accumulation

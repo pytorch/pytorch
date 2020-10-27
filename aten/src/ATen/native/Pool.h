@@ -31,7 +31,7 @@ static inline T pooling_output_shape_pad_lr(
     if (ceil_mode) {
         // ensure that the last pooling starts inside the image
         // needed to avoid problems in ceil mode
-        if ((outputSize - 1) * stride >= inputSize + pad_l + pad_r) {
+        if ((outputSize - 1) * stride >= inputSize + pad_l) {
           --outputSize;
         }
     }

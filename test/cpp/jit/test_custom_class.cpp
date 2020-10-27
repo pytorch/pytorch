@@ -44,5 +44,47 @@ TEST(CustomClassTest, TorchbindIValueAPI) {
   test_with_obj(new_stack_ivalue, "boo");
 }
 
+class TorchBindTestClass : public torch::jit::CustomClassHolder {
+ public:
+  std::string get() {
+    return "Hello, I am your test custom class";
+  }
+};
+
+constexpr char class_doc_string[] = R"(
+  I am docstring for TorchBindTestClass
+  Args:
+      What is an argument? Oh never mind, I don't take any.
+
+  Return:
+      How would I know? I am just a holder of some meaningless test methods.
+  )";
+constexpr char method_doc_string[] =
+    "I am docstring for TorchBindTestClass get_with_docstring method";
+
+namespace {
+static auto reg =
+    torch::class_<TorchBindTestClass>(
+        "_TorchBindTest",
+        "_TorchBindTestClass",
+        class_doc_string)
+        .def("get", &TorchBindTestClass::get)
+        .def("get_with_docstring", &TorchBindTestClass::get, method_doc_string);
+
+} // namespace
+
+// Tests DocString is properly propagated when defining CustomClasses.
+TEST(CustomClassTest, TestDocString) {
+  auto class_type = getCustomClass(
+      "__torch__.torch.classes._TorchBindTest._TorchBindTestClass");
+  AT_ASSERT(class_type);
+  AT_ASSERT(class_type->doc_string() == class_doc_string);
+
+  AT_ASSERT(class_type->getMethod("get").doc_string().empty());
+  AT_ASSERT(
+      class_type->getMethod("get_with_docstring").doc_string() ==
+      method_doc_string);
+}
+
 } // namespace jit
 } // namespace torch
