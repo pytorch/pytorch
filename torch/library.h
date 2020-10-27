@@ -650,6 +650,8 @@ public:
   ); \
   void TORCH_LIBRARY_init_ ## ns (torch::Library& m)
 
+
+// TODO: comment, maybe fold this into TORCH_LIBRARY_FRAGMENT_THIS_API_IS_FOR_PER_OP_REGISTRATION_ONLY
 #define TORCH_LIBRARY_FRAGMENT(ns, m, uid) \
   static void TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _ ## uid (torch::Library&); \
   static torch::detail::TorchLibraryInit TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _ ## uid ( \
@@ -726,6 +728,7 @@ public:
   ); \
   void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library& m)
 
+// TODO: meaningful comment
 #define TORCH_LIBRARY_IMPL_FRAGMENT(ns, k, m, uid) \
   static void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## uid (torch::Library&); \
   static torch::detail::TorchLibraryInit TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ## uid ( \
