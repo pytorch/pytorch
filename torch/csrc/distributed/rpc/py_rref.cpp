@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/rpc/py_rref.h>
 
+#include <torch/csrc/autograd/autograd.h>
+#include <torch/csrc/distributed/autograd/autograd.h>
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
@@ -281,6 +283,25 @@ c10::IValue PyRRef::toIValue() const {
   // cast to RRefInterface to hold it into IValue
   auto rrefPtr = c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref_);
   return IValue(rrefPtr);
+}
+
+void PyRRef::backward(int64_t dist_autograd_ctx_id, bool retain_graph) {
+  if (rref_->isOwner()) {
+    const auto& value =
+        c10::static_intrusive_pointer_cast<const OwnerRRef>(rref_)->getValue();
+    TORCH_CHECK(
+        value.isTensor(), "RRef should contain a tensor for .backward()");
+    auto root = value.toTensor();
+
+    if (dist_autograd_ctx_id == -1) {
+      torch::autograd::backward({root});
+    } else {
+      torch::distributed::autograd::backward(
+          dist_autograd_ctx_id, {value.toTensor()}, retain_graph);
+    }
+  } else {
+    // TODO
+  }
 }
 
 } // namespace rpc
