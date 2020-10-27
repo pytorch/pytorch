@@ -2665,6 +2665,15 @@ std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, c
   return std::tuple<Tensor, Tensor, Tensor>(grad_i1, grad_i2, grad_i3);
 }
 
+Tensor expm1_backward(const Tensor& grad, const Tensor& result) {
+  if (result.is_sparse()) {
+    auto temp = result.clone();
+    temp._values().add_(1);
+    return grad * temp;
+  }
+  return grad * (result + 1);
+}
+
 Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
   if (self.is_sparse()) {
     AT_ERROR(

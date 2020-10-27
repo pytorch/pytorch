@@ -1685,7 +1685,7 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    DefaultBackend: exp_
+    CPU, CUDA: exp_
 
 - func: exp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1718,10 +1718,12 @@
   variants: function, method
   dispatch:
     DefaultBackend: expm1_
+    SparseCPU, SparseCUDA: expm1_sparse_
 
 - func: expm1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: expm1_out
+    SparseCPU, SparseCUDA: expm1_out_sparse
 
 - func: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
   use_c10_dispatcher: full

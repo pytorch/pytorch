@@ -193,6 +193,33 @@ SparseTensor pow_sparse_scalar(const SparseTensor& t, Scalar value) {
 }
 
 // --------------------------------------------------------------------
+// exp(SparseTensor, Scalar)
+// --------------------------------------------------------------------
+
+// In-place exp on uncoalesced tensors is not supported since the operation is not a linear map.
+// Values of uncoalesced tensor corresponding to the same indices are summed
+// and exp(summed_value) != exp(v1) + exp(v2)
+
+SparseTensor& expm1_out_sparse(SparseTensor& r, const SparseTensor& t) {
+  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
+
+  if (is_same_tensor(r, t)) {
+    // don't have in-place exp for uncoalesced input because coalesce() is not in-place
+    TORCH_CHECK(r.is_coalesced(), "exp: in-place on uncoalesced tensors is not supported");
+  }
+  else {
+    copy_sparse_to_sparse_(r, t.coalesce());
+  }
+  r._values().exp_().sub_(1);
+  return r;
+}
+
+SparseTensor& expm1_sparse_(SparseTensor& t) {
+  return expm1_out_sparse(t, t);
+}
+
+// --------------------------------------------------------------------
 // div(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
