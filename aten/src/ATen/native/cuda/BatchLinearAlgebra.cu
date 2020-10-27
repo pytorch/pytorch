@@ -1322,6 +1322,7 @@ static void apply_eig(const Tensor& self, bool eigenvectors, Tensor& out_eigvals
 TORCH_CHECK(false, "Calling torch.eig on a CUDA tensor requires compiling PyTorch with MAGMA. "
                    "Either transfer the tensor to the CPU before calling torch.eig or recompile with MAGMA.");
 #else
+  TORCH_CHECK(self.device() == at::kCPU, "Internal error: apply_eig needs a CPU tensor");
   magma_vec_t jobvr = eigenvectors ? MagmaVec : MagmaNoVec;
   magma_int_t n = magma_int_cast(self.size(-1), "n");
   auto self_data = self.data_ptr<scalar_t>();
