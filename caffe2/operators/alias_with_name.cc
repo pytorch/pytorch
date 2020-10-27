@@ -2,22 +2,22 @@
 
 namespace caffe2 {
 
-//REGISTER_CPU_OPERATOR(AliasWithName, AliasWithNameOp<CPUContext>);
+REGISTER_CPU_OPERATOR(AliasWithName, AliasWithNameOp<CPUContext>);
 
-//OPERATOR_SCHEMA(AliasWithName)
-    //.NumInputs(1)
-    //.NumOutputs(1)
-    //.AllowInplace({{0, 0}})
-    //.IdenticalTypeAndShape()
-    //.SetDoc(R"DOC(
-//Similar with AliasOp, storing the alias name as operator argument.
-//)DOC")
-    //.Arg("name", "name of the aliasing")
-    //.Arg("is_backward", "weather or not to alias forward or backward")
-    //.Input(0, "input", "Input tensor whose storage will be shared.")
-    //.Output(0, "output", "Tensor of same shape as input, sharing its storage.");
+OPERATOR_SCHEMA(AliasWithName)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .IdenticalTypeAndShape()
+    .SetDoc(R"DOC(
+Similar with AliasOp, storing the alias name as operator argument.
+)DOC")
+    .Arg("name", "name of the aliasing")
+    .Arg("is_backward", "weather or not to alias forward or backward")
+    .Input(0, "input", "Input tensor whose storage will be shared.")
+    .Output(0, "output", "Tensor of same shape as input, sharing its storage.");
 
-} // namespace caffe2
+}  namespace caffe2
 
 C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     AliasWithName,
