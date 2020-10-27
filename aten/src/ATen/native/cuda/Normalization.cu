@@ -78,10 +78,16 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
 }
 
 std::tuple<Tensor, Tensor> batch_norm_stats_cuda(const Tensor& self, double epsilon) {
+  bool use_channels_last_kernel = (self.is_contiguous(at::MemoryFormat::ChannelsLast) || self.ndimension() == 2);
+
   return AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "batch_norm_stats_cuda", [&] {
     AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "batch_norm_stats_cuda", [&] {
       if (cuda::detail::canUse32BitIndexMath(self)) {
-        return batch_norm_stats_cuda_template<scalar_t, int32_t>(self, epsilon);
+        if (use_channels_last_kernel) {
+          return batch_norm_stats_channels_last_cuda_template<scalar_t>(self, epsilon);
+        } else {
+          return batch_norm_stats_cuda_template<scalar_t, int32_t>(self, epsilon);
+        }
       } else {
         return batch_norm_stats_cuda_template<scalar_t, int64_t>(self, epsilon);
       }

@@ -7,7 +7,8 @@ class SyncBatchNorm(Function):
 
     @staticmethod
     def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, process_group, world_size):
-        input = input.contiguous()
+        if not input.is_contiguous(memory_format=torch.channels_last):
+            input = input.contiguous()
 
         count = torch.empty(1,
                             dtype=running_mean.dtype,
@@ -15,6 +16,8 @@ class SyncBatchNorm(Function):
 
         # calculate mean/invstd for input.
         mean, invstd = torch.batch_norm_stats(input, eps)
+
+        input = input.contiguous()  #TODO: remove this after batch_norm_gather_stats_with_counts channels_last
 
         num_channels = input.shape[1]
         # C, C, 1 -> (2C + 1)
