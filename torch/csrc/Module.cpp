@@ -830,7 +830,7 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
 
   py_module.def(
-    "valgrind_supported_platform", [](){
+    "_valgrind_supported_platform", [](){
       #if defined(USE_VALGRIND)
       return true;
       #else
@@ -840,7 +840,7 @@ Call this whenever a new thread is created in order to propagate values from
   );
 
   py_module.def(
-    "valgrind_toggle", [](){
+    "_valgrind_toggle", [](){
       #if defined(USE_VALGRIND)
       CALLGRIND_TOGGLE_COLLECT;
       #else
