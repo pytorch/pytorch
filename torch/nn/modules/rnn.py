@@ -80,10 +80,11 @@ class RNNBase(Module):
         self._all_weights = []
         for layer in range(num_layers):
             for direction in range(num_directions):
-                layer_input_size = input_size if layer == 0 else hidden_size * num_directions
+                real_hid_size = proj_size if proj_size > 0 else hidden_size
+
+                layer_input_size = input_size if layer == 0 else real_hid_size * num_directions
 
                 w_ih = Parameter(torch.Tensor(gate_size, layer_input_size))
-                real_hid_size = proj_size if proj_size > 0 else hidden_size
                 w_hh = Parameter(torch.Tensor(gate_size, real_hid_size))
                 b_ih = Parameter(torch.Tensor(gate_size))
                 # Second bias vector included for CuDNN compatibility. Only one
