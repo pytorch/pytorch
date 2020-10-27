@@ -52,9 +52,13 @@ def texpr_reductions_enabled():
 class TestTEFuser(JitTestCase):
     def setUp(self):
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
+        self.old_must_use_cpu_state = torch._C._jit_get_te_must_use_llvm_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
 
         torch._C._jit_override_can_fuse_on_cpu(True)
+        # TODO: internal LLVM enablement
+        if not IS_SANDCASTLE:
+            torch._C._jit_set_te_must_use_llvm_cpu(True)
         torch._C._jit_override_can_fuse_on_gpu(True)
 
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
@@ -69,6 +73,7 @@ class TestTEFuser(JitTestCase):
 
         torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
+        torch._C._jit_set_te_must_use_llvm_cpu(self.old_must_use_cpu_state)
 
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
 
@@ -93,7 +98,6 @@ class TestTEFuser(JitTestCase):
         self.assertEqual(len(fusion_groups), 1)
         FileCheck().check("aten::abs").check("aten::mul").run(str(fusion_groups[0]))
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_sum_simple(self):
         def func(x):
             x2 = x * x
@@ -108,7 +112,6 @@ class TestTEFuser(JitTestCase):
             self.assertEqual(len(fusion_groups), 1)
             self.assertEqual(scripted(a), func(a))
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_sum_dim(self):
         def func(x):
             return x.sum((0, )) * 2
@@ -122,7 +125,6 @@ class TestTEFuser(JitTestCase):
             self.assertEqual(len(fusion_groups), 1)
             self.assertEqual(scripted(a), func(a))
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_sum_keepdim_cast(self):
         def func(x):
             return x.sum((0, ), keepdim=True, dtype=torch.double) * 2
@@ -136,7 +138,6 @@ class TestTEFuser(JitTestCase):
             self.assertEqual(len(fusion_groups), 1)
             self.assertEqual(scripted(a), func(a))
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_abs_cpu(self):
         self._test_fused_abs()
 
@@ -158,7 +159,6 @@ class TestTEFuser(JitTestCase):
     def test_zero_element_tensors_cuda(self):
         self._test_zero_element_tensors(device="cuda")
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_zero_element_tensors_cpu(self):
         self._test_zero_element_tensors(device="cpu")
 
@@ -289,7 +289,6 @@ class TestTEFuser(JitTestCase):
             for fn in fns:
                 self.checkScript(fn, [tensor])
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_chunk_correctness(self):
         return self._test_chunk_correctness(self, 'cpu')
 
@@ -791,7 +790,6 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
                                                                   "aten::_size_if_not_equal"))
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @unittest.skip("deduplicating introduces aliasing in backward graph's outputs")
     def test_fuser_deduplication(self):
         # See that fusion kernel outputs are deduplicated when removing  _grad_sum_to_size in the fuser's compilation
@@ -813,7 +811,6 @@ class TestTEFuser(JitTestCase):
         # check that a, b share storage, i.e. were generated as a single output in the fuser
         self.assertEqual(ga2.data_ptr(), gb2.data_ptr())
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @unittest.skip("temporarily disabled because fusion was restricted in fixing #22833")
     def test_fuser_iou(self):
         # This checks if most of Intersection over Union is fused.
@@ -978,7 +975,6 @@ class TestTEFuser(JitTestCase):
         self.assertEqual(len(fusion_groups), 1)
         FileCheck().check("Chunk").check("aten::sigmoid").check("aten::tanh").run(str(fusion_groups[0]))
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
     def test_lstm_traced_cpu(self):
         inputs = get_lstm_inputs('cpu')
@@ -1170,7 +1166,6 @@ class TestTEFuser(JitTestCase):
         self.assertGraphContainsExactly(
             ge.graph_for(*inputs), FUSION_GROUP, 1, consider_subgraphs=True)
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_where_and_typing(self):
         def f(x, y):
             mask = x > y

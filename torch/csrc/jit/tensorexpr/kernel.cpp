@@ -19,6 +19,7 @@ static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
 static bool fallback_allowed = false;
 static bool te_generate_block_code = false;
+static bool te_must_use_llvm_on_cpu = false;
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -65,6 +66,10 @@ int& getTECudaPointwiseBlockSize() {
 // based on device type in tensor.
 bool& getTEGenerateBlockCode() {
   return te_generate_block_code;
+}
+
+bool& getTEMustUseLLVMOnCPU() {
+  return te_must_use_llvm_on_cpu;
 }
 
 c10::optional<at::Device> pickDeviceType(
@@ -1542,6 +1547,9 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
 #else
     backendType = kSimpleIREval;
 #endif
+    if (getTEMustUseLLVMOnCPU() && backendType == kSimpleIREval) {
+      throw std::runtime_error("LLVM Backend not found");
+    }
   } else {
     throw std::runtime_error("Invalid device type");
   }

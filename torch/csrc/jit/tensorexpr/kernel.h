@@ -211,6 +211,7 @@ TORCH_API int& getTECudaPointwiseLoopLevels();
 TORCH_API int& getTECudaPointwiseBlockCount();
 TORCH_API int& getTECudaPointwiseBlockSize();
 TORCH_API bool& getTEGenerateBlockCode();
+TORCH_API bool& getTEMustUseLLVMOnCPU();
 TORCH_API bool fallbackAllowed();
 TORCH_API bool setFallbackAllowed(bool value);
 
