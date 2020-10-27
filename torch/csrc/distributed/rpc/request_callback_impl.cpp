@@ -503,11 +503,11 @@ void RequestCallbackImpl::processRpcWithErrors(
 }
 
 bool RequestCallbackImpl::cudaAvailable() const {
-  #ifdef USE_CUDA
+#ifdef USE_CUDA
   return true;
-  #else
+#else
   return false;
-  #endif
+#endif
 }
 
 } // namespace rpc

@@ -810,7 +810,7 @@ struct TORCH_API Node {
     auto it = findAttr(name, true);
     auto* child = dynamic_cast<T*>(it->get());
     if (child == nullptr) {
-      throw AttributeError(name, true);
+      throw IRAttributeError(name, true);
     }
     return child->value();
   }
@@ -825,7 +825,7 @@ struct TORCH_API Node {
       return v->name == name;
     });
     if (required && it == values_.end()) {
-      throw AttributeError(name, false);
+      throw IRAttributeError(name, false);
     }
     AT_ASSERT(!required || it != values_.end());
     return it;
@@ -837,7 +837,7 @@ struct TORCH_API Node {
       return v->name == name;
     });
     if (required && it == values_.end()) {
-      throw AttributeError(name, false);
+      throw IRAttributeError(name, false);
     }
     AT_ASSERT(!required || it != values_.end());
     return it;

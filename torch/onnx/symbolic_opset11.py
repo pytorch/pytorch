@@ -538,21 +538,38 @@ def squeeze(g, self, dim=None):
         return g.op("Squeeze", self)
 
     dim = sym_help._get_const(dim, 'i', 'dim')
-    # create 'cond' node (condition is shape[i]==1)
-    dim_constant = g.op("Constant", value_t=torch.tensor([dim]))
-    size = sym_help._size_helper(g, self, dim_constant)
-    const_one = g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))
-    cond = g.op("Equal", size, const_one)
-    # create the 'If' node and add the 'then' and 'else' blocks to it.
-    if_node_outputs = g.op("If", cond)
-    if_node = if_node_outputs.node()
-    if_block = torch.onnx.utils._add_block(if_node)
-    squeeze_ = if_block.op("Squeeze", self, axes_i=[dim])
-    torch.onnx.utils._add_output_to_block(if_block, squeeze_)
-    else_block = torch.onnx.utils._add_block(if_node)
-    identity_ = else_block.op("Identity", self)
-    torch.onnx.utils._add_output_to_block(else_block, identity_)
-    return if_node_outputs
+
+    input_shape = self.type().sizes()
+    from torch.onnx.symbolic_helper import _onnx_shape_inference
+    if input_shape is None or not _onnx_shape_inference:
+        # If onnx shape inference is not on, export always as dynamic.
+        # Because we cannot tell if observed static shape is also static at runtime.
+        # create 'cond' node (condition is shape[i]==1)
+        dim_constant = g.op("Constant", value_t=torch.tensor([dim]))
+        size = sym_help._size_helper(g, self, dim_constant)
+        const_one = g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))
+        cond = g.op("Equal", size, const_one)
+        # create the 'If' node and add the 'then' and 'else' blocks to it.
+        if_node_outputs = g.op("If", cond)
+        if_node = if_node_outputs.node()
+        if_block = torch.onnx.utils._add_block(if_node)
+        squeeze_ = if_block.op("Squeeze", self, axes_i=[dim])
+        torch.onnx.utils._add_output_to_block(if_block, squeeze_)
+        else_block = torch.onnx.utils._add_block(if_node)
+        identity_ = else_block.op("Identity", self)
+        torch.onnx.utils._add_output_to_block(else_block, identity_)
+        return if_node_outputs
+
+    # For static input shape
+    if dim < 0:
+        dim += self.type().dim()
+    if input_shape[dim] > 1:
+        warnings.warn("This model contains a squeeze operation on dimension " + str(dim) + ". The size of " +
+                      "this dimension in the given input is " + str(input_shape[dim]) + ". The model will " +
+                      "be exported without the squeeze node. If the model is intended to be used with dynamic " +
+                      "input shapes, please export with dynamic_axes argument.")
+        return self
+    return g.op("Squeeze", self, axes_i=[dim])
 
 
 @parse_args('v', 'i')
@@ -725,18 +742,17 @@ def narrow(g, input, dim, start, length):
 @parse_args('v', 'i', 'i')
 def flatten(g, input, start_dim, end_dim):
     dim = input.type().dim()
+    # use ONNX's Flatten operator for cases where the output shape is 2D
+    if start_dim == 1:
+        if (end_dim == -1 or (dim is not None and end_dim == dim - 1)):
+            return g.op("Flatten", input, axis_i=start_dim)
+    elif start_dim == 0:
+        if (end_dim == -2 or (dim is not None and end_dim == dim - 2)):
+            return g.op("Flatten", input, axis_i=end_dim + 1)
     if dim is None:
         return _unimplemented("dim",
                               "ONNX and PyTorch use different strategies to split the input. "
                               "Input rank must be known at export time.")
-
-    # use ONNX's Flatten operator for cases where the output shape is 2D
-    if start_dim == 1:
-        if (end_dim == -1 or end_dim == dim - 1):
-            return g.op("Flatten", input, axis_i=start_dim)
-    elif start_dim == 0:
-        if (end_dim == -2 or end_dim == dim - 2):
-            return g.op("Flatten", input, axis_i=end_dim + 1)
     # if end_dim is negative add dim
     if end_dim < 0 :
         end_dim = dim + end_dim

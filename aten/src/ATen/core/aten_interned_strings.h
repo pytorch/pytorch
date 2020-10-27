@@ -137,7 +137,6 @@ _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
 _(aten, _th_get_device) \
 _(aten, _th_kthvalue) \
-_(aten, _th_median) \
 _(aten, _th_mode) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
@@ -463,6 +462,7 @@ _(aten, max_unpool3d_forward) \
 _(aten, max_values) \
 _(aten, mean) \
 _(aten, median) \
+_(aten, nanmedian) \
 _(aten, meshgrid) \
 _(aten, min) \
 _(aten, min_values) \
@@ -565,6 +565,7 @@ _(aten, randn_like) \
 _(aten, random) \
 _(aten, randperm) \
 _(aten, range) \
+_(aten, ravel) \
 _(aten, reciprocal) \
 _(aten, reflection_pad1d) \
 _(aten, reflection_pad1d_backward) \
@@ -664,6 +665,7 @@ _(aten, tan) \
 _(aten, tanh) \
 _(aten, tensor) \
 _(aten, tensordot) \
+_(aten, tensor_split) \
 _(aten, th_addmm) \
 _(aten, th_clone) \
 _(aten, th_norm) \
@@ -901,6 +903,7 @@ _(attr, maxnorm) \
 _(attr, maximum) \
 _(attr, mean) \
 _(attr, median) \
+_(attr, nanmedian) \
 _(attr, min) \
 _(attr, min_indices) \
 _(attr, min_val) \

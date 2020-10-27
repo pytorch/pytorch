@@ -286,3 +286,12 @@ class TestTorchbind(JitTestCase):
             if e.name == '_TorchScriptTesting::take_an_instance':
                 found_event = True
         self.assertTrue(found_event)
+
+    def test_torchbind_getattr(self):
+        foo = torch.classes._TorchScriptTesting._StackString(["test"])
+        self.assertEqual(None, getattr(foo, 'bar', None))
+
+    def test_torchbind_attr_exception(self):
+        foo = torch.classes._TorchScriptTesting._StackString(["test"])
+        with self.assertRaisesRegex(AttributeError, 'does not have a field'):
+            foo.bar

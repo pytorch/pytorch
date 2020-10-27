@@ -5,6 +5,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/hash.h>
 #include <cmath>
 
 namespace c10 {
@@ -97,6 +98,8 @@ TypePtr IValue::type() const {
       return RRefType::create(toRRef()->type());
     case Tag::Device:
       return DeviceObjType::get();
+    case Tag::Stream:
+      return StreamObjType::get();
     case Tag::Object:
       return toObjectRef().type();
     case Tag::PyObject:
@@ -269,6 +272,8 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isGenericDict() && lhs.toGenericDict() == rhs.toGenericDict();
     case Tag::Tuple:
       return rhs.isTuple() && *lhs.toTuple() == *rhs.toTuple();
+    case Tag::Stream:
+      return rhs.isStream() && lhs.toStream() == lhs.toStream();
     case Tag::Device:
       return rhs.isDevice() && lhs.toDevice() == rhs.toDevice();
     case Tag::GenericList:
@@ -288,6 +293,46 @@ IValue IValue::equals(const IValue& rhs) const {
       // Unitialized ivalues show up in no-ops when the compiler can prove a
       // value will never be used. Just return false on any equality comparison.
       return false;
+  }
+  // the above switch should be exhaustive
+  TORCH_INTERNAL_ASSERT(false, "we should never reach here")
+}
+
+size_t IValue::hash(const IValue& v) {
+  switch (v.tag) {
+    case Tag::None:
+      return 0;
+    case Tag::Bool:
+      return c10::get_hash(v.payload.as_bool);
+    case Tag::Double:
+      return c10::get_hash(v.payload.as_double);
+    case Tag::Tensor:
+      // Tensor __hash__ is equivalent to `id()`, so take the pointer value of
+      // the tensor to emulate it
+      return c10::get_hash(v.payload.as_int);
+    case Tag::Int:
+      return c10::get_hash(v.payload.as_int);
+    case Tag::String:
+      return c10::get_hash(v.toStringRef());
+    case Tag::Tuple:
+      return c10::get_hash(*v.toTuple());
+    case Tag::Device:
+      return c10::get_hash(v.toDevice());
+    case Tag::GenericDict:
+    case Tag::GenericList:
+    case Tag::Blob:
+    case Tag::Future:
+    case Tag::RRef:
+    case Tag::Object:
+    case Tag::PyObject:
+    case Tag::Capsule:
+    case Tag::Generator:
+    case Tag::Quantizer:
+    case Tag::Enum:
+    case Tag::Stream:
+    case Tag::Uninitialized:
+      throw std::runtime_error(
+          "unhashable type: '" + v.type()->repr_str() + "'");
   }
   // the above switch should be exhaustive
   TORCH_INTERNAL_ASSERT(false, "we should never reach here")
@@ -634,6 +679,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "Uninitialized";
     case IValue::Tag::Device:
       return out << v.toDevice();
+    case IValue::Tag::Stream:
+      return out << v.toStream();
     case IValue::Tag::GenericDict:
       return printDict(out, v.toGenericDict(), formatter);
     case IValue::Tag::PyObject: {

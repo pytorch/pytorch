@@ -95,6 +95,14 @@ struct CAFFE2_API ShapeInfo {
     }
   }
 
+  bool getShapeIsFinal() {
+    return shape_is_final;
+  }
+
+  void setShapeIsFinal(bool flag) {
+    shape_is_final = flag;
+  }
+
   TensorShape shape;
 
   // quantization related information
@@ -106,6 +114,9 @@ struct CAFFE2_API ShapeInfo {
   // dim_type.size == shape.dims.size
   std::vector<TensorBoundShape_DimType> dim_type;
   bool dim_type_is_set = false;
+  // a flag to indicate whether the shape is final and cannot be changed
+  // eg: input/output of in-place ops
+  bool shape_is_final = false;
 };
 
 using ShapeInfoMap = std::unordered_map<std::string, ShapeInfo>;

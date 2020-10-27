@@ -85,6 +85,17 @@ bool getAutodiffSubgraphInlining() {
   return autodiff_subgraph_inlining;
 }
 
+// for debugging it is helpful to be able to force fusion groups
+// to be created
+static std::atomic<bool> fusion_group_inlining(true);
+void debugSetFusionGroupInlining(bool state) {
+  fusion_group_inlining = state;
+}
+
+bool getFusionGroupInlining() {
+  return fusion_group_inlining;
+}
+
 thread_local std::weak_ptr<Graph> last_executed_optimized_graph;
 std::shared_ptr<Graph> lastExecutedOptimizedGraph() {
   return last_executed_optimized_graph.lock();

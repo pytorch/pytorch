@@ -625,7 +625,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mf.hasattr('sub'))
         self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
-        with self.assertRaisesRegex(RuntimeError, "TestModule does not have a field with name '_forward'"):
+        with self.assertRaisesRegex(AttributeError, "TestModule does not have a field with name '_forward'"):
             mf._forward(x)
 
     def test_freeze_module_with_inplace_mutable(self):
@@ -1047,7 +1047,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mEval_freezed.hasattr('fc1'))
         self.assertFalse(mEval_freezed.hasattr('dropout2'))
         self.assertFalse(mEval_freezed.hasattr('fc2'))
-        with self.assertRaisesRegex(RuntimeError, "does not have a field with name 'state_dict'"):
+        with self.assertRaisesRegex(AttributeError, "does not have a field with name 'state_dict'"):
             print(mEval_freezed.state_dict())
         buffer = io.BytesIO()
         torch.jit.save(mEval_freezed, buffer)
@@ -1068,7 +1068,8 @@ class TestFreezing(JitTestCase):
         inp = torch.ones(1, 8, 32, 32)
         out1 = fmod.forward(inp)
         # FIXME: frozen module mutated from outside (original module).
-        smod.weight[0, 0, 0, 0] += 100.0
+        with torch.no_grad():
+            smod.weight[0, 0, 0, 0] += 100.0
         out2 = fmod.forward(inp)
         out3 = smod(inp)
         self.assertNotEqual(out1, out2)
@@ -1195,3 +1196,29 @@ class TestFreezing(JitTestCase):
             # It used to segfault while running frozen module.
             m_frozen_res = m_frozen(data)
             self.assertEqual(m_res, m_frozen_res)
+
+    def test_module_getattr_indirection(self):
+        @torch.jit.script
+        class ValHolder(object):
+            def __init__(self, val: int):
+                self.val: int = val
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.mod1 = ValHolder(1)
+                self.mod2 = ValHolder(2)
+
+            def forward(self, cond: bool):
+                if cond:
+                    mod = self.mod1
+                else:
+                    mod = self.mod2
+                return mod.val
+
+        mod = Mod()
+        mod.eval()
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod))
+        mod_eager = Mod()
+        self.assertEqual(mod_eager(True), frozen_mod(True))
+        self.assertEqual(mod_eager(False), frozen_mod(False))
