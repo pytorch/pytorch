@@ -137,7 +137,7 @@ RegisterOperators reg(
      // the whole gradients in every tensor of the Autograd graph with
      // create_graph=True so we use aliasAnalysisConservative for these two OPs
      Operator(
-         "aten::backward.TensorList(Tensor[] tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False, Tensor?[]? inputs=None) -> ()",
+         "aten::backward.TensorList(Tensor[] tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False, Tensor[]? inputs=None) -> ()",
          [](Stack* stack) {
            auto inputs = pop(stack);
            bool create_graph = pop(stack).toBool();

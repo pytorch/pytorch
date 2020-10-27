@@ -117,6 +117,8 @@ def backward(
         create_graph (bool, optional): If ``True``, graph of the derivative will
             be constructed, allowing to compute higher order derivative products.
             Defaults to ``False``.
+        inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
+            accumulated into ``.grad``. All other Tensors will be ignored.
     """
     if grad_variables is not None:
         warnings.warn("'grad_variables' is deprecated. Use 'grad_tensors' instead.")

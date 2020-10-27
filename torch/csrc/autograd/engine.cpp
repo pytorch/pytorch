@@ -843,8 +843,8 @@ auto Engine::execute(const edge_list& roots,
                      const variable_list& inputs,
                      bool keep_graph,
                      bool create_graph,
-                     const edge_list& outputs,
-                     bool accumulate_grad) -> variable_list {
+                     bool accumulate_grad,
+                     const edge_list& outputs) -> variable_list {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
