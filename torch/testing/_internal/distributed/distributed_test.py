@@ -3140,9 +3140,12 @@ class DistributedTest:
         @require_backend({"nccl", "gloo"})
         @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
         def test_allgather_object(self):
-            # Case where rank != GPU device.
-            next_rank = (self.rank + 1) % int(self.world_size)
-            torch.cuda.set_device(next_rank)
+            # Only set device for NCCL backend since it must use GPUs.
+            backend = os.environ["BACKEND"]
+            if backend == "nccl":
+                # Case where rank != GPU device.
+                next_rank = (self.rank + 1) % int(self.world_size)
+                torch.cuda.set_device(next_rank)
 
             gather_objects = collectives_object_test_list
             output_gathered = [None for _ in range(dist.get_world_size())]
@@ -3672,9 +3675,13 @@ class DistributedTest:
         @require_backend({"nccl", "gloo"})
         @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
         def test_broadcast_object_list(self):
-            # Case where rank != GPU device.
-            next_rank = (self.rank + 1) % int(self.world_size)
-            torch.cuda.set_device(next_rank)
+            # Only set device for NCCL backend since it must use GPUs.
+            backend = os.environ["BACKEND"]
+            if backend == "nccl":
+                # Case where rank != GPU device.
+                next_rank = (self.rank + 1) % int(self.world_size)
+                torch.cuda.set_device(next_rank)
+
             src_rank = 0
             objects = collectives_object_test_list if self.rank == src_rank else [None for _ in collectives_object_test_list]
 
