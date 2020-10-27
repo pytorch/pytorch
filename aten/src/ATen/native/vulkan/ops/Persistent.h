@@ -9,23 +9,38 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
-class Pool final {
- public:
-  explicit Pool(const api::GPU& gpu);
-  Pool(const Pool&) = delete;
-  Pool& operator=(const Pool&) = delete;
-  Pool(Pool&&) = default;
-  Pool& operator=(Pool&&) = default;
-  ~Pool() = default;
+struct Persistent final {
+  typedef api::Handle<
+      api::Resource::Buffer,
+      std::function<void(const api::Resource::Buffer&)>> Buffer;
 
-  api::Resource::Buffer buffer(c10::ArrayRef<const uint8_t> data);
-  api::Resource::Image image(c10::ArrayRef<const uint8_t> data);
+  typedef api::Handle<
+      api::Resource::Image,
+      std::function<void(const api::Resource::Image&)>> Image;
 
- private:
-  api::Resource::Pool pool_;
+  class Pool final {
+   public:
+    explicit Pool(const api::GPU& gpu);
+    Pool(const Pool&) = delete;
+    Pool& operator=(const Pool&) = delete;
+    Pool(Pool&&) = default;
+    Pool& operator=(Pool&&) = default;
+    ~Pool() = default;
+
+    Buffer buffer(
+        const api::Resource::Buffer::Descriptor& descriptor,
+        c10::ArrayRef<const uint8_t> data);
+
+    Image image(
+        const api::Resource::Image::Descriptor& descriptor,
+        c10::ArrayRef<const uint8_t> data);
+
+   private:
+    api::Resource::Pool pool_;
+  };
 };
 
-Pool* persistent();
+Persistent::Pool* persistent();
 
 } // namespace ops
 } // namespace vulkan

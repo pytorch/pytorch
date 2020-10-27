@@ -278,7 +278,6 @@ struct Resource final {
     void purge();
     void release(const Buffer& buffer);
     void release(const Image& image);
-    void release(const Fence& fence);
 
     // Helper
 

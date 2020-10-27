@@ -483,15 +483,21 @@ void Resource::Pool::purge() {
 }
 
 void Resource::Pool::release(const Buffer& buffer) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && allocator_,
+      "This resource pool is in an invalid state! ",
+      "Potential reason: This resource pool is moved from.");
+
   release_buffer(buffer);
 }
 
 void Resource::Pool::release(const Image& image) {
-  release_image(image);
-}
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && allocator_,
+      "This resource pool is in an invalid state! ",
+      "Potential reason: This resource pool is moved from.");
 
-void Resource::Pool:release(const Fence& fence) {
-  fence.wait();
+  release_image(image);
 }
 
 } // namespace api
