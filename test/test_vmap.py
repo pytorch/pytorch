@@ -466,6 +466,37 @@ class TestVmapAPI(TestCase):
             self.assertEqual(len(wa), 2)
             self.assertRegex(str(wa[-1].message), FALLBACK_REGEX)
 
+    def test_fallback_zero_dim(self):
+        # NB: One day we will implement a batching rule for torch.atan2.
+        # If/when we do, this test should be replaced to test the fallback
+        # path on another operator to avoid bitrot.
+        op = torch.atan2
+        x = torch.randn(11)
+        y = torch.randn(11)
+        self._assert_uses_vmap_fallback((op,), (x, y))
+
+        B0, B1 = 0, 3
+        x = torch.randn(B0, 11)
+        y = torch.randn(11)
+
+        msg = 'The fallback path does not support vmap over dims of size 0'
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (0, None))(x, y)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (None, 0))(y, x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op)(x, x)
+
+        x = torch.randn(B0, B1, 11)
+        y = torch.randn(B1, 11)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (0, None))(x, y)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, (None, 0))(y, x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op)(x, x)
+
     def test_fallback_atan2(self):
         # NB: One day we will implement a batching rule for torch.atan2.
         # If/when we do, this test should be replaced to test the fallback
@@ -733,6 +764,25 @@ class TestVmapAPI(TestCase):
         result = vmap(model)(tensor)
         self.assertEqual(result, model(tensor))
 
+    def test_fallback_with_undefined_grad(self):
+        B0 = 7
+        x = torch.randn(2, 3, 4, 5, requires_grad=True)
+        weight = torch.randn(3, 3, 1, 1)
+        v = torch.randn(B0, 2, 3, 4, 5)
+
+        def get_vjp(v):
+            result = torch.nn.functional.conv2d(x, weight)
+            grad_x, = torch.autograd.grad(result, x, v)
+            return grad_x
+
+        # Runs vmap(get_vjp)(v), which should not error out.
+        # The backward formula for convolution returns an undefined
+        # Tensor for grad_bias because the original bias does not exist.
+        #
+        # In the future we'll probably add a batching rule for convolution
+        # backward. When this happens, we should modify this test to use a
+        # different op (and/or create and use a dummy operator) to avoid bitrot.
+        self._assert_uses_vmap_fallback([get_vjp], [v])
 
 def slice_inputs(inputs, bdims, i):
     result = []
@@ -1742,6 +1792,21 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(torch.log1p, (x,), {})
         self._batched_grad_grad_test(torch.log1p, (x,), {})
+
+    @allowVmapFallbackUsage
+    def test_max(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(torch.max, (x,), {})
+
+    @allowVmapFallbackUsage
+    def test_median(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(torch.median, (x,), {})
+
+    @allowVmapFallbackUsage
+    def test_min(self, device):
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(torch.min, (x,), {})
 
     def test_permute(self, device):
         x = torch.randn(2, 3, 5, requires_grad=True, device=device)
