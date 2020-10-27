@@ -132,11 +132,12 @@ Context* context() {
 Descriptor::Set dispatch_prologue(
     Command::Buffer& command_buffer,
     const Shader::Layout::Signature& shader_layout_signature,
-    const Shader::Descriptor& shader_descriptor,
-    const Shader::WorkGroup& local_work_group) {
-  Descriptor& descriptor = context()->descriptor();
-  Pipeline& pipeline = context()->pipeline();
-  Shader& shader = context()->shader();
+    const Shader::Descriptor& shader_descriptor) {
+  Context* const context = api::context();
+  const GPU gpu = context->gpu();
+  Descriptor& descriptor = context->descriptor();
+  Pipeline& pipeline = context->pipeline();
+  Shader& shader = context->shader();
 
   const Shader::Layout::Object shader_layout =
       shader.layout.cache.retrieve({
@@ -149,7 +150,7 @@ Descriptor::Set dispatch_prologue(
           shader_layout.handle,
         }),
         shader.cache.retrieve(shader_descriptor),
-        local_work_group,
+        gpu.adapter->local_work_group_size(),
       }));
 
   return descriptor.pool.allocate(shader_layout);

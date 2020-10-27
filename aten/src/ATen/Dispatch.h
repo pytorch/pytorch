@@ -31,6 +31,8 @@
     const auto& SCALAR_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = enum_type; \
     const auto& UNDERLYING_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND =        \
         toUnderlying(enum_type);                                             \
+    (void)SCALAR_TYPE;  /* Suppress unused-var compiler warning */           \
+    /* TODO: Use [[maybe-unused]] when C++17 becomes the standard */         \
     return __VA_ARGS__();                                                    \
   }
 
