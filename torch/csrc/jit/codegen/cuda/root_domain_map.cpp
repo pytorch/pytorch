@@ -54,10 +54,8 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
   // Sanity check that the given producer and consumer domains are
   // really the TensorDomains of the producer and consumer TensorViews
   // given to the constructor.
-  TORCH_INTERNAL_ASSERT(
-      producer_tv_ == nullptr || producer_tv_->domain() == producer);
-  TORCH_INTERNAL_ASSERT(
-      consumer_tv_ == nullptr || consumer_tv_->domain() == consumer);
+  TORCH_INTERNAL_ASSERT(producer_tv_->domain() == producer);
+  TORCH_INTERNAL_ASSERT(consumer_tv_->domain() == consumer);
 
   std::vector<bool> broadcast_flags;
   if (BroadcastOp* bop =
