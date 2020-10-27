@@ -46,8 +46,8 @@ PyObject* THPModule_isEnabledTorchFunction(PyObject* self, PyObject *unused) {
 }
 
 static PyMethodDef DisableTorchFunction_methods[] = { // NOLINT
-  {"__enter__",  (PyCFunction)DisableTorchFunction__enter, METH_NOARGS,  nullptr},
-  {"__exit__",   (PyCFunction)DisableTorchFunction__exit,  METH_VARARGS, nullptr},
+  {"__enter__",  DisableTorchFunction__enter, METH_NOARGS,  nullptr},
+  {"__exit__",   DisableTorchFunction__exit,  METH_VARARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 
