@@ -432,7 +432,8 @@ class DataLoader(Generic[T_co]):
                 "Our suggested max number of thread in current system is {}{}, which is smaller "
                 "than what this DataLoader might create.").format(
                     max_td_suggest,
-                    ("" if cpuset_checked else " (`cpuset` is not taken into account)"))) if max_td_suggest else (
+                    ("" if cpuset_checked else " (`cpuset` is not taken into account)"))
+            ) if max_td_suggest is not None else (
                 "DataLoader is not able to compute a suggested max number of thread in current system.")
 
             warn_msg = (
@@ -452,6 +453,7 @@ class DataLoader(Generic[T_co]):
 
         max_num_thread_per_worker = torch.get_num_threads()
         max_total_thread_created = max_num_thread_per_worker * self.num_workers
+
         # try to compute a suggested max number of thread based on system's resource
         max_total_thread_suggest = None
         cpuset_checked = False
@@ -461,12 +463,14 @@ class DataLoader(Generic[T_co]):
                 cpuset_checked = True
             except Exception:
                 pass
-        if not max_total_thread_suggest:
-            try:
-                max_total_thread_suggest = os.cpu_count() * 2
-            except Exception:
-                pass
-        if not max_total_thread_suggest:
+        if max_total_thread_suggest is None:
+            # os.cpu_count() could return Optional[int]
+            # get cpu count first and check None in order to satify mypy check
+            cpu_count = os.cpu_count()
+            if cpu_count is not None:
+                max_total_thread_suggest = cpu_count * 2
+
+        if max_total_thread_suggest is None:
             warnings.warn(_create_warning_msg(
                 max_total_thread_created,
                 max_num_thread_per_worker,
