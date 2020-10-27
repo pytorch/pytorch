@@ -10531,6 +10531,11 @@ class TestNNDeviceType(NNTestCase):
         check((1, 1, 2, 3, 3), (1, 1, 3, 4, 5), kernel_size=2, stride=2, padding=1, ceil_mode=False)
         check((1, 1, 2, 3, 3), (1, 1, 3, 4, 5), kernel_size=2, stride=2, padding=1, ceil_mode=True)
 
+        # Test case from issue https://github.com/pytorch/pytorch/issues/45357
+        x = torch.randn(1, 1, 6, 7, device=device)
+        y = torch.nn.functional.max_pool2d(x, 1, stride=(2, 2), padding=0, ceil_mode=True)
+        self.assertEqual(y.size(), (1, 1, 3, 4))
+
     @onlyOnCPUAndCUDA   # TODO: fix on XLA
     def test_adaptive_avg_pool2d_output_size_one(self, device):
         def helper(size, memory_format):
