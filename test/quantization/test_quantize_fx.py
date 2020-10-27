@@ -267,30 +267,6 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(model_device, device)
 
     @skipIfNoFBGEMM
-    def test_inplace_option(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-
-            def forward(self, x):
-                return self.conv(x)
-
-        model = M().eval()
-        qconfig_dict = {'': default_qconfig}
-        prepared = prepare_fx(model, qconfig_dict)
-        test_only_eval_fn(model, self.img_data_2d)
-        non_inplace_model = convert_fx(prepared, inplace=True)
-
-        prepared = prepare_fx(model, qconfig_dict)
-        test_only_eval_fn(model, self.img_data_2d)
-        inplace_model = convert_fx(prepared, inplace=True)
-
-        non_inplace_res = non_inplace_model(self.img_data_2d[0][0])
-        inplace_res = inplace_model(self.img_data_2d[0][0])
-        self.assertEqual(non_inplace_res, inplace_res)
-
-    @skipIfNoFBGEMM
     def test_dict_output(self):
         """ Make sure quantization runs for models with dictionary output
         """

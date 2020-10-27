@@ -628,29 +628,28 @@ class QuantizationTestCase(TestCase):
         # TODO: make img_data a single example instead of a list
         if type(inputs) == list:
             inputs = inputs[0]
-        if custom_qconfig is None:
-            if quant_type == QuantType.QAT:
-                qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
-            elif quant_type == QuantType.STATIC:
-                qconfig = get_default_qconfig(torch.backends.quantized.engine)
-            else:
-                qconfig = default_dynamic_qconfig
-        else:
-            qconfig = custom_qconfig
 
         if quant_type == QuantType.QAT:
+            qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
             model.train()
+        elif quant_type == QuantType.STATIC:
+            qconfig = get_default_qconfig(torch.backends.quantized.engine)
+            model.eval()
         else:
+            qconfig = default_dynamic_qconfig
             model.eval()
 
-        original = symbolic_trace(model)
+        # overwrite qconfig with custom_qconfig
+        if custom_qconfig is not None:
+            qconfig = custom_qconfig
+
         if quant_type == QuantType.QAT:
             prepare = prepare_qat_fx
         else:
             prepare = prepare_fx
 
         qconfig_dict = {'': qconfig}
-        prepared = prepare(original, qconfig_dict)
+        prepared = prepare(model, qconfig_dict)
         if not quant_type == QuantType.DYNAMIC:
             prepared(*inputs)
         qgraph = convert_fx(prepared)
@@ -662,10 +661,9 @@ class QuantizationTestCase(TestCase):
         if print_debug_info:
             print()
             print('quant type:', quant_type)
-            print('origianl graph module:', type(model))
-            self.printGraphModule(original)
+            print('original model:', model)
             print()
-            print('quantized graph module:', type(qgraph_to_check))
+            print('quantized model:', qgraph_to_check)
             self.printGraphModule(qgraph_to_check)
             print()
         self.checkGraphModuleNodes(
