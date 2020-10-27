@@ -505,6 +505,7 @@ class TestCuda(TestCase):
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
+    @skipIfRocm
     def test_to_non_blocking(self):
         def _test_to_non_blocking(a, non_blocking, dst):
             stream = torch.cuda.current_stream()
