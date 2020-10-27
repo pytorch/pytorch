@@ -1811,7 +1811,7 @@ def foo(x):
           ASSERT_TRUE(n->callstack());
           auto callstack_vector = (*n->callstack())->vec();
           ASSERT_EQ(callstack_vector.size(), 1);
-          ASSERT_EQ(callstack_vector[0].first, &cu->get_function("bar"));
+          ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("bar"));
           break;
         }
         case 7: {
@@ -1821,8 +1821,8 @@ def foo(x):
           ASSERT_TRUE(n->callstack());
           auto callstack_vector = (*n->callstack())->vec();
           ASSERT_EQ(callstack_vector.size(), 2);
-          ASSERT_EQ(callstack_vector[0].first, &cu->get_function("baz"));
-          ASSERT_EQ(callstack_vector[1].first, &cu->get_function("ham"));
+          ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("baz"));
+          ASSERT_EQ(std::get<0>(callstack_vector[1]), &cu->get_function("ham"));
           break;
         }
         case 11: {
@@ -1851,7 +1851,7 @@ def foo(x):
       ASSERT_TRUE(n->callstack());
       auto callstack_vector = (*n->callstack())->vec();
       ASSERT_EQ(callstack_vector.size(), 1);
-      ASSERT_EQ(callstack_vector[0].first, &cu->get_function("ham"));
+      ASSERT_EQ(std::get<0>(callstack_vector[0]), &cu->get_function("ham"));
     }
   }
 }

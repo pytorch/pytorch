@@ -505,7 +505,7 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   }
 
   std::unordered_set<std::string> expected_result(
-      {"top(C).A0(A).forward", "top(C).B0(B).forward"});
+      {"top(C).A0(A).forward", "top(C).A0(A).B0(B).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -591,7 +591,7 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   // which have the same class type. Hence, it only records module
   // information for A1.
   std::unordered_set<std::string> expected_result(
-      {"top(B).forward", "top(B).A1(A).forward"});
+      {"top(B).forward", "top(B).A0(A).forward", "top(B).A1(A).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 

@@ -54,20 +54,71 @@ static IValue Table(
 }
 
 std::string getModulePath(Node* node) {
-  std::string modulePath = node->scopeName();
-  size_t end = modulePath.size();
-  // Here we remove the source range information to make the
-  // module debugging information shorter and cleaner.
-  if (modulePath[end - 1] == '>') {
-    end = modulePath.rfind('<');
-    if (end > 0 && modulePath[end - 1] == '<') {
-      --end;
+  auto callStack = node->callstack();
+  return callStack.has_value() ? callStack->get()->getModulePath() : "";
+}
+
+std::string getModuleTypeName(const Module& module, const std::string& prefix) {
+  std::string moduleType = module.type()->str();
+  size_t lastDotIndex = moduleType.rfind('.');
+  if (lastDotIndex != std::string::npos) {
+    moduleType = moduleType.substr(lastDotIndex + 1);
+  }
+  return prefix + "(" + moduleType + ")";
+}
+
+void setModulePath(Node* node, const std::string& root_scope_string) {
+  if (!node->callstack()) {
+    std::string root = root_scope_string + ".forward";
+    InlinedCallStackPtr inlineCallStack = c10::make_intrusive<InlinedCallStack>();
+    node->setCallStack(inlineCallStack);
+    node->setModulePathStr(root);
+  } else {
+    std::string module_info = root_scope_string;
+    auto callstack_ptr = *(node->callstack());
+    const auto& vec = callstack_ptr->vec();
+
+    for (size_t i = 0; i < vec.size(); ++i) {
+      const auto& tup = vec[i];
+      const auto opt_module_instance_info = std::get<2>(tup);
+      if (opt_module_instance_info) {
+        const auto& module_instance_info = opt_module_instance_info.value();
+        if (module_instance_info.class_type()) {
+          const auto& class_type = module_instance_info.class_type();
+          const auto& instance_name = module_instance_info.instance_name();
+          auto type_name = class_type->name()->qualifiedName();
+          type_name = type_name.substr(type_name.find_last_of(".") + 1);
+          module_info += "." + instance_name + "(" + type_name + ")";
+          if (i == vec.size() - 1) {
+            module_info += "." + std::get<0>(tup)->name();
+          }
+        } else {
+          module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
+        }
+      } else {
+        module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
+      }
+    }
+
+    node->setModulePathStr(module_info);
+  }
+}
+
+void reconstructScopes(
+    std::shared_ptr<Graph> graph,
+    const std::string& root_scope_string) {
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* block = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* node : block->nodes()) {
+      setModulePath(node, root_scope_string);
+      for (Block* subblock : node->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
     }
   }
-  // We only keep the last function in a callstack.
-  size_t start = modulePath.rfind('/', end);
-  start = (start != std::string::npos) ? start + 1 : 0;
-  return modulePath.substr(start, end - start);
 }
 
 std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
@@ -78,7 +129,8 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
 
   Inline(*graph);
   if (save_mobile_debug_info) {
-    ReconstructScopes(module, *graph, "top");
+    std::string root_scope_string = getModuleTypeName(module, "top");
+    reconstructScopes(graph, root_scope_string);
   }
 
   torch::jit::Code code(graph, func.name());

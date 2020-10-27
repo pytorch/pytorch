@@ -86,6 +86,8 @@ InlinedCallStackPtr InlinedCallStack::intrusive_from_this() {
   return c10::intrusive_ptr<InlinedCallStack>::reclaim(this);
 }
 
+InlinedCallStack::InlinedCallStack(): initialized_(false){}
+
 InlinedCallStack::InlinedCallStack(Function* fn, SourceRange source_range)
     : fn_(fn), source_range_(std::move(source_range)) {}
 
@@ -123,10 +125,18 @@ std::vector<InlinedCallStackEntry> InlinedCallStack::vec() {
   std::vector<InlinedCallStackEntry> r;
   c10::optional<InlinedCallStackPtr> current = intrusive_from_this();
   while (current) {
-    r.emplace_back(std::make_pair((*current)->fn_, (*current)->source_range_));
+    r.emplace_back(std::make_tuple((*current)->fn_, (*current)->source_range_, (*current)->module_instance_info_));
     current = (*current)->callee_;
   }
   return r;
+}
+
+void InlinedCallStack::setModulePath(std::string path) {
+  modulePath_ = path;
+}
+
+std::string InlinedCallStack::getModulePath() {
+  return modulePath_;
 }
 
 ModuleInstanceInfo::ModuleInstanceInfo(

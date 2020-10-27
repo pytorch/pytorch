@@ -326,6 +326,11 @@ struct TORCH_API Node {
   void setScope(ScopePtr scope) {
     scope_ = std::move(scope);
   }
+
+  void setModulePathStr(std::string modulePathStr) {
+    callstack_->get()->setModulePath(modulePathStr);
+  }
+
   std::string scopeName() const {
     if (!scope_) {
       return "";
