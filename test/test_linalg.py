@@ -919,6 +919,15 @@ class TestLinalg(TestCase):
         triangle_function = torch.triu if upper else torch.tril
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = torch.randn(*A_dims, dtype=dtype, device=device)
+        # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
+        if self.device_type == 'cuda' and dtype.is_complex:
+            A_tmp = torch.empty_like(A).view(-1, *A_dims[-2:])
+            for A_i, A_tmp_i in zip(A.contiguous().view(-1, *A_dims[-2:]), A_tmp):
+                torch.matmul(A_i, A_i.t(), out=A_tmp_i)
+            A = A_tmp.view(*A_dims)
+        else:
+            # create positive definite matrix
+            A = torch.matmul(A, A.transpose(-2, -1))
         A_triangular = triangle_function(A)
         if unitriangular:
             A_triangular.diagonal(dim1=-2, dim2=-1).fill_(1.)
@@ -969,16 +978,15 @@ class TestLinalg(TestCase):
                                           upper, unitriangular, transpose)
 
 
-    # @slowTest
-    # @onlyCPU
+    @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_triangular_solve_batched_many_batches(self, device, dtype):
-        # for upper, transpose, unitriangular in itertools.product([True, False], repeat=3):
-        for upper, transpose, unitriangular in itertools.product([True, False], [True, False], [True, False]):
+        for upper, transpose, unitriangular in itertools.product([True, False], repeat=3):
+            # test batched A case
             b, A = self.triangular_solve_test_helper((256, 256, 5, 5), (5, 1),
                                                      upper, unitriangular, device, dtype)
             x, _ = torch.triangular_solve(b, A,
@@ -988,34 +996,23 @@ class TestLinalg(TestCase):
 
             # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
             if self.device_type == 'cuda' and dtype.is_complex:
-                Ax_list = []
-                for A_i, x_i in zip(A.contiguous().view(-1, 5, 5), x.contiguous().view(-1, 5, 1)):
-                    Ax_list.append(torch.matmul(A_i, x_i))
-                Ax = torch.stack(Ax_list).view(256, 256, 5, 1)
+                Ax = torch.empty_like(x).view(-1, 5, 1)
+                for A_i, x_i, Ax_i in zip(A.contiguous().view(-1, 5, 5), x.contiguous().view(-1, 5, 1), Ax):
+                    torch.matmul(A_i, x_i, out=Ax_i)
+                Ax = Ax.view(256, 256, 5, 1)
             else:
                 Ax = torch.matmul(A, x)
 
-            # For this case individual entries of Ax and b differ a lot, so at least norm is compared
-            if self.device_type == 'cpu' and dtype == torch.float32 and unitriangular == False:
-                self.assertEqual(b.expand(A.shape[:-2] + (5, 1)).norm(p=1), Ax.norm(p=1), atol=self.precision, rtol=1e-3)
-            else:
-                self.assertEqual(b.expand(A.shape[:-2] + (5, 1)), Ax, atol=self.precision, rtol=1e-3)
+            rtol = 1e-2 if dtype in [torch.float32, torch.complex64] else self.precision
+            self.assertEqual(Ax, b.expand_as(Ax), atol=self.precision, rtol=rtol)
 
+            # test batched b case
             b, A = self.triangular_solve_test_helper((3, 3), (512, 512, 3, 1),
                                                      upper, unitriangular, device, dtype)
             x, _ = torch.triangular_solve(b, A, upper=upper, transpose=transpose,
                                           unitriangular=unitriangular)
             if transpose:
                 A = A.transpose(-2, -1)
-
-            # # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
-            # if self.device_type == 'cuda' and dtype.is_complex:
-            #     Ax_list = []
-            #     for A_i, x_i in zip(A.contiguous().view(-1, 5, 5), x.contiguous().view(-1, 5, 1)):
-            #         Ax_list.append(torch.matmul(A_i, x_i))
-            #     Ax = torch.stack(Ax_list).view(256, 256, 5, 1)
-            # else:
-            #     Ax = torch.matmul(A, x)
 
             self.assertEqual(torch.matmul(A, x), b)
 
