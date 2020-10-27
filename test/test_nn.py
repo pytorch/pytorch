@@ -10516,11 +10516,16 @@ class TestNNDeviceType(NNTestCase):
         test('threshold', 3, 2, inplace=True)
 
     def test_pooling_shape(self, device):
+        ''' Test the output shape calculation for pooling functions '''
+
+        # Checks output shape against expected for 1D, 2D and 3D
         def check(expected_out_shape, sizes, *args, **kwargs):
-            for i in [1, 2, 3]:
-                op = getattr(torch.nn.functional, f'max_pool{i}d')
-                t = torch.randn(sizes[:i + 2], device=device)
-                self.assertEqual(op(t, *args, **kwargs).shape, expected_out_shape[:i + 2])
+            for kernel in ['max', 'avg']:
+                for i in [1, 2, 3]:
+                    if hasattr(torch.nn.functional, f'{kernel}_pool{i}d'):
+                        op = getattr(torch.nn.functional, f'{kernel}_pool{i}d')
+                        t = torch.randn(sizes[:i + 2], device=device)
+                        self.assertEqual(op(t, *args, **kwargs).shape, expected_out_shape[:i + 2])
 
         check((1, 1, 3, 3, 4), (1, 1, 5, 6, 7), kernel_size=1, stride=2, padding=0, ceil_mode=True)
         check((1, 1, 2, 3, 3), (1, 1, 3, 4, 5), kernel_size=2, stride=2, padding=1, ceil_mode=False)
