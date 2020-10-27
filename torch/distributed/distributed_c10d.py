@@ -1344,7 +1344,8 @@ def all_gather_object(object_list, obj, group=group.WORLD):
         object_list (list[Any]): Output list. It should be correctly sized as the
             size of the group for this collective and will contain the output.
         object (Any): Pickable Python object to be broadcast from current process.
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
 
     Returns:
         None. If the calling rank is part of this group, the output of the
@@ -1355,6 +1356,13 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     .. note:: Note that this API differs slightly from the :func:`all_gather`
         collective since it does not provide an ``async_op`` handle and thus
         will be a blocking call.
+
+    .. note:: For NCCL-based processed groups, internal tensor representations
+        of objects must be moved to the GPU device before communication takes
+        place. In this case, the device used is given by
+        ``torch.cuda.current_device()`` and it is the user's responsiblity to
+        ensure that this is set so that each rank has an individual GPU, via
+        ``torch.cuda.set_device()``.
 
     .. warning::
         :func:`all_gather_object` uses ``pickle`` module implicitly, which is
@@ -1367,15 +1375,19 @@ def all_gather_object(object_list, obj, group=group.WORLD):
 
     input_tensor, local_size = _object_to_tensor(obj)
     group_backend = get_backend(group)
-    my_rank = get_rank()
     is_nccl_backend = group_backend == Backend.NCCL
     if is_nccl_backend:
-        input_tensor, local_size = input_tensor.to(my_rank), local_size.to(my_rank)
+        current_device = torch.cuda.current_device()
+        input_tensor = input_tensor.to(current_device)
+        local_size = local_size.to(current_device)
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
+    # See note about using torch.cuda.current_device() here in docstring.
+    # We cannot simply use my_rank since rank == device is not necessarily
+    # true.
     object_sizes_tensor = torch.zeros(group_size, dtype=int).to(
-        my_rank if is_nccl_backend else "cpu"
+        torch.cuda.current_device() if is_nccl_backend else "cpu"
     )
     object_size_list = [
         object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
@@ -1387,7 +1399,7 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     input_tensor.resize_(max_object_size)
     coalesced_output_tensor = torch.empty(
         max_object_size * group_size, dtype=torch.uint8
-    ).to(my_rank if is_nccl_backend else "cpu")
+    ).to(torch.cuda.current_device() if is_nccl_backend else "cpu")
     # Output tensors are nonoverlapping views of coalesced_output_tensor
     output_tensors = [
         coalesced_output_tensor[max_object_size * i : max_object_size * (i + 1)]
@@ -1414,7 +1426,8 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
             collective and will contain the output. Must be ``None`` on non-dst
             ranks. (default is ``None``)
         dst (int, optional): Destination rank. (default is 0)
-        group: (ProcessGroup, optional): The process group to work on.
+        group: (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
 
     Returns:
         None. On the ``dst`` rank, ``object_gather_list`` will contain the
@@ -1442,18 +1455,21 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     group_backend = get_backend(group)
     is_nccl_backend = group_backend == Backend.NCCL
     if is_nccl_backend:
-        input_tensor, local_size = input_tensor.to(my_rank), local_size.to(my_rank)
+        current_device = torch.cuda.current_device()
+        input_tensor = input_tensor.to(current_device)
+        local_size = local_size.to(current_device)
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
     object_sizes_tensor = torch.zeros(group_size, dtype=int).to(
-        my_rank if is_nccl_backend else "cpu"
+        torch.cuda.current_device() if is_nccl_backend else "cpu"
     )
     object_size_list = [
         object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
     ]
-    # Allgather tensor sizes. An all-gather is needed here despite this being a gather,
-    # since each rank needs to broadcast a tensor of the same (maximal) size.
+    # Allgather tensor sizes. An all-gather is needed here despite this being a
+    # gather, since each rank needs to broadcast a tensor of the same (maximal)
+    # size.
     all_gather(object_size_list, local_size, group=group)
     max_object_size = max(object_size_list)
     # Resize tensor to max size across all ranks.
@@ -1462,7 +1478,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     if my_rank == dst:
         coalesced_output_tensor = torch.empty(
             max_object_size * group_size, dtype=torch.uint8
-        ).to(my_rank if is_nccl_backend else "cpu")
+        ).to(torch.cuda.current_device() if is_nccl_backend else "cpu")
         # Output tensors are nonoverlapping views of coalesced_output_tensor
         output_tensors = [
             coalesced_output_tensor[max_object_size * i : max_object_size * (i + 1)]
@@ -1495,15 +1511,23 @@ def broadcast_object_list(object_list, src, group=group.WORLD):
             Each object must be picklable. Only objects on the ``src`` rank will
             be broadcast, but each rank must provide lists of equal sizes.
         src (int): Source rank from which to broadcast ``object_list``.
-        group: (ProcessGroup, optional): The process group to work on.
+        group: (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
 
     Returns:
         ``None``. If rank is part of the group, ``object_list`` will contain the
         broadcasted objects from ``src`` rank.
 
-    .. note:: Note that this API differs slightly from the broadcast collective
-        since it does not provide an ``async_op`` handle and thus will be a
-        blocking call.
+    .. note:: For NCCL-based processed groups, internal tensor representations
+        of objects must be moved to the GPU device before communication takes
+        place. In this case, the device used is given by
+        ``torch.cuda.current_device()`` and it is the user's responsiblity to
+        ensure that this is set so that each rank has an individual GPU, via
+        ``torch.cuda.set_device()``.
+
+    .. note:: Note that this API differs slightly from the :func:`all_gather`
+        collective since it does not provide an ``async_op`` handle and thus
+        will be a blocking call.
 
     .. warning::
         :func:`broadcast_object_list` uses ``pickle`` module implicitly, which
@@ -1525,7 +1549,11 @@ def broadcast_object_list(object_list, src, group=group.WORLD):
     group_backend = get_backend(group)
     is_nccl_backend = group_backend == Backend.NCCL
     if is_nccl_backend:
-        object_sizes_tensor = object_sizes_tensor.to(my_rank)
+        # See note about using torch.cuda.current_device() here in docstring.
+        # We cannot simply use my_rank since rank == device is not necessarily
+        # true.
+        object_sizes_tensor = object_sizes_tensor.to(torch.cuda.current_device())
+        object_sizes_tensor = object_sizes_tensor.to(torch.cuda.current_device())
 
     # Broadcast object sizes
     broadcast(object_sizes_tensor, src=src, group=group)
@@ -1537,7 +1565,7 @@ def broadcast_object_list(object_list, src, group=group.WORLD):
         object_tensor = torch.ByteTensor(torch.sum(object_sizes_tensor).item())
 
     if is_nccl_backend:
-        object_tensor = object_tensor.to(my_rank)
+        object_tensor = object_tensor.to(torch.cuda.current_device())
     broadcast(object_tensor, src=src, group=group)
     # Deserialize objects using their stored sizes.
     offset = 0
