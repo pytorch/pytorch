@@ -15,10 +15,6 @@ Tensor _fft_mkl(const Tensor& input, int64_t signal_ndim,
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
-const Tensor& _fft_fill_with_conjugate_symmetry_cpu_(const Tensor& input, IntArrayRef dim) {
-  AT_ERROR("fft: ATen not compiled with MKL support");
-}
-
 }}
 
 #else // AT_MKL_ENABLED
