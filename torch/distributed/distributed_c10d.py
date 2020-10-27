@@ -1377,15 +1377,15 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     group_backend = get_backend(group)
     is_nccl_backend = group_backend == Backend.NCCL
     if is_nccl_backend:
+        # See note about using torch.cuda.current_device() here in docstring.
+        # We cannot simply use my_rank since rank == device is not necessarily
+        # true.
         current_device = torch.cuda.current_device()
         input_tensor = input_tensor.to(current_device)
         local_size = local_size.to(current_device)
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
-    # See note about using torch.cuda.current_device() here in docstring.
-    # We cannot simply use my_rank since rank == device is not necessarily
-    # true.
     object_sizes_tensor = torch.zeros(group_size, dtype=int).to(
         torch.cuda.current_device() if is_nccl_backend else "cpu"
     )
