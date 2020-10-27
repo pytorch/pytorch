@@ -77,6 +77,9 @@ class TestTEFuser(JitTestCase):
 
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
 
+    def assertLastGraphAllFused(self):
+        self.assertAllFused(torch.jit.last_executed_optimized_graph())
+
     def findFusionGroups(self, graph):
         result = []
         for n in graph.nodes():
@@ -93,10 +96,7 @@ class TestTEFuser(JitTestCase):
 
         a = torch.randn(5, device=device)
         scripted = self.checkScript(func, (a,))
-        graph = scripted.graph_for(a)
-        fusion_groups = self.findFusionGroups(graph)
-        self.assertEqual(len(fusion_groups), 1)
-        FileCheck().check("aten::abs").check("aten::mul").run(str(fusion_groups[0]))
+        self.assertLastGraphAllFused()
 
     def test_sum_simple(self):
         def func(x):
@@ -107,10 +107,7 @@ class TestTEFuser(JitTestCase):
             a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
             a = a.reshape(5, 3)
             scripted = self.checkScript(func, (a,))
-            graph = scripted.graph_for(a)
-            fusion_groups = self.findFusionGroups(graph)
-            self.assertEqual(len(fusion_groups), 1)
-            self.assertEqual(scripted(a), func(a))
+            self.assertLastGraphAllFused()
 
     def test_sum_dim(self):
         def func(x):
@@ -120,10 +117,7 @@ class TestTEFuser(JitTestCase):
             a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
             a = a.reshape(5, 3)
             scripted = self.checkScript(func, (a,))
-            graph = scripted.graph_for(a)
-            fusion_groups = self.findFusionGroups(graph)
-            self.assertEqual(len(fusion_groups), 1)
-            self.assertEqual(scripted(a), func(a))
+            self.assertLastGraphAllFused()
 
     def test_sum_keepdim_cast(self):
         def func(x):
@@ -132,11 +126,9 @@ class TestTEFuser(JitTestCase):
         with texpr_reductions_enabled():
             a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
             a = a.reshape(5, 3)
-            scripted = self.checkScript(func, (a,))
-            graph = scripted.graph_for(a)
-            fusion_groups = self.findFusionGroups(graph)
-            self.assertEqual(len(fusion_groups), 1)
-            self.assertEqual(scripted(a), func(a))
+
+            self.checkScript(func, (a,))
+            self.assertLastGraphAllFused()
 
     def test_abs_cpu(self):
         self._test_fused_abs()
@@ -187,11 +179,8 @@ class TestTEFuser(JitTestCase):
             torch.randn(4, dtype=torch.float, device='cuda'),
             torch.randn(4, dtype=torch.float, device='cuda'),
         ]
-        ge = self.checkTrace(scaleshift, inputs)
-        graph = ge.graph_for(*inputs)
-        fusion_groups = self.findFusionGroups(graph)
-        self.assertEqual(len(fusion_groups), 1)
-        FileCheck().check("aten::mul").check("aten::add").run(str(fusion_groups[0]))
+        self.checkTrace(scaleshift, inputs)
+        self.assertLastGraphAllFused()
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_HALF, "no half support")
@@ -254,10 +243,8 @@ class TestTEFuser(JitTestCase):
 
         inputs = [torch.randn(10, 6, dtype=torch.float, device='cuda')]
 
-        ge = self.checkScript(fn, inputs)
-        graph = ge.graph_for(*inputs)
-        self.assertAllFused(graph)
-        FileCheck().check("prim::ConstantChunk[chunks=3, dim=1]").run(str(graph))
+        self.checkScript(fn, inputs)
+        self.assertLastGraphAllFused()
 
     @staticmethod
     def _test_chunk_correctness(self, device='cpu'):
@@ -288,6 +275,7 @@ class TestTEFuser(JitTestCase):
         for tensor in tensors:
             for fn in fns:
                 self.checkScript(fn, [tensor])
+                self.assertLastGraphAllFused()
 
     def test_chunk_correctness(self):
         return self._test_chunk_correctness(self, 'cpu')
@@ -330,11 +318,8 @@ class TestTEFuser(JitTestCase):
             torch.tensor([1.1, 1.2], device='cuda', dtype=torch.float),
         ]
         for func in [func1, func2]:
-            module = self.checkScript(func, inputs)
-            forward_graph = module.graph_for(*inputs)
-            self.assertGraphContainsExactly(forward_graph, FUSION_GROUP, 1)
-            fusion_group = list(forward_graph.nodes())[-1]
-            self.assertEqual(len(list(fusion_group.inputs())), 1)
+            self.checkScript(func, inputs)
+            self.assertLastGraphAllFused()
 
     @unittest.skipIf(not RUN_CUDA, "No CUDA")
     def test_chunk_multiple_cuda(self):
