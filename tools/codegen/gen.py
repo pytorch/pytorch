@@ -236,7 +236,7 @@ def compute_type_method(
             return_kw = "    return "
 
             cuda_guard = ""
-            if dispatch_to_all_backends or 'CUDA' in dispatch or 'Vulkan' == dispatch:  # type: ignore
+            if dispatch_to_all_backends or 'CUDA' in dispatch:  # type: ignore
                 self_args = (a for a in f.func.arguments if a.name == "self")
 
                 # There is precedence for which argument we use to do
@@ -261,7 +261,7 @@ def compute_type_method(
 
                 # TODO: There is probably a simpler version of this that
                 # works just as well.
-                if f.device_guard and (dispatch_to_all_backends or 'Vulkan' == dispatch) and has_tensor_options:
+                if f.device_guard and dispatch_to_all_backends and has_tensor_options:
                     cuda_guard = cuda_guard_from_tensor_options
                 elif f.device_guard and dispatch is not None and 'CUDA' in dispatch and has_tensor_options:
                     cuda_guard = f"""\
@@ -931,11 +931,6 @@ def main() -> None:
         '--rocm',
         action='store_true',
         help='reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly')
-    # TODO: remove this, we should just unconditionally generate Vulkan
-    parser.add_argument(
-        '--vulkan',
-        action='store_true',
-        help='Generate Vulkan backend functions')
     # TODO: --op_registration_whitelist will be removed when all call-sites
     # for gen.py are moved over to using the operator YAML file for mobile
     # custom build.
@@ -1016,9 +1011,15 @@ def main() -> None:
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>'''
 
-    backends = ["CPU", "SparseCPU", "MkldnnCPU", "CUDA", "SparseCUDA", "QuantizedCPU", "QuantizedCUDA"]
-    if options.vulkan:
-        backends.append("Vulkan")
+    backends = [
+        "CPU",
+        "SparseCPU",
+        "MkldnnCPU",
+        "CUDA",
+        "SparseCUDA",
+        "QuantizedCPU",
+        "QuantizedCUDA",
+    ]
     if options.backend_whitelist:
         backends = [b for b in backends if b in options.backend_whitelist]
 
