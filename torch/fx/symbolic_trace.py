@@ -33,9 +33,9 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     new_code = CodeType(*co_args)  # type: ignore
     return FunctionType(new_code, fn.__globals__, fn.__name__, fn.__defaults__, fn.__closure__)
 
-    # we need to insert placeholder nodes for *args, and **kwargs,
-    # so we can't call this function normally, otherwise it would try to unpack them
-    # instead, let's make python think that args and kwargs are normay variables
+    # we need to insert placeholder nodes for *args and **kwargs
+    # we can't call this function normally, otherwise it would try to unpack them
+    # instead, let's make python think that args and kwargs are normal variables
 
 class Tracer(TracerBase):
     def __init__(self):
@@ -126,19 +126,26 @@ class Tracer(TracerBase):
         return self.create_proxy('call_module', module_qualified_name, args, kwargs)
 
     def create_args_for_root(self, root_fn, is_module):
-        co = root_fn.__code__
+        # In some cases, a function or method has been decorated with a wrapper
+        # defined via `functools.wraps`. In this case, the outer code object
+        # will likely not contain the actual parameters we care about, so unwrap
+        # the function to get to the innermost callable.
+        fn_for_analysis = inspect.unwrap(root_fn)
+        co = fn_for_analysis.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
         names_iter = iter(co.co_varnames)
         args : List[Any] = []
         skip_arg_idx = 0
         if is_module:
+            if total_args == 0:
+                raise RuntimeError('`self` argument cannot be part of *args expansion!')
             skip_arg_idx = 1
             next(names_iter)  # skip self
             args.append(self.root)
 
         def proxy_placeholder(name: str):
             return self.create_proxy('placeholder', name, (), {},
-                                     type_expr=root_fn.__annotations__.get(name, None))
+                                     type_expr=fn_for_analysis.__annotations__.get(name, None))
 
         args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
 
@@ -153,8 +160,7 @@ class Tracer(TracerBase):
         return root_fn, args
 
     def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
-        is_module = isinstance(root, torch.nn.Module)
-        if is_module:
+        if isinstance(root, torch.nn.Module):
             self.root = root
             fn = type(root).forward
         else:
@@ -164,7 +170,7 @@ class Tracer(TracerBase):
 
         assert isinstance(fn, FunctionType)
 
-        fn, args = self.create_args_for_root(fn, is_module)
+        fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module))
 
         orig_call = torch.nn.Module.__call__
 

@@ -68,7 +68,7 @@ class ProcessGroupGloo : public ProcessGroup {
   //
   class AsyncWork : public ProcessGroup::Work {
    public:
-    AsyncWork(const char* profiling_title = nullptr):  ProcessGroup::Work(-1, OpType::UNKNOWN, profiling_title) {}
+    AsyncWork(const char* profilingTitle = nullptr):  ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle) {}
 
     static void execute(std::shared_ptr<AsyncWork> work) {
       std::exception_ptr eptr;

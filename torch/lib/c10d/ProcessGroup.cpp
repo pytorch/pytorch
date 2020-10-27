@@ -54,18 +54,17 @@ bool isP2POp(OpType opType) {
 }
 
 
-ProcessGroup::Work::Work(int rank, OpType opType, const char* profiling_title)
+ProcessGroup::Work::Work(int rank, OpType opType, const char* profilingTitle)
     : rank_(rank), opType_(opType) {
-  if (profiling_title != nullptr) {
+  if (profilingTitle != nullptr) {
     profilingFuture_ = c10::make_intrusive<c10::ivalue::Future>(
         c10::TensorType::get());
     auto recordingFunction = std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
     if (recordingFunction->active) {
-        recordingFunction->before(profiling_title, {});
+        recordingFunction->before(profilingTitle, {});
         std::function<void()> end_handler = [this, recordingFunction]() {
           recordingFunction->end();
-          if (profilingFuture_)
-            profilingFuture_->markCompleted();
+          profilingFuture_->markCompleted();
         };
         recordFunctionEndCallback_ = at::wrapPropagateTLSState(end_handler);
     }
@@ -147,6 +146,7 @@ void ProcessGroup::Work::finish(std::exception_ptr exception) {
   exception_ = exception;
   if (recordFunctionEndCallback_) {
     recordFunctionEndCallback_();
+    recordFunctionEndCallback_ = nullptr;
   }
   lock.unlock();
   cv_.notify_all();
@@ -156,6 +156,10 @@ void ProcessGroup::Work::finishAndThrow(std::exception_ptr exception) {
   std::unique_lock<std::mutex> lock(mutex_);
   completed_ = true;
   exception_ = exception;
+  if (recordFunctionEndCallback_) {
+    recordFunctionEndCallback_();
+    recordFunctionEndCallback_ = nullptr;
+  }
   if (exception_) {
     std::rethrow_exception(exception_);
   }

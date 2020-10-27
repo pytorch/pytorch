@@ -391,11 +391,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     COMMAND
     "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
+      --native-functions-path "aten/src/ATen/native/native_functions.yaml"
       --nn-path "aten/src"
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
       --force_schema_registration
     DEPENDS
+    "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"

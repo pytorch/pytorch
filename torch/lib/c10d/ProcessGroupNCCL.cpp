@@ -240,8 +240,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     const std::vector<at::Device>& devices,
     int rank,
     OpType opType,
-    const char* profiling_title)
-    : Work(rank, opType, profiling_title),
+    const char* profilingTitle)
+    : Work(rank, opType, profilingTitle),
       devices_(devices),
       workStartTime_(std::chrono::steady_clock::now()) {
   // Creates the CUDA event wrappers
@@ -986,8 +986,8 @@ std::shared_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     std::vector<at::Device> devices,
     int rank,
     OpType opType,
-    const char* profiling_title) {
-  return std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices, rank, opType, profiling_title);
+    const char* profilingTitle) {
+  return std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices, rank, opType, profilingTitle);
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
@@ -1032,7 +1032,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     PreProcess pre,
     PostProcess post,
     OpType opType,
-    const char* profiling_title) {
+    const char* profilingTitle) {
   const auto devices = getDeviceList(inputs);
   const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices, opType);
@@ -1042,7 +1042,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   // Work itself will create the CUDA events on all GPUs of tensors
   bool can_profile = outputs.size() == 1;
-  auto work = initWork(devices, rank_, opType, can_profile ? profiling_title : nullptr);
+  auto work = initWork(devices, rank_, opType, can_profile ? profilingTitle : nullptr);
 
   // Store references to outputs and futureNCCLCallbackStream to be used by
   // WorkNCCL::getFuture.
@@ -1053,6 +1053,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     // recordFunctionEndCallback_ is normally called in fininsh() function by
     // base class, but since finish is not called by WorkNCCL, we schedule this
     // function to be run when work is done.
+    // Note when can_profile is false, profilingTitle is not provided and so,
+    // recordFunctionEndCallback_ is not set.
     work->getFuture()->addCallback(std::move(work->recordFunctionEndCallback_));
   }
 
@@ -1187,7 +1189,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& outputs,
     Fn fn,
     OpType opType,
-    const char* profiling_title) {
+    const char* profilingTitle) {
   return collective(
       inputs,
       outputs,
@@ -1195,7 +1197,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
       [](std::vector<at::cuda::CUDAStream>&) {},
       [](std::vector<at::cuda::CUDAStream>&) {},
       opType,
-      profiling_title);
+      profilingTitle);
 }
 
 template <typename Fn>
@@ -1235,7 +1237,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
             stream.stream());
       },
       OpType::ALLREDUCE,
-      "all_reduce");
+      "nccl:all_reduce");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_coalesced(
@@ -1267,7 +1269,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
             stream.stream());
       },
       OpType::BROADCAST,
-      "broadcast");
+      "nccl:broadcast");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
@@ -1294,7 +1296,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
             stream.stream());
       },
       OpType::REDUCE,
-      "reduce");
+      "nccl:reduce");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
@@ -1339,7 +1341,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
         }
       },
       OpType::ALLGATHER,
-      "all_gather");
+      "nccl:all_gather");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_coalesced(
@@ -1393,7 +1395,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
       },
       [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {},
       OpType::REDUCE_SCATTER,
-      "reduce_scatter");
+      "nccl:reduce_scatter");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
@@ -1455,6 +1457,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
+        // See [Sync Streams].
+        c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
         torch::cuda::nccl::all2all(
               input,
               output,
@@ -1464,7 +1469,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
           return ncclSuccess;
         },
         OpType::ALLTOALL_BASE,
-        "all_to_all");
+        "nccl:all_to_all");
   } else {
     c10d::checkSplitSizes(inputSplitSizes, inputTensor, size_);
     c10d::checkSplitSizes(outputSplitSizes, outputTensor, size_);
@@ -1485,6 +1490,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
               inputSplitSizes, input, &send_lengths, &send_offsets);
           c10d::computeLengthsAndOffsets(
               outputSplitSizes, output, &recv_lengths, &recv_offsets);
+          // See [Sync Streams].
+          c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
           return ncclAlltoallv(
               input.data_ptr(),
               send_lengths.data(),
@@ -1498,7 +1506,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
               stream.stream());
         },
         OpType::ALLTOALL_BASE,
-        "all_to_all");
+        "nccl:all_to_all");
   }
 }
 
