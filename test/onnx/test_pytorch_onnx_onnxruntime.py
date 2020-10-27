@@ -6,6 +6,7 @@ import numpy as np
 import io
 import itertools
 import copy
+import os
 
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
@@ -131,6 +132,7 @@ class TestONNXRuntime(unittest.TestCase):
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)
         np.random.seed(seed=0)
+        os.environ['ALLOW_RELEASED_ONNX_OPSET_ONLY'] = '0'
         self.is_script_test_enabled = True
 
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
