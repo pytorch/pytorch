@@ -440,7 +440,7 @@
   self: grad * result * M_LN2
 
 - name: expm1(Tensor self) -> Tensor
-  self: expm1_backward(grad, result)
+  self: grad * result + grad
 
 - name: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
   self: at::sum_to(grad, self.sizes())
