@@ -804,7 +804,8 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
     return;
   }
 
-  bool destUnsigned = v->dtype().scalar_type() == ScalarType::Byte;
+  bool destUnsigned = v->dtype().scalar_type() == ScalarType::Byte ||
+      v->dtype().scalar_type() == ScalarType::Bool;
 
   // Scalar casts
   if (srcType->isFPOrFPVectorTy()) {

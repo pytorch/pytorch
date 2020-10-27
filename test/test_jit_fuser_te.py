@@ -417,7 +417,7 @@ class TestTEFuser(JitTestCase):
     def test_add_bool(self):
         for device in self.devices:
             def f(x, y, z):
-                return x + y
+                return x + y + z
 
             x = torch.randint(0, 2, (4, 4), dtype=torch.bool, device=device)
             y = torch.randint(0, 2, (4, 4), dtype=torch.bool, device=device)
