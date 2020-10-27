@@ -814,6 +814,11 @@ class TestFX(JitTestCase):
         x, w = torch.rand(3, 4), torch.rand(4, 4)
         self.assertTrue(any(n.target == torch.relu for n in traced.graph.nodes))
 
+    def test_sequential(self):
+        m = torch.nn.Sequential(torch.nn.Conv2d(1, 1, 1))
+        gm = torch.fx.symbolic_trace(m)
+        gm_copy = copy.deepcopy(gm)
+
     def test_ctx_mgr(self):
         @contextlib.contextmanager
         def do_nothing():
