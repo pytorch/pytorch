@@ -1223,7 +1223,7 @@ void batch_norm_elemt_channels_last_cuda_template(
     });
   } else {
     if (weight.defined()){
-      TORCH_CHECK(input.scalar_type() == weight.scalar_type(), "input.scalar_type() ", input.scalar_type(),
+      TORCH_CHECK(input.scalar_type() == weight.scalar_type(), "batch norm: input.scalar_type() ", input.scalar_type(),
         " is not supported with weight.scalar_type() ", weight.scalar_type());
     }
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "batchnorm_forward", [&]{
