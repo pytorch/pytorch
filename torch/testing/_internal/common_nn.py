@@ -1845,6 +1845,7 @@ new_module_tests = [
         desc='dilated',
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv2d',
@@ -1893,7 +1894,7 @@ new_module_tests = [
         input_size=(1, 3, 7, 6),
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -2219,6 +2220,7 @@ new_module_tests = [
         desc='1x1x1_no_bias',
         check_with_long_tensor=False,
         with_tf32=False,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='Conv3d',
