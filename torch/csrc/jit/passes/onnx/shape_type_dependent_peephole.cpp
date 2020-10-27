@@ -157,13 +157,9 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
   for (auto it = slice_and_select_nodes.rbegin();
        it != slice_and_select_nodes.rend();
        ++it) {
-    printf("for each slice and select node, cur_dim: %ld\n", cur_dim);
     auto node = *it;
     // select does not keep dims,
     // this creates offset for latter slice and select nodes.
-    // auto dim = node->get(attr::dim)->toInt();
-    printf("get dim before\n");
-    // auto dim = node->get(attr::dim)->toTensor().item().toInt();
     // NOTE: Cannot rely on get(attr::dim), because op no longer match schema.
     int dim = 0;
     if (node->kind() == aten::slice) {
@@ -193,7 +189,6 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
       }
     }
     dim = dim + dim_offset;
-    printf("cur dim %ld, dim %d\n", cur_dim, dim);
     while (cur_dim < dim) {
       // Handle skipped dims, these are created from ..., or tensor indices
       // E.g.: x[torch.tensor([1, 0]), ..., 0] = update, where x has rank 3.
