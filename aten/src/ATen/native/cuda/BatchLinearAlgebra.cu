@@ -1354,7 +1354,7 @@ AT_ERROR("symeig: MAGMA library not found in "
  *   1. assume that self is a square matrix of side "n"
  *   2. return CPU tensors, which will be copied to GPU memory by the caller
  */
-static std::tuple<Tensor,Tensor> eig_cuda_helper(const Tensor & self, int64_t n, bool eigenvectors) {
+static std::tuple<Tensor,Tensor> eig_cuda_helper(const Tensor& self, int64_t n, bool eigenvectors) {
   // copy self to pinned CPU memory
   auto self_working_copy = at::empty_strided(
       {n, n}, // square matrix
@@ -1378,24 +1378,26 @@ static std::tuple<Tensor,Tensor> eig_cuda_helper(const Tensor & self, int64_t n,
   return std::tuple<Tensor, Tensor>(out_eigvals, out_eigvecs);
 }
 
-std::tuple<Tensor &,Tensor &> eig_cuda_out(Tensor & e, Tensor & v, const Tensor & self, bool eigenvectors) {
+std::tuple<Tensor&, Tensor&> eig_cuda_out(Tensor& e, Tensor& v, const Tensor& self, bool eigenvectors) {
   TORCH_CHECK(self.dim() == 2, "A should be 2 dimensional");
   squareCheckInputs(self);
   int64_t n = self.size(-1);
 
   at::native::resize_output(e, {n, 2});
-  if (eigenvectors)
+  if (eigenvectors) {
       at::native::resize_output(v, self.sizes());
+  }
 
   Tensor cpu_vals, cpu_vecs;
   std::tie(cpu_vals, cpu_vecs) = eig_cuda_helper(self, n, eigenvectors);
   e.copy_(cpu_vals);
-  if (eigenvectors)
+  if (eigenvectors) {
       v.copy_(cpu_vecs);
+  }
   return std::tuple<Tensor&, Tensor&>(e, v);
 }
 
-std::tuple<Tensor,Tensor> eig_cuda(const Tensor & self, bool eigenvectors) {
+std::tuple<Tensor,Tensor> eig_cuda(const Tensor& self, bool eigenvectors) {
   TORCH_CHECK(self.dim() == 2, "A should be 2 dimensional");
   squareCheckInputs(self);
   int64_t n = self.size(-1);
