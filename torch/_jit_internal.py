@@ -637,11 +637,7 @@ def _get_overloaded_methods(method, mod_class):
 
 def is_tuple(ann):
     if ann is Tuple:
-        raise RuntimeError(
-            "Attempted to use Tuple without a "
-            "contained type. Please add a contained type, e.g. "
-            "Tuple[int]"
-        )
+        raise_error_container_parameter_missing("Tuple")
 
     # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
     if not hasattr(ann, '__module__'):
@@ -652,11 +648,7 @@ def is_tuple(ann):
 
 def is_list(ann):
     if ann is List:
-        raise RuntimeError(
-            "Attempted to use List without a "
-            "contained type. Please add a contained type, e.g. "
-            "List[int]"
-        )
+        raise_error_container_parameter_missing("List")
 
     if not hasattr(ann, '__module__'):
         return False
@@ -666,11 +658,7 @@ def is_list(ann):
 
 def is_dict(ann):
     if ann is Dict:
-        raise RuntimeError(
-            "Attempted to use Dict without "
-            "contained types. Please add contained type, e.g. "
-            "Dict[int, int]"
-        )
+        raise_error_container_parameter_missing("Dict")
 
     if not hasattr(ann, '__module__'):
         return False
@@ -680,11 +668,7 @@ def is_dict(ann):
 
 def is_optional(ann):
     if ann is Optional:
-        raise RuntimeError(
-            "Attempted to use Optional without a "
-            "contained type. Please add a contained type, e.g. "
-            "Optional[int]"
-        )
+        raise_error_container_parameter_missing("Optional")
 
     # Optional[T] is just shorthand for Union[T, None], so check for both
     def safe_is_subclass(the_type, super_type):
@@ -885,3 +869,111 @@ def _is_exception(obj):
     if not inspect.isclass(obj):
         return False
     return issubclass(obj, Exception)
+
+def raise_error_container_parameter_missing(target_type):
+    if target_type == 'Dict':
+        raise RuntimeError(
+            "Attempted to use Dict without "
+            "contained types. Please add contained type, e.g. "
+            "Dict[int, int]"
+        )
+    raise RuntimeError(
+        f"Attempted to use {target_type} without a "
+        "contained type. Please add a contained type, e.g. "
+        f"{target_type}[int]"
+    )
+
+
+def get_origin(target_type):
+    return getattr(target_type, "__origin__", None)
+
+
+def get_args(target_type):
+    return getattr(target_type, "__args__", None)
+
+
+def check_args_exist(target_type):
+    if target_type is List or target_type is list:
+        raise_error_container_parameter_missing("List")
+    elif target_type is Tuple or target_type is tuple:
+        raise_error_container_parameter_missing("Tuple")
+    elif target_type is Dict or target_type is dict:
+        raise_error_container_parameter_missing("Dict")
+    elif target_type is None or target_type is Optional:
+        raise_error_container_parameter_missing("Optional")
+
+
+# supports List/Dict/Tuple and Optional types
+# TODO support future
+def container_checker(obj, target_type):
+    origin_type = get_origin(target_type)
+    check_args_exist(target_type)
+    if origin_type is list or origin_type is List:
+        if not isinstance(obj, list):
+            return False
+        arg_type = get_args(target_type)[0]
+        arg_origin = get_origin(arg_type)
+        for el in obj:
+            # check if nested container, ex: List[List[str]]
+            if arg_origin:  # processes nested container, ex: List[List[str]]
+                if not container_checker(el, arg_type):
+                    return False
+            elif not isinstance(el, arg_type):
+                return False
+        return True
+    elif origin_type is Dict or origin_type is dict:
+        if not isinstance(obj, dict):
+            return False
+        key_type = get_args(target_type)[0]
+        val_type = get_args(target_type)[1]
+        for key, val in obj.items():
+            # check if keys are of right type
+            if not isinstance(key, key_type):
+                return False
+            val_origin = get_origin(val_type)
+            if val_origin:
+                if not container_checker(val, val_type):
+                    return False
+            elif not isinstance(val, val_type):
+                return False
+        return True
+    elif origin_type is Tuple or origin_type is tuple:
+        if not isinstance(obj, tuple):
+            return False
+        arg_types = get_args(target_type)
+        if len(obj) != len(arg_types):
+            return False
+        for el, el_type in zip(obj, arg_types):
+            el_origin = get_origin(el_type)
+            if el_origin:
+                if not container_checker(el, el_type):
+                    return False
+            elif not isinstance(el, el_type):
+                return False
+        return True
+    elif origin_type is Union:  # actually handles Optional Case
+        if obj is None:  # check before recursion because None is always fine
+            return True
+        optional_type = get_args(target_type)[0]
+        optional_origin = get_origin(optional_type)
+        if optional_origin:
+            return container_checker(obj, optional_type)
+        elif isinstance(obj, optional_type):
+            return True
+    return False
+
+
+def _isinstance(obj, target_type) -> bool:
+    origin_type = get_origin(target_type)    
+    if origin_type:
+        return container_checker(obj, target_type)
+
+    # Check to handle weird python type behaviors
+    # 1. python 3.6 returns None for origin of containers without 
+    #    contained type (intead of returning outer container type)
+    # 2. non-typed optional origin returns as none instead 
+    #    of as optional in 3.6-3.8
+    check_args_exist(target_type)
+
+    # handle non-containers
+    return isinstance(obj, target_type)

@@ -414,6 +414,9 @@ class TORCH_API IRSimplifierBase : public IRMutator {
 
   Stmt* mutate(const For* v) override;
 
+  // Trivially factorize terms by GCD of scalar components.
+  const Term* factorizePolynomial(const Polynomial* poly);
+
   HashProvider& hasher() {
     return hasher_;
   }
@@ -471,9 +474,7 @@ class TORCH_API PolynomialTransformer : public IRSimplifierBase {
 
   const Expr* mutate(const Div* v) override;
 
-  const Expr* mutate(const Mod* v) override {
-    return mutateBinaryOp(v, this);
-  }
+  const Expr* mutate(const Mod* v) override;
 
   const Expr* mutate(const And* v) override {
     return mutateBinaryOp(v, this);
@@ -547,9 +548,6 @@ class TORCH_API TermExpander : public IRSimplifierBase {
 
   // Expand Terms out to a series of Muls.
   const Expr* mutate(const Term* v) override;
-
-  // Trivially factorize terms by GCD of scalar components.
-  const Expr* factorizePolynomial(const Polynomial* poly);
 
   // Expand Polynomials out to a series of Adds.
   const Expr* mutate(const Polynomial* v) override;

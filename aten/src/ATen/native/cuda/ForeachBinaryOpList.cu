@@ -20,7 +20,10 @@ std::vector<Tensor> foreach_tensor_list_op(TensorList tensors1, TensorList tenso
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_binary_op_list_cuda", [&]() {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
         multi_tensor_apply<3>(tensor_lists,
-                              BinaryOpListAlphaFunctor<scalar_t>(),
+                              BinaryOpListAlphaFunctor<scalar_t, 
+                                                       /* depth */ 3,
+                                                       /* r_args_depth */ 2, 
+                                                       /* res_arg_index */ 2>(),
                               Op<opmath_t>(),
                               alpha.to<opmath_t>());
     });
@@ -37,7 +40,10 @@ void foreach_tensor_list_op_(TensorList tensors1, TensorList tensors2, Scalar al
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_binary_op_list_cuda_", [&]() {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
         multi_tensor_apply<2>(tensor_lists,
-                              BinaryOpListAlphaFunctor_<scalar_t>(),
+                              BinaryOpListAlphaFunctor<scalar_t, 
+                                                       /* depth */ 2,
+                                                       /* r_args_depth */ 2, 
+                                                       /* res_arg_index */ 0>(),
                               Op<opmath_t>(),
                               alpha.to<opmath_t>());
     });

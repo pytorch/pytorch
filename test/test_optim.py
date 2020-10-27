@@ -878,7 +878,7 @@ class TestLRScheduler(TestCase):
         # lr = 0.0005   if epoch >= 9
         epochs = 10
         single_targets = [0.05] * 3 + [0.005] * 3 + [0.0005] * 3 + [0.00005] * 3
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
         self._test(scheduler, targets, epochs)
 
@@ -897,7 +897,7 @@ class TestLRScheduler(TestCase):
         # lr = 0.00005   if 9 <= epoch
         epochs = 10
         single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 1
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test_get_last_lr(scheduler, targets, epochs)
 
@@ -908,7 +908,7 @@ class TestLRScheduler(TestCase):
         # lr = 0.00005   if epoch >= 9
         epochs = 10
         single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 3
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test(scheduler, targets, epochs)
 
@@ -919,14 +919,14 @@ class TestLRScheduler(TestCase):
         # lr = 0.00005   if epoch >= 9
         epochs = 10
         single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 3
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test_with_epoch(scheduler, targets, epochs)
 
     def test_exp_lr(self):
         epochs = 10
         single_targets = [0.05 * (0.9 ** x) for x in range(epochs)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = ExponentialLR(self.opt, gamma=0.9)
         self._test(scheduler, targets, epochs)
 
@@ -936,7 +936,7 @@ class TestLRScheduler(TestCase):
         single_targets = [eta_min + (0.05 - eta_min) *
                           (1 + math.cos(math.pi * x / epochs)) / 2
                           for x in range(epochs)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         self._test(scheduler, targets, epochs)
 
@@ -1058,7 +1058,7 @@ class TestLRScheduler(TestCase):
         single_targets += [0.005 * (0.9 ** x) for x in range(3, 6)]
         single_targets += [0.0005 * (0.9 ** x) for x in range(6, 9)]
         single_targets += [0.00005 * (0.9 ** x) for x in range(9, 12)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         schedulers[0] = StepLR(self.opt, gamma=0.1, step_size=3)
         schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
         self._test(schedulers, targets, epochs)
@@ -1070,7 +1070,7 @@ class TestLRScheduler(TestCase):
         single_targets += [0.005 * (0.9 ** x) for x in range(2, 5)]
         single_targets += [0.0005 * (0.9 ** x) for x in range(5, 9)]
         single_targets += [0.00005 * (0.9 ** x) for x in range(9, 11)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         schedulers[0] = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
         self._test(schedulers, targets, epochs)
@@ -1082,7 +1082,7 @@ class TestLRScheduler(TestCase):
                           (1 + math.cos(math.pi * x / epochs)) / 2
                           for x in range(epochs)]
         single_targets = [x * 0.1 ** (i // 3) for i, x in enumerate(single_targets)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         schedulers = [None] * 2
         schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         schedulers[1] = StepLR(self.opt, gamma=0.1, step_size=3)
@@ -1096,7 +1096,7 @@ class TestLRScheduler(TestCase):
                           for x in range(epochs)]
         multipliers = [1] * 2 + [0.1] * 3 + [0.01] * 4 + [0.001]
         single_targets = [x * y for x, y in zip(single_targets, multipliers)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         schedulers = [None] * 2
         schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         schedulers[1] = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
@@ -1110,7 +1110,7 @@ class TestLRScheduler(TestCase):
                           for x in range(epochs)]
         multipliers = [0.1 ** i for i in range(epochs)]
         single_targets = [x * y for x, y in zip(single_targets, multipliers)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        targets = [single_targets, [x * epochs for x in single_targets]]
         schedulers = [None] * 2
         schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         schedulers[1] = ExponentialLR(self.opt, gamma=0.1)
@@ -1222,8 +1222,8 @@ class TestLRScheduler(TestCase):
         diff_lr = max_lr - base_lr
         gamma = 0.9
         xs = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.50, 0.25, 0, 0.25, 0.5, 0.75, 1]
-        lr_target = list(map(lambda x: base_lr + x[1] * diff_lr * gamma**x[0], enumerate(xs)))
-        momentum_target = list(map(lambda x: max_lr - x[1] * diff_lr * gamma**x[0], enumerate(xs)))
+        lr_target = [base_lr + x * diff_lr * gamma**i for i, x in enumerate(xs)]
+        momentum_target = [max_lr - x * diff_lr * gamma**i for i, x in enumerate(xs)]
         lr_targets = [lr_target, lr_target]
         momentum_targets = [momentum_target, momentum_target]
         scheduler = CyclicLR(self.opt, base_lr=base_lr,
@@ -1234,10 +1234,10 @@ class TestLRScheduler(TestCase):
 
     def test_cycle_lr_triangular_mode(self):
         lr_target_1 = [1, 2, 3, 4, 5, 4, 3, 2, 1, 2, 3]
-        lr_target_2 = list(map(lambda x: x + 1, lr_target_1))
+        lr_target_2 = [x + 1 for x in lr_target_1]
         lr_targets = [lr_target_1, lr_target_2]
         momentum_target_1 = [5, 4, 3, 2, 1, 2, 3, 4, 5, 4, 3]
-        momentum_target_2 = list(map(lambda x: x + 1, momentum_target_1))
+        momentum_target_2 = [x + 1 for x in momentum_target_1]
         momentum_targets = [momentum_target_1, momentum_target_2]
         scheduler = CyclicLR(self.opt, base_lr=[1, 2], max_lr=[5, 6], step_size_up=4,
                              cycle_momentum=True, base_momentum=[1, 2], max_momentum=[5, 6],
@@ -1247,11 +1247,11 @@ class TestLRScheduler(TestCase):
     def test_cycle_lr_triangular2_mode(self):
         lr_target_1 = [1, 2, 3, 4, 5, 4, 3, 2, 1, 1.5, 2.0, 2.5, 3.0, 2.5, 2.0, 1.5, 1,
                        1.25, 1.50, 1.75, 2.00, 1.75]
-        lr_target_2 = list(map(lambda x: x + 2, lr_target_1))
+        lr_target_2 = [x + 2 for x in lr_target_1]
         lr_targets = [lr_target_1, lr_target_2]
         momentum_target_1 = [5.0, 4.0, 3.0, 2.0, 1.0, 2.0, 3.0, 4.0, 5.0, 4.5, 4.0, 3.5,
                              3.0, 3.5, 4.0, 4.5, 5.0, 4.75, 4.5, 4.25, 4.0, 4.25]
-        momentum_target_2 = list(map(lambda x: x + 2, momentum_target_1))
+        momentum_target_2 = [x + 2 for x in momentum_target_1]
         momentum_targets = [momentum_target_1, momentum_target_2]
         scheduler = CyclicLR(self.opt, base_lr=[1, 3], max_lr=[5, 7], step_size_up=4,
                              cycle_momentum=True, base_momentum=[1, 3], max_momentum=[5, 7],
@@ -1267,11 +1267,11 @@ class TestLRScheduler(TestCase):
 
         gamma = 0.9
         xs = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.50, 0.25, 0, 0.25, 0.5, 0.75, 1]
-        lr_target_1 = list(map(lambda x: base_lr_1 + x[1] * diff_lr_1 * gamma**x[0], enumerate(xs)))
-        lr_target_2 = list(map(lambda x: base_lr_2 + x[1] * diff_lr_2 * gamma**x[0], enumerate(xs)))
+        lr_target_1 = [base_lr_1 + x * diff_lr_1 * gamma**i for i, x in enumerate(xs)]
+        lr_target_2 = [base_lr_2 + x * diff_lr_2 * gamma**i for i, x in enumerate(xs)]
         lr_targets = [lr_target_1, lr_target_2]
-        momentum_target_1 = list(map(lambda x: max_lr_1 - x[1] * diff_lr_1 * gamma**x[0], enumerate(xs)))
-        momentum_target_2 = list(map(lambda x: max_lr_2 - x[1] * diff_lr_2 * gamma**x[0], enumerate(xs)))
+        momentum_target_1 = [max_lr_1 - x * diff_lr_1 * gamma**i for i, x in enumerate(xs)]
+        momentum_target_2 = [max_lr_2 - x * diff_lr_2 * gamma**i for i, x in enumerate(xs)]
         momentum_targets = [momentum_target_1, momentum_target_2]
         scheduler = CyclicLR(self.opt, base_lr=[base_lr_1, base_lr_2],
                              max_lr=[max_lr_1, max_lr_2], step_size_up=4,

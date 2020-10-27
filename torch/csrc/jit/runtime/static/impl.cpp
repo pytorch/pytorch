@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <ATen/core/interned_strings.h>
+#include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
@@ -10,59 +11,53 @@
 
 namespace torch {
 namespace jit {
+namespace {
+void OptimizeGraph(std::shared_ptr<torch::jit::Graph>& graph) {
+  Inline(*graph);
+  ConstantPropagation(graph);
+  Canonicalize(graph);
+  ConstantPropagation(graph);
+  RemoveTensorMutation(graph);
+  ConstantPropagation(graph);
+}
 
-std::shared_ptr<torch::jit::Graph> PrepareForStaticRuntime(
-    std::shared_ptr<torch::jit::Graph> g) {
-  Inline(*g);
-  ConstantPropagation(g);
-  Canonicalize(g);
-  ConstantPropagation(g);
-  RemoveTensorMutation(g);
-  ConstantPropagation(g);
-
-  for (auto n : g->nodes()) {
+void CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
+  for (auto n : graph->nodes()) {
     if (n->kind() == c10::Symbol::fromQualString("prim::GetAttr")) {
       throw std::runtime_error("Cannot accelerate unfrozen graphs");
     }
   }
+}
 
-  // remove unused input 0 from graph
-  if (g->inputs().at(0)->type()->is_module()) {
-    TORCH_CHECK(!g->inputs().at(0)->hasUses());
-    g->eraseInput(0);
+// remove unused input 0 from graph
+void RemoveSelfFromGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
+  if (graph->inputs().at(0)->type()->is_module()) {
+    TORCH_CHECK(!graph->inputs().at(0)->hasUses());
+    graph->eraseInput(0);
   }
-
-  return g;
 }
 
-std::shared_ptr<torch::jit::Graph> PrepareForStaticRuntime(
-    const torch::jit::Module& m) {
-  auto module = m.copy();
-  module.eval();
-  module = freeze_module(module);
-  auto g = module.get_method("forward").graph();
-  return PrepareForStaticRuntime(g);
+// remove "self" from function schema
+std::unique_ptr<c10::FunctionSchema> RemoveSelfFromSchema(
+    const c10::FunctionSchema& s) {
+  TORCH_CHECK(s.arguments().size() >= 1 && s.arguments()[0].name() == "self");
+  std::vector<Argument> args({s.arguments().begin() + 1, s.arguments().end()});
+  return std::make_unique<c10::FunctionSchema>(s.cloneWithArguments(args));
 }
 
-StaticRuntime::StaticRuntime(std::shared_ptr<torch::jit::Graph> g)
-    : StaticRuntime(g, c10::nullopt) {}
-
-StaticRuntime::StaticRuntime(const torch::jit::Module& m)
-    : StaticRuntime(PrepareForStaticRuntime(m), m) {}
-
-StaticRuntime::StaticRuntime(
-    std::shared_ptr<torch::jit::Graph> g,
-    c10::optional<torch::jit::Module> m)
-    : graph_(g) {
+void AssignRegisters(
+    const std::shared_ptr<torch::jit::Graph>& graph,
+    std::unordered_map<Value*, size_t>& value_to_reg,
+    std::vector<size_t>& input_regs,
+    std::vector<size_t>& output_regs) {
   // assign register to Value*
-  std::unordered_map<Value*, size_t> value_to_reg;
-  for (Value* input : g->inputs()) {
+  for (Value* input : graph->inputs()) {
     TORCH_CHECK(value_to_reg.count(input) == 0);
     size_t index = value_to_reg.size();
     value_to_reg[input] = index;
-    input_regs_.push_back(index);
+    input_regs.push_back(index);
   }
-  for (Node* node : graph_->nodes()) {
+  for (Node* node : graph->nodes()) {
     for (Value* input : node->inputs()) {
       TORCH_CHECK(value_to_reg.count(input) > 0);
     }
@@ -73,18 +68,78 @@ StaticRuntime::StaticRuntime(
       value_to_reg[output] = index;
     }
   }
-
-  TORCH_CHECK(g->outputs().size() > 0);
-  for (Value* output : g->outputs()) {
+  TORCH_CHECK(graph->outputs().size() > 0);
+  for (Value* output : graph->outputs()) {
     TORCH_CHECK(value_to_reg.count(output) > 0);
-    output_regs_.push_back(value_to_reg[output]);
+    output_regs.push_back(value_to_reg[output]);
   }
+}
 
+void DeduceInternalBlobs(
+    const std::shared_ptr<torch::jit::Graph>& graph,
+    const std::unordered_map<Value*, size_t>& value_to_reg,
+    std::vector<size_t>& internals) {
+  std::unordered_set<Value*> outputs{graph->outputs().begin(),
+                                     graph->outputs().end()};
+  for (Node* node : graph->nodes()) {
+    if (node->kind() != prim::Constant) {
+      for (Value* output : node->outputs()) {
+        if (outputs.count(output) == 0) {
+          internals.push_back(value_to_reg.at(output));
+        }
+      }
+    }
+  }
+}
+} // namespace
+
+void InferenceModule::init() {
+  OptimizeGraph(graph);
+  CheckGraphEligibility(graph);
+  RemoveSelfFromGraphInput(graph);
+  AssignRegisters(graph, value_to_reg, input_regs, output_regs);
+  DeduceInternalBlobs(graph, value_to_reg, internals);
+}
+
+InferenceModule::InferenceModule(const torch::jit::Module& m)
+    : module(m.copy()), graph(nullptr), schema(nullptr) {
+  module.eval();
+  module = freeze_module(module);
+
+  Method method = module.get_method("forward");
+  graph = method.graph();
+
+  const c10::FunctionSchema& s = method.function().getSchema();
+  schema = RemoveSelfFromSchema(s);
+
+  init();
+}
+
+InferenceModule::InferenceModule(std::shared_ptr<torch::jit::Graph> g)
+    : module(), graph(g), schema(nullptr) {
+  init();
+}
+
+StaticRuntime::StaticRuntime(
+    const torch::jit::Module& m,
+    const StaticRuntimeOptions& opts)
+    : StaticRuntime(PrepareForStaticRuntime(m), opts) {}
+
+StaticRuntime::StaticRuntime(
+    std::shared_ptr<InferenceModule> m,
+    const StaticRuntimeOptions& opts)
+    : module_(m), opts_(opts) {
+  TORCH_CHECK(
+      module_ != nullptr,
+      "std::shared_ptr<InferenceModule> module_ cannot be nullptr")
   // initialize registers
-  reg_.resize(value_to_reg.size());
+  reg_.resize(module_->value_to_reg.size());
 
-  // fill workspace_ with constants
-  for (Node* node : graph_->nodes()) {
+  Graph* graph = module_->graph.get();
+  auto& value_to_reg = module_->value_to_reg;
+
+  // fill workspace_ with constants and create ProcessedNodes
+  for (Node* node : graph->nodes()) {
     if (node->kind() == prim::Constant) {
       TORCH_CHECK(node->output()->type()->kind() != FunctionType::Kind);
       reg_[value_to_reg[node->output()]] = toIValue(node->output()).value();
@@ -96,46 +151,34 @@ StaticRuntime::StaticRuntime(
       for (Value* output : node->outputs()) {
         output_regs.push_back(value_to_reg[output]);
       }
-      nodes_.emplace_back(node, std::move(input_regs), std::move(output_regs));
+      nodes_.emplace_back(
+          node,
+          std::move(input_regs),
+          std::move(output_regs),
+          opts.enable_out_variant);
     }
-  }
-
-  if (m) {
-    Method method = m->get_method("forward");
-    const c10::FunctionSchema& schema = method.function().getSchema();
-
-    // remove "self" from function schema
-    TORCH_CHECK(
-        schema.arguments().size() >= 1 &&
-        schema.arguments()[0].name() == "self");
-    std::vector<Argument> args(
-        {schema.arguments().begin() + 1, schema.arguments().end()});
-    schema_ =
-        std::make_unique<c10::FunctionSchema>(schema.cloneWithArguments(args));
   }
 }
 
 std::vector<at::Tensor> StaticRuntime::run(
     const std::vector<at::Tensor>& inps) const {
+  std::vector<c10::IValue> stack;
+  stack.resize(inps.size());
   for (size_t i = 0; i < inps.size(); i++) {
-    Input(i) = inps[i];
+    stack[i] = inps[i];
   }
 
-  for (const auto& n : nodes_) {
-    n.run(reg_);
-  }
+  c10::IValue v = run(stack, std::unordered_map<std::string, c10::IValue>());
 
   std::vector<at::Tensor> out;
-  for (size_t i = 0; i < graph_->outputs().size(); i++) {
-    const IValue& v = Output(i);
-    if (v.isTuple()) {
-      auto t = v.toTuple();
-      for (const auto& el : t->elements()) {
-        out.emplace_back(el.toTensor());
-      }
-    } else {
-      out.emplace_back(v.toTensor());
+
+  if (v.isTuple()) {
+    auto t = v.toTuple();
+    for (const auto& el : t->elements()) {
+      out.emplace_back(el.toTensor());
     }
+  } else {
+    out.emplace_back(v.toTensor());
   }
   return out;
 }
@@ -143,14 +186,25 @@ std::vector<at::Tensor> StaticRuntime::run(
 c10::IValue StaticRuntime::run(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) const {
+  caffe2::MakeGuard([&] {
+    if (opts_.cleanup_activations) {
+      for (size_t i : module_->internals) {
+        if (reg_[i].isTensor()) {
+          // Temporary solution
+          auto t = reg_[i].toTensor();
+          reg_[i] = at::empty({0}, t.options());
+        }
+      }
+    }
+  });
   std::vector<IValue> stack(args);
   if (!kwargs.empty()) {
     // This is not ideal
     TORCH_CHECK(
-        schema_ != nullptr,
+        module_->schema != nullptr,
         "Schema is not available. Consider creating the Static Runtime "
         "with StaticRuntime(const torch::jit::Module& m) instead.");
-    schema_->checkAndNormalizeInputs(stack, kwargs);
+    module_->schema->checkAndNormalizeInputs(stack, kwargs);
   }
   for (size_t i = 0; i < stack.size(); i++) {
     Input(i) = stack[i];
@@ -238,10 +292,10 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   if (!kwargs.empty()) {
     // This is not ideal
     TORCH_CHECK(
-        schema_ != nullptr,
+        module_->schema != nullptr,
         "Schema is not available. Consider creating the Static Runtime "
         "with StaticRuntime(const torch::jit::Module& m) instead.");
-    schema_->checkAndNormalizeInputs(stack, kwargs);
+    module_->schema->checkAndNormalizeInputs(stack, kwargs);
   }
   for (size_t i = 0; i < stack.size(); i++) {
     Input(i) = stack[i];
@@ -282,7 +336,8 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
 ProcessedNode::ProcessedNode(
     Node* node,
     std::vector<size_t>&& input_regs,
-    std::vector<size_t>&& output_regs)
+    std::vector<size_t>&& output_regs,
+    bool enable_out_variants)
     : node_(node),
       input_regs_(std::move(input_regs)),
       output_regs_(std::move(output_regs)) {
@@ -293,7 +348,7 @@ ProcessedNode::ProcessedNode(
     TORCH_CHECK(op.hasOperation());
     op_ = op.getOperation(node);
   }
-  if (canRunOutOfPlace(node)) {
+  if (enable_out_variants && canRunOutOfPlace(node)) {
     fn_ = getOutOfPlaceOperation(node);
   }
 }
