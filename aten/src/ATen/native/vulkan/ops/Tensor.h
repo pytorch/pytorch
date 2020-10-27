@@ -145,7 +145,7 @@ class vTensor final {
   /*
     Host access - these functions will be expensive if they trigger a GPU -> CPU
     sync due to pending writes.  A call to host() will trigger an async copy in
-    such scenarios, which is then explictly waited on as part of Future::wait().
+    such scenarios, which is then explicitly waited on as part of Future::wait().
     Consequently, for optimal performance, put as much time and distance between
     the place where this function is called, and the location where the future is
     waited on.
