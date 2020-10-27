@@ -1,5 +1,6 @@
-#include <gtest/gtest.h>
+#ifdef USE_VULKAN_API
 
+#include <gtest/gtest.h>
 #include <ATen/ATen.h>
 
 // TODO: These functions should move to a common place.

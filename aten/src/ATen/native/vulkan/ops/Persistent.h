@@ -25,6 +25,8 @@ class Pool final {
   api::Resource::Pool pool_;
 };
 
+Pool* persistent();
+
 } // namespace ops
 } // namespace vulkan
 } // namespace native

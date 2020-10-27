@@ -482,6 +482,18 @@ void Resource::Pool::purge() {
   buffer_.pool.clear();
 }
 
+void Resource::Pool::release(const Buffer& buffer) {
+  release_buffer(buffer);
+}
+
+void Resource::Pool::release(const Image& image) {
+  release_image(image);
+}
+
+void Resource::Pool:release(const Fence& fence) {
+  fence.wait();
+}
+
 } // namespace api
 } // namespace vulkan
 } // namespace native
