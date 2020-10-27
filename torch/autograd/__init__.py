@@ -71,7 +71,7 @@ def backward(
     retain_graph: Optional[bool] = None,
     create_graph: bool = False,
     grad_variables: Optional[_TensorOrTensors] = None,
-    inputs: Optional[_TensorOrTensors] = None,
+    inputs: Optional[Sequence[torch.Tensor]] = None,
 ) -> None:
     r"""Computes the sum of gradients of given tensors w.r.t. graph leaves.
 
@@ -128,6 +128,7 @@ def backward(
                                "use 'grad_tensors'.")
 
     tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tuple(tensors)
+    inputs = (inputs,) if isinstance(inputs, torch.Tensor) else tuple(inputs)
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
     grad_tensors_ = _make_grads(tensors, grad_tensors_)
@@ -135,8 +136,8 @@ def backward(
         retain_graph = create_graph
 
     Variable._execution_engine.run_backward(
-        tensors, grad_tensors_, retain_graph, create_graph,
-        allow_unreachable=True)  # allow_unreachable flag
+        tensors, grad_tensors_, retain_graph, create_graph, inputs,
+        allow_unreachable=True, accumulate_grad=True)  # allow_unreachable flag
 
 
 def grad(
@@ -214,7 +215,7 @@ def grad(
 
     return Variable._execution_engine.run_backward(
         outputs, grad_outputs_, retain_graph, create_graph,
-        inputs, allow_unused)
+        inputs, allow_unused, accumulate_grad=False)
 
 
 # This function applies in case of gradient checkpointing for memory

@@ -178,7 +178,7 @@ class Tensor(torch._C._TensorBase):
         # All strings are unicode in Python 3.
         return torch._tensor_str._str(self)
 
-    def backward(self, gradient=None, retain_graph=None, create_graph=False):
+    def backward(self, gradient=None, retain_graph=None, create_graph=False, inputs=None):
         r"""Computes the gradient of current tensor w.r.t. graph leaves.
 
         The graph is differentiated using the chain rule. If the tensor is
@@ -224,7 +224,7 @@ class Tensor(torch._C._TensorBase):
                 gradient=gradient,
                 retain_graph=retain_graph,
                 create_graph=create_graph)
-        torch.autograd.backward(self, gradient, retain_graph, create_graph)
+        torch.autograd.backward(self, gradient, retain_graph, create_graph, inputs)
 
     def register_hook(self, hook):
         r"""Registers a backward hook.
