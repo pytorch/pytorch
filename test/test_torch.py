@@ -5901,7 +5901,6 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaises(TypeError):
             torch.isinf(1)  # Parameter must be a tensor
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @dtypes(*tuple(itertools.combinations_with_replacement(torch.testing.get_all_dtypes(), 2)))
     def test_comparison_ops_type_promotion_and_broadcasting(self, device, dtypes):
         # issue #42660
