@@ -45,7 +45,6 @@ from .utils import (
 
 from collections import OrderedDict
 import warnings
-import copy
 import re
 
 from typing import Optional

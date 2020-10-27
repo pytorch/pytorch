@@ -12,7 +12,6 @@ from .pattern_utils import (
 
 from .fusion_patterns import *  # noqa: F401
 
-import copy
 class Fuser:
     def fuse(self, model, fuse_custom_config_dict=None):
         if fuse_custom_config_dict is None:
