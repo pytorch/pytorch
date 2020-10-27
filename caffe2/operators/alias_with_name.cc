@@ -17,7 +17,7 @@ Similar with AliasOp, storing the alias name as operator argument.
     .Input(0, "input", "Input tensor whose storage will be shared.")
     .Output(0, "output", "Tensor of same shape as input, sharing its storage.");
 
-}  namespace caffe2
+} // namespace caffe2
 
 C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     AliasWithName,
