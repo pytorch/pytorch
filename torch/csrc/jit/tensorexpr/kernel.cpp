@@ -1355,56 +1355,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   }
 }
 
-void TensorExprKernel::flattenTensors(BackendType backendType) {
-  if (backendType != BackendType::kCudaCodeGen &&
-      backendType != BackendType::kBlockCodeGen) {
-    // We only need to flatten for GPU, for other backends just use the same
-    // tensors.
-    flatTensorOutputs_ = tensorOutputs_;
-    return;
-  }
-
-  flatTensorOutputs_.resize(tensorOutputs_.size());
-  for (size_t tensorIdx = 0; tensorIdx < tensorOutputs_.size(); tensorIdx++) {
-    Tensor* tensor = tensorOutputs_[tensorIdx];
-    ExprHandle totalCount = ExprHandle(tensor->dim(0));
-    for (int i = 1; i < tensor->ndim(); i++) {
-      const IntImm* totalCountImm = totalCount.AsNode<IntImm>();
-      const IntImm* tensorDimImm = dynamic_cast<const IntImm*>(tensor->dim(i));
-      if (totalCountImm && tensorDimImm) {
-        // TODO: switch to real constant folding when it is available.
-        totalCount = ExprHandle(totalCountImm->value() * tensorDimImm->value());
-      } else {
-        totalCount = totalCount * ExprHandle(tensor->dim(i));
-      }
-    }
-    // Flatten the index for GPU kernels.
-    // TODO: move this to fusing axis when it is ready.
-    Tensor* newOut = Compute(
-        tensor->buf()->name_hint() + "_flat",
-        {totalCount},
-        [tensor](const VarHandle& index) -> ExprHandle {
-          std::vector<ExprHandle> dims;
-          ExprHandle value = index;
-          for (int i = tensor->ndim() - 1; i >= 0; i--) {
-            ExprHandle idx = value;
-            if (i > 0) {
-              idx = Mod::make(value, ExprHandle(tensor->dim(i)));
-            }
-            dims.push_back(idx);
-            value = value / ExprHandle(tensor->dim(i));
-          }
-          std::reverse(dims.begin(), dims.end());
-          return tensor->call(dims);
-        });
-    flatTensorOutputs_[tensorIdx] = newOut;
-  }
-}
-
 Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
-  flattenTensors(backendType);
-
-  torch::jit::tensorexpr::LoopNest l(flatTensorOutputs_);
+  torch::jit::tensorexpr::LoopNest l(tensorOutputs_);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
@@ -1417,12 +1369,12 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
     l.computeInline(p.second->buf());
   }
   if (backendType == kCudaCodeGen) {
-    for (size_t i = 0; i < flatTensorOutputs_.size(); i++) {
-      Tensor* tensor = flatTensorOutputs_[i];
-
-      // For every output tensor we've created a flattened 1D tensor - let's
-      // mark the original output tensor with computeInline
-      l.computeInline(tensorOutputs_[i]->buf());
+    for (auto tensor : tensorOutputs_) {
+      std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+      TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
+      For* flattened = nullptr;
+      LoopNest::flatten(loops, &flattened);
+      assert(flattened);
 
       int loopLevels = getTECudaPointwiseLoopLevels();
       const int kDefaultLoopLevels = 2;
@@ -1437,8 +1389,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
         if (blockSize < 0) {
           blockSize = kDefaultBlockSize;
         }
-        std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-        l.splitWithMask(loops[0], blockSize, &outer, &inner);
+        l.splitWithMask(flattened, blockSize, &outer, &inner);
         l.setGPUBlockIndex(outer, 0);
         l.setGPUThreadIndex(inner, 0);
       } else if (loopLevels == 3) {
@@ -1451,8 +1402,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
         const int kDefaultBlockSize = 256;
         blockCount = (blockCount > 0) ? blockCount : kDefaultBlockCount;
         blockSize = (blockSize > 0) ? blockSize : kDefaultBlockSize;
-        std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-        l.splitWithMask(loops[0], blockCount * blockSize, &outer, &inner);
+        l.splitWithMask(flattened, blockCount * blockSize, &outer, &inner);
         l.splitWithMask(inner, blockSize, &inner1, &inner2);
         l.setGPUBlockIndex(inner1, 0);
         l.setGPUThreadIndex(inner2, 0);
@@ -1465,12 +1415,11 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
   if (backendType == kBlockCodeGen) {
     auto block_analysis = std::make_unique<CreateBufferMap>();
-    for (size_t i = 0; i < flatTensorOutputs_.size(); i++) {
+    for (auto tensor : tensorOutputs_) {
       const int default_fp16_blocksize = 16;
       const int default_uint8_blocksize = 32;
       int blockSize = default_fp16_blocksize;
       // We only handle looplevels == 2 for now
-      Tensor* tensor = flatTensorOutputs_[i];
       // Run Block analysis to get multi dim buffer info
       auto root_stmt = l.root_stmt();
       root_stmt->accept(block_analysis.get());
@@ -1478,12 +1427,16 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
       if (tensor->buf()->dtype().scalar_type() == ScalarType::Byte) {
         blockSize = default_uint8_blocksize;
       }
-      l.computeInline(l.getLoopBodyFor(tensorOutputs_[i]));
-      For* outer;
-      For* inner;
+
       std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-      TORCH_INTERNAL_ASSERT(loops.size() > 0, "loops should not be empty");
-      l.splitWithMask(loops[0], blockSize, &outer, &inner);
+      TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
+      For* flattened = nullptr;
+      LoopNest::flatten(loops, &flattened);
+      assert(flattened);
+
+      For* outer = nullptr;
+      For* inner = nullptr;
+      l.splitWithMask(flattened, blockSize, &outer, &inner);
       l.setGPUBlockIndex(outer, 0);
       l.setGPUThreadIndex(inner, 0);
       l.setBufferMap(outer, block_analysis->getBufferMap());
@@ -1531,7 +1484,7 @@ std::vector<CodeGen::BufferArg> TensorExprKernel::prepareBufferArgs() {
       params.emplace_back(stride.var);
     }
   }
-  for (auto& o : flatTensorOutputs_) {
+  for (auto& o : tensorOutputs_) {
     params.emplace_back(o);
   }
   return params;
