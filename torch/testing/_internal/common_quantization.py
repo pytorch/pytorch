@@ -604,7 +604,8 @@ class QuantizationTestCase(TestCase):
                            expected_node_occurrence=None,
                            expected_node_list=None,
                            debug=False,
-                           print_debug_info=False):
+                           print_debug_info=False,
+                           custom_qconfig=None):
         """ Quantizes model with graph mode quantization on fx and check if the
         quantized model contains the quantized_node
 
@@ -627,14 +628,19 @@ class QuantizationTestCase(TestCase):
         # TODO: make img_data a single example instead of a list
         if type(inputs) == list:
             inputs = inputs[0]
-        if quant_type == QuantType.QAT:
-            qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
-            model.train()
-        elif quant_type == QuantType.STATIC:
-            qconfig = get_default_qconfig(torch.backends.quantized.engine)
-            model.eval()
+        if custom_qconfig is None:
+            if quant_type == QuantType.QAT:
+                qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
+            elif quant_type == QuantType.STATIC:
+                qconfig = get_default_qconfig(torch.backends.quantized.engine)
+            else:
+                qconfig = default_dynamic_qconfig
         else:
-            qconfig = default_dynamic_qconfig
+            qconfig = custom_qconfig
+
+        if quant_type == QuantType.QAT:
+            model.train()
+        else:
             model.eval()
 
         original = symbolic_trace(model)
@@ -645,10 +651,10 @@ class QuantizationTestCase(TestCase):
 
         qconfig_dict = {'': qconfig}
         prepared = prepare(original, qconfig_dict)
-        prepared(*inputs)
+        if not quant_type == QuantType.DYNAMIC:
+            prepared(*inputs)
         qgraph = convert_fx(prepared)
         qgraph_debug = convert_fx(prepared, debug=True)
-
         result = qgraph(*inputs)
         result_debug = qgraph_debug(*inputs)
 
