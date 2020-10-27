@@ -148,14 +148,17 @@ class Pipe(Module):
     Pipe combines pipeline parallelism with checkpointing to reduce peak
     memory required to train while minimizing device under-utilization.
 
-    You should determine the balance when defining a :class:`Pipe` module, as
-    balancing will not be done automatically. The module will be partitioned
-    into multiple devices according to the given balance. You may rely on
-    heuristics to find your own optimal configuration.
+    You should place all the modules on the appropriate devices before passing
+    them to this API and wrap them into an nn.Sequential module defining the
+    desired order of execution.
 
     Args:
         module (torch.nn.Sequential):
-            sequential module to be parallelized
+            Sequential module to be parallelized using pipelining. Each module
+            in the sequence has to have all of its parameters on a single
+            device. Each module in the sequence has to either be an nn.Module
+            or nn.Sequential (to combine multiple sequential modules on a single
+            device)
 
     Keyword Args:
         chunks (int):

@@ -11,7 +11,7 @@ from torch import nn
 from torch.distributed._pipeline.sync import Pipe
 from torch.distributed._pipeline.sync.skip import pop, skippable, stash
 from torch.distributed._pipeline.sync.skip.portal import PortalBlue, PortalCopy, PortalOrange
-from torch.distributed._pipeline.sync._test_libs.utils import convert_to_balance
+from torch.testing._internal.distributed.pipeline.utils import convert_to_balance
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")

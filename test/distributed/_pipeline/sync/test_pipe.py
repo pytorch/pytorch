@@ -6,7 +6,6 @@
 # LICENSE file in the root directory of this source tree.
 from collections import OrderedDict
 from copy import deepcopy
-import re
 import time
 
 import pytest
@@ -517,6 +516,24 @@ def test_verify_module_params_on_same_device():
             ' to place the module on a single device'):
         Pipe(model)
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
+@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="Need atleast two GPUs")
+def test_verify_nested_modules():
+    model = nn.Sequential(
+        nn.Sequential(
+            nn.Linear(32, 16).cuda(0),
+            nn.Linear(16, 8).cuda(0)
+        ),
+        nn.Sequential(
+            nn.Linear(8, 4).cuda(1),
+            nn.Linear(4, 2).cuda(1)
+        ),
+    )
+
+    pipe = Pipe(model)
+    out = pipe(torch.rand(10, 32).cuda(0))
+    assert out.device == torch.device("cuda:1")
+    assert out.size() == torch.Size([10, 2])
 
 def test_verify_module_duplicate_parameters_on_same_device():
     class Surrogate(nn.Module):
