@@ -89,3 +89,5 @@ TEST(VulkanAPITest, empty) {
 }
 
 } // namespace
+
+#endif /* USE_VULKAN_API */
