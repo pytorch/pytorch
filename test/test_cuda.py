@@ -23,7 +23,7 @@ from test_torch import AbstractTestCases
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
-    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_SANDCASTLE, \
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
@@ -1545,7 +1545,6 @@ class TestCuda(TestCase):
         counted = t.bincount(minlength=65536)
         self.assertEqual(torch.sum(counted), 10)
 
-    @skipIfRocm
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()
         a /= 100000000
@@ -2152,6 +2151,7 @@ t2.start()
 
         self._run_scaling_case(run, unskipped=3, skipped=1)
 
+    @unittest.skipIf(IS_WINDOWS, 'FIXME: fix this test for Windows')
     def test_grad_scaling_penalty(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
             for i, (input, target) in enumerate(data):
