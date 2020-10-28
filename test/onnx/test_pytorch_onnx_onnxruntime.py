@@ -123,7 +123,7 @@ class TestONNXRuntime(unittest.TestCase):
     opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True  # For IR version 3 type export.
     use_new_jit_passes = False  # For testing main code-path
-    onnx_shape_inference = False
+    onnx_shape_inference = True
 
     def setUp(self):
         torch.manual_seed(0)
@@ -3524,6 +3524,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MaskedSelectModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    @disableScriptTest()
     def test_index_put_to_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
             def forward(self, input_mask, some_const):
@@ -3537,6 +3538,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MaskedFillModel(), (mask, constant))
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    @disableScriptTest()
     def test_index_put_to_masked_scatter(self):
         class MaskedScatterModel(torch.nn.Module):
             def forward(self, input_mask, some_const):
@@ -3561,10 +3563,17 @@ class TestONNXRuntime(unittest.TestCase):
     def test_scalar_type(self):
         class ArithmeticModel(torch.nn.Module):
             def forward(self, x):
-                return x.size(0) * 2 * x
+                return x.size(0) * 2 * x,
 
         x = torch.ones(2, 3, dtype=torch.float32)
         self.run_test(ArithmeticModel(), x)
+
+        class ArithmeticModel2(torch.nn.Module):
+            def forward(self, x):
+                return 2 - x
+
+        x = torch.randn(2, 3, dtype=torch.float32)
+        self.run_test(ArithmeticModel2(), x)
 
         class ReciprocalModel(torch.nn.Module):
             def forward(self, x):

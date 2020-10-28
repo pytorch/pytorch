@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/onnx.h>
 
@@ -378,10 +379,13 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
   auto n_graph = std::make_shared<Graph>();
   auto clone_node = CloneNodeToGraph(n, n_graph);
   n_graph->insertNode(clone_node);
+
   // Register all node outputs as graph outputs.
   for (auto output : clone_node->outputs()) {
     n_graph->registerOutput(output);
   }
+
+  ScalarTypeAnalysisForONNX(n_graph);
 
   GRAPH_DEBUG("Original torch graph: ", n->owningGraph()->toString());
   GRAPH_DEBUG(
