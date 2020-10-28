@@ -91,6 +91,12 @@ std::string IrPrinter::gen(const kir::Node* node, bool top_level) {
   std::swap(node_str, ir_str_);
 
   if (top_level) {
+    // Implicitly mark top level nodes as used, so we
+    // get their definitions printed (useful for debugging)
+    if (auto val = dynamic_cast<const kir::Val*>(node)) {
+      uses_.insert(val);
+    }
+
     // Make a copy of the node uses (and reset global state)
     const auto node_uses = uses_;
     uses_.clear();
