@@ -58,25 +58,25 @@ Persistent::Image Persistent::Pool::image(
   return {
     // Resource
     pool_.image({
-      VK_IMAGE_TYPE_3D,
-      api::utils::convert(options.dtype()),
-      extents,
-      // Usage
-      {
-        VK_IMAGE_USAGE_SAMPLED_BIT |
-            VK_IMAGE_USAGE_STORAGE_BIT,
-        {
-          VMA_MEMORY_USAGE_GPU_ONLY,
-          0u,
-          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        },
-      },
-      // View
-      {
-        VK_IMAGE_VIEW_TYPE_3D,
+        VK_IMAGE_TYPE_3D,
         api::utils::convert(options.dtype()),
-      },
-    }),
+        extents,
+        // Usage
+        {
+          VK_IMAGE_USAGE_SAMPLED_BIT |
+              VK_IMAGE_USAGE_STORAGE_BIT,
+          {
+            VMA_MEMORY_USAGE_GPU_ONLY,
+            0u,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+          },
+        },
+        // View
+        {
+          VK_IMAGE_VIEW_TYPE_3D,
+          api::utils::convert(options.dtype()),
+        },
+      }),
     // Deleter
     std::bind(release_image, std::ref(pool_), std::placeholders::_1),
   };
