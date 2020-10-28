@@ -700,7 +700,8 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
     if (comm_hook_ == nullptr) {
       bucket.work = process_group_->allreduce(tensors);
     } else {
-      bucket.future_work = comm_hook_->runHook(GradBucket(tensors));
+      GradBucket grad_bucket(tensors);
+      bucket.future_work = comm_hook_->runHook(grad_bucket);
     }
   }
 }
@@ -1165,7 +1166,7 @@ void Reducer::finalize_backward() {
       bucket.future_work->wait();
 
       auto future_result =
-          comm_hook_->processFuture(bucket.future_work->value());
+          comm_hook_->parseHookResult(bucket.future_work->value());
 
       for (size_t i = 0; i < future_result.size(); i++) {
         auto& replica = bucket.replicas[i];
