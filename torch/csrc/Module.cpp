@@ -864,7 +864,7 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
 #endif
 
-  auto defaultGenerator = at::detail::getDefaultCPUGenerator();
+  const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator = (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);
   // This reference is meant to be given away, so no need to incref here.
   ASSERT_TRUE(set_module_attr("default_generator", (PyObject*)THPDefaultCPUGenerator, /* incref= */ false));
