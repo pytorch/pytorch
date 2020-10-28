@@ -219,6 +219,7 @@ struct ProfilingRecord {
   void insertShapeProfile(Node* n, size_t offset);
   ProfilingRecord(std::shared_ptr<Graph> g);
   void profileOptionalValue(Value* none_output);
+  void profileListValue(Value* none_output);
 };
 
 } // namespace jit

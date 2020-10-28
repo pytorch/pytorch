@@ -93,6 +93,41 @@ class TestTEFuser(JitTestCase):
         self.assertEqual(len(fusion_groups), 1)
         FileCheck().check("aten::abs").check("aten::mul").run(str(fusion_groups[0]))
 
+    def test_sum_axes(self):
+        def func(x, a):
+            # type: (Tensor, List[int]) -> Tensor
+            return x.sum(a)
+
+        x = torch.ones(5,5)
+        #torch._C._jit_set_num_profiled_runs(num_runs)
+        js = torch.jit.script(func)
+        js(x, (0,1))
+        js(x, (0,1))
+
+    def test_trace(self):
+
+        torch._C._jit_set_texpr_fuser_enabled(False)
+
+        @torch.jit.script
+        def fma(x, y, z):
+            return x + y * z
+        
+        x = torch.ones(128, 1024, device="cuda")
+        y = torch.ones(128, 1024, device="cuda")
+        z = torch.ones(128, 1024, device="cuda")
+
+        fma(x, y, z)
+        fma(x, y, z)
+
+        with torch.autograd.profiler.profile() as prof:
+            #s = time.perf_counter()
+            fma(x, y, z)
+            #e = time.perf_counter()
+
+        prof.export_chrome_trace("fma.json")
+        # print(prof.key_averages().table(sort_by="cuda_time_total"))
+        #print("time (ms): {:.2f}".format((e - s) * 1000))
+
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_sum_simple(self):
         def func(x):

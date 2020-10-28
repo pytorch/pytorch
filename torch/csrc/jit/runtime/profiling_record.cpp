@@ -137,6 +137,22 @@ void ProfilingRecord::profileOptionalValue(Value* none_output) {
   insertProfileIValueOp(none_output, combine, init_val, "none_counts");
 }
 
+void ProfilingRecord::profileListValue(Value* none_output) {
+
+  IValue init_val;
+
+  auto combine = [](const IValue& acc, const IValue& val) {
+    if (val.isNone()) {
+      return val;
+    } else if (acc == val) {
+        return acc;
+    } else {
+        return IValue{std::vector<int64_t>{}};
+    }
+  };
+  insertProfileIValueOp(none_output, combine, init_val, "axes_or_shape");
+}
+
 void ProfilingRecord::insertProfileIValueOp(
     Value* none_output,
     std::function<IValue(const IValue& acc, const IValue& val)> combine,
@@ -277,13 +293,23 @@ void ProfilingRecord::removeProfileCounter(Block* b) {
   }
 }
 
-bool hasGradSumToSizeUses(Value* v) {
-  return std::any_of(v->uses().begin(), v->uses().end(), [](const Use& use) {
-    return use.user->kind() == aten::_grad_sum_to_size;
+bool hasKindUses(Value* v, NodeKind kind) {
+  return std::any_of(v->uses().begin(), v->uses().end(), [kind](const Use& use) {
+    return use.user->kind() == kind;
   });
 }
 
+bool hasGradSumToSizeUses(Value* v) {
+  return hasKindUses(v, aten::_grad_sum_to_size);
+}
+
+bool hasSumUses(Value* v) {
+  return hasKindUses(v, aten::sum);
+}
+
+
 void ProfilingRecord::instrumentBlock(Block* block) {
+
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
     for (size_t offset = 0; offset < n->inputs().size(); offset++) {
@@ -298,6 +324,14 @@ void ProfilingRecord::instrumentBlock(Block* block) {
         // because we are only optimizing in the case of a None value which is
         // immutable
         profileOptionalValue(i);
+      }
+
+      GRAPH_DEBUG("before %", i->debugName(), " isList ", (i->type()->cast<OptionalType>() || i->type()->cast<ListType>()), ", hasSumUses ", hasSumUses(i));
+      i = n->input(offset);
+      GRAPH_DEBUG("after %", i->debugName(), " isList ", (i->type()->cast<OptionalType>() || i->type()->cast<ListType>()), ", hasSumUses ", hasSumUses(i));
+      if ((i->type()->cast<OptionalType>() || i->type()->cast<ListType>()) && (hasSumUses(i) || hasGradSumToSizeUses(i))) {
+        // get a profiled optional
+        profileListValue(i);
       }
     }
 
