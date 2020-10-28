@@ -46,10 +46,11 @@ void debugPrint(const TensorTypePtr& type) {
     int rank = static_cast<int>(sizes->size());
     for (int i = 0; i < rank; i++) {
       const auto& shape_symbol = sizes.value()[i];
+      //int64_t format
       if (shape_symbol.is_static()) {
-        printf("%ld, ", shape_symbol.static_size());
+        printf("%lld, ", shape_symbol.static_size());
       } else {
-        printf("s(%ld), ", *reinterpret_cast<const int64_t*>(&shape_symbol));
+        printf("s(%lld), ", *reinterpret_cast<const int64_t*>(&shape_symbol));
       }
     }
   } else {
