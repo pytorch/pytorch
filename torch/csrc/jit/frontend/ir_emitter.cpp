@@ -2883,15 +2883,37 @@ struct to_ir {
         return iterable_tree;
       }
       case prim::list: {
+        if (apply.inputs().size() == 0) {
+          TypePtr type = type_hint ? type_hint : ListType::ofTensors();
+          return std::make_shared<SimpleValue>(graph->insertNode(graph->createList(type, {}))->output());
+        }
         // list(iter) desugars to [_elem for _elem in iter]
         checkApplyNumInputs(apply, 1);
-        auto iter = apply.inputs()[0];
+        auto iter_input = emitSugaredExpr(apply.inputs()[0], 1);
+
+        // aten::list builtin op is registered for List and Str input
+        // dispatch to the builtin op to avoid perf slowdown on existing uses
+        if (auto simple = asSimple(iter_input)) {
+          if (simple->type()->cast<ListType>() || simple->type()->cast<StringType>()) {
+            return std::make_shared<SimpleValue>(emitBuiltinCall(
+              apply.range(), *method.graph(), aten::list, {simple}, {}));
+          }
+        }
+        const std::string& iter_name = createTempName("$_iter");
+        environment_stack->setSugaredVar(
+          apply.range(),
+          iter_name,
+          iter_input,
+        /*annotated_type=*/nullptr);
+
         const std::string& elem_name = createTempName("$_elem");
         auto ident =
             Var::create(apply.range(), Ident::create(apply.range(), elem_name));
+        auto iter =
+            Var::create(apply.range(), Ident::create(apply.range(), iter_name));
         auto lc = ListComp::create(apply.range(), ident, ident, iter);
         return std::make_shared<SimpleValue>(
-            emitListComprehension(lc, nullptr));
+            emitListComprehension(lc, type_hint));
       }
       default:
         TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
