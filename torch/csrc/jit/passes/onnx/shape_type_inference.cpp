@@ -347,13 +347,14 @@ void UpdateOutputTypeByONNXProto(
   auto graph_proto = model_proto.graph();
 
   // get data from value_info and updated original graph.
-  auto updateNodeOutputsByONNXValueInfo = [&](const onnx::ValueInfoProto& v_info) {
-    for (size_t i = 0; i < n->outputs().size(); ++i) {
-      if (clone_node->output(i)->debugName() == v_info.name()) {
-        UpdateTorchValueByOnnxValueInfo(n->output(i), v_info, symbol_map);
-      }
-    }
-  };
+  auto updateNodeOutputsByONNXValueInfo =
+      [&](const onnx::ValueInfoProto& v_info) {
+        for (size_t i = 0; i < n->outputs().size(); ++i) {
+          if (clone_node->output(i)->debugName() == v_info.name()) {
+            UpdateTorchValueByOnnxValueInfo(n->output(i), v_info, symbol_map);
+          }
+        }
+      };
 
   // Check graph outputs for inferred shapes.
   for (size_t i = 0; i < graph_proto.output_size(); ++i) {

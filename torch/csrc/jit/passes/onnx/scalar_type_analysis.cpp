@@ -111,8 +111,11 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
           auto tensor = input->node()->t(attr::value);
           auto rank = tensor.dim();
           auto scalar_type = tensor.scalar_type();
+          // Mimic PyTorch scalar type promotion logic
+          // from https://github.com/pytorch/pytorch/issues/9515
           if (rank == 0) {
-            auto default_scalar_type = at::typeMetaToScalarType(at::get_default_dtype());
+            auto default_scalar_type =
+                at::typeMetaToScalarType(at::get_default_dtype());
             switch (scalar_type) {
               case at::kDouble:
                 typesFromScalars.emplace_back(default_scalar_type);
