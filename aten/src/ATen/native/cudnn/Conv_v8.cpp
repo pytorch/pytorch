@@ -44,16 +44,17 @@ cudnnDataType_t getDataType(const Tensor &t) {
 }
 
 int64_t getAlignment(const Tensor &t) {
-  return 4;
+  // alignment are in bytes
   int64_t alignment = 1;
   uint64_t address = reinterpret_cast<uint64_t>(t.data_ptr());
   while (address % alignment == 0) alignment *= 2;
-  return alignment / 2;
+  return std::min<int64_t>(alignment / 2, 8);
 }
 
 using shape_stride_t = std::pair<std::vector<int64_t>, std::vector<int64_t>>;
 
 shape_stride_t getInputOutputShapeAndStride(const Tensor &t, int64_t groups) {
+  return {t.sizes().vec(), t.strides().vec()};
   // cuDNN v8 has shape NGCHW..., but PyTorch has NCHW...
   std::vector<int64_t> shape = t.sizes().vec();
   shape.insert(shape.begin() + 1, groups);
@@ -65,6 +66,7 @@ shape_stride_t getInputOutputShapeAndStride(const Tensor &t, int64_t groups) {
 }
 
 shape_stride_t getFilterShapeAndStride(const Tensor &t, int64_t groups) {
+  return {t.sizes().vec(), t.strides().vec()};
   // cuDNN v8 has shape GKCRS..., but PyTorch has KCRS...
   std::vector<int64_t> shape = t.sizes().vec();
   shape.insert(shape.begin(), groups);
@@ -95,10 +97,10 @@ Tensor _cudnn_convolution_v8(
 {
   TORCH_CHECK(!benchmark && !deterministic, "not supported yet");
 
-  std::cout << "input.sizes() " << input.sizes() << std::endl;
-  std::cout << "input.strides() " << input.strides() << std::endl;
-  std::cout << "weight.sizes() " << weight.sizes() << std::endl;
-  std::cout << "weight.strides() " << weight.strides() << std::endl;
+  // std::cout << "input.sizes() " << input.sizes() << std::endl;
+  // std::cout << "input.strides() " << input.strides() << std::endl;
+  // std::cout << "weight.sizes() " << weight.sizes() << std::endl;
+  // std::cout << "weight.strides() " << weight.strides() << std::endl;
 
   TensorArg input_  { input,  "input",  1 },
             weight_ { weight, "weight", 2 };
@@ -115,6 +117,13 @@ Tensor _cudnn_convolution_v8(
                     input.options(), layout);
   // output.fill_(1.0);
 
+  // See #4500
+  Tensor weight_contig = weight.contiguous(layout);
+  // Make sure that NC11 strides follow formula
+  weight_contig.resize_(weight_contig.sizes(), layout);
+  Tensor input_contig = input.contiguous(layout);
+  input_contig.resize_(input_contig.sizes(), layout);
+
   if (output.numel() == 0) {
     return output;
   }
@@ -130,23 +139,27 @@ Tensor _cudnn_convolution_v8(
       .setDilation(convDim, dilation.vec().data())
       .build();
 
-  std::cout << getTensorDescriptor(input, groups, 'x').describe() << std::endl;
-  std::cout << getTensorDescriptor(output, groups, 'y').describe() << std::endl;
-  std::cout << getTensorDescriptor(weight, groups, 'w').describe() << std::endl;
-  std::cout << conv_descriptor.describe() << std::endl;
+  // std::cout << getTensorDescriptor(input_contig, groups, 'x').describe() << std::endl;
+  // std::cout << getTensorDescriptor(output, groups, 'y').describe() << std::endl;
+  // std::cout << getTensorDescriptor(weight_contig, groups, 'w').describe() << std::endl;
+  // std::cout << conv_descriptor.describe() << std::endl;
 
   cudnnHandle_t handle = getCudnnHandle();
 
-  auto op = cudnn_frontend::OperationBuilder()
+  auto op_builder = cudnn_frontend::OperationBuilder();
+  op_builder
       .setOpMode(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
-      .setxDesc(getTensorDescriptor(input, groups, 'x'))
+      .setxDesc(getTensorDescriptor(input_contig, groups, 'x'))
       .setyDesc(getTensorDescriptor(output, groups, 'y'))
-      .setwDesc(getTensorDescriptor(weight, groups, 'w'))
-      .setcDesc(conv_descriptor)
-      .setAlpha(1.0f)
-      .setBeta(0.0f)
-      .build();
-  std::cout << op.describe() << std::endl;
+      .setwDesc(getTensorDescriptor(weight_contig, groups, 'w'))
+      .setcDesc(conv_descriptor);
+  if (input.scalar_type() == kDouble) {
+    op_builder.setAlpha(1.0).setBeta(0.0);
+  } else {
+    op_builder.setAlpha(1.0f).setBeta(0.0f);
+  }
+  auto op = op_builder.build();
+  // std::cout << op.describe() << std::endl;
 
   std::array<cudnn_frontend::Operation const *, 1> ops = {&op};
 
@@ -154,37 +167,44 @@ Tensor _cudnn_convolution_v8(
       .setHandle(handle)
       .setOperationGraph(1, ops.data())
       .build();
-  std::cout << opGraph.describe() << std::endl;
+  // std::cout << opGraph.describe() << std::endl;
 
   auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
       .setOperationGraph(opGraph)
       .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
       .build();
+  // auto fallback = cudnn_frontend::EngineFallbackListBuilder()
+  //     .setOperationGraph(opGraph)
+  //     .setOperation(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
+  //     .build();
 
-  auto &engine_config = heuristics.getEngineConfig();
+  auto &engine_config = heuristics.getEngineConfig(100000);
+  // auto &fallback_list = fallback.getFallbackList();
 
-  for (auto &cfg : engine_config) {
-    try {
-      auto plan = cudnn_frontend::ExecutionPlanBuilder()
-          .setHandle(handle)
-          .setEngineConfig(cfg)
-          .build();
+  for (auto cfg_list : {&engine_config/*, &fallback_list*/}) {
+    for (auto &cfg : *cfg_list) {
+      try {
+        auto plan = cudnn_frontend::ExecutionPlanBuilder()
+            .setHandle(handle)
+            .setEngineConfig(cfg)
+            .build();
 
-      auto workspace_size = plan.getWorkspaceSize();
-      auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
-      void * data_ptrs[] = {input.data_ptr(), output.data_ptr(), weight.data_ptr()};
-      std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
-      int64_t uids[] = {'x', 'y', 'w'};
-      auto variantPack = cudnn_frontend::VariantPackBuilder()
-          .setWorkspacePointer(workspace.data_ptr())
-          .setDataPointers(3, data_ptrs)
-          .setUids(3, uids)
-          .build();
-      AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
-      return output;
-    } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
+        auto workspace_size = plan.getWorkspaceSize();
+        auto workspace = at::empty({workspace_size}, input_contig.options().dtype(kByte));
+        void * data_ptrs[] = {input_contig.data_ptr(), output.data_ptr(), weight_contig.data_ptr()};
+        // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
+        int64_t uids[] = {'x', 'y', 'w'};
+        auto variantPack = cudnn_frontend::VariantPackBuilder()
+            .setWorkspacePointer(workspace.data_ptr())
+            .setDataPointers(3, data_ptrs)
+            .setUids(3, uids)
+            .build();
+        AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
+        return output;
+      } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
+    }
   }
-  TORCH_CHECK(false, "Unable to find an engine to execute this computation")
+  TORCH_CHECK(false, "Unable to find an engine to execute this computation");
 }
 
 }}
