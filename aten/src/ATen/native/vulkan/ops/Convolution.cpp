@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/ops/Persistent.h>
 #include <torch/custom_class.h>
 
@@ -42,16 +43,19 @@ class Context final : public torch::jit::CustomClassHolder {
   struct {
     Persistent::Image weight;
     Persistent::Buffer bias;
+    std::vector<int64_t> stride;
+    std::vector<int64_t> padding;
+    std::vector<int64_t> dilation;
   } packed_;
 
   struct {
     Tensor weight;
     c10::optional<Tensor> bias;
+    std::vector<int64_t> stride;
+    std::vector<int64_t> padding;
+    std::vector<int64_t> dilation;
   } original_;
 
-  std::vector<int64_t> stride_;
-  std::vector<int64_t> padding_;
-  std::vector<int64_t> dilation_;
   int64_t groups_;
   c10::optional<Scalar> output_min_;
   c10::optional<Scalar> output_max_;
@@ -85,14 +89,17 @@ Context::Context(
   : packed_{
       prepack_weights(weight.contiguous()),
       prepack_biases(*bias),  // TODO (Ashkan)!
+      expand_param_if_needed(stride, "stride", 2),
+      expand_param_if_needed(padding, "padding", 2),
+      expand_param_if_needed(dilation, "dilation", 2),
     },
     original_ {
       std::move(weight),
       std::move(bias),
+      std::move(stride),
+      std::move(padding),
+      std::move(dilation),
     },
-    stride_(std::move(stride)),
-    padding_(std::move(padding)),
-    dilation_(std::move(dilation)),
     groups_(groups),
     output_min_(output_min),
     output_max_(output_max) {
@@ -106,9 +113,9 @@ Context::State Context::unpack() const {
   return Context::State{
     original_.weight,
     original_.bias,
-    stride_,
-    padding_,
-    dilation_,
+    original_.stride,
+    original_.padding,
+    original_.dilation,
     groups_,
     output_min_,
     output_max_,
