@@ -19446,6 +19446,21 @@ else:
                     tp = t.permute(p)
                     compare_helper_(like_fn, tp)
 
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_muldiv_scalar(self, device, dtype):
+        if dtype.is_complex or dtype.is_floating_point:
+            x = torch.randn(10, 3, dtype=dtype, device=device)
+            s = torch.randn(1, dtype=dtype, device='cpu').item()
+        else:
+            dtype_max = torch.iinfo(dtype).max if dtype != torch.bool else 2
+            dtype_min = torch.iinfo(dtype).min if dtype != torch.bool else 0
+            x = torch.randint(dtype_min, dtype_max, (10, 3), device=device, dtype=dtype)
+            s = torch.randint(dtype_min, dtype_max, (1,), device='cpu', dtype=dtype).item()
+        y = torch.full_like(x, s)
+        self.assertEqual(x * s, x * y)
+        self.assertEqual(s * x, y * x)
+        self.assertEqual(x / s, x / y)
+
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
     exact_dtype = True
