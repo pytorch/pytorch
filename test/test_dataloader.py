@@ -1843,11 +1843,8 @@ except RuntimeError as e:
     def test_excessive_thread_creation_warning(self):
         with self.assertWarnsRegex(
             UserWarning,
-                r"excessive threads might get DataLoader running slow or even freeze"):
-            num_thread = torch.get_num_threads()
-            torch.set_num_threads(200)
-            dataloader = DataLoader(self.dataset, batch_size=2, num_workers=50)
-            torch.set_num_threads(num_thread)
+                r"excessive worker creation might get DataLoader running slow or even freeze"):
+            dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
 
 class StringDataset(Dataset):
