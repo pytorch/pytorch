@@ -379,7 +379,7 @@ Tensor new_empty(
   auto dtype = dtype_opt.has_value() ? dtype_opt : optTypeMetaToScalarType(self.options().dtype_opt());
   auto layout = layout_opt.has_value() ? layout_opt : self.options().layout_opt();
   auto device = device_opt.has_value() ? device_opt : self.options().device_opt();
-  auto pin_memory = pin_memory_opt;
+  auto pin_memory = pin_memory_opt.has_value() ? pin_memory_opt : self.options().pinned_memory_opt();
   return at::empty(size, dtype, layout, device, pin_memory, c10::nullopt);
 }
 
