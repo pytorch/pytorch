@@ -1389,6 +1389,7 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     input_tensor, local_size = _object_to_tensor(obj)
     group_backend = get_backend(group)
     is_nccl_backend = group_backend == Backend.NCCL
+    current_device = torch.device("cpu")
     if is_nccl_backend:
         # See note about using torch.cuda.current_device() here in docstring.
         # We cannot simply use my_rank since rank == device is not necessarily
@@ -1399,9 +1400,7 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
-    object_sizes_tensor = torch.zeros(group_size, dtype=int).to(
-        torch.cuda.current_device() if is_nccl_backend else "cpu"
-    )
+    object_sizes_tensor = torch.zeros(group_size, dtype=int, device=current_device)
     object_size_list = [
         object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
     ]
@@ -1411,8 +1410,8 @@ def all_gather_object(object_list, obj, group=group.WORLD):
     # Resize tensor to max size across all ranks.
     input_tensor.resize_(max_object_size)
     coalesced_output_tensor = torch.empty(
-        max_object_size * group_size, dtype=torch.uint8
-    ).to(torch.cuda.current_device() if is_nccl_backend else "cpu")
+        max_object_size * group_size, dtype=torch.uint8, device=current_device
+    )
     # Output tensors are nonoverlapping views of coalesced_output_tensor
     output_tensors = [
         coalesced_output_tensor[max_object_size * i : max_object_size * (i + 1)]
@@ -1466,6 +1465,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     _validate_output_list_for_rank(my_rank, dst, object_gather_list)
     input_tensor, local_size = _object_to_tensor(obj)
     group_backend = get_backend(group)
+    current_device = torch.device("cpu")
     is_nccl_backend = group_backend == Backend.NCCL
     if is_nccl_backend:
         current_device = torch.cuda.current_device()
@@ -1474,9 +1474,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
-    object_sizes_tensor = torch.zeros(group_size, dtype=int).to(
-        torch.cuda.current_device() if is_nccl_backend else "cpu"
-    )
+    object_sizes_tensor = torch.zeros(group_size, dtype=int, device=current_device)
     object_size_list = [
         object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
     ]
@@ -1490,8 +1488,8 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     # Avoid populating output tensors if the result won't be gathered on this rank.
     if my_rank == dst:
         coalesced_output_tensor = torch.empty(
-            max_object_size * group_size, dtype=torch.uint8
-        ).to(torch.cuda.current_device() if is_nccl_backend else "cpu")
+            max_object_size * group_size, dtype=torch.uint8, device=current_device
+        )
         # Output tensors are nonoverlapping views of coalesced_output_tensor
         output_tensors = [
             coalesced_output_tensor[max_object_size * i : max_object_size * (i + 1)]
@@ -1561,12 +1559,14 @@ def broadcast_object_list(object_list, src, group=group.WORLD):
 
     group_backend = get_backend(group)
     is_nccl_backend = group_backend == Backend.NCCL
+    current_device = torch.device("cpu")
     if is_nccl_backend:
         # See note about using torch.cuda.current_device() here in docstring.
         # We cannot simply use my_rank since rank == device is not necessarily
         # true.
-        object_sizes_tensor = object_sizes_tensor.to(torch.cuda.current_device())
-        object_sizes_tensor = object_sizes_tensor.to(torch.cuda.current_device())
+        current_device = torch.cuda.current_device()
+        object_sizes_tensor = object_sizes_tensor.to(current_device)
+        object_sizes_tensor = object_sizes_tensor.to(current_device)
 
     # Broadcast object sizes
     broadcast(object_sizes_tensor, src=src, group=group)
@@ -1578,7 +1578,7 @@ def broadcast_object_list(object_list, src, group=group.WORLD):
         object_tensor = torch.ByteTensor(torch.sum(object_sizes_tensor).item())
 
     if is_nccl_backend:
-        object_tensor = object_tensor.to(torch.cuda.current_device())
+        object_tensor = object_tensor.to(current_device)
     broadcast(object_tensor, src=src, group=group)
     # Deserialize objects using their stored sizes.
     offset = 0

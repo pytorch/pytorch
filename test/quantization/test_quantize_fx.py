@@ -50,6 +50,7 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing import FileCheck
 
+import copy
 import itertools
 import operator
 import unittest
@@ -816,6 +817,33 @@ class TestQuantizeFx(QuantizationTestCase):
         # make sure these modules are not traced
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
+    def test_prepared_model_deepcopy(self):
+        """Ensures that copy.deepcopy works correctly on a prepared model.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self._foobar = 'foobar'
+                self.foobar2 = 'foobar2'
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x
+
+        m = M()
+        print(m.__dict__.keys())
+        m.eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        prepared = torch.quantization.prepare_fx(m, qconfig_dict)
+        # calibrate
+        prepared(torch.randn(4, 1, 4, 4))
+        # copy
+        prepared_copy = copy.deepcopy(prepared)
+        # quantize, should run with no errors
+        quantized = torch.quantization.convert_fx(prepared_copy)
+
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
@@ -969,7 +997,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def forward(self, x, y):
                 x = self.conv1(x)
                 y = 3 if self.is_scalar else self.conv2(y)
+                # x = x + y
                 x = self.op(x, y)
+                # x = y + x
+                x = self.op(y, x)
                 return x
 
         # TODO: decide whether we want to quantize or not
@@ -1011,6 +1042,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.conv1(x)
                 y = 3 if self.is_scalar else self.conv2(y)
                 x = self.op(x, y)
+                x = self.relu(x)
+                x = self.op(y, x)
                 x = self.relu(x)
                 return x
 
