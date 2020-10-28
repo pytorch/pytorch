@@ -146,11 +146,13 @@ RegisterOperators reg(
            std::vector<torch::autograd::Variable> output_vars(
                outputs.begin(), outputs.end());
            std::vector<torch::autograd::Variable> gradients;
+
            if (!grad_tensors.isNone()) {
              for (const IValue& v : grad_tensors.toListRef()) {
                gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
              }
            }
+
            torch::autograd::backward(
                output_vars, gradients, retain_graph, create_graph);
          },
