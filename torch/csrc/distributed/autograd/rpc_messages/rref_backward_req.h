@@ -19,9 +19,9 @@ class TORCH_API RRefBackwardReq : public rpc::RpcCommandBase {
 
   const rpc::RRefId& getRRefId();
 
-  int64_t getAutogradContextId();
+  const int64_t getAutogradContextId() const;
 
-  bool retainGraph();
+  const bool retainGraph() const;
 
   // Serialization and deserialization methods.
   rpc::Message toMessageImpl() && override;
@@ -29,9 +29,9 @@ class TORCH_API RRefBackwardReq : public rpc::RpcCommandBase {
       const rpc::Message& message);
 
  private:
-  rpc::RRefId rrefId_;
-  int64_t autogradContextId_;
-  bool retainGraph_;
+  const rpc::RRefId rrefId_;
+  const int64_t autogradContextId_;
+  const bool retainGraph_;
 };
 
 } // namespace autograd

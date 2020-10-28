@@ -3707,6 +3707,9 @@ class RpcTest(RpcAgentTestFixture):
             with self.assertRaisesRegex(RuntimeError, "RRef should contain a tensor for .backward()"):
                 rref.backward(context_id)
 
+            with self.assertRaisesRegex(RuntimeError, "User RRefs require 'dist_autograd_ctx_id' to be specified"):
+                rref.backward()
+
 class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 
     def test_mismatched_type_for_options(self):

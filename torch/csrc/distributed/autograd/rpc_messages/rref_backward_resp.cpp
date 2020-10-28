@@ -10,6 +10,7 @@ rpc::Message RRefBackwardResp::toMessageImpl() && {
 
 std::unique_ptr<RRefBackwardResp> RRefBackwardResp::fromMessage(
     const rpc::Message& message) {
+  TORCH_INTERNAL_ASSERT(message.type() == rpc::MessageType::RREF_BACKWARD_RESP);
   return std::unique_ptr<RRefBackwardResp>();
 }
 

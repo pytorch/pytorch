@@ -64,11 +64,11 @@ const rpc::RRefId& RRefBackwardReq::getRRefId() {
   return rrefId_;
 }
 
-int64_t RRefBackwardReq::getAutogradContextId() {
+const int64_t RRefBackwardReq::getAutogradContextId() const {
   return autogradContextId_;
 }
 
-bool RRefBackwardReq::retainGraph() {
+const bool RRefBackwardReq::retainGraph() const {
   return retainGraph_;
 }
 
