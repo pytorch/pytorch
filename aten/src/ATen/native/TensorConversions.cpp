@@ -29,7 +29,8 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
     return self;
   }
 
-  bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu());
+  bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
+                  (options.layout() == c10::kStrided));
 
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
