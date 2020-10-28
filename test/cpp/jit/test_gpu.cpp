@@ -8286,6 +8286,141 @@ TEST(NVFuserTest, FusionNonUniqueBroadcastSize_CUDA) {
   ASSERT_ANY_THROW(tv3->computeAt(tv4, -1));
 }
 
+TEST(NVFuserTest, FusionBiasGeluFwd_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const float k_079 = 0.79788456;
+  const float k_004 = 0.044715;
+
+  // bias vector
+  auto t0 = makeDummyTensor(1, DataType::Half);
+  fusion.addInput(t0);
+  auto t1 = castOp(DataType::Float, t0);
+  // input tensor
+  auto t2 = makeDummyTensor(3, DataType::Half);
+  fusion.addInput(t2);
+  auto t3 = castOp(DataType::Float, t2);
+  auto t4 = broadcast(t1, {true, true, false});
+  auto t5 = add(t4, t3);
+  auto t6 = mul(t5, new Float(0.5));
+  auto t7 = mul(t5, new Float(k_079));
+  auto t8 = mul(t5, new Float(k_004));
+  auto t9 = mul(t8, t5);
+  auto t10 = add(t9, new Int(1));
+  auto t11 = mul(t7, t10);
+  auto t12 = unaryOp(UnaryOpType::Tanh, t11);
+  auto t13 = add(t12, new Float(1));
+  auto t14 = mul(t6, t13);
+  auto t15 = castOp(DataType::Half, t14);
+  fusion.addOutput(t15);
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  c10::IntArrayRef input_shape{6, 512, 4096};
+  c10::IntArrayRef bias_shape{4096};
+  auto at_input = at::randn(input_shape, options);
+  auto at_bias = at::randn(bias_shape, options);
+
+  scheduleFusion(&fusion, {at_bias, at_input});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto outputs = fe.runFusion({at_bias, at_input});
+
+  auto at_x =
+      at_bias.to(c10::ScalarType::Float) + at_input.to(c10::ScalarType::Float);
+  auto at_out =
+      at_x * 0.5 * (1.0 + (k_079 * at_x * (1 + k_004 * at_x * at_x)).tanh());
+  auto at_out_half = at_out.to(c10::ScalarType::Half);
+
+  TORCH_CHECK(
+      at_out_half.allclose(outputs.front(), 1e-04, 1e-04),
+      "Error of: ",
+      at_out_half.sub(outputs.front()).abs().max());
+}
+
+TEST(NVFuserTest, FusionBiasGeluBwd_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const float k_079 = 0.79788456;
+  const float k_004 = 0.044715;
+  const float k_010 = 0.1070322243;
+
+  // gradient tensor
+  auto t0 = makeDummyTensor(3, DataType::Half);
+  fusion.addInput(t0);
+  auto t1 = castOp(DataType::Float, t0);
+  // bias tensor
+  auto t2 = makeDummyTensor(1, DataType::Half);
+  fusion.addInput(t2);
+  auto t3 = castOp(DataType::Float, t2);
+  // input tensor
+  auto t4 = makeDummyTensor(3, DataType::Half);
+  fusion.addInput(t4);
+  auto t5 = castOp(DataType::Float, t4);
+  auto t6 = broadcast(t3, {true, true, false});
+  auto t7 = add(t6, t5);
+  auto t8 = mul(t7, new Float(k_079));
+  auto t9 = mul(t7, new Float(k_004));
+  auto t10 = mul(t9, t7);
+  auto t11 = add(t10, new Int(1));
+  auto t12 = mul(t8, t11);
+  auto t13 = unaryOp(UnaryOpType::Tanh, t12);
+  auto t14 = mul(t7, new Float(0.5));
+  auto t15 = mul(t13, t13);
+  auto t16 = unaryOp(UnaryOpType::Neg, t15);
+  auto t17 = add(t16, new Int(1));
+  auto t18 = mul(t7, new Float(k_010));
+  auto t19 = mul(t18, t7);
+  auto t20 = add(t19, new Float(k_079));
+  auto t21 = mul(t17, t20);
+  auto t22 = mul(t14, t21);
+  auto t23 = add(t13, new Int(1));
+  auto t24 = mul(t23, new Float(0.5));
+  auto t25 = add(t22, t24);
+  auto t26 = mul(t25, t1);
+  // Save float output for validation
+  fusion.addOutput(t26);
+  auto t27 = castOp(DataType::Half, t26);
+  fusion.addOutput(t27);
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  c10::IntArrayRef input_shape{6, 512, 4096};
+  c10::IntArrayRef bias_shape{4096};
+  auto at_input = at::randn(input_shape, options);
+  auto at_bias = at::randn(bias_shape, options);
+  auto at_grad = at::randn(input_shape, options);
+
+  scheduleFusion(&fusion, {at_grad, at_bias, at_input});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto outputs = fe.runFusion({at_grad, at_bias, at_input});
+
+  auto at_x =
+      at_bias.to(c10::ScalarType::Float) + at_input.to(c10::ScalarType::Float);
+  auto at_tanh_out = (k_079 * at_x * (1 + k_004 * at_x * at_x)).tanh();
+  auto at_ff = 0.5 * at_x *
+          ((1 - at_tanh_out * at_tanh_out) * (k_079 + k_010 * at_x * at_x)) +
+      0.5 * (1 + at_tanh_out);
+  auto at_out = at_ff * at_grad;
+  auto at_out_half = at_out.to(c10::ScalarType::Half);
+
+  TORCH_CHECK(
+      at_out.allclose(outputs[0], 1e-05, 1e-05),
+      "Error of: ",
+      at_out.sub(outputs[0]).abs().max());
+  TORCH_CHECK(
+      at_out_half.allclose(outputs[1], 1e-03, 1e-03),
+      "Error of: ",
+      at_out_half.sub(outputs[1]).abs().max());
+}
+
 // Reproducer of issue #459
 TEST(NVFuserTest, FusionIssue459_CUDA) {
   Fusion fusion;
