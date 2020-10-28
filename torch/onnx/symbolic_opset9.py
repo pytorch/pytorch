@@ -1645,10 +1645,22 @@ def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False)
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
 
-def eye(g, n, m, dtype=None, layout=None, device=None, pin_memory=False):
-    shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
-    tensor = zeros(g, shape, dtype, layout, device)
-    return g.op("EyeLike", tensor)
+def eye(g, *args):
+    if len(args) == 5:
+        # aten::eye(n, dtype, layout, device, pin_memory)
+        n, dtype, layout, device, pin_memory = args
+        dim_size = g.op("Unsqueeze", n, axes_i=[0])
+        shape = g.op("Concat", dim_size, dim_size, axis_i=0)
+        tensor = zeros(g, shape, dtype, layout, device)
+        return g.op("EyeLike", tensor)
+    elif len(args) == 6:
+        # aten::eye(n, m, dtype, layout, device, pin_memory)
+        n, m, dtype, layout, device, pin_memory = args
+        shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
+        tensor = zeros(g, shape, dtype, layout, device)
+        return g.op("EyeLike", tensor)
+    else:
+        raise NotImplementedError("Unknown aten::eye signature")
 
 
 def slice(g, self, *args):
