@@ -654,9 +654,10 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
   }
 
   const auto & grad_sizes = grad.sizes();
-  at::DimVector grad_sizes_(input_dims);
+  at::DimVector grad_sizes_(input_dims), sum_dims;
   std::copy(grad_sizes.begin(), grad_sizes.end(), grad_sizes_.begin());
   auto grad_iter_ = grad_sizes_.begin();
+  int64_t offset = 0;
   for (size_t j = num_unsqueezed; j < repeats.size(); ++j, ++grad_iter_) {
     int64_t repeat = repeats[j];
     if (repeat == 1) {
@@ -666,8 +667,8 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
     // Reshape gradient
     // Index:      [..., dim    , ...]    [..., dim   ,  dim+1        , ...]
     // Shape: From [..., dimsize, ...] to [..., repeat, dimsize/repeat, ...]
-    // The gradient tensor at 'dim' is reshaped to 'repeat' times of input tensor. 
-    // Then, sum up gradients over repeated tensors along 'dim', and reduce shape 
+    // The gradient tensor at 'dim' is reshaped to 'repeat' times of input tensor.
+    // Then, sum up gradients over repeated tensors along 'dim', and reduce shape
     // from 'repeat * dimsize/repeat' to 'dimsize/repeat' ('input_dimsize').
     // Example:
     //        Size(3, 2)                                             Size(6, 2)
@@ -687,7 +688,7 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
     //                                    [g2_2, g2_3],             [g2_4, g2_5]]
     //                                    [g2_4, g2_5]]]
     // If gradient tensor is reshaped to [..., dimsize/repeat, repeat, ...] and then
-    // sum over 'dim+1'. The gradient for input is not correctly aligned with input. 
+    // sum over 'dim+1'. The gradient for input is not correctly aligned with input.
     // Example:
     //     input grad (3, 2)            reshape (3, 2, 2)        output grad (6, 2)
     //                                  [[[g1_0, g1_1],
@@ -698,12 +699,13 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
     //  [g2_2+g2_4, g2_3+g2_5]]                                     [g2_2, g2_3],
     //                                   [[g2_2, g2_3],             [g2_4, g2_5]]
     //                                    [g2_4, g2_5]]]
+    sum_dims.push_back(dim + offset);
+    ++offset;
     grad_iter_ = grad_sizes_.insert(grad_iter_, repeat);
-    *(grad_iter_ + 1) /= repeat;
-    grad = grad.reshape(grad_sizes_);
-    grad_iter_ = grad_sizes_.erase(grad_iter_);
-    grad = grad.sum(dim, false);
+    *(++grad_iter_) /= repeat;
   }
+  grad = grad.reshape(grad_sizes_);
+  grad = grad.sum(sum_dims, false);
   return grad;
 }
 
