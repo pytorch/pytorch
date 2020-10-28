@@ -24,6 +24,9 @@ def is_integral(dtype: torch.dtype) -> bool:
     dtypes = [x for x in get_all_dtypes() if x not in get_all_complex_dtypes()]
     return dtype in dtypes and not dtype.is_floating_point
 
+def is_quantized(dtype: torch.dtype) -> bool:
+    return dtype in (torch.quint8, torch.qint8, torch.qint32, torch.quint4x2)
+
 # Helper function that maps a flattened index back into the given shape
 # TODO: consider adding torch.unravel_index
 def _unravel_index(flat_index, shape):
@@ -70,7 +73,11 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
     debug_msg : Optional[str]
     # Integer (including bool) comparisons are identity comparisons
     # when rtol is zero and atol is less than one
-    if (is_integral(a.dtype) and rtol == 0 and atol < 1) or a.dtype is torch.bool:
+    if (
+        (is_integral(a.dtype) and rtol == 0 and atol < 1)
+        or a.dtype is torch.bool
+        or is_quantized(a.dtype)
+    ):
         if (a == b).all().item():
             return (True, None)
 

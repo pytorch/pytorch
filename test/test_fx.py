@@ -838,6 +838,25 @@ class TestFX(JitTestCase):
         output : torch.fx.Node = graph.output(b)
         self.assertTrue('typing.List[float]' in str(graph))
 
+    def test_inf_nan(self):
+        class FooMod(torch.nn.Module):
+            def forward(self, x):
+                return x + float('inf'), x + float('-inf'), x + float('nan')
+
+        fm = FooMod()
+        self.checkGraphModule(fm, (torch.rand(3, 4),))
+
+    def test_inf_nan_kwds(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_function', operator.add, (x, float('inf')), {}, name='inf')
+        c : torch.fx.Node = graph.create_node('call_function', operator.add, (x, float('nan')), {}, name='nan')
+        graph.output((b, c))
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        x = torch.rand(3, 4)
+        self.assertEqual(gm(x), (x + float('inf'), x + float('nan')))
+
     def test_subgraph_creation(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
