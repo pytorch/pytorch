@@ -61,7 +61,6 @@ CMAKE_ARGS=()
 
 if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
   # Build PyTorch mobile
-  CMAKE_ARGS+=("-DUSE_STATIC_DISPATCH=ON")
   CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$($PYTHON -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
   CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$($PYTHON -c 'import sys; print(sys.executable)')")
   CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")

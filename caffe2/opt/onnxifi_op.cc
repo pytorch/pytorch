@@ -46,6 +46,9 @@ void setInputTensorDescriptorTypeAndBuffer(
   if (cpu_tensor.template IsType<uint8_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_UINT8;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<uint8_t>());
+  } else if (cpu_tensor.template IsType<int8_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_INT8;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int8_t>());
   } else if (cpu_tensor.template IsType<int32_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_INT32;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int32_t>());
@@ -143,7 +146,8 @@ void BlobToTensorDescriptor(
        is_external_tensor),
       "Initialization blob ",
       name,
-      " needs to be TensorCPU or Int8TensorCPU or Int8FCDNNLowPPackedWeightBlob Based class");
+      " needs to be TensorCPU or Int8TensorCPU or Int8FCDNNLowPPackedWeightBlob Based class: ",
+      blob->TypeName());
   desc->tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
   desc->memoryType = ONNXIFI_MEMORY_TYPE_CPU;
   desc->isOffline = false;
@@ -395,7 +399,7 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
           real_shape.dims(j),
           ")");
       begin_ptr[j] = 0;
-      if (max_shape[j] > real_shape.dims(j)) {
+      if (max_shape[j] >= real_shape.dims(j)) {
         end_ptr[j] = real_shape.dims(j);
         mismatch += j;
       } else {
@@ -564,9 +568,18 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
     current_batch_size = extractOutputBatchSizes();
     onnxEventState eventState;
     onnxStatus eventStatus;
+    std::string message;
+    size_t messageLength = 512;
+    message.resize(messageLength);
+
     CAFFE_ENFORCE_EQ(
         (*onnxWaitEventForPointer_)(
-            output_fence.event, timeout_, &eventState, &eventStatus),
+            output_fence.event,
+            timeout_,
+            &eventState,
+            &eventStatus,
+            const_cast<char*>(message.data()),
+            &messageLength),
         ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         eventState,
@@ -574,7 +587,13 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
         "Onnxifi run timeouted out after ",
         timeout_,
         " ms.");
-    CAFFE_ENFORCE_EQ(eventStatus, ONNXIFI_STATUS_SUCCESS);
+    if (eventStatus != ONNXIFI_STATUS_SUCCESS) {
+      if (messageLength == 0) {
+        CAFFE_THROW("onnxifi internal error");
+      } else {
+        CAFFE_THROW(message);
+      }
+    }
     CAFFE_ENFORCE_EQ(
         lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
   }

@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
@@ -28,12 +29,54 @@ class SubgraphSlicer {
   SubgraphSlicer(
       Block* block,
       std::shared_ptr<Graph> graph,
-      size_t minSubgraphSize)
+      size_t minSubgraphSize,
+      AliasDb& aliasDb,
+      std::vector<Node*>& diff_nodes)
       : block_(block),
         graph_(std::move(graph)),
-        minSubgraphSize_(minSubgraphSize) {}
+        minSubgraphSize_(minSubgraphSize),
+        aliasDb_(aliasDb),
+        diff_nodes_(diff_nodes) {}
 
-  void run(std::vector<Node*>& diffGraphs) {
+  void run() {
+    // We maintain alias db correctness in-place while building up the autodiff
+    // subgraphs, however it is difficult to preserve correctness when
+    // un-inlining autodiff subgraphs. We first recursively construct all
+    // subgraphs and then recursively cleanup & unmerge the small subgraphs
+    buildupSubgraphs();
+    cleanupSubgraphs();
+    // Run CSE globally onceto eliminate duplicates that may have occurred
+    // while inlining subgraphs.
+    EliminateCommonSubexpression(graph_);
+  }
+
+  void cleanupSubgraphs() {
+    auto curNode = *block_->nodes().rbegin();
+    while (curNode != *block_->nodes().rend()) {
+      // Save the previous node, since we might delete `curNode` in next block
+      auto prevNode = curNode->prev();
+      if (curNode->kind() == prim::DifferentiableGraph) {
+        // Inlining nodes may cause some subexpression to come back in the
+        // subgraphs (for example, copying constants in repeatedly will generate
+        // redundant prim::Constants). Run CSE to clean them up.
+        EliminateCommonSubexpression(curNode->g(attr::Subgraph));
+
+        if (!inlineIfTooSmall(curNode)) {
+          diff_nodes_.push_back(curNode);
+        }
+      }
+      curNode = prevNode;
+    }
+
+    for (Node* n : block_->nodes()) {
+      for (Block* b : n->blocks()) {
+        SubgraphSlicer(b, graph_, minSubgraphSize_, aliasDb_, diff_nodes_)
+            .cleanupSubgraphs();
+      }
+    }
+  }
+
+  void buildupSubgraphs() {
     // We need to run the slicer multiple times in order to get all merge
     // opportunities. This is because moveBeforeTopologicalValid may reorder
     // nodes to be AFTER the current iteration point. In order to properly
@@ -54,39 +97,23 @@ class SubgraphSlicer {
     for (auto& workblock : workblocks) {
       bool any_changed = true;
       while (any_changed) {
-        AliasDb aliasDb(graph_);
         any_changed = false;
         for (auto it = workblock.end()->reverseIterator();
              it != workblock.begin()->reverseIterator();) {
           bool changed;
-          std::tie(it, changed) = scanNode(*it, aliasDb);
+          std::tie(it, changed) = scanNode(*it);
           any_changed |= changed;
         }
       }
     }
 
-    // Done constructing subgraphs. Do some post-processing cleanup:
-    // 1. Run CSE to delete redundanet constant nodes.
-    // 2. We may need to re-inline ones that are too small.
-    auto curNode = *block_->nodes().rbegin();
-    while (curNode != *block_->nodes().rend()) {
-      for (auto subBlock : curNode->blocks()) {
-        SubgraphSlicer(subBlock, graph_, minSubgraphSize_).run(diffGraphs);
+    // Construct Subgraphs Recursively
+    for (Node* n : block_->nodes()) {
+      for (auto subBlock : n->blocks()) {
+        SubgraphSlicer(
+            subBlock, graph_, minSubgraphSize_, aliasDb_, diff_nodes_)
+            .buildupSubgraphs();
       }
-
-      // Save the previous node, since we might delete `curNode` in next block
-      auto prevNode = curNode->prev();
-      if (curNode->kind() == prim::DifferentiableGraph) {
-        // Inlining nodes may cause some subexpression to come back in the
-        // subgraphs (for example, copying constants in repeatedly will generate
-        // redundant prim::Constants). Run CSE to clean them up.
-        EliminateCommonSubexpression(curNode->g(attr::Subgraph));
-
-        if (!inlineIfTooSmall(curNode)) {
-          diffGraphs.push_back(curNode);
-        }
-      }
-      curNode = prevNode;
     }
   }
 
@@ -141,8 +168,7 @@ class SubgraphSlicer {
     size_t i = 0;
     for (auto it = subgraph->nodes().begin(); it != subgraph->nodes().end();
          ++it) {
-      // constants are not interpreted as instructions, ignore them
-      i += it->kind() != prim::Constant;
+      i += !it->notExecutedOp();
       if (i >= minSubgraphSize_) {
         return false;
       }
@@ -196,17 +222,15 @@ class SubgraphSlicer {
     return isDifferentiable(node);
   }
 
-  std::pair<graph_node_list::iterator, bool> scanNode(
-      Node* consumer,
-      AliasDb& aliasDb) {
+  std::pair<graph_node_list::iterator, bool> scanNode(Node* consumer) {
     if (shouldConsiderForMerge(consumer)) {
       if (consumer->kind() != prim::DifferentiableGraph) {
-        consumer = SubgraphUtils::createSingletonSubgraph(
-            consumer, prim::DifferentiableGraph);
+        consumer = SubgraphUtils::createSingletonSubgraphAndUpdateAliasing(
+            consumer, prim::DifferentiableGraph, aliasDb_);
       }
       auto inputs = sortReverseTopological(consumer->inputs());
       for (auto input : inputs) {
-        if (auto group = tryMerge(consumer, input->node(), aliasDb)) {
+        if (auto group = tryMerge(consumer, input->node())) {
           // we successfully merged, so the new group's `inputs` may have
           // changed. So rescan the new group for more merging opportunities.
           return std::make_pair(group.value()->reverseIterator(), true);
@@ -219,26 +243,25 @@ class SubgraphSlicer {
 
   // Try to merge `producer` into `consumer`. If successful, this destroys
   // `producer` and returns the `consumer` group.
-  c10::optional<Node*> tryMerge(
-      Node* consumer,
-      Node* producer,
-      AliasDb& aliasDb) {
+  c10::optional<Node*> tryMerge(Node* consumer, Node* producer) {
     AT_ASSERT(consumer->kind() == prim::DifferentiableGraph);
     bool canMerge = shouldConsiderForMerge(producer) &&
-        aliasDb.moveBeforeTopologicallyValid(producer, consumer);
+        aliasDb_.moveBeforeTopologicallyValid(producer, consumer);
 
     if (!canMerge) {
       return c10::nullopt;
     }
 
-    SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
-
+    SubgraphUtils::mergeNodeIntoSubgraphAndUpdateAliasing(
+        producer, consumer, aliasDb_);
     return consumer;
   }
 
   Block* block_;
   std::shared_ptr<Graph> graph_;
   size_t minSubgraphSize_;
+  AliasDb& aliasDb_;
+  std::vector<Node*>& diff_nodes_;
 };
 } // anonymous namespace
 
@@ -246,10 +269,8 @@ std::vector<Node*> CreateAutodiffSubgraphs(
     const std::shared_ptr<Graph>& graph,
     size_t threshold) {
   std::vector<Node*> diff_nodes;
-  SubgraphSlicer(graph->block(), graph, threshold).run(diff_nodes);
-  // Run CSE to eliminate duplicates that may have occurred
-  // while inlining subgraphs.
-  EliminateCommonSubexpression(graph);
+  AliasDb db(graph);
+  SubgraphSlicer(graph->block(), graph, threshold, db, diff_nodes).run();
   return diff_nodes;
 }
 } // namespace jit

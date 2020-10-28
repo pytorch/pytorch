@@ -10,6 +10,41 @@
 namespace torch {
 namespace jit {
 
+namespace {
+
+class ProfileRegistry {
+ public:
+  static ProfileRegistry* getRegistry() {
+    static ProfileRegistry profile_registry_;
+    return &profile_registry_;
+  }
+
+  void registerProfileNode(const std::function<bool(const Node*)>& func) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    registry_funcs_.push_back(func);
+  }
+
+  bool shouldProfileNode(const Node* node) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    for (const auto& func : registry_funcs_) {
+      if (func(node)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+ private:
+  std::vector<std::function<bool(const Node*)>> registry_funcs_;
+  std::mutex mutex_;
+};
+
+} // namespace
+
+void RegisterProfilingNode(const std::function<bool(const Node*)>& func) {
+  ProfileRegistry::getRegistry()->registerProfileNode(func);
+}
+
 bool ShapeSymbolTable::bindSymbolicShapes(
     at::IntArrayRef new_sizes,
     const c10::SymbolicShape& sym_shapes) {
@@ -44,6 +79,19 @@ ProfileOp* ProfilingRecord::createProfileNode(
     const std::function<void(Stack&)>& fp,
     at::ArrayRef<Value*> inputs) {
   auto pn = new ProfileOp(profiled_graph_.get(), fp);
+
+  for (auto in : inputs) {
+    pn->addInput(in);
+  }
+  return pn;
+}
+
+ProfileOptionalOp* ProfilingRecord::createProfileOptionalNode(
+    const std::function<void(Stack&)>& fp,
+    at::ArrayRef<Value*> inputs) {
+  auto pn = new ProfileOptionalOp(profiled_graph_.get(), fp);
+  pn->i_(attr::num_present, 0);
+  pn->i_(attr::num_none, 0);
 
   for (auto in : inputs) {
     pn->addInput(in);
@@ -103,9 +151,11 @@ c10::SymbolicShape ProfilingRecord::mergeSymbolicShapes(
   return c10::SymbolicShape(new_symbols);
 }
 
-void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
+void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
+  Value* i = n->input(offset);
   auto pn = createProfileNode(nullptr, {i});
   auto pno = pn->addOutput();
+  pn->ty_(attr::profiled_type, TensorType::get());
   pno->setType(TensorType::get());
   std::function<void(Stack&)> shape_profiler = [this, pno](Stack& stack) {
     int64_t frame_id = 0;
@@ -144,7 +194,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
 
   pn->setCallback(shape_profiler);
   pn->insertBefore(n);
-  n->replaceInputWith(i, pn->output());
+  n->replaceInput(offset, pn->output());
 }
 
 bool needsProfiledInputs(Node* n) {
@@ -156,6 +206,8 @@ bool needsProfiledInputs(Node* n) {
     // specialize_autogradzero
     case prim::AutogradAdd:
     case prim::AutogradAnyNonZero:
+    case prim::AutogradAllNonZero:
+    case prim::AutogradAllZero:
     case prim::AutogradZero:
     // peephole
     case aten::dim:
@@ -172,7 +224,7 @@ bool needsProfiledInputs(Node* n) {
     case aten::mm:
       return true;
     default:
-      return false;
+      return ProfileRegistry::getRegistry()->shouldProfileNode(n);
   }
 }
 
@@ -186,17 +238,64 @@ bool needsProfiledOutput(Node* n) {
     case prim::AutogradZero:
       return true;
     default:
-      return false;
+      return ProfileRegistry::getRegistry()->shouldProfileNode(n);
   }
+}
+
+void ProfilingRecord::removeProfileCounter(Block* b) {
+  for (auto it = b->nodes().rbegin(); it != b->nodes().rend();) {
+    auto n = *it;
+    if (n->kind() == prim::profile && n->inputs().size() == 0) {
+      it.destroyCurrent();
+      // there is only one counter node
+      return;
+    } else {
+      it++;
+    }
+  }
+}
+
+bool hasGradSumToSizeUses(Value* v) {
+  return std::any_of(v->uses().begin(), v->uses().end(), [](const Use& use) {
+    return use.user->kind() == aten::_grad_sum_to_size;
+  });
 }
 
 void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
-    for (auto i : n->inputs()) {
+    for (size_t offset = 0; offset < n->inputs().size(); offset++) {
+      auto i = n->input(offset);
       if (i->type()->kind() == c10::TypeKind::TensorType &&
           (needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
-        insertShapeProfile(n, i);
+        insertShapeProfile(n, offset);
+      }
+
+      if (i->type()->cast<OptionalType>() && hasGradSumToSizeUses(i)) {
+        // here we are profile the definition instead of the use,
+        // because we are only optimizing in the case of a None value which is
+        // immutable
+        auto opt_pn = createProfileOptionalNode(nullptr, {i});
+        std::function<void(Stack&)> optional_profiler = [this,
+                                                         opt_pn](Stack& stack) {
+          std::lock_guard<std::mutex> lock(this->mutex_);
+          // frame_id is unused
+          int64_t frame_id = 0;
+          pop(stack, frame_id);
+          IValue value;
+          pop(stack, value);
+          if (value.isNone()) {
+            opt_pn->i_(attr::num_none, opt_pn->i(attr::num_none) + 1);
+          } else {
+            opt_pn->i_(attr::num_present, opt_pn->i(attr::num_present) + 1);
+          }
+          push(stack, value);
+        };
+        opt_pn->setCallback(optional_profiler);
+        auto pno = opt_pn->addOutput();
+        pno->setType(i->type());
+        opt_pn->insertAfter(i->node());
+        i->replaceAllUsesAfterNodeWith(opt_pn, pno);
       }
     }
 
@@ -210,9 +309,24 @@ void ProfilingRecord::instrumentBlock(Block* block) {
   // the use of a guard is now in the same
   // block as opposed to being separated from
   // the definition by block boundaries
-  for (auto i : block->return_node()->inputs()) {
+  for (size_t offset = 0; offset < block->return_node()->inputs().size();
+       offset++) {
+    auto i = block->return_node()->input(offset);
     if (i->type()->isSubtypeOf(TensorType::get())) {
-      insertShapeProfile(block->return_node(), i);
+      insertShapeProfile(block->return_node(), offset);
+    }
+  }
+}
+
+void ProfilingRecord::removeProfilingNodes(Block* b) {
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+    if (it->kind() == prim::profile || it->kind() == prim::profile_optional) {
+      it->output()->replaceAllUsesWith(it->input());
+      it.destroyCurrent();
+    } else {
+      for (Block* ib : it->blocks()) {
+        removeProfilingNodes(ib);
+      }
     }
   }
 }
@@ -286,7 +400,6 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
             } else {
               // reset symbolic shapes when ranks are different
               type = type->merge(val_type_pair.second);
-              // type = type->withSymbolicShapes(c10::nullopt);
               merged_profiled_types[val_type_pair.first] = type;
             }
           }
@@ -295,7 +408,8 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
 
       // update types in the graph
       for (auto val_type_pair : merged_profiled_types) {
-        val_type_pair.first->setType(val_type_pair.second);
+        val_type_pair.first->node()->ty_(
+            attr::profiled_type, val_type_pair.second);
       }
     }
   };

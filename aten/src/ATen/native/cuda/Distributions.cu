@@ -69,7 +69,11 @@ struct curand_uniform_wrapper {
   curandStatePhilox4_32_10_t &state;
   __device__ curand_uniform_wrapper(curandStatePhilox4_32_10_t &state): state(state) {}
   __device__ float operator()() {
-    return curand_uniform(&state);
+
+  uint32_t val = curand(&state); //need just bits
+  constexpr auto MASK = static_cast<uint32_t>((static_cast<uint64_t>(1) << std::numeric_limits<float>::digits) - 1);
+  constexpr auto DIVISOR = static_cast<float>(1) / (static_cast<uint32_t>(1) << std::numeric_limits<float>::digits);
+    return (val & MASK) * DIVISOR;
   }
 };
 

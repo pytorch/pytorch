@@ -309,6 +309,8 @@ class Hardsigmoid(Module):
             x / 6 + 1 / 2 & \text{otherwise}
         \end{cases}
 
+    Args:
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -321,9 +323,16 @@ class Hardsigmoid(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['inplace']
+
+    inplace: bool
+
+    def __init__(self, inplace : bool = False) -> None:
+        super(Hardsigmoid, self).__init__()
+        self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.hardsigmoid(input)
+        return F.hardsigmoid(input, self.inplace)
 
 
 class Tanh(Module):
@@ -400,6 +409,9 @@ class Hardswish(Module):
             x \cdot (x + 3) /6 & \text{otherwise}
         \end{cases}
 
+    Args:
+        inplace: can optionally do the operation in-place. Default: ``False``
+
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
@@ -414,16 +426,26 @@ class Hardswish(Module):
     .. _`Searching for MobileNetV3`:
         https://arxiv.org/abs/1905.02244
     """
+    __constants__ = ['inplace']
+
+    inplace: bool
+
+    def __init__(self, inplace : bool = False) -> None:
+        super(Hardswish, self).__init__()
+        self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.hardswish(input)
+        return F.hardswish(input, self.inplace)
 
 
 class ELU(Module):
     r"""Applies the element-wise function:
 
     .. math::
-        \text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))
+        \text{ELU}(x) = \begin{cases}
+        x, & \text{ if } x > 0\\
+        \alpha * (\exp(x) - 1), & \text{ if } x \leq 0
+        \end{cases}
 
     Args:
         alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
@@ -834,10 +856,8 @@ class MultiheadAttention(Module):
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
     """
-    __annotations__ = {
-        'bias_k': torch._jit_internal.Optional[torch.Tensor],
-        'bias_v': torch._jit_internal.Optional[torch.Tensor],
-    }
+    bias_k: Optional[torch.Tensor]
+    bias_v: Optional[torch.Tensor]
 
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
         super(MultiheadAttention, self).__init__()

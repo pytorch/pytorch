@@ -93,7 +93,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // No batch dims
     Tensor tensor = makeBatched(ones({2, 3, 5, 7}), {});
-    auto* batched = maybeGetBatched(tensor);
+    auto* batched = maybeGetBatchedImpl(tensor);
     ASSERT_EQ(batched->actualDim(0), 0);
     ASSERT_EQ(batched->actualDim(1), 1);
     ASSERT_EQ(batched->actualDim(3), 3);
@@ -111,7 +111,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // Single batch dim at front
     Tensor tensor = makeBatched(ones({2, 3, 5, 7}), {{/*lvl*/1, /*dim*/0}});
-    auto* batched = maybeGetBatched(tensor);
+    auto* batched = maybeGetBatchedImpl(tensor);
     ASSERT_EQ(batched->actualDim(0), 1);
     ASSERT_EQ(batched->actualDim(2), 3);
     ASSERT_EQ(batched->actualDim(-1), 3);
@@ -120,7 +120,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // Single batch dim in middle
     Tensor tensor = makeBatched(ones({2, 3, 5, 7}), {{/*lvl*/1, /*dim*/1}});
-    auto* batched = maybeGetBatched(tensor);
+    auto* batched = maybeGetBatchedImpl(tensor);
     ASSERT_EQ(batched->actualDim(0), 0);
     ASSERT_EQ(batched->actualDim(1), 2);
     ASSERT_EQ(batched->actualDim(2), 3);
@@ -128,7 +128,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // Single batch dim at end
     Tensor tensor = makeBatched(ones({2, 3, 5, 7}), {{/*lvl*/1, /*dim*/1}});
-    auto* batched = maybeGetBatched(tensor);
+    auto* batched = maybeGetBatchedImpl(tensor);
     ASSERT_EQ(batched->actualDim(0), 0);
     ASSERT_EQ(batched->actualDim(2), 3);
     ASSERT_EQ(batched->actualDim(-1), 3);
@@ -138,7 +138,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
     Tensor tensor = makeBatched(
         ones({2, 3, 5, 7}),
         {{/*lvl*/1, /*dim*/0}, {/*lvl*/2, /*dim*/1}});
-    auto* batched = maybeGetBatched(tensor);
+    auto* batched = maybeGetBatchedImpl(tensor);
     ASSERT_EQ(batched->actualDim(0), 2);
     ASSERT_EQ(batched->actualDim(1), 3);
   }
@@ -147,7 +147,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
     Tensor tensor = makeBatched(
         ones({2, 3, 5, 7}),
         {{/*lvl*/1, /*dim*/1}, {/*lvl*/2, /*dim*/3}});
-    auto* batched = maybeGetBatched(tensor);
+    auto* batched = maybeGetBatchedImpl(tensor);
     ASSERT_EQ(batched->actualDim(0), 0);
     ASSERT_EQ(batched->actualDim(1), 2);
     ASSERT_EQ(batched->actualDim(-1), 2);
@@ -162,7 +162,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
     ASSERT_EQ(tensor.dim(), kVmapMaxTensorDims);
 
     auto batched = addBatchDim(tensor, /*lvl*/1, /*dim*/0);
-    auto* batched_impl = maybeGetBatched(batched);
+    auto* batched_impl = maybeGetBatchedImpl(batched);
     ASSERT_EQ(
         batched_impl->actualDim(kVmapMaxTensorDims - 2),
         kVmapMaxTensorDims - 1);
@@ -298,7 +298,7 @@ TEST(VmapTest, TestVmapPhysicalViewNewLogicalFromPhysical) {
     Tensor physical = ones({2, 6, 7});
 
     auto result = physical_view.newLogicalFromPhysical(physical);
-    auto* batched = maybeGetBatched(result);
+    auto* batched = maybeGetBatchedImpl(result);
     ASSERT_TRUE(batched != nullptr);
     ASSERT_TRUE(batched->value().is_same(physical));
     checkBatchDimsEqual(batched->bdims(), {{2, 0}});
@@ -309,7 +309,7 @@ TEST(VmapTest, TestVmapPhysicalViewNewLogicalFromPhysical) {
     Tensor physical = ones({2, 3, 4, 7});
 
     auto result = physical_view.newLogicalFromPhysical(physical);
-    auto* batched = maybeGetBatched(result);
+    auto* batched = maybeGetBatchedImpl(result);
     ASSERT_TRUE(batched != nullptr);
     ASSERT_TRUE(batched->value().is_same(physical));
     checkBatchDimsEqual(batched->bdims(), {{1, 0}, {3, 1}, {4, 2}});
@@ -320,7 +320,7 @@ TEST(VmapTest, TestVmapPhysicalViewNewLogicalFromPhysical) {
     Tensor physical = ones({2});
 
     auto result = physical_view.newLogicalFromPhysical(physical);
-    auto* batched = maybeGetBatched(result);
+    auto* batched = maybeGetBatchedImpl(result);
     ASSERT_TRUE(batched != nullptr);
     ASSERT_TRUE(batched->value().is_same(physical));
     checkBatchDimsEqual(batched->bdims(), {{2, 0}});
@@ -337,7 +337,7 @@ TEST(VmapTest, TestBatchedTensorSum) {
 
     Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/0}});
     Tensor batched_out = batched_x.sum(0);
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
 
     ASSERT_TRUE(at::allclose(out, x.sum(1)));
   }
@@ -347,7 +347,7 @@ TEST(VmapTest, TestBatchedTensorSum) {
 
     Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/1}});
     Tensor batched_out = batched_x.sum(-1);
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
 
     ASSERT_TRUE(at::allclose(out, x.sum(0)));
   }
@@ -357,7 +357,7 @@ TEST(VmapTest, TestBatchedTensorSum) {
 
     Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/1}});
     Tensor batched_out = batched_x.sum(std::vector<int64_t>{0, 1});
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
 
     ASSERT_TRUE(at::allclose(out, x.sum(std::vector<int64_t>{0, 2})));
   }
@@ -367,7 +367,7 @@ TEST(VmapTest, TestBatchedTensorSum) {
 
     Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/0}, {/*lvl*/2, /*dim*/1}});
     Tensor batched_out = batched_x.sum(std::vector<int64_t>{0, 1});
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
 
     ASSERT_TRUE(at::allclose(out, x.sum(std::vector<int64_t>{2, 3})));
   }
@@ -560,7 +560,7 @@ TEST(VmapTest, TestBatchedTensorMul) {
     Tensor By = addBatchDim(y, /*lvl*/1, /*dim*/0);
     Tensor Bout = Bx * By;
 
-    const auto& out = maybeGetBatched(Bout)->value();
+    const auto& out = maybeGetBatchedImpl(Bout)->value();
     std::vector<int64_t> expected_size = {2, 3};
     ASSERT_EQ(out.sizes(), expected_size);
     ASSERT_TRUE(at::allclose(out, x * y));
@@ -572,7 +572,7 @@ TEST(VmapTest, TestBatchedTensorMul) {
 
     Tensor Bx = addBatchDim(x, /*lvl*/1, /*dim*/0);
     Tensor Bout = Bx * y;
-    const auto& out = maybeGetBatched(Bout)->value();
+    const auto& out = maybeGetBatchedImpl(Bout)->value();
     std::vector<int64_t> expected_size = {2, 3};
     ASSERT_EQ(out.sizes(), expected_size);
     ASSERT_TRUE(at::allclose(out, x * y));
@@ -587,7 +587,7 @@ TEST(VmapTest, TestBatchedTensorMul) {
     Tensor Bout = Bx * By;
 
     // We get a doubly wrapped BatchTensor...
-    const auto& out = maybeGetBatched(Bout)->value();
+    const auto& out = maybeGetBatchedImpl(Bout)->value();
     std::vector<int64_t> expected_size = {2, 5, 3};
     ASSERT_EQ(out.sizes(), expected_size);
     ASSERT_TRUE(at::allclose(out, x.unsqueeze(1) * y));
@@ -602,7 +602,7 @@ TEST(VmapTest, TestBatchedTensorMul) {
     Tensor By = makeBatched(y, {{1, 1}, {2, 2}, {3, 0}});
     Tensor Bout = Bx * By;
 
-    const auto& out = maybeGetBatched(Bout)->value();
+    const auto& out = maybeGetBatchedImpl(Bout)->value();
 
     // The batching rule aligns dimensions in the order of their `level`.
     // It just happened that we chose sizes to be in the same order as the level.
@@ -670,7 +670,7 @@ TEST(VmapTest, TestBatchedTensorExpand) {
     auto tensor = at::randn({2, 1, 5});
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
     auto batched_out = batched.expand({3, 5});
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
 
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor.expand({2, 3, 5})));
@@ -686,7 +686,7 @@ TEST(VmapTest, TestBatchedTensorExpand) {
     auto tensor = at::randn({2, 3, 5});
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
     auto batched_out = batched.expand({7, 3, 5});
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
 
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor.view({2, 1, 3, 5}).expand({2, 7, 3, 5})));
@@ -702,7 +702,7 @@ TEST(VmapTest, TestBatchedTensorExpand) {
     auto tensor = at::randn({2, 3});
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
     auto batched_out = batched.expand({});
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor));
   }
@@ -711,7 +711,7 @@ TEST(VmapTest, TestBatchedTensorExpand) {
     auto tensor = at::randn({2, 3});
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
     auto batched_out = batched.expand({5, 7});
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor.view({2, 3, 1, 1}).expand({2, 3, 5, 7})));
   }
@@ -724,7 +724,7 @@ TEST(VmapTest, TestBatchedTensorUnsqueeze) {
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.unsqueeze(0);
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor.unsqueeze(1)));
   }
@@ -734,7 +734,7 @@ TEST(VmapTest, TestBatchedTensorUnsqueeze) {
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
 
     auto batched_out = batched.unsqueeze(0);
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor.unsqueeze(2)));
   }
@@ -744,7 +744,7 @@ TEST(VmapTest, TestBatchedTensorUnsqueeze) {
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.unsqueeze(-1);
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor.unsqueeze(-1)));
   }
@@ -757,7 +757,7 @@ TEST(VmapTest, TestBatchedTensorSqueeze) {
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.squeeze(0);
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor.squeeze(1)));
   }
@@ -767,7 +767,7 @@ TEST(VmapTest, TestBatchedTensorSqueeze) {
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
 
     auto batched_out = batched.squeeze(0);
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor.squeeze(2)));
   }
@@ -777,7 +777,7 @@ TEST(VmapTest, TestBatchedTensorSqueeze) {
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.squeeze(-1);
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor.squeeze(-1)));
   }
@@ -790,7 +790,7 @@ TEST(VmapTest, TestBatchedTensorTranspose) {
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.transpose(0, 1);
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor.transpose(1, 2)));
   }
@@ -800,7 +800,7 @@ TEST(VmapTest, TestBatchedTensorTranspose) {
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
 
     auto batched_out = batched.transpose(0, 2);
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor.transpose(2, 4)));
   }
@@ -810,7 +810,7 @@ TEST(VmapTest, TestBatchedTensorTranspose) {
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.transpose(-2, -1);
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor.transpose(-2, -1)));
   }
@@ -824,7 +824,7 @@ TEST(VmapTest, TestBatchedTensorPermute) {
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.permute({1, 0});
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor.permute({0, 2, 1})));
   }
@@ -834,7 +834,7 @@ TEST(VmapTest, TestBatchedTensorPermute) {
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
 
     auto batched_out = batched.permute({2, 1, 0});
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor.permute({0, 1, 4, 3, 2})));
   }
@@ -844,7 +844,7 @@ TEST(VmapTest, TestBatchedTensorPermute) {
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
     auto batched_out = batched.permute({-1, -2, -3});
-    const auto& out = maybeGetBatched(batched_out)->value();
+    const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor.permute({0, -1, -2, -3})));
   }

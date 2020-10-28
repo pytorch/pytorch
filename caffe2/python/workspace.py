@@ -1,9 +1,9 @@
 ## @package workspace
 # Module caffe2.python.workspace
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 import collections
 import contextlib
 from google.protobuf.message import Message
@@ -40,6 +40,7 @@ Workspaces = C.workspaces
 BenchmarkNet = C.benchmark_net
 BenchmarkNetOnce = C.benchmark_net_once
 GetStats = C.get_stats
+CreateOfflineTensor = C.create_offline_tensor
 
 operator_tracebacks = defaultdict(dict)
 

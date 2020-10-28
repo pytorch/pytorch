@@ -8,36 +8,13 @@
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
 # Temp: use new sccache
-if [[ -n "$IN_CIRCLECI" && "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+if [[ -n "$IN_CI" && "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Download customized sccache
   sudo curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
   sudo chmod 755 /opt/cache/bin/sccache
 fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-
-# For distributed, four environmental configs:
-# (1) build with only NCCL
-# (2) build with NCCL and MPI
-# (3) build with only MPI
-# (4) build with neither
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
-  # TODO: move this to Docker
-  sudo apt-get -qq update
-  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc5* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
-  # TODO: move this to Docker
-  sudo apt-get -qq update
-  if [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
-    sudo apt-get -qq install openmpi-bin libopenmpi-dev
-  else
-    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
-  fi
-  sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
-  sudo mkdir -p /var/run/sshd
-fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
@@ -90,8 +67,14 @@ if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
   POSSIBLE_JAVA_HOMES+=(/usr/local)
   POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
   POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  # Add the Windows-specific JNI
+  POSSIBLE_JAVA_HOMES+=("$PWD/.circleci/windows-jni/")
   for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
     if [[ -e "$JH/include/jni.h" ]] ; then
+      # Skip if we're not on Windows but haven't found a JAVA_HOME
+      if [[ "$JH" == "$PWD/.circleci/windows-jni/" && "$OSTYPE" != "msys" ]] ; then
+        break
+      fi
       echo "Found jni.h under $JH"
       export JAVA_HOME="$JH"
       export BUILD_JNI=ON
@@ -122,6 +105,11 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
+  export USE_VULKAN=1
+  export VULKAN_SDK=/var/lib/jenkins/vulkansdk/
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # hcc used to run out of memory, silently exiting without stopping
   # the build process, leaving undefined symbols in the shared lib,
@@ -133,7 +121,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
 
   # ROCm CI is using Caffe2 docker images, which needs these wrapper
   # scripts to correctly use sccache.
-  if [[ -n "${SCCACHE_BUCKET}" && -z "$IN_CIRCLECI" ]]; then
+  if [[ -n "${SCCACHE_BUCKET}" && -z "$IN_CI" ]]; then
     mkdir -p ./sccache
 
     SCCACHE="$(which sccache)"
@@ -157,7 +145,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export PATH="$CACHE_WRAPPER_DIR:$PATH"
   fi
 
-  if [[ -n "$IN_CIRCLECI" ]]; then
+  if [[ -n "$IN_CI" ]]; then
       # Set ROCM_ARCH to gtx900 and gtx906 in CircleCI
       echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CircleCI builds"
       export PYTORCH_ROCM_ARCH="gfx900;gfx906"
@@ -214,9 +202,11 @@ else
     # set only when building other architectures
     # only use for "python setup.py install" line
     if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
-      WERROR=1 python setup.py install
+      WERROR=1 python setup.py bdist_wheel
+      python -mpip install dist/*.whl
     else
-      python setup.py install
+      python setup.py bdist_wheel
+      python -mpip install dist/*.whl
     fi
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
@@ -228,6 +218,11 @@ else
     fi
 
     assert_git_not_dirty
+    # Copy ninja build logs to dist folder
+    mkdir -p dist
+    if [ -f build/.ninja_log ]; then
+      cp build/.ninja_log dist
+    fi
 
     # Build custom operator tests.
     CUSTOM_OP_BUILD="$PWD/../custom-op-build"

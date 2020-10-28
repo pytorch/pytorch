@@ -14,7 +14,12 @@ torch/testing/_internal/generated
 """
 
 from .utils import write, CodeTemplate
-from .gen_python_functions import get_py_nn_functions, get_py_torch_functions, op_name
+from .gen_python_functions import (
+    get_py_nn_functions,
+    get_py_torch_functions,
+    get_py_variable_methods,
+    op_name,
+)
 import textwrap
 from .gen_autograd import load_aten_declarations
 
@@ -27,6 +32,9 @@ def gen_annotated(aten_path, out, template_path):
 
     for func in recurse_dict(get_py_nn_functions(declarations)):
         annotated_args.append(process_func("torch._C._nn", func))
+
+    for func in recurse_dict(get_py_variable_methods(declarations)):
+        annotated_args.append(process_func("torch.Tensor", func))
 
     annotated_args = textwrap.indent("\n".join(annotated_args), "    ")
     env = {"annotated_args": annotated_args}

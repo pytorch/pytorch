@@ -1,4 +1,4 @@
-from torch.onnx.symbolic_helper import _black_list_in_opset
+from torch.onnx.symbolic_helper import _block_list_in_opset
 
 import torch.onnx.symbolic_opset9 as sym_opset9
 
@@ -15,7 +15,7 @@ import warnings
 #   MaxPool: added optional indices output.
 #   Scan
 
-black_listed_operators = [
+block_listed_operators = [
     "scan", "expand", "expand_as", "meshgrid",
     "adaptive_max_pool1d", "adaptive_max_pool2d", "adaptive_max_pool3d",
     "max_pool1d_with_indices", "max_pool2d_with_indices", "max_pool3d_with_indices"
@@ -43,5 +43,5 @@ def min(g, self, dim_or_y=None, keepdim=None):
     return sym_opset9.min(g, self, dim_or_y, keepdim)
 
 
-for black_listed_op in black_listed_operators:
-    vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
+for block_listed_op in block_listed_operators:
+    vars()[block_listed_op] = _block_list_in_opset(block_listed_op)

@@ -1,10 +1,6 @@
 """Provides an API for writing protocol buffers to event files to be
 consumed by TensorBoard for visualization."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import os
 import six
 import time
@@ -344,6 +340,7 @@ class SummaryWriter(object):
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_scalar")
         if self._check_caffe2_blob(scalar_value):
+            from caffe2.python import workspace
             scalar_value = workspace.FetchBlob(scalar_value)
         self._get_file_writer().add_summary(
             scalar(tag, scalar_value), global_step, walltime)
@@ -382,6 +379,7 @@ class SummaryWriter(object):
         fw_logdir = self._get_file_writer().get_logdir()
         for tag, scalar_value in tag_scalar_dict.items():
             fw_tag = fw_logdir + "/" + main_tag.replace("/", "_") + "_" + tag
+            assert self.all_writers is not None
             if fw_tag in self.all_writers.keys():
                 fw = self.all_writers[fw_tag]
             else:
@@ -389,6 +387,7 @@ class SummaryWriter(object):
                                 self.filename_suffix)
                 self.all_writers[fw_tag] = fw
             if self._check_caffe2_blob(scalar_value):
+                from caffe2.python import workspace
                 scalar_value = workspace.FetchBlob(scalar_value)
             fw.add_summary(scalar(main_tag, scalar_value),
                            global_step, walltime)
@@ -423,6 +422,7 @@ class SummaryWriter(object):
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_histogram")
         if self._check_caffe2_blob(values):
+            from caffe2.python import workspace
             values = workspace.FetchBlob(values)
         if isinstance(bins, six.string_types) and bins == 'tensorflow':
             bins = self.default_bins
@@ -540,6 +540,7 @@ class SummaryWriter(object):
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_image")
         if self._check_caffe2_blob(img_tensor):
+            from caffe2.python import workspace
             img_tensor = workspace.FetchBlob(img_tensor)
         self._get_file_writer().add_summary(
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime)
@@ -583,6 +584,7 @@ class SummaryWriter(object):
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_images")
         if self._check_caffe2_blob(img_tensor):
+            from caffe2.python import workspace
             img_tensor = workspace.FetchBlob(img_tensor)
         self._get_file_writer().add_summary(
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime)
@@ -612,8 +614,10 @@ class SummaryWriter(object):
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_image_with_boxes")
         if self._check_caffe2_blob(img_tensor):
+            from caffe2.python import workspace
             img_tensor = workspace.FetchBlob(img_tensor)
         if self._check_caffe2_blob(box_tensor):
+            from caffe2.python import workspace
             box_tensor = workspace.FetchBlob(box_tensor)
         if labels is not None:
             if isinstance(labels, str):
@@ -676,6 +680,7 @@ class SummaryWriter(object):
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_audio")
         if self._check_caffe2_blob(snd_tensor):
+            from caffe2.python import workspace
             snd_tensor = workspace.FetchBlob(snd_tensor)
         self._get_file_writer().add_summary(
             audio(tag, snd_tensor, sample_rate=sample_rate), global_step, walltime)
@@ -821,7 +826,7 @@ class SummaryWriter(object):
             metadata, label_img, fs, subdir, global_step, tag)
         self._projector_config.embeddings.extend([embedding_info])
 
-        from google.protobuf import text_format
+        from google.protobuf import text_format  # type: ignore
         config_pbtxt = text_format.MessageToString(self._projector_config)
         write_pbtxt(self._get_file_writer().get_logdir(), config_pbtxt)
 

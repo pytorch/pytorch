@@ -115,11 +115,9 @@ void IRVisitor::visit(const AtomicAdd* v) {
   v->value()->accept(this);
 }
 
+void IRVisitor::visit(const SyncThreads* v) {}
+
 void IRVisitor::visit(const Block* v) {
-  for (const auto& pair : v->varBindings()) {
-    pair.first->accept(this);
-    pair.second->accept(this);
-  }
   for (Stmt* s : *v) {
     s->accept(this);
   }
@@ -172,6 +170,11 @@ void IRVisitor::visit(const Free* v) {
   v->buffer_var()->accept(this);
 }
 
+void IRVisitor::visit(const Let* v) {
+  v->var()->accept(this);
+  v->value()->accept(this);
+}
+
 void IRVisitor::visit(const Cond* v) {
   const Expr* condition = v->condition();
   Stmt* true_stmt = v->true_stmt();
@@ -202,6 +205,24 @@ void IRVisitor::visit(const Polynomial* v) {
 void IRVisitor::visit(const RoundOff* v) {
   v->lhs()->accept(this);
   v->rhs()->accept(this);
+}
+
+void IRVisitor::visit(const MaxTerm* v) {
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+  }
+  for (auto* t : v->variables()) {
+    t->accept(this);
+  }
+}
+
+void IRVisitor::visit(const MinTerm* v) {
+  if (v->scalar()) {
+    v->scalar()->accept(this);
+  }
+  for (auto* t : v->variables()) {
+    t->accept(this);
+  }
 }
 
 void IRVisitor::visit(const ReduceOp* v) {

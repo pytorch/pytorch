@@ -8,7 +8,7 @@ from typing import Tuple, Optional
 import torch
 from torch import Tensor
 from . import _linalg_utils as _utils
-from ._overrides import has_torch_function, handle_torch_function
+from .overrides import has_torch_function, handle_torch_function
 
 
 def get_approximate_basis(A,        # type: Tensor

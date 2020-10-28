@@ -1,12 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import time
 import json
 import torch
-import torch.utils.cpp_extension as cpp_extension # noqa
+import cpp_extension # noqa
 
 
 """PyTorch performance microbenchmarks.
@@ -154,14 +149,14 @@ class PyTorchOperatorTestCase(object):
             for _ in range(num_runs):
                 start_time = time.time()
                 self.output = self.op_bench.forward()
-                if cuda_sync: 
+                if cuda_sync:
                     torch.cuda.synchronize(torch.cuda.current_device())
                 end_time = time.time()
                 self.time_series.append((end_time - start_time) * 1e3)
         else:
             for _ in range(num_runs):
                 self.output = self.op_bench.forward()
-            if cuda_sync: 
+            if cuda_sync:
                 torch.cuda.synchronize(torch.cuda.current_device())
 
     def _output_mean(self):

@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import torch
 import torch.nn.quantized.functional
 import torch.nn.intrinsic as nni
@@ -31,7 +26,7 @@ class BatchNorm2d(torch.nn.BatchNorm2d):
             mod = mod[0]
         else:
             activation_post_process = mod.activation_post_process
-        scale, zero_point = mod.activation_post_process.calculate_qparams()
+        scale, zero_point = activation_post_process.calculate_qparams()
         new_mod = cls(mod.num_features, mod.eps)
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias

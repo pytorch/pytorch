@@ -18,6 +18,7 @@ using c10::ListType;
 using c10::make_left;
 using c10::make_right;
 using c10::OperatorName;
+using c10::OptionalType;
 
 namespace torch {
 namespace jit {
@@ -109,7 +110,6 @@ struct SchemaParser {
   }
 
   Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
-    Argument result;
     auto p = type_parser.parseType();
     auto type = std::move(p.first);
     auto alias_info = std::move(p.second);
@@ -127,6 +127,9 @@ struct SchemaParser {
         container->addContainedType(std::move(*alias_info));
       }
       alias_info = std::move(container);
+      if (L.nextIf('?')) {
+        type = OptionalType::create(type);
+      }
     }
     if (is_return) {
       // optionally field names in return values
@@ -234,7 +237,8 @@ struct SchemaParser {
     auto range = L.cur().range;
     switch (arg_type->kind()) {
       case TypeKind::TensorType:
-      case TypeKind::GeneratorType: {
+      case TypeKind::GeneratorType:
+      case TypeKind::QuantizerType: {
         return parseTensorDefault(range);
       } break;
       case TypeKind::StringType:

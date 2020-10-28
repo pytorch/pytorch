@@ -64,6 +64,9 @@ static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scal
 
 } // namespace
 
+DEFINE_DISPATCH(complex_stub);
+DEFINE_DISPATCH(polar_stub);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor arange(Scalar end, const TensorOptions& options) {
@@ -98,6 +101,69 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
   return at::arange(like.size(dim), like.options().dtype(at::kLong));
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / polar ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+void complex_check_floating(const Tensor& a, const Tensor& b) {
+  TORCH_CHECK((a.scalar_type() == kFloat || a.scalar_type() == kDouble) &&
+              (b.scalar_type() == kFloat || b.scalar_type() == kDouble),
+              "Expected both inputs to be Float or Double tensors but got ",
+              a.scalar_type(), " and ", b.scalar_type());
+}
+
+void complex_check_dtype(
+    const Tensor& result,
+    const Tensor& a,
+    const Tensor& b) {
+  complex_check_floating(a, b);
+  TORCH_CHECK(a.scalar_type() == b.scalar_type(),
+              "Expected object of scalar type ", a.scalar_type(),
+              " but got scalar type ", b.scalar_type(), " for second argument");
+  TORCH_CHECK(result.scalar_type() == toComplexType(a.scalar_type()),
+              "Expected object of scalar type ", toComplexType(a.scalar_type()),
+              " but got scalar type ", result.scalar_type(),
+              " for argument 'out'");
+}
+
+Tensor& complex_out(Tensor& result, const Tensor& real, const Tensor& imag) {
+  complex_check_dtype(result, real, imag);
+  auto iter = TensorIteratorConfig()
+      .add_output(result)
+      .add_input(real)
+      .add_input(imag)
+      .check_all_same_dtype(false)
+      .build();
+  complex_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor complex(const Tensor& real, const Tensor& imag) {
+  complex_check_floating(real, imag);
+  c10::TensorOptions options = real.options();
+  options = options.dtype(toComplexType(real.scalar_type()));
+  Tensor result = at::empty(0, options);
+  return at::complex_out(result, real, imag);
+}
+
+Tensor& polar_out(Tensor& result, const Tensor& abs, const Tensor& angle) {
+  complex_check_dtype(result, abs, angle);
+  auto iter = TensorIteratorConfig()
+      .add_output(result)
+      .add_input(abs)
+      .add_input(angle)
+      .check_all_same_dtype(false)
+      .build();
+  polar_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor polar(const Tensor& abs, const Tensor& angle) {
+  complex_check_floating(abs, angle);
+  c10::TensorOptions options = abs.options();
+  options = options.dtype(toComplexType(abs.scalar_type()));
+  Tensor result = at::empty(0, options);
+  return at::polar_out(result, abs, angle);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<c10::MemoryFormat> optional_memory_format) {
 
@@ -108,7 +174,6 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
   TensorOptions options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
 
   AT_ASSERT(options.device().type() == DeviceType::CPU);
-  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   check_size_nonnegative(size);
 
   c10::Allocator* allocator;
@@ -283,6 +348,12 @@ Tensor empty_like(
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
       result = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
+    } else if (self.unsafeGetTensorImpl()->support_as_strided() && self.layout() == kStrided) {
+      // If input tensor is not dense and non-overlapping but strided, we will infer an output strides
+      // which keeps the layout permutation of the input tensor.
+      std::vector<int64_t> strides = infer_dense_strides(self.sizes(), self.strides());
+      // See Note [Explicit nullopt MemoryFormat argument]
+      result = at::empty_strided(self.sizes(), strides, options.memory_format(c10::nullopt));
     } else {
       // See Note [Explicit nullopt MemoryFormat argument]
       result = at::empty(self.sizes(), options.memory_format(self.suggest_memory_format()), c10::nullopt);
@@ -413,10 +484,11 @@ Tensor new_full(
 Tensor linspace(
     Scalar start,
     Scalar end,
-    int64_t steps,
+    c10::optional<int64_t> steps,
     const TensorOptions& options) {
-  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
-  Tensor result = at::empty({steps}, options);
+  const auto steps_ = steps.value_or(100);
+  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
+  Tensor result = at::empty({steps_}, options);
   return at::linspace_out(result, start, end, steps);
 }
 
@@ -425,10 +497,12 @@ Tensor linspace(
 Tensor logspace(
     Scalar start,
     Scalar end,
-    int64_t steps,
+    c10::optional<int64_t> steps,
     double base,
     const TensorOptions& options) {
-  Tensor result = at::empty({steps}, options);
+  const auto steps_ = steps.value_or(100);
+  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
+  Tensor result = at::empty({steps_}, options);
   return at::logspace_out(result, start, end, steps, base);
 }
 
@@ -791,6 +865,9 @@ Tensor zeros_like(
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   if (options.layout() == kSparse && self.is_sparse()) {
+    TORCH_CHECK(
+        !(optional_memory_format.has_value()),
+        "memory format option is only supported by strided tensors");
     auto res = at::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(
         self.sizes(), self.sparse_dim(), self.dense_dim());
@@ -845,6 +922,9 @@ Tensor blackman_window(
     bool periodic,
     const TensorOptions& options) {
   window_function_checks("blackman_window", options, window_length);
+  if (window_length == 0) {
+    return at::empty({0}, options);
+  }
   if (window_length == 1) {
     return native::ones({1}, options);
   }
@@ -914,6 +994,38 @@ Tensor hann_window(
   window_function_checks("hann_window", options, window_length);
   return native::hamming_window(
       window_length, periodic, /*alpha=*/0.5, /*beta=*/0.5, options);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ kaiser_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor kaiser_window(int64_t window_length, const TensorOptions& options) {
+  return native::kaiser_window(window_length, /*periodic=*/true, /*beta=*/12.0, options);
+}
+
+Tensor kaiser_window(int64_t window_length, bool periodic, const TensorOptions& options) {
+  return native::kaiser_window(window_length, periodic, /*beta=*/12.0, options);
+}
+
+Tensor kaiser_window(
+    int64_t window_length,
+    bool periodic,
+    double beta,
+    const TensorOptions& options) {
+  window_function_checks("kaiser_window", options, window_length);
+  if (window_length == 0) {
+    return at::empty({0}, options);
+  }
+  if (window_length == 1) {
+    return at::ones({1}, options);
+  }
+  if (periodic) {
+    window_length += 1;
+  }
+  auto initial = at::arange(window_length, options);
+  auto window = at::empty(window_length, options);
+  auto iter = TensorIterator::unary_op(window, initial);
+  kaiser_window_stub(iter.device_type(), iter, window_length, beta);
+  return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~ vandermonde_matrix ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1106,6 +1218,8 @@ Tensor rand(
   return result.uniform_(0, 1, generator);
 }
 
+
+DEFINE_DISPATCH(kaiser_window_stub);
 
 } // namespace native
 } // namespace at

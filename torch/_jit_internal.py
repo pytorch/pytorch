@@ -11,6 +11,7 @@ import inspect
 import weakref
 import warnings
 import torch
+import sys
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
@@ -18,11 +19,16 @@ import torch.distributed.rpc
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
-from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic  # noqa: F401
+from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
+
+if sys.version_info[:2] > (3, 7):
+    from typing import Final
+else:
+    from typing_extensions import Final
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
-boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
+boolean_dispatched: 'weakref.WeakKeyDictionary[Callable, Dict[str, Callable]]' = weakref.WeakKeyDictionary()  # noqa: T484
 
 
 def createResolutionCallbackFromEnv(lookup_base):
@@ -50,7 +56,7 @@ def createResolutionCallbackFromEnv(lookup_base):
             i += 1
 
         base = lookupInModule(expr[:i].strip(), module)
-        assert base is not None, "Unresolvable type {}".format(expr[:i])
+        assert base is not None, f"Unresolvable type {expr[:i]}"
         if i == len(expr) or expr[i] != '[':
             return base, i
 
@@ -114,9 +120,11 @@ def createResolutionCallbackFromFrame(frames_up=0):
     frame = inspect.currentframe()
     i = 0
     while i < frames_up + 1:
+        assert frame is not None
         frame = frame.f_back
         i += 1
 
+    assert frame is not None
     f_locals = frame.f_locals
     f_globals = frame.f_globals
 
@@ -126,6 +134,8 @@ def createResolutionCallbackFromFrame(frames_up=0):
                 return f_locals[key]
             elif key in f_globals:
                 return f_globals[key]
+            elif key in dir(builtins):
+                return getattr(builtins, key)
 
     return createResolutionCallbackFromEnv(env())
 
@@ -229,7 +239,13 @@ def createResolutionCallbackForClassMethods(cls):
     for fn in fns:
         captures.update(get_closure(fn))
 
-    return lambda key: captures.get(key, None)
+    def lookup_in_class(key):
+        if key in captures:
+            return captures[key]
+        else:
+            return getattr(builtins, key, None)
+
+    return lookup_in_class
 
 
 def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_name, func_name):
@@ -374,6 +390,15 @@ def unused(fn):
             # exception raised
             m(torch.rand(100))
     """
+    if isinstance(fn, property):
+        prop = fn
+        setattr(prop.fget, "_torchscript_modifier", FunctionModifiers.UNUSED)  # noqa: B010
+
+        if prop.fset:
+            setattr(prop.fset, "_torchscript_modifier", FunctionModifiers.UNUSED)  # noqa: B010
+
+        return prop
+
     fn._torchscript_modifier = FunctionModifiers.UNUSED
     return fn
 
@@ -449,7 +474,7 @@ def ignore(drop=False, **kwargs):
 
     if not isinstance(drop, bool):
         raise RuntimeError("Argument to @torch.jit.ignore must be a bool or "
-                           "a function but got {}".format(drop))
+                           f"a function but got {drop}")
 
     # for backwards compat
     drop_on_export = kwargs.pop("drop_on_export", None)
@@ -496,7 +521,7 @@ def is_ignored_fn(fn):
 
 
 def is_static_fn(cls, fn):
-    return isinstance(inspect.getattr_static(cls, fn), staticmethod)
+    return isinstance(inspect.getattr_static(cls, fn, default=None), staticmethod)
 
 def get_static_fn(cls, fn):
     return inspect.getattr_static(cls, fn).__func__
@@ -520,7 +545,7 @@ def copy_torchscript_modifier(orig, new):
 # so that they can be imported in nn/functional.py without an import cycle
 
 # qualified_name => list[overload_functions]
-_overloaded_fns = {}  # noqa: T484
+_overloaded_fns : Dict[str, List[Callable]] = {}  # noqa: T484
 
 def _overload(func):
     qual_name = _qualified_name(func)
@@ -543,7 +568,10 @@ def get_class_name_lineno(method):
 
     # one for the get_class_name call, one for _overload_method call
     for i in range(2):
+        assert current_frame is not None  # assert current frame is not an Optional[FrameType]
         current_frame = current_frame.f_back
+
+    assert current_frame is not None  # same here
     class_name = current_frame.f_code.co_name
     line_no = current_frame.f_code.co_firstlineno
     return class_name, line_no
@@ -558,7 +586,7 @@ def get_class_name_lineno(method):
 # when modules of the same name are in the same file
 
 # qualified_name => class name => list[overload_functions]
-_overloaded_methods = {}  # noqa: T484
+_overloaded_methods : Dict[str, Dict[str, List[Callable]]] = {}  # noqa: T484
 
 
 # (qualified_name, class name) => class_fileno
@@ -608,6 +636,9 @@ def _get_overloaded_methods(method, mod_class):
 
 
 def is_tuple(ann):
+    if ann is Tuple:
+        raise_error_container_parameter_missing("Tuple")
+
     # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
     if not hasattr(ann, '__module__'):
         return False
@@ -616,6 +647,9 @@ def is_tuple(ann):
             getattr(ann, '__origin__', None) is tuple)
 
 def is_list(ann):
+    if ann is List:
+        raise_error_container_parameter_missing("List")
+
     if not hasattr(ann, '__module__'):
         return False
     return ann.__module__ == 'typing' and \
@@ -623,6 +657,9 @@ def is_list(ann):
             getattr(ann, '__origin__', None) is list)
 
 def is_dict(ann):
+    if ann is Dict:
+        raise_error_container_parameter_missing("Dict")
+
     if not hasattr(ann, '__module__'):
         return False
     return ann.__module__ == 'typing' and \
@@ -630,6 +667,9 @@ def is_dict(ann):
             getattr(ann, '__origin__', None) is dict)
 
 def is_optional(ann):
+    if ann is Optional:
+        raise_error_container_parameter_missing("Optional")
+
     # Optional[T] is just shorthand for Union[T, None], so check for both
     def safe_is_subclass(the_type, super_type):
         # Don't throw if `the_type` isn't a class type (e.g. if it is
@@ -675,29 +715,9 @@ if torch.distributed.rpc.is_available():
             )
         return getattr(ann, "__origin__", None) is RRef
 
-try:
-    import typing_extensions
-    from typing_extensions import Final
-
-    def is_final(ann):
-        return ann.__module__ == 'typing_extensions' and \
-            (getattr(ann, '__origin__', None) is typing_extensions.Final)
-except ImportError:
-    # Same as above, this polyfill is only for `typing_extensions`
-    class FinalInstance(object):
-        __slots__ = ['__args__']
-
-        def __init__(self, types):
-            self.__args__ = types
-
-    class FinalCls(object):
-        def __getitem__(self, types):
-            return FinalInstance(types)
-
-    Final = FinalCls()  # noqa: T484
-
-    def is_final(ann):
-        return isinstance(ann, FinalInstance)
+def is_final(ann):
+    return ann.__module__ in {'typing', 'typing_extensions'} and \
+        (getattr(ann, '__origin__', None) is Final)
 
 # allows BroadcastingList instance to be subscriptable
 class BroadcastingListCls(object):
@@ -708,7 +728,30 @@ class BroadcastingListCls(object):
 # list size
 BroadcastingList1 = BroadcastingListCls()
 for i in range(2, 7):
-    globals()["BroadcastingList{}".format(i)] = BroadcastingList1
+    globals()[f"BroadcastingList{i}"] = BroadcastingList1
+
+
+def is_scripting():
+    r"""
+    Function that returns True when in compilation and False otherwise. This
+    is useful especially with the @unused decorator to leave code in your
+    model that is not yet TorchScript compatible.
+    .. testcode::
+
+        import torch
+
+        @torch.jit.unused
+        def unsupported_linear_op(x):
+            return x
+
+        def linear(x):
+           if not torch.jit.is_scripting():
+              return torch.linear(x)
+           else:
+              return unsupported_linear_op(x)
+    """
+    return False
+
 
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
 def _qualified_name(obj):
@@ -746,12 +789,12 @@ def _qualified_name(obj):
     # The Python docs are very clear that `__module__` can be None, but I can't
     # figure out when it actually would be.
     if module_name is None:
-        raise RuntimeError("Could not get qualified name for class '{}': "
-                           "__module__ can't be None.".format(name))
+        raise RuntimeError(f"Could not get qualified name for class '{name}': "
+                           "__module__ can't be None.")
 
     # if getattr(sys.modules[module_name], name) is not obj:
-    #     raise RuntimeError("Could not get qualified name for class '{}': "
-    #                        "the attr {} on module {} is not the the class".format(name, name, module_name))
+    #     raise RuntimeError(f"Could not get qualified name for class '{name}': "
+    #                        f"the attr {name} on module {module_name} is not the the class")
 
     # __main__ is a builtin module, so rewrite it to "__torch__".
     if module_name == "__main__":
@@ -762,8 +805,8 @@ def _qualified_name(obj):
         module_name = "__torch__." + module_name
 
     if "." in name:
-        raise RuntimeError("Could not get qualified name for class '{}': "
-                           "'{}' is not a valid identifier".format(name, name))
+        raise RuntimeError(f"Could not get qualified name for class '{name}': "
+                           f"'{name}' is not a valid identifier")
 
     return module_name + "." + name
 
@@ -800,8 +843,9 @@ def _get_named_tuple_properties(obj):
     return type(obj).__name__, fields, annotations
 
 
-def _create_named_tuple(t, unqual_name, field_names):
-    TupleType = collections.namedtuple(unqual_name, field_names)
+def _create_named_tuple(t, unqual_name: str, field_names: List[str]):
+    # mypy: namedtuple() expects a string literal as the first argument
+    TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore
     return TupleType(*t)
 
 
@@ -820,3 +864,116 @@ def _disable_emit_hooks_decorator(_DecoratorContextManager):  # noqa: F811
 
     def __exit__(self, *args):
         torch._C._jit_set_emit_hooks(self.hooks[0], self.hooks[1])
+
+def _is_exception(obj):
+    if not inspect.isclass(obj):
+        return False
+    return issubclass(obj, Exception)
+
+def raise_error_container_parameter_missing(target_type):
+    if target_type == 'Dict':
+        raise RuntimeError(
+            "Attempted to use Dict without "
+            "contained types. Please add contained type, e.g. "
+            "Dict[int, int]"
+        )
+    raise RuntimeError(
+        f"Attempted to use {target_type} without a "
+        "contained type. Please add a contained type, e.g. "
+        f"{target_type}[int]"
+    )
+
+
+def get_origin(target_type):
+    return getattr(target_type, "__origin__", None)
+
+
+def get_args(target_type):
+    return getattr(target_type, "__args__", None)
+
+
+def check_args_exist(target_type):
+    if target_type is List or target_type is list:
+        raise_error_container_parameter_missing("List")
+    elif target_type is Tuple or target_type is tuple:
+        raise_error_container_parameter_missing("Tuple")
+    elif target_type is Dict or target_type is dict:
+        raise_error_container_parameter_missing("Dict")
+    elif target_type is None or target_type is Optional:
+        raise_error_container_parameter_missing("Optional")
+
+
+# supports List/Dict/Tuple and Optional types
+# TODO support future
+def container_checker(obj, target_type):
+    origin_type = get_origin(target_type)
+    check_args_exist(target_type)
+    if origin_type is list or origin_type is List:
+        if not isinstance(obj, list):
+            return False
+        arg_type = get_args(target_type)[0]
+        arg_origin = get_origin(arg_type)
+        for el in obj:
+            # check if nested container, ex: List[List[str]]
+            if arg_origin:  # processes nested container, ex: List[List[str]]
+                if not container_checker(el, arg_type):
+                    return False
+            elif not isinstance(el, arg_type):
+                return False
+        return True
+    elif origin_type is Dict or origin_type is dict:
+        if not isinstance(obj, dict):
+            return False
+        key_type = get_args(target_type)[0]
+        val_type = get_args(target_type)[1]
+        for key, val in obj.items():
+            # check if keys are of right type
+            if not isinstance(key, key_type):
+                return False
+            val_origin = get_origin(val_type)
+            if val_origin:
+                if not container_checker(val, val_type):
+                    return False
+            elif not isinstance(val, val_type):
+                return False
+        return True
+    elif origin_type is Tuple or origin_type is tuple:
+        if not isinstance(obj, tuple):
+            return False
+        arg_types = get_args(target_type)
+        if len(obj) != len(arg_types):
+            return False
+        for el, el_type in zip(obj, arg_types):
+            el_origin = get_origin(el_type)
+            if el_origin:
+                if not container_checker(el, el_type):
+                    return False
+            elif not isinstance(el, el_type):
+                return False
+        return True
+    elif origin_type is Union:  # actually handles Optional Case
+        if obj is None:  # check before recursion because None is always fine
+            return True
+        optional_type = get_args(target_type)[0]
+        optional_origin = get_origin(optional_type)
+        if optional_origin:
+            return container_checker(obj, optional_type)
+        elif isinstance(obj, optional_type):
+            return True
+    return False
+
+
+def _isinstance(obj, target_type) -> bool:
+    origin_type = get_origin(target_type)    
+    if origin_type:
+        return container_checker(obj, target_type)
+
+    # Check to handle weird python type behaviors
+    # 1. python 3.6 returns None for origin of containers without 
+    #    contained type (intead of returning outer container type)
+    # 2. non-typed optional origin returns as none instead 
+    #    of as optional in 3.6-3.8
+    check_args_exist(target_type)
+
+    # handle non-containers
+    return isinstance(obj, target_type)
