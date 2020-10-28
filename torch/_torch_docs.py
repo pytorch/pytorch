@@ -1647,6 +1647,9 @@ and `c` is returned such that:
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `c`
 
+Supports real-valued and complex-valued inputs.
+For the complex-valued inputs the transpose operator above is the conjugate transpose.
+
 Args:
     input (Tensor): input matrix :math:`b` of size :math:`(*, m, k)`,
                 where :math:`*` is zero or more batch dimensions
