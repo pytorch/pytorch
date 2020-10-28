@@ -36,7 +36,7 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCUDAIfNotRocm, \
     onlyCUDA, onlyCPU, \
-    dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
+    dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest, largeTensorTest, onlyOnCPUAndCUDA, expectedAlertNondeterministic
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
