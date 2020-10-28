@@ -393,11 +393,9 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
         break;
       case at::kPerChannelAffineFloatQParams:
       case at::kPerChannelAffine: {
-        const auto* quantizer = static_cast<at::PerChannelAffineQuantizer*>(
-            tensor.quantizer().get());
-        pushTensor(quantizer->scales());
-        pushTensor(quantizer->zero_points());
-        pushInt(quantizer->axis());
+        pushTensor(tensor.q_per_channel_scales());
+        pushTensor(tensor.q_per_channel_zero_points());
+        pushInt(tensor.q_per_channel_axis());
       } break;
       default:
         TORCH_CHECK(
@@ -598,12 +596,14 @@ void Pickler::pushTuple(const IValue& ivalue) {
   }
 }
 
-WriteableTensorData getWriteableTensorData(const at::Tensor& tensor) {
+WriteableTensorData getWriteableTensorData(
+    const at::Tensor& tensor,
+    bool to_cpu) {
   WriteableTensorData result;
   result.tensor_ = tensor;
   result.size_ = tensor.storage().nbytes();
   // TODO HIP support
-  if (tensor.storage().device_type() == DeviceType::CUDA) {
+  if (tensor.storage().device_type() == DeviceType::CUDA && to_cpu) {
     // NB: This new tensor is created to support cuda tensors.
     // Storages can be mutated when converting tensors from cuda to cpu,
     // and we need a cpu tensor to copy data from.

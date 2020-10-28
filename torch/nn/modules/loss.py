@@ -42,8 +42,8 @@ class L1Loss(_Loss):
     .. math::
         \ell(x, y) =
         \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     :math:`x` and :math:`y` are tensors of arbitrary shapes with a total
@@ -130,9 +130,9 @@ class NLLLoss(_WeightedLoss):
     .. math::
         \ell(x, y) = \begin{cases}
             \sum_{n=1}^N \frac{1}{\sum_{n=1}^N w_{y_n}} l_n, &
-            \text{if reduction} = \text{'mean';}\\
+            \text{if reduction} = \text{`mean';}\\
             \sum_{n=1}^N l_n,  &
-            \text{if reduction} = \text{'sum'.}
+            \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     Can also be used for higher dimension inputs, such as 2D images, by providing
@@ -322,8 +322,8 @@ class KLDivLoss(_Loss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';} \\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';} \\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     In default :attr:`reduction` mode ``'mean'``, the losses are averaged for each minibatch over observations
@@ -396,8 +396,8 @@ class MSELoss(_Loss):
     .. math::
         \ell(x, y) =
         \begin{cases}
-            \operatorname{mean}(L), &  \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  &  \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), &  \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  &  \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     :math:`x` and :math:`y` are tensors of arbitrary shapes with a total
@@ -461,8 +461,8 @@ class BCELoss(_WeightedLoss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
@@ -548,8 +548,8 @@ class BCEWithLogitsLoss(_Loss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
@@ -651,8 +651,8 @@ class HingeEmbeddingLoss(_Loss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
+            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
         \end{cases}
 
     where :math:`L = \{l_1,\dots,l_N\}^\top`.
@@ -758,7 +758,7 @@ class MultiLabelMarginLoss(_Loss):
 
 class SmoothL1Loss(_Loss):
     r"""Creates a criterion that uses a squared term if the absolute
-    element-wise error falls below 1 and an L1 term otherwise.
+    element-wise error falls below beta and an L1 term otherwise.
     It is less sensitive to outliers than the `MSELoss` and in some cases
     prevents exploding gradients (e.g. see `Fast R-CNN` paper by Ross Girshick).
     Also known as the Huber loss:
@@ -779,6 +779,9 @@ class SmoothL1Loss(_Loss):
     the sum operation still operates over all the elements, and divides by :math:`n`.
 
     beta is an optional parameter that defaults to 1.
+
+    Note: When beta is set to 0, this is equivalent to :class:`L1Loss`.
+    Passing a negative value in for beta will result in an exception.
 
     The division by :math:`n` can be avoided if sets ``reduction = 'sum'``.
 
@@ -861,7 +864,7 @@ class SoftMarginLoss(_Loss):
 
 
 class CrossEntropyLoss(_WeightedLoss):
-    r"""This criterion combines :func:`nn.LogSoftmax` and :func:`nn.NLLLoss` in one single class.
+    r"""This criterion combines :class:`~torch.nn.LogSoftmax` and :class:`~torch.nn.NLLLoss` in one single class.
 
     It is useful when training a classification problem with `C` classes.
     If provided, the optional argument :attr:`weight` should be a 1D `Tensor`
@@ -1273,7 +1276,7 @@ class TripletMarginWithDistanceLoss(_Loss):
 
     where :math:`N` is the batch size; :math:`d` is a nonnegative, real-valued function
     quantifying the closeness of two tensors, referred to as the :attr:`distance_function`;
-    and :math:`margin` is a non-negative margin representing the minimum difference
+    and :math:`margin` is a nonnegative margin representing the minimum difference
     between the positive and negative distances that is required for the loss to
     be 0.  The input tensors have :math:`N` elements each and can be of any shape
     that the distance function can handle.
@@ -1295,7 +1298,7 @@ class TripletMarginWithDistanceLoss(_Loss):
         distance_function (callable, optional): A nonnegative, real-valued function that
             quantifies the closeness of two tensors. If not specified,
             `nn.PairwiseDistance` will be used.  Default: ``None``
-        margin (float, optional): A non-negative margin representing the minimum difference
+        margin (float, optional): A nonnegative margin representing the minimum difference
             between the positive and negative distances required for the loss to be 0. Larger
             margins penalize cases where the negative examples are not distant enough from the
             anchors, relative to the positives. Default: :math:`1`.
@@ -1320,9 +1323,9 @@ class TripletMarginWithDistanceLoss(_Loss):
 
     >>> # Initialize embeddings
     >>> embedding = nn.Embedding(1000, 128)
-    >>> anchor_ids = torch.randint(0, 1000, (1,), requires_grad=True)
-    >>> positive_ids = torch.randint(0, 1000, (1,), requires_grad=True)
-    >>> negative_ids = torch.randint(0, 1000, (1,), requires_grad=True)
+    >>> anchor_ids = torch.randint(0, 1000, (1,))
+    >>> positive_ids = torch.randint(0, 1000, (1,))
+    >>> negative_ids = torch.randint(0, 1000, (1,))
     >>> anchor = embedding(anchor_ids)
     >>> positive = embedding(positive_ids)
     >>> negative = embedding(negative_ids)

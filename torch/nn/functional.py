@@ -11,6 +11,7 @@ from . import grad  # noqa: F401
 from torch import _VF
 from .._jit_internal import boolean_dispatch, List, Optional, _overload, Tuple
 from ..overrides import has_torch_function, handle_torch_function
+from torch._torch_docs import reproducibility_notes, tf32_notes
 
 
 Tensor = torch.Tensor
@@ -21,17 +22,13 @@ conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> T
 Applies a 1D convolution over an input signal composed of several input
 planes.
 
-This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+{tf32_note}
 
 See :class:`~torch.nn.Conv1d` for details and output shape.
 
 Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
+    {cudnn_reproducibility_note}
+""".format(**reproducibility_notes, **tf32_notes) + r"""
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
@@ -59,19 +56,13 @@ conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> T
 Applies a 2D convolution over an input image composed of several input
 planes.
 
-This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+{tf32_note}
 
 See :class:`~torch.nn.Conv2d` for details and output shape.
 
 Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
-
-
+    {cudnn_reproducibility_note}
+""".format(**reproducibility_notes, **tf32_notes) + r"""
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
     weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
@@ -99,17 +90,13 @@ conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> T
 Applies a 3D convolution over an input image composed of several input
 planes.
 
-This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+{tf32_note}
 
 See :class:`~torch.nn.Conv3d` for details and output shape.
 
 Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
+    {cudnn_reproducibility_note}
+""".format(**reproducibility_notes, **tf32_notes) + r"""
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
@@ -137,17 +124,13 @@ conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0
 Applies a 1D transposed convolution operator over an input signal
 composed of several input planes, sometimes also called "deconvolution".
 
-This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+{tf32_note}
 
 See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
 
 Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
+    {cudnn_reproducibility_note}
+""".format(**reproducibility_notes, **tf32_notes) + r"""
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
@@ -178,17 +161,13 @@ conv_transpose2d(input, weight, bias=None, stride=1, padding=0, output_padding=0
 Applies a 2D transposed convolution operator over an input image
 composed of several input planes, sometimes also called "deconvolution".
 
-This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+{tf32_note}
 
 See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
 
 Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
+    {cudnn_reproducibility_note}
+""".format(**reproducibility_notes, **tf32_notes) + r"""
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
@@ -221,17 +200,13 @@ conv_transpose3d(input, weight, bias=None, stride=1, padding=0, output_padding=0
 Applies a 3D transposed convolution operator over an input image
 composed of several input planes, sometimes also called "deconvolution"
 
-This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+{tf32_note}
 
 See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
 
 Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
+    {cudnn_reproducibility_note}
+""".format(**reproducibility_notes, **tf32_notes) + r"""
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
@@ -1289,8 +1264,7 @@ In-place version of :func:`~celu`.
 """)
 
 
-def leaky_relu(input, negative_slope=0.01, inplace=False):
-    # type: (Tensor, float, bool) -> Tensor
+def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = False) -> Tensor:
     r"""
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
 
@@ -1832,6 +1806,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
                  [ 0.0000,  0.0000,  0.0000],
                  [ 0.6262,  0.2438,  0.7471]]])
     """
+
     if padding_idx is not None:
         if padding_idx > 0:
             assert padding_idx < weight.size(0), 'Padding_idx must be within num_embeddings'
@@ -1863,9 +1838,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     See :class:`torch.nn.EmbeddingBag` for more details.
 
     Note:
-        When using the CUDA backend, this operation may induce nondeterministic
-        behaviour in its backward pass that is not easily switched off.
-        Please see the notes on :doc:`/notes/randomness` for background.
+        {backward_reproducibility_note}
 
     Args:
         input (LongTensor): Tensor containing bags of indices into the embedding matrix
@@ -1933,6 +1906,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         tensor([[ 0.3397,  0.3552,  0.5545],
                 [ 0.5893,  0.4386,  0.5882]])
     """
+
     if not torch.jit.is_scripting():
         tens_ops = (input, weight)
         if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
@@ -2018,6 +1992,8 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         per_sample_weights,
         include_last_offset)
     return ret
+
+embedding_bag.__doc__ = embedding_bag.__doc__.format(**reproducibility_notes)
 
 
 def _verify_batch_size(size):
@@ -2153,17 +2129,10 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
     See :class:`~torch.nn.CTCLoss` for details.
 
     Note:
-        In some circumstances when using the CUDA backend with CuDNN, this operator
-        may select a nondeterministic algorithm to increase performance. If this is
-        undesirable, you can try to make the operation deterministic (potentially at
-        a performance cost) by setting ``torch.backends.cudnn.deterministic =
-        True``.
-        Please see the notes on :doc:`/notes/randomness` for background.
+        {cudnn_reproducibility_note}
 
     Note:
-        When using the CUDA backend, this operation may induce nondeterministic
-        behaviour in its backward pass that is not easily switched off.
-        Please see the notes on :doc:`/notes/randomness` for background.
+        {backward_reproducibility_note}
 
     Args:
         log_probs: :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
@@ -2200,6 +2169,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
     """
     return torch.ctc_loss(log_probs, targets, input_lengths, target_lengths, blank, _Reduction.get_enum(reduction),
                           zero_infinity)
+ctc_loss.__doc__ = ctc_loss.__doc__.format(**reproducibility_notes)
 
 
 def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
@@ -2826,6 +2796,8 @@ def multi_margin_loss(input, target, p=1, margin=1., weight=None, size_average=N
 
 
 pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""
+pixel_shuffle(input, upscale_factor) -> Tensor
+
 Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)` to a
 tensor of shape :math:`(*, C, H \times r, W \times r)`.
 
@@ -2844,6 +2816,8 @@ Examples::
 """)
 
 channel_shuffle = _add_docstr(torch.channel_shuffle, r"""
+channel_shuffle(input, groups) -> Tensor
+
 Divide the channels in a tensor of shape :math:`(*, C , H, W)`
 into g groups and rearrange them as :math:`(*, C \frac g, g, H, W)`,
 while keeping the original tensor shape.
@@ -2900,9 +2874,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         This is equivalent with ``nn.functional.interpolate(...)``.
 
     Note:
-        When using the CUDA backend, this operation may induce nondeterministic
-        behaviour in its backward pass that is not easily switched off.
-        Please see the notes on :doc:`/notes/randomness` for background.
+        {backward_reproducibility_note}
 
     The algorithm used for upsampling is determined by :attr:`mode`.
 
@@ -2952,6 +2924,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     """
     warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.")
     return interpolate(input, size, scale_factor, mode, align_corners)
+upsample.__doc__ = upsample.__doc__.format(**reproducibility_notes)
 
 @_overload  # noqa: F811
 def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
@@ -3009,7 +2982,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             Default: ``False``
         recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
             interpolation calculation.  When `scale_factor` is passed as a parameter, it is used
-            to compute the `output_size`.  If `recompute_scale_factor` is ```False`` or not specified,
+            to compute the `output_size`.  If `recompute_scale_factor` is ``False`` or not specified,
             the passed-in `scale_factor` will be used in the interpolation computation.
             Otherwise, a new `scale_factor` will be computed based on the output and input sizes for
             use in the interpolation computation (i.e. the computation will be identical to if the computed
@@ -3041,9 +3014,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         calculation.
 
     Note:
-        When using the CUDA backend, this operation may induce nondeterministic
-        behaviour in its backward pass that is not easily switched off.
-        Please see the notes on :doc:`/notes/randomness` for background.
+        {backward_reproducibility_note}
     """
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
@@ -3173,6 +3144,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported"
                               " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear"
                               " (got {})".format(input.dim(), mode))
+interpolate.__doc__ = interpolate.__doc__.format(**reproducibility_notes)
 
 @_overload  # noqa: F811
 def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
@@ -3201,13 +3173,12 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
         scale_factor (int): multiplier for spatial size. Has to be an integer.
 
     Note:
-        When using the CUDA backend, this operation may induce nondeterministic
-        behaviour in its backward pass that is not easily switched off.
-        Please see the notes on :doc:`/notes/randomness` for background.
+        {backward_reproducibility_note}
     """
     # DeprecationWarning is ignored by default
     warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
     return interpolate(input, size, scale_factor, mode='nearest')
+upsample_nearest.__doc__ = upsample_nearest.__doc__.format(**reproducibility_notes)
 
 @_overload  # noqa: F811
 def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
@@ -3246,14 +3217,12 @@ def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
         scale_factor (int or Tuple[int, int]): multiplier for spatial size
 
     Note:
-        When using the CUDA backend, this operation may induce nondeterministic
-        behaviour in its backward pass that is not easily switched off.
-        Please see the notes on :doc:`/notes/randomness` for background.
+        {backward_reproducibility_note}
     """
     # DeprecationWarning is ignored by default
     warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.interpolate instead.")
     return interpolate(input, size, scale_factor, mode='bilinear', align_corners=True)
-
+upsample_bilinear.__doc__ = upsample_bilinear.__doc__.format(**reproducibility_notes)
 
 GRID_SAMPLE_INTERPOLATION_MODES = {
     'bilinear': 0,
@@ -3800,7 +3769,7 @@ def assert_int_or_pair(arg, arg_name, message):
 
 def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
     # type: (Tensor, BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int]) -> Tensor  # noqa
-    r"""Extracts sliding local blocks from an batched input tensor.
+    r"""Extracts sliding local blocks from a batched input tensor.
 
     .. warning::
         Currently, only 4-D input tensors (batched image-like tensors) are

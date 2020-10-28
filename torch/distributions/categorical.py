@@ -16,14 +16,14 @@ class Categorical(Distribution):
 
     Samples are integers from :math:`\{0, \ldots, K-1\}` where `K` is ``probs.size(-1)``.
 
-    If :attr:`probs` is 1D with length-`K`, each element is the relative
+    If :attr:`probs` is 1-dimensional with length-`K`, each element is the relative
     probability of sampling the class at that index.
 
-    If :attr:`probs` is 2D, it is treated as a batch of relative probability
-    vectors.
+    If :attr:`probs` is N-dimensional, the first N-1 dimensions are treated as a batch of 
+    relative probability vectors.
 
     .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
-              and it will be normalized to sum to 1.
+              and it will be normalized to sum to 1 along the last dimension.
 
     See also: :func:`torch.multinomial`
 

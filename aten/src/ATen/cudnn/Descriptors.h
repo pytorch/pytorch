@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Exceptions.h>
 
@@ -11,6 +13,8 @@
 #include <cuda.h>
 
 namespace at { namespace native {
+
+std::string cudnnTypeToString(cudnnDataType_t dtype);
 
 // TODO: Add constructors for all of the descriptors
 
@@ -153,11 +157,14 @@ class TORCH_CUDA_API FilterDescriptor
 public:
   void set(const at::Tensor &t, int64_t pad = 0, bool force_nhwc = false);
 
+  void print();
 private:
   void set(cudnnDataType_t dataType, int dim, int* size, cudnnTensorFormat_t filter_format) {
     AT_CUDNN_CHECK(cudnnSetFilterNdDescriptor(mut_desc(), dataType, filter_format, dim, size));
   }
 };
+
+std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d);
 
 struct TORCH_CUDA_API ConvolutionDescriptor
   : public Descriptor<cudnnConvolutionStruct,

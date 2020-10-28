@@ -59,6 +59,7 @@ if sys.platform == 'win32':
     FILE_SCHEMA = "file:///"
 
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
+IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 
 class ProfilingMode(Enum):
     LEGACY = 1
@@ -146,22 +147,22 @@ parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
-parser.add_argument('--ge_config', type=str)
+parser.add_argument('--jit_executor', type=str)
 parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test_bailouts', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
                     const=_get_test_report_path(),
-                    default=_get_test_report_path() if bool(os.environ.get('IN_CIRCLECI')) else None)
+                    default=_get_test_report_path() if bool(os.environ.get('IN_CI')) else None)
 parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
 
 args, remaining = parser.parse_known_args()
-if args.ge_config == 'legacy':
+if args.jit_executor == 'legacy':
     GRAPH_EXECUTOR = ProfilingMode.LEGACY
-elif args.ge_config == 'profiling':
+elif args.jit_executor == 'profiling':
     GRAPH_EXECUTOR = ProfilingMode.PROFILING
-elif args.ge_config == 'simple':
+elif args.jit_executor == 'simple':
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
 else:
     # infer flags based on the default settings
@@ -510,6 +511,11 @@ def slowTest(fn):
             fn(*args, **kwargs)
     wrapper.__dict__['slow_test'] = True
     return wrapper
+
+
+def slowAwareTest(fn):
+    fn.__dict__['slow_test'] = True
+    return fn
 
 
 def skipCUDAMemoryLeakCheckIf(condition):
@@ -1036,9 +1042,12 @@ class TestCase(expecttest.TestCase):
                 rtol, atol = self._getDefaultRtolAndAtol(torch.float32, torch.float32)
             else:
                 rtol, atol = 0, 0
+        rtol = cast(float, rtol)
+        atol = cast(float, atol)
+        assert atol is not None
         atol = max(atol, self.precision)
 
-        return _compare_scalars_internal(a, b, rtol=cast(float, rtol), atol=cast(float, atol), equal_nan=equal_nan)
+        return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
     def assertEqualIgnoreType(self, *args, **kwargs) -> None:
         # If you are seeing this function used, that means test is written wrongly
@@ -1174,7 +1183,7 @@ class TestCase(expecttest.TestCase):
         else:
             super().assertEqual(x, y, msg=msg)
 
-    def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override] 
+    def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
                        atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:  # type: ignore[override]
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
@@ -1503,6 +1512,14 @@ def random_symmetric_matrix(l, *batches, **kwargs):
     return A
 
 
+def random_hermitian_matrix(l, *batches, **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
+    A = (A + A.transpose(-2, -1).conj()).div_(2)
+    return A
+
+
 def random_symmetric_psd_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
@@ -1547,8 +1564,9 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
 
     A = torch.randn(batch_dims + (matrix_size, matrix_size), dtype=dtype, device=device)
     u, _, v = A.svd()
-    s = torch.arange(1., matrix_size + 1, dtype=dtype, device=device).mul_(1.0 / (matrix_size + 1)).diag()
-    return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).matmul(v.transpose(-2, -1)))
+    real_dtype = A.real.dtype if A.dtype.is_complex else A.dtype
+    s = torch.arange(1., matrix_size + 1, dtype=real_dtype, device=device).mul_(1.0 / (matrix_size + 1)).diag()
+    return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).to(A.dtype).matmul(v.transpose(-2, -1)))
 
 
 def random_matrix(rows, columns, *batch_dims, **kwargs):

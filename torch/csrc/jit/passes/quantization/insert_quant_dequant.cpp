@@ -330,6 +330,8 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   // Create and insert quantized embedding op.
   Value* none = g->insertConstant(IValue());
   Value* zero = g->insertConstant(IValue(0));
+  bool pruned_wt = false;
+  auto pruned_const = g->insertConstant(pruned_wt);
 
   if (is_aten_op) {
     TORCH_CHECK(
@@ -340,6 +342,10 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     for (auto i = 1; i < inputs_size - 1; ++i) {
       qembedding_bag_inputs.push_back(embedding_bag_inputs[i]);
     }
+    // The sparse field in the float operator denotes sparse gradients.
+    // For inference this stands for pruned weights. We currently don't support
+    // pruning in graph mode API so we set the field to 0 for inference.
+    qembedding_bag_inputs[5] = pruned_const;
   } else {
     TORCH_CHECK(
         inputs_size == 11,
@@ -348,8 +354,8 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     qembedding_bag_inputs.push_back(embedding_bag_inputs[3]); // offsets
     qembedding_bag_inputs.push_back(
         embedding_bag_inputs[6]); // scale_grad_by_freq
-    qembedding_bag_inputs.push_back(zero); // zero
-    qembedding_bag_inputs.push_back(embedding_bag_inputs[8]); // sparse
+    qembedding_bag_inputs.push_back(zero); // mode
+    qembedding_bag_inputs.push_back(pruned_const); // pruned_weights
     qembedding_bag_inputs.push_back(
         embedding_bag_inputs[9]); // per_sample_weights
   }
@@ -475,7 +481,7 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
           matched_choose_qparam, matched_quantize, matched_dequantize));
     }
   }
-  for (const auto nodes : nodes_to_rewrite) {
+  for (const auto& nodes : nodes_to_rewrite) {
     auto quant_node = std::get<1>(nodes);
     auto dequant_node = std::get<2>(nodes);
     // get input of quantize call.
@@ -988,8 +994,14 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
 
   auto observer_module = module.attr(observer_name.value()).toModule();
   auto scalar_type = observer_module.attr("dtype");
-  if (isPlaceholderObserver(n->input(0)) ||
-      scalar_type == at::ScalarType::Half) {
+  if (isPlaceholderObserver(n->input(0))) {
+    // get compute_dtype for dynamic quantization
+    if (observer_module.hasattr("compute_dtype")) {
+      qparams.push_back(std::make_pair(
+          "_scalar_type", observer_module.attr("compute_dtype")));
+    }
+    return std::make_tuple(qscheme, qparams);
+  } else if (scalar_type == at::ScalarType::Half) {
     return std::make_tuple(qscheme, qparams);
   }
   auto calculate_qparams = observer_module.get_method("calculate_qparams");

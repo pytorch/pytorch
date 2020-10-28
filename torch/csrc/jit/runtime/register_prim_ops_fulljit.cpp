@@ -212,6 +212,13 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "aten::percentFormat(str self, ...) -> str",
+         [](Stack* stack) {
+           size_t num_inputs = pop(stack).toInt();
+           percentFormat(*stack, num_inputs);
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "aten::to.prim_other(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
          [](Stack* stack) {
            at::Tensor self;
@@ -266,6 +273,14 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::is_vulkan(Tensor a) -> bool",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_vulkan());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::is_quantized(Tensor a) -> bool",
          [](Stack* stack) {
            at::Tensor a;
@@ -299,14 +314,6 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.layout());
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::cpu(Tensor(a) self) -> Tensor(a|b)",
-         [](Stack* stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.cpu());
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -518,80 +525,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         prim::tolist,
-         // This operator has to be unschematized because the return type
-         // depends on the type hint and input. The implementation of this
-         // operator below is intended to be as close to the Python
-         // implementation in torch/csrc/utils/tensor_list.cpp as possible.
-         [](const Node* node) -> Operation {
-           return [](Stack* stack) {
-             int elem_ty_val;
-             int dim_val;
-             at::Tensor t;
-
-             pop(stack, elem_ty_val);
-             pop(stack, dim_val);
-             pop(stack, t);
-
-             // If the Tensor is not on the CPU, transfer it.
-             if (!t.device().is_cpu()) {
-               t = t.cpu();
-             }
-
-             // Rebuild the output type using elem_ty_val and dim_val. Start
-             // with the element type corresponding to elem_ty_val.
-             TypePtr out_ty;
-             if (elem_ty_val == 0) {
-               out_ty = IntType::get();
-             } else if (elem_ty_val == 1) {
-               out_ty = FloatType::get();
-             } else if (elem_ty_val == 2) {
-               out_ty = BoolType::get();
-             } else {
-               TORCH_CHECK(
-                   false,
-                   "Unsupported element type for tolist; only int, float and bool are supported");
-             }
-
-             // Check that type of the Tensor matches that of the annotation.
-             // Make an exception for the case in which the annotated type is
-             // float and the Tensor data type is also float; the elements will
-             // be casted to double later.
-             TORCH_CHECK(
-                 (out_ty == FloatType::get() && t.is_floating_point()) ||
-                     tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
-                 "Output annotation element type and runtime tensor element type must match for tolist()");
-
-             // Check that the dimension of the Tensor matches that of the
-             // annotation.
-             TORCH_CHECK(
-                 dim_val == t.dim(),
-                 "Output annotation list dimension and runtime tensor dimension must match for tolist()");
-
-             // Wrap out_ty in a ListType dim times.
-             for (int i = 0; i < dim_val; ++i) {
-               out_ty = ListType::create(out_ty);
-             }
-
-             int64_t dim = t.dim();
-             auto sizes = t.sizes();
-             auto strides = t.strides();
-             size_t element_size = t.element_size();
-             char* data = static_cast<char*>(t.data_ptr());
-             auto result = tensorToListRecursive(
-                 data,
-                 0,
-                 dim,
-                 out_ty,
-                 t.scalar_type(),
-                 sizes,
-                 strides,
-                 element_size);
-             push(stack, std::move(result));
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
          prim::ConstantChunk,
          [](const Node* node) -> Operation {
            int64_t chunks = node->i(attr::chunks);
@@ -702,11 +635,9 @@ RegisterOperators logging_operators(
          },
          aliasAnalysisFromSchema())});
 
-template <typename T>
 void hashValue(Stack* stack) {
   auto value = pop(stack);
-  auto hash = std::hash<T>()(value.to<T>());
-  push(stack, int64_t(hash));
+  push(stack, value.hash());
 }
 
 // As described in https://docs.python.org/3/library/functions.html#round
@@ -947,7 +878,6 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__rshift__, a >> b),
 
     DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
-    DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
     DEFINE_GENERIC_BINARY_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_SCALAR_SCALAR_BINARY_OP(
@@ -1156,16 +1086,8 @@ RegisterOperators reg2({
 
 #undef DEFINE_DIVMOD_MIXED_OP
     Operator(
-        "aten::hash.str(str t) -> int",
-        hashValue<std::string>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::hash.int(int t) -> int",
-        hashValue<int>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::hash.float(float t) -> int",
-        hashValue<double>,
+        "aten::hash.generic(t value) -> int",
+        hashValue,
         aliasAnalysisFromSchema()),
 });
 

@@ -1,4 +1,5 @@
 
+from typing import Optional
 import multiprocessing
 import multiprocessing.connection
 import signal
@@ -6,6 +7,45 @@ import sys
 import warnings
 
 from . import _prctl_pr_set_pdeathsig
+
+
+class ProcessException(Exception):
+    __slots__ = ["error_index", "error_pid"]
+
+    def __init__(self, msg: str, error_index: int, pid: int):
+        super().__init__(msg)
+        self.error_index = error_index
+        self.pid = pid
+
+
+class ProcessRaisedException(ProcessException):
+    """
+    Exception is thrown when the process failed due to exception
+    raised by the code.
+    """
+    def __init__(
+        self,
+        msg: str,
+        error_index: int,
+        error_pid: int,
+    ):
+        super().__init__(msg, error_index, error_pid)
+
+
+class ProcessExitedException(ProcessException):
+    """
+    Exception is thrown when the process failed due to signal
+    or exited with a specific code.
+    """
+    __slots__ = ["exit_code"]
+
+    def __init__(
+            self, msg: str, error_index: int, error_pid: int,
+            exit_code: int, signal_name: Optional[str] = None
+    ):
+        super().__init__(msg, error_index, error_pid)
+        self.exit_code = exit_code
+        self.signal_name = signal_name
 
 
 def _wrap(fn, i, args, error_queue):
@@ -98,24 +138,32 @@ class ProcessContext:
             process.join()
 
         # There won't be an error on the queue if the process crashed.
+        failed_process = self.processes[error_index]
         if self.error_queues[error_index].empty():
             exitcode = self.processes[error_index].exitcode
             if exitcode < 0:
                 name = signal.Signals(-exitcode).name
-                raise Exception(
+                raise ProcessExitedException(
                     "process %d terminated with signal %s" %
-                    (error_index, name)
+                    (error_index, name),
+                    error_index=error_index,
+                    error_pid=failed_process.pid,
+                    exit_code=exitcode,
+                    signal_name=name
                 )
             else:
-                raise Exception(
+                raise ProcessExitedException(
                     "process %d terminated with exit code %d" %
-                    (error_index, exitcode)
+                    (error_index, exitcode),
+                    error_index=error_index,
+                    error_pid=failed_process.pid,
+                    exit_code=exitcode
                 )
 
         original_trace = self.error_queues[error_index].get()
         msg = "\n\n-- Process %d terminated with the following error:\n" % error_index
         msg += original_trace
-        raise Exception(msg)
+        raise ProcessRaisedException(msg, error_index, failed_process.pid)
 
 
 class SpawnContext(ProcessContext):

@@ -121,6 +121,7 @@ def floor_divide(g, self, other):
     # - self is not fp and other is not fp, the output's type is self's output type
     # - the output type defaults to Float
     scalar_type = self.type().scalarType()
+
     if scalar_type is not None:
         if not sym_help._is_fp(self) and \
            other.type().scalarType() is not None and \
@@ -825,7 +826,6 @@ avg_pool3d = _avg_pool('avg_pool3d', _triple)
 
 
 def _adaptive_pool(name, type, tuple_fn, fn=None):
-    @parse_args('v', 'is')
     def symbolic_fn(g, input, output_size):
         # _adaptive_pool is supported for cases where output_size is 1 for all dimensions,
         # by executing a GlobalPool.
@@ -836,6 +836,10 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         # so we try using max_poolxd_with_indices, and if it is not possible
         # (input is not a complete tensor or output size not factor of input size)
         # then we call GlobalAveragePool and return None for the indices
+        try:
+            output_size = _parse_arg(output_size, 'is')
+        except Exception:
+            return sym_help._onnx_unsupported('adaptive pooling, since output_size is not constant.')
         if output_size == [1] * len(output_size) and type == "AveragePool":
             return g.op("GlobalAveragePool", input)
         if not input.isCompleteTensor():
@@ -848,7 +852,10 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         if mod != [0] * len(mod):
             if output_size == [1] * len(output_size):
                 return g.op("GlobalMaxPool", input), None
-            return _unimplemented(name, 'output size that are not factor of input size')
+            if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+                return _unimplemented(name, 'output size that are not factor of input size')
+            else:
+                return sym_help._onnx_unsupported(name + ', since output size is not factor of input size')
         k = [int(dim[i] / output_size[i]) for i in range(0, len(dim))]
         # call max_poolxd_with_indices to get indices in the output
         if type == "MaxPool":
@@ -2209,39 +2216,76 @@ def gather(g, self, dim, index, sparse_grad=False):
 
 
 @parse_args('v', 'is', 'b', 'i')
-def _std(g, input, dim, unbiased, keepdim):
-    if input.isCompleteTensor():
-        sqrd = g.op("Mul", input, input)
-        if dim is None:
-            sqrdmean = g.op("ReduceMean", sqrd, keepdims_i=0)
-            mean = g.op("ReduceMean", input, keepdims_i=0)
-            redudced_dims = input.type().sizes()
-        else:
-            sqrdmean = g.op("ReduceMean", sqrd, axes_i=dim, keepdims_i=keepdim)
-            mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
-            redudced_dims = [input.type().sizes()[i] for i in dim]
-        meansqrd = g.op("Mul", mean, mean)
-        var = g.op("Abs", g.op("Sub", sqrdmean, meansqrd))
-        # This is to correct bias in calculating variance, by dividing it over (N - 1) instead on N
-        if unbiased:
-            count = numpy.prod(redudced_dims)
-            mul = g.op("Mul", var, g.op("Constant", value_t=torch.tensor(count, dtype=torch.float)))
-            var = g.op("Div", mul, g.op("Constant", value_t=torch.tensor(count - 1, dtype=torch.float)))
-        std = g.op("Sqrt", var)
-        return std
+def _var_mean(g, input, dim, unbiased, keepdim):
+    sqrd = g.op("Mul", input, input)
+    if dim is None:
+        sqrdmean = g.op("ReduceMean", sqrd, keepdims_i=0)
+        mean = g.op("ReduceMean", input, keepdims_i=0)
+        num_elements = numel(g, input)
     else:
-        _unimplemented("std", "Unknown input rank. Cannot compute std along dimensions.")
+        sqrdmean = g.op("ReduceMean", sqrd, axes_i=dim, keepdims_i=keepdim)
+        mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
+        redudced_dims = g.op("Shape", input)
+        # dim could contain one or multiple dimensions
+        redudced_dims = g.op("Gather", redudced_dims, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
+        num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
+    meansqrd = g.op("Mul", mean, mean)
+    var = g.op("Sub", sqrdmean, meansqrd)
+    # Correct bias in calculating variance, by dividing it over (N - 1) instead on N
+    if unbiased:
+        num_elements = g.op("Cast", num_elements, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+        one = g.op("Constant", value_t=torch.tensor(1, dtype=torch.float))
+        mul = g.op("Mul", var, num_elements)
+        var = g.op("Div", mul, g.op("Sub", num_elements, one))
+    return var, mean
 
 
 # Since position of optional arguments can change for std, this is a hack to find if first argument
 # is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
-# torch.std(input, unbiased=True)
-# torch.std(input, dim, keepdim=False, unbiased=True)
+# at::std(input, unbiased)
+# at::std(input, dim, unbiased, keepdim)
 def std(g, input, *args):
     if len(args) == 3:
-        return _std(g, input, *args)
+        var, _ = _var_mean(g, input, *args)
     else:
-        return _std(g, input, None, args[0], None)
+        var, _ = _var_mean(g, input, None, args[0], None)
+    return g.op("Sqrt", var)
+
+
+# Since position of optional arguments can change for var, this is a hack to find if first argument
+# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
+# at::var(input, unbiased)
+# at::var(input, dim, unbiased, keepdim)
+def var(g, input, *args):
+    if len(args) == 3:
+        var, _ = _var_mean(g, input, *args)
+    else:
+        var, _ = _var_mean(g, input, None, args[0], None)
+    return var
+
+
+# Since position of optional arguments can change for var_mean, this is a hack to find if first argument
+# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
+# at::var_mean(input, unbiased)
+# at::var_mean(input, dim, unbiased, keepdim)
+def var_mean(g, input, *args):
+    if len(args) == 3:
+        var, mean = _var_mean(g, input, *args)
+    else:
+        var, mean = _var_mean(g, input, None, args[0], None)
+    return var, mean
+
+
+# Since position of optional arguments can change for std_mean, this is a hack to find if first argument
+# is 'dim' or 'unbiased'. As shown below, 'dim' argument could be listed before 'unbiased' :
+# at::std_mean(input, unbiased)
+# at::std_mean(input, dim, unbiased, keepdim)
+def std_mean(g, input, *args):
+    if len(args) == 3:
+        var, mean = _var_mean(g, input, *args)
+    else:
+        var, mean = _var_mean(g, input, None, args[0], None)
+    return g.op("Sqrt", var), mean
 
 
 @parse_args('v', 'is', 'i')

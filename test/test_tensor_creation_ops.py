@@ -6,7 +6,7 @@ import random
 import torch
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, do_test_empty_full, TEST_NUMPY, suppress_warnings,
+    (TestCase, run_tests, do_test_empty_full, TEST_NUMPY, TEST_WITH_ROCM, suppress_warnings,
      torch_to_numpy_dtype_dict, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
@@ -1048,7 +1048,9 @@ class TestTensorCreation(TestCase):
             self._test_logspace_base2(device, dtype, steps=steps)
 
     @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False, include_complex=False))
-    @dtypesIfCUDA(*torch.testing.get_all_dtypes(include_bool=False, include_half=True, include_complex=False))
+    @dtypesIfCUDA(*((torch.testing.get_all_int_dtypes() + [torch.float32, torch.float16, torch.bfloat16]) 
+                    if TEST_WITH_ROCM 
+                    else torch.testing.get_all_dtypes(include_bool=False, include_half=True, include_complex=False)))
     def test_logspace(self, device, dtype):
         _from = random.random()
         to = _from + random.random()

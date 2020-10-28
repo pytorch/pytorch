@@ -86,8 +86,7 @@ void print_unsupported_ops_and_throw(
   TORCH_CHECK(
       false,
       "Following ops cannot be found. ",
-      "May need to add them explicitly to the selective build operator whitelist, ",
-      "or re-run the export_opnames to update the whitelist:",
+      "Check fburl.com/missing_ops for the fix.",
       error_message);
 }
 
@@ -403,8 +402,9 @@ mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
   auto observer = torch::observerConfig().getModuleObserver();
+  auto instance_key = std::rand();
   if (observer) {
-    observer->onEnterLoadModel();
+    observer->onEnterLoadModel(instance_key);
   }
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader));
@@ -416,13 +416,15 @@ mobile::Module _load_for_mobile(
       copied_metadata["model_name"] = result.name();
     }
     if (observer) {
-      observer->onExitLoadModel(copied_metadata);
+      observer->onExitLoadModel(instance_key, copied_metadata);
     }
     return result;
   } catch (c10::Error& error) {
     if (observer) {
       observer->onFailLoadModel(
-          error.what(), deserializer.deserializeMetadata(std::move(device)));
+          instance_key,
+          error.what(),
+          deserializer.deserializeMetadata(std::move(device)));
     }
     TORCH_RETHROW(error);
   } catch (...) {
@@ -440,7 +442,9 @@ mobile::Module _load_for_mobile(
     } catch (c10::Error& error) {
       if (observer) {
         observer->onFailLoadModel(
-            error.what(), deserializer.deserializeMetadata(std::move(device)));
+            instance_key,
+            error.what(),
+            deserializer.deserializeMetadata(std::move(device)));
       }
       TORCH_RETHROW(error);
     }

@@ -15,14 +15,14 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.distributed.autograd as dist_autograd
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
-from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler
+from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler, _thread_local_var, _wait_all
 from torch.distributed.rpc.internal import (
     PythonUDF,
     RPCExecMode,
     _internal_rpc_pickler,
     _build_rpc_profiling_key,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu, captured_output
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -313,8 +313,9 @@ def my_script_func(tensor):
     return torch.add(tensor, tensor)
 
 
+expected_err = "Expected error"
 def raise_func():
-    raise ValueError("Expected error")
+    raise ValueError(expected_err)
 
 
 global_rref = None
@@ -539,6 +540,31 @@ class RpcTest(RpcAgentTestFixture):
         ret = rpc.rpc_sync(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
         self.assertEqual(fut.wait(), torch.ones(2, 2) + 1)
         self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+    @dist_init
+    def test_send_to_rank(self):
+        dst_rank = (self.rank + 1) % self.world_size
+
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            ret = self._run_func_in_mode(dst_rank, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+            self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+        # Test invalid ranks
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            with self.assertRaises(RuntimeError):
+                self._run_func_in_mode(self.world_size + 1, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            with self.assertRaises(RuntimeError):
+                self._run_func_in_mode(-1, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            with self.assertRaises(ValueError):
+                self._run_func_in_mode(dst_rank + 0.5, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            with self.assertRaises(ValueError):
+                self._run_func_in_mode(dst_rank - 0.5, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
 
     @dist_init
     def test_self_py_udf_remote(self):
@@ -972,7 +998,8 @@ class RpcTest(RpcAgentTestFixture):
             ):
                 rpc.api._all_gather(SlowPickleClass(0.5))
         else:
-            with self.assertRaisesRegex(RuntimeError, "timeout.*100 ms"):
+            expected_error = self.get_timeout_error_regex()
+            with self.assertRaisesRegex(RuntimeError, expected_error):
                 rpc.api._all_gather(SlowPickleClass(0.5))
 
     @dist_init
@@ -1124,6 +1151,9 @@ class RpcTest(RpcAgentTestFixture):
             fut1.wait()
             fut2.wait()
 
+        def get_name(event):
+            return event.name[event.name.find(REMOTE_OP_STR) + len(REMOTE_OP_STR):]
+
         function_events = p.function_events
         for event in function_events:
             if event.is_async:
@@ -1134,22 +1164,18 @@ class RpcTest(RpcAgentTestFixture):
                 if event.node_id == 1:
                     continue
                 self.assertTrue(event.node_id in [dst_cuda_0, dst_cuda_1])
-                self.assertGreater(event.cuda_time_total, 0)
-                self.assertEqual(1, len(event.kernels))
-                kernel = event.kernels[0]
-                if event.node_id == dst_cuda_0:
-                    self.assertEqual(kernel.device, 0)
-                if event.node_id == dst_cuda_1:
-                    self.assertEqual(kernel.device, 1)
-
-                self.assertGreater(event.cuda_time, 0)
+                if get_name(event) in EXPECTED_REMOTE_EVENTS:
+                    self.assertGreater(event.cuda_time_total, 0)
+                    self.assertEqual(1, len(event.kernels))
+                    kernel = event.kernels[0]
+                    if event.node_id == dst_cuda_0:
+                        self.assertEqual(kernel.device, 0)
+                    if event.node_id == dst_cuda_1:
+                        self.assertEqual(kernel.device, 1)
+                    self.assertGreater(event.cuda_time, 0)
 
         # Validate that EXPECTED_REMOTE_EVENTS is a subset of remotely profiled
         # events.
-
-        def get_name(event):
-            return event.name[event.name.find(REMOTE_OP_STR) + len(REMOTE_OP_STR):]
-
         remote_events = [event for event in function_events if event.is_remote]
         remote_event_names = [get_name(event) for event in remote_events if get_name(event) in EXPECTED_REMOTE_EVENTS]
         self.assertEqual(set(remote_event_names), set(EXPECTED_REMOTE_EVENTS))
@@ -1930,11 +1956,23 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_py_raise_in_user_func(self):
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        fut = rpc.rpc_async(worker_name(dst_rank), raise_func)
-        with self.assertRaises(ValueError):
-            fut.wait()
+        with captured_output() as (_, err):
+            # This barrier prevents a race condition where the main thread has
+            # not entered the context manager when the remote function runs.
+            initialize_pg(self.init_method, self.rank, self.world_size)
+            dist.barrier()
+            n = self.rank + 1
+            dst_rank = n % self.world_size
+            fut = rpc.rpc_async(worker_name(dst_rank), raise_func)
+            with self.assertRaisesRegex(ValueError, expected_err):
+                fut.wait()
+            # This barrier prevents a race condition where the main thread exits
+            # context manager before the remote function has ran.
+            dist.barrier()
+
+        # Validate that trainers log errors when running functions.
+        stderr_lines = err.getvalue()
+        self.assertTrue(expected_err in stderr_lines)
 
     @dist_init
     def test_nested_rpc(self):
@@ -2819,6 +2857,58 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
+    def test_wait_all(self):
+        with _wait_all():
+            self.assertTrue(_thread_local_var.future_list == [])
+            dst = worker_name((self.rank + 1) % self.world_size)
+            fut = rpc.rpc_async(dst, torch.add, (torch.ones(2, 2), 1))
+            self.assertTrue(len(_thread_local_var.future_list) == 1)
+            self.assertTrue(isinstance(_thread_local_var.future_list[0], torch._C.Future))
+        self.assertTrue(fut.done())
+        self.assertEqual(fut.wait(), torch.ones(2, 2) + 1)
+        self.assertFalse(hasattr(_thread_local_var, "future_list"))
+
+    @dist_init
+    def test_wait_all_multiple_call(self):
+        with _wait_all():
+            self.assertTrue(_thread_local_var.future_list == [])
+            dst = worker_name((self.rank + 1) % self.world_size)
+            for i in range(20):
+                fut = rpc.rpc_async(dst, torch.add, (torch.ones(i, i), 1))
+                res = rpc.rpc_sync(dst, torch.add, (torch.ones(i, i), 1))
+                self.assertEqual(res, torch.ones(i, i) + 1)
+                self.assertEqual(fut.wait(), torch.ones(i, i) + 1)
+            self.assertTrue(len(_thread_local_var.future_list) == 20)
+        self.assertFalse(hasattr(_thread_local_var, "future_list"))
+
+    @dist_init
+    def test_wait_all_timeout(self):
+        expected_error = self.get_timeout_error_regex()
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            with _wait_all():
+                self.assertTrue(_thread_local_var.future_list == [])
+                dst = worker_name((self.rank + 1) % self.world_size)
+                timeout = 0.1  # 100 ms
+                fut = rpc.rpc_async(dst, my_sleep_func, args=(1,), timeout=timeout)
+        self.assertFalse(hasattr(_thread_local_var, "future_list"))
+
+    @dist_init
+    def test_wait_all_raise_in_user_func(self):
+        with self.assertRaises(ValueError):
+            with _wait_all():
+                self.assertTrue(_thread_local_var.future_list == [])
+                dst = worker_name((self.rank + 1) % self.world_size)
+                fut = rpc.rpc_async(dst, raise_func)
+        self.assertFalse(hasattr(_thread_local_var, "future_list"))
+
+    @dist_init
+    def test_wait_all_raise_in_body(self):
+        with self.assertRaises(ValueError):
+            with _wait_all():
+                raise_func()
+        self.assertFalse(hasattr(_thread_local_var, "future_list"))
+
+    @dist_init
     def test_function_not_on_callee(self):
         # test that if a function does not exist on a callee, we don't crash,
         # instead we get an AttributeError indicating that the func does not exist.
@@ -2902,38 +2992,6 @@ class RpcTest(RpcAgentTestFixture):
     @staticmethod
     def _gpu_tensor_list_arg(tensor_list):
         return torch.rand(3, 3)
-
-    @skip_if_lt_x_gpu(2)
-    @dist_init
-    def test_cuda(self):
-        dst = worker_name((self.rank + 1) % self.world_size)
-        t1 = torch.rand(3, 3).cuda(0)
-        t2 = torch.rand(3, 3).cuda(1)
-        t3 = torch.rand(3, 3)
-
-        # cuda tensors as args fail.
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
-            rpc.rpc_sync(dst, torch.add, args=(t1, t2))
-
-        # mix of cpu and cuda tensors as args fail.
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
-            rpc.rpc_sync(dst, torch.add, args=(t1, t3))
-
-        # gpu tensor list as args fails.
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
-            rpc.rpc_sync(dst, RpcTest._gpu_tensor_list_arg, args=([t1, t2]))
-
-        # cuda tensors as return values fail.
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
-            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor, args=())
-
-        # cuda tensors as a list of return value fails
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
-            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor_list, args=())
-
-        # Sending to self should fail too.
-        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
-            rpc.rpc_sync(worker_name(self.rank), torch.add, args=(t1, t2))
 
     def _create_rref(self):
         owner_rank = (self.rank + 2) % self.world_size
@@ -3159,6 +3217,33 @@ class RpcTest(RpcAgentTestFixture):
             "incompatible function arguments."
         ):
             rpc.rpc_async(dst, raise_func).then(None)
+
+    @dist_init
+    def test_add_done_callback(self):
+        set_by_cb = False
+        n = self.rank + 1
+
+        def callback(fut):
+            nonlocal set_by_cb
+            fut.wait()
+            set_by_cb = True
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n))
+        )
+
+        fut.add_done_callback(callback)
+        fut_then = fut.then(lambda _: True)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+        # We have no guarantee that the add_done_callback fn will execute before the test finishes.
+        # Adding a 'then' callback that runs afterwards to guarantee we wait for the first callback
+        fut_then.wait()
+        self.assertTrue(set_by_cb)
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
     @dist_init
     def test_mark_future_twice(self):
@@ -3615,6 +3700,41 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_backend_options=rpc_backend_options,
             )
 
+    @dist_init
+    def test_local_rref_backward(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        t1 = torch.rand(10, 10, requires_grad=True)
+        rref = rpc.RRef(t1.sum() + t1.sum())
+        rref.backward()
+        expected_grad = torch.ones_like(t1) * 2
+        self.assertEqual(expected_grad, t1.grad)
+
+        with dist_autograd.context() as context_id:
+            t2 = rpc.rpc_sync(dst, torch.add, args=(t1, t1))
+            rref = rpc.RRef(t2.sum())
+            rref.backward(context_id)
+            self.assertEqual(expected_grad, dist_autograd.get_gradients(context_id)[t1])
+
+        # Double backward.
+        with dist_autograd.context() as context_id:
+            t2 = rpc.rpc_sync(dst, torch.add, args=(t1, t1))
+            rref = rpc.RRef(t2.sum())
+            rref.backward(context_id, retain_graph=True)
+            rref.backward(context_id)
+            self.assertEqual(expected_grad * 2, dist_autograd.get_gradients(context_id)[t1])
+
+        # Test errors.
+        with self.assertRaisesRegex(RuntimeError, "tensors does not require grad and does not have a grad_fn"):
+            rpc.RRef(torch.rand(10)).backward()
+
+        with self.assertRaisesRegex(RuntimeError, "grad can be implicitly created only for scalar outputs"):
+            rpc.RRef(torch.rand(10, requires_grad=True)).backward()
+
+        with self.assertRaisesRegex(RuntimeError, "Could not find autograd context with id: 100"):
+            rpc.RRef(torch.rand(10, requires_grad=True).sum()).backward(100)
+
+        with self.assertRaisesRegex(RuntimeError, "RRef should contain a tensor for .backward()"):
+            rpc.RRef("foo").backward()
 
 class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 
@@ -3667,6 +3787,39 @@ class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
             "It is recommended to migrate to the TENSORPIPE backend.",
             "\n".join(cm.output),
         )
+
+    @skip_if_lt_x_gpu(2)
+    @dist_init
+    def test_cuda(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        t1 = torch.rand(3, 3).cuda(0)
+        t2 = torch.rand(3, 3).cuda(1)
+        t3 = torch.rand(3, 3)
+
+        # cuda tensors as args fail.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, torch.add, args=(t1, t2))
+
+        # mix of cpu and cuda tensors as args fail.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, torch.add, args=(t1, t3))
+
+        # gpu tensor list as args fails.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, RpcTest._gpu_tensor_list_arg, args=([t1, t2]))
+
+        # cuda tensors as return values fail.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor, args=())
+
+        # cuda tensors as a list of return value fails
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(dst, RpcTest._return_gpu_tensor_list, args=())
+
+        # Sending to self should fail too.
+        with self.assertRaisesRegex(RuntimeError, "RPC backend only supports CPU tensors.*Found tensor on device: cuda:0"):
+            rpc.rpc_sync(worker_name(self.rank), torch.add, args=(t1, t2))
+
 
     def test_single_threaded_rref_owner(self):
         # We need a process group in order to perform a barrier at the end.
@@ -4314,3 +4467,341 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
                 num_worker_threads=self.rpc_backend_options.num_worker_threads,
                 rpc_timeout=timeout,
             )
+
+    def _test_device_maps(self, options, errMsg="Invalid device_map"):
+        with self.assertRaisesRegex(ValueError, errMsg):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=options,
+            )
+
+        self.assertFalse(rpc.api._is_current_rpc_agent_set())
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_maps_wrong_worker_name(self):
+        options = self.rpc_backend_options
+        options.set_device_map("none_exist", {0: 1})
+        self._test_device_maps(options, "Wrong worker names")
+
+    @skip_if_lt_x_gpu(1)
+    def test_device_maps_invalid_max_local_device(self):
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options.set_device_map(dst, {torch.cuda.device_count(): 0})
+
+        self._test_device_maps(options)
+
+    @skip_if_lt_x_gpu(1)
+    def test_device_maps_invalid_max_remote_device(self):
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options.set_device_map(dst, {0: torch.cuda.device_count()})
+
+        self._test_device_maps(options)
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_maps_many_to_one(self):
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options.set_device_map(dst, {1: 0})
+        options.set_device_map(dst, {0: 0})
+
+        self._test_device_maps(options)
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_maps_one_to_many(self):
+        if self.rank == 0:
+            options = self.rpc_backend_options
+            dst = worker_name((self.rank + 1) % self.world_size)
+            options.set_device_map(dst, {0: 1})
+            with self.assertRaisesRegex(
+                ValueError, "`set_device_map` only supports 1-to-1 mapping"
+            ):
+                options.set_device_map(dst, {0: 0})
+
+    @skip_if_lt_x_gpu(1)
+    def test_device_maps_invalid_min_device(self):
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+        with self.assertRaisesRegex(
+            RuntimeError, "Device index must not be negative"
+        ):
+            options.set_device_map(dst, {-1: 0})
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Device index must not be negative"
+        ):
+            options.set_device_map(dst, {0: -1})
+
+    @staticmethod
+    def _gpu_add(x, y):
+        if all([x.is_cuda, x.device.index == 1, y.is_cuda, y.device.index == 1]):
+            return (x + y).to(0)
+        else:
+            raise ValueError("Wrong device affinity")
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_maps_gpu(self):
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options.set_device_map(dst, {0: 1, 1: 0})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        ret = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._gpu_add,
+            args=(torch.zeros(2).to(0), torch.ones(2).to(0))
+        )
+        self.assertEqual(ret.device, torch.device(1))
+        self.assertEqual(ret, (torch.zeros(2) + torch.ones(2)).to(1))
+        rpc.shutdown()
+
+    @staticmethod
+    def _gpu_add_multi_gpu(x, y):
+        if all([x.is_cuda, x.device.index == 0, y.is_cuda, y.device.index == 1]):
+            return x + y.to(0), x.to(1) - y
+        else:
+            raise ValueError("Wrong device affinity")
+
+    def _test_device_maps_multi_gpu(self, dst):
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {1: 0})
+        options.set_device_map(dst, {0: 1})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        rets = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._gpu_add_multi_gpu,
+            args=(torch.zeros(2).to(1), torch.ones(2).to(0))
+        )
+        self.assertEqual(rets[0].device, torch.device(1))
+        self.assertEqual(rets[1].device, torch.device(0))
+        self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(1))
+        self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))
+        rpc.shutdown()
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_maps_multi_gpu(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        self._test_device_maps_multi_gpu(dst)
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_maps_multi_gpu_self(self):
+        dst = worker_name(self.rank)
+        self._test_device_maps_multi_gpu(dst)
+
+    @staticmethod
+    def _gpu_add_return_to_gpu(x, y):
+        if x.device.type == 'cpu' and y.device.type == 'cpu':
+            return (x + y).to(0), (x - y).to(1), (x * y).to(2), (x / y).to(3)
+        else:
+            raise ValueError("Wrong device affinity")
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_maps_in_options(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
+                init_method=options.init_method,
+                num_worker_threads=options.num_worker_threads,
+                device_maps={dst: {0: 1, 1: 0}}
+            )
+        )
+
+        rets = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._gpu_add_multi_gpu,
+            args=(torch.zeros(2).to(1), torch.ones(2).to(0))
+        )
+        self.assertEqual(rets[0].device, torch.device(1))
+        self.assertEqual(rets[1].device, torch.device(0))
+        self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(1))
+        self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))
+        rpc.shutdown()
+
+    def _test_device_maps_return_to_gpu(self, dst):
+        options = self.rpc_backend_options
+
+        options.set_device_map(dst, {0: 1})
+        options.set_device_map(dst, {1: 2})
+        options.set_device_map(dst, {2: 3})
+        options.set_device_map(dst, {3: 0})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        rets = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._gpu_add_return_to_gpu,
+            args=(torch.zeros(2), torch.ones(2))
+        )
+        for i in range(len(rets)):
+            self.assertEqual(rets[i].device, torch.device((3 + i) % 4))
+        self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(3))
+        self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))
+        self.assertEqual(rets[2], (torch.zeros(2) * torch.ones(2)).to(1))
+        self.assertEqual(rets[3], (torch.zeros(2) / torch.ones(2)).to(2))
+        rpc.shutdown()
+
+    @skip_if_lt_x_gpu(4)
+    def test_device_maps_return_to_gpu(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        self._test_device_maps_return_to_gpu(dst)
+
+    @skip_if_lt_x_gpu(4)
+    def test_device_maps_return_to_gpu_self(self):
+        dst = worker_name(self.rank)
+        self._test_device_maps_return_to_gpu(dst)
+
+    @staticmethod
+    def _add_to_gpu(x, y):
+        return (x + y).to(0)
+
+    def _test_device_maps_missing_config(self, mode):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        errMsg = (
+            "TensorPipe RPC backend only supports CPU tensors by default.*"
+            "`set_device_map` on `TensorPipeRpcBackendOptions`"
+        )
+
+        with self.assertRaisesRegex(RuntimeError, errMsg):
+            if mode == RPCExecMode.SYNC:
+                rpc.rpc_sync(dst, torch.add, args=(torch.zeros(2).to(0), 1))
+            elif mode == RPCExecMode.REMOTE:
+                rpc.remote(dst, torch.add, args=(torch.zeros(2).to(0), 1)).to_here()
+            else:
+                raise ValueError(f"unexpected mode {mode}")
+
+        # make sure RPC is still functioning
+        ret = rpc.rpc_sync(dst, torch.add, args=(torch.ones(2), 1))
+        self.assertEqual(ret, torch.ones(2) + 1)
+
+    def _test_device_maps_missing_config_response(self, mode):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        errMsg = "Response device mapping is not available"
+
+        with self.assertRaisesRegex(RuntimeError, errMsg):
+            if mode == RPCExecMode.SYNC:
+                rpc.rpc_sync(
+                    dst,
+                    TensorPipeAgentRpcTest._add_to_gpu,
+                    args=(torch.zeros(2), 1)
+                )
+            elif mode == RPCExecMode.REMOTE:
+                rpc.remote(
+                    dst,
+                    TensorPipeAgentRpcTest._add_to_gpu,
+                    args=(torch.zeros(2), 1)
+                ).to_here()
+            else:
+                raise ValueError(f"unexpected mode {mode}")
+
+        # make sure RPC is still functioning
+        ret = rpc.rpc_sync(dst, torch.add, args=(torch.ones(2), 1))
+        self.assertEqual(ret, torch.ones(2) + 1)
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
+    def test_device_maps_missing_config(self):
+        self._test_device_maps_missing_config(RPCExecMode.SYNC)
+
+    @skip_if_lt_x_gpu(1)
+    def test_device_maps_missing_config_not_timeout(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options
+        )
+
+        timeout = rpc.get_rpc_timeout()
+
+        tik = time.time()
+        self._test_device_maps_missing_config(RPCExecMode.SYNC)
+        rpc.shutdown()
+        tok = time.time()
+
+        self.assertTrue(tok - tik < timeout)
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
+    def test_device_maps_missing_config_loop(self):
+        for _ in range(self.rpc_backend_options.num_worker_threads + 5):
+            self._test_device_maps_missing_config(RPCExecMode.SYNC)
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
+    def test_device_maps_missing_config_response(self):
+        self._test_device_maps_missing_config_response(RPCExecMode.SYNC)
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
+    def test_device_maps_missing_config_response_loop(self):
+        for _ in range(self.rpc_backend_options.num_worker_threads + 5):
+            self._test_device_maps_missing_config_response(RPCExecMode.SYNC)
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
+    def test_device_maps_missing_config_remote(self):
+        self._test_device_maps_missing_config(RPCExecMode.REMOTE)
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
+    def test_device_maps_missing_config_remote_response(self):
+        self._test_device_maps_missing_config_response(RPCExecMode.REMOTE)
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_maps_remote(self):
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options.set_device_map(dst, {1: 0})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        rref = rpc.remote(
+            dst,
+            TensorPipeAgentRpcTest._add_to_gpu,
+            args=(torch.zeros(2), 1)
+        )
+
+        self.assertEqual(rref.to_here(), torch.ones(2).to(1))
+
+        rpc.shutdown()

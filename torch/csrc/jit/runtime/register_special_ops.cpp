@@ -431,10 +431,7 @@ RegisterOperators reg({
         aliasAnalysisConservative()),
     Operator(
         "aten::set_grad_enabled(bool val) -> ()",
-        [](Stack* stack) {
-          torch::GradMode::set_enabled(pop(stack).toBool());
-          push(stack, IValue());
-        },
+        [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
 });
 } // namespace

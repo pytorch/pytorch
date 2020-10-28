@@ -1,5 +1,6 @@
 import os
 import io
+import pathlib
 import sys
 import random
 import torch
@@ -920,3 +921,29 @@ class TestSaveLoad(JitTestCase):
         with self.assertRaises(RuntimeError):
             extra_files['bar'] = ''
             torch.jit.load(buffer, _extra_files=extra_files)
+
+    def test_save_load_using_pathlib(self):
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return 2 * a
+
+        m = MyMod()
+
+        # Save then load.
+        with TemporaryFileName() as fname:
+            path = pathlib.Path(fname)
+            m.save(path)
+            m2 = torch.jit.load(path)
+
+        x = torch.tensor([1., 2., 3., 4.])
+        self.assertTrue(torch.equal(m(x), m2(x)))
+
+    def test_save_nonexit_file(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return 2 * x
+
+        script_module = torch.jit.script(Foo())
+        with self.assertRaises(RuntimeError):
+            script_module.save("NoExist/path/test.pt")

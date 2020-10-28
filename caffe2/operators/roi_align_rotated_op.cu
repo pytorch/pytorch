@@ -158,7 +158,7 @@ __global__ void RoIAlignRotatedForward(
 } // namespace
 
 template <>
-bool RoIAlignRotatedOp<float, CUDAContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignRotatedOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
 

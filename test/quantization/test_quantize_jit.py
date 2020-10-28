@@ -2732,11 +2732,11 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
             else:
                 # for input of FC for dynamic quant
                 assert len(attrs_with_prefix(m, '_observer_')) == 1
-                observer_name = 'DynamicQuantObserver = prim::GetAttr[name="_observer_'
+                observer_name = 'Observer = prim::GetAttr[name="_observer_'
                 FileCheck().check(observer_name) \
                            .check('prim::GetAttr[name="fc"]') \
                            .check('prim::CallMethod') \
-                           .check_not('Observer = prim::GetAttr[name="_observer_') \
+                           .check_not(observer_name) \
                            .run(m.graph)
 
 
@@ -2772,7 +2772,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
         assert len(attrs_with_prefix(m.sub.fc, '_observer_')) == 1
         FileCheck().check('prim::GetAttr[name="sub') \
                    .check('prim::CallMethod') \
-                   .check('DynamicQuantObserver = prim::GetAttr[name="_observer_') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
                    .check('prim::CallMethod') \
                    .check_not('Observer = prim::GetAttr[name="_observer_') \
                    .run(m.graph)
@@ -3039,14 +3039,14 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
                 self.embedding1 = torch.nn.EmbeddingBag(num_embeddings=10,
                                                         embedding_dim=12,
                                                         include_last_offset=True,
-                                                        sparse=False,
+                                                        sparse=True,
                                                         _weight=weights,
                                                         mode='sum')
 
                 self.embedding2 = torch.nn.EmbeddingBag(num_embeddings=10,
                                                         embedding_dim=12,
                                                         include_last_offset=True,
-                                                        sparse=False,
+                                                        sparse=True,
                                                         _weight=weights,
                                                         mode='sum')
 
@@ -3077,6 +3077,7 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
             FileCheck().check("quantized::embedding_bag_4bit_rowwise_offsets") \
                        .check_next("quantized::embedding_bag_byte_rowwise_offsets") \
                        .run(m.graph)
+            m(*dummy_inputs)
 
 
 

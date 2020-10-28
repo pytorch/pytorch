@@ -6,7 +6,7 @@ if(USE_VULKAN)
   include(../cmake/VulkanCodegen.cmake)
 endif()
 
-# ---[ MSVC OpenMP modification 
+# ---[ MSVC OpenMP modification
 if(MSVC)
   include(../cmake/public/utils.cmake)
 endif()
@@ -111,7 +111,7 @@ endif()
 add_subdirectory(core)
 add_subdirectory(serialize)
 add_subdirectory(utils)
-if(BUILD_CAFFE2)
+if(BUILD_CAFFE2 OR (NOT USE_FBGEMM))
   add_subdirectory(perfkernels)
 endif()
 
@@ -391,11 +391,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     COMMAND
     "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
+      --native-functions-path "aten/src/ATen/native/native_functions.yaml"
       --nn-path "aten/src"
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
       --force_schema_registration
     DEPENDS
+    "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
@@ -501,8 +503,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     endif()
   endif()
 
-  if(USE_CUDA)
-    list(APPEND Caffe2_GPU_SRCS
+  if(USE_CUDA OR USE_ROCM)
+    list(APPEND Caffe2_GPU_HIP_JIT_FUSERS_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
@@ -530,7 +532,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_cache.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir_builder.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir_printer.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_index.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_alias_memory.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_insert_syncs.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_loops.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_thread_predicate.cpp
@@ -553,6 +557,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/type.cpp
       ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/cuda_codegen.cpp
     )
+  endif()
+
+  if(USE_CUDA)
+    list(APPEND Caffe2_GPU_SRCS ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
     add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
     if(MSVC)
       # Delay load nvcuda.dll so we can import torch compiled with cuda on a CPU-only machine
@@ -570,13 +578,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   if(USE_ROCM)
-    list(APPEND Caffe2_HIP_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp
-      ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
-      ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/cuda_codegen.cpp
-    )
+    list(APPEND Caffe2_HIP_SRCS ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
     if(USE_NCCL)
       list(APPEND Caffe2_HIP_SRCS
         ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
@@ -841,7 +843,7 @@ endif()
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 
-  if(BUILD_TEST AND NOT USE_ROCM)
+  if(BUILD_TEST)
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
     add_subdirectory(${TORCH_ROOT}/test/cpp/tensorexpr ${CMAKE_BINARY_DIR}/test_tensorexpr)
     if(USE_DISTRIBUTED AND NOT WIN32)
@@ -971,7 +973,7 @@ if(USE_DISTRIBUTED)
   target_compile_definitions(torch_cpu PRIVATE
     USE_DISTRIBUTED
   )
-  # Pass USE_RPC in order to reduce use of 
+  # Pass USE_RPC in order to reduce use of
   # #if defined(USE_DISTRIBUTED) && !defined(_WIN32)
   # need to be removed when RPC is supported
   if(NOT WIN32)
@@ -1026,7 +1028,11 @@ if($ENV{TH_BINARY_BUILD})
     #
     # These linker commands do not work on OS X, do not attempt this there.
     # (It shouldn't matter anyway, though, because OS X has dropped CUDA support)
-    set_target_properties(torch_cpu PROPERTIES LINK_FLAGS "-Wl,--undefined=mkl_lapack_slaed0 -Wl,--undefined=mkl_lapack_dlaed0 -Wl,--undefined=mkl_lapack_dormql -Wl,--undefined=mkl_lapack_sormql")
+    foreach(_symb  slaed0 daled0 dormql sormql zheevd cheevd)
+    STRING(APPEND _undefined_link_flags " -Wl,--undefined=mkl_lapack_${_symb}")
+    endforeach(_symb)
+    set_target_properties(torch_cpu PROPERTIES LINK_FLAGS  ${_undefined_link_flags})
+
   endif()
 endif()
 
@@ -1261,6 +1267,10 @@ if(BUILD_STATIC_RUNTIME_BENCHMARK)
   target_link_libraries(static_runtime_test torch_library gtest_main)
 endif()
 
+if(BUILD_TENSOREXPR_BENCHMARK)
+  add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/tensorexpr ${CMAKE_BINARY_DIR}/tensorexpr_bench)
+endif()
+
 if(BUILD_MOBILE_BENCHMARK)
   foreach(benchmark_src ${ATen_MOBILE_BENCHMARK_SRCS})
     get_filename_component(benchmark_name ${benchmark_src} NAME_WE)
@@ -1291,8 +1301,8 @@ if(BUILD_TEST)
   foreach(test_src ${ATen_VEC256_TEST_SRCS})
     foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
         get_filename_component(test_name ${test_src} NAME_WE)
-        list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY) 
-        list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)  
+        list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
+        list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
         separate_arguments(FLAGS UNIX_COMMAND "${FLAGS}")
         add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
         target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library gtest_main)
@@ -1302,7 +1312,7 @@ if(BUILD_TEST)
         target_compile_definitions(${test_name}_${CPU_CAPABILITY} PRIVATE CPU_CAPABILITY=${CPU_CAPABILITY}  CPU_CAPABILITY_${CPU_CAPABILITY})
         target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE  ${FLAGS})
         if(NOT MSVC)
-              target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE -Wno-ignored-qualifiers) 
+              target_compile_options(${test_name}_${CPU_CAPABILITY} PRIVATE -Wno-ignored-qualifiers)
         endif(NOT MSVC)
         add_test(NAME ${test_name}_${CPU_CAPABILITY} COMMAND $<TARGET_FILE:${test_name}_${CPU_CAPABILITY}>)
     endforeach()

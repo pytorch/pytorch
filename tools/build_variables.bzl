@@ -39,11 +39,7 @@ def libtorch_generated_sources(gencode_pattern):
         "autograd/generated/TraceType_2.cpp",
         "autograd/generated/TraceType_3.cpp",
         "autograd/generated/TraceType_4.cpp",
-    ]] + [
-        "torch/csrc/autograd/TraceTypeManual.cpp",
-        "torch/csrc/autograd/VariableTypeManual.cpp",
-        "torch/csrc/autograd/FunctionsManual.cpp",
-    ]
+    ]]
 
 # copied from https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/core/CMakeLists.txt
 jit_core_headers = [
@@ -148,6 +144,7 @@ core_sources_full = [
     "torch/csrc/jit/ir/scope.cpp",
     "torch/csrc/jit/ir/subgraph_matcher.cpp",
     "torch/csrc/jit/jit_log.cpp",
+    "torch/csrc/jit/passes/annotate_warns.cpp",
     "torch/csrc/jit/passes/bailout_graph.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
     "torch/csrc/jit/passes/canonicalize.cpp",
@@ -202,6 +199,7 @@ core_sources_full = [
     "torch/csrc/jit/passes/utils/subgraph_utils.cpp",
     "torch/csrc/jit/passes/xnnpack_rewrite.cpp",
     "torch/csrc/jit/passes/vulkan_rewrite.cpp",
+    "torch/csrc/jit/passes/metal_rewrite.cpp",
     "torch/csrc/jit/passes/quantization/helper.cpp",
     "torch/csrc/jit/passes/quantization/quantization_type.cpp",
     "torch/csrc/jit/passes/quantization/insert_observers.cpp",
@@ -230,7 +228,6 @@ core_sources_full = [
     "torch/csrc/jit/tensorexpr/codegen.cpp",
     "torch/csrc/jit/tensorexpr/eval.cpp",
     "torch/csrc/jit/tensorexpr/expr.cpp",
-    "torch/csrc/jit/tensorexpr/function.cpp",
     "torch/csrc/jit/tensorexpr/hash_provider.cpp",
     "torch/csrc/jit/tensorexpr/ir.cpp",
     "torch/csrc/jit/tensorexpr/ir_mutator.cpp",
@@ -361,8 +358,10 @@ libtorch_cuda_sources = [
     "torch/csrc/jit/codegen/cuda/kernel_cache.cpp",
     "torch/csrc/jit/codegen/cuda/kernel_ir.cpp",
     "torch/csrc/jit/codegen/cuda/kernel_ir_builder.cpp",
+    "torch/csrc/jit/codegen/cuda/kernel_ir_printer.cpp",
     "torch/csrc/jit/codegen/cuda/lower_index.cpp",
     "torch/csrc/jit/codegen/cuda/lower_loops.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_alias_memory.cpp",
     "torch/csrc/jit/codegen/cuda/lower_insert_syncs.cpp",
     "torch/csrc/jit/codegen/cuda/lower_unroll.cpp",
     "torch/csrc/jit/codegen/cuda/lower_thread_predicate.cpp",
@@ -477,6 +476,7 @@ libtorch_python_core_sources = [
     "torch/csrc/python_dimname.cpp",
     "torch/csrc/Size.cpp",
     "torch/csrc/Storage.cpp",
+    "torch/csrc/Stream.cpp",
     "torch/csrc/TypeInfo.cpp",
     "torch/csrc/api/src/python/init.cpp",
     "torch/csrc/autograd/functions/init.cpp",
@@ -544,6 +544,7 @@ libtorch_python_core_sources = [
 
 libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/comm.cpp",
+    "torch/csrc/distributed/c10d/default_comm_hooks.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/reducer.cpp",
 ]
