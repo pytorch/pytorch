@@ -157,7 +157,7 @@ RegisterOperators reg(
 
           if (!inputs.isNone()) {
              for (const IValue& v : inputs.toListRef()) {
-               input_vars.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
+               input_vars.emplace_back(v.toTensor());
              }
            }
 
