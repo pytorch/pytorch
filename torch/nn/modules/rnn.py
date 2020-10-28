@@ -81,7 +81,6 @@ class RNNBase(Module):
         for layer in range(num_layers):
             for direction in range(num_directions):
                 real_hid_size = proj_size if proj_size > 0 else hidden_size
-
                 layer_input_size = input_size if layer == 0 else real_hid_size * num_directions
 
                 w_ih = Parameter(torch.Tensor(gate_size, layer_input_size))
@@ -266,6 +265,8 @@ class RNNBase(Module):
 
     def extra_repr(self) -> str:
         s = '{input_size}, {hidden_size}'
+        if self.proj_size != 0:
+            s += ', proj_size={proj_size}'
         if self.num_layers != 1:
             s += ', num_layers={num_layers}'
         if self.bias is not True:
@@ -292,14 +293,23 @@ class RNNBase(Module):
         for layer in range(num_layers):
             for direction in range(num_directions):
                 suffix = '_reverse' if direction == 1 else ''
-                weights = ['weight_ih_l{}{}', 'weight_hh_l{}{}', 'bias_ih_l{}{}', 'bias_hh_l{}{}']
+                weights = ['weight_ih_l{}{}', 'weight_hh_l{}{}', 'bias_ih_l{}{}',
+                           'bias_hh_l{}{}', 'weight_hr_l{}{}']
                 weights = [x.format(layer, suffix) for x in weights]
                 if self.bias:
-                    self._all_weights += [weights]
-                    self._flat_weights_names.extend(weights)
+                    if self.proj_size > 0:
+                        self._all_weights += [weights]
+                        self._flat_weights_names.extend(weights)
+                    else:
+                        self._all_weights += [weights[:4]]
+                        self._flat_weights_names.extend(weights[:4])
                 else:
-                    self._all_weights += [weights[:2]]
-                    self._flat_weights_names.extend(weights[:2])
+                    if self.proj_size > 0:
+                        self._all_weights += [weights[:2]] + [weights[-1:]]
+                        self._flat_weights_names.extend(weights[:2] + [weights[-1:]])
+                    else:
+                        self._all_weights += [weights[:2]]
+                        self._flat_weights_names.extend(weights[:2])
         self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
 
     @property
