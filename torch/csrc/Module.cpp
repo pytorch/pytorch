@@ -864,7 +864,7 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
 #endif
 
-// Expose PYBIND constants
+// See note [Pybind11 ABI constants]
 #define SET_STR_DEFINE(name) \
   ASSERT_TRUE(set_module_attr("_" # name, THPUtils_packString(name)))
 
