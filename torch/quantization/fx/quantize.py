@@ -30,7 +30,9 @@ from .pattern_utils import (
     get_default_output_activation_post_process_map,
 )
 
-from .standalone_module import (
+from .observed_module import (
+    mark_observed_module,
+    is_observed_module,
     mark_observed_standalone_module,
     is_observed_standalone_module,
 )
@@ -382,7 +384,7 @@ class Quantizer:
                 continue
 
             prefix = node.name + '_activation_post_process_'
-            root_node, _, pattern, obj, qconfig = matches.get(node.name, (None, None, None, None, None))
+            root_node, matched_nodes, pattern, obj, qconfig = matches.get(node.name, (None, None, None, None, None))
             if root_node is None:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
             elif root_node is node:
@@ -456,15 +458,23 @@ class Quantizer:
                     # propagate observed property from input
                     if is_observed(node.args[0]):
                         observed_node_names_set.add(node.name)
-                elif (isinstance(obj, Add) or isinstance(obj, Mul)) and not obj.all_nodes:
-                    if node.args[0].name in observed_node_names_set:
+                elif (isinstance(obj, Add) or isinstance(obj, Mul)) and obj.num_node_args == 1:
+                    input_node = matched_nodes[-1]  # first node in the sequence
+
+                    def input_is_observed(arg):
+                        return isinstance(arg, Node) and arg.name in observed_node_names_set
+                    # This is checking if one of the argument of add/mul
+                    # is an observed node
+                    # If both of the inputs are number,
+                    # we will not consider the output to be observed
+                    if input_is_observed(input_node.args[0]) or input_is_observed(input_node.args[1]):
                         observed_node_names_set.add(node.name)
                 elif isinstance(obj, StandaloneModuleQuantizeHandler):
                     assert node.op == 'call_module'
                     output_is_observed = self.modules[node.target]._output_is_observed
                     if output_is_observed:
                         observed_node_names_set.add(node.name)
-                elif qconfig is not None and obj.all_nodes:
+                elif qconfig is not None and obj.all_node_args:
                     # observer for outputs
                     new_observer = qconfig.activation()
                     # respect device affinity when adding observers
@@ -506,6 +516,7 @@ class Quantizer:
 
         model = GraphModule(model, observed_graph)
         self.save_state(model)
+        model = mark_observed_module(model)
         if is_standalone_module:
             assert result_node is not None
             assert isinstance(result_node.args[0], Node), \
@@ -523,13 +534,7 @@ class Quantizer:
         observed._qconfig_map = self.qconfig_map
 
     def restore_state(self, observed):
-        err_msg = 'please make sure the model is produced by prepare'
-        assert hasattr(observed, '_activation_post_process_map'), 'did not found ' + \
-            '_activation_post_process attribute ' + err_msg
-        assert hasattr(observed, '_patterns'), 'did not found ' + \
-            '_patterns attribute ' + err_msg
-        assert hasattr(observed, '_qconfig_map'), 'did not found ' + \
-            '_qconfig_map attribute ' + err_msg
+        assert is_observed_module(observed), 'incoming model must be produced by prepare_fx'
         self.activation_post_process_map = observed._activation_post_process_map
         self.patterns = observed._patterns
         self.qconfig_map = observed._qconfig_map
@@ -744,8 +749,8 @@ class Quantizer:
                 # the node is quantized in parent module
                 quant_env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
             else:
-                # dequantize inputs for the node that are not quantized
-                env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
+                # copy quantized or non-quantized node
+                env[node.name] = self.quantized_graph.node_copy(node, load_x)
 
         # remove activation post process
         act_post_process_removed_graph = Graph()
