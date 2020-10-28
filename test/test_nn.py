@@ -13456,6 +13456,264 @@ class TestLazyModules(TestCase):
             module.load_state_dict(lazy_module.state_dict())
 
     @suppress_warnings
+    def test_lazy_conv1d(self):
+        module = nn.LazyConv1d(32, 2)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(192, 16, 50)
+        module(input)
+        self.assertIsInstance(module, nn.Conv1d)
+        self.assertNotIsInstance(module, nn.LazyConv1d)
+        self.assertEqual(module.weight.shape, (32, 16, 2))
+        y = module(input)
+        self.assertTrue(torch.equal(torch.nn.functional.conv1d(input, module.weight, module.bias), y))
+
+    @suppress_warnings
+    def test_lazy_conv1d_pickle(self):
+        module = nn.LazyConv1d(32, 2)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(module, nn.LazyConv1d)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(192, 16, 50)
+        module(input)  # fully materialized
+        new_module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(new_module, nn.Conv1d)
+        self.assertNotIsInstance(new_module, nn.LazyConv1d)
+        self.assertEqual(new_module.weight.shape, (32, 16, 2))
+        self.assertNotIsInstance(new_module.weight, UninitializedParameter)
+
+    @suppress_warnings
+    def test_lazy_conv1d_state(self):
+        module = nn.Conv1d(16, 32, 2)
+        lazy_module = nn.LazyConv1d(32, 2)
+        lazy_module.load_state_dict(module.state_dict())
+        # Parameters have been initialized but the module won't become a full
+        # Conv1d one until the first iteration. This is due to
+        # limitations on the state_dict loading logic
+        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertEqual(lazy_module.weight.shape, (32, 16, 2))
+
+        module = nn.Conv1d(16, 32, 2)
+        lazy_module = nn.LazyConv1d(32, 2)
+        with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
+            module.load_state_dict(lazy_module.state_dict())
+
+    @suppress_warnings
+    def test_lazy_conv2d(self):
+        module = nn.LazyConv2d(32, 2)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(192, 16, 8, 6)
+        module(input)
+        self.assertIsInstance(module, nn.Conv2d)
+        self.assertNotIsInstance(module, nn.LazyConv2d)
+        self.assertEqual(module.weight.shape, (32, 16, 2, 2))
+        y = module(input)
+        self.assertTrue(torch.equal(torch.nn.functional.conv2d(input, module.weight, module.bias), y))
+
+    @suppress_warnings
+    def test_lazy_conv2d_pickle(self):
+        module = nn.LazyConv2d(32, 2)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(module, nn.LazyConv2d)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(192, 16, 8, 6)
+        module(input)  # fully materialized
+        new_module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(new_module, nn.Conv2d)
+        self.assertNotIsInstance(new_module, nn.LazyConv2d)
+        self.assertEqual(new_module.weight.shape, (32, 16, 2, 2))
+        self.assertNotIsInstance(new_module.weight, UninitializedParameter)
+
+    @suppress_warnings
+    def test_lazy_conv2d_state(self):
+        module = nn.Conv2d(16, 32, 2)
+        lazy_module = nn.LazyConv2d(32, 2)
+        lazy_module.load_state_dict(module.state_dict())
+        # Parameters have been initialized but the module won't become a full
+        # Conv2d one until the first iteration. This is due to
+        # limitations on the state_dict loading logic
+        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertEqual(lazy_module.weight.shape, (32, 16, 2, 2))
+
+        module = nn.Conv2d(16, 32, 2)
+        lazy_module = nn.LazyConv2d(32, 2)
+        with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
+            module.load_state_dict(lazy_module.state_dict())
+
+    @suppress_warnings
+    def test_lazy_conv3d(self):
+        module = nn.LazyConv3d(32, 2)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(192, 16, 8, 7, 6)
+        module(input)
+        self.assertIsInstance(module, nn.Conv3d)
+        self.assertNotIsInstance(module, nn.LazyConv3d)
+        self.assertEqual(module.weight.shape, (32, 16, 2, 2, 2))
+        y = module(input)
+        self.assertTrue(torch.equal(torch.nn.functional.conv3d(input, module.weight, module.bias), y))
+
+    @suppress_warnings
+    def test_lazy_conv3d_pickle(self):
+        module = nn.LazyConv3d(32, 2)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(module, nn.LazyConv3d)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(192, 16, 8, 7, 6)
+        module(input)  # fully materialized
+        new_module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(new_module, nn.Conv3d)
+        self.assertNotIsInstance(new_module, nn.LazyConv3d)
+        self.assertEqual(new_module.weight.shape, (32, 16, 2, 2, 2))
+        self.assertNotIsInstance(new_module.weight, UninitializedParameter)
+
+    @suppress_warnings
+    def test_lazy_conv3d_state(self):
+        module = nn.Conv3d(16, 32, 2)
+        lazy_module = nn.LazyConv3d(32, 2)
+        lazy_module.load_state_dict(module.state_dict())
+        # Parameters have been initialized but the module won't become a full
+        # Conv3d one until the first iteration. This is due to
+        # limitations on the state_dict loading logic
+        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertEqual(lazy_module.weight.shape, (32, 16, 2, 2, 2))
+
+        module = nn.Conv3d(16, 32, 2)
+        lazy_module = nn.LazyConv3d(32, 2)
+        with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
+            module.load_state_dict(lazy_module.state_dict())
+
+    @suppress_warnings
+    def test_lazy_conv_transposed1d(self):
+        module = nn.LazyConvTranspose1d(32, 2)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(192, 16, 50)
+        module(input)
+        self.assertIsInstance(module, nn.ConvTranspose1d)
+        self.assertNotIsInstance(module, nn.LazyConvTranspose1d)
+        self.assertEqual(module.weight.shape, (16, 32, 2))
+        y = module(input)
+        self.assertTrue(torch.equal(torch.nn.functional.conv_transpose1d(input, module.weight, module.bias), y))
+
+    @suppress_warnings
+    def test_lazy_conv_transpose1d_pickle(self):
+        module = nn.LazyConvTranspose1d(32, 2)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(module, nn.LazyConvTranspose1d)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(192, 16, 50)
+        module(input)  # fully materialized
+        new_module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(new_module, nn.ConvTranspose1d)
+        self.assertNotIsInstance(new_module, nn.LazyConvTranspose1d)
+        self.assertEqual(new_module.weight.shape, (16, 32, 2))
+        self.assertNotIsInstance(new_module.weight, UninitializedParameter)
+
+    @suppress_warnings
+    def test_lazy_conv_transpose1d_state(self):
+        module = nn.ConvTranspose1d(16, 32, 2)
+        lazy_module = nn.LazyConvTranspose1d(32, 2)
+        lazy_module.load_state_dict(module.state_dict())
+        # Parameters have been initialized but the module won't become a full
+        # ConvTranspose1d one until the first iteration. This is due to
+        # limitations on the state_dict loading logic
+        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertEqual(lazy_module.weight.shape, (16, 32, 2))
+
+        module = nn.ConvTranspose1d(16, 32, 2)
+        lazy_module = nn.LazyConvTranspose1d(32, 2)
+        with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
+            module.load_state_dict(lazy_module.state_dict())
+
+    @suppress_warnings
+    def test_lazy_conv_transpose2d(self):
+        module = nn.LazyConvTranspose2d(32, 2)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(192, 16, 8, 6)
+        module(input)
+        self.assertIsInstance(module, nn.ConvTranspose2d)
+        self.assertNotIsInstance(module, nn.LazyConvTranspose2d)
+        self.assertEqual(module.weight.shape, (16, 32, 2, 2))
+        y = module(input)
+        self.assertTrue(torch.equal(torch.nn.functional.conv_transpose2d(input, module.weight, module.bias), y))
+
+    @suppress_warnings
+    def test_lazy_conv_transpose2d_pickle(self):
+        module = nn.LazyConvTranspose2d(32, 2)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(module, nn.LazyConvTranspose2d)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(192, 16, 8, 6)
+        module(input)  # fully materialized
+        new_module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(new_module, nn.ConvTranspose2d)
+        self.assertNotIsInstance(new_module, nn.LazyConvTranspose2d)
+        self.assertEqual(new_module.weight.shape, (16, 32, 2, 2))
+        self.assertNotIsInstance(new_module.weight, UninitializedParameter)
+
+    @suppress_warnings
+    def test_lazy_conv_transpose2d_state(self):
+        module = nn.ConvTranspose2d(16, 32, 2)
+        lazy_module = nn.LazyConvTranspose2d(32, 2)
+        lazy_module.load_state_dict(module.state_dict())
+        # Parameters have been initialized but the module won't become a full
+        # ConvTranspose2d one until the first iteration. This is due to
+        # limitations on the state_dict loading logic
+        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertEqual(lazy_module.weight.shape, (16, 32, 2, 2))
+
+        module = nn.ConvTranspose2d(16, 32, 2)
+        lazy_module = nn.LazyConvTranspose2d(32, 2)
+        with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
+            module.load_state_dict(lazy_module.state_dict())
+
+    @suppress_warnings
+    def test_lazy_conv_transpose3d(self):
+        module = nn.LazyConvTranspose3d(32, 2)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(192, 16, 8, 7, 6)
+        module(input)
+        self.assertIsInstance(module, nn.ConvTranspose3d)
+        self.assertNotIsInstance(module, nn.LazyConvTranspose3d)
+        self.assertEqual(module.weight.shape, (16, 32, 2, 2, 2))
+        y = module(input)
+        self.assertTrue(torch.equal(torch.nn.functional.conv_transpose3d(input, module.weight, module.bias), y))
+
+    @suppress_warnings
+    def test_lazy_conv_transpose3d_pickle(self):
+        module = nn.LazyConvTranspose3d(32, 2)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(module, nn.LazyConvTranspose3d)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(192, 16, 8, 7, 6)
+        module(input)  # fully materialized
+        new_module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(new_module, nn.ConvTranspose3d)
+        self.assertNotIsInstance(new_module, nn.LazyConvTranspose3d)
+        self.assertEqual(new_module.weight.shape, (16, 32, 2, 2, 2))
+        self.assertNotIsInstance(new_module.weight, UninitializedParameter)
+
+    @suppress_warnings
+    def test_lazy_conv_transpose3d_state(self):
+        module = nn.ConvTranspose3d(16, 32, 2)
+        lazy_module = nn.LazyConvTranspose3d(32, 2)
+        lazy_module.load_state_dict(module.state_dict())
+        # Parameters have been initialized but the module won't become a full
+        # ConvTranspose3d one until the first iteration. This is due to
+        # limitations on the state_dict loading logic
+        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertEqual(lazy_module.weight.shape, (16, 32, 2, 2, 2))
+
+        module = nn.ConvTranspose3d(16, 32, 2)
+        lazy_module = nn.LazyConvTranspose3d(32, 2)
+        with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
+            module.load_state_dict(lazy_module.state_dict())
+
+    @suppress_warnings
     def test_materialize_dtype(self):
         module = LazyModule()
         module.register_parameter('test_param', UninitializedParameter())

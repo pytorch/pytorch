@@ -4,9 +4,10 @@ import warnings
 
 import torch
 from torch import Tensor
-from torch.nn.parameter import Parameter
+from torch.nn.parameter import Parameter, UninitializedParameter
 from .. import functional as F
 from .. import init
+from .lazy import LazyModuleMixin
 from .module import Module
 from .utils import _single, _pair, _triple, _reverse_repeat_tuple
 from torch._torch_docs import reproducibility_notes
@@ -996,3 +997,397 @@ class _ConvTransposeMixin(_ConvTransposeNd):
 # TODO: Conv2dLocal
 # TODO: Conv2dMap
 # TODO: ConvTranspose2dMap
+
+
+class _LazyConvXdMixin(LazyModuleMixin):
+
+    def reset_parameters(self) -> None:
+        if not self.has_uninitialized_params() and self.in_channels != 0:
+            super().reset_parameters()
+
+    def initialize_parameters(self, input) -> None:
+        if self.has_uninitialized_params():
+            with torch.no_grad():
+                self.in_channels = input.shape[1]
+                if self.transposed:
+                    self.weight.materialize((
+                        self.in_channels, self.out_channels // self.groups, *self.kernel_size))
+                else:
+                    self.weight.materialize((
+                        self.out_channels, self.in_channels // self.groups, *self.kernel_size))
+                self.reset_parameters()
+
+
+class LazyConv1d(_LazyConvXdMixin, Conv1d):
+    r"""A :class:`torch.nn.Conv1d` module with lazy initialization.
+    In this module, the `weight` is of :class:`torch.nn.UninitializedParameter`
+    class. They will be initialized  after the first call to ``forward`` is done and the
+    module will become a regular :class:`torch.nn.Conv1d` module.
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+    Args:
+        out_channels (int): Number of channels produced by the convolution
+        kernel_size (int or tuple): Size of the convolving kernel
+        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        padding (int or tuple, optional): Zero-padding added to both sides of
+            the input. Default: 0
+        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
+            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
+        dilation (int or tuple, optional): Spacing between kernel
+            elements. Default: 1
+        groups (int, optional): Number of blocked connections from input
+            channels to output channels. Default: 1
+        bias (bool, optional): If ``True``, adds a learnable bias to the
+            output. Default: ``True``
+
+    Attributes:
+        weight (Tensor): the learnable weights of the module of shape
+            :math:`(\text{out\_channels},
+            \frac{\text{in\_channels}}{\text{groups}}, \text{kernel\_size})`.
+            The values of these weights are sampled from
+            :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`k = \frac{groups}{C_\text{in} * \text{kernel\_size}}`
+        bias (Tensor):   the learnable bias of the module of shape
+            (out_channels). If :attr:`bias` is ``True``, then the values of these weights are
+            sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`k = \frac{groups}{C_\text{in} * \text{kernel\_size}}`
+    """
+
+    cls_to_become = Conv1d
+
+    def __init__(
+        self,
+        out_channels: int,
+        kernel_size: _size_1_t,
+        stride: _size_1_t = 1,
+        padding: _size_1_t = 0,
+        dilation: _size_1_t = 1,
+        groups: int = 1,
+        bias: bool = True,
+        padding_mode: str = 'zeros'
+    ) -> None:
+        super().__init__(
+            0,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bias,
+            padding_mode
+        )
+        self.weight = UninitializedParameter()
+
+
+class LazyConv2d(_LazyConvXdMixin, Conv2d):
+    r"""A :class:`torch.nn.Conv2d` module with lazy initialization.
+    In this module, the `weight` is of :class:`torch.nn.UninitializedParameter`
+    class. They will be initialized  after the first call to ``forward`` is done and the
+    module will become a regular :class:`torch.nn.Conv2d` module.
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+    Args:
+        out_channels (int): Number of channels produced by the convolution
+        kernel_size (int or tuple): Size of the convolving kernel
+        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        padding (int or tuple, optional): Zero-padding added to both sides of
+            the input. Default: 0
+        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
+            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
+        dilation (int or tuple, optional): Spacing between kernel
+            elements. Default: 1
+        groups (int, optional): Number of blocked connections from input
+            channels to output channels. Default: 1
+        bias (bool, optional): If ``True``, adds a learnable bias to the
+            output. Default: ``True``
+
+    Attributes:
+        weight (Tensor): the learnable weights of the module of shape
+            :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},`
+            :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]})`.
+            The values of these weights are sampled from
+            :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+        bias (Tensor):   the learnable bias of the module of shape
+            (out_channels). If :attr:`bias` is ``True``,
+            then the values of these weights are
+            sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]    """
+
+    cls_to_become = Conv2d
+
+    def __init__(
+        self,
+        out_channels: int,
+        kernel_size: _size_2_t,
+        stride: _size_2_t = 1,
+        padding: _size_2_t = 0,
+        dilation: _size_2_t = 1,
+        groups: int = 1,
+        bias: bool = True,
+        padding_mode: str = 'zeros'  # TODO: refine this type
+    ) -> None:
+        super().__init__(
+            0,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bias,
+            padding_mode
+        )
+        self.weight = UninitializedParameter()
+
+
+class LazyConv3d(_LazyConvXdMixin, Conv3d):
+    r"""A :class:`torch.nn.Conv3d` module with lazy initialization.
+    In this module, the `weight` is of :class:`torch.nn.UninitializedParameter`
+    class. They will be initialized  after the first call to ``forward`` is done and the
+    module will become a regular :class:`torch.nn.Conv3d` module.
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+    Args:
+        out_channels (int): Number of channels produced by the convolution
+        kernel_size (int or tuple): Size of the convolving kernel
+        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        padding (int or tuple, optional): Zero-padding added to both sides of
+            the input. Default: 0
+        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
+            ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
+        dilation (int or tuple, optional): Spacing between kernel
+            elements. Default: 1
+        groups (int, optional): Number of blocked connections from input
+            channels to output channels. Default: 1
+        bias (bool, optional): If ``True``, adds a learnable bias to the
+            output. Default: ``True``
+
+    Attributes:
+        weight (Tensor): the learnable weights of the module of shape
+            :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},`
+            :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
+            The values of these weights are sampled from
+            :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+        bias (Tensor):   the learnable bias of the module of shape (out_channels). If :attr:`bias` is ``True``,
+            then the values of these weights are
+            sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`k = \frac{groups}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+    """
+
+    cls_to_become = Conv3d
+
+    def __init__(
+        self,
+        out_channels: int,
+        kernel_size: _size_3_t,
+        stride: _size_3_t = 1,
+        padding: _size_3_t = 0,
+        dilation: _size_3_t = 1,
+        groups: int = 1,
+        bias: bool = True,
+        padding_mode: str = 'zeros'
+    ) -> None:
+        super().__init__(
+            0,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bias,
+            padding_mode
+        )
+        self.weight = UninitializedParameter()
+
+
+class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):
+    r"""A :class:`torch.nn.Conv1d` module with lazy initialization.
+    In this module, the `weight` is of :class:`torch.nn.UninitializedParameter`
+    class. They will be initialized  after the first call to ``forward`` is done and the
+    module will become a regular :class:`torch.nn.Conv1d` module.
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+    Args:
+        out_channels (int): Number of channels produced by the convolution
+        kernel_size (int or tuple): Size of the convolving kernel
+        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
+            will be added to both sides of the input. Default: 0
+        output_padding (int or tuple, optional): Additional size added to one side
+            of the output shape. Default: 0
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+        bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+
+    Attributes:
+        weight (Tensor): the learnable weights of the module of shape
+                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},`
+                         :math:`\text{kernel\_size})`.
+                         The values of these weights are sampled from
+                         :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{groups}{C_\text{out} * \text{kernel\_size}}`
+        bias (Tensor):   the learnable bias of the module of shape (out_channels).
+                         If :attr:`bias` is ``True``, then the values of these weights are
+                         sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{groups}{C_\text{out} * \text{kernel\_size}}`
+    """
+
+    cls_to_become = ConvTranspose1d
+
+    def __init__(
+        self,
+        out_channels: int,
+        kernel_size: _size_1_t,
+        stride: _size_1_t = 1,
+        padding: _size_1_t = 0,
+        output_padding: _size_1_t = 0,
+        groups: int = 1,
+        bias: bool = True,
+        dilation: _size_1_t = 1,
+        padding_mode: str = 'zeros'
+    ) -> None:
+        super().__init__(
+            0,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            output_padding,
+            groups,
+            bias,
+            dilation,
+            padding_mode
+        )
+        self.weight = UninitializedParameter()
+
+
+class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):
+    r"""A :class:`torch.nn.Conv2d` module with lazy initialization.
+    In this module, the `weight` is of :class:`torch.nn.UninitializedParameter`
+    class. They will be initialized  after the first call to ``forward`` is done and the
+    module will become a regular :class:`torch.nn.Conv2d` module.
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+    Args:
+        out_channels (int): Number of channels produced by the convolution
+        kernel_size (int or tuple): Size of the convolving kernel
+        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
+            will be added to both sides of each dimension in the input. Default: 0
+        output_padding (int or tuple, optional): Additional size added to one side
+            of each dimension in the output shape. Default: 0
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+        bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+
+    Attributes:
+        weight (Tensor): the learnable weights of the module of shape
+                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},`
+                         :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]})`.
+                         The values of these weights are sampled from
+                         :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+        bias (Tensor):   the learnable bias of the module of shape (out_channels)
+                         If :attr:`bias` is ``True``, then the values of these weights are
+                         sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
+    """
+
+    cls_to_become = ConvTranspose2d
+
+    def __init__(
+        self,
+        out_channels: int,
+        kernel_size: _size_2_t,
+        stride: _size_2_t = 1,
+        padding: _size_2_t = 0,
+        output_padding: _size_2_t = 0,
+        groups: int = 1,
+        bias: bool = True,
+        dilation: int = 1,
+        padding_mode: str = 'zeros'
+    ) -> None:
+        super().__init__(
+            0,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            output_padding,
+            groups,
+            bias,
+            dilation,
+            padding_mode
+        )
+        self.weight = UninitializedParameter()
+
+
+class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):
+    r"""A :class:`torch.nn.Conv3d` module with lazy initialization.
+    In this module, the `weight` is of :class:`torch.nn.UninitializedParameter`
+    class. They will be initialized  after the first call to ``forward`` is done and the
+    module will become a regular :class:`torch.nn.Conv3d` module.
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+    Args:
+        out_channels (int): Number of channels produced by the convolution
+        kernel_size (int or tuple): Size of the convolving kernel
+        stride (int or tuple, optional): Stride of the convolution. Default: 1
+        padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
+            will be added to both sides of each dimension in the input. Default: 0
+        output_padding (int or tuple, optional): Additional size added to one side
+            of each dimension in the output shape. Default: 0
+        groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
+        bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
+        dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
+
+    Attributes:
+        weight (Tensor): the learnable weights of the module of shape
+                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},`
+                         :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
+                         The values of these weights are sampled from
+                         :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+        bias (Tensor):   the learnable bias of the module of shape (out_channels)
+                         If :attr:`bias` is ``True``, then the values of these weights are
+                         sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{groups}{C_\text{out} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
+    """
+
+    cls_to_become = ConvTranspose3d
+
+    def __init__(
+        self,
+        out_channels: int,
+        kernel_size: _size_3_t,
+        stride: _size_3_t = 1,
+        padding: _size_3_t = 0,
+        output_padding: _size_3_t = 0,
+        groups: int = 1,
+        bias: bool = True,
+        dilation: _size_3_t = 1,
+        padding_mode: str = 'zeros'
+    ) -> None:
+        super().__init__(
+            0,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            output_padding,
+            groups,
+            bias,
+            dilation,
+            padding_mode
+        )
+        self.weight = UninitializedParameter()
