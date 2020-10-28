@@ -30,7 +30,9 @@ from .pattern_utils import (
     get_default_output_activation_post_process_map,
 )
 
-from .standalone_module import (
+from .observed_module import (
+    mark_observed_module,
+    is_observed_module,
     mark_observed_standalone_module,
     is_observed_standalone_module,
 )
@@ -506,6 +508,7 @@ class Quantizer:
 
         model = GraphModule(model, observed_graph)
         self.save_state(model)
+        model = mark_observed_module(model)
         if is_standalone_module:
             assert result_node is not None
             assert isinstance(result_node.args[0], Node), \
@@ -523,13 +526,7 @@ class Quantizer:
         observed._qconfig_map = self.qconfig_map
 
     def restore_state(self, observed):
-        err_msg = 'please make sure the model is produced by prepare'
-        assert hasattr(observed, '_activation_post_process_map'), 'did not found ' + \
-            '_activation_post_process attribute ' + err_msg
-        assert hasattr(observed, '_patterns'), 'did not found ' + \
-            '_patterns attribute ' + err_msg
-        assert hasattr(observed, '_qconfig_map'), 'did not found ' + \
-            '_qconfig_map attribute ' + err_msg
+        assert is_observed_module(observed), 'incoming model must be produced by prepare_fx'
         self.activation_post_process_map = observed._activation_post_process_map
         self.patterns = observed._patterns
         self.qconfig_map = observed._qconfig_map

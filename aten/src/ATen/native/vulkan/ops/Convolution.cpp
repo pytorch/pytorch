@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/Persistent.h>
 #include <torch/custom_class.h>
 
 namespace at {
@@ -11,8 +12,8 @@ class Context final : public torch::jit::CustomClassHolder {
  public:
  private:
   struct {
-    api::Resource::Image weight;
-    api::Resource::Image bias;
+    Persistent::Image weight;
+    Persistent::Buffer bias;
   } packed_;
 
   struct {

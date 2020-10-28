@@ -28,12 +28,12 @@ struct Persistent final {
     ~Pool() = default;
 
     Buffer buffer(
-        const api::Resource::Buffer::Descriptor& descriptor,
-        c10::ArrayRef<const uint8_t> data);
+        const IntArrayRef sizes,
+        const TensorOptions& options);
 
     Image image(
-        const api::Resource::Image::Descriptor& descriptor,
-        c10::ArrayRef<const uint8_t> data);
+        const VkExtent3D& extents,
+        const TensorOptions& options);
 
    private:
     api::Resource::Pool pool_;
