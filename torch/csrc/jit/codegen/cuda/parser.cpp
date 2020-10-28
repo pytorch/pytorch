@@ -461,16 +461,17 @@ class IrParser {
             auto self = value_map[node->input(0)->unique()];
             auto dims_list = constant_as<c10::List<int64_t>>(node->input(1));
             TORCH_INTERNAL_ASSERT(
-                dims_list.has_value(), "requires static reduce axes");
-            auto keepdim = constant_as<bool>(node->input(2));
+                dims_list.has_value(),
+                "aten::sum cannot be fused with dynamic axes");
             std::vector<int> dims;
             for (const auto dim : dims_list->vec()) {
               dims.emplace_back(static_cast<int>(dim));
             }
+            auto keepdim = constant_as<bool>(node->input(2));
             TORCH_INTERNAL_ASSERT(
-                keepdim.has_value() && !keepdim.value(),
-                "Keep dim in reduction is not a const false");
-            auto out = sum(self->as<TensorView>(), dims);
+                keepdim.has_value(),
+                "aten::sum cannot be fused with dynamic keepdim");
+            auto out = sum(self->as<TensorView>(), dims, keepdim.value());
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
@@ -491,9 +492,8 @@ class IrParser {
             if (node->inputs()[1]->node()->kind() != prim::Constant) {
               return false;
             }
-            // we don't support keepdim yet;
-            if (node->inputs()[2]->node()->kind() != prim::Constant ||
-                *constant_as<bool>(node->input(2))) {
+            // we don't support dynamic keepdim yet;
+            if (node->inputs()[2]->node()->kind() != prim::Constant) {
               return false;
             }
             return true;

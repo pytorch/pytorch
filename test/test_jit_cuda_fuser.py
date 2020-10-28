@@ -607,17 +607,18 @@ class TestCudaFuser(JitTestCase):
                     x = [7, 8, 12]
                     self._permutation_helper(x, b_axis, torch.float32, "cuda", perm0, perm1)
 
-    def _reduction_helper(self, sizes, reduction_axis, dtype, device, perm0, perm1):
+    def _reduction_helper(self, sizes, reduction_axis, dtype, device, perm0, perm1, keepdim=False):
         class MyReduction(torch.nn.Module):
-            __constants__ = ['reduction_axis']
+            __constants__ = ['reduction_axis', 'keepdim']
 
             def __init__(self):
                 super(MyReduction, self).__init__()
                 self.reduction_axis = reduction_axis
+                self.keepdim = keepdim
 
             def forward(self, x: torch.Tensor, y: torch.Tensor):
                 o = torch.add(x, y)
-                o = torch.sum(o, dim=self.reduction_axis)
+                o = torch.sum(o, dim=self.reduction_axis, keepdim=self.keepdim)
                 return o
 
         t = MyReduction()
@@ -643,9 +644,10 @@ class TestCudaFuser(JitTestCase):
             # to single element (codegen limitation at this moment)
             for num_reduce_dim in range(1, len(x)):
                 for axes in itertools.combinations(range(len(x)), num_reduce_dim):
-                    perm0 = range(len(x))
-                    perm1 = range(len(x))
-                    self._reduction_helper(x, axes, torch.float32, "cuda", perm0, perm1)
+                    for keepdim in (True, False):
+                        perm0 = range(len(x))
+                        perm1 = range(len(x))
+                        self._reduction_helper(x, axes, torch.float32, "cuda", perm0, perm1, keepdim)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,

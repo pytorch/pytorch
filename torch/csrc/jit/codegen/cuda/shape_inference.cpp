@@ -160,7 +160,7 @@ class NaiveTypePropagator {
         const auto dims = constant_as<c10::List<int64_t>>(node->input(1));
         const auto keepdim = constant_as<bool>(node->input(2));
         TORCH_CHECK(
-            dims.has_value() && keepdim.has_value() && !keepdim.value(),
+            dims.has_value() && keepdim.has_value(),
             "Shape inference cannot handle options.");
         node->output()->setType(
             unary_reduce_type(out_type, dims->vec(), keepdim.value()));
