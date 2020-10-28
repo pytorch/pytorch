@@ -222,11 +222,11 @@ class TestConversion(TestCase):
         # lcd is a dummy loop-carried dependency that only exists because
         # right now the schema checker is broken and assumes a variadic
         # input needs at least one value.
-        graph_inputs = [helper.make_tensor_value_info("i", TensorProto.INT64, ()),
-                        helper.make_tensor_value_info("cond", TensorProto.BOOL, ())]
+        graph_inputs = [helper.make_tensor_value_info("i", TensorProto.INT64, (1,)),
+                        helper.make_tensor_value_info("cond", TensorProto.BOOL, (1,))]
         for type, shape, name in input_types:
             graph_inputs.append(helper.make_tensor_value_info("_" + name, type, shape))
-        graph_outputs = [helper.make_tensor_value_info("cond", TensorProto.BOOL, ())]
+        graph_outputs = [helper.make_tensor_value_info("cond", TensorProto.BOOL, (1,))]
         for type, shape, name in output_types:
             graph_outputs.append(helper.make_tensor_value_info("_" + name, type, shape))
         body_graph = helper.make_graph(body_nodes, "body_graph", graph_inputs,
