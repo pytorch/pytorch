@@ -23,6 +23,7 @@ from torch.quantization import (
     convert,
     PerChannelMinMaxObserver,
     QConfigDynamic,
+    FixedQParamsFakeQuantize,
 )
 
 # test utils
@@ -49,6 +50,7 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing import FileCheck
 
+import copy
 import itertools
 import operator
 import unittest
@@ -815,6 +817,33 @@ class TestQuantizeFx(QuantizationTestCase):
         # make sure these modules are not traced
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
+    def test_prepared_model_deepcopy(self):
+        """Ensures that copy.deepcopy works correctly on a prepared model.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self._foobar = 'foobar'
+                self.foobar2 = 'foobar2'
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x
+
+        m = M()
+        print(m.__dict__.keys())
+        m.eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        prepared = torch.quantization.prepare_fx(m, qconfig_dict)
+        # calibrate
+        prepared(torch.randn(4, 1, 4, 4))
+        # copy
+        prepared_copy = copy.deepcopy(prepared)
+        # quantize, should run with no errors
+        quantized = torch.quantization.convert_fx(prepared_copy)
+
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
@@ -1410,7 +1439,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         """
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.avg_pool1d = torch.nn.AvgPool1d(3)
                 self.avg_pool2d = torch.nn.AvgPool2d(3)
@@ -1418,9 +1447,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
-                self.hardsigmoid = torch.nn.Hardsigmoid()
-                self.sigmoid = torch.nn.Sigmoid()
-                self.tanh = torch.nn.Tanh()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1442,21 +1468,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = x.mean([2, 3], True)
                 x = F.interpolate(x, 4, mode='nearest')
                 x = F.interpolate(x, 4, mode='linear')
-                x = self.hardsigmoid(x)
-                x = F.hardsigmoid(x)
-                x = F.hardsigmoid(x, inplace=True)
-                x = x.hardsigmoid()
-                x.hardsigmoid_()
-                x = self.sigmoid(x)
-                x = torch.sigmoid(x)
-                # F.sigmoid is deprecated
-                x = x.sigmoid()
-                x.sigmoid_()
-                x = self.tanh(x)
-                # F.tanh is deprecated
-                x = torch.tanh(x)
-                x = x.tanh()
-                x.tanh_()
                 x = self.conv(x)
                 return x
 
@@ -1487,6 +1498,84 @@ class TestQuantizeFxOps(QuantizationTestCase):
             quantized,
             expected_node_occurrence=count_check,
             expected_node_list=order_check)
+
+    @skipIfNoFBGEMM
+    def test_fixed_qparams_ops(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.sigmoid = torch.nn.Sigmoid()
+                self.hardsigmoid = torch.nn.Hardsigmoid()
+                self.tanh = torch.nn.Tanh()
+
+            def forward(self, x):
+                x = self.conv(x)
+                # F.sigmoid is deprecated
+                x = self.sigmoid(x)
+                x = torch.sigmoid(x)
+                x = x.sigmoid()
+                x.sigmoid_()
+                x = self.hardsigmoid(x)
+                x = F.hardsigmoid(x)
+                x = F.hardsigmoid(x, inplace=True)
+                x = x.hardsigmoid()
+                x.hardsigmoid_()
+                x = self.tanh(x)
+                # F.tanh is deprecated
+                x = torch.tanh(x)
+                x = x.tanh()
+                x.tanh_()
+                x = self.conv(x)
+                return x
+
+        for eval_mode in [True, False]:
+            # This model is not executable since we just put all ops
+            # in the same forward
+            m = M()
+            if eval_mode:
+                m.eval()
+                qconfig = default_qconfig
+                prepare = prepare_fx
+                fq_count = 0
+            else:
+                m.train()
+                qconfig = default_qat_qconfig
+                prepare = prepare_qat_fx
+                fq_count = 13
+
+            # nothing to fuse so skipping the fuse step
+            qconfig_dict = {'': qconfig}
+            prepared = prepare(m, qconfig_dict)
+            # check the correct number of activation_post_process is inserted
+            count_check = {
+                ns.call_module(FixedQParamsFakeQuantize) : fq_count,
+            }
+            self.checkGraphModuleNodes(
+                prepared,
+                expected_node_occurrence=count_check)
+            # not runnable
+            quantized = convert_fx(prepared)
+
+            # This checks that the dequantize from the output of first conv
+            # is being propagated to the end, so that we don't insert extra
+            # observers
+            # check exact counts of quantize and dequantize
+            count_check = {
+                ns.call_function(torch.quantize_per_tensor) : 1,
+                ns.call_method('dequantize') : 1
+            }
+            order_check = [
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_module(nnq.Conv2d),
+                ns.call_module(nn.Sigmoid),
+                ns.call_module(nnq.Conv2d),
+                ns.call_method('dequantize'),
+            ]
+            self.checkGraphModuleNodes(
+                quantized,
+                expected_node_occurrence=count_check,
+                expected_node_list=order_check)
 
     def test_float_functional(self):
         class TorchAdd(nn.Module):

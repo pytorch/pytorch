@@ -5300,7 +5300,10 @@ class TestTorchDeviceType(TestCase):
                 self.assertRaises(RuntimeError,
                                   lambda: zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor))
 
-            self.assertRaises(RuntimeError, lambda: torch.sign(torch.tensor([4j], device=device, dtype=dtype)))
+            with self.assertRaisesRegex(RuntimeError,
+                                        (r'Unlike NumPy, torch.sign is not intended to support complex numbers\. '
+                                         r'Please use torch.sgn instead\.')):
+                torch.sign(torch.tensor([4j], device=device, dtype=dtype))
 
             a = torch.rand((2, 2), dtype=dtype, device=device)
             b = torch.rand((2, 2), dtype=dtype, device=device)
@@ -6326,6 +6329,25 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'heaviside is not yet implemented for tensors with different dtypes.'):
                 input.heaviside_(values)
 
+    @onlyCUDA
+    def test_heaviside_cross_device(self, device):
+        x = torch.tensor([-9, 5, 0, 6, -2, 2], device='cuda')
+        y = torch.tensor(0)
+        result = torch.heaviside(x, y)
+        expect = torch.tensor([0, 1, 0, 1, 0, 1], device='cuda')
+        self.assertEqual(result, expect)
+
+        result = torch.heaviside(y, x)
+        expect = torch.tensor([-9, 5, 0, 6, -2, 2], device='cuda')
+        self.assertEqual(result, expect)
+
+        x = torch.tensor([-9, 5, 0, 6, -2, 2])
+        y = torch.tensor(0, device='cuda')
+        with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
+            torch.heaviside(x, y)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
+            torch.heaviside(y, x)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @dtypes(*list(product(torch.testing.get_all_complex_dtypes(),
