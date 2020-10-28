@@ -62,7 +62,6 @@ public:
   }
   // Test if a DispatchKey is in the set
   constexpr bool has(DispatchKey t) const {
-    TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
     return static_cast<bool>(repr_ & DispatchKeySet(t).repr_);
   }
   // Test if DispatchKeySet is a superset of ks.
