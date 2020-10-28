@@ -205,10 +205,10 @@ def compute_type_method(
     @with_native_function
     def func(f: NativeFunction) -> Optional[str]:
         if dispatch is not None:
-            if f.dispatch is None or dispatch not in f.dispatch:
+            if dispatch not in f.dispatch:
                 return None
         else:
-            if f.dispatch is not None and target is not Target.REGISTRATION:
+            if target is not Target.REGISTRATION:
                 return None
 
         op_name = f"aten::{f.func.name}"
@@ -219,24 +219,21 @@ def compute_type_method(
         returns_type = native.returns_type(f.func.returns)
         args = native.arguments(f.func)
         args_str = ', '.join(map(str, args))
+        # TODO: don't need dispatch is None shortly
         dispatch_to_all_backends = dispatch is None or dispatch in KEYWORD_ALL_BACKENDS
 
         if target is Target.DECLARATION:
             return f"{returns_type} {name}({args_str});"
         elif target is Target.DEFINITION:
-            if f.dispatch is None:
-                cpp_name = cpp.name(f.func)
-                impl_name = f"at::native::{cpp_name}"
-            else:
-                assert dispatch is not None
-                impl_name = f"at::native::{f.dispatch[dispatch]}"
+            assert dispatch is not None
+            impl_name = f"at::native::{f.dispatch[dispatch]}"
 
             args_exprs_str = ', '.join(a.name for a in args)
 
             return_kw = "    return "
 
             cuda_guard = ""
-            if dispatch_to_all_backends or 'CUDA' in dispatch:  # type: ignore
+            if dispatch_to_all_backends or 'CUDA' in dispatch:
                 self_args = (a for a in f.func.arguments if a.name == "self")
 
                 # There is precedence for which argument we use to do
@@ -284,20 +281,18 @@ def compute_type_method(
 """
 
         elif target is Target.REGISTRATION:
-            dispatcher_sig = DispatcherSignature.from_schema(f.func)
-
-            if dispatch_to_all_backends:
-                type_name = f'TypeDefault::{name}'
-            else:
-                type_name = f'{dispatch}Type::{name}'
-
-            # def registration only happens in TypeDefault
-            def_registration = ""
             if dispatch is None:
-                def_registration = f'm.def({cpp_string(str(f.func))});\n'
+                return f'm.def({cpp_string(str(f.func))});\n'
+            elif def_only or f.manual_kernel_registration:
+                return None
+            else:
+                if dispatch_to_all_backends:
+                    type_name = f'TypeDefault::{name}'
+                else:
+                    type_name = f'{dispatch}Type::{name}'
 
-            impl_registration = ""
-            if not def_only and not f.manual_kernel_registration and (dispatch is not None or f.dispatch is None):
+                dispatcher_sig = DispatcherSignature.from_schema(f.func)
+
                 # Figure out which signature the function is
                 if local.use_c10_dispatcher() is UseC10Dispatcher.full:
                     payload = f"TORCH_FN({type_name})"
@@ -321,9 +316,7 @@ def compute_type_method(
                 if dispatch is not None:
                     payload = f"torch::dispatch(DispatchKey::{dispatch},\n{payload})\n"
 
-                impl_registration = f'm.impl("{f.func.name}",\n{payload});\n'
-
-            return f"{def_registration}{impl_registration}"
+                return f'm.impl("{f.func.name}",\n{payload});\n'
         else:
             assert_never(target)
 
@@ -439,10 +432,7 @@ def compute_aten_op(f: NativeFunction) -> str:
 # actual kernel definitions we keep in aten/src/ATen/native/
 @with_native_function
 def compute_native_function_declaration(f: NativeFunction) -> List[str]:
-    if f.dispatch is None:
-        ns = [cpp.name(f.func)]
-    else:
-        ns = list(f.dispatch.values())
+    ns = list(f.dispatch.values())
 
     rs = []
     # Sometimes a function name shows up multiple times; only generate
@@ -763,8 +753,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     is_factory_method = any(isinstance(a.argument, TensorOptionsArguments) for a in cpp_args) \
         and Variant.method not in f.variants
 
-    # Having only Math in dispatch section is equivalent to no dispatch section.
-    is_abstract = f.dispatch is not None and set(f.dispatch.keys()) != set({'Math'})  # type ignore
+    is_abstract = f.dispatch.keys() != {'Math'}
 
     return OrderedDict([
         ('name', cpp.name(f.func)),
@@ -803,7 +792,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('device_guard', f.device_guard),
         ('with_gil', False),
         ('deprecated', False),
-        ('has_math_kernel', f.dispatch is not None and 'Math' in f.dispatch),
+        ('has_math_kernel', 'Math' in f.dispatch),
     ])
 
 @with_native_function
@@ -814,8 +803,9 @@ def compute_registration_declarations(f: NativeFunction) -> str:
     args_str = ', '.join(map(str, args))
     comment_data : Dict[str, str] = {
         'schema': f'aten::{f.func}',
-        'dispatch': str(f.dispatch is not None),
-        'default': str(f.dispatch is not None and any(k in f.dispatch for k in KEYWORD_ALL_BACKENDS))
+        # TODO: What exactly is the semantics of the 'dispatch' field?
+        'dispatch': str(f.dispatch.keys() != {'Math'}),
+        'default': str(any(k in f.dispatch for k in KEYWORD_ALL_BACKENDS))
     }
     return f"""{returns_type} {name}({args_str}); // {json.dumps(comment_data)}
 """
@@ -1069,9 +1059,6 @@ def main() -> None:
     cpu_fm.write('TypeDefault.cpp', lambda: {
         'type_method_definitions':
         list(mapMaybe(
-            compute_type_method(None, target=Target.DEFINITION, selector=selector),
-            native_functions)) +
-        list(mapMaybe(
             compute_type_method('Math', target=Target.DEFINITION, selector=selector),
             native_functions)) +
         list(mapMaybe(
@@ -1080,9 +1067,11 @@ def main() -> None:
 
         'function_registrations': list(mapMaybe(
             compute_type_method(None, target=Target.REGISTRATION, selector=selector),
-            native_functions)) + list(mapMaybe(
-                compute_type_method('Math', target=Target.REGISTRATION, selector=selector),
-                native_functions)),
+            native_functions)),
+
+        'math_function_registrations': list(mapMaybe(
+            compute_type_method('Math', target=Target.REGISTRATION, selector=selector),
+            native_functions)),
 
         'default_backend_function_registrations': list(mapMaybe(
             compute_type_method('DefaultBackend', target=Target.REGISTRATION, selector=selector),
