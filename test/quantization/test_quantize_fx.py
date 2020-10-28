@@ -280,13 +280,11 @@ class TestQuantizeFx(QuantizationTestCase):
 
         model = M().eval()
         qconfig_dict = {'': default_qconfig}
-        prepared = prepare_fx(
-            model, qconfig_dict, inplace=False)
+        prepared = prepare_fx(model, qconfig_dict)
         test_only_eval_fn(model, self.img_data_2d)
         non_inplace_model = convert_fx(prepared, inplace=True)
 
-        prepared = prepare_fx(
-            model, qconfig_dict, inplace=True)
+        prepared = prepare_fx(model, qconfig_dict)
         test_only_eval_fn(model, self.img_data_2d)
         inplace_model = convert_fx(prepared, inplace=True)
 
