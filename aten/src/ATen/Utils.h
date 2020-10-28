@@ -93,10 +93,6 @@ inline int64_t sum_intlist(ArrayRef<int64_t> list) {
   return std::accumulate(list.begin(), list.end(), 0ll);
 }
 
-// inline int64_t prod_intlist(ArrayRef<int64_t> list) {
-//   return std::accumulate(list.begin(), list.end(), 1ll, std::multiplies<int64_t>());
-// }
-
 template<typename C>
 inline typename C::value_type prod_intlist(const C &container){
     typedef typename C::value_type element_type;
