@@ -699,6 +699,57 @@ void TensorView::createExprProducer(
   CreateExprProducer::create(expr, current, producer);
 }
 
+TensorViewBuilder& TensorViewBuilder::ndims(size_t ndims) {
+  TORCH_CHECK(shape_.empty() || shape_.size() == ndims);
+  TORCH_CHECK(contiguity_.empty() || contiguity_.size() == ndims);
+  ndims_ = ndims;
+  return *this;
+}
+
+TensorViewBuilder& TensorViewBuilder::dtype(DataType dtype) {
+  dtype_ = dtype;
+  return *this;
+}
+
+TensorViewBuilder& TensorViewBuilder::contiguity(std::vector<bool> contiguity) {
+  TORCH_CHECK(contiguity_.empty(), "Attempting to reset contiguity");
+  if (!contiguity.empty()) {
+    TORCH_CHECK(ndims_ == 0 || ndims_ == contiguity.size());
+    ndims_ = contiguity.size();
+  }
+  contiguity_ = std::move(contiguity);
+  return *this;
+}
+
+TensorViewBuilder& TensorViewBuilder::shape(std::vector<int64_t> shape) {
+  TORCH_CHECK(shape_.empty(), "Attempting to reset shape");
+  if (!shape.empty()) {
+    TORCH_CHECK(ndims_ == 0 || ndims_ == shape.size());
+    ndims_ = shape.size();
+  }
+  shape_ = std::move(shape);
+  return *this;
+}
+
+TensorView* TensorViewBuilder::build() const {
+  // Build the domain
+  std::vector<IterDomain*> domain(ndims_, nullptr);
+  for (int i = 0; i < ndims_; i++) {
+    if (shape_.empty() || shape_[i] == -1) {
+      domain[i] = new IterDomain(new Int(0), new Int());
+    } else {
+      TORCH_CHECK(
+          shape_[i] > 0,
+          "Invalid extent value. ",
+          "For a tensor representing a single scalar use ndims = 0 with no sizes set.");
+      domain[i] = new IterDomain(new Int(0), new Int(shape_[i]));
+    }
+  }
+
+  // Create the final TensorView
+  return new TensorView(new TensorDomain(domain, contiguity_), dtype_);
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
