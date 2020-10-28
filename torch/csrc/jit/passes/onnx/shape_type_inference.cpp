@@ -480,7 +480,7 @@ Node* CreateCastToBoolNode(Value* val, Graph* graph) {
 
 // Infer shape and type of the uninitialized_output from the corresponding
 // output of the other subblock. prim::Uninitialized node is proven to be
-// unsed. So replace this node with a constant of the inferred shape and type.
+// unused. So replace this node with a constant of the inferred shape and type.
 void InferShapeTypeForUninitializedOutput(
     Graph* graph,
     Block* block,
