@@ -81,11 +81,16 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
     auto dataPtr = allocator.allocate(sizeof(int)*batch_size*n);
     int* ipiv_array = reinterpret_cast<int*>(dataPtr.get());
 
+    Tensor _info1 = at::zeros({batch_size}, self.options().dtype(at::kInt));
+    Tensor _info2 = at::zeros({batch_size}, self.options().dtype(at::kInt));
+
     at::cuda::blas::getrfBatched<scalar_t>(n, reinterpret_cast<scalar_t**>(self_array.data_ptr()), n,
-      ipiv_array, infos.data_ptr<int>(), batch_size);
+      ipiv_array, _info1.data_ptr<int>(), batch_size);
 
     at::cuda::blas::getriBatched<scalar_t>(n, reinterpret_cast<scalar_t**>(self_array.data_ptr()), n,
-      ipiv_array, infos.data_ptr<int>(), batch_size, reinterpret_cast<scalar_t**>(self_inv_array.data_ptr()));
+      ipiv_array, _info2.data_ptr<int>(), batch_size, reinterpret_cast<scalar_t**>(self_inv_array.data_ptr()));
+
+    infos = at::stack({_info1, _info2}, 1);
   }
 }
 
