@@ -65,11 +65,10 @@ jobs:
         id: get_pr_tip
       - name: Run flake8
         run: |
-          set -eux
+          set -eux -o pipefail
           pip install flake8==3.8.2 flake8-bugbear flake8-comprehensions flake8-executable flake8-pyi==20.5.0 mccabe pycodestyle==2.6.0 pyflakes==2.2.0
           flake8 --version
-          flake8 > ${GITHUB_WORKSPACE}/flake8-output.txt
-          cat ${GITHUB_WORKSPACE}/flake8-output.txt
+          flake8 | tee ${GITHUB_WORKSPACE}/flake8-output.txt
       - name: Add annotations
         uses: pytorch/add-annotations-github-action@master
         with:
