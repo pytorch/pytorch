@@ -387,14 +387,6 @@ Allocate::Allocate(
       size_ = ir_builder.mulExpr(size_, domain->axis(i)->extent());
     }
   }
-
-  if (memory_type_ == MemoryType::Local) {
-    TORCH_INTERNAL_ASSERT(
-        ExpressionEvaluator::isConst(size_),
-        "Allocations must be based on constant integers for the memory type ",
-        memory_type_);
-  }
-
   addInput(size_);
 }
 

@@ -50,6 +50,8 @@ class KernelIrScanner : private kir::IrVisitor {
         }
         break;
       case MemoryType::Local:
+        summary_.has_dynamic_local_memory_allocations |=
+            !ExpressionEvaluator::isConst(allocate->size());
         break;
     }
   }

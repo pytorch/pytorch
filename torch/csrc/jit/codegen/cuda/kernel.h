@@ -43,6 +43,9 @@ struct KernelSummary {
 
   //! Largest shared memory buffer base type
   DataType largest_smem_data_type = DataType::Null;
+
+  //! Do we have allocations of dynamic local memory?
+  bool has_dynamic_local_memory_allocations = false;
 };
 
 //! Container for a lowered Kernel IR

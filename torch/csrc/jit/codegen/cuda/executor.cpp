@@ -157,6 +157,10 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
         "The static shared memory allocation is larger than available memory.");
   }
 
+  TORCH_INTERNAL_ASSERT(
+      !kernel_summary.has_dynamic_local_memory_allocations,
+      "Allocations must be based on constant integers for local memory.");
+
   compiled_kernel_ = executor_utils::nvrtcCompile(
       structured_code,
       (kernelNamespace() + "::" + kernelName()).c_str(),
