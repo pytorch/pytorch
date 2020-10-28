@@ -28,6 +28,7 @@ from .pattern_utils import (
     is_match,
     get_default_quant_patterns,
     get_default_output_activation_post_process_map,
+    input_output_observed,
 )
 
 from .standalone_module import (
@@ -464,7 +465,7 @@ class Quantizer:
                     output_is_observed = self.modules[node.target]._output_is_observed
                     if output_is_observed:
                         observed_node_names_set.add(node.name)
-                elif qconfig is not None and obj.all_nodes:
+                elif qconfig is not None and obj.all_nodes and input_output_observed(obj):
                     # observer for outputs
                     new_observer = qconfig.activation()
                     # respect device affinity when adding observers
@@ -703,7 +704,7 @@ class Quantizer:
                             'CopyNode of type ' + node.op + ' is not handled'
                         quantized = is_quantized(node.args[0])
 
-                    if not activation_is_statically_quantized(qconfig):
+                    if not activation_is_statically_quantized(qconfig) or not input_output_observed(obj):
                         quantized = False
 
                 if quantized:
@@ -940,7 +941,7 @@ class Quantizer:
                 # don't attach observer/fake_quant for CopyNode
                 if isinstance(quantize_handler, CopyNode):
                     qconfig = None
-                if root_node is node:
+                if root_node is node and input_output_observed(quantize_handler):
                     # matched_nodes[-1] is the first op in the sequence and
                     # matched_nodes[0] is the last op in the sequence
                     # inputs
