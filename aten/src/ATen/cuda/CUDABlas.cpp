@@ -145,10 +145,8 @@ const char* _cublasGetErrorEnum(cublasStatus_t error) {
 
 template <>
 void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
-  if (num_batches == 1) {
-    // See Note [Writing Nondeterministic Operations]
-    globalContext().alertCuBLASConfigNotDeterministic();
-  }
+  // See Note [Writing Nondeterministic Operations]
+  globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
@@ -160,10 +158,8 @@ void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
 
 template <>
 void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
-  if (num_batches == 1) {
-    // See Note [Writing Nondeterministic Operations]
-    globalContext().alertCuBLASConfigNotDeterministic();
-  }
+  // See Note [Writing Nondeterministic Operations]
+  globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
@@ -176,10 +172,8 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
 #ifndef __HIP_PLATFORM_HCC__
   template <>
   void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>)) {
-    if (num_batches == 1) {
-      // See Note [Writing Nondeterministic Operations]
-      globalContext().alertCuBLASConfigNotDeterministic();
-    }
+    // See Note [Writing Nondeterministic Operations]
+    globalContext().alertCuBLASConfigNotDeterministic();
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
     cublasOperation_t opa = _cublasOpFromChar(transa);
     cublasOperation_t opb = _cublasOpFromChar(transb);
@@ -193,10 +187,8 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
 
   template <>
   void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
-    if (num_batches == 1) {
-      // See Note [Writing Nondeterministic Operations]
-      globalContext().alertCuBLASConfigNotDeterministic();
-    }
+    // See Note [Writing Nondeterministic Operations]
+    globalContext().alertCuBLASConfigNotDeterministic();
     cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
     cublasOperation_t opa = _cublasOpFromChar(transa);
     cublasOperation_t opb = _cublasOpFromChar(transb);
@@ -211,6 +203,8 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
 
 template <>
 void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
+  // See Note [Writing Nondeterministic Operations]
+  globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
@@ -219,10 +213,6 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   float fAlpha = alpha;
   float fBeta = beta;
 #ifdef __HIP_PLATFORM_HCC__
-  if (batchCount == 1) {
-    // See Note [Writing Nondeterministic Operations]
-    globalContext().alertCuBLASConfigNotDeterministic();
-  }
   TORCH_CUDABLAS_CHECK(rocblas_gemm_strided_batched_ex(handle, opa, opb, (int)m, (int)n, (int)k,
                                    (void*)&fAlpha, a, rocblas_datatype_f16_r, (int)lda, stridea,
                                    b, rocblas_datatype_f16_r, (int)ldb, strideb,
@@ -231,10 +221,6 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
                                    (int) batchCount, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0));
 #else
-if (num_batches == 1) {
-    // See Note [Writing Nondeterministic Operations]
-    globalContext().alertCuBLASConfigNotDeterministic();
-}
 #if defined(CUDA_VERSION) && CUDA_VERSION < 11000
   // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
   // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
@@ -255,10 +241,8 @@ if (num_batches == 1) {
 #ifdef __HIP_PLATFORM_HCC__
 template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
-  if (batchCount == 1) {
-    // See Note [Writing Nondeterministic Operations]
-    globalContext().alertCuBLASConfigNotDeterministic();
-  }
+  // See Note [Writing Nondeterministic Operations]
+  globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
