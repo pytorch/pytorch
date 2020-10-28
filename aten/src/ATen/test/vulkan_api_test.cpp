@@ -29,6 +29,56 @@ bool exactlyEqual(const at::Tensor& a, const at::Tensor& b) {
 
 namespace {
 
+TEST(VulkanAPITest, add) {
+  const auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  const auto c_cpu = at::add(a_cpu, b_cpu, 2.1f);
+  const auto c_vulkan = at::add(a_vulkan, b_vulkan, 2.1f);
+
+  ASSERT_TRUE(almostEqual(c_cpu, c_vulkan.cpu()));
+}
+
+TEST(VulkanAPITest, add_) {
+  auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_vulkan = a_cpu.vulkan();
+
+  const auto b_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_vulkan = b_cpu.vulkan();
+
+  a_cpu.add_(b_cpu, 2.1f);
+  a_vulkan.add_(b_vulkan, 2.1f);
+
+  ASSERT_TRUE(almostEqual(a_cpu, a_vulkan.cpu()));
+}
+
+TEST(VulkanAPITest, add_scalar) {
+  const auto a_cpu = at::rand({1, 1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const float b_scalar = 3.1415f;
+
+  const auto c_cpu = at::add(a_cpu, b_scalar, 2.1f);
+  const auto c_vulkan = at::add(a_vulkan, b_scalar, 2.1f);
+
+  ASSERT_TRUE(almostEqual(c_cpu, c_vulkan.cpu()));
+}
+
+TEST(VulkanAPITest, add_scalar_) {
+  auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_vulkan = a_cpu.vulkan();
+
+  const float b_scalar = 3.1415f;
+
+  a_cpu.add_(b_scalar, 2.1f);
+  a_vulkan.add_(b_scalar, 2.1f);
+
+  ASSERT_TRUE(almostEqual(a_cpu, a_vulkan.cpu()));
+}
+
 TEST(VulkanAPITest, copy) {
   const auto cpu = at::rand({13, 17, 37, 19}, at::device(at::kCPU).dtype(at::kFloat));
   ASSERT_TRUE(exactlyEqual(cpu, cpu.vulkan().cpu()));
