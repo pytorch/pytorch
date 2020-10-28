@@ -211,10 +211,6 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
 
 template <>
 void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
-  if (batchCount == 1) {
-    // See Note [Writing Nondeterministic Operations]
-    globalContext().alertCuBLASConfigNotDeterministic();
-  }
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
@@ -223,6 +219,10 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   float fAlpha = alpha;
   float fBeta = beta;
 #ifdef __HIP_PLATFORM_HCC__
+  if (batchCount == 1) {
+    // See Note [Writing Nondeterministic Operations]
+    globalContext().alertCuBLASConfigNotDeterministic();
+  }
   TORCH_CUDABLAS_CHECK(rocblas_gemm_strided_batched_ex(handle, opa, opb, (int)m, (int)n, (int)k,
                                    (void*)&fAlpha, a, rocblas_datatype_f16_r, (int)lda, stridea,
                                    b, rocblas_datatype_f16_r, (int)ldb, strideb,
@@ -231,6 +231,10 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
                                    (int) batchCount, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0));
 #else
+if (num_batches == 1) {
+    // See Note [Writing Nondeterministic Operations]
+    globalContext().alertCuBLASConfigNotDeterministic();
+}
 #if defined(CUDA_VERSION) && CUDA_VERSION < 11000
   // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
   // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
@@ -623,6 +627,69 @@ void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16)) {
   char trans_flipped = (trans_bool ? 'n' : 't');
   gemm<at::BFloat16>(
       'n', trans_flipped, 1, m, n, alpha, x, incx, a, lda, beta, y, incy);
+}
+#endif
+
+#define GER_CHECK_ARGVALUES(Dtype)           \
+  do {                                        \
+    CUDABLAS_NONNEGINT_CHECK(gemv<Dtype>, m); \
+    CUDABLAS_NONNEGINT_CHECK(gemv<Dtype>, n); \
+    CUDABLAS_POSINT_CHECK(gemv<Dtype>, lda);  \
+    CUDABLAS_POSINT_CHECK(gemv<Dtype>, incx); \
+    CUDABLAS_POSINT_CHECK(gemv<Dtype>, incy); \
+  } while (0)
+
+template <>
+void ger<float>(CUDABLAS_GER_ARGTYPES(float)) {
+  NoTF32Guard disable_tf32;
+  // See Note [Writing Nondeterministic Operations]
+  globalContext().alertCuBLASConfigNotDeterministic();
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  _cublasAdjustLdLevel2(m, n, &lda);
+  GER_CHECK_ARGVALUES(float);
+  TORCH_CUDABLAS_CHECK(
+      cublasSger(handle, m, n, &alpha, x, incx, y, incy, a, lda));
+}
+
+template <>
+void ger<double>(CUDABLAS_GER_ARGTYPES(double)) {
+  // See Note [Writing Nondeterministic Operations]
+  globalContext().alertCuBLASConfigNotDeterministic();
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  _cublasAdjustLdLevel2(m, n, &lda);
+  GER_CHECK_ARGVALUES(double);
+  TORCH_CUDABLAS_CHECK(
+      cublasDger(handle, m, n, &alpha, x, incx, y, incy, a, lda));
+}
+
+#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
+template <>
+void ger<c10::complex<float>>(CUDABLAS_GER_ARGTYPES(c10::complex<float>)) {
+  NoTF32Guard disable_tf32;
+  // See Note [Writing Nondeterministic Operations]
+  globalContext().alertCuBLASConfigNotDeterministic();
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  _cublasAdjustLdLevel2(m, n, &lda);
+  GER_CHECK_ARGVALUES(c10::complex<float>);
+  TORCH_CUDABLAS_CHECK(
+      cublasCgeru(handle, m, n, reinterpret_cast<const cuComplex*>(&alpha),
+      reinterpret_cast<const cuComplex*>(x), incx,
+      reinterpret_cast<const cuComplex*>(y), incy,
+      reinterpret_cast<cuComplex*>(a), lda));
+}
+
+template <>
+void ger<c10::complex<double>>(CUDABLAS_GER_ARGTYPES(c10::complex<double>)) {
+  // See Note [Writing Nondeterministic Operations]
+  globalContext().alertCuBLASConfigNotDeterministic();
+  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  _cublasAdjustLdLevel2(m, n, &lda);
+  GER_CHECK_ARGVALUES(c10::complex<double>);
+  TORCH_CUDABLAS_CHECK(
+      cublasZgeru(handle, m, n, reinterpret_cast<const cuDoubleComplex*>(&alpha),
+      reinterpret_cast<const cuDoubleComplex*>(x), incx,
+      reinterpret_cast<const cuDoubleComplex*>(y), incy,
+      reinterpret_cast<cuDoubleComplex*>(a), lda));
 }
 #endif
 

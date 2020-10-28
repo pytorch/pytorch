@@ -46,7 +46,7 @@ Tensor & _th_fmod_(Tensor & self, Scalar other);
 Tensor & _th_fmod_(Tensor & self, const Tensor & other);
 Tensor & _th_cross_kernel_out(Tensor & result, const Tensor & self, const Tensor & other, int64_t dim);
 Tensor _th_cross_kernel(const Tensor & self, const Tensor & other, int64_t dim);
-td::tuple<Tensor &,Tensor &> _th_gels_out(Tensor & res1, Tensor & res2, const Tensor & self, const Tensor & A);
+std::tuple<Tensor &,Tensor &> _th_gels_out(Tensor & res1, Tensor & res2, const Tensor & self, const Tensor & A);
 std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A);
 std::tuple<Tensor &,Tensor &> _th_eig_out(Tensor & res1, Tensor & res2, const Tensor & self, bool eigenvectors);
 std::tuple<Tensor,Tensor> _th_eig(const Tensor & self, bool eigenvectors);
