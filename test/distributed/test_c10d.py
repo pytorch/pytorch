@@ -3525,6 +3525,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm
+    def test_builtin_ddp_comm_hook_allreduce_hook_nccl_grad_is_view(self):
+        self._test_builtin_ddp_comm_hook_allreduce_hook_nccl(gradient_as_bucket_view=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_ddp_comm_hook_allreduce_with_then_hook_nccl(self):
         """
         This unit test verifies whether a DDP communication hook that calls allreduce and then
