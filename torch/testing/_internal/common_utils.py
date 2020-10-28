@@ -1536,6 +1536,24 @@ def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
         + torch.eye(matrix_size, dtype=dtype, device=device) * 1e-5
 
 
+def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
+    """
+    Returns a batch of random Hermitian positive-definite matrices.
+    The shape of the result is batch_dims + (matrix_size, matrix_size)
+    The following example creates a tensor of size 2 x 4 x 3 x 3
+    >>> matrices = random_hermitian_pd_matrix(3, 2, 4, dtype=dtype, device=device)
+    """
+    A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
+                    dtype=dtype, device=device)
+    # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
+    if torch.device(device).type == 'cuda' and dtype.is_complex:
+        A_cpu = A.cpu()
+        result = torch.matmul(A_cpu, A_cpu.transpose(-2, -1).conj()).to(device)
+    else:
+        result = torch.matmul(A, A.transpose(-2, -1).conj())
+    return result + torch.eye(matrix_size, dtype=dtype, device=device)
+
+
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     u, s, v = A.svd()
     s.clamp_(min=min_singular_value)
