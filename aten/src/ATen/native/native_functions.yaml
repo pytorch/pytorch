@@ -283,7 +283,7 @@
   use_c10_dispatcher: full
   variants: function
   dispatch:
-    DefaultBackend: view_as_real
+    CPU, CUDA: view_as_real
 
 - func: view_as_complex(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
