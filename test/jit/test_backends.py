@@ -373,7 +373,7 @@ class SelectiveLoweringTest(JitBackendTestCase):
         mod = OuterModule(MiddleModule(BasicModule()), MiddleModule(BasicModule()), MiddleModule(BasicModule()))
 
         with self.assertRaisesRegex(RuntimeError, r"Selective lowering is only supported for module hierarchies with unique types"):
-            to_test_backend_selective(torch.jit.script(mod), {"forward": ""}, ["new_attr"])
+            to_test_backend_selective(torch.jit.script(mod), {"forward": ""}, ["sub1.submodule"])
 
 
 class TestBackends(JitTestCase):

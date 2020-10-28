@@ -8,24 +8,24 @@
 namespace torch {
 namespace jit {
 
-// Check whether all modules in the hierarchy rooted at \p mod have unique
-// types.
-bool allModuleTypesUnique(Module& mod) {
-  // Maintain a set of TypePtrs and return false at the first sight of a
-  // repeated type.
+// Get all types that are shared in the module hierarchy rooted at \p mod.
+std::unordered_set<TypePtr> getSharedModuleTypes(Module& mod) {
+  // Maintain a set of all TypePtrs.
   std::unordered_set<TypePtr> types;
+  // Maintain another set of TypePtrs that have been encountered more than once.
+  std::unordered_set<TypePtr> duplicate_types;
 
   // Iterate over all modules in the hierarchy, including the root.
   for (auto module : mod.modules()) {
     auto module_type = module.type();
     if (types.count(module_type) > 0) {
-      return false;
+      duplicate_types.insert(module_type);
     }
 
     types.insert(module_type);
   }
 
-  return true;
+  return duplicate_types;
 }
 
 // Selectively lower \p mod to a backend. \p to_backend
@@ -34,7 +34,8 @@ bool allModuleTypesUnique(Module& mod) {
 void toBackendSelectiveImpl(
     Module& mod,
     py::function to_backend,
-    const std::vector<std::string>& modules_to_lower) {
+    const std::vector<std::string>& modules_to_lower,
+    const std::unordered_set<TypePtr>& duplicate_types) {
   // This map will be used later to remap types in ancestor module graphs for
   // all lowered submodules.
   std::unordered_map<TypePtr, TypePtr> type_remap;
@@ -65,6 +66,12 @@ void toBackendSelectiveImpl(
       }
     }
 
+    // Check that the parent type is not shared and therefore can be edited.
+    if (duplicate_types.count(parent.type()) > 0) {
+      throw py::cast_error(c10::str(
+          "Selective lowering is only supported for module hierarchies with unique types for selected modules"));
+    }
+
     // Call to_backend on the module that needs to be lowered. It needs to be
     // wrapped before doing so because _to_jit_backend accepts wrapped modules.
     // The result needs to be unwrapped in order to access its type below.
@@ -76,6 +83,7 @@ void toBackendSelectiveImpl(
     // Adjust the parent's type so that the type of the submodule matches
     // the type of lowered_submodule.
     auto parent_type = parent.type();
+
     parent_type->unsafeChangeAttributeType(
         atoms.back(), lowered_submodule.type());
     parent.setattr(atoms.back(), lowered_submodule._ivalue());
@@ -224,7 +232,7 @@ void initJitBackendBindings(PyObject* module) {
       static const auto method_ct = CodeTemplate(R"(
             def $method(self${,def_inputs}):
                 typed_inputs: List[Any] = [${fwd_inputs,}]
-                $ret, = self.__backend.execute(self.__handles["$method"], typed_inputs)
+                $unpack, = self.__backend.execute(self.__handles["$method"], typed_inputs)
                 ${refine,}
                 return $ret
             )");
@@ -281,7 +289,9 @@ void initJitBackendBindings(PyObject* module) {
       out_ss << "_0";
       type_check_ss << "assert isinstance(_0, ";
 
-      if (auto out_tuple_ty = out_ty->cast<TupleType>()) {
+      auto out_tuple_ty = out_ty->cast<TupleType>();
+
+      if (out_tuple_ty) {
         auto tuple_elements = out_tuple_ty->elements();
         type_check_ss << tuple_elements[0]->str() << ")";
         type_checks.emplace_back(type_check_ss.str());
@@ -301,6 +311,14 @@ void initJitBackendBindings(PyObject* module) {
       method_te.v("def_inputs", def_inputs);
       method_te.v("fwd_inputs", fwd_inputs);
       method_te.v("refine", type_checks);
+      method_te.s("unpack", out_ss.str());
+
+      // If the output type is a single element tuple then add an extra comma
+      // to ensure the final output maintains this type.
+      if (out_tuple_ty && out_tuple_ty->elements().size() == 1) {
+        out_ss << ",";
+      }
+
       method_te.s("ret", out_ss.str());
 
       loweredModule.define(
@@ -342,22 +360,19 @@ void initJitBackendBindings(PyObject* module) {
           const std::vector<std::string>& modules_to_lower) {
         if (auto original_module =
                 as_module(py::cast<py::object>(orig_module))) {
-          // Check that the original module hierarchy has unique types for every
-          // Module.
+          // Clone the Module to avoid editing types that are shared with
+          // Modules in other instances outside this hierarchy.
           Module& mod = original_module.value();
-          if (allModuleTypesUnique(mod)) {
-            // Clone the Module to avoid editing types that are shared with
-            // Modules in other instances outside this hierarchy.
-            auto cloned_mod = mod.clone();
-            toBackendSelectiveImpl(cloned_mod, to_backend, modules_to_lower);
-            // Wrap the result in a RecursiveScriptModule because that's what
-            // the caller passed in.
-            return py::module::import("torch.jit._recursive")
-                .attr("wrap_cpp_module")(cloned_mod);
-          } else {
-            throw py::cast_error(c10::str(
-                "Selective lowering is only supported for module hierarchies with unique types for each Module"));
-          }
+          auto cloned_mod = mod.clone();
+          // Get all shared module types. Type sharing is only a problem if the
+          // parent modules of the ones to lower are in this set.
+          auto shared_types = getSharedModuleTypes(cloned_mod);
+          toBackendSelectiveImpl(
+              cloned_mod, to_backend, modules_to_lower, shared_types);
+          // Wrap the result in a RecursiveScriptModule because that's what
+          // the caller passed in.
+          return py::module::import("torch.jit._recursive")
+              .attr("wrap_cpp_module")(cloned_mod);
         }
 
         throw py::cast_error(c10::str(

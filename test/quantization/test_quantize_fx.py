@@ -12,16 +12,18 @@ from torch.quantization import (
     prepare_fx,
     convert_fx,
     prepare_qat_fx,
-)
-
-from torch.quantization import (
     default_qconfig,
     default_dynamic_qconfig,
-    float16_dynamic_qconfig,
+    default_dynamic_quant_observer,
     default_qat_qconfig,
+    float16_dynamic_qconfig,
+    float_qparams_dynamic_qconfig,
     prepare,
     prepare_qat,
     convert,
+    PerChannelMinMaxObserver,
+    QConfigDynamic,
+    FixedQParamsFakeQuantize,
 )
 
 # test utils
@@ -48,6 +50,7 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing import FileCheck
 
+import copy
 import itertools
 import operator
 import unittest
@@ -761,6 +764,87 @@ class TestQuantizeFx(QuantizationTestCase):
             ref_res = ref_m(data)
             self.assertEqual(res, ref_res)
 
+    @skipIfNoFBGEMM
+    def test_non_traceable_module(self):
+        class NonTraceable(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                for k in x.keys():
+                    print(x[k])
+                return x
+
+        class NonTraceable2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                # data dependent control flow is not traceable
+                for i in x:
+                    print(i)
+                return x
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = NonTraceable()
+                self.m2 = NonTraceable2()
+
+            def forward(self, x):
+                x = self.m1(x)
+                x = self.m2(x)
+                return x
+
+        m = M().eval()
+        qconfig_dict = {"": default_qconfig}
+        prepare_custom_config_dict = {
+            "non_traceable_module_name": [
+                "m1"
+            ],
+            "non_traceable_module_class": [
+                NonTraceable2
+            ]
+        }
+        m = prepare_fx(
+            m, qconfig_dict,
+            prepare_custom_config_dict=prepare_custom_config_dict)
+
+        node_occurrence = {
+            ns.call_module(NonTraceable) : 1,
+            ns.call_module(NonTraceable2) : 1,
+        }
+        # make sure these modules are not traced
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
+    def test_prepared_model_deepcopy(self):
+        """Ensures that copy.deepcopy works correctly on a prepared model.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self._foobar = 'foobar'
+                self.foobar2 = 'foobar2'
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x
+
+        m = M()
+        print(m.__dict__.keys())
+        m.eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        prepared = torch.quantization.prepare_fx(m, qconfig_dict)
+        # calibrate
+        prepared(torch.randn(4, 1, 4, 4))
+        # copy
+        prepared_copy = copy.deepcopy(prepared)
+        # quantize, should run with no errors
+        quantized = torch.quantization.convert_fx(prepared_copy)
+
+
+@skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
     """
@@ -1355,7 +1439,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         """
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.avg_pool1d = torch.nn.AvgPool1d(3)
                 self.avg_pool2d = torch.nn.AvgPool2d(3)
@@ -1363,9 +1447,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
-                self.hardsigmoid = torch.nn.Hardsigmoid()
-                self.sigmoid = torch.nn.Sigmoid()
-                self.tanh = torch.nn.Tanh()
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1387,21 +1468,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = x.mean([2, 3], True)
                 x = F.interpolate(x, 4, mode='nearest')
                 x = F.interpolate(x, 4, mode='linear')
-                x = self.hardsigmoid(x)
-                x = F.hardsigmoid(x)
-                x = F.hardsigmoid(x, inplace=True)
-                x = x.hardsigmoid()
-                x.hardsigmoid_()
-                x = self.sigmoid(x)
-                x = torch.sigmoid(x)
-                # F.sigmoid is deprecated
-                x = x.sigmoid()
-                x.sigmoid_()
-                x = self.tanh(x)
-                # F.tanh is deprecated
-                x = torch.tanh(x)
-                x = x.tanh()
-                x.tanh_()
                 x = self.conv(x)
                 return x
 
@@ -1432,6 +1498,212 @@ class TestQuantizeFxOps(QuantizationTestCase):
             quantized,
             expected_node_occurrence=count_check,
             expected_node_list=order_check)
+
+    @skipIfNoFBGEMM
+    def test_fixed_qparams_ops(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.sigmoid = torch.nn.Sigmoid()
+                self.hardsigmoid = torch.nn.Hardsigmoid()
+                self.tanh = torch.nn.Tanh()
+
+            def forward(self, x):
+                x = self.conv(x)
+                # F.sigmoid is deprecated
+                x = self.sigmoid(x)
+                x = torch.sigmoid(x)
+                x = x.sigmoid()
+                x.sigmoid_()
+                x = self.hardsigmoid(x)
+                x = F.hardsigmoid(x)
+                x = F.hardsigmoid(x, inplace=True)
+                x = x.hardsigmoid()
+                x.hardsigmoid_()
+                x = self.tanh(x)
+                # F.tanh is deprecated
+                x = torch.tanh(x)
+                x = x.tanh()
+                x.tanh_()
+                x = self.conv(x)
+                return x
+
+        for eval_mode in [True, False]:
+            # This model is not executable since we just put all ops
+            # in the same forward
+            m = M()
+            if eval_mode:
+                m.eval()
+                qconfig = default_qconfig
+                prepare = prepare_fx
+                fq_count = 0
+            else:
+                m.train()
+                qconfig = default_qat_qconfig
+                prepare = prepare_qat_fx
+                fq_count = 13
+
+            # nothing to fuse so skipping the fuse step
+            qconfig_dict = {'': qconfig}
+            prepared = prepare(m, qconfig_dict)
+            # check the correct number of activation_post_process is inserted
+            count_check = {
+                ns.call_module(FixedQParamsFakeQuantize) : fq_count,
+            }
+            self.checkGraphModuleNodes(
+                prepared,
+                expected_node_occurrence=count_check)
+            # not runnable
+            quantized = convert_fx(prepared)
+
+            # This checks that the dequantize from the output of first conv
+            # is being propagated to the end, so that we don't insert extra
+            # observers
+            # check exact counts of quantize and dequantize
+            count_check = {
+                ns.call_function(torch.quantize_per_tensor) : 1,
+                ns.call_method('dequantize') : 1
+            }
+            order_check = [
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_module(nnq.Conv2d),
+                ns.call_module(nn.Sigmoid),
+                ns.call_module(nnq.Conv2d),
+                ns.call_method('dequantize'),
+            ]
+            self.checkGraphModuleNodes(
+                quantized,
+                expected_node_occurrence=count_check,
+                expected_node_list=order_check)
+
+    def test_float_functional(self):
+        class TorchAdd(nn.Module):
+            """Wrapper around torch.add so that all ops can be found at build"""
+            def __init__(self):
+                super().__init__()
+                self.add_func = nnq.FloatFunctional()
+
+            def forward(self, x, y):
+                return self.add_func.add(x, y)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.ff1 = TorchAdd()
+                self.ff2 = nnq.FloatFunctional()
+                self.ff3 = nnq.FloatFunctional()
+                self.ff4 = nnq.FloatFunctional()
+                self.ff5 = nnq.FloatFunctional()
+                self.ff6 = nnq.FloatFunctional()
+
+            def forward(self, x):
+                x = self.ff1(x, x)
+                x = self.ff2.add_scalar(x, 3)
+                x = self.ff3.mul(x, x)
+                x = self.ff4.mul_scalar(x, 3)
+                x = self.ff5.add_relu(x, x)
+                x = self.ff6.cat([x])
+                return x
+
+        data = torch.rand(3, 3)
+        # Note: QAT test succeeded by chance, to make it actually work
+        # we need to fix eager mode FloatFunctional by removing
+        # activation_post_process in add_scalar and mul_scalar
+        for quant_type in self.static_quant_types:
+            m = M()
+            ref_m = torch.quantization.QuantWrapper(M())
+            is_qat = quant_type == QuantType.QAT
+            if is_qat:
+                m.train()
+                ref_m.train()
+                qconfig = default_qat_qconfig
+                expected_act_post_process = torch.quantization.FakeQuantize
+            else:
+                m.eval()
+                ref_m.eval()
+                qconfig = default_qconfig
+                expected_act_post_process = torch.quantization.MinMaxObserver
+
+            prepare_fx_function = prepare_qat_fx if is_qat else prepare_fx
+            qconfig_dict = {"": qconfig}
+            m = prepare_fx_function(m, qconfig_dict)
+            node_occurrence = {
+                ns.call_module(expected_act_post_process): 5,
+                ns.call_module(torch.nn.quantized.FloatFunctional): 0
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+            m(data)
+            node_list = [
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_function(torch.ops.quantized.add),
+                ns.call_function(torch.ops.quantized.add),
+                ns.call_function(torch.ops.quantized.mul),
+                ns.call_function(torch.ops.quantized.mul),
+                ns.call_function(torch.ops.quantized.add_relu),
+                ns.call_function(torch.ops.quantized.cat),
+                ns.call_method('dequantize')
+            ]
+            m = convert_fx(m)
+            self.checkGraphModuleNodes(m, expected_node_list=node_list)
+
+            # make sure numerics match with eager mode
+            ref_m.qconfig = qconfig
+            prepare_function = prepare_qat if is_qat else prepare
+            ref_m = prepare_function(ref_m)
+            ref_m(data)
+            ref_m = convert(ref_m)
+            self.assertEqual(m(data), ref_m(data))
+
+    def test_qembedding_module(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
+
+            def forward(self, indices):
+                return self.emb(indices)
+
+        model = M().eval()
+        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        quantized_node = ns.call_module(nnq.Embedding)
+        self.checkGraphModeFxOp(
+            model,
+            [[indices]],
+            QuantType.DYNAMIC,
+            quantized_node,
+            custom_qconfig=float_qparams_dynamic_qconfig
+        )
+
+    def test_qembedding_bag_module(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12, include_last_offset=True)
+
+            def forward(self, indices, offsets):
+                return self.emb(indices, offsets)
+
+        model = M().eval()
+        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        offsets = torch.tensor([0, 19, 20, 28, 28, 32])
+        quantized_node = ns.call_module(nnq.EmbeddingBag)
+        inputs = (indices, offsets)
+
+        for dtype in [torch.quint8, torch.quint4x2]:
+            float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=dtype,
+                                                                        qscheme=torch.per_channel_affine_float_qparams,
+                                                                        ch_axis=0)
+            float_qparams_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+                                                   weight=float_qparams_observer)
+            self.checkGraphModeFxOp(
+                model,
+                inputs,
+                QuantType.DYNAMIC,
+                quantized_node,
+                custom_qconfig=float_qparams_qconfig
+            )
+
 
 class TestQuantizeFxModels(QuantizationTestCase):
     def _test_model_impl(
