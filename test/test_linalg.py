@@ -987,7 +987,7 @@ class TestLinalg(TestCase):
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_cholesky_solve_batched_many_batches(self, device, dtype):
-        for A_dims, b_dims in zip([(5, 256, 256), (5,),], [(5, 10), (512, 512, 5, 10)]):
+        for A_dims, b_dims in zip([(5, 256, 256), (5,)], [(5, 10), (512, 512, 5, 10)]):
             for upper in [True, False]:
                 b, A, L = self.cholesky_solve_test_helper(A_dims, b_dims, upper, device, dtype)
                 x = torch.cholesky_solve(b, L, upper)
