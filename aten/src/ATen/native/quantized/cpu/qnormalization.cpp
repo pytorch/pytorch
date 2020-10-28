@@ -74,7 +74,7 @@ Tensor quantized_group_norm_impl(
   const int64_t elements_per_batch = std::accumulate(
       input_shape.cbegin() + 1,
       input_shape.cend(),
-      1LL,
+      decltype(elements_per_batch){1},
       std::multiplies<int64_t>());
 
   const int64_t M = batches * num_groups;

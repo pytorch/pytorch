@@ -109,7 +109,7 @@ Tensor group_norm(
   const int64_t HxW = std::accumulate(
       input_shape.cbegin() + 2,
       input_shape.cend(),
-      1LL,
+      decltype(HxW){1},
       std::multiplies<int64_t>());
 
   const Tensor kEmpty;

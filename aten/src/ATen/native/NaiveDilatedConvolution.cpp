@@ -182,9 +182,9 @@ void slow_conv_dilated_all_cpu_template(
   Tensor columns = at::empty({0}, options);
   if (output.defined() || grad_weight.defined() || grad_input.defined()) {
     int64_t m = std::accumulate(
-        kernel_size.begin(), kernel_size.end(), 1, std::multiplies<int64_t>());
+        kernel_size.begin(), kernel_size.end(), decltype(m){1}, std::multiplies<int64_t>());
     int64_t n = std::accumulate(
-        output_size.begin(), output_size.end(), 1, std::multiplies<int64_t>());
+        output_size.begin(), output_size.end(), decltype(n){1}, std::multiplies<int64_t>());
     columns.resize_({nInputPlane * m, n});
   }
   // Initialize

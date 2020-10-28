@@ -1185,7 +1185,7 @@ class VulkanTensor::Impl final {
         numel_(std::accumulate(
             std::begin(sizes_),
             std::end(sizes_),
-            1,
+            (int64_t)1,
             std::multiplies<int64_t>())) {
     TORCH_CHECK(
         initVulkanContextOnce(), "Vulkan Failed to create Vulkan Context");
@@ -1290,7 +1290,7 @@ class VulkanTensor::Impl final {
   VkDeviceSize buffer_size_for_sizes(std::vector<int64_t> sizes) const {
     const auto d = sizes.size();
     const auto numel = std::accumulate(
-        std::begin(sizes), std::end(sizes), 1, std::multiplies<int64_t>());
+        std::begin(sizes), std::end(sizes), (int64_t)1, std::multiplies<int64_t>());
     VkDeviceSize bufferSize{sizeof(float) * numel};
     // alignment to be able to copy between image and buffer
     if (d == 4) {

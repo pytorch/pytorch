@@ -55,12 +55,12 @@ std::tuple<Tensor, Tensor, Tensor, int64_t, int64_t> _prepare_layer_norm_inputs(
   const int64_t M = std::accumulate(
       input_shape.cbegin(),
       input_shape.cbegin() + axis,
-      1LL,
+      decltype(M){1},
       std::multiplies<int64_t>());
   const int64_t N = std::accumulate(
       input_shape.cbegin() + axis,
       input_shape.cend(),
-      1LL,
+      decltype(N){1},
       std::multiplies<int64_t>());
 
   const auto& X = input.is_contiguous() ? input : input.contiguous();

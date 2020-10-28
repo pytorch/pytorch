@@ -25,7 +25,7 @@ VkDeviceSize bytes(
     size = std::accumulate(
         sizes.cbegin(),
         sizes.cend(),
-        size,
+        decltype(size){size},
         std::multiplies<int64_t>());
   }
 

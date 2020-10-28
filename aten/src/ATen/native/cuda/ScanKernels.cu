@@ -128,16 +128,16 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
  */
 template<typename scalar_t, class BinaryFunction>
 __global__ void tensor_kernel_scan_outer_dim_with_indices(scalar_t *self_, scalar_t *values_, int64_t *indices_,
-                  int num_orows, int num_irows, int row_size, scalar_t init, BinaryFunction binary_op) {
-  for (int orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
-    for (int irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
+                  unsigned num_orows, unsigned num_irows, unsigned row_size, scalar_t init, BinaryFunction binary_op) {
+  for (unsigned orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
+    for (unsigned irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
       scalar_t *self = self_ + orow * row_size * num_irows + irow;
       scalar_t *values = values_ + orow * row_size * num_irows + irow;
       int64_t *indices = indices_ + orow * row_size * num_irows + irow;
       scalar_t out = init;
       int64_t out_idx = 0;
 
-      for (int64_t col = 0; col < row_size; ++col) {
+      for (auto col = decltype(row_size){0}; col < row_size; ++col) {
         if(THCNumerics<scalar_t>::isnan(*self) || (!THCNumerics<scalar_t>::isnan(out) && binary_op(*self, out))) {
           out = *self;
           out_idx = col;
@@ -152,21 +152,32 @@ __global__ void tensor_kernel_scan_outer_dim_with_indices(scalar_t *self_, scala
   }
 }
 
+void check_fits_in_unsigned(int64_t val, const char* name) {
+  constexpr auto umax = std::numeric_limits<unsigned>::max();
+  TORCH_CHECK(
+      val >= 0 && val <= umax, name, " must fit in a 32-bit unsigned value");
+}
+
+
 template<typename scalar_t, class BinaryFunction>
 __host__ void scan_outer_dim_with_indices(const Tensor& self, Tensor& values, Tensor& indices,
                                        int dim, scalar_t init, BinaryFunction binary_op) {
-  int row_size = self.size(dim);
+  int64_t row_size = self.size(dim);
   auto sizes = self.sizes();
 
   // Treat all outer dimensions (i.e. dim_ < dim) as one.
-  int num_orows = std::accumulate(sizes.begin(), sizes.begin() + dim, 1, std::multiplies<int>());
+  int64_t num_orows = std::accumulate(sizes.begin(), sizes.begin() + dim, decltype(num_orows){1}, std::multiplies<int>());
 
   // Treat all inner dimensions (i.e. dim > dimension) as one.
-  int num_irows = std::accumulate(sizes.begin() + dim + 1, sizes.end(), 1, std::multiplies<int>());
+  int64_t num_irows = std::accumulate(sizes.begin() + dim + 1, sizes.end(), decltype(num_orows){1}, std::multiplies<int>());
+  check_fits_in_unsigned(num_irows, "num_irows");
+  check_fits_in_unsigned(num_orows, "num_orows");
+  check_fits_in_unsigned(row_size, "row_size");
+
 
   dim3 threads(std::min(512, int(num_irows)));
-  int maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
-  dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, ceil_div(num_irows, int(threads.x))));
+  int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
+  dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, ceil_div(num_irows, int64_t{threads.x})));
   tensor_kernel_scan_outer_dim_with_indices<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     self.data_ptr<scalar_t>(), values.data_ptr<scalar_t>(), indices.data_ptr<int64_t>(),
     num_orows, num_irows, row_size, init, binary_op);
@@ -399,11 +410,6 @@ tensor_kernel_scan_innermost_dim(
       row_buf, tgt_, src_, num_rows, row_size, init, binary_op);
 }
 
-void check_fits_in_unsigned(int64_t val, const char* name) {
-  constexpr auto umax = std::numeric_limits<unsigned>::max();
-  TORCH_CHECK(
-      val >= 0 && val <= umax, name, " must fit in a 32-bit unsigned value");
-}
 
 template<typename scalar_t, class BinaryFunction>
 __host__ void scan_outer_dim(const Tensor& self, Tensor& result,
@@ -412,10 +418,10 @@ __host__ void scan_outer_dim(const Tensor& self, Tensor& result,
   auto sizes = self.sizes();
 
   // Treat all outer dimensions (i.e. dim_ < dim) as one.
-  int64_t num_orows = std::accumulate(sizes.begin(), sizes.begin() + dim, 1, std::multiplies<int64_t>());
+  int64_t num_orows = std::accumulate(sizes.begin(), sizes.begin() + dim, decltype(num_orows){1}, std::multiplies<int64_t>());
 
   // Treat all inner dimensions (i.e. dim > dimension) as one.
-  int64_t num_irows = std::accumulate(sizes.begin() + dim + 1, sizes.end(), 1, std::multiplies<int64_t>());
+  int64_t num_irows = std::accumulate(sizes.begin() + dim + 1, sizes.end(), decltype(num_irows){1}, std::multiplies<int64_t>());
 
   dim3 threads(std::min(512, int(num_irows)));
   int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
