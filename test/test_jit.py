@@ -1810,6 +1810,19 @@ graph(%Ra, %Rb):
         # and True / or False are removed from graph
         FileCheck().check("aten::eq").check_not("prim::If").run(redundant_expressions.graph)
 
+    def test_empty_list_constructor(self):
+        def fn():
+            l = list()
+            return l
+        self.checkScript(fn, ())
+
+    def test_typed_empty_list_constructor(self):
+        def fn() -> List[int]:
+            l: List[int] = list()
+            return l
+        print(torch.jit.script(fn).graph)
+        self.checkScript(fn, ())
+
     @_inline_everything
     def test_peephole_type_refinements(self):
         def refine(x):

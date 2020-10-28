@@ -2929,6 +2929,11 @@ struct to_ir {
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
+        auto callee = Var(apply.callee());
+        if (callee.name().name() == "list" && apply.inputs().size() == 0) {
+          return std::make_shared<SimpleValue>(
+              emitListLiteral(apply, type_hint));
+        }
         return emitApplyExpr(apply, n_binders, type_hint);
       } break;
       case TK_SUBSCRIPT: {
@@ -3229,47 +3234,7 @@ struct to_ir {
         return emitStringLiteral(StringLiteral(tree));
       } break;
       case TK_LIST_LITERAL: {
-        auto ll = ListLiteral(tree);
-        auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
-
-        // determine the element type of the list
-        // if we have a type hint of List[T], use T
-        // if the list is non-empty use type_of(list[0])
-        // otherwise assume it is List[Tensor]
-        TypePtr elem_type = TensorType::get();
-        if (type_hint) {
-          if (type_hint->kind() == TypeKind::ListType) {
-            elem_type = type_hint->expect<ListType>()->getElementType();
-          } else {
-            // If the type hint was not a List[T] throw an error
-            throw ErrorReport(tree)
-                << "Expected a List type hint but instead got "
-                << type_hint->repr_str();
-          }
-        } else if (!values.empty()) {
-          std::stringstream ss;
-          auto types = fmap(values, [](const Value* v) { return v->type(); });
-          auto maybe_elem_type = unifyTypeList(types, ss);
-          if (!maybe_elem_type) {
-            throw ErrorReport(tree) << "Lists must contain only a single type\n"
-                                    << ss.str();
-          }
-          elem_type = maybe_elem_type.value();
-        }
-
-        for (auto v : values) {
-          std::stringstream ss;
-          if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
-            throw ErrorReport(tree)
-                << "Lists must contain only a single type, expected: "
-                << elem_type->repr_str() << " but found "
-                << v->type()->repr_str() << " instead.\n"
-                << ss.str();
-          }
-        }
-        Value* result =
-            graph->insertNode(graph->createList(elem_type, values))->output();
-        return result;
+        return emitListLiteral(tree, type_hint);
       } break;
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);
@@ -3334,6 +3299,76 @@ struct to_ir {
       default:
         throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
     }
+  }
+
+  // This function simplifies control flow and type checking for
+  // `emitListLiteral`. (The base ListLiteral must be created differently based
+  // on the `kind` of the TreeRef that `emitListLiteral` is passed)
+  ListLiteral getListLiteralFromTreeRef(const TreeRef& tree) {
+    if (tree->kind() == TK_LIST_LITERAL) {
+      return ListLiteral(tree);
+    } else if (tree->kind() == TK_APPLY) {
+      auto apply = Apply(tree);
+      auto callee = Var(apply.callee()).name();
+      TORCH_CHECK(
+          callee.name() == "list",
+          "Expected a call to aten::list but got ",
+          callee.name());
+      TORCH_CHECK(
+          apply.inputs().empty(),
+          "Expected 0 arguments to aten::list but got ",
+          apply.inputs().size());
+      return ListLiteral::create(tree->range(), apply.inputs());
+    }
+    TORCH_CHECK(
+        false, "A ListLiteral cannot be created from the given TreeRef");
+  }
+
+  // This function should be used to emit a ListLiteral when `tree` is either:
+  //    1) a ListLiteral
+  //    2) a call to `list()` that is typed and has no arguments
+  Value* emitListLiteral(
+      const TreeRef& tree,
+      const TypePtr& type_hint = nullptr) {
+    ListLiteral ll = getListLiteralFromTreeRef(tree);
+    auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
+
+    // Determine the element type of the list. If we have a type hint of
+    // List[T], use T. If the list is non-empty, use type_of(list[0]). Otherwise
+    // assume it is List[Tensor]
+    TypePtr elem_type = TensorType::get();
+    if (type_hint) {
+      if (type_hint->kind() == TypeKind::ListType) {
+        elem_type = type_hint->expect<ListType>()->getElementType();
+      } else {
+        // If the type hint was not a List[T], throw an error
+        throw ErrorReport(tree) << "Expected a List type hint but instead got "
+                                << type_hint->repr_str();
+      }
+    } else if (!values.empty()) {
+      std::stringstream ss;
+      auto types = fmap(values, [](const Value* v) { return v->type(); });
+      auto maybe_elem_type = unifyTypeList(types, ss);
+      if (!maybe_elem_type) {
+        throw ErrorReport(tree) << "Lists must contain only a single type\n"
+                                << ss.str();
+      }
+      elem_type = maybe_elem_type.value();
+    }
+
+    for (auto v : values) {
+      std::stringstream ss;
+      if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
+        throw ErrorReport(tree)
+            << "Lists must contain only a single type, expected: "
+            << elem_type->repr_str() << " but found " << v->type()->repr_str()
+            << " instead.\n"
+            << ss.str();
+      }
+    }
+    Value* result =
+        graph->insertNode(graph->createList(elem_type, values))->output();
+    return result;
   }
 
   Value* emitConst(const Const& c) {
