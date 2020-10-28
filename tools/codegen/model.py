@@ -384,8 +384,7 @@ class FunctionSchema:
                     '_foreach_addcmul_.Scalar',
                     '_foreach_addcdiv_.Scalar',
                     '_foreach_addcmul_.ScalarList',
-                    '_foreach_addcdiv_.ScalarList',
-                    '_foreach_zero_']:
+                    '_foreach_addcdiv_.ScalarList']:
                 assert len(self.returns) == 1
 
     def is_out_fn(self) -> bool:
