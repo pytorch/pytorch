@@ -470,6 +470,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             assert len(prepared.init_net.op) == 8
             assert len(prepared.predict_net.op) == 997
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_alexnet(self):
         state_dict = model_zoo.load_url(model_urls['alexnet'], progress=False)
         self.run_model_test(alexnet(), train=False, batch_size=BATCH_SIZE,
