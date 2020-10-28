@@ -871,7 +871,6 @@ def decl_to_python_signature(decl: Dict[str, Any], *, method: bool) -> PythonSig
         src_args: Dict[str, PythonArgument] = {a.name: PythonArgument(
             name=a.name,
             type=a.type,
-            cpp_type_str=a.cpp_type_str,
             default=None,
             default_init=None,
         ) for a in itertools.chain(python_sig.input_args, python_sig.input_kwargs)}
