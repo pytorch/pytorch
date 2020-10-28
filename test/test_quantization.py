@@ -44,6 +44,7 @@ from quantization.test_quantize import TestPostTrainingStatic  # noqa: F401
 from quantization.test_quantize import TestPostTrainingDynamic  # noqa: F401
 from quantization.test_quantize import TestQuantizationAwareTraining  # noqa: F401
 from quantization.test_quantize import TestEagerModeOps  # noqa: F401
+from quantization.test_quantize import TestEagerModeQATOps  # noqa: F401
 
 # TODO: merge with other tests in test_quantize.py?
 from quantization.test_quantize import TestFunctionalModule  # noqa: F401
@@ -69,7 +70,7 @@ except ImportError:
     # velocity. These are covered by a separate test target `quantization_fx`
     pass
 
-# Tooling: numric_suite
+# Tooling: numeric_suite
 from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F401
 
 # Backward Compatibility
