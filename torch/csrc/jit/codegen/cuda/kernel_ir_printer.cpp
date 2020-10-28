@@ -207,7 +207,7 @@ void IrPrinter::visit(const kir::TensorDomain*) {
 }
 
 void IrPrinter::visit(const kir::TensorView* node) {
-  // TODO(KIR): print memory type too?
+  // TODO(kir): print memory type too?
   ir_str_ << varName(node, "T");
 }
 

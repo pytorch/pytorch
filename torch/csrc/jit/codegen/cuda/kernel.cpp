@@ -50,7 +50,8 @@ class KernelIrScanner : private kir::IrVisitor {
         }
         break;
       case MemoryType::Local:
-        summary_.has_dynamic_local_memory_allocations |=
+        summary_.has_dynamic_local_memory_allocations =
+            summary_.has_dynamic_local_memory_allocations ||
             !ExpressionEvaluator::isConst(allocate->size());
         break;
     }
@@ -68,11 +69,14 @@ class KernelIrScanner : private kir::IrVisitor {
     const auto domain = tv->domain();
 
     // Do we have any reductions?
-    summary_.has_block_reductions |= domain->hasBlockReduction();
-    summary_.has_grid_reductions |= domain->hasGridReduction();
+    summary_.has_block_reductions =
+        summary_.has_block_reductions || domain->hasBlockReduction();
+    summary_.has_grid_reductions =
+        summary_.has_grid_reductions || domain->hasGridReduction();
 
     // Do we have block broadcasts?
-    summary_.has_block_broadcasts |= domain->hasBlockBroadcast();
+    summary_.has_block_broadcasts =
+        summary_.has_block_broadcasts || domain->hasBlockBroadcast();
 
     // Update the largest smem data type
     if (domain->hasBlockReduction() || domain->hasGridReduction() ||
