@@ -1202,10 +1202,11 @@ AT_ERROR("cholesky: MAGMA library not found in "
 
     MAGMAQueue magma_queue(self.get_device());
 
-    constexpr int64_t batch_limit = 262140;
+    int64_t batch_limit = self.is_complex() ? 65535 : 262140;
     // Compute as many batches of 262140 possible
     // 262140 is the size of the largest batch of matrices that can be run with
     // violating maximum kernel configuration
+    // For complex input the batch limit is 65535
     // The number of "mini"-batches are floor(batch_size / batch_limit)
     // and these cover floor(batch_size / batch_limit) * batch_limit cholesky calls
     int64_t mini_batches = batch_size / batch_limit, mini_idx;
