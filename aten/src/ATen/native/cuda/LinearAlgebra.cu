@@ -161,16 +161,14 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
   TORCH_CHECK(batch1_sizes[2] == batch2_sizes[1], "batch1 dim 2 must match batch2 dim 1");
 
   if (!result.is_same(self)) {
-    at::native::resize_as_(result, self);
+    result.resize_as_(self);
     if ((beta.isComplex() && beta.to<c10::complex<double>>() != 0.0) ||
         (beta.to<double>() != 0.0)) {
-      at::native::copy_(result, self);
+      result.copy_(self);
     }
   }
 
   bool transpose_result = false;
-  bool transpose_batch1, transpose_batch2;
-  int64_t lda, ldb, ldc;
   Tensor result_;
   IntArrayRef result_strides = result.strides();
   IntArrayRef result_sizes = result.sizes();
@@ -189,18 +187,19 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
 
   int leading_dim = transpose_result ? 1 : 2;
 
-  ldc = result_.stride(leading_dim);
   Tensor batch1_ = transpose_result ? batch2 : batch1;
   Tensor batch2_ = transpose_result ? batch1 : batch2;
   int64_t m = result_sizes[transpose_result ? 2 : 1];
   int64_t n = result_sizes[leading_dim];
   int64_t k = batch1_.size(leading_dim);
 
+  int64_t lda, ldb, ldc;
+  bool transpose_batch1, transpose_batch2;
   batch1_ = prepare_batch_matrix_for_cublas(batch1_, transpose_batch1, lda, transpose_result, m, k);
   batch2_ = prepare_batch_matrix_for_cublas(batch2_, transpose_batch2, ldb, transpose_result, k, n);
 
-  IntArrayRef result__sizes = result.sizes();
-  int64_t num_batches = result__sizes[0];
+  ldc = result_.stride(leading_dim);
+  int64_t num_batches = result_.sizes()[0];
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddmm_cuda", [&] {
     scalar_t alpha_val = alpha.to<scalar_t>();
