@@ -614,6 +614,9 @@ void addInputs(
 void addInputs(Node* n, const char* name, at::Device value) {
   detail::genericAddInput(n, value);
 }
+void addInputs(Node* n, const char* name, c10::Stream stream) {
+  detail::genericAddInput(n, static_cast<int64_t>(stream.pack()));
+}
 void addInputs(Node* n, const char* name, at::Layout value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
 }
@@ -694,15 +697,6 @@ void addInputs(
     Value* none = g->insertNode(g->createNone())->output();
     n->addInput(none);
   }
-}
-
-void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
-  // [TensorOptions in script] - update this when you change how we schematize
-  // TensorOptions
-  addInputs(n, name, options.dtype_opt());
-  addInputs(n, name, options.layout());
-  addInputs(n, name, options.device());
-  addInputs(n, name, options.pinned_memory());
 }
 
 void addInputs(Node* n, const char* name, at::IntArrayRef value) {
@@ -919,6 +913,18 @@ void recordSourceLocation(Node* n) {
 }
 void setRecordSourceLocation(void (*v)(Node*)) {
   record_source_location.store(v);
+}
+
+std::vector<StackEntry> defaultPythonCallstack() {
+  return std::vector<StackEntry>();
+}
+std::atomic<decltype(&defaultPythonCallstack)> python_callstack_fn(
+    defaultPythonCallstack);
+std::vector<StackEntry> pythonCallstack() {
+  return python_callstack_fn.load()();
+}
+void setPythonCallstack(std::vector<StackEntry> (*v)()) {
+  python_callstack_fn.store(v);
 }
 
 void defaultWarn(const std::string& str) {

@@ -23,7 +23,6 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 , dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
 , manuallyBoxedKernel_()
 , kernels_()
-, catchAllKernel_()
 , cpp_signature_()
 , is_observed_(ObservedOperators::isObserved(name_))
 {
@@ -54,11 +53,6 @@ void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug)
       if (j->inferred_function_schema != nullptr) {
         checkSchema(name_, schema, debug, *j->inferred_function_schema, j->debug);
       }
-    }
-  }
-  for (auto j = catchAllKernel_.begin(); j != catchAllKernel_.end(); ++j) {
-    if (j->inferred_function_schema != nullptr) {
-      checkSchema(name_, schema, debug, *j->inferred_function_schema, j->debug);
     }
   }
   // NB: don't register schema until after we've checked everything!
@@ -105,7 +99,8 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
 
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
-  auto& k = dispatch_key.has_value() ? kernels_[*dispatch_key] : catchAllKernel_;
+  // Redirect catchAll registrations to Math.
+  auto& k = dispatch_key.has_value() ? kernels_[*dispatch_key] : kernels_[DispatchKey::Math];
 
   if (k.size() > 0) {
     TORCH_WARN("Registering a kernel (", debug, ") for operator ", name_, " for dispatch key ", toString(dispatch_key), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
@@ -132,20 +127,17 @@ void OperatorEntry::deregisterKernel_(
   c10::optional<DispatchKey> dispatch_key,
   std::list<AnnotatedKernel>::iterator kernel
 ) {
-  if (dispatch_key.has_value()) {
-    auto found = kernels_.find(*dispatch_key);
-    TORCH_INTERNAL_ASSERT(found != kernels_.end(), "Tried to deregister a kernel for dispatch key ", toString(dispatch_key), " but there are no kernels registered for this dispatch key. The operator is ", toString(name_));
-    auto& k = found->second;
-    k.erase(kernel);
-    if (k.empty()) {
-      // the invariant says we don't want empty lists but instead remove the list from the map
-      kernels_.erase(found);
-    }
-    updateDispatchTable_(dispatcher, *dispatch_key);
-  } else {
-    catchAllKernel_.erase(kernel);
-    updateDispatchTableFull_(dispatcher);
+  // Redirect catchAll deregistrations to Math.
+  DispatchKey dk = dispatch_key.has_value() ? *dispatch_key : DispatchKey::Math;
+  auto found = kernels_.find(dk);
+  TORCH_INTERNAL_ASSERT(found != kernels_.end(), "Tried to deregister a kernel for dispatch key ", toString(dispatch_key), " but there are no kernels registered for this dispatch key. The operator is ", toString(name_));
+  auto& k = found->second;
+  k.erase(kernel);
+  if (k.empty()) {
+    // the invariant says we don't want empty lists but instead remove the list from the map
+    kernels_.erase(found);
   }
+  updateDispatchTable_(dispatcher, dk);
 }
 
 void OperatorEntry::updateFallback(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
@@ -156,11 +148,10 @@ const KernelFunction& OperatorEntry::computeDispatchTableEntry(const c10::Dispat
   return computeDispatchTableEntryWithDebug(dispatcher, dispatch_key).first.kernel;
 }
 
-bool OperatorEntry::hasKernelForDispatchKeySet(DispatchKeySet ks) const {
-  for (auto k : ks) {
-    if (kernels_.find(k) != kernels_.end()) {
-      return true;
-    }
+bool OperatorEntry::hasKernelForAnyDispatchKey(DispatchKeySet ks) const {
+  TORCH_INTERNAL_ASSERT(kernels_.find(DispatchKey::Undefined) == kernels_.end());
+  for (auto& kv : kernels_) {
+    if (ks.has(kv.first)) return true;
   }
   return false;
 }
@@ -176,92 +167,104 @@ c10::optional<const AnnotatedKernel*> OperatorEntry::getKernelForDispatchKey(Dis
 }
 
 std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTableEntryWithDebug(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const {
-  auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
   // [Note] DispatchTable computation
   // dispatchTable contains entries for runtime dispatch keys.
   // For any dispatch key, it'll pick a kernel using the following order:
   //  (1) Use kernel if it's directly registered to this key
   //  (2) Handle runtime keys that have kernels available from alias keys
-  //    (2.1) Use kernel from DispatchKey::Math if available.
+  //    (2.1) Use kernel from DispatchKey::DefaultBackend if available.
+  //          This is used to register a kernel that works for all backend in inference. But it requires
+  //          separate registration for Autograd keys to support training.
+  //    (2.2) Use kernel from DispatchKey::Math if available.
   //          For autograd keys, we only use kernel from Math when there's no direct registration
-  //          to its corresponding backend key.
+  //          to its corresponding backend key or DefaultBackend. See Note [DefaultBackend and Math].
   //          For AutogradOther, we eagerly return ambiguousAutogradOtherKernel_ if there's registration to any of
   //          its backends and ask backend extender to request a decicated Autograd key for the backend.
   //          See Note [Ambiguity in AutogradOther kernel] for more details.
-  //    (2.2) Use kernel from DispatchKey::Autograd if available
-  //    (2.3) Special logic to handle catchAll for Autograd keys
-  //          For autograd backend keys, we use kernel from alias Math key (catchAll will be moved to Math)
-  //          if there's no direct registration to the backend key.
-  //          Tensor factory functions used to have no registration to Autograd key but only to catchAll.
-  //          In the past we directly call into backends(filled with catchAll) after BackendSelect.
-  //          Now that we first call Autograd backend keys after BackendSelect, we should fill those
-  //          with catchAll as well.
+  //          A DefaultBackend kernel prevents Math kernel being used for Autograd keys, but it doesn't
+  //          cause confusion for AutogradOther. It's pretty straightforward to use Autograd (if available)
+  //          in this case.
+  //    (2.3) Use kernel from DispatchKey::Autograd if available
+  //    The implementation of (2.2) relies on the invariant that for a given backend,
+  //    `computeDispatchTableEntryWithDebug()` will be called for that backend's autograd key after the
+  //    backend key. See Note [Refresh Runtime Autograd entries in dispatchTable_]
   //  (3) Use fallthrough kernel that are registered as fallback.
-  //  (4) Use catchAll kernel if available
   // Alias Key Precedence:
-  //   Math > Autograd
+  //   DefaultBackend > Math > Autograd
+  // Note [DefaultBackend and Math]
+  //   When there're registrations to both DefaultBackend & Math & Autograd, from (2.2) we know DefaultBackend
+  //   and Autograd kernels will be picked up and Math is overriden.
+  //   This is fine and in practice DefaultBackend and Math shouldn't co-exist for an op.
   // TODO: Update alias key precedence after we add new alias keys AutogradDispatchCPUOrCUDA .
-  // TODO: we can remove (2.3) and (4) after TypeDefault registrations are moved from catchAll to Math
-  //       so that Math can populate to Autograd backend keys before fallback kernels.
 
   // 1. Operator registration
   if (auto direct_registration = getKernelForDispatchKey(dispatch_key)) {
     return {*direct_registration.value(), "kernel"};
   }
 
-  bool is_autograd_key_with_backend_kernel =
-    hasKernelForDispatchKeySet(getBackendKeySetFromAutograd(dispatch_key));
-  // 2.1. Use Math kernel if available. For autograd keys, we only use kernel from Math
-  //      when there's no direct registration to its corresponding backend key.
+  // 2.1 Use DefaultBackend kernel if available.
+  //     See Note [Undefined in dispatchTable_] for the special handling for Undefined.
+  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::DefaultBackend)) {
+    if (auto default_backend_registration = getKernelForDispatchKey(DispatchKey::DefaultBackend)) {
+      return {*default_backend_registration.value(), "default backend kernel"};
+    }
+  }
+
+  // Note when there's direct registration to DefaultBackend, this code path will only be hit by
+  // non backend keys (e.g AutogradXXX, Batched etc) due to (2.1).
+  bool has_backend_kernel =
+    hasKernelForAnyDispatchKey(getBackendKeySetFromAutograd(dispatch_key).add(DispatchKey::DefaultBackend));
+
+  // 2.2. Use Math kernel if available. For autograd keys, we only use kernel from Math
+  //      when there's no direct registration to its corresponding backend key or DefaultBackend.
   //      For AutogradOther, we return ambiguousAutogradOtherKernel_ if there's registration
   //      to any of its backends.
-  if (isIncludedInAlias(dispatch_key, DispatchKey::Math)) {
+  //      See Note [Undefined in dispatchTable_] for the special handling for Undefined.
+  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::Math)) {
     if (auto math_registration = getKernelForDispatchKey(DispatchKey::Math)) {
-      if (dispatch_key == DispatchKey::AutogradOther && is_autograd_key_with_backend_kernel) {
+      if (dispatch_key == DispatchKey::AutogradOther
+          && hasKernelForAnyDispatchKey(c10::autogradother_backends)) {
         return {ambiguousAutogradOtherKernel_, "ambiguous autogradother"};
-      } else if (!is_autograd_key_with_backend_kernel) {
+      } else if (!has_backend_kernel) {
         return {*math_registration.value(), "math kernel"};
       }
     }
   }
 
-  // 2.2. For autograd backend keys, use kernel from DispatchKey::Autograd if available
+  // 2.3. For autograd backend keys, use kernel from DispatchKey::Autograd if available
   if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)) {
     if (auto autograd_registration = getKernelForDispatchKey(DispatchKey::Autograd)) {
       return {*autograd_registration.value(), "autograd kernel"};
     }
   }
 
-  // 2.3. For autograd backend keys, we use kernel from catchAll if there's no direct
-  //      registration to the backend key. Once CatchAll is moved to Math, this should
-  //      fit 2.1 and we can remove 2.3 entirely.
-  if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)
-      && !is_autograd_key_with_backend_kernel && !catchAllKernel_.empty()) {
-    TORCH_INTERNAL_ASSERT(catchAllKernel_.front().kernel.isValid());
-    return {catchAllKernel_.front(), "catch all"};
-  }
-
   // 3. Backend fallback
+  auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
   if (dispatcher.backendFallbackKernels_[dispatch_ix].kernel.isValid()) {
     return {dispatcher.backendFallbackKernels_[dispatch_ix], "backend fallback"};
-
-  // 4. Catch all
-  } else if (!catchAllKernel_.empty()) {
-    TORCH_INTERNAL_ASSERT(catchAllKernel_.front().kernel.isValid());
-    return {catchAllKernel_.front(), "catch all"};
-
-  // 5. Default to error
-  } else {
-    return {missingKernel_, "missing"};
   }
+
+  // 4. Default to error
+  return {missingKernel_, "missing"};
 }
 
+// synchronizes the dispatch table entry for a given dispatch key
+// with the current state of kernel registrations in the dispatcher.
+// note that this is not a complete update, due to relationships between
+// dispatch keys (e.g. runtime keys and their associated autograd keys,
+// or alias keys and their associated keysets).
+// This function should be considered a private helper for updateDispatchTable_()
 void OperatorEntry::updateDispatchTableEntry_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
   auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
   dispatchTable_[dispatch_ix] = computeDispatchTableEntry(dispatcher, dispatch_key);
   dispatchKeyExtractor_.setOperatorHasFallthroughForKey(dispatch_key, dispatchTable_[dispatch_ix].isFallthrough());
 }
 
+// synchronizes the dispatch table entries for a given dispatch key *and its
+// associated keys* with the current state of kernel registrations in the
+// dispatcher.
+// After a kernel has been registered to a dispatch key, a call to this
+// function will synchronize the dispatcher state. See e.g. registerKernel()
 void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
   // Handle Undefined separately since it isn't a runtime key but we have an entry in dispatchTable_.
   // See Note [Undefined in dispatchTable_]
@@ -272,18 +275,41 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
   for (auto k : c10::getRuntimeDispatchKeySet(dispatch_key)) {
     updateDispatchTableEntry_(dispatcher, k);
   }
-  // Registering to backend key might affect computed entry at its Autograd backend key due to 2.2.
-  DispatchKey autograd_key = getAutogradKeyFromBackend(dispatch_key);
-  updateDispatchTableEntry_(dispatcher, autograd_key);
+  // Registration to DefaultBackend and Math should be populated to Undefined.
+  // We cannot do this above since Undefined cannot be represented in DispatchKeySet.
+  if (dispatch_key == DispatchKey::Math || dispatch_key == DispatchKey::DefaultBackend) {
+    updateDispatchTableEntry_(dispatcher, DispatchKey::Undefined);
+  }
+  // Note [Refresh Runtime Autograd entries in dispatchTable_]
+  // Registering to backend key might affect computed entry at its Autograd backend key due to (2.1) & (2.3).
+  if (c10::isBackendDispatchKey(dispatch_key)) {
+    DispatchKey autograd_key = getAutogradKeyFromBackend(dispatch_key);
+    updateDispatchTableEntry_(dispatcher, autograd_key);
+  }
 }
 
+// does a complete update of the dispatch table, synchronizing all
+// runtime dispatch keys with the current state of kernel registrations
+// in the dispatcher.
+// Note that we use updateDispatchTable_() to perform our per-key updating,
+// even though that function is equipped to handle out-of-order updates and
+// alias key updates, neither of which we send it. This is deliberate - the
+// current design is more tractable with all updates funneled through a single
+// per-key update mechanism, than with multiple variations that assume different
+// invariants.
+//
 void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) {
   // Note [Undefined in dispatchTable_]
+  // DispatchKey Undefined is used in runtime:
   // (1) it gives people place to specify functionality that should run when there are no dispatch keys,
-  //     e.g., an empty TensorList argument
+  //     e.g., an op without Tensor inputs or empty TensorList arguments
   // (2) it would let us remove the explicit error checking code in the dispatch hotpath, and so when
   //     no dispatch keys are available we just slide into the undefined handler which would then raise
-  //     the error message./
+  //     the error message.
+  // In the old world of catchAll, the only way to "register" a kernel to Undefined is by registering it to
+  // catchAll. After catchAllKernel_ is removed, Undefined now can get a kernel from either DefaultBackend
+  // or Math alias key so that we don't break the support. Ideally isIncludedInAlias(Undefined, Math)
+  // should return true, it returns false because Undefined cannot be represented in a DispatchKeySet.
   for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
     updateDispatchTable_(dispatcher, static_cast<DispatchKey>(iter));
   }
@@ -298,10 +324,6 @@ void OperatorEntry::setManuallyBoxedKernel_(const c10::Dispatcher& dispatcher, K
       k.kernel.setManuallyBoxedKernel_(func);
     }
   }
-  for (auto& k : catchAllKernel_) {
-    k.kernel.setManuallyBoxedKernel_(func);
-  }
-
   // Refresh entries in dispatchTable_
   updateDispatchTableFull_(dispatcher);
 }
@@ -420,7 +442,6 @@ std::string OperatorEntry::dumpState() const {
       print_kernel(toString(k), it->second, c10::isAliasDispatchKey(k));
     }
   }
-  print_kernel("catchall", catchAllKernel_);
   return oss.str();
 }
 

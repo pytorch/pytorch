@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/annotate_warns.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -1195,6 +1196,14 @@ struct to_ir {
               return emitHasAttr(apply.inputs()[0], apply.inputs()[1]);
             }
           }
+          auto sv = emitSugaredExpr(apply.callee(), 1);
+          auto loc = apply.callee().range();
+          if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
+            if (special_form->form() == prim::isinstance) {
+              checkApplyNumInputs(apply, 2);
+              return emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+            }
+          }
         }
         auto expr_out = emitToBool(expr.range(), emitExpr(expr));
         c10::optional<bool> static_if = c10::nullopt;
@@ -2189,13 +2198,13 @@ struct to_ir {
   NamedValue emitValueToTensor(
       const NamedValue& value,
       const NamedValue& matchTypeOf) {
-    // Add implicit conversion of int/float/bool types to tensors
+    // Add implicit conversion of int/float/bool/number types to tensors
     // Used in emitSubscriptAssign to convert:
     //   `tensor(...)[x] = 99` to `tensor(...)[x] = tensor(99)`
     // Mirrors the `valueToTensor` behavior in python_variable_indexing.cpp
     const auto kind = value.type()->kind();
-    if (kind == c10::TypeKind::IntType || kind == c10::TypeKind::BoolType ||
-        kind == c10::TypeKind::FloatType) {
+    if (kind == c10::TypeKind::NumberType || kind == c10::TypeKind::IntType ||
+        kind == c10::TypeKind::BoolType || kind == c10::TypeKind::FloatType) {
       auto dtype = graph->insert(prim::dtype, {matchTypeOf}, {});
       auto device = graph->insert(prim::device, {matchTypeOf}, {});
       auto converted = graph->insert(
@@ -2701,7 +2710,7 @@ struct to_ir {
               << why_not.str();
         }
 
-        // None is a subtype of Optional[T], but we want to remember what T is,
+        // None is a subtype of Optional[T], but we want to remember what T is
         // after annotation so that variables assigned to this None will still
         // get the right type. To do this, we make a None constant that
         // has the type Optional[T]
@@ -3123,6 +3132,22 @@ struct to_ir {
     return std::make_shared<SimpleValue>(rpc_node_output);
   }
 
+  Value* emitBinaryOp(const TreeRef& tree) {
+    const auto& inputs = tree->trees();
+    auto kind = getNodeKind(tree->kind(), inputs.size());
+    auto overload = getOperatorOverload(tree->kind(), inputs.size());
+    auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+    if (tree->kind() == TK_IN) {
+      // For `in` the arguments are in reverse order (the object being
+      // checked is second)
+      std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
+    }
+    return asSimple(
+        makeMagic(
+            overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
+            ->call(tree->range(), method, named_values, {}, 0));
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree,
       const TypePtr& type_hint = nullptr) {
@@ -3134,6 +3159,21 @@ struct to_ir {
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
         return emitBuiltinCall(
             tree->range(), *method.graph(), kind, named_values, {});
+      }
+      case '%': {
+        auto lhs = emitSugaredExpr(Expr(tree->tree(0)), 0)
+                       ->asValue(tree->tree(0)->range(), method);
+        auto const& lhs_type = lhs->type();
+        if (lhs_type == StringType::get()) {
+          auto values = getValues(tree->trees(), /*maybe_unpack=*/false);
+          auto node = graph->create(aten::percentFormat, values, 1)
+                          ->setSourceRange(tree->range());
+          Value* output = graph->insertNode(node)->output();
+          output->setType(StringType::get());
+          return output;
+        } else {
+          return emitBinaryOp(tree);
+        }
       }
       case TK_IN:
       case TK_POW:
@@ -3147,28 +3187,12 @@ struct to_ir {
       case '/':
       case '+':
       case '-':
-      case '%':
       case '&':
       case '|':
       case '^':
       case TK_LSHIFT:
-      case TK_RSHIFT: {
-        const auto& inputs = tree->trees();
-        auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto overload = getOperatorOverload(tree->kind(), inputs.size());
-        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-
-        if (tree->kind() == TK_IN) {
-          // For `in` the arguments are in reverse order (the object being
-          // checked is second)
-          std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
-        }
-
-        return asSimple(
-            makeMagic(
-                overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
-                ->call(tree->range(), method, named_values, {}, 0));
-      }
+      case TK_RSHIFT:
+        return emitBinaryOp(tree);
       case TK_IS:
       case TK_ISNOT:
       case TK_AND:
@@ -4090,6 +4114,10 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
 
   // For jitter
   CanonicalizeOutputs(to_clean);
+
+  // Annotate aten::warns so that each has its unique ID. This enables us to
+  // mimic Python behavior of only emitting each warning only once.
+  AnnotateWarns(to_clean);
 }
 
 // we consider _N where N is a number, to be a non-meaningful name

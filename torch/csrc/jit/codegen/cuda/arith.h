@@ -17,6 +17,7 @@ class Val;
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // Insertion of casting op to dtype, returns new resulting val
 TORCH_CUDA_API Val* castOp(DataType dtype, Val* v1);
@@ -183,6 +184,7 @@ TORCH_CUDA_API TensorView* threshold(TensorView* in, Val* thresh, Val* value);
 TORCH_CUDA_API Val* clamp(Val* in, Val* min_val, Val* max_val);
 TORCH_CUDA_API TensorView* clamp(TensorView* in, Val* min_val, Val* max_val);
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

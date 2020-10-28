@@ -24,7 +24,22 @@ class Dtype;
 
 class TORCH_API LoopNest {
  public:
+  // A constructor for building a LoopNest from a list of Tensors
   LoopNest(const std::vector<Tensor*>& output_tensors);
+
+  // A constructor for building a LoopNest from a pre-baked Stmt and meta-info
+  // TODO: Nuke intermediate_bufs_ and possibly buf_initializers from here if
+  // they can be deduced.
+  LoopNest(
+      Stmt* stmt,
+      const std::unordered_set<const Buf*>& output_bufs,
+      const std::unordered_set<const Buf*>& intermediate_bufs,
+      const std::unordered_map<const Buf*, const Expr*>& buf_initializers)
+      : root_stmt_(stmt),
+        output_bufs_(output_bufs),
+        intermediate_bufs_(intermediate_bufs),
+        buf_initializers_(buf_initializers) {}
+
   Stmt* root_stmt() const {
     return root_stmt_;
   }
@@ -39,13 +54,25 @@ class TORCH_API LoopNest {
   void computeInline(Stmt* s);
   void computeInline(const Buf* b);
 
-  void splitWithTail(For* f, int factor, For** outer, For** inner, For** tail);
-  void splitWithMask(For* f, int factor, For** outer, For** inner);
+  static void splitWithTail(For* f, int factor);
+  static void splitWithTail(
+      For* f,
+      int factor,
+      For** outer,
+      For** inner,
+      For** tail);
+
+  static void splitWithMask(For* f, int factor);
+  static void splitWithMask(For* f, int factor, For** outer, For** inner);
 
   void reorderAxis(For* a, For* b);
 
   static void unroll(For* f, Stmt** unrolled);
   static void normalize(For* f, For** normalized);
+  static bool flatten(const std::vector<For*>& f, For** flattened);
+
+  // Get 'num' loops from the loopnest starting at 'f'.
+  static std::vector<For*> getLoopStmtsInLoopNest(For* f, size_t num);
 
   // LoopOptions are propagated to tail.
   void sliceHead(For* f, int factor, For** head, For** tail);
@@ -55,11 +82,21 @@ class TORCH_API LoopNest {
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);
 
+  using AccessResult = std::pair<const Buf*, Stmt*>;
+  // Insert a cache for the consumer's usages of the buffer produced in
+  // consumer, and redirect reads and writes in the consumer to that cache.
+  // Returns a pair of the new cache buffer, and the new rewritten consumer.
+  AccessResult cacheAccesses(
+      const Buf* producer,
+      const std::string& name,
+      Stmt* consumer);
+
   // Insert a temporary computation of statement S in the scope of loop AT.
   // S is assumed to be a Store or a Block containing a Store. Along with the
   // computation itself, this transformation inserts Alloc/Free statements for
   // the temporary buffer used in the computation.
   void computeAt(Stmt* s, For* at);
+
   void rfactor(
       const Expr* f,
       const Var* reduction_var,
@@ -71,6 +108,10 @@ class TORCH_API LoopNest {
 
   void prepareForCodegen();
 
+  // Find the inner-most loops and vectorize them. Currently, this only works
+  // for the LLVM backend, when no reductions are involved.
+  void vectorizeInnerLoops();
+
  private:
   std::vector<Tensor*> findAllNeededTensors(
       const std::vector<Tensor*>& tensors);
@@ -79,9 +120,8 @@ class TORCH_API LoopNest {
 
   Stmt* root_stmt_;
 
-  std::unordered_set<Tensor*> output_tensors_;
-  std::unordered_set<Tensor*> intermediate_tensors_;
-  std::vector<const Buf*> temp_bufs_;
+  std::unordered_set<const Buf*> output_bufs_;
+  std::unordered_set<const Buf*> intermediate_bufs_;
   // Holds the initializer Expr of buffers that have been initialized.
   std::unordered_map<const Buf*, const Expr*> buf_initializers_;
 };

@@ -62,6 +62,7 @@ std::ostream& operator<<(std::ostream & out, const ConvParams& params) {
       << "  benchmark = " << params.benchmark
       << "  deterministic = " << params.deterministic
       << "  cudnn_enabled = " << params.cudnn_enabled
+      << "  allow_tf32 = " << params.allow_tf32
       << "}";
   return out;
 }
@@ -101,7 +102,7 @@ auto ConvParams::is_output_padding_neg() const -> bool {
 auto ConvParams::is_output_padding_big() const -> bool {
   bool is_big = false;
   for (size_t i = 0; i < output_padding.size(); i++) {
-    is_big |= (output_padding[i] >= stride[i] || output_padding[i] >= dilation[i]);
+    is_big |= (output_padding[i] >= stride[i]);
   }
   return is_big;
 }
@@ -198,6 +199,9 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
   if (!input.is_cuda() || !cudnn_enabled) {
     return false;
   }
+  if (input.scalar_type() == at::kBFloat16 || weight.scalar_type() == at::kBFloat16) {
+    return false;
+  }
   if (!cudnn_conv_use_channels_last(input, weight)) { // bypass dilation checks for channels-last convolution
     if (deterministic && is_dilated()) {
       // cudnn doesn't support deterministic dilated convolution fully yet
@@ -233,7 +237,11 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
     (input.options().backend() == at::Backend::CPU &&
      input.scalar_type() == kFloat && // only on CPU Float Tensors
      !transposed && // or transposed tensors
-     (groups > 1 || weight.size(2) > 3 || input.size(0) > 1
+     (is_strided() || is_dilated() || input.size(0) >= 16 ||
+      weight.size(-1) != 1 || weight.size(-2) != 1) &&
+     (groups > 1
+      || (weight.size(-1) > 3 && weight.size(-2) > 3)
+      || input.size(0) > 1
       || input.size(0)*input.size(1)*input.size(2)*input.size(3) > 20480)); // for some case, native is faster
 #endif
   return false;

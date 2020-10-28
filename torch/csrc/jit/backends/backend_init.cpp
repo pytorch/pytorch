@@ -124,7 +124,7 @@ void initJitBackendBindings(PyObject* module) {
       static const auto method_ct = CodeTemplate(R"(
             def $method(self${,def_inputs}):
                 typed_inputs: List[Any] = [${fwd_inputs,}]
-                $ret, = self.__backend.execute(self.__handles["$method"], typed_inputs)
+                $unpack, = self.__backend.execute(self.__handles["$method"], typed_inputs)
                 ${refine,}
                 return $ret
             )");
@@ -181,7 +181,9 @@ void initJitBackendBindings(PyObject* module) {
       out_ss << "_0";
       type_check_ss << "assert isinstance(_0, ";
 
-      if (auto out_tuple_ty = out_ty->cast<TupleType>()) {
+      auto out_tuple_ty = out_ty->cast<TupleType>();
+
+      if (out_tuple_ty) {
         auto tuple_elements = out_tuple_ty->elements();
         type_check_ss << tuple_elements[0]->str() << ")";
         type_checks.emplace_back(type_check_ss.str());
@@ -201,6 +203,14 @@ void initJitBackendBindings(PyObject* module) {
       method_te.v("def_inputs", def_inputs);
       method_te.v("fwd_inputs", fwd_inputs);
       method_te.v("refine", type_checks);
+      method_te.s("unpack", out_ss.str());
+
+      // If the output type is a single element tuple then add an extra comma
+      // to ensure the final output maintains this type.
+      if (out_tuple_ty && out_tuple_ty->elements().size() == 1) {
+        out_ss << ",";
+      }
+
       method_te.s("ret", out_ss.str());
 
       loweredModule.define(
@@ -226,11 +236,13 @@ void initJitBackendBindings(PyObject* module) {
   m.def(
       "_jit_to_backend",
       [=](const std::string& backend_name,
-          const Module& orig_module,
+          py::handle orig_module,
           const py::dict& method_compile_spec) {
         return py::module::import("torch.jit._recursive")
-            .attr("wrap_cpp_module")(
-                codegen_lambda(backend_name, orig_module, method_compile_spec));
+            .attr("wrap_cpp_module")(codegen_lambda(
+                backend_name,
+                py::cast<Module>(orig_module.attr("_c")),
+                method_compile_spec));
       });
 }
 } // namespace jit

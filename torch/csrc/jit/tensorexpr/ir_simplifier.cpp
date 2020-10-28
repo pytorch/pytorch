@@ -516,10 +516,10 @@ const Expr* PolynomialTransformer::mutate(const Sub* v) {
   if (rhsPoly && lhsTerm) {
     // Negate every part of the Polynomial.
     const Expr* minusOne = getImmediateByType(lhsTerm->dtype(), -1);
-    const Expr* negateScalar = evaluateOp(new Mul(minusOne, lhsTerm->scalar()));
+    const Expr* negateScalar = evaluateOp(new Mul(minusOne, rhsPoly->scalar()));
 
     std::vector<const Term*> variables;
-    for (auto* t : lhsPoly->variables()) {
+    for (auto* t : rhsPoly->variables()) {
       const Expr* negate = evaluateOp(new Mul(minusOne, t->scalar()));
       variables.push_back(new Term(hasher_, negate, t->variables()));
     }
@@ -984,15 +984,100 @@ const Expr* PolynomialTransformer::mutate(const Div* v) {
   }
 
   // If numberator and denominator are equal the result is 1.
-  if (hasher_.hash(lhs_new) == hasher_.hash(rhs_new)) {
-    return getImmediateByType(v->dtype(), 1);
-  }
+  // Unless the demoninator could be zero.
+  // if (hasher_.hash(lhs_new) == hasher_.hash(rhs_new)) {
+  //   return getImmediateByType(v->dtype(), 1);
+  // }
 
   if (auto ret = factorizeDivision(lhs_new, rhs_new)) {
-    return ret;
+    return ret->accept_mutator(this);
   }
 
   return new Div(lhs_new, rhs_new);
+}
+
+const Expr* PolynomialTransformer::mutate(const Mod* v) {
+  const Expr* lhs_new = v->lhs()->accept_mutator(this);
+  const Expr* rhs_new = v->rhs()->accept_mutator(this);
+
+  // Constant Folding.
+  if (lhs_new->isConstant() && rhs_new->isConstant()) {
+    return evaluateOp(new Mod(lhs_new, rhs_new));
+  }
+
+  // 0 % x => 0.
+  if (lhs_new->isConstant() && immediateEquals(lhs_new, 0)) {
+    return lhs_new;
+  }
+
+  // x % 1 == 0.
+  if (rhs_new->isConstant() && immediateEquals(rhs_new, 1)) {
+    return getImmediateByType(v->dtype(), 0);
+  }
+
+  // x % x => 0.
+  if (hasher_.hash(lhs_new) == hasher_.hash(rhs_new)) {
+    return getImmediateByType(v->dtype(), 0);
+  }
+
+  const Term* lhsTerm = dynamic_cast<const Term*>(lhs_new);
+  if (!lhsTerm) {
+    const Polynomial* lhsPoly = dynamic_cast<const Polynomial*>(lhs_new);
+    if (lhsPoly) {
+      // Can still optimize this out if we can factorize the polynomial.
+      lhsTerm = factorizePolynomial(lhsPoly);
+    }
+  }
+
+  if (lhsTerm) {
+    // ((C1 * C2) * x) % C1 => 0.
+    if (rhs_new->isConstant() &&
+        immediateEquals(evaluateOp(new Mod(lhsTerm->scalar(), rhs_new)), 0)) {
+      return getImmediateByType(v->dtype(), 0);
+    }
+
+    // (x * y * z) % x => 0.
+    for (auto* component : lhsTerm->variables()) {
+      if (hasher_.hash(component) == hasher_.hash(rhs_new)) {
+        return getImmediateByType(v->dtype(), 0);
+      }
+    }
+
+    // (6 * x * y) % (3 * x * y) => 0.
+    // also, (x * y * z) % (z * y) => 0.
+    // This requires all variable terms found in the RHS to be present in the
+    // LHS.
+    const Term* rhsTerm = dynamic_cast<const Term*>(rhs_new);
+    if (rhsTerm) {
+      auto& lVars = lhsTerm->variables();
+      auto& rVars = rhsTerm->variables();
+      size_t rLeft = rVars.size();
+
+      auto rIt = rVars.begin();
+
+      for (auto lIt = lVars.begin(); lIt != lVars.end() && !rVars.empty();
+           ++lIt) {
+        auto lHash = hasher_.hash(*lIt);
+        for (; rIt != rVars.end(); ++rIt) {
+          auto rHash = hasher_.hash(*rIt);
+          if (lHash == rHash) {
+            --rLeft;
+            break;
+          } else if (lHash < rHash) {
+            break;
+          }
+        }
+      }
+
+      if (rLeft == 0 &&
+          immediateEquals(
+              evaluateOp(new Mod(lhsTerm->scalar(), rhsTerm->scalar())), 0)) {
+        return getImmediateByType(v->dtype(), 0);
+      }
+    }
+  }
+
+  return new Mod(lhs_new, rhs_new);
 }
 
 namespace {
@@ -1202,17 +1287,54 @@ const Expr* PolynomialTransformer::mutate(const Min* v) {
 const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
   const Expr* lhs_new = v->lhs()->accept_mutator(this);
   const Expr* rhs_new = v->rhs()->accept_mutator(this);
-  const Expr* retval1_new = v->ret_val1()->accept_mutator(this);
-  const Expr* retval2_new = v->ret_val2()->accept_mutator(this);
-  const Expr* v_new = new CompareSelect(
-      lhs_new, rhs_new, retval1_new, retval2_new, v->compare_select_op());
+  const Expr* true_branch = v->ret_val1()->accept_mutator(this);
+  const Expr* false_branch = v->ret_val2()->accept_mutator(this);
 
   // Constant Folding.
   if (lhs_new->isConstant() && rhs_new->isConstant()) {
+    const Expr* v_new = new CompareSelect(
+        lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
     return evaluateOp(v_new);
   }
 
-  return v_new;
+  // If the comparison is done in float, don't attempt diff simplification,
+  // since we can't correctly handle NaN.
+  if (lhs_new->dtype().is_floating_point() ||
+      rhs_new->dtype().is_floating_point()) {
+    return new CompareSelect(
+        lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
+  }
+
+  // If diff is constant, we can determine it.
+  const Expr* diff = new Sub(rhs_new, lhs_new);
+  diff = diff->accept_mutator(this);
+
+  if (!diff->isConstant()) {
+    return new CompareSelect(
+        lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
+  }
+
+  bool equal = immediateEquals(diff, 0);
+  bool lhsSmaller = !equal && !immediateIsNegative(diff);
+
+  switch (v->compare_select_op()) {
+    case CompareSelectOperation::kEQ:
+      return equal ? true_branch : false_branch;
+    case CompareSelectOperation::kGT:
+      return (lhsSmaller || equal) ? false_branch : true_branch;
+    case CompareSelectOperation::kGE:
+      return lhsSmaller ? false_branch : true_branch;
+    case CompareSelectOperation::kLT:
+      return lhsSmaller ? true_branch : false_branch;
+    case CompareSelectOperation::kLE:
+      return (lhsSmaller || equal) ? true_branch : false_branch;
+    case CompareSelectOperation::kNE:
+      return equal ? false_branch : true_branch;
+  }
+
+  // should not be possible but just in case.
+  return new CompareSelect(
+      lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
 }
 
 const Expr* PolynomialTransformer::mutate(const Intrinsics* v) {
@@ -1503,9 +1625,23 @@ const Expr* TermExpander::mutate(const Term* v) {
     if (lastNode) {
       // We want to avoid a leaving a CastNode on the scalar, so handle that
       // now.
-      if (v->scalar()->dtype() != lastNode->dtype()) {
-        lastNode = new Mul(
-            evaluateOp(new Cast(lastNode->dtype(), v->scalar())), lastNode);
+      auto termDtype = v->scalar()->dtype();
+      auto lastNodeDtype = lastNode->dtype();
+      if (termDtype != lastNodeDtype) {
+        const Expr* castV = v->scalar();
+        // Take care of lane mismatch first.
+        if (termDtype.lanes() != lastNodeDtype.lanes()) {
+          castV = new Broadcast(v->scalar(), lastNodeDtype.lanes());
+        }
+        // Now take care of scalar type as well.
+        if (termDtype.scalar_type() != lastNodeDtype.scalar_type()) {
+          castV = new Cast(lastNode->dtype(), castV);
+          // For scalars, we can simplify the cast further.
+          if (lastNodeDtype.lanes() == 1) {
+            castV = evaluateOp(castV);
+          }
+        }
+        lastNode = new Mul(castV, lastNode);
       } else {
         lastNode = new Mul(v->scalar(), lastNode);
       }
@@ -1641,7 +1777,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
 }
 
 // Trivially factorize terms by GCD of scalar components.
-const Expr* TermExpander::factorizePolynomial(const Polynomial* poly) {
+const Term* IRSimplifierBase::factorizePolynomial(const Polynomial* poly) {
   const Expr* scalar = poly->scalar();
   const std::vector<const Term*>& variables = poly->variables();
 
@@ -1895,6 +2031,7 @@ Block* TermExpander::fuseConditions(Block* v) {
       stmts.push_back(s);
       continue;
     }
+
     // Fuse the two Conds by appending the bodies of the second Cond to the
     // first.
     Block* true_block = new Block({});
@@ -1925,11 +2062,13 @@ Block* TermExpander::fuseConditions(Block* v) {
       false_block = nullptr;
     }
 
-    prev_cond = prev_cond->cloneWithNewBodies(true_block, false_block);
+    Stmt* new_cond = prev_cond->cloneWithNewBodies(true_block, false_block)
+                         ->accept_mutator(this);
+    prev_cond = dynamic_cast<Cond*>(new_cond);
 
     // erase, which shortens the list.
     stmts.pop_back();
-    stmts.push_back(prev_cond);
+    stmts.push_back(new_cond);
     did_anything = true;
   }
 

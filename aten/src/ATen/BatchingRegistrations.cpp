@@ -172,6 +172,22 @@ std::vector<Tensor> chunk_batching_rule(const Tensor& self, int64_t chunks, int6
   return result;
 }
 
+std::vector<Tensor> tensor_split_sections_batching_rule(const Tensor& self, int64_t sections, int64_t dim) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = at::tensor_split(self_physical.tensor(), sections, dim_physical);
+  self_physical.makeLogicalFromPhysicalListInplace(result);
+  return result;
+}
+
+std::vector<Tensor> tensor_split_indices_batching_rule(const Tensor& self, IntArrayRef indices, int64_t dim) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = at::tensor_split(self_physical.tensor(), indices, dim_physical);
+  self_physical.makeLogicalFromPhysicalListInplace(result);
+  return result;
+}
+
 Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   // NB: unsqueeze has some special handling of its `dim` argument so we can't call
@@ -508,6 +524,34 @@ Tensor to_dtype_layout_batching_rule(
   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
 }
 
+Tensor new_zeros_batching_rule(
+    const Tensor& self,
+    IntArrayRef size,
+    optional<ScalarType> dtype,
+    optional<Layout> layout,
+    optional<Device> device,
+    optional<bool> pin_memory) {
+  auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto physical_size = physical_view.getPhysicalShape(size);
+  auto options = TensorOptions()
+    .dtype(dtype)
+    .layout(layout)
+    .device(device)
+    .pinned_memory(pin_memory);
+  auto result = physical_view.tensor().new_zeros(physical_size, options);
+  return physical_view.newLogicalFromPhysical(result);
+}
+
+Tensor new_empty_batching_rule(
+    const Tensor& self,
+    IntArrayRef size,
+    const TensorOptions& options) {
+  auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto physical_size = physical_view.getPhysicalShape(size);
+  auto result = physical_view.tensor().new_empty(physical_size, options);
+  return physical_view.newLogicalFromPhysical(result);
+}
+
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
@@ -527,6 +571,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 
   // view operations
   m.impl("chunk", chunk_batching_rule);
+  m.impl("tensor_split.sections", tensor_split_sections_batching_rule);
+  m.impl("tensor_split.indices", tensor_split_indices_batching_rule);
   m.impl("diagonal", diagonal_batching_rule);
   m.impl("expand", expand_batching_rule);
   m.impl("expand_as", native::expand_as); // composite wrt autograd
@@ -651,6 +697,10 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("select_backward", select_backward_batching_rule);
   m.impl("slice_backward", slice_backward_batching_rule);
   m.impl("diagonal_backward", diagonal_backward_batching_rule);
+
+  // Tensor.new_* operators
+  m.impl_UNBOXED("new_empty", new_empty_batching_rule);
+  m.impl("new_zeros", new_zeros_batching_rule);
 }
 
 } // namespace at

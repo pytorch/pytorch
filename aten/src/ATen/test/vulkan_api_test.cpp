@@ -1,14 +1,13 @@
 #include <gtest/gtest.h>
 
-#ifdef USE_VULKAN_API
+#include <ATen/ATen.h>
 
-#include <ATen/native/vulkan/api/api.h>
+#ifdef USE_VULKAN_API
 
 namespace {
 
-TEST(VulkanAPITest, Context) {
-  constexpr bool kDebug = true;
-  ASSERT_NO_THROW(at::native::vulkan::api::Context{kDebug});
+TEST(VulkanAPITest, empty) {
+  ASSERT_NO_THROW(at::empty({1, 17, 41, 53}, at::device(at::kVulkan).dtype(at::kFloat)));
 }
 
 } // namespace

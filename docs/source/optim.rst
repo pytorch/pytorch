@@ -269,7 +269,7 @@ and start to collect SWA averages of the parameters at epoch 160:
 >>>           optimizer.zero_grad()
 >>>           loss_fn(model(input), target).backward()
 >>>           optimizer.step()
->>>       if i > swa_start:
+>>>       if epoch > swa_start:
 >>>           swa_model.update_parameters(model)
 >>>           swa_scheduler.step()
 >>>       else:

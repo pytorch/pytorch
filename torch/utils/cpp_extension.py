@@ -152,13 +152,17 @@ MSVC_IGNORE_CUDAFE_WARNINGS = [
 COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
     '-D__CUDA_NO_HALF_CONVERSIONS__',
+    '-D__CUDA_NO_BFLOAT16_CONVERSIONS__',
     '-D__CUDA_NO_HALF2_OPERATORS__',
     '--expt-relaxed-constexpr'
 ]
 
-COMMON_HIPCC_FLAGS = [
+COMMON_HIP_FLAGS = [
     '-fPIC',
     '-D__HIP_PLATFORM_HCC__=1',
+]
+
+COMMON_HIPCC_FLAGS = [
     '-DCUDA_HAS_FP16=1',
     '-D__HIP_NO_HALF_OPERATORS__=1',
     '-D__HIP_NO_HALF_CONVERSIONS__=1',
@@ -347,6 +351,18 @@ class BuildExtension(build_ext, object):
     def build_extensions(self) -> None:
         self._check_abi()
         for extension in self.extensions:
+            # Ensure at least an empty list of flags for 'cxx' and 'nvcc' when
+            # extra_compile_args is a dict. Otherwise, default torch flags do
+            # not get passed. Necessary when only one of 'cxx' and 'nvcc' is
+            # passed to extra_compile_args in CUDAExtension, i.e.
+            #   CUDAExtension(..., extra_compile_args={'cxx': [...]})
+            # or
+            #   CUDAExtension(..., extra_compile_args={'nvcc': [...]})
+            if isinstance(extension.extra_compile_args, dict):
+                for ext in ['cxx', 'nvcc']:
+                    if ext not in extension.extra_compile_args:
+                        extension.extra_compile_args[ext] = []
+
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
@@ -395,13 +411,13 @@ class BuildExtension(build_ext, object):
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
                     if IS_HIP_EXTENSION:
-                        cflags = cflags + _get_rocm_arch_flags(cflags)
+                        cflags = COMMON_HIPCC_FLAGS + cflags + _get_rocm_arch_flags(cflags)
                     else:
                         cflags = unix_cuda_flags(cflags)
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
                 if IS_HIP_EXTENSION:
-                    cflags = cflags + COMMON_HIPCC_FLAGS
+                    cflags = COMMON_HIP_FLAGS + cflags
                 append_std14_if_no_std_present(cflags)
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
@@ -450,7 +466,7 @@ class BuildExtension(build_ext, object):
             else:
                 post_cflags = list(extra_postargs)
             if IS_HIP_EXTENSION:
-                post_cflags += COMMON_HIPCC_FLAGS
+                post_cflags = COMMON_HIP_FLAGS + post_cflags
             append_std14_if_no_std_present(post_cflags)
 
             cuda_post_cflags = None
@@ -463,7 +479,7 @@ class BuildExtension(build_ext, object):
                     cuda_post_cflags = list(extra_postargs)
                 if IS_HIP_EXTENSION:
                     cuda_post_cflags = cuda_post_cflags + _get_rocm_arch_flags(cuda_post_cflags)
-                    cuda_post_cflags = cuda_post_cflags + COMMON_HIPCC_FLAGS
+                    cuda_post_cflags = COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS + cuda_post_cflags
                 else:
                     cuda_post_cflags = unix_cuda_flags(cuda_post_cflags)
                 append_std14_if_no_std_present(cuda_post_cflags)
@@ -1389,11 +1405,11 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Pascal', '6.0;6.1+PTX'),
         ('Volta', '7.0+PTX'),
         ('Turing', '7.5+PTX'),
-        ('Ampere', '8.0+PTX'),
+        ('Ampere', '8.0;8.6+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5', '8.0']
+                        '7.0', '7.2', '7.5', '8.0', '8.6']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
@@ -1544,7 +1560,7 @@ def _import_module_from_library(module_name, path, is_python_module):
     # Close the .so file after load.
     with file:
         if is_python_module:
-            return imp.load_module(module_name, file, path, description)
+            return imp.load_module(module_name, file, path, description)  # type: ignore
         else:
             torch.ops.load_library(path)
 
@@ -1591,7 +1607,7 @@ def _write_ninja_file_to_build_library(path,
         cflags = common_cflags + ['-fPIC', '-std=c++14'] + extra_cflags
 
     if with_cuda and IS_HIP_EXTENSION:
-        cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIPCC_FLAGS
+        cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
         cuda_flags += extra_cuda_cflags
         cuda_flags += _get_rocm_arch_flags(cuda_flags)
         sources = [s if not _is_cuda_file(s) else
@@ -1628,7 +1644,7 @@ def _write_ninja_file_to_build_library(path,
             target = '{}.o'.format(file_name)
         return target
 
-    objects = list(map(object_file_path, sources))
+    objects = [object_file_path(src) for src in sources]
 
     if IS_WINDOWS:
         ldflags = ['/DLL'] + extra_ldflags

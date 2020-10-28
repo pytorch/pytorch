@@ -504,9 +504,9 @@ void testHashDifferenceTypes() {
 void testHashLargeExpression() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kInt));
-  Buffer b(BufHandle("B", {N}, kInt));
-  Buffer c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto memcpy_stmt = For::make(
@@ -522,8 +522,8 @@ void testHashLargeExpression() {
               CompareSelectOperation::kEQ),
           mask));
 
-  Buffer d(BufHandle("D", {1}, kInt));
-  Buffer e(BufHandle("E", {1}, kInt));
+  BufHandle d("D", {1}, kInt);
+  BufHandle e("E", {1}, kInt);
   auto store_ramp_stmt = Store::make(
       e,
       {Ramp::make(0, 1, 4)},
@@ -555,9 +555,9 @@ void testHashLargeExpression() {
 void testHashForLoopOptions() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(BufHandle("A", {N}, kInt));
-  Buffer b(BufHandle("B", {N}, kInt));
-  Buffer c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto for_stmt = For::make(
@@ -1060,6 +1060,47 @@ void testSimplifySubs() {
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_IMM_WITH_VAL(Int, simplified.node(), 2);
   }
+
+  {
+    // Sub where result is negative.
+    ExprHandle body = x - (x + 1);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), -1);
+  }
+
+  {
+    // Sub where result is positive due to negative scalar on RHS.
+    ExprHandle body = x - (x - 1);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 1);
+  }
+
+  {
+    // Term - Polynomial sub where RHS must be negated.
+    ExprHandle body = (x * 2) - (x * 2 + 1);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), -1);
+  }
+
+  {
+    // Term - Polynomial sub where the result is a Term.
+    ExprHandle body = (y * x * 2) - (x * y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+
+    IS_VAR_WITH_NAME(mul->lhs(), "x");
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
+  }
+
+  {
+    // Term - Polynomial sub where the result is a Polynomial.
+    ExprHandle body = (x * 2) - (x + 1);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Sub, simplified.node(), sub);
+
+    IS_VAR_WITH_NAME(sub->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, sub->rhs(), 1);
+  }
 }
 
 void testSimplifyDiv() {
@@ -1079,12 +1120,130 @@ void testSimplifyDiv() {
 
     IS_VAR_WITH_NAME(simplified.node(), "x");
   }
+}
+
+void testSimplifyMod() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  VarHandle z("z", kInt);
 
   {
-    ExprHandle body = x / x;
+    // Constant folding works.
+    ExprHandle body = ExprHandle(10) % 8;
     ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 2);
+  }
 
-    IS_IMM_WITH_VAL(Int, simplified.node(), 1);
+  {
+    // x % x => 0
+    ExprHandle body = x % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // 0 % x => 0
+    ExprHandle body = ExprHandle(0) % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // x % 1 => 0
+    ExprHandle body = x % 1;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // Doesn't change unknown mods.
+    // x % y => x % y
+    ExprHandle body = x % y;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "x");
+    IS_VAR_WITH_NAME(mod->rhs(), "y");
+  }
+
+  {
+    // don't touch if RHS is unknown.
+    // 4 % x => 4 % x
+    ExprHandle body = ExprHandle(4) % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_IMM_WITH_VAL(Int, mod->lhs(), 4);
+    IS_VAR_WITH_NAME(mod->rhs(), "x");
+  }
+
+  {
+    // don't touch if LHS is unknown.
+    // x % 4 => x % 4
+    ExprHandle body = x % 4;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_VAR_WITH_NAME(mod->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 4);
+  }
+
+  {
+    // if LHS is a multiple of RHS, mod is zero.
+    // 2 * x % x => 0
+    ExprHandle body = (x * 2) % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // true even if the multiple is not constant.
+    // x * y % x => 0
+    ExprHandle body = (x * y) % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // true with multiple unknown values in LHS.
+    // x * y * z % x => 0
+    ExprHandle body = (x * y * z) % x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // true if the denom is compound.
+    // x * y * z % y * z => 0
+    ExprHandle body = (x * y * z) % (y * z);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // Sanity check true with scalars that are multiples.
+    // 12 * x % 4 => 0
+    ExprHandle body = (x * 12) % 4;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    // Sanity check not true if the smaller scalar is on LHS.
+    // 4 * x % 12 => 4 * x % 12
+    ExprHandle body = (x * 4) % 12;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_NODE_WITH_NAME(Mul, mod->lhs(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 4);
+    IS_VAR_WITH_NAME(mul->rhs(), "x");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 12);
+  }
+
+  {
+    // Both scalar and symbolic in multiple.
+    // (6 * x * y) % (3 * x * y) => 0
+    ExprHandle body = (ExprHandle(6) * x * y) % (x * y * 3);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
   }
 }
 
@@ -2632,8 +2791,8 @@ void testSimplifyConstantCond() {
   {
     // If the condition is constant true then take the true_value.
     // 1 ? A[0] = 1 : B[0] = 1 => A[0] = 1
-    Buffer a(BufHandle("A", {1}, kInt));
-    Buffer b(BufHandle("B", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
+    BufHandle b("B", {1}, kInt);
     ExprHandle condition(1);
     Stmt* true_val = Store::make(a, {0}, 1, 1);
     Stmt* false_val = Store::make(b, {0}, 1, 1);
@@ -2648,8 +2807,8 @@ void testSimplifyConstantCond() {
   {
     // If the condition is constant false then take the false_value.
     // 0 ? A[0] = 1 : B[0] = 1 => B[0] = 1
-    Buffer a(BufHandle("A", {1}, kInt));
-    Buffer b(BufHandle("B", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
+    BufHandle b("B", {1}, kInt);
     ExprHandle condition(0);
     Stmt* true_val = Store::make(a, {0}, 1, 1);
     Stmt* false_val = Store::make(b, {0}, 1, 1);
@@ -2665,8 +2824,8 @@ void testSimplifyConstantCond() {
     // condition is simplified before checking.
     // (x-x) ? A[0] = 1 : B[0] = 1 => B[0] = 1
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {1}, kInt));
-    Buffer b(BufHandle("B", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
+    BufHandle b("B", {1}, kInt);
     ExprHandle condition(x - x);
     Stmt* true_val = Store::make(a, {0}, 1, 1);
     Stmt* false_val = Store::make(b, {0}, 1, 1);
@@ -2682,7 +2841,7 @@ void testSimplifyConstantCond() {
     // If both branches are the same then don't do the condition.
     // x ? A[0] = x : A[0] = x => A[0] = x
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
     ExprHandle condition(x - x);
     Stmt* true_val = Store::make(a, {0}, x, 1);
     Stmt* false_val = Store::make(a, {0}, x, 1);
@@ -2698,7 +2857,7 @@ void testSimplifyConstantCond() {
     // If both branches simplify to the same thing it still works.
     // x ? (x + x) : (2 * x) => x
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
     ExprHandle condition(x - x);
     Stmt* true_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
     Stmt* false_val = Store::make(a, {0}, x + x, 1);
@@ -2714,7 +2873,7 @@ void testSimplifyConstantCond() {
     // But not if they dont
     // x ? x : (2 * x) => x ? x : (2 * x)
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
     ExprHandle condition(x);
     Stmt* true_val = Store::make(a, {0}, x, 1);
     Stmt* false_val = Store::make(a, {0}, ExprHandle(2) * x, 1);
@@ -2766,13 +2925,196 @@ void testSimplifyEliminateEmptyCond() {
   }
 }
 
+void testSimplifyConstantComparisons() {
+  KernelScope kernel_scope;
+
+  auto ComparisonTest =
+      [](ExprHandle a, ExprHandle b, CompareSelectOperation op, int result) {
+        ExprHandle body = CompareSelect::make(a, b, op);
+        ExprHandle simplified = IRSimplifier::simplify(body);
+        IS_IMM_WITH_VAL(Int, simplified.node(), result);
+      };
+
+  // Equals.
+  ComparisonTest(2, 2, kEQ, 1);
+  ComparisonTest(1, 2, kEQ, 0);
+  ComparisonTest(2, 1, kEQ, 0);
+
+  // Greater than.
+  ComparisonTest(2, 2, kGT, 0);
+  ComparisonTest(1, 2, kGT, 0);
+  ComparisonTest(2, 1, kGT, 1);
+
+  // Greater or Equal.
+  ComparisonTest(2, 2, kGE, 1);
+  ComparisonTest(1, 2, kGE, 0);
+  ComparisonTest(2, 1, kGE, 1);
+
+  // Less Than.
+  ComparisonTest(2, 2, kLT, 0);
+  ComparisonTest(1, 2, kLT, 1);
+  ComparisonTest(2, 1, kLT, 0);
+
+  // Less or Equal.
+  ComparisonTest(2, 2, kLE, 1);
+  ComparisonTest(1, 2, kLE, 1);
+  ComparisonTest(2, 1, kLE, 0);
+
+  // Not equal.
+  ComparisonTest(2, 2, kNE, 0);
+  ComparisonTest(1, 2, kNE, 1);
+  ComparisonTest(2, 1, kNE, 1);
+
+  // With specified results:
+  ExprHandle body = CompareSelect::make(2, 2, 5, 42, kNE);
+  ExprHandle simplified = IRSimplifier::simplify(body);
+  IS_IMM_WITH_VAL(Int, simplified.node(), 42);
+}
+
+void testSimplifySymbolicComparisons() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+
+  auto TookTrueBranch = [](ExprHandle a) { IS_IMM_WITH_VAL(Int, a.node(), 1); };
+  auto TookFalseBranch = [](ExprHandle a) {
+    IS_IMM_WITH_VAL(Int, a.node(), 0);
+  };
+
+  // EQ
+
+  // x == x => 1
+  ExprHandle body = CompareSelect::make(x, x, kEQ);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x == x+1 => 0
+  body = CompareSelect::make(x, x + 1, kEQ);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x == x * 2 cannot simplify since we don't know x is nonzero.
+  body = CompareSelect::make(x, x * 2, kEQ);
+  IS_NODE(CompareSelect, IRSimplifier::simplify(body).node());
+
+  // x == x * 1 => 1
+  body = CompareSelect::make(x, x * 1, kEQ);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  {
+    // x == y => x == y
+    body = CompareSelect::make(x, y, kEQ);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(CompareSelect, simplified.node(), cmp);
+    ASSERT_EQ(cmp->compare_select_op(), kEQ);
+    IS_VAR_WITH_NAME(cmp->lhs(), "x");
+    IS_VAR_WITH_NAME(cmp->rhs(), "y");
+  }
+
+  {
+    // x == 5 => x == 5
+    body = CompareSelect::make(x, 5, kEQ);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(CompareSelect, simplified.node(), cmp);
+    ASSERT_EQ(cmp->compare_select_op(), kEQ);
+    IS_VAR_WITH_NAME(cmp->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, cmp->rhs(), 5);
+  }
+
+  // GT
+
+  // x+1 > x => 1
+  body = CompareSelect::make(x + 1, x, kGT);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x > x + 1 => 0
+  body = CompareSelect::make(x, x + 1, kGT);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x > x - 1 => 1
+  body = CompareSelect::make(x, x - 1, kGT);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x - 1 > x => 0
+  body = CompareSelect::make(x - 1, x, kGT);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x > x => 0
+  body = CompareSelect::make(x, x, kGT);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x * 2 > x => x * 2 > x
+  // since we don't know the sign of x.
+  body = CompareSelect::make(x * 2, x, kGT);
+  IS_NODE(CompareSelect, IRSimplifier::simplify(body).node());
+
+  // GE
+
+  // x+1 >= x => 1
+  body = CompareSelect::make(x + 1, x, kGE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x >= x + 1 => 0
+  body = CompareSelect::make(x, x + 1, kGE);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x >= x => 1
+  body = CompareSelect::make(x, x, kGE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x * 2 >= x => x * 2 >= x
+  // since we don't know the sign of x.
+  body = CompareSelect::make(x * 2, x, kGE);
+  IS_NODE(CompareSelect, IRSimplifier::simplify(body).node());
+
+  // LT
+
+  // x+1 < x => 0
+  body = CompareSelect::make(x + 1, x, kLT);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x < x + 1 => 1
+  body = CompareSelect::make(x, x + 1, kLT);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x < x => 0
+  body = CompareSelect::make(x, x, kLT);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // LE
+
+  // x+1 <= x => 0
+  body = CompareSelect::make(x + 1, x, kLE);
+  TookFalseBranch(IRSimplifier::simplify(body));
+
+  // x <= x + 1 => 1
+  body = CompareSelect::make(x, x + 1, kLE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x <= x => 1
+  body = CompareSelect::make(x, x, kLE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // NE
+
+  // x+1 != x => 1
+  body = CompareSelect::make(x + 1, x, kNE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x != x + 1 => 1
+  body = CompareSelect::make(x, x + 1, kNE);
+  TookTrueBranch(IRSimplifier::simplify(body));
+
+  // x != x => 0
+  body = CompareSelect::make(x, x, kNE);
+  TookFalseBranch(IRSimplifier::simplify(body));
+}
+
 void testSimplifyEliminateZeroLengthFor() {
   KernelScope kernel_scope;
 
   {
     // Will eliminate zero loop For.
-    Buffer a(BufHandle("A", {4}, kInt));
-    Buffer c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -2784,8 +3126,8 @@ void testSimplifyEliminateZeroLengthFor() {
 
   {
     // still works if start is not zero.
-    Buffer a(BufHandle("A", {4}, kInt));
-    Buffer c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -2798,8 +3140,8 @@ void testSimplifyEliminateZeroLengthFor() {
   {
     // works if both terms are variable.
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {4}, kInt));
-    Buffer c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -2812,8 +3154,8 @@ void testSimplifyEliminateZeroLengthFor() {
   {
     // works if one term simplifies down.
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {4}, kInt));
-    Buffer c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body = For::make(
@@ -2825,8 +3167,8 @@ void testSimplifyEliminateZeroLengthFor() {
 
   {
     // Sanity check does nothing if the condition is not met.
-    Buffer a(BufHandle("A", {4}, kInt));
-    Buffer c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -2841,8 +3183,8 @@ void testSimplifyOneLoopFor() {
 
   {
     // Will remove the loop if the body is run once.
-    Buffer a(BufHandle("A", {4}, kInt));
-    Buffer c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -2856,8 +3198,8 @@ void testSimplifyOneLoopFor() {
 
   {
     // still works if start is not zero.
-    Buffer a(BufHandle("A", {4}, kInt));
-    Buffer c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -2872,8 +3214,8 @@ void testSimplifyOneLoopFor() {
   {
     // works if both terms are variable.
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {4}, kInt));
-    Buffer c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body = For::make(
@@ -2888,8 +3230,8 @@ void testSimplifyOneLoopFor() {
   {
     // works if one term simplifies down.
     VarHandle x("x", kInt);
-    Buffer a(BufHandle("A", {4}, kInt));
-    Buffer c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body = For::make(
@@ -2903,8 +3245,8 @@ void testSimplifyOneLoopFor() {
 
   {
     // Sanity check does nothing if the condition is not met.
-    Buffer a(BufHandle("A", {4}, kInt));
-    Buffer c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     auto body =
@@ -2919,8 +3261,8 @@ void testSimplifyForWontLoseLoopOptions() {
 
   {
     // Sanity check does nothing if the condition is not met.
-    Buffer a(BufHandle("A", {4}, kInt));
-    Buffer c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     LoopOptions options;
@@ -2939,8 +3281,8 @@ void testSimplifyMultilevelFor() {
 
   {
     // Multiple layers of For will be simplified out.
-    Buffer a(BufHandle("A", {4}, kInt));
-    Buffer c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
@@ -2956,8 +3298,8 @@ void testSimplifyMultilevelFor() {
 
   {
     // Will maintain an outer loop if the inner loop is eliminated.
-    Buffer a(BufHandle("A", {4}, kInt));
-    Buffer c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
@@ -2979,8 +3321,8 @@ void testSimplifyMultilevelFor() {
 
   {
     // Will maintain inner loop if outer loops is eliminated.
-    Buffer a(BufHandle("A", {4}, kInt));
-    Buffer c(BufHandle("C", {4}, kInt));
+    BufHandle a("A", {4}, kInt);
+    BufHandle c("C", {4}, kInt);
     auto mask = IntImm::make(1);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
@@ -3003,7 +3345,7 @@ void testSimplifyForCleansUp() {
   KernelScope kernel_scope;
 
   {
-    Buffer a("a", kFloat, {1, 12, 1});
+    Placeholder a("a", kFloat, {1, 12, 1});
     VarHandle x("x", kInt);
     Tensor* b = Compute(
         "x",
@@ -3051,7 +3393,7 @@ void testSimplifyFlattenBlock() {
   {
     // Flatten multiple blocks down to one.
     // { { { stmt1, stmt2 } } } =>  { stmt1, stmt2 }
-    Buffer a(BufHandle("A", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
     Store* store1 = Store::make(a, {0}, 1, 1);
     Store* store2 = Store::make(a, {0}, 0, 1);
 
@@ -3074,7 +3416,7 @@ void testSimplifyFlattenBlock() {
   {
     // Flatten multiple sub blocks containing statements.
     // { { stmt1 }, { stmt2 } } =>  { stmt1, stmt2 }
-    Buffer a(BufHandle("A", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
     Store* store1 = Store::make(a, {0}, 1, 1);
     Store* store2 = Store::make(a, {0}, 0, 1);
 
@@ -3097,7 +3439,7 @@ void testSimplifyFlattenBlock() {
   {
     // Flatten sub blocks with different depths.
     // { stmt1 , { { stmt2 } } } =>  { stmt1, stmt2 }
-    Buffer a(BufHandle("A", {1}, kInt));
+    BufHandle a("A", {1}, kInt);
     Store* store1 = Store::make(a, {0}, 1, 1);
     Store* store2 = Store::make(a, {0}, 0, 1);
 
@@ -3240,9 +3582,9 @@ void testDontSimplifyRand() {
 
 void testSimplifyReorderForCond() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {4}, kInt));
-  Buffer b(BufHandle("B", {1}, kInt));
-  Buffer c(BufHandle("C", {4}, kInt));
+  BufHandle a("A", {4}, kInt);
+  BufHandle b("B", {1}, kInt);
+  BufHandle c("C", {4}, kInt);
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
@@ -3440,8 +3782,8 @@ void testSimplifyReorderForCond() {
 
 void testSimplifyFuseConditions() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {2}, kInt));
-  Buffer b(BufHandle("B", {2}, kInt));
+  BufHandle a("A", {2}, kInt);
+  BufHandle b("B", {2}, kInt);
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
@@ -3858,7 +4200,7 @@ void testSimplifyFuseConditions() {
 
 void testSimplifySyncThreads() {
   KernelScope kernel_scope;
-  Buffer a(BufHandle("A", {4}, kInt));
+  BufHandle a("A", {4}, kInt);
   auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
 
@@ -3962,6 +4304,32 @@ void testSimplifyRampSubBroadcast() {
   IS_NODE_WITH_NAME(IntImm, newRamp->stride(), stride);
   ASSERT_EQ(stride->value(), 6);
   ASSERT_EQ(newRamp->lanes(), num_lanes);
+}
+
+void testSimplifyBroadcastTermExpander() {
+  KernelScope kernel_scope;
+  int num_lanes = 8;
+  ExprHandle bc0 = Broadcast::make(ExprHandle(0), num_lanes);
+  ExprHandle bc1 = Broadcast::make(ExprHandle(1), num_lanes);
+  ExprHandle bc2 = Broadcast::make(ExprHandle(2), num_lanes);
+  // NB: We need a term in the middle which isn't simplified to trigger the
+  // relevant path in TermExpander::mutate. The two bc1 terms are brought
+  // together and simplified to 2 * bc1, which then needs to make 2 multi-lane.
+  ExprHandle simplified = IRSimplifier::simplify(bc1 + (bc0 / bc2) + bc1);
+  BufHandle buf("buf", {num_lanes}, kInt);
+  // The result isn't fully simplified currently and thus would be brittle to
+  // match. Observe its value instead.
+  auto store = Store::make(
+      buf,
+      {Ramp::make(0, 1, num_lanes)},
+      simplified,
+      Broadcast::make(ExprHandle(1), num_lanes));
+  SimpleIREvaluator eval(store, buf);
+  std::vector<int> output(num_lanes);
+  eval(output);
+  for (int i = 0; i < num_lanes; ++i) {
+    ASSERT_EQ(output[i], 2);
+  }
 }
 
 } // namespace jit

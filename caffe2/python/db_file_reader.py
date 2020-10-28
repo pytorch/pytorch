@@ -1,9 +1,9 @@
 ## @package db_file_reader
 # Module caffe2.python.db_file_reader
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, scope, workspace, _import_c_extension as C
 from caffe2.python.dataio import Reader

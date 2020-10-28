@@ -178,6 +178,10 @@ class EncoderBase {
     return model_proto_;
   }
 
+  SymbolDimMap get_symbol_dim_param_map() {
+    return symbol_dim_map_;
+  }
+
  protected:
   // Using std::map instead of std::unordered_map for initializers
   // in EncodeGraph constructor so that the order in which initializers
@@ -243,6 +247,7 @@ class EncoderBase {
       const bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
+  SymbolDimMap symbol_dim_map_;
   onnx::ModelProto model_proto_;
   size_t num_blocks_;
   size_t num_op_nodes_;
@@ -316,33 +321,38 @@ void EncoderBase::EncodeValueInfo(
         std::unordered_map<int64_t, std::string>>& dynamic_axes) {
   std::string name = n->debugName();
   v->set_name(name);
-  auto tensorTypeToONNXType = [&dynamic_axes, &name](
+  auto tensorTypeToONNXType = [&dynamic_axes, &name, this](
                                   TensorTypePtr t,
                                   onnx::TypeProto_Tensor* tensor_type) {
-    if (t->sizes().isComplete()) {
-      // onnx::TypeProto* onnx_type = v->mutable_type();
-      // onnx::TypeProto_Tensor* tensor_type = onnx_type->mutable_tensor_type();
+    if (t->dim()) {
       onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
-      std::vector<std::int64_t> sizes = t->sizes().concrete_sizes().value();
+      auto sizes = t->symbolic_sizes().sizes().value();
       for (size_t i = 0; i < sizes.size(); i++) {
         shape->add_dim();
         if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
             (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())) {
           shape->mutable_dim(i)->set_dim_param(dynamic_axes.at(name).at(i));
+          if (!sizes[i].is_static()) {
+            symbol_dim_map_[sizes[i]] = dynamic_axes.at(name).at(i);
+          }
+        } else if (sizes[i].is_static()) {
+          shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
         } else {
-          shape->mutable_dim(i)->set_dim_value(sizes[i]);
+          if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
+            symbol_dim_map_[sizes[i]] = name + "_" + std::to_string(i);
+          }
+          shape->mutable_dim(i)->set_dim_param(symbol_dim_map_[sizes[i]]);
         }
       }
     }
     if (t->scalarType()) {
-      // onnx::TypeProto* onnx_type = v->mutable_type();
-      // onnx::TypeProto_Tensor* tensor_type = onnx_type->mutable_tensor_type();
       tensor_type->set_elem_type(ATenTypeToOnnxType(t->scalarType().value()));
     }
   };
 
   if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
-    if (node_type->sizes().isComplete() || node_type->scalarType()) {
+    if (node_type->dim() || node_type->scalarType()) {
+      // Encode type if either shape or dtype exists.
       onnx::TypeProto* onnx_type = v->mutable_type();
       onnx::TypeProto_Tensor* tensor_type = onnx_type->mutable_tensor_type();
       tensorTypeToONNXType(node_type, tensor_type);
@@ -854,7 +864,11 @@ std::string pretty_print_onnx(
 // conform to the ONNX op specification. Thus, the output will not
 // be interpretable by a ONNX-compatible framework. However, PyTorch or
 // libtorch will be able to import the IR and play it back.
-std::tuple<std::string, RawDataExportMap> export_onnx(
+std::tuple<
+    std::shared_ptr<::ONNX_NAMESPACE::ModelProto>,
+    RawDataExportMap,
+    SymbolDimMap>
+export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
@@ -887,10 +901,17 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       proto_size <= INT_MAX,
       "Exporting model exceed maximum protobuf size of 2GB. "
       "Please call torch.onnx.export with use_external_data_format=True.");
-  GRAPH_UPDATE("onnx proto:", prettyPrint(graph_encoder.get_model_proto()));
+  GRAPH_DEBUG("onnx proto:", prettyPrint(graph_encoder.get_model_proto()));
   return std::make_tuple(
-      graph_encoder.get_model_proto().SerializeAsString(),
-      graph_encoder.get_raw_data_export_map());
+      std::make_shared<::ONNX_NAMESPACE::ModelProto>(
+          graph_encoder.get_model_proto()),
+      graph_encoder.get_raw_data_export_map(),
+      graph_encoder.get_symbol_dim_param_map());
+}
+
+std::string serialize_model_proto_to_string(
+    const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto) {
+  return model_proto->SerializeAsString();
 }
 
 void check_onnx_proto(const std::string& proto_string) {

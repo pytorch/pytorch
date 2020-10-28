@@ -19,8 +19,6 @@ if is_available() and not torch._C._rpc_init():
     raise RuntimeError("Failed to initialize torch.distributed.rpc")
 
 
-
-
 if is_available():
     from . import api, backend_registry, functions, _set_profiler_node_id
     from . import (

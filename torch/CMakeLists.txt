@@ -46,7 +46,7 @@ append_filelist("libtorch_python_core_sources" TORCH_PYTHON_SRCS)
 
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
-if(BUILD_TEST AND NOT USE_ROCM)
+if(BUILD_TEST)
     add_definitions(-DBUILDING_TESTS)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
@@ -65,6 +65,8 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${CMAKE_BINARY_DIR}/caffe2/aten/src
     ${CMAKE_BINARY_DIR}/third_party
     ${CMAKE_BINARY_DIR}/third_party/onnx
+
+    ${TORCH_ROOT}/third_party/valgrind-headers
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
@@ -160,28 +162,35 @@ endif()
 
 if(USE_DISTRIBUTED)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
-    if(NOT MSVC)
+    if(WIN32)
+      append_filelist("libtorch_python_distributed_core_sources" TORCH_PYTHON_SRCS)
+    else()
+      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_RPC)
       append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
-      # Disable certain warnings for GCC-9.X
-      if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
-        set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-        set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-        set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-        set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      endif()
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
-      if(USE_TENSORPIPE)
-        list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
-        list(APPEND TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS USE_TENSORPIPE)
-      endif()
     endif()
+    # Disable certain warnings for GCC-9.X
+    if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+    endif()
+    if(USE_TENSORPIPE)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
+      list(APPEND TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS USE_TENSORPIPE)
+    endif()
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
 endif()
 
-if(USE_NCCL)
+if(USE_NCCL AND NOT WIN32)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
+endif()
+
+if(USE_VALGRIND AND NOT WIN32)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_VALGRIND)
 endif()
 
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists

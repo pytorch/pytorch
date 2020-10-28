@@ -40,8 +40,8 @@ TypePtr MergeInferredType(TypePtr existing_type, TypePtr inferred_type) {
       return new_tensor_type;
     }
     auto type = old_tensor_type;
-    if (new_tensor_type->sizes().isComplete()) {
-      type = type->withSizes(new_tensor_type->sizes().concrete_sizes().value());
+    if (new_tensor_type->dim()) {
+      type = type->withSymbolicShapes(new_tensor_type->symbolic_sizes());
     }
     if (new_tensor_type->scalarType().has_value()) {
       type = type->withScalarType(new_tensor_type->scalarType());
@@ -69,7 +69,8 @@ namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
 TensorTypePtr TorchTensorTypeFromONNX(
-    const onnx::TypeProto_Tensor& onnx_tensor_type) {
+    const onnx::TypeProto_Tensor& onnx_tensor_type,
+    const SymbolDimMap& symbol_map) {
   c10::optional<at::ScalarType> scalar_type;
   if (onnx_tensor_type.has_elem_type()) {
     scalar_type = ONNXTypeToATenType(onnx_tensor_type.elem_type());
@@ -82,33 +83,51 @@ TensorTypePtr TorchTensorTypeFromONNX(
       c10::VaryingShape<c10::Stride>{},
       {});
   if (onnx_tensor_type.has_shape()) {
-    std::vector<int64_t> sizes;
+    std::vector<c10::ShapeSymbol> sizes;
     auto onnx_shape = onnx_tensor_type.shape();
 
     for (int i = 0; i < onnx_shape.dim_size(); ++i) {
       auto& dim = onnx_shape.dim(i);
       if (dim.has_dim_value()) {
-        sizes.push_back(dim.dim_value());
+        sizes.emplace_back(c10::ShapeSymbol::fromStaticSize(dim.dim_value()));
       } else {
-        // TODO: handle dim_param?
-        return v_type;
+        GRAPH_UPDATE("Got dim_param:", dim.dim_param());
+        c10::optional<c10::ShapeSymbol> sym = c10::nullopt;
+        for (auto pair : symbol_map) {
+          if (pair.second == dim.dim_param()) {
+            sym = pair.first;
+            break;
+          }
+        }
+        if (!sym) {
+          sym = c10::ShapeSymbol::newSymbol();
+        }
+        sizes.emplace_back(sym.value());
       }
     }
     v_type = TensorType::create(scalar_type, at::kCPU, sizes.size(), {});
-    v_type = v_type->withSizes(sizes);
+    v_type = v_type->withSymbolicShapes(c10::SymbolicShape(sizes));
+
+    if (v_type->sizes().concrete_sizes().has_value()) {
+      // Populate strides based on sizes info, if sizes are all static.
+      // Creating strides ensures yielding True for isCompleteTensor.
+      v_type = v_type->contiguous();
+    }
   }
 
   return v_type;
 }
 
 ListTypePtr TorchListTypeFromONNX(
-    const onnx::TypeProto_Sequence& onnx_sequence_type) {
+    const onnx::TypeProto_Sequence& onnx_sequence_type,
+    SymbolDimMap symbol_map) {
   c10::optional<at::ScalarType> scalar_type;
   if (onnx_sequence_type.has_elem_type()) {
     auto onnx_seq_elem_type = onnx_sequence_type.elem_type();
     if (onnx_seq_elem_type.has_tensor_type()) {
       auto onnx_tensor_type = onnx_seq_elem_type.tensor_type();
-      auto v_tensor_type = TorchTensorTypeFromONNX(onnx_tensor_type);
+      auto v_tensor_type =
+          TorchTensorTypeFromONNX(onnx_tensor_type, symbol_map);
       auto v_type = ListType::create(v_tensor_type);
       return v_type;
     }
@@ -118,21 +137,24 @@ ListTypePtr TorchListTypeFromONNX(
 
 void UpdateTorchValueByOnnxValueInfo(
     Value* v,
-    const onnx::ValueInfoProto& p_info) {
+    const onnx::ValueInfoProto& p_info,
+    SymbolDimMap symbol_map) {
   if (!p_info.has_type()) {
     return;
   }
 
   auto p_type = p_info.type();
   if (p_type.has_tensor_type()) {
-    auto torch_tensor_type = TorchTensorTypeFromONNX(p_type.tensor_type());
+    auto torch_tensor_type =
+        TorchTensorTypeFromONNX(p_type.tensor_type(), symbol_map);
     if (torch_tensor_type) {
-      v->setType(torch_tensor_type);
+      v->setType(MergeInferredType(v->type(), torch_tensor_type));
     }
   } else if (p_type.has_sequence_type()) {
-    auto torch_list_type = TorchListTypeFromONNX(p_type.sequence_type());
+    auto torch_list_type =
+        TorchListTypeFromONNX(p_type.sequence_type(), symbol_map);
     if (torch_list_type) {
-      v->setType(torch_list_type);
+      v->setType(MergeInferredType(v->type(), torch_list_type));
     }
   }
 }
@@ -148,9 +170,17 @@ bool IsSupportedNode(const Node* n) {
   // Skip when block size is zero. This is when the node is first created,
   // doesn't have subblocks attached yet. Run shape inference for these nodes
   // when the subgraph has already completed shape inferencing.
-  if ((node_kind == ::c10::onnx::Loop || node_kind == ::c10::onnx::If) &&
-      n->blocks().size() == 0) {
-    return false;
+  if (node_kind == ::c10::onnx::Loop || node_kind == ::c10::onnx::If) {
+    if (n->blocks().size() == 0) {
+      return false;
+    }
+    for (auto b : n->blocks()) {
+      for (auto b_n : b->nodes()) {
+        if (!IsSupportedNode(b_n)) {
+          return false;
+        }
+      }
+    }
   }
 
   return true;
@@ -170,11 +200,34 @@ Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
       // prim::ListConstruct is converted to onnx::Concat. The conversion should
       // eventually be moved to symbolic. For now, treat this operator as
       // special case, and change from list type to tensor type. The scalar type
-      // is preserved.
+      // is preserved. If the elemtype is Int, insert a onnx::Concat node into
+      // the graph.
       TypePtr elem = v->type()->cast<ListType>()->getElementType();
       c10::optional<at::ScalarType> scalar_type = c10::nullopt;
       if (elem->cast<IntType>()) {
         scalar_type = at::kLong;
+
+        auto lc_node = v->node();
+        // ListConstruct Int[] output case, we need to transform to ONNX
+        // Concat to ensure the output is a single tensor(dynamic) type in
+        // order to be consumed as inputs
+        std::vector<Value*> unsqueezed;
+        for (auto* input : lc_node->inputs()) {
+          Node* unsqueezed_node =
+              n_graph->insertNode(n_graph->create(::c10::onnx::Unsqueeze, 1));
+          auto new_input = n_graph->addInput();
+          new_input->copyMetadata(input);
+          unsqueezed_node->addInput(new_input);
+          unsqueezed_node->is_(attr::axes, {0});
+          unsqueezed.emplace_back(unsqueezed_node->output());
+        }
+        Node* concat_node =
+            n_graph->insertNode(n_graph->create(::c10::onnx::Concat, 1));
+        concat_node->i_(attr::axis, 0);
+        for (auto v : unsqueezed) {
+          concat_node->addInput(v);
+        }
+        return concat_node->output();
       } else if (elem->cast<FloatType>()) {
         scalar_type = at::kFloat;
       } else if (elem->cast<BoolType>()) {
@@ -233,11 +286,11 @@ bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
 
 void ConvertGraphToONNXProto(
     std::shared_ptr<Graph> graph,
-    onnx::ModelProto& model_proto,
+    std::shared_ptr<onnx::ModelProto>& model_proto,
+    SymbolDimMap& symbol_map,
     int opset_version) {
-  std::string model_str;
   RawDataExportMap export_map;
-  std::tie(model_str, export_map) = export_onnx(
+  std::tie(model_proto, export_map, symbol_map) = export_onnx(
       graph,
       {},
       opset_version,
@@ -250,9 +303,8 @@ void ConvertGraphToONNXProto(
       true,
       false,
       std::string());
-  model_proto.ParseFromString(model_str);
-  for (int i = 0; i < model_proto.graph().output_size(); ++i) {
-    model_proto.mutable_graph()->mutable_output(i)->clear_type();
+  for (int i = 0; i < model_proto->graph().output_size(); ++i) {
+    model_proto->mutable_graph()->mutable_output(i)->clear_type();
   }
 }
 
@@ -284,7 +336,8 @@ void SpecialPostProcess(Node* n) {
 void UpdateOutputTypeByONNXProto(
     Node* n,
     Node* clone_node,
-    const onnx::ModelProto& model_proto) {
+    const onnx::ModelProto& model_proto,
+    SymbolDimMap symbol_map) {
   auto graph_proto = model_proto.graph();
   // inferred shapes are stored in value_info.
   for (size_t i = 0; i < graph_proto.value_info_size(); ++i) {
@@ -292,12 +345,10 @@ void UpdateOutputTypeByONNXProto(
     // get data from value_info and updated original graph.
     for (size_t j = 0; j < clone_node->outputs().size(); ++j) {
       if (clone_node->output(j)->debugName() == v_info.name()) {
-        UpdateTorchValueByOnnxValueInfo(n->output(j), v_info);
+        UpdateTorchValueByOnnxValueInfo(n->output(j), v_info, symbol_map);
       }
     }
   }
-
-  SpecialPostProcess(n);
 }
 
 } // namespace
@@ -322,25 +373,93 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
   GRAPH_DEBUG(
       "Cloned torch graph to run shape inference: ", n_graph->toString());
 
-  if (!IsGraphValidForInference(n_graph)) {
-    GRAPH_UPDATE("Skipping ONNX shape inference for this node.");
-    return;
+  if (IsGraphValidForInference(n_graph)) {
+    // TODO: Some ops have conversion happen at Peephole pass.
+    //       The conversion here is incomplete for these ops.
+    //       e.g: ListConstruct, ListUnpack, etc.
+    std::shared_ptr<onnx::ModelProto> model_proto;
+    SymbolDimMap symbol_map;
+    ConvertGraphToONNXProto(n_graph, model_proto, symbol_map, opset_version);
+    GRAPH_DEBUG(
+        "ONNX graph to run shape inference: ", prettyPrint(*model_proto));
+
+    // infer shape
+    onnx::shape_inference::InferShapes(*model_proto);
+    GRAPH_DEBUG(
+        "ONNX graph after shape inference: ", prettyPrint(*model_proto));
+
+    UpdateOutputTypeByONNXProto(n, clone_node, *model_proto, symbol_map);
   }
 
-  // TODO: Some ops have conversion happen at Peephole pass.
-  //       The conversion here is incomplete for these ops.
-  //       e.g: ListConstruct, ListUnpack, etc.
-  onnx::ModelProto model_proto;
-  ConvertGraphToONNXProto(n_graph, model_proto, opset_version);
-  GRAPH_DEBUG("ONNX graph to run shape inference: ", prettyPrint(model_proto));
-
-  // infer shape
-  onnx::shape_inference::InferShapes(model_proto);
-  GRAPH_DEBUG("ONNX graph after shape inference: ", prettyPrint(model_proto));
-
-  UpdateOutputTypeByONNXProto(n, clone_node, model_proto);
+  SpecialPostProcess(n);
   GRAPH_DEBUG(
       "Torch graph after shape inference:", n->owningGraph()->toString());
+}
+
+void ONNXSetDynamicInputShape(
+    std::shared_ptr<Graph>& graph,
+    const std::unordered_map<
+        std::string,
+        std::unordered_map<int64_t, std::string>>& dynamic_axes,
+    const std::vector<std::string>& input_names) {
+  GRAPH_UPDATE("ONNX set dynamic input shape.");
+  GRAPH_UPDATE("dynamic axes tensor names:", [&]() {
+    std::vector<std::string> res(dynamic_axes.size());
+    std::transform(
+        dynamic_axes.begin(), dynamic_axes.end(), res.begin(), [](auto pair) {
+          return pair.first;
+        });
+    return res;
+  }());
+
+  std::map<std::string, ::c10::ShapeSymbol> name_to_sym;
+
+  for (int i = 0; i < input_names.size(); ++i) {
+    auto input_name = input_names[i];
+    if (dynamic_axes.find(input_name) != dynamic_axes.end()) {
+      auto axes_names = dynamic_axes.find(input_name)->second;
+      TORCH_INTERNAL_ASSERT(i < graph->inputs().size());
+      auto input_tensor_type = graph->inputs()[i]->type()->cast<TensorType>();
+      if (!input_tensor_type) {
+        continue;
+      }
+
+      auto shape = input_tensor_type->symbolic_sizes().sizes().value();
+
+      for (auto pair : axes_names) {
+        auto axis = pair.first;
+        auto name = pair.second;
+        if (name_to_sym.find(name) == name_to_sym.end()) {
+          name_to_sym[name] = ::c10::ShapeSymbol::newSymbol();
+        }
+        shape[axis] = name_to_sym[name];
+      }
+
+      graph->inputs()[i]->setType(
+          input_tensor_type->withSymbolicShapes(::c10::SymbolicShape(shape)));
+    }
+  }
+}
+
+void ONNXAssignOutputShape(
+    std::shared_ptr<Graph>& graph,
+    at::ArrayRef<at::Tensor> outputs,
+    bool onnx_shape_inference) {
+  TORCH_INTERNAL_ASSERT(graph->outputs().size() == outputs.size());
+  for (size_t i = 0; i < outputs.size(); ++i) {
+    if (onnx_shape_inference) {
+      graph->outputs()[i]->setType(MergeInferredType(
+          TensorType::create(outputs[i]), graph->outputs()[i]->type()));
+    } else {
+      graph->outputs()[i]->inferTypeFrom(outputs[i]);
+    }
+  }
+}
+
+void ONNXShapeTypeInference(std::shared_ptr<Graph>& graph, int opset_version) {
+  for (auto n : graph->nodes()) {
+    ONNXShapeTypeInference(n, opset_version);
+  }
 }
 
 } // namespace jit

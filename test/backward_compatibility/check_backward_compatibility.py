@@ -27,6 +27,8 @@ from torch._C import parse_schema
 # NB: function name DOES NOT include overload name!
 allow_list = [
     ("c10_experimental", datetime.date(2222, 1, 1)),
+    # Internal
+    ("static", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
@@ -99,8 +101,38 @@ allow_list = [
     ("preprocess", datetime.date(2020, 10, 1)),
     ("compile", datetime.date(2020, 10, 1)),
     ("execute", datetime.date(2020, 10, 1)),
+    ("aten::_addr", datetime.date(2020, 10, 31)),
+    ("aten::_addr_", datetime.date(2020, 10, 31)),
+    ("aten::_addr.out", datetime.date(2020, 10, 31)),
+    ("aten::_foreach_add", datetime.date(2020, 10, 1)),
+    ("aten::_foreach_sub_", datetime.date(2020, 10, 1)),
+    ("aten::_foreach_div", datetime.date(2020, 10, 1)),
+    ("aten::_foreach_sub", datetime.date(2020, 10, 1)),
+    ("aten::_foreach_mul_scalar_list", datetime.date(2020, 11, 10)),
+    ("aten::_foreach_mul_scalar_list_", datetime.date(2020, 11, 10)),
+    ("aten::_amp_non_finite_check_and_unscale_", datetime.date(9999, 1, 1)),
+    ("aten::choose_qparams_optimized", datetime.date(2020, 10, 5)),
+    ("aten::smooth_l1_loss_backward", datetime.date(2020, 10, 15)),
+    ("quantized::embedding_bag_byte", datetime.date(2020, 10, 15)),
+    ("quantized::embedding_bag_4bit", datetime.date(2020, 10, 15)),
+    ("quantized::embedding_byte", datetime.date(2020, 10, 15)),
+    ("quantized::embedding_bag_byte_rowwise_offsets", datetime.date(2020, 10, 15)),
+    ("quantized::embedding_bag_4bit_rowwise_offsets", datetime.date(2020, 10, 15)),
+    ("aten::_foreach_sub_scalar_list", datetime.date(2020, 11, 10)),
+    ("aten::_foreach_add_scalar_list_", datetime.date(2020, 11, 10)),
+    ("aten::_foreach_add_scalar_list", datetime.date(2020, 11, 10)),
+    ("aten::_foreach_sub_scalar_list_", datetime.date(2020, 11, 10)),
+    ("aten::_foreach_div_scalar_list", datetime.date(2020, 11, 10)),
+    ("aten::_foreach_div_scalar_list_", datetime.date(2020, 11, 10)),
+    ("aten::_foreach_addcmul_", datetime.date(2020, 10, 15)),
+    ("aten::_foreach_addcdiv_", datetime.date(2020, 10, 15)),
+    ("aten::_foreach_addcdiv", datetime.date(2020, 10, 15)),
+    ("aten::_foreach_addcmul", datetime.date(2020, 10, 15)),
+    ("aten::conj", datetime.date(2020, 11, 10)),
+    ("aten::add_relu", datetime.date(2020, 10, 28)),
+    ("aten::add_relu_", datetime.date(2020, 10, 28)),
+    ("aten::hash", datetime.date(2020, 11, 15)),
 ]
-
 
 def allow_listed(schema, allow_list):
     for item in allow_list:

@@ -51,8 +51,7 @@ class State {
   // parse_cpu_trace(result) for results of all profile range.
   std::mutex resultsMutex_;
   std::vector<thread_event_lists> results_;
-  const ProfilerConfig config_ =
-      ProfilerConfig(ProfilerState::Disabled, false, false);
+  const ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled);
 };
 
 class StateStackEntry;

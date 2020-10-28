@@ -1,9 +1,9 @@
 # This is a comment.
 # Each line is a file pattern followed by one or more owners.
 
-/docs/cpp @goldsborough @ebetica @yf225
-/torch/csrc/api/ @ebetica @goldsborough @yf225
-/test/cpp/api/ @ebetica @goldsborough @yf225
+/docs/cpp @goldsborough @ebetica @yf225 @glaringlee
+/torch/csrc/api/ @ebetica @goldsborough @yf225 @glaringlee
+/test/cpp/api/ @ebetica @goldsborough @yf225 @glaringlee
 /torch/utils/cpp_extension.py @goldsborough @fmassa @soumith @ezyang
 
 # Not there to strictly require the approval, but to be tagged as a reviewer
@@ -23,9 +23,9 @@
 # Distributed package
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/torch/lib/c10d/ @pietern @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma
-/torch/csrc/distributed/ @pietern @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma
-/torch/distributed/ @apaszke @pietern @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma
+/torch/lib/c10d/ @pietern @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088
+/torch/csrc/distributed/ @pietern @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088
+/torch/distributed/ @apaszke @pietern @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088
 
 # Distributed tests
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add

@@ -22,7 +22,6 @@ from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
 from torch._jit_internal import _qualified_name
 from torch.autograd import function
-from torch import _jit_internal
 from torch.nn import Module
 
 _flatten = torch._C._jit_flatten
@@ -549,23 +548,11 @@ def make_module(mod, _module_class, _compilation_unit):
         return mod
     elif torch._jit_internal.module_has_exports(mod):
 
-        def make_stubs_from_exported_methods(mod):
-            exported = []
-            for name in dir(mod):
-                item = getattr(mod, name, None)
-                if (
-                    torch._jit_internal.get_torchscript_modifier(item)
-                    is _jit_internal.FunctionModifiers.EXPORT
-                ):
-                    exported.append(name)
-
-            stubs = []
-            for method in exported:
-                stubs.append(torch.jit._recursive.make_stub_from_method(mod, method))
-            return stubs
-
+        infer_methods_stubs_fn = torch.jit._recursive.make_stubs_from_exported_methods
         return torch.jit._recursive.create_script_module(
-            mod, make_stubs_from_exported_methods, share_types=False
+            mod,
+            infer_methods_stubs_fn,
+            share_types=False
         )
     else:
         if _module_class is None:
@@ -1096,16 +1083,6 @@ class TopLevelTracedModule(TracedModule):
 
 
 def _script_if_tracing(fn):
-    """
-    Compiles ``fn`` when it is first called during tracing. ``torch.jit.script``
-    has a non-negligible start up time when it is first called due to
-    lazy-initializations of many compiler builtins. Therefore you should not use
-    it in library code. However, you may want to have parts of your library work
-    in tracing even if they use control flow. In these cases, you should use
-    ``@torch.jit._script_if_tracing`` to substitute for
-    ``torch.jit.script``.
-    """
-
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if not is_tracing():

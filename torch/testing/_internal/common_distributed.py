@@ -1,5 +1,7 @@
 
 from multiprocessing import Manager
+from contextlib import contextmanager
+from io import StringIO
 import os
 import sys
 import tempfile
@@ -16,7 +18,7 @@ import torch
 import torch.distributed as c10d
 
 from functools import partial, reduce
-from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, FILE_SCHEMA
 
 class TestSkip(NamedTuple):
     exit_code: int
@@ -130,6 +132,17 @@ def requires_mpi():
         "c10d was not compiled with the MPI backend",
     )
 
+def skip_if_rocm_single_process(func):
+    """Skips a test for ROCm in a single process environment"""
+    func.skip_if_rocm = True
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not TEST_WITH_ROCM:
+            return func(*args, **kwargs)
+        raise unittest.SkipTest("Test skipped for ROCm")
+
+    return wrapper
 
 def skip_if_rocm(func):
     """Skips a test for ROCm"""
@@ -143,13 +156,35 @@ def skip_if_rocm(func):
 
     return wrapper
 
+def skip_if_win32():
+    return unittest.skipIf(
+        sys.platform == 'win32',
+        "This unit test case is not supportted on Windows platform",
+    )
+
 TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
+
+
+def create_device(interface=None):
+    if sys.platform == 'win32' or interface is None:
+        return c10d.ProcessGroupGloo.create_device(hostname="127.0.0.1")
+    else:
+        return c10d.ProcessGroupGloo.create_device(interface=interface)
 
 
 def get_timeout(test_id):
     return TIMEOUT_OVERRIDE.get(test_id.split('.')[-1], TIMEOUT_DEFAULT)
 
+@contextmanager
+def captured_output():
+    new_out, new_err = StringIO(), StringIO()
+    old_out, old_err = sys.stdout, sys.stderr
+    try:
+        sys.stdout, sys.stderr = new_out, new_err
+        yield sys.stdout, sys.stderr
+    finally:
+        sys.stdout, sys.stderr = old_out, old_err
 
 def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
     """
@@ -206,7 +241,7 @@ def initialize_temp_directories(init_method=None):
     if init_method is not None:
         os.environ["INIT_METHOD"] = init_method
     else:
-        os.environ["INIT_METHOD"] = "file://" + os.path.join(
+        os.environ["INIT_METHOD"] = FILE_SCHEMA + os.path.join(
             init_dir_path, "shared_init_file"
         )
 

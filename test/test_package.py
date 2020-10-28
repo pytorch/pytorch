@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import torch
 from sys import version_info
+from io import StringIO
 
 try:
     from torchvision.models import resnet18
@@ -132,7 +133,7 @@ b = resources.load_binary('main', 'main_binary')
         self.assertIsNot(package_a, package_a_im)
         self.assertIs(package_a.subpackage, package_a_im.subpackage)
 
-    @skipIf(version_info.major < 3 or version_info.minor < 7, 'mock uses __getattr__ a 3.7 feature')
+    @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
     def test_mock(self):
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
@@ -149,7 +150,7 @@ b = resources.load_binary('main', 'main_binary')
         with self.assertRaisesRegex(NotImplementedError, 'was mocked out'):
             r()
 
-    @skipIf(version_info.major < 3 or version_info.minor < 7, 'mock uses __getattr__ a 3.7 feature')
+    @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
     def test_custom_requires(self):
         filename = self.temp()
 
@@ -182,6 +183,11 @@ b = resources.load_binary('main', 'main_binary')
             # this will also save all the code files references by
             # the objects in the pickle
             e.save_pickle('model', 'model.pkl', resnet)
+
+            # check th debug graph has something reasonable:
+            buf = StringIO()
+            debug_graph = e._write_dep_graph(failing_module='torch')
+            self.assertIn('torchvision.models.resnet', debug_graph)
 
         # we can now load the saved model
         i = PackageImporter(f1)

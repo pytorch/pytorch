@@ -7,6 +7,7 @@
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
+#include <ATen/metal/Context.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <torch/library.h>
@@ -34,7 +35,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   }
   Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
 
-  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "copy_", [&] {
     scalar_t* sp = src.data_ptr<scalar_t>();
     scalar_t* rp = self.data_ptr<scalar_t>();
     scalar_t* bp = buf.data_ptr<scalar_t>();
@@ -79,7 +80,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
 // (e.g. XLA) may be supported by overriding copy_ and _copy_from.
 bool is_supported_device(Device device) {
   DeviceType device_type = device.type();
-  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan;
+  return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal;
 }
 
 } // namespace
@@ -131,6 +132,10 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 
   if (self.device().type() == at::kVulkan || src.device().type() == at::kVulkan) {
     return at::vulkan::vulkan_copy_(self, src);
+  }
+
+  if (self.device().type() == at::kMetal || src.device().type() == at::kMetal) {
+    return at::metal::metal_copy_(self, src);
   }
 
   auto iter = TensorIteratorConfig()

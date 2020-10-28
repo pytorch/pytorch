@@ -99,6 +99,7 @@ Indexing, Slicing, Joining, Mutating Ops
     stack
     t
     take
+    tensor_split
     transpose
     unbind
     unsqueeze
@@ -312,6 +313,7 @@ Pointwise Ops
     mul
     multiply
     mvlgamma
+    nan_to_num
     neg
     negative
     nextafter
@@ -353,6 +355,7 @@ Reduction Ops
     logsumexp
     mean
     median
+    nanmedian
     mode
     norm
     nansum
@@ -459,6 +462,7 @@ Other Operations
     meshgrid
     lcm
     logcumsumexp
+    ravel
     renorm
     repeat_interleave
     roll
@@ -536,3 +540,4 @@ Utilities
     set_deterministic
     is_deterministic
     vmap
+    Assert

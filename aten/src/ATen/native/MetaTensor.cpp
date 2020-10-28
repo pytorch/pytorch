@@ -25,7 +25,7 @@ Tensor empty_meta(
     // participate in dispatch, but so that tests like is_sparse/is_cuda
     // give the correct result (a CUDA meta tensor "is cuda").  If we don't
     // like this, remove the computeDispatchKey line
-    DispatchKeySet{DispatchKey::Meta, computeDispatchKey(options)},
+    DispatchKeySet{DispatchKey::Meta, options.computeDispatchKey()},
     dtype,
     device
   );

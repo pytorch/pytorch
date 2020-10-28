@@ -31,7 +31,7 @@ import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
-                                                  load_tests, random_symmetric_pd_matrix, random_symmetric_matrix,
+                                                  load_tests, random_symmetric_matrix,
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
@@ -780,16 +780,55 @@ class TestAutograd(TestCase):
         sparse = torch.sparse_coo_tensor(size, requires_grad=True)
         dense = torch.randn(size, requires_grad=True)
 
-        z = sparse.mm(dense)
-        with self.assertRaisesRegex(RuntimeError,
-                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
-            z.sum().backward()
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "The backward pass for this operation requires the 'mat1' tensor to be strided,"):
+            z = dense.addmm(sparse, dense)
 
-        z = dense.addmm(sparse, dense)
-        with self.assertRaisesRegex(RuntimeError,
-                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
-            z.sum().backward()
+        mm_test_cases = [
+            # a requires grad, a is sparse, b requires grad, b is sparse, error message
+            (False, True, True, False, None),
+            (False, False, True, True, "The backward pass for this operation requires the 'mat2'"),
+            (False, True, True, True, "The backward pass for this operation requires the 'mat2'"),
+            (True, False, True, True, "The backward pass for this operation requires the 'mat2'"),
+            (True, True, False, False, "The backward pass for this operation requires the 'self'"),
+            (True, True, True, False, "The backward pass for this operation requires the 'self'"),
+            (True, True, True, True, "The backward pass for this operation requires the 'mat2'"),
+        ]
+        for a_req_grad, a_is_sparse, b_req_grad, b_is_sparse, err_msg in mm_test_cases:
+            # We should only be testing cases with sparse inputs, and at least one
+            # input needs to require grad so we can call a backward pass
+            assert a_is_sparse or b_is_sparse
+            assert a_req_grad or b_req_grad
 
+            a = torch.randn(size, requires_grad=a_req_grad)
+            if a_is_sparse:
+                a = a.to_sparse()
+            b = torch.randn(size, requires_grad=b_req_grad)
+            if b_is_sparse:
+                b = b.to_sparse()
+
+            # If no error expected, check that sparse and dense cases match
+            if err_msg is None:
+                r = a.mm(b)
+                r.sum().backward()
+                a_grad = None if a.grad is None else a.grad.clone().detach()
+                b_grad = None if b.grad is None else b.grad.clone().detach()
+
+                # Redo with only dense tensors
+                a = (a.to_dense() if a.is_sparse else a).clone().detach()
+                a.requires_grad = a_req_grad
+                b = (b.to_dense() if b.is_sparse else b).clone().detach()
+                b.requires_grad = b_req_grad
+                r = a.mm(b)
+                r.sum().backward()
+
+                self.assertEqual(a_grad, a.grad)
+                self.assertEqual(b_grad, b.grad)
+
+            else:
+                with self.assertRaisesRegex(RuntimeError, err_msg):
+                    a.mm(b)
 
     def test_multi_backward(self):
         x = torch.randn(5, 5, requires_grad=True)
@@ -2501,22 +2540,26 @@ class TestAutograd(TestCase):
     @skipIfNoLapack
     def test_cholesky(self):
         def func(root, upper):
-            x = torch.matmul(root, root.transpose(-1, -2)) + 1e-05
+            x = 0.5 * (root + root.transpose(-1, -2).conj())
             return torch.cholesky(x, upper)
 
-        def run_test(upper, dims):
-            root = torch.rand(*dims, requires_grad=True)
+        def run_test(upper, dims, dtype):
+            root = torch.rand(*dims, dtype=dtype, requires_grad=True)
+            root = root + torch.eye(dims[-1])
 
             gradcheck(func, [root, upper])
             gradgradcheck(func, [root, upper])
 
-            root = random_symmetric_pd_matrix(dims[-1], *dims[:-2]).requires_grad_()
+            root = torch.rand(*dims, dtype=dtype)
+            root = torch.matmul(root, root.transpose(-1, -2).conj())
+            root.requires_grad_()
             chol = root.cholesky().sum().backward()
-            self.assertEqual(root.grad, root.grad.transpose(-1, -2))  # Check the gradient is symmetric
+            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())  # Check the gradient is hermitian
 
-        for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
-            run_test(upper, dims)
-            run_test(upper, dims)
+        for upper, dims, dtype in product([True, False],
+                                          [(3, 3), (4, 3, 2, 2)],
+                                          [torch.double, torch.cdouble]):
+            run_test(upper, dims, dtype)
 
     @skipIfNoLapack
     def test_cholesky_solve(self):
@@ -2592,6 +2635,67 @@ class TestAutograd(TestCase):
         for upper, dims in product([True, False], [(3, 3), (5, 3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
 
+    @slowTest
+    @skipIfNoLapack
+    def test_lobpcg(self):
+
+        def func(k, A, largest=True, B=None):
+            X_shape = list(A.shape)
+            X_shape[-1] = k
+            X = torch.eye(A.size(-2), k, dtype=A.dtype, device=A.device)
+            if A.dim() > 2:
+                X = X.expand(X_shape)
+
+            D, U = torch.lobpcg(A=A, k=k, B=B, X=X)
+
+            # LOBPCG uses a random initial eigenspace approximation
+            # if parameter `X` is not provided.
+            # This may cause a non-deterministic behavior
+            # when it comes to the sign of an eigenvector
+            # (note if v is an eigenvector, so is -v),
+            # hence we eliminate this non-determinism
+            # by making sure that each column of U
+            # gets multiplied by the sign of its max (in absolute value) element.
+            # Also, gradcheck changes the content of the input by +/- eps (default to 1e-06)
+            # to compute the numerical gradient which can also cause the signs to flip.
+            _, idx = U.abs().max(-2, keepdim=True)
+            sign = U.gather(-2, idx).sign()
+            U = U * sign
+            return D, U
+
+        def run_symeig_test(k, sizes, largest=True):
+            A = torch.rand(*sizes).double()
+            A = A.matmul(A.transpose(-1, -2)) / 10
+            A.requires_grad_(True)
+
+            gradcheck(lambda A: func(k, A, largest), A)
+
+            # Custom gradient vectors for better stability due to some
+            # non-determinism in the lobpcg's forward.
+            # Note it is not required if symeig is in forward instead (tested).
+            D_grad = torch.rand(*A.shape[:-2], k) / 100
+            U_grad = torch.rand(*A.shape[:-1], k) / 100
+            gradgradcheck(lambda A: func(k, A, largest), A, [D_grad, U_grad], atol=1e-4)
+
+            # check whether A.grad is symmetric
+            A = A.detach().requires_grad_(True)
+            D, U = func(k, A, largest)
+            (D.sum() + U.sum()).backward()
+            self.assertEqual(A.grad, A.grad.transpose(-1, -2))
+
+        # the tests below take about 1-2 minutes to finish,
+        # but we want to be extra sure that the backward is correct.
+        for largest in [True, False]:
+            run_symeig_test(1, (6, 6), largest=largest)
+            run_symeig_test(1, (2, 6, 6), largest=largest)
+            run_symeig_test(1, (2, 2, 6, 6), largest=largest)
+            run_symeig_test(2, (6, 6), largest=largest)
+            run_symeig_test(2, (2, 6, 6), largest=largest)
+            run_symeig_test(2, (2, 2, 6, 6), largest=largest)
+            run_symeig_test(3, (9, 9), largest=largest)
+            run_symeig_test(3, (2, 9, 9), largest=largest)
+            run_symeig_test(3, (2, 2, 9, 9), largest=largest)
+
     @skipIfNoLapack
     def test_cholesky_inverse(self):
         def _test_with_size(upper, dims):
@@ -2617,9 +2721,9 @@ class TestAutograd(TestCase):
 
     @skipIfNoLapack
     def test_triangular_solve(self):
-        def _test_with_size(A_dims, B_dims):
-            A = torch.rand(*A_dims).requires_grad_()
-            b = torch.rand(*B_dims).requires_grad_()
+        def run_test(A_dims, B_dims, dtype):
+            A = torch.rand(*A_dims, dtype=dtype).requires_grad_()
+            b = torch.rand(*B_dims, dtype=dtype).requires_grad_()
 
             for upper, transpose, unitriangular in product((True, False), repeat=3):
                 def func(A, b):
@@ -2628,10 +2732,11 @@ class TestAutograd(TestCase):
                 gradcheck(func, [A, b])
                 gradgradcheck(func, [A, b])
 
-        _test_with_size((3, 3), (3, 4))
-        _test_with_size((3, 3), (3, 2))
-        _test_with_size((2, 3, 3), (2, 3, 4))
-        _test_with_size((2, 3, 3), (2, 3, 2))
+        for dtype in (torch.double, torch.cdouble):
+            run_test((3, 3), (3, 4), dtype)
+            run_test((3, 3), (3, 2), dtype)
+            run_test((2, 3, 3), (2, 3, 4), dtype)
+            run_test((2, 3, 3), (2, 3, 2), dtype)
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_fft_ifft_rfft_irfft(self):
@@ -3415,6 +3520,16 @@ class TestAutograd(TestCase):
         test()
         self.assertEqual(dealloc[0], 1)
 
+    def test_inplace_view_leaf_errors(self):
+        # Issue #21875: Fail faster (when we try to modify the view vs. in backward())
+        x = torch.zeros(1, requires_grad=True)
+        y = x.view_as(x)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "a view of a leaf Variable that "
+                                    "requires grad is being used in "
+                                    "an in-place operation."):
+            y.add_(1)
+
     def test_inplace_view_backward(self):
         # Issue #10532: Make sure that this does not raise RuntimeError.
         net = nn.Sequential(
@@ -3459,13 +3574,10 @@ class TestAutograd(TestCase):
         s.backward()
         self.assertEqual(s, torch.tensor(1.0))
 
-        # Issue 23502: Ensure RuntimeError for modification of SavedVariable.
+        # Issue #21875: Fail faster (when we try to modify the view vs. in backward())
         a = torch.rand(10, requires_grad=True).narrow(0, 0, 10)
-        b = a.relu_()
-        c = b.add_(100)
-        del b
         with self.assertRaises(RuntimeError):
-            c.sum().backward(torch.ones(1, requires_grad=True))
+            b = a.relu_()
 
     def test_mul_out(self):
         a = torch.randn(2, 2, requires_grad=True)
@@ -4160,6 +4272,49 @@ for shape in [(1,), ()]:
         run_test(grad_mode=False, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
 
+    def test_inplace_not_requires_grad(self):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.view_as(inp)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        # Original Tensor does not require grad
+        a = torch.rand(1, 2)
+
+        # Tensor being written does require grad
+        b = torch.rand(1, requires_grad=True)
+
+        # Take an invalid view on a that should raise an error
+        view_a = MyFn.apply(a)
+
+        with self.assertRaisesRegex(RuntimeError, 'Output 0 of a function created in no_grad mode is a view'):
+            view_a += b
+
+        # Extra test for copy_ that is a manual implementation and could be easily
+        # forgotten when the codegen is updated
+        a = torch.rand(1, 2)
+        b = torch.rand(1, requires_grad=True)
+        view_a = MyFn.apply(a)
+
+        with self.assertRaisesRegex(RuntimeError, 'Output 0 of a function created in no_grad mode is a view'):
+            view_a.copy_(b)
+
+        # Functions that should throw must properly throw
+        a = torch.rand(1, 2)
+        b = torch.rand(1, requires_grad=True)
+        view_a = a.unbind()[0]
+        with self.assertRaisesRegex(RuntimeError, 'Output 0 of a function created in no_grad mode is a view'):
+            view_a.copy_(b)
+
+        # Sanity check that views that should work still work
+        a = torch.rand(1, 2)
+        b = torch.rand(1, requires_grad=True)
+        a.select(1, 0).copy_(b)
+
     def _do_test_autograd_simple_views_python(self, dtype):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected
@@ -4273,7 +4428,9 @@ for shape in [(1,), ()]:
                                 if fn_id == "view_of_temp":
                                     # This will be fixed after the deprecation cycle and the warning becomes
                                     # an error.
-                                    with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0"):
+                                    with self.assertRaisesRegex(RuntimeError,
+                                                                "a view of a leaf Variable that requires grad "
+                                                                "is being used in an in-place operation."):
                                         gradcheck(fn, (a, b))
                                 else:
                                     # This works but the custom backward is not called (or called with partial)
@@ -4287,7 +4444,13 @@ for shape in [(1,), ()]:
                         bw_called[0] = 0
                         ga_nz[0] = True  # For the case where the backward is called
                         with warnings.catch_warnings(record=True) as w:
-                            fn(a, b).backward()
+                            if inplace and output_is_a_view and fn_id != "one_output":
+                                with self.assertRaisesRegex(RuntimeError,
+                                                            "a view of a leaf Variable that requires grad "
+                                                            "is being used in an in-place operation."):
+                                    fn(a, b).backward()
+                            else:
+                                fn(a, b).backward()
 
                         expected_called = 1
                         expected_ga_nz = True
@@ -4574,6 +4737,33 @@ for shape in [(1,), ()]:
         test(inp, torch.float, torch.double)
         test(inp, torch.double, torch.float)
 
+    def test_nan_to_num(self):
+        a = torch.randn(3, 3, 3, 3)
+        with torch.no_grad():
+            a[torch.rand_like(a) < 0.2] = float('nan')
+            a[torch.rand_like(a) < 0.2] = float('inf')
+            a[torch.rand_like(a) < 0.2] = -float('inf')
+
+        a.requires_grad = True
+
+        gradcheck(lambda x: x.nan_to_num(), a)
+        gradgradcheck(lambda x: x.nan_to_num(), a)
+
+        gradcheck(lambda x: x.nan_to_num(nan=1.2), a)
+        gradgradcheck(lambda x: x.nan_to_num(nan=1.2), a)
+
+        gradcheck(lambda x: x.nan_to_num(nan=1.2, posinf=2.0), a)
+        gradgradcheck(lambda x: x.nan_to_num(nan=1.2, posinf=2.0), a)
+
+        gradcheck(lambda x: x.nan_to_num(nan=1.2, posinf=2.0, neginf=-2.0), a)
+        gradgradcheck(lambda x: x.nan_to_num(nan=1.2, posinf=2.0, neginf=-2.0), a)
+
+        gradcheck(lambda x: x.nan_to_num(posinf=2.0, neginf=-2.0), a)
+        gradgradcheck(lambda x: x.nan_to_num(posinf=2.0, neginf=-2.0), a)
+
+        gradcheck(lambda x: x.nan_to_num(neginf=-2.0), a)
+        gradgradcheck(lambda x: x.nan_to_num(neginf=-2.0), a)
+
     def test_custom_function_error(self):
         class BadFw(Function):
             @staticmethod
@@ -4727,8 +4917,8 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
 
-# TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition
-separate_complex_tests = ['view_as_real', 'real', 'imag', 'asin', 'acos']  # ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
+separate_complex_tests = ['view_as_real', 'real', 'imag', 'asin', 'acos', 'div', 'log',
+                          'log10', 'log1p', 'log2', 'pow', 'tan', 'reciprocal', 'rsqrt', '__rdiv__']
 
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
@@ -4737,12 +4927,13 @@ separate_complex_tests = ['view_as_real', 'real', 'imag', 'asin', 'acos']  # ['l
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
                 'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
-                'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'round',
+                'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh',
-                'cosh', '__rmul__', 'sgn'] + separate_complex_tests
+                'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
+                'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub'] + separate_complex_tests
 
-# TODO(@anjali411): add the commented tests back after updating the formula based on tensorflow definition - @anjali411
-# complex_list += ['fill_', 't', '__rdiv__', 'tanh']
+# this list corresponds to cases that are not currently implemented
+skip_cuda_list = ['bmm_complex', 'matmul_4d_4d_complex']
 
 def add_test(
         name,
@@ -4864,7 +5055,9 @@ def add_test(
                                         'broadcast_all' in test_name or
                                         'atanh' in test_name or
                                         'acosh' in test_name or
-                                        'asinh' in test_name)
+                                        'asinh' in test_name or
+                                        'abs_complex' in test_name or
+                                        'abs_scalar_complex' in test_name)
                         if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
                             output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                             if not isinstance(output_variable, tuple):
@@ -4911,13 +5104,21 @@ def add_test(
                 inplace_name = name + '_'
                 # can't broadcast inplace to left hand side
                 broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
-                if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
+                # skip C -> R inplace tests
+                skip_c_to_r_inplace = 'abs_complex' in test_name or 'abs_scalar_complex' in test_name
+                skip_inplace = broadcast_skip_inplace or skip_c_to_r_inplace
+                if hasattr(torch.ones(1), inplace_name) and not skip_inplace:
                     check(inplace_name)
 
             assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
 
             for skip in skipTestIf:
                 do_test = skip(do_test)
+
+            # TODO: remove this once tests from skip_cuda_list work
+            do_test = skipCUDAIf(
+                any(skip_test in test_name for skip_test in skip_cuda_list),
+                "not implemented for CUDA yet")(do_test)
 
             setattr(TestAutogradDeviceType, test_name, do_test)
 
@@ -5982,12 +6183,14 @@ class TestAutogradFunctional(TestCase):
 class TestAutogradDeviceType(TestCase):
 
     def test_min_max_median_backprops_to_all_values(self, device):
-        for f in [torch.min, torch.max, torch.median]:
-            x = torch.tensor([1., 0., 1., 0., 1., 0.], device=device, requires_grad=True)
-            y = f(x)
-            y.backward()
-            self.assertEqual(x.grad.sum(), 1.)
-            self.assertEqual((x.grad == 1 / 3).sum(), 3)
+        for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
+            x1 = torch.tensor([1., 0., 1., 0., 1., 0.], device=device, requires_grad=True)
+            x2 = torch.tensor([float('nan'), float('nan'), float('nan')], requires_grad=True)
+            for x in [x1, x2]:
+                y = f(x)
+                y.backward()
+                self.assertEqual(x.grad.sum(), 1.)
+                self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
     # skip this test if running on rocm, because in cdist
     # we use __shfl_down_sync on CUDA for fast reduction
@@ -6036,6 +6239,18 @@ class TestAutogradDeviceType(TestCase):
         _test_cdist_for_size((1, 2, 3))
         _test_cdist_for_size((1, 1), (S, 1))
         _test_euclidean_large_cdist((2000, 5))
+
+    # Ensure that cdist backward with p<1 does not produce NaNs
+    def test_cdist_grad_p_lt_1_no_nan(self, device):
+        for p in [0.99, 0.7, 0.5, 0.1, 0.01]:
+            x = torch.randn(1, 2, device=device)
+            y = x.clone().detach() + torch.tensor([[1., 0.]], device=device)
+            x.requires_grad = True
+            y.requires_grad = True
+            result = torch.cdist(x, y, p=p)
+            result.backward(torch.ones_like(result))
+            self.assertFalse(torch.isnan(x.grad).any())
+            self.assertFalse(torch.isnan(y.grad).any())
 
     def test_cdist_same_inputs(self, device):
         # Test to detect issues in cdist gradient calculation
@@ -6831,6 +7046,32 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(lambda x: x.logcumsumexp(2), a)
         gradgradcheck(lambda x: x.logcumsumexp(2), a)
+
+    @slowTest
+    def test_lu_backward(self, device):
+        def run_test(*sizes):
+            x = torch.rand(*sizes, device=device, dtype=torch.double).requires_grad_(True)
+
+            gradcheck(lambda x: x.lu(get_infos=True), x)
+            gradgradcheck(lambda x: x.lu(get_infos=True), x)
+
+            gradcheck(lambda x: x.lu(get_infos=False), x)
+            gradgradcheck(lambda x: x.lu(get_infos=False), x)
+
+            # there is no pivot-less LU factorization on CPU
+            if x.device.type == 'cuda':
+                gradcheck(lambda x: x.lu(pivot=False, get_infos=True), x)
+                gradgradcheck(lambda x: x.lu(pivot=False, get_infos=True), x)
+
+                gradcheck(lambda x: x.lu(pivot=False, get_infos=False), x)
+                gradgradcheck(lambda x: x.lu(pivot=False, get_infos=False), x)
+
+        run_test(3, 3)
+        run_test(3, 3, 3)
+        run_test(3, 3, 3, 3)
+        run_test(5, 5)
+        run_test(3, 5, 5)
+        run_test(3, 3, 5, 5)
 
     def test_strided_leaf_grad_layout(self, device):
         # (1) If leaf is non-overlapping and dense, grad's layout should match its leaf.

@@ -144,7 +144,7 @@ if(INTERN_BUILD_ATEN_OPS)
   endforeach()
   list(APPEND ATen_CPU_SRCS ${cpu_kernel_cpp})
 
-  file(GLOB all_python "${CMAKE_CURRENT_LIST_DIR}/../tools/codegen/*.py")
+  file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../tools/codegen/*.py")
 
   set(GEN_ROCM_FLAG)
   if(USE_ROCM)
@@ -167,7 +167,7 @@ if(INTERN_BUILD_ATEN_OPS)
     endif()
     execute_process(
       COMMAND
-      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_op_registration_whitelist.py
+      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_op_registration_allowlist.py
       --op-dependency "${OP_DEPENDENCY}"
       --root-ops "${SELECTED_OP_LIST}"
       OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST

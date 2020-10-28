@@ -55,6 +55,7 @@ cc_library(
         "c10/cuda/*.h",
         "c10/cuda/impl/*.h",
         "c10/macros/*.h",
+        "c10/mobile/*.h",
         "c10/util/*.h",
         "c10/util/*.hpp",
     ]),
@@ -71,6 +72,7 @@ cc_library(
     srcs = glob([
         "c10/core/*.cpp",
         "c10/core/impl/*.cpp",
+        "c10/mobile/*.cpp",
         "c10/util/*.cpp",
     ]) + if_cuda(
         glob([
@@ -189,7 +191,6 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/TraceType_3.cpp",
         "torch/csrc/autograd/generated/TraceType_4.cpp",
         # "torch/csrc/autograd/generated/TraceTypeEverything.cpp",
-        "torch/csrc/autograd/generated/RegistrationDeclarations.h",
         "torch/csrc/autograd/generated/Functions.h",
         "torch/csrc/autograd/generated/Functions.cpp",
         "torch/csrc/autograd/generated/variable_factories.h",
@@ -212,9 +213,10 @@ genrule(
     name = "all_generated_code",
     srcs = [
         "aten/src/ATen/Declarations.yaml",
+        "aten/src/ATen/native/native_functions.yaml",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --nn-path aten/src",
+    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src",
     tools = [":generate_code"],
 )
 
@@ -294,6 +296,11 @@ filegroup(
 filegroup(
     name = "aten_base_vulkan",
     srcs = glob(["aten/src/ATen/vulkan/*.cpp"]),
+)
+
+filegroup(
+    name = "aten_base_metal",
+    srcs = glob(["aten/src/ATen/metal/*.cpp"]),
 )
 
 filegroup(
@@ -593,7 +600,10 @@ cc_library(
         "aten/src/THC/generic/*.cu.cc",
         "aten/src/THCUNN/*.cuh",
         "aten/src/THCUNN/generic/*.cu.cc",
-    ]) + [
+    ],
+    exclude = [
+        "aten/src/ATen/Config.h",
+    ],) + [
         ":generated_cpp",
         ":aten_src_ATen_config",
     ],
@@ -648,6 +658,7 @@ cc_library(
         ":ATen_CORE_SRCS",
         ":ATen_QUANTIZED_SRCS",
         ":aten_base_cpp",
+        ":aten_base_metal",
         ":aten_base_vulkan",
         ":aten_native_cpp",
         ":aten_native_mkl_cpp",
@@ -721,6 +732,7 @@ torch_cuda_half_options = [
     "-DCUDA_HAS_FP16=1",
     "-D__CUDA_NO_HALF_OPERATORS__",
     "-D__CUDA_NO_HALF_CONVERSIONS__",
+    "-D__CUDA_NO_BFLOAT16_CONVERSIONS__",
     "-D__CUDA_NO_HALF2_OPERATORS__",
 ]
 
@@ -1873,6 +1885,10 @@ cc_library(
         exclude = [
             "torch/lib/c10d/ProcessGroupMPI.hpp",
             "torch/lib/c10d/ProcessGroupNCCL.hpp",
+            "torch/csrc/autograd/generated/VariableType.h",
+            "torch/csrc/autograd/generated/RegistrationDeclarations.h",
+            "torch/csrc/autograd/generated/variable_factories.h",
+            "torch/csrc/autograd/generated/Functions.h",
         ] + torch_cuda_headers,
     ) + [":cpp_generated_code"],
     includes = [

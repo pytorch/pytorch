@@ -11,31 +11,31 @@ class EmbeddingPackedParams(torch.nn.Module):
     def __init__(self, num_embeddings, embedding_dim, dtype=torch.quint8):
         super(EmbeddingPackedParams, self).__init__()
         self.dtype = dtype
-        if self.dtype == torch.quint8:
+        if self.dtype in [torch.quint8, torch.quint4x2]:
             scales = torch.ones(num_embeddings, dtype=torch.float)
             zero_points = torch.zeros(num_embeddings, dtype=torch.float)
             wq = torch._empty_per_channel_affine_quantized([num_embeddings, embedding_dim], scales=scales,
                                                            zero_points=zero_points,
-                                                           axis=0, dtype=torch.quint8)
+                                                           axis=0, dtype=self.dtype)
             self.set_weight(wq)
         else:
-            raise RuntimeError('Unsupported dtype on quantized embedding!')
+            raise NotImplementedError('Unsupported dtype on quantized embedding! Supports quint8 and quint4x2.')
 
     @torch.jit.export
     def set_weight(self, weight):
         # type: (torch.Tensor) -> None
-        if self.dtype == torch.quint8:
+        if self.dtype in [torch.quint8, torch.quint4x2]:
             self._packed_weight = torch.ops.quantized.embedding_bag_prepack(weight)
         else:
-            raise RuntimeError('Unsupported dtype on quantized embedding!')
+            raise NotImplementedError('Unsupported dtype for quantized embedding prepack! Supports quint8 and quint4x2.')
 
 
     @torch.jit.export
     def _weight(self):
-        if self.dtype == torch.quint8:
+        if self.dtype in [torch.quint8, torch.quint4x2]:
             return torch.ops.quantized.embedding_bag_unpack(self._packed_weight)
         else:
-            raise RuntimeError('Unsupported dtype on quantized embedding!')
+            raise NotImplementedError('Unsupported dtype for quantized embedding unpack! Supports quint8 and quint4x2.')
 
     def forward(self, x):
         return x
@@ -192,17 +192,23 @@ class EmbeddingBag(Embedding):
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
                  mode: str = 'sum', sparse: bool = False, _weight: Optional[Tensor] = None,
                  include_last_offset: bool = False, dtype=torch.quint8) -> None:
-        super(EmbeddingBag, self).__init__(num_embeddings, embedding_dim, _weight=_weight)
+        super(EmbeddingBag, self).__init__(num_embeddings, embedding_dim, _weight=_weight, dtype=dtype)
 
         self.mode = mode
-        self.sparse = sparse
+        self.pruned_weights = False
         self.include_last_offset = include_last_offset
+        self.dtype = dtype
 
     def forward(self, indices: Tensor, offsets: Optional[Tensor] = None, per_sample_weights: Optional[Tensor] = None,
                 compressed_indices_mapping: Optional[Tensor] = None) -> Tensor:
-        return torch.ops.quantized.embedding_bag_byte(self._packed_params._packed_weight, indices, offsets, False, 0,
-                                                      self.sparse, per_sample_weights, compressed_indices_mapping,
-                                                      self.include_last_offset)
+        if self.dtype == torch.quint4x2:
+            return torch.ops.quantized.embedding_bag_4bit(self._packed_params._packed_weight, indices, offsets, False, 0,
+                                                          self.pruned_weights, per_sample_weights, compressed_indices_mapping,
+                                                          self.include_last_offset)
+        else:
+            return torch.ops.quantized.embedding_bag_byte(self._packed_params._packed_weight, indices, offsets, False, 0,
+                                                          self.pruned_weights, per_sample_weights, compressed_indices_mapping,
+                                                          self.include_last_offset)
 
     def _get_name(self):
         return 'QuantizedEmbeddingBag'
@@ -226,13 +232,14 @@ class EmbeddingBag(Embedding):
 
         dtype = weight_observer.dtype
 
-        assert dtype == torch.quint8, 'The only supported dtype for nnq.EmbeddingBag is torch.quint8'
+        assert dtype == torch.quint8 or dtype == torch.quint4x2, \
+            'The only supported dtype for nnq.EmbeddingBag is torch.quint8 and torch.quint4x2'
 
         # Run the observer to calculate qparams.
         weight_observer(mod.weight)
         qweight = _quantize_weight(mod.weight.float(), weight_observer)
 
         # Create quantized EmbeddingBag module and pass in the quantized weight
-        qembedding_bag = EmbeddingBag(mod.num_embeddings, mod.embedding_dim)
+        qembedding_bag = EmbeddingBag(mod.num_embeddings, mod.embedding_dim, dtype=dtype)
         qembedding_bag.set_weight(qweight)
         return qembedding_bag

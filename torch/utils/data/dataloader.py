@@ -113,7 +113,7 @@ class DataLoader(Generic[T_co]):
             in advance by each worker. ``2`` means there will be a total of
             2 * num_workers samples prefetched across all workers. (default: ``2``)
         persistent_workers (bool, optional): If ``True``, the data loader will not shutdown
-            the worker processes after a dataset has been consumed once. This allows to 
+            the worker processes after a dataset has been consumed once. This allows to
             maintain the workers `Dataset` instances alive. (default: ``False``)
 
 
@@ -139,6 +139,9 @@ class DataLoader(Generic[T_co]):
                  See `Dataset Types`_ for more details on these two types of datasets and how
                  :class:`~torch.utils.data.IterableDataset` interacts with
                  `Multi-process data loading`_.
+
+    .. warning:: See :ref:`reproducibility`, and :ref:`dataloader-workers-random-seed`, and
+                 :ref:`data-loading-randomness` notes for random seed related questions.
     """
     dataset: Dataset[T_co]
     batch_size: Optional[int]
