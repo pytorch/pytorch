@@ -926,7 +926,7 @@ Tensor& nonzero_out_cuda(Tensor& out, const Tensor& self){
 }
 
 Tensor nonzero_cuda(const Tensor& self){
-  Tensor out = at::native::empty_cuda({0}, kLong, c10::nullopt, c10::nullopt, c10::nullopt);
+  Tensor out = at::native::empty_cuda({0}, kLong, self.options().layout_opt(), self.options().device_opt(), self.options().pinned_memory_opt());
   return nonzero_out_cuda(out, self);
 }
 
