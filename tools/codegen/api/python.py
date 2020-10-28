@@ -343,7 +343,6 @@ class DispatchLambdaArgument:
     name: str
     type_str: str
     is_out_arg: bool
-    argument: Union[Argument, TensorOptionsArguments]
 
 # To pass PyObjects arguments to C++ function (via the lambda wrapper),
 # we need first convert PyObjects into simple C++ objects. This work
@@ -425,7 +424,7 @@ def argument_type_str(t: Type) -> str:
                         BaseTy.ScalarType, BaseTy.Generator, BaseTy.Storage,
                         BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat,
                         BaseTy.Dimname, BaseTy.Stream, BaseTy.ConstQuantizerPtr]:
-            # These C++ names line up with their schema names
+            # These python schema type names line up with their function schema names
             return t.name.name
 
     elif isinstance(t, OptionalType):
@@ -637,7 +636,6 @@ def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction, *, method: bool
             name=cpp_arg.name,
             type_str=type_str,
             is_out_arg=is_out_arg,
-            argument=cpp_arg.argument,
         )
 
     return tuple(map(dispatch_lambda_arg, cpp_args))
@@ -805,40 +803,10 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
 # Return RHS expression for python argument using PythonArgParser output.
 # e.g. for arg name 'foo', arg type 'bool', arg_index = 2, returns '_r.toBool(2)'
 def arg_parser_output_expr(
-    arg_index: int, a: PythonArgument, la: Optional[DispatchLambdaArgument]
+    arg_index: int, a: PythonArgument
 ) -> PythonArgParserOutputExpr:
-    # The same python signature (and python schema string) is usually
-    # associated with two aten C++ functions: the base version and the
-    # out-place variant. Usually the two functions have the same set of
-    # arguments - of course, except for the output arguments. But in some
-    # cases they might have slightly different C++ argument types -
-    # affected by the 'use_c10_dispatcher' state.
-    #
-    # More specially, 'Tensor?' type can be translated into
-    # either 'const c10::optional<Tensor>&' or 'const Tensor &'.
-    # Unfortunately, this difference can affect how we should access arg
-    # parser output. The former expects '_r.optionalTensor(i)' while the
-    # latter expects '_r.tensor(i)'.
-    #
-    # Because of this subtle difference, we cannot solely use the shared
-    # python signature to determine the RHS expr for both C++ variants.
-    # We could create and use each C++ variant's own python signature,
-    # but we have to fix the argument index difference between the two
-    # python signatures like the old codegen does - and it feels wrong as
-    # technically there is only one shared python signature!
-    #
-    # So here we pass in the lambda wrapper's argument and use it to
-    # decide what PythonArgParser unpack method to use.
-    #
-    # TODO: this seems too complicated - maybe we can simplify after full
-    # c10 dispatch migration?
-    if a.name != 'out' and la is not None and isinstance(la.argument, Argument):
-        arg_type = la.argument.type
-    else:
-        arg_type = a.type
-
     has_default = a.default_init is not None
-    unpack_method = arg_parser_unpack_method(arg_type, has_default)
+    unpack_method = arg_parser_unpack_method(a.type, has_default)
     default = f', {a.default_init}' if has_default else ''
     expr = f'_r.{unpack_method}({arg_index}{default})'
 
@@ -853,11 +821,8 @@ def arg_parser_output_expr(
 def arg_parser_output_exprs(
     ps: PythonSignature, f: NativeFunction, *, method: bool
 ) -> Dict[str, PythonArgParserOutputExpr]:
-    lambda_args = dispatch_lambda_args(ps, f, method=method)
-    lambda_args_map = dict(map(lambda a: (a.name, a), lambda_args))
-
     return {e.name: e for i, a in enumerate(ps.arguments())
-            for e in (arg_parser_output_expr(i, a, lambda_args_map.get(a.name)), )}
+            for e in (arg_parser_output_expr(i, a), )}
 
 # argument name to type for scattered tensor options fields
 TENSOR_OPTIONS_FIELDS = {
