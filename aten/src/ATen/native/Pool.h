@@ -53,7 +53,7 @@ pool2d_shape_check(
   int kH, int kW, int dH, int dW, int padH, int padW, int dilationH, int dilationW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
-  int64_t outputHeight, int64_t outputWidth)
+  int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format)
 {
   const int64_t ndim = input.ndimension();
   const int64_t nOutputPlane = nInputPlane;
@@ -67,8 +67,6 @@ pool2d_shape_check(
   TORCH_CHECK(dilationH > 0 && dilationW > 0,
               "dilation should be greater than zero, but got ",
               "dilationH: ", dilationH, " dilationW: ", dilationW);
-
-  const auto memory_format = input.suggest_memory_format();
   
   bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
   if (memory_format == at::MemoryFormat::ChannelsLast){
@@ -105,13 +103,13 @@ max_pool2d_backward_shape_check(
   int kH, int kW, int dH, int dW, int padH, int padW, int dilationH, int dilationW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
-  int64_t outputHeight, int64_t outputWidth,
+  int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format,
   bool cuda=false)
 {
   pool2d_shape_check(
     input,
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-    nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth);
+    nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, memory_format);
 
   const int64_t ndim = input.ndimension();
   const int64_t nOutputPlane = nInputPlane;
@@ -134,12 +132,14 @@ avg_pool2d_backward_shape_check(
   int kH, int kW, int dH, int dW, int padH, int padW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
-  int64_t outputHeight, int64_t outputWidth)
+  int64_t outputHeight, int64_t outputWidth,
+  MemoryFormat memory_format)
 {
   pool2d_shape_check(
     input,
     kH, kW, dH, dW, padH, padW, 1, 1,
-    nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth);
+    nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+    memory_format);
 
   const int64_t ndim = input.ndimension();
   const int64_t nOutputPlane = nInputPlane;
