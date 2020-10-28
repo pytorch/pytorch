@@ -505,7 +505,6 @@ class TestCuda(TestCase):
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
-    @skipIfRocm
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
 
@@ -522,7 +521,9 @@ class TestCuda(TestCase):
 
         for dst, try_non_blocking in product(("cuda", "cpu"), (True, False)):
             # Creates source on the opposite device from destination.
-            src = torch.randn(1000000, device="cuda" if dst == "cpu" else "cpu")
+            src = torch.randn(1000000,
+                              device="cuda" if dst == "cpu" else "cpu",
+                              pin_memory=True if dst == "cuda" else False)
             _test_to_non_blocking(src, try_non_blocking, dst)
 
     def test_to_cpu_blocking_by_default(self):
