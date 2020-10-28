@@ -756,6 +756,8 @@ public:
 /// \private
 #define MAKE_TORCH_LIBRARY(ns) torch::Library(torch::Library::DEF, #ns, c10::nullopt, __FILE__, __LINE__)
 /// \private
+#define MAKE_TORCH_LIBRARY_FRAGMENT(ns) torch::Library(torch::Library::FRAGMENT, #ns, c10::nullopt, __FILE__, __LINE__)
+/// \private
 #define MAKE_TORCH_LIBRARY_IMPL(ns, k) torch::Library(torch::Library::IMPL, #ns, c10::make_optional(c10::DispatchKey::k), __FILE__, __LINE__)
 
 // Make the custom class API visible, so it is available from
