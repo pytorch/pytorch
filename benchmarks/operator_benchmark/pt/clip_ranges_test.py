@@ -3,6 +3,7 @@ import torch
 
 
 """Microbenchmarks for ClipRanges operator."""
+torch.ops.load_library("//caffe2/torch/fb/sparsenn:sparsenn_operators")
 
 # Configs for C2 ClipRanges operator
 clip_ranges_long_configs = op_bench.cross_product_configs(
@@ -39,8 +40,7 @@ class ClipRangesBenchmark(op_bench.TorchBenchmarkBase):
         self.set_module_name("clip_ranges")
 
     def forward(self):
-        output = self.input.clone()
-        output[:, :, 1].clamp_(0, self.max_length)
+        output = torch.ops.fb.clip_ranges(self.input, self.max_length)
         return output
 
 
