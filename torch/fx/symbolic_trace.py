@@ -173,6 +173,10 @@ class Tracer(TracerBase):
         fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module))
 
         orig_call = torch.nn.Module.__call__
+        orig_getattr = torch.nn.Module.__getattr__
+
+        def module_getattr_wrapper(mod, attr):
+            return self.create_proxy('get_attr', attr, (), {})
 
         def module_call_wrapper(mod, *args, **kwargs):
             def forward(*args, **kwargs):
@@ -181,11 +185,13 @@ class Tracer(TracerBase):
             return self.call_module(mod, forward, args, kwargs)
 
         try:
+            torch.nn.Module.__getattr__ = module_getattr_wrapper
             torch.nn.Module.__call__ = module_call_wrapper
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
         finally:
             torch.nn.Module.__call__ = orig_call
+            torch.nn.Module.__getattr__ = orig_getattr
         return self.graph
 
 # Symbolic tracing API
