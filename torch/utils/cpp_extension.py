@@ -364,8 +364,11 @@ class BuildExtension(build_ext, object):
                         extension.extra_compile_args[ext] = []
 
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
-            self._add_compile_flag(extension, '-DPYBIND11_COMPILER_TYPE=""')
-            self._add_compile_flag(extension, '-DPYBIND11_STDLIB=""')
+            # Pass PYBIND11 constants if defined
+            for name in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
+                val = getattr(torch._C, f"_PYBIND11_{name}")
+                if val is not None:
+                    self._add_compile_flag(extension, f'-DPYBIND11_{name}="{val}"')
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
 
@@ -1592,8 +1595,11 @@ def _write_ninja_file_to_build_library(path,
 
     common_cflags = [f'-DTORCH_EXTENSION_NAME={name}']
     common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
-    common_cflags.append('-DPYBIND11_COMPILER_TYPE=""')
-    common_cflags.append('-DPYBIND11_STDLIB=""')
+    # Pass PYBIND11 constants if defined
+    for pname in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
+        pval = getattr(torch._C, f"_PYBIND11_{pname}")
+        if pval is not None:
+            common_cflags.append(f'-DPYBIND11_{pname}=\\"{pval}\\"')
     common_cflags += [f'-I{include}' for include in user_includes]
     common_cflags += [f'-isystem {include}' for include in system_includes]
 
