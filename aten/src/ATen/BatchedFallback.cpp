@@ -161,6 +161,11 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
       batch_sizes.end(),
       1,
       std::multiplies<int64_t>());
+  // Without a shape-checking API, we're unable to compute the correct shape of
+  // the output so we just error out.
+  TORCH_CHECK(num_batches > 0,
+      "Batching rule not implemented for ", schema.operator_name(), ". ",
+      "The fallback path does not support vmap over dims of size 0.");
 
   // Strategy: For each batch, we are going to push slices (where applicable)
   // of the arguments onto `stack`, and call `op`.
@@ -293,6 +298,11 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
       batch_sizes.end(),
       1,
       std::multiplies<int64_t>());
+  // Without a shape-checking API, we're unable to compute the correct shape of
+  // the output so we just error out.
+  TORCH_CHECK(num_batches > 0,
+      "Batching rule not implemented for ", schema.operator_name(), ". ",
+      "The fallback path does not support vmap over dims of size 0.");
 
   // Strategy: For each batch, we are going to push slices (where applicable)
   // of the arguments onto `stack`, call `op`, and store the result in
