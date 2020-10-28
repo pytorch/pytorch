@@ -195,7 +195,7 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
     return schema;                                                            \
   }                                                                           \
   TORCH_LIBRARY_FRAGMENT_UNIQUE(_caffe2, m, OperatorName) {                   \
-      m.def(OperatorSchema);                                                  \
+      m.def(::caffe2::detail::make_function_schema_for_c10(OperatorSchema));  \
   }                                                                           \
   }                                                                           \
   }
@@ -233,7 +233,7 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
 #define C10_EXPORT_CAFFE2_OP_TO_C10_HIP(OperatorName, OperatorClass)         \
   /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */ \
     TORCH_LIBRARY_IMPL_FRAGMENT(_caffe2, HIP, m, OperatorName) {             \
-        m.impl("_caffe2::OperatorName",                                      \
+        m.impl("_caffe2::" #OperatorName,                                    \
             torch::CppFunction::makeFromBoxedFunction<                       \
                 ::caffe2::detail::call_caffe2_op_from_c10<                   \
                     ::caffe2::_c10_ops::schema_##OperatorName,               \

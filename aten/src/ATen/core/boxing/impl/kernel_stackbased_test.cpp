@@ -73,7 +73,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenC
   expectCallsIncrement(DispatchKey::CPU);
 }
 
-TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
+TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneLibrary_thenCallsRightKernel) {
   auto m = MAKE_TORCH_LIBRARY(_test);
   m.def("_test::my_op(Tensor dummy, int input) -> int");
   m.impl("my_op", DispatchKey::CPU, torch::CppFunction::makeFromBoxedFunction<incrementKernel>());
