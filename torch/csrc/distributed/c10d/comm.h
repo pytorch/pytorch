@@ -1,7 +1,5 @@
 #pragma once
 
-#include <memory>
-
 #include <ATen/ATen.h>
 #include <c10d/ProcessGroup.hpp>
 #include <torch/csrc/utils/pybind.h>
@@ -31,6 +29,10 @@ class GradBucket {
     return tensors_;
   }
 
+  std::vector<at::Tensor>& getTensorsRef() {
+    return tensors_;
+  }
+
  private:
   std::vector<at::Tensor> tensors_;
 };
@@ -47,7 +49,7 @@ class TORCH_PYTHON_API CommHookInterface {
   // Once the tensors in the bucket are ready, kicks off the hook asynchronously
   // and returns a future that holds the communication results.
   virtual c10::intrusive_ptr<torch::jit::Future> runHook(
-      const GradBucket& bucket) = 0;
+      GradBucket& bucket) = 0;
 
   // Returns the resulting tensors once the communication hook result is ready.
   // The resulting tensors will then be copied to the grads of individual
@@ -68,16 +70,39 @@ class TORCH_PYTHON_API PythonCommHook : public CommHookInterface {
 
   ~PythonCommHook() override;
 
-  c10::intrusive_ptr<torch::jit::Future> runHook(
-      const GradBucket& bucket) override;
+  c10::intrusive_ptr<torch::jit::Future> runHook(GradBucket& bucket) override;
 
   std::vector<at::Tensor> parseHookResult(const c10::IValue& result) override;
 
  private:
   // Only needed for stateful communication.
   py::object state_;
-  // Indicates an asynchrounous communication of gradients.
   py::object hook_;
+};
+
+// This CppCommHook interface only requires implementing runHook method that
+// potentially uses a state.
+template <typename T>
+class TORCH_API CppCommHookInterface : public CommHookInterface {
+ public:
+  explicit CppCommHookInterface(T& state) : state_(state) {}
+
+  virtual ~CppCommHookInterface() {}
+
+  std::vector<at::Tensor> parseHookResult(const c10::IValue& result) override {
+    TORCH_INTERNAL_ASSERT(
+        result.isTensor() || result.isTensorList(),
+        "expected the hook result is either a Tensor or a TensorList");
+
+    if (result.isTensor()) {
+      return {result.toTensor()};
+    }
+
+    return result.toTensorVector();
+  }
+
+ protected:
+  T state_; // Not owned.
 };
 
 } // namespace c10d
