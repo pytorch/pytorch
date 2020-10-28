@@ -225,8 +225,9 @@ class Tensor(torch._C._TensorBase):
                 self,
                 gradient=gradient,
                 retain_graph=retain_graph,
-                create_graph=create_graph)
-        torch.autograd.backward(self, gradient, retain_graph, create_graph, inputs)
+                create_graph=create_graph,
+                inputs=inputs)
+        torch.autograd.backward(self, gradient, retain_graph, create_graph, None, inputs)
 
     def register_hook(self, hook):
         r"""Registers a backward hook.

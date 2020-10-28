@@ -866,6 +866,60 @@ class TestAutograd(TestCase):
             torch.autograd.backward([z, q], [torch.ones(5, 5), torch.ones(5, 5)])
         self.assertRaises(RuntimeError, call_backwards)
 
+    def test_backward_with_inputs(self):
+        x = torch.randn(2, 2, requires_grad=True)
+        y = torch.randn(2, 2, requires_grad=True)
+        z = x ** 2 + y * x + y ** 2
+        gradient = torch.ones(2, 2)
+        x_grad_expected = 2 * x + y
+        y_grad_expected = x + 2 * y
+
+        def reset_grad():
+            x.grad.data.zero_()
+            y.grad.data.zero_()
+
+        z.backward(gradient, create_graph=True, inputs=[x,y])
+        self.assertEqual(x.grad, x_grad_expected)
+        self.assertEqual(y.grad, y_grad_expected)
+
+        reset_grad()
+        z.backward(gradient, create_graph=True, inputs=[x])
+        self.assertEqual(x.grad, x_grad_expected)
+        self.assertEqual(y.grad, torch.zeros(2, 2))
+
+        reset_grad()
+        z.backward(gradient, create_graph=True, inputs=[y])
+        self.assertEqual(y.grad, y_grad_expected)
+        self.assertEqual(x.grad, torch.zeros(2, 2))
+
+        # Mirror the behavior from autograd.grad api for empty inputs
+        # populate all grads when inputs is empty
+        reset_grad()
+        z.backward(gradient, create_graph=True, inputs=[])
+        self.assertEqual(y.grad, y_grad_expected)
+        self.assertEqual(x.grad, x_grad_expected)
+
+    def test_backward_nonleaf(self):
+        x = torch.randn(2, 2, requires_grad=True)
+        x_nonleaf = x * 1
+        y = torch.randn(2, 2, requires_grad=True)
+        z = torch.randn(2, 2, requires_grad=True)
+
+        z = x_nonleaf ** 2 + y * x_nonleaf + y ** 2
+
+        z.backward(torch.ones(2, 2), create_graph=True, inputs=[x, y])
+        x_grad_expected = 2 * x + y
+        y_grad_expected = x + 2 * y
+
+        self.assertEqual(y.grad, y_grad_expected)
+        self.assertEqual(x.grad, x_grad_expected)
+
+        self.assertRaisesRegex(RuntimeError, 'One of the differentiated Tensors from inputs is not a leaf Tensor',
+                               lambda: z.backward(torch.ones(2, 2), create_graph=True, inputs=[x, y, x_nonleaf]))
+
+        self.assertRaisesRegex(RuntimeError, 'One of the differentiated Tensors from inputs is not a leaf Tensor',
+                               lambda: z.backward(torch.ones(2, 2), create_graph=True, inputs=[z]))
+
     def test_dependent_backward(self):
         x = torch.randn(10, requires_grad=True)
         y = x ** 2

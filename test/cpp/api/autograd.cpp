@@ -211,7 +211,6 @@ TEST(CustomAutogradTest, FunctionReturnsUndefined) {
   };
 
   auto x = torch::ones(1, torch::requires_grad());
-
   MyFunction::apply(x).backward();
   ASSERT_FALSE(x.grad().defined());
 

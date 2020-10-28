@@ -215,7 +215,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
       }
       if (accumulate_grad) {
         THPUtils_assert(input_var->cdata.is_leaf(),
-          "One of the differentiated Tensors is not a leaf Tensor");
+          "One of the differentiated Tensors from inputs is not a leaf Tensor");
       }
       THPUtils_assert(input_var->cdata.requires_grad(),
           "One of the differentiated Tensors does not require grad");
