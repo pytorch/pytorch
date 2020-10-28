@@ -51,6 +51,7 @@ struct NAME1 {                                                          \
 };                                                                      \
                                                                         \
 std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors) {  \
+    check_foreach_api_restrictions(tensors);                            \
     if (!can_use_fast_route(tensors)) {                                 \
         return at::native::foreach_tensor_##NAME##_slow(tensors);       \
     }                                                                   \
@@ -59,6 +60,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors) {  \
 }                                                                       \
                                                                         \
 void foreach_tensor_##NAME##_cuda_(TensorList tensors) {                \
+    check_foreach_api_restrictions(tensors);                            \
     if (!can_use_fast_route(tensors)) {                                 \
         return at::native::foreach_tensor_##NAME##_slow_(tensors);      \
     }                                                                   \
