@@ -231,7 +231,7 @@ def compute_type_method(
                 assert dispatch is not None
                 impl_name = f"at::native::{f.dispatch[dispatch]}"
 
-            args_exprs_str = ', '.join(map(lambda a: a.name, args))
+            args_exprs_str = ', '.join(a.name for a in args)
 
             return_kw = "    return "
 
@@ -356,7 +356,7 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
             dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
             dispatcher_exprs = dispatcher.cpparguments_exprs(sig.argument_packs())
-            dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, dispatcher_exprs))
+            dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
 
             return f"""
 // aten::{f.func}
@@ -406,7 +406,7 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
             dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
             dispatcher_exprs = dispatcher.cpparguments_exprs(sig.argument_packs())
-            dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, dispatcher_exprs))
+            dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
 
             return f"""
 // aten::{f.func}
@@ -456,7 +456,7 @@ def compute_native_function_declaration(f: NativeFunction) -> List[str]:
         seen.add(n)
         returns_type = native.returns_type(f.func.returns)
         args = native.arguments(f.func)
-        rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(map(lambda a: a.str_with_default(), args))});")
+        rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(a.str_with_default() for a in args)});")
 
     return rs
 
@@ -763,6 +763,9 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     is_factory_method = any(isinstance(a.argument, TensorOptionsArguments) for a in cpp_args) \
         and Variant.method not in f.variants
 
+    # Having only Math in dispatch section is equivalent to no dispatch section.
+    is_abstract = f.dispatch is not None and set(f.dispatch.keys()) != set({'Math'})  # type ignore
+
     return OrderedDict([
         ('name', cpp.name(f.func)),
         ('operator_name', str(f.func.name.name)),
@@ -796,7 +799,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         # for the entry or not (as this affects whether or not the operation is
         # overrideable or not.)  Once this all gets cleaned up, this
         # property will be obsolete.
-        ('abstract', f.dispatch is not None),
+        ('abstract', is_abstract),
         ('device_guard', f.device_guard),
         ('with_gil', False),
         ('deprecated', False),
@@ -974,7 +977,7 @@ def main() -> None:
         d = pre_grouped_native_functions[f.func.signature()]
         assert f.func.kind() not in d
         d[f.func.kind()] = f
-    grouped_native_functions = list(map(NativeFunctionGroup.from_dict, pre_grouped_native_functions.values()))
+    grouped_native_functions = [NativeFunctionGroup.from_dict(v) for v in pre_grouped_native_functions.values()]
     # NB: At the moment, grouped_native_functions isn't used by anything,
     # this code lives here to help potential future consumers; for a live
     # example see https://github.com/pytorch/pytorch/pull/45277
@@ -1130,9 +1133,9 @@ def main() -> None:
             }
         cpu_fm.write('SchemaRegister.cpp', computeSchemaRegister)
 
-    cpu_fm.write('Declarations.yaml', lambda: format_yaml(list(map(compute_declaration_yaml, native_functions))))
+    cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]))
     cpu_fm.write('RegistrationDeclarations.h', lambda: {
-        'registration_declarations': list(map(compute_registration_declarations, native_functions)),
+        'registration_declarations': [compute_registration_declarations(f) for f in native_functions],
     })
 
     if options.output_dependencies:
