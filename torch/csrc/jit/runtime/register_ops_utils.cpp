@@ -205,7 +205,7 @@ int64_t partProduct(int n, int m) {
     return (int64_t)n;
   if (m == (n + 2))
     return (int64_t)n * m;
-  int k = (n + m) / 2;
+  auto k = n + (m - n) / 2; // Overflow-safe midpoint
   if ((k & 1) != 1)
     k = k - 1;
   return partProduct(n, k) * partProduct(k + 2, m);

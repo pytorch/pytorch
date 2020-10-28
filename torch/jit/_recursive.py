@@ -561,6 +561,13 @@ def check_module_initialized(mod):
         raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
                            .format(torch.typename(type(mod))))
 
+    # This is to avoid importing torch.distributed.nn
+    if not hasattr(mod, 'remote_parameters'):
+        for name, param in mod._parameters.items():
+            if isinstance(param, torch.nn.parameter.UninitializedParameter):
+                raise RuntimeError("'{}' has uninitialized parameters {}. Did you forget to run a forward pass?"
+                                   .format(torch.typename(type(mod)), name))
+
 def infer_methods_to_compile(nn_module):
     """
     Implements the default rules for which methods should act as starting
