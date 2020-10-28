@@ -1076,6 +1076,11 @@ def main() -> None:
             compute_type_method('DefaultBackend', target=Target.DECLARATION, selector=selector),
             native_functions)),
     })
+
+    schema_selector = selector
+    if options.force_schema_registration:
+        schema_selector = SelectiveBuilder.get_nop_selector()
+
     cpu_fm.write('TypeDefault.cpp', lambda: {
         'type_method_definitions':
         list(mapMaybe(
@@ -1089,7 +1094,7 @@ def main() -> None:
             native_functions)),
 
         'function_registrations': list(mapMaybe(
-            compute_type_method(None, target=Target.REGISTRATION, selector=selector),
+            compute_type_method(None, target=Target.REGISTRATION, selector=schema_selector),
             native_functions)) + list(mapMaybe(
                 compute_type_method('Math', target=Target.REGISTRATION, selector=selector),
                 native_functions)),
@@ -1122,16 +1127,6 @@ def main() -> None:
         'backend_select_function_registrations':
             list(mapMaybe(compute_backend_select(target=Target.REGISTRATION), native_functions)),
     })
-
-    if options.force_schema_registration:
-        def computeSchemaRegister() -> Dict[str, object]:
-            schema_registrations = list(mapMaybe(
-                compute_type_method(None, target=Target.REGISTRATION, selector=SelectiveBuilder.get_nop_selector(), def_only=True),
-                native_functions))
-            return {
-                'schema_registrations': schema_registrations,
-            }
-        cpu_fm.write('SchemaRegister.cpp', computeSchemaRegister)
 
     cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]))
     cpu_fm.write('RegistrationDeclarations.h', lambda: {
