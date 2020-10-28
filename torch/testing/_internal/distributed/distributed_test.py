@@ -1030,13 +1030,12 @@ class DistributedTest:
             expected_value,
             cuda=False,
             rank_to_GPU=None,
-            async_op=False,
         ):
             for src in group:
                 tensor = _build_tensor(src + 1).fill_(master_value if rank == src else worker_value)
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
-                self.call_dist_op(":reduce", async_op, dist.reduce, tensor, src, op, group_id)
+                self.call_dist_op(":reduce", False, dist.reduce, tensor, src, op, group_id)
                 if rank == src:
                     self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
 
@@ -1184,14 +1183,13 @@ class DistributedTest:
             expected_value,
             cuda=False,
             rank_to_GPU=None,
-            async_op=False,
         ):
             for src in group:
                 tensors = [_build_tensor(src + 1).fill_(master_value if rank == src else worker_value) for i in range(2)]
                 if cuda:
                     for i in range(2):
                         tensors[i] = tensors[i].cuda(rank_to_GPU[rank][0])
-                self.call_dist_op(":reduce", async_op, dist.reduce, tensors[0], src, op, group_id,
+                self.call_dist_op(":reduce", False, dist.reduce, tensors[0], src, op, group_id,
                                   secondary_op_call=lambda: dist.reduce(tensors[1], src, op, group_id))
                 if rank == src:
                     for tensor in tensors:
@@ -1278,14 +1276,14 @@ class DistributedTest:
                 self.assertEqual(result, [_build_tensor(src + 1, expected_value)])
             self._barrier()
 
-        def call_dist_op(self, profiling_title_postfix, async_op, op, *args, expect_event=True, secondary_op_call=None, **kwargs):
-            op_calls = [lambda: op(*args, async_op=async_op, **kwargs)]
+        def call_dist_op(self, profiling_title_postfix, is_async, op, *args, expect_event=True, secondary_op_call=None, **kwargs):
+            op_calls = [lambda: op(*args, **kwargs)]
             if secondary_op_call is not None:
                 op_calls.append(secondary_op_call)
 
             with torch.autograd.profiler.profile() as prof:
                 works = [op_call() for op_call in op_calls]
-                if async_op:
+                if is_async:
                     for work in works:
                         work.wait()
                         work._get_profiling_future().wait()
@@ -1324,7 +1322,7 @@ class DistributedTest:
                 tensor = _build_tensor(src + 1, dtype=dtype).fill_(curr_value)
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
-                self.call_dist_op(":all_reduce", async_op, dist.all_reduce, tensor, op, group_id)
+                self.call_dist_op(":all_reduce", async_op, dist.all_reduce, tensor, op, group_id, async_op=async_op)
 
             self._barrier()
 
@@ -2088,7 +2086,6 @@ class DistributedTest:
             rank,
             cuda=False,
             rank_to_GPU=None,
-            async_op=False,
         ):
             if group_id is not None:
                 size = len(group)
@@ -2099,7 +2096,7 @@ class DistributedTest:
                     in_tensor = in_tensor.cuda(rank_to_GPU[rank][0])
                     expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
                     out_tensor = out_tensor.cuda(rank_to_GPU[rank][0])
-                self.call_dist_op(":all_to_all", async_op, dist.all_to_all_single, out_tensor, in_tensor, group=group_id)
+                self.call_dist_op(":all_to_all", False, dist.all_to_all_single, out_tensor, in_tensor, group=group_id)
                 self.assertEqual(out_tensor, expected_tensor)
             self._barrier()
 
