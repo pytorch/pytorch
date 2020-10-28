@@ -20,6 +20,7 @@ from .utils import (
     _parent_name,
     quantize_node,
     get_per_tensor_qparams,
+    get_swapped_custom_module_class,
     activation_is_statically_quantized,
     weight_is_quantized,
     weight_dtype,
@@ -194,6 +195,12 @@ class ConvRelu(QuantizeHandler):
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         # TODO: debug option for conv module
+        qconfig = quantizer.qconfig_map[node.name]
+        activation_statically_quantized = activation_is_statically_quantized(qconfig)
+        # only static qunatization (for both ptq and qat) is supported for conv
+        if not activation_statically_quantized:
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
         if self.conv_node.op == 'call_module':
             # note that relu should already be fused into conv module in the fusion step
             assert self.relu_node is None, 'conv module and relu fusion is not executed, ' \
@@ -609,13 +616,14 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         assert convert_custom_config_dict is not None
         custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", None)
         assert custom_module_class_mapping is not None
+        qconfig = quantizer.qconfig_map[node.name]
         observed_custom_module = quantizer.modules[node.target]
-        if node.name in quantizer.activation_post_process_map:
+        if activation_is_statically_quantized(qconfig):
+            assert node.name in quantizer.activation_post_process_map
             observed_custom_module.activation_post_process = \
                 quantizer.activation_post_process_map[node.name]
-        quantized_custom_module_class = custom_module_class_mapping.get(type(observed_custom_module), None)
-        assert quantized_custom_module_class is not None, "did not found quantized custom module for:" + \
-            str(type(observed_custom_module))
+        quantized_custom_module_class = get_swapped_custom_module_class(
+            observed_custom_module, custom_module_class_mapping, qconfig)
         quantized_custom_module = \
             quantized_custom_module_class.from_observed(observed_custom_module)
         parent_name, name = _parent_name(node.target)
