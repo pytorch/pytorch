@@ -383,7 +383,7 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
       int64_t seq_num = -1;
       // Setting sequence number in the Autograd case to associate
       // the forward range with the coresponding Autograd's node
-      if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
+      if (c10::autograd_dispatch_keyset.has(dispatchKey) && at::GradMode::is_enabled()) {
         seq_num = at::sequence_number::peek();
       }
       if (guard.needs_inputs) {
@@ -434,7 +434,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   if (C10_UNLIKELY(guard.active)) {
     if (shouldRecord(dispatchKey) && entry.isObserved()) {
       int64_t seq_num = -1;
-      if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
+      if (c10::autograd_dispatch_keyset.has(dispatchKey) && at::GradMode::is_enabled()) {
         seq_num = at::sequence_number::peek();
       }
       if (guard.needs_inputs) {

@@ -56,10 +56,30 @@ TEST(DispatchKeySet, Full) {
   }
 }
 
-TEST(DispatchKeySet, IteratorBasicOps) {
-  DispatchKeySet empty_set;
+TEST(RuntimeDispatchKeySet, Construction) {
   DispatchKeySet full_set(DispatchKeySet::FULL);
-  DispatchKeySet mutated_set = empty_set.add(static_cast<DispatchKey>(1));
+  RuntimeDispatchKeySet s1 = RuntimeDispatchKeySet(full_set, /*has_undefined=*/false);
+  ASSERT_FALSE(s1.has(DispatchKey::Undefined));
+
+  RuntimeDispatchKeySet s2 = RuntimeDispatchKeySet(full_set, /*has_undefined=*/true);
+  ASSERT_TRUE(s2.has(DispatchKey::Undefined));
+
+  RuntimeDispatchKeySet s3 = RuntimeDispatchKeySet(DispatchKey::CPU);
+  ASSERT_TRUE(s3.has(DispatchKey::CPU));
+  ASSERT_FALSE(s1.has(DispatchKey::Undefined));
+
+  RuntimeDispatchKeySet s4 = RuntimeDispatchKeySet(DispatchKey::Undefined);
+  ASSERT_TRUE(s4.has(DispatchKey::Undefined));
+
+  RuntimeDispatchKeySet s5 = RuntimeDispatchKeySet({DispatchKey::CPU, DispatchKey::CUDA, DispatchKey::Undefined});
+  ASSERT_TRUE(s5.has(DispatchKey::CPU));
+  ASSERT_TRUE(s5.has(DispatchKey::CUDA));
+  ASSERT_TRUE(s5.has(DispatchKey::Undefined));
+}
+
+TEST(RuntimeDispatchKeySet, IteratorBasicOps) {
+  RuntimeDispatchKeySet empty_set;
+  RuntimeDispatchKeySet mutated_set = empty_set | RuntimeDispatchKeySet(static_cast<DispatchKey>(1));
 
   // Constructor + Comparison
   ASSERT_EQ(*empty_set.begin(), DispatchKey::NumDispatchKeys);
@@ -67,15 +87,15 @@ TEST(DispatchKeySet, IteratorBasicOps) {
   ASSERT_EQ(*mutated_set.begin(), static_cast<DispatchKey>(1));
 
   ASSERT_TRUE(empty_set.begin() == empty_set.end());
-  ASSERT_TRUE(full_set.begin() != full_set.end());
+  ASSERT_TRUE(mutated_set.begin() != mutated_set.end());
 
   // Increment Ops
-  ASSERT_TRUE(full_set.begin() == full_set.begin()++);
-  ASSERT_TRUE(full_set.begin() != ++full_set.begin());
+  ASSERT_TRUE(mutated_set.begin() == mutated_set.begin()++);
+  ASSERT_TRUE(mutated_set.begin() != ++mutated_set.begin());
 }
 
-TEST(DispatchKeySet, IteratorEmpty) {
-  DispatchKeySet empty_set;
+TEST(RuntimeDispatchKeySet, IteratorEmpty) {
+  RuntimeDispatchKeySet empty_set;
   uint8_t i = 0;
 
   for (auto it = empty_set.begin(); it != empty_set.end(); ++it) {
@@ -84,8 +104,9 @@ TEST(DispatchKeySet, IteratorEmpty) {
   ASSERT_EQ(i, 0);
 }
 
-TEST(DispatchKeySet, IteratorFull) {
-  DispatchKeySet full_set(DispatchKeySet::FULL);
+TEST(RuntimeDispatchKeySet, IteratorFull) {
+  DispatchKeySet full(DispatchKeySet::FULL);
+  RuntimeDispatchKeySet full_set(full);
   uint8_t i = 0;
 
   for (auto it = full_set.begin(); it != full_set.end(); ++it) {
@@ -97,8 +118,9 @@ TEST(DispatchKeySet, IteratorFull) {
 }
 
 
-TEST(DispatchKeySet, IteratorRangeFull) {
-  DispatchKeySet full_set(DispatchKeySet::FULL);
+TEST(RuntimeDispatchKeySet, IteratorRangeFull) {
+  DispatchKeySet full(DispatchKeySet::FULL);
+  RuntimeDispatchKeySet full_set(full);
   uint8_t i = 0;
 
   for (DispatchKey dispatch_key: full_set) {
@@ -109,31 +131,47 @@ TEST(DispatchKeySet, IteratorRangeFull) {
   ASSERT_EQ(i, static_cast<uint8_t>(DispatchKey::NumDispatchKeys) - 1);
 }
 
-TEST(DispatchKeySet, SpecificKeys) {
-  DispatchKeySet keyset({
-      static_cast<DispatchKey>(0), // Undefined should be ignored
+TEST(RuntimeDispatchKeySet, IteratorUndefined) {
+  DispatchKeySet full_set(DispatchKeySet::FULL);
+  RuntimeDispatchKeySet full_set_with_undefined(full_set, /*has_undefined=*/true);
+  uint8_t i = 0;
+
+  for (DispatchKey dispatch_key: full_set_with_undefined) {
+    ASSERT_TRUE(dispatch_key == static_cast<DispatchKey>(i));
+    i++;
+  }
+  ASSERT_EQ(i, static_cast<uint8_t>(DispatchKey::NumDispatchKeys));
+}
+
+TEST(RuntimeDispatchKeySet, SpecificKeys) {
+  RuntimeDispatchKeySet keyset({
+      static_cast<DispatchKey>(0),
       static_cast<DispatchKey>(4),
       static_cast<DispatchKey>(10),
       static_cast<DispatchKey>(15),
     });
+  ASSERT_TRUE(keyset.has(DispatchKey::Undefined));
   std::unordered_set<DispatchKey> visited_keys;
 
   for(DispatchKey key: keyset) {
     visited_keys.insert(key);
   }
 
-  ASSERT_EQ(visited_keys.size(), 3);
+  ASSERT_EQ(visited_keys.size(), 4);
+  ASSERT_TRUE(visited_keys.find(static_cast<DispatchKey>(0)) != visited_keys.end());
   ASSERT_TRUE(visited_keys.find(static_cast<DispatchKey>(4)) != visited_keys.end());
   ASSERT_TRUE(visited_keys.find(static_cast<DispatchKey>(10)) != visited_keys.end());
   ASSERT_TRUE(visited_keys.find(static_cast<DispatchKey>(15)) != visited_keys.end());
 }
 
-TEST(DispatchKeySet, FailAtEndIterator) {
-  DispatchKeySet full_set(DispatchKeySet::FULL);
-  uint64_t raw_repr = full_set.raw_repr();
+TEST(RuntimeDispatchKeySet, FailAtEndIterator) {
+  DispatchKeySet full(DispatchKeySet::FULL);
+  RuntimeDispatchKeySet full_set(full);
+  DispatchKeySet raw_ks = full_set.key_set();
 
-  EXPECT_THROW(DispatchKeySet::iterator(
-                   &raw_repr,
+  EXPECT_THROW(RuntimeDispatchKeySet::iterator(
+                   &raw_ks,
+                   full_set.has(DispatchKey::Undefined),
                    static_cast<uint8_t>(DispatchKey::NumDispatchKeys) + 1
                ),
                c10::Error);
