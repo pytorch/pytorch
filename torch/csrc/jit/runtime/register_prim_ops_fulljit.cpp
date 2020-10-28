@@ -137,9 +137,8 @@ RegisterOperators reg(
      // the whole gradients in every tensor of the Autograd graph with
      // create_graph=True so we use aliasAnalysisConservative for these two OPs
      Operator(
-         "aten::backward.TensorList(Tensor[] tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False, Tensor[]? inputs=None) -> ()",
+         "aten::backward.TensorList(Tensor[] tensors, Tensor?[]? grad_tensors=None, bool? retain_graph=None, bool create_graph=False) -> ()",
          [](Stack* stack) {
-           auto inputs = pop(stack);
            bool create_graph = pop(stack).toBool();
            auto retain_graph = pop(stack).toOptional<bool>();
            auto grad_tensors = pop(stack);
@@ -147,22 +146,13 @@ RegisterOperators reg(
            std::vector<torch::autograd::Variable> output_vars(
                outputs.begin(), outputs.end());
            std::vector<torch::autograd::Variable> gradients;
-           std::vector<torch::autograd::Variable> input_vars;
-
            if (!grad_tensors.isNone()) {
              for (const IValue& v : grad_tensors.toListRef()) {
                gradients.emplace_back(v.isNone() ? at::Tensor() : v.toTensor());
              }
            }
-
-          if (!inputs.isNone()) {
-             for (const IValue& v : inputs.toListRef()) {
-               input_vars.emplace_back(v.toTensor());
-             }
-           }
-
            torch::autograd::backward(
-               output_vars, gradients, retain_graph, create_graph, input_vars);
+               output_vars, gradients, retain_graph, create_graph);
          },
          aliasAnalysisConservative()),
      Operator(

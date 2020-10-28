@@ -8,7 +8,7 @@
 namespace at {
 namespace native {
 
-void backward(const Tensor& self, const Tensor& gradient, c10::optional<bool> keep_graph, bool create_graph, const Tensor& inputs) {
+void backward(const Tensor& self, const Tensor& gradient, c10::optional<bool> keep_graph, bool create_graph) {
   AT_ERROR("backward is not implemented for Tensor");
 }
 

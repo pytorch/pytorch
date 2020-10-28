@@ -858,9 +858,8 @@ RegisterOperators reg(
 #undef CREATE_COPY_OP
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
-             "aten::backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False, Tensor? inputs=None) -> ()"),
+             "aten::backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()"),
          [](Stack* stack) {
-           auto inputs = pop(stack).toOptional<at::Tensor>();
            bool create_graph = pop(stack).toBool();
            auto retain_graph = pop(stack).toOptional<bool>();
            IValue gradient_ivalue = pop(stack);
@@ -869,7 +868,7 @@ RegisterOperators reg(
                : gradient_ivalue.toTensor();
            at::Tensor self = pop(stack).toTensor();
            bool keep_graph = retain_graph ? retain_graph.value() : create_graph;
-           self.backward(gradient, keep_graph, create_graph, inputs);
+           self.backward(gradient, keep_graph, create_graph);
          },
          aliasAnalysisConservative()),
      //
