@@ -1245,7 +1245,6 @@ void addmm(
     int32_t OW;
     int32_t OH;
     int32_t C_4;
-    int32_t C;
     float beta;
     float alpha;
     int32_t K;
@@ -1253,7 +1252,6 @@ void addmm(
   ConstBlock cb{safe_downcast<int32_t>(OW),
                 safe_downcast<int32_t>(OH),
                 safe_downcast<int32_t>(C_4),
-                safe_downcast<int32_t>(C),
                 beta,
                 alpha,
                 safe_downcast<int32_t>(K)};

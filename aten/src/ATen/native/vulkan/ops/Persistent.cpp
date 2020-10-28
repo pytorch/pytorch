@@ -33,8 +33,6 @@ Persistent::Buffer Persistent::Pool::buffer(
     api::Resource::Memory::Handle<uint8_t*> memory = buffer.memory.template map<
         uint8_t,
         api::Resource::Memory::Access::Write>();
-
-    memcpy();
   }
 
   return Persistent::Buffer{
