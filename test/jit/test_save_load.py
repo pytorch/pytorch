@@ -946,4 +946,4 @@ class TestSaveLoad(JitTestCase):
 
         script_module = torch.jit.script(Foo())
         with self.assertRaises(RuntimeError):
-            script_module.save("NoExist/path/test.pt")
+            script_module.save("NonExist/path/test.pt")
