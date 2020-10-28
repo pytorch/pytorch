@@ -185,8 +185,7 @@ Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & 
 }
 
 Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent_) {
-  auto exponent = (exponent_.isComplex()) ? exponent_.toComplexDouble() : exponent_.toDouble();
-  if (exponent == 0.0) {
+  if ((exp.isComplex() && (exp.toComplexDouble() == 0.0)) || (!exp.isComplex() && (exp.toDouble() == 0.0))) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     auto out = grad * (exponent * self.pow(exponent - 1)).conj();
@@ -222,7 +221,12 @@ Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& expo
 }
 
 Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exponent, Tensor result) {
-  auto base_ = base.isComplex() ? base.toComplexDouble() : base.toDouble();
+  Scalar base_;
+  if (base.isComplex()) {
+    base_ = base.toComplexDouble();
+  } else {
+    base_ = base.toDouble();
+  }
   auto grad_lambda = [](auto a, auto b) { return (a * std::log(b)).conj(); };
   if (base_ == 0.0) {
     auto cond = [](auto exp) {
