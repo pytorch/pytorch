@@ -47,7 +47,7 @@ Tensor prepare_batch_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor, i
     } else {
       tensor_ = tensor.clone(at::MemoryFormat::Contiguous);
     }
-    ld_tensor = tensor_strides[1];
+    ld_tensor = tensor_.strides()[1];
   }
 
   return tensor_;
@@ -150,6 +150,9 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 
+  TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {batch1, "batch1", 2}, {batch2, "batch2", 3}};
+  checkAllSameGPU("baddmm", args);
+
   IntArrayRef batch1_sizes = batch1.sizes();
   IntArrayRef batch2_sizes = batch2.sizes();
   IntArrayRef self_sizes = self.sizes();
@@ -162,8 +165,9 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
 
   if (!result.is_same(self)) {
     result.resize_as_(self);
-    if ((beta.isComplex() && beta.to<c10::complex<double>>() != 0.0) ||
-        (beta.to<double>() != 0.0)) {
+    bool is_beta_complex = beta.isComplex();
+    if ((is_beta_complex && beta.to<c10::complex<double>>() != 0.0) ||
+        (!is_beta_complex && beta.to<double>() != 0.0)) {
       result.copy_(self);
     }
   }
