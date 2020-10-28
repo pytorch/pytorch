@@ -650,8 +650,9 @@ class QuantizationTestCase(TestCase):
         prepared = prepare(model, qconfig_dict)
         if not quant_type == QuantType.DYNAMIC:
             prepared(*inputs)
+        prepared_copy = copy.deepcopy(prepared)
         qgraph = convert_fx(prepared)
-        qgraph_debug = convert_fx(prepared, debug=True)
+        qgraph_debug = convert_fx(prepared_copy, debug=True)
         result = qgraph(*inputs)
         result_debug = qgraph_debug(*inputs)
 
