@@ -119,6 +119,8 @@ Reducer::Reducer(
         // This is used later on when the autograd graph is traversed
         // to check for parameters for which no gradient is computed, if
         // find_unused_parameters=True.
+        // We maintain a mapping of gradient accumulator to vector of variables,
+        // since multiple parameters may share the same grad accumulator.
         if (find_unused_parameters_) {
           auto gradAcc = gradAccToVariablesMap_.find(grad_accumulator.get());
           if (gradAcc == gradAccToVariablesMap_.end()) {
@@ -1175,7 +1177,7 @@ void Reducer::finalize_backward() {
       bucket.future_work->wait();
 
       auto future_result =
-          comm_hook_->processFuture(bucket.future_work->value());
+          comm_hook_->parseHookResult(bucket.future_work->value());
 
       for (size_t i = 0; i < future_result.size(); i++) {
         auto& replica = bucket.replicas[i];
