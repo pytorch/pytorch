@@ -103,9 +103,9 @@ static void multilabel_margin_loss_forward_out_cpu_template(
 
   const auto ndims = input.dim();
 
+  bool valid_inputs = (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0);
   TORCH_CHECK(
-      (ndims == 2 && input.size(1) != 0) ||
-      (ndims == 1 && input.size(0) != 0),
+       valid_inputs,
       "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
       input.sizes());
 
@@ -114,7 +114,7 @@ static void multilabel_margin_loss_forward_out_cpu_template(
     nframe = 1;
     dim = ndims == 0 ? 1 : input.size(0);
     TORCH_CHECK(
-        target.numel() > 0 && target.dim() <= 1 && target.numel() == dim,
+        valid_inputs && target.dim() <= 1 && target.numel() == dim,
         "inconsistent size ",
         target.sizes(),
         " for ",
@@ -123,12 +123,28 @@ static void multilabel_margin_loss_forward_out_cpu_template(
     nframe = input.size(0);
     dim = input.size(1);
     TORCH_CHECK(
-        target.numel() > 0 && target.dim() == 2 && target.size(0) == nframe &&
+        valid_inputs && target.dim() == 2 && target.size(0) == nframe &&
             target.size(1) == dim,
         "inconsistent size ",
         target.sizes(),
         " for ",
         target_arg);
+  }
+  
+  // special case target.dim() <= 1: produce scalar output for scalar inputs
+  // even if reduction == Reduction::None
+  if (reduction != Reduction::None || target.dim() <= 1) {
+    output.resize_({});
+  } else {
+    output.resize_({nframe});
+  }
+
+  is_target.resize_as_(target);
+  TORCH_CHECK(is_target.is_contiguous(), "is_target must be contiguous");
+  is_target.zero_();
+
+  if (input.numel() == 0) {
+    return;
   }
 
   TORCH_CHECK(
@@ -138,18 +154,6 @@ static void multilabel_margin_loss_forward_out_cpu_template(
 
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
-
-  is_target.resize_as_(target);
-  TORCH_CHECK(is_target.is_contiguous(), "is_target must be contiguous");
-  is_target.zero_();
-
-  // special case target.dim() <= 1: produce scalar output for scalar inputs
-  // even if reduction == Reduction::None
-  if (reduction != Reduction::None || target.dim() <= 1) {
-    output.resize_({});
-  } else {
-    output.resize_({nframe});
-  }
 
   AT_DISPATCH_FLOATING_TYPES(
       input.scalar_type(), "multilabel_margin_loss_forward_out_frame", [&] {
@@ -239,9 +243,9 @@ static void multilabel_margin_loss_backward_out_cpu_template(
 
   const auto ndims = input.dim();
 
+  bool valid_inputs = (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0);
   TORCH_CHECK(
-      (ndims == 2 && input.size(1) != 0) ||
-      (ndims == 1 && input.size(0) != 0),
+      valid_inputs,
       "Expected non-empty vector or matrix expected with optional 0-dim batch size, but got: ",
       input.sizes());
 
@@ -250,7 +254,7 @@ static void multilabel_margin_loss_backward_out_cpu_template(
     nframe = 1;
     dim = ndims == 0 ? 1 : input.size(0);
     TORCH_CHECK(
-        target.numel() > 0 && target.dim() <= 1 && target.numel() == dim,
+        valid_inputs && target.dim() <= 1 && target.numel() == dim,
         "inconsistent size ",
         target.sizes(),
         " for ",
@@ -259,7 +263,7 @@ static void multilabel_margin_loss_backward_out_cpu_template(
     nframe = input.size(0);
     dim = input.size(1);
     TORCH_CHECK(
-        target.numel() > 0 && target.dim() == 2 && target.size(0) == nframe &&
+        valid_inputs && target.dim() == 2 && target.size(0) == nframe &&
             target.size(1) == dim,
         "inconsistent size ",
         target.sizes(),
@@ -267,6 +271,14 @@ static void multilabel_margin_loss_backward_out_cpu_template(
         target_arg);
   }
   checkSameSize(c, target_arg, is_target_arg);
+  
+  grad_input.resize_as_(input);
+  if (grad_input.numel() == 0) {
+    return;
+  }
+  
+  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
+  grad_input.zero_();
 
   TORCH_CHECK(
       target.min().item<int64_t>() >= -1, target_arg, " is out of range");
@@ -276,10 +288,6 @@ static void multilabel_margin_loss_backward_out_cpu_template(
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
   auto is_target_contiguous = is_target.contiguous();
-
-  grad_input.resize_as_(input);
-  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
-  grad_input.zero_();
 
   AT_DISPATCH_FLOATING_TYPES(
       input.scalar_type(), "multilabel_margin_loss_backward_out_frame", [&] {
