@@ -8286,6 +8286,41 @@ TEST(NVFuserTest, FusionNonUniqueBroadcastSize_CUDA) {
   ASSERT_ANY_THROW(tv3->computeAt(tv4, -1));
 }
 
+// Reproducer of issue #459
+TEST(NVFuserTest, FusionIssue459_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto t0 = makeDummyTensor(1);
+  fusion.addInput(t0);
+  auto t1 = makeDummyTensor(2);
+  fusion.addInput(t1);
+
+  auto t2 = add(t0, new Float(1));
+  auto t3 = broadcast(t2, {true, false});
+
+  auto t4 = add(t1, t3);
+
+  // Create two outputs from the final arithmetic result
+  auto t5 = add(t4, new Float(1));
+  fusion.addOutput(t5);
+  auto t6 = add(t4, new Float(1));
+  fusion.addOutput(t6);
+
+  // Scheduling
+  for (auto output : ir_utils::filterByType<TensorView>(fusion.outputs())) {
+    output->merge(-2, -1);
+  }
+  for (auto output : ir_utils::filterByType<TensorView>(fusion.outputs())) {
+    output->split(0, 128);
+  }
+
+  t0->computeAt(t5, -1);
+
+  // TODO: Fix lowering. See #459.
+  ASSERT_ANY_THROW(fusion.printKernel());
+}
+
 } // namespace jit
 } // namespace torch
 
