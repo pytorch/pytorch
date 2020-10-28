@@ -85,9 +85,9 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
   THPObjectPtr types(PySequence_Fast(arg, "expected a sequence"));
   if (!types) return nullptr;
 
-  int num_classes = PySequence_Fast_GET_SIZE(types.get());
+  auto num_classes = PySequence_Fast_GET_SIZE(types.get());
   names.reserve(names.size() + num_classes);
-  for (size_t i = 0; i < num_classes; i++) {
+  for (Py_ssize_t i = 0; i < num_classes; i++) {
     PyObject* obj = PySequence_Fast_GET_ITEM(types.get(), i);
     THPUtils_assert(PyType_Check(obj), "expected a PyTypeObject");
     PyTypeObject* type = (PyTypeObject*)obj;
