@@ -619,35 +619,38 @@ class DdpComparisonTest(RpcAgentTestFixture):
             rank=self.rank,
         )
 
-        remote_layer1 = RemoteModule(
-            remote_device="worker0/cpu", module_cls=nn.Linear, args=(10, 5, False)
-        )
-        layer1 = nn.Linear(10, 5, False)
-        # Start with the same parameters for remote and local
-        layer1.weight = remote_layer1.module_rref.to_here().weight
-
-        # Run local case.
-        layer2 = nn.Linear(5, 1)
-        inputs = torch.rand((10, 10))
-        ddp_model = DistributedDataParallel(layer2)
-        loss = ddp_model(layer1(inputs)).sum()
-        loss.backward()
-
-        # Run remote case.
-        with dist_autograd.context() as context_id:
-            loss = ddp_model(remote_layer1(inputs)).sum()
-            dist_autograd.backward(context_id, [loss])
-            grads_dict = dist_autograd.get_gradients(context_id)
-            dist.barrier()
-            self.assertEqual(layer2.weight.grad, grads_dict[layer2.weight])
-            self.assertEqual(
-                layer1.weight.grad,
-                rpc.rpc_sync(
-                    "worker0",
-                    DdpComparisonTest.get_remote_grads,
-                    args=(remote_layer1.module_rref, context_id),
-                ),
+        # Use two different remote device input string, w/ and w/o the default
+        # device string "cpu", respectively.
+        for remote_device in ["worker0/cpu", "worker0"]:
+            remote_layer1 = RemoteModule(
+                remote_device=remote_device, module_cls=nn.Linear, args=(10, 5, False)
             )
+            layer1 = nn.Linear(10, 5, False)
+            # Start with the same parameters for remote and local
+            layer1.weight = remote_layer1.module_rref.to_here().weight
+
+            # Run local case.
+            layer2 = nn.Linear(5, 1)
+            inputs = torch.rand((10, 10))
+            ddp_model = DistributedDataParallel(layer2)
+            loss = ddp_model(layer1(inputs)).sum()
+            loss.backward()
+
+            # Run remote case.
+            with dist_autograd.context() as context_id:
+                loss = ddp_model(remote_layer1(inputs)).sum()
+                dist_autograd.backward(context_id, [loss])
+                grads_dict = dist_autograd.get_gradients(context_id)
+                dist.barrier()
+                self.assertEqual(layer2.weight.grad, grads_dict[layer2.weight])
+                self.assertEqual(
+                    layer1.weight.grad,
+                    rpc.rpc_sync(
+                        "worker0",
+                        DdpComparisonTest.get_remote_grads,
+                        args=(remote_layer1.module_rref, context_id),
+                    ),
+                )
 
     @skip_if_lt_x_gpu(NUM_TRAINERS)
     @requires_nccl()

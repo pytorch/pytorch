@@ -17,6 +17,7 @@ import torch
 import torch.distributed.rpc as rpc
 from torch import Tensor, device, dtype, nn
 from torch.distributed.nn.jit import instantiator
+from torch.distributed.rpc.utils import _parse_remote_device
 from torch.nn.parameter import Parameter
 from torch.utils.hooks import RemovableHandle
 
@@ -102,6 +103,7 @@ class _RemoteModule(nn.Module):
             remote_device (str): Device on the destination worker where we‘d like to place this module.
                 The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
                 E.g., "trainer0/cpu", "ps0/cuda:0".
+                In addition, the device field can be optional, and the default value is "cpu".
             module_cls (nn.Module): For example,
                 >>> class MyModule(nn.Module):
                 >>>     def forward(input):
@@ -155,7 +157,7 @@ class _RemoteModule(nn.Module):
         args = args if args is not None else ()
         kwargs = kwargs if kwargs is not None else {}
 
-        [self.on, self.device] = remote_device.split("/")
+        self.on, self.device = _parse_remote_device(remote_device)
 
         if _module_interface_cls is not None:
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
@@ -336,6 +338,7 @@ class RemoteModule(_RemoteModule):
         remote_device (str): Device on the destination worker where we‘d like to place this module.
             The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
             E.g., "trainer0/cpu", "ps0/cuda:0".
+            In addition, the device field can be optional, and the default value is "cpu".
         module_cls (nn.Module): For example,
             >>> class MyModule(nn.Module):
             >>>     def forward(input):
