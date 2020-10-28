@@ -12,7 +12,7 @@
 
 namespace c10 {
 
-enum class DeviceType : int16_t {
+enum class DeviceType : int8_t {
   CPU = 0,
   CUDA = 1, // CUDA.
   MKLDNN = 2, // Reserved for explicit MKLDNN
@@ -30,7 +30,6 @@ enum class DeviceType : int16_t {
   //    in DeviceType.cpp
   //  - Change the number below
   COMPILE_TIME_MAX_DEVICE_TYPES = 12,
-  ONLY_FOR_TEST = 20901, // This device type is only for test.
 };
 
 constexpr DeviceType kCPU = DeviceType::CPU;

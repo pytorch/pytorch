@@ -66,7 +66,7 @@ static void getMajorMinor(
 
 // Compiles the specified kernel and stores the metadata required to run it
 FusedKernelCUDA::FusedKernelCUDA(
-    int16_t device,
+    at::DeviceIndex device,
     std::string name,
     std::string code,
     std::vector<TensorDesc> input_desc,
@@ -222,7 +222,7 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
     std::vector<PartitionDesc> concat_desc,
     bool has_random) {
   return std::make_shared<FusedKernelCUDA>(
-      device,
+      static_cast<at::DeviceIndex>(device),
       std::move(name),
       std::move(code),
       std::move(input_desc),

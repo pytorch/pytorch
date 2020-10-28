@@ -93,6 +93,8 @@ DeviceIndex device_count() noexcept {
   // initialize number of devices only once
   static int count = []() {
     try {
+      auto result = device_count_impl();
+      TORCH_INTERNAL_ASSERT(result < (1 << (sizeof(DeviceIndex) * CHAR_BIT)), "Too many CUDA devices, DeviceIndex overflowed");
       return device_count_impl();
     } catch (const c10::Error& ex) {
       // We don't want to fail, but still log the warning

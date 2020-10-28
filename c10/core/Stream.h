@@ -111,14 +111,14 @@ public:
   uint64_t pack() const noexcept {
     // Are you here because this static assert failed?  Make sure you ensure
     // that the bitmasking code below is updated accordingly!
-    static_assert(sizeof(DeviceType) == 2, "DeviceType is not 16-bit");
-    static_assert(sizeof(DeviceIndex) == 2, "DeviceIndex is not 16-bit");
+    static_assert(sizeof(DeviceType) == 1, "DeviceType is not 8-bit");
+    static_assert(sizeof(DeviceIndex) == 1, "DeviceIndex is not 8-bit");
     static_assert(sizeof(StreamId) == 4, "DeviceIndex is not 32-bit");
     // Concat these together into a 64-bit integer
     // See Note [Hazard when concatenating signed integers]
     uint64_t bits =
-        static_cast<uint64_t>(static_cast<uint16_t>(device_type())) << 48
-      | static_cast<uint64_t>(static_cast<uint16_t>(device_index())) << 32
+        static_cast<uint64_t>(static_cast<uint8_t>(device_type())) << 48
+      | static_cast<uint64_t>(static_cast<uint8_t>(device_index())) << 32
       | static_cast<uint64_t>(static_cast<uint32_t>(id()));
     return bits;
   }
