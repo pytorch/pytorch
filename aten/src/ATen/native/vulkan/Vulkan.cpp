@@ -7,6 +7,7 @@
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+#include <ATen/Utils.h>
 
 #ifdef USE_VULKAN_WRAPPER
 #include <vulkan_wrapper.h>

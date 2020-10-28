@@ -156,7 +156,7 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
   auto first_physical_view_sizes = input_physical_views.front().tensor().sizes();
   auto batch_sizes = ArrayRef<int64_t>(
       first_physical_view_sizes.begin(), first_physical_view_sizes.begin() + num_batch_dims);
-  auto num_batches = prod_intlist(batch_sizes);
+  const auto num_batches = prod_intlist(batch_sizes);
   // Without a shape-checking API, we're unable to compute the correct shape of
   // the output so we just error out.
   TORCH_CHECK(num_batches > 0,
@@ -289,7 +289,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   auto num_batch_dims = input_physical_views.front().numBatchDims();
   auto some_sizes = input_physical_views.front().tensor().sizes();
   auto batch_sizes = ArrayRef<int64_t>(some_sizes.begin(), some_sizes.begin() + num_batch_dims);
-  auto num_batches = prod_intlist(batch_sizes);
+  const auto num_batches = prod_intlist(batch_sizes);
   // Without a shape-checking API, we're unable to compute the correct shape of
   // the output so we just error out.
   TORCH_CHECK(num_batches > 0,

@@ -675,7 +675,7 @@ Tensor matmul(
     std::vector<int64_t> tensor2_expand_size(expand_batch_portion);
     tensor2_expand_size.insert(tensor2_expand_size.end(), {m2, p});
 
-    int64_t expand_batch_product =
+    const int64_t expand_batch_product =
         prod_intlist(expand_batch_portion);
 
     std::vector<int64_t> tensor1_bmm_view({expand_batch_product});

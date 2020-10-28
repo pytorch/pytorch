@@ -128,7 +128,7 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
  */
 template<typename scalar_t, class BinaryFunction>
 __global__ void tensor_kernel_scan_outer_dim_with_indices(scalar_t *self_, scalar_t *values_, int64_t *indices_,
-                  uint32_t num_orows, uint32_t num_irows, uint32_t row_size, scalar_t init, BinaryFunction binary_op) {
+                  const uint32_t num_orows, const uint32_t num_irows, const uint32_t row_size, scalar_t init, BinaryFunction binary_op) {
   for (uint32_t orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
     for (uint32_t irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
       scalar_t *self = self_ + orow * row_size * num_irows + irow;
@@ -166,10 +166,10 @@ __host__ void scan_outer_dim_with_indices(const Tensor& self, Tensor& values, Te
   auto sizes = self.sizes();
 
   // Treat all outer dimensions (i.e. dim_ < dim) as one.
-  int64_t num_orows = accumulate_prod(sizes.begin(), sizes.begin() + dim);
+  const int64_t num_orows = accumulate_prod(sizes.begin(), sizes.begin() + dim);
 
   // Treat all inner dimensions (i.e. dim > dimension) as one.
-  int64_t num_irows = accumulate_prod(sizes.begin() + dim + 1, sizes.end());
+  const int64_t num_irows = accumulate_prod(sizes.begin() + dim + 1, sizes.end());
   check_fits_in_unsigned(num_irows, "num_irows");
   check_fits_in_unsigned(num_orows, "num_orows");
   check_fits_in_unsigned(row_size, "row_size");
@@ -265,8 +265,8 @@ void cummin_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
  */
 template<typename scalar_t, class BinaryOp>
 __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, scalar_t *src_,
-                                              uint32_t num_orows, uint32_t num_irows, uint32_t row_size,
-                                              scalar_t init, BinaryOp binary_op)
+                                              const uint32_t num_orows, const uint32_t num_irows, const uint32_t row_size,
+                                              const scalar_t init, BinaryOp binary_op)
 {
   for (uint32_t orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
     for (uint32_t irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
@@ -297,7 +297,7 @@ __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, scalar_t *src_,
  */
 template<typename T, int num_threads_x, int num_threads_y, class BinaryFunction>
 __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, T *src_,
-                                      uint32_t num_rows, uint32_t row_size,
+                                      const uint32_t num_rows, const uint32_t row_size,
                                       T init, BinaryFunction binary_op){
   for (uint32_t block_row = blockIdx.x * blockDim.y;
        block_row < num_rows;
@@ -372,8 +372,8 @@ __global__ typename std::enable_if<!c10::is_complex<T>::value, void>::type
 tensor_kernel_scan_innermost_dim(
     T* tgt_,
     T* src_,
-    uint32_t num_rows,
-    uint32_t row_size,
+    const uint32_t num_rows,
+    const uint32_t row_size,
     T init,
     BinaryFunction binary_op) {
   __shared__ T sbuf[num_threads_y][2 * num_threads_x];
@@ -392,8 +392,8 @@ __global__ typename std::enable_if<c10::is_complex<T>::value, void>::type
 tensor_kernel_scan_innermost_dim(
     T* tgt_,
     T* src_,
-    uint32_t num_rows,
-    uint32_t row_size,
+    const uint32_t num_rows,
+    const uint32_t row_size,
     T init,
     BinaryFunction binary_op) {
   // As we cannot directly initialize shared array for complex types
@@ -414,14 +414,14 @@ tensor_kernel_scan_innermost_dim(
 template<typename scalar_t, class BinaryFunction>
 __host__ void scan_outer_dim(const Tensor& self, Tensor& result,
                                        int dim, scalar_t init, BinaryFunction binary_op) {
-  int64_t row_size = self.size(dim);
+  const int64_t row_size = self.size(dim);
   auto sizes = self.sizes();
 
   // Treat all outer dimensions (i.e. dim_ < dim) as one.
-  int64_t num_orows = accumulate_prod(sizes.begin(), sizes.begin() + dim);
+  const int64_t num_orows = accumulate_prod(sizes.begin(), sizes.begin() + dim);
 
   // Treat all inner dimensions (i.e. dim > dimension) as one.
-  int64_t num_irows = accumulate_prod(sizes.begin() + dim + 1, sizes.end());
+  const int64_t num_irows = accumulate_prod(sizes.begin() + dim + 1, sizes.end());
 
   dim3 threads(std::min(512, int(num_irows)));
   int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];

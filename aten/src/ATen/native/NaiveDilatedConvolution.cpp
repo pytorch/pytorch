@@ -182,8 +182,8 @@ void slow_conv_dilated_all_cpu_template(
   // Temporary buffer:
   Tensor columns = at::empty({0}, options);
   if (output.defined() || grad_weight.defined() || grad_input.defined()) {
-    int64_t m = prod_intlist(kernel_size);
-    int64_t n = prod_intlist(output_size);
+    const int64_t m = prod_intlist(kernel_size);
+    const int64_t n = prod_intlist(output_size);
     columns.resize_({nInputPlane * m, n});
   }
   // Initialize
