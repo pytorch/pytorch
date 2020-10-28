@@ -48,18 +48,18 @@ void debugPrint(const TensorTypePtr& type) {
       const auto& shape_symbol = sizes.value()[i];
       if (shape_symbol.is_static()) {
         #if defined(__APPLE__)
-          //int64_t format: mac int64_t=long long, should be %lld
+          //int64_t format: mac int64_t=long long, %lld
           printf("%lld, ", shape_symbol.static_size());
         #else
-          //int64_t format: linux int64_t=long int, should be %ld
+          //int64_t format: linux int64_t=long int, %ld
           printf("%ld, ", shape_symbol.static_size());
         #endif
       } else {
         #if defined(__APPLE__)
-          //int64_t format: mac int64_t=long long, should be %lld
+          //int64_t format: mac int64_t=long long, %lld
           printf("s(%lld), ", *reinterpret_cast<const int64_t*>(&shape_symbol));
         #else
-          //int64_t format: linux int64_t=long int, should be %ld
+          //int64_t format: linux int64_t=long int, %ld
           printf("s(%ld), ", *reinterpret_cast<const int64_t*>(&shape_symbol));
         #endif
       }
