@@ -7,6 +7,7 @@
 #include <test/cpp/api/support.h>
 
 using namespace torch::autograd;
+using namespace torch::test;
 
 #define ASSERT_VARIABLE_EQ(a,b) ASSERT_TRUE(torch::allclose((a),(b)))
 #define EXPECT_VARIABLE_EQ(a,b) EXPECT_TRUE(torch::allclose((a),(b)))
@@ -152,6 +153,18 @@ TEST(AutogradAPITests, RetainGrad) {
   input.retain_grad();
   out.backward();
   ASSERT_VARIABLE_EQ(input * 18, input.grad());
+}
+
+TEST(AutogradAPITests, AnomalyMode) {
+  // Needs to have backtrace as warning and then throw an error
+  WarningCapture warnings;
+  torch::autograd::AnomalyMode::set_enabled(true);
+  auto x = torch::tensor({5.0}, torch::requires_grad());
+  auto y = x * x;
+  auto z = y * y;
+  y += 1;
+  ASSERT_THROWS_WITH(z.backward(), "inplace");
+  ASSERT_TRUE(warnings.str().find("Traceback of forward") != std::string::npos);
 }
 
 TEST(CustomAutogradTest, CustomFunction) {
