@@ -905,9 +905,9 @@ class TestAutograd(TestCase):
         y = torch.randn(2, 2, requires_grad=True)
         z = torch.randn(2, 2, requires_grad=True)
 
-        z = x_nonleaf ** 2 + y * x_nonleaf + y ** 2
+        out = x_nonleaf ** 2 + y * x_nonleaf + y ** 2
 
-        z.backward(torch.ones(2, 2), create_graph=True, inputs=[x, y])
+        out.backward(torch.ones(2, 2), create_graph=True, inputs=[x, y])
         x_grad_expected = 2 * x + y
         y_grad_expected = x + 2 * y
 
@@ -915,10 +915,13 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad, x_grad_expected)
 
         self.assertRaisesRegex(RuntimeError, 'One of the differentiated Tensors from inputs is not a leaf Tensor',
-                               lambda: z.backward(torch.ones(2, 2), create_graph=True, inputs=[x, y, x_nonleaf]))
+                               lambda: out.backward(torch.ones(2, 2), create_graph=True, inputs=[x, y, x_nonleaf]))
 
-        self.assertRaisesRegex(RuntimeError, 'One of the differentiated Tensors from inputs is not a leaf Tensor',
-                               lambda: z.backward(torch.ones(2, 2), create_graph=True, inputs=[z]))
+        # backward doesn't have an allow_unused flag, so the behavior of backward
+        # when variable is not part of the graph is as if allow_used were true
+        # x.grad will simply be None.
+        out.backward(torch.ones(2, 2), create_graph=True, inputs=[z])
+        self.assertIsNone(z.grad)
 
     def test_dependent_backward(self):
         x = torch.randn(10, requires_grad=True)
