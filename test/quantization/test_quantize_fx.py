@@ -46,9 +46,6 @@ from torch.testing._internal.common_distributed import skip_if_not_multigpu
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
-from torch.testing._internal.common_quantization import (
-    test_only_eval_fn,
-)
 from torch.testing import FileCheck
 
 import copy
