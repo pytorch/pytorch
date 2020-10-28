@@ -210,15 +210,15 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::Half);
-  float fAlpha = alpha;
-  float fBeta = beta;
+  float falpha = alpha;
+  float fbeta = beta;
 #ifdef __HIP_PLATFORM_HCC__
   TORCH_CUDABLAS_CHECK(rocblas_gemm_strided_batched_ex(handle, opa, opb, (int)m, (int)n, (int)k,
-                                   (void*)&fAlpha, a, rocblas_datatype_f16_r, (int)lda, stridea,
+                                   (void*)&falpha, a, rocblas_datatype_f16_r, (int)lda, stridea,
                                    b, rocblas_datatype_f16_r, (int)ldb, strideb,
-                                   (void*)&fBeta, c, rocblas_datatype_f16_r, (int)ldc, strideC,
+                                   (void*)&fbeta, c, rocblas_datatype_f16_r, (int)ldc, stridec,
                                    c, rocblas_datatype_f16_r, (int)ldc, stridec,
-                                   (int) batchCount, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
+                                   (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0));
 #else
 #if defined(CUDA_VERSION) && CUDA_VERSION < 11000
@@ -250,11 +250,11 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   TORCH_CUDABLAS_CHECK(rocblas_gemm_strided_batched_ex(handle, opa, opb, (int)m, (int)n, (int)k,
-                                   (void*)&fAlpha, a, rocblas_datatype_bf16_r, (int)lda, strideA,
-                                   b, rocblas_datatype_bf16_r, (int)ldb, strideB,
-                                   (void*)&fBeta, c, rocblas_datatype_bf16_r, (int)ldc, strideC,
-                                   c, rocblas_datatype_bf16_r, (int)ldc, strideC,
-                                   (int) batchCount, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
+                                   (void*)&falpha, a, rocblas_datatype_bf16_r, (int)lda, stridea,
+                                   b, rocblas_datatype_bf16_r, (int)ldb, strideb,
+                                   (void*)&fbeta, c, rocblas_datatype_bf16_r, (int)ldc, stridec,
+                                   c, rocblas_datatype_bf16_r, (int)ldc, stridec,
+                                   (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0, NULL, NULL));
 }
 #endif
