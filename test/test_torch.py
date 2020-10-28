@@ -17239,92 +17239,54 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_copysign(self, device, dtype):
         def _test_copysign_numpy(a, b):
             torch_result = torch.copysign(a, b)
-            if torch.is_tensor(b):
-                expected = torch.from_numpy(np.copysign(a.cpu().numpy(), b.cpu().numpy()))
+
+            if a.dtype == torch.bfloat16:
+                np_a = a.to(torch.float).cpu().numpy()
             else:
-                expected = torch.from_numpy(np.copysign(a.cpu().numpy(), b))
+                np_a = a.cpu().numpy()
+
+            if b.dtype == torch.bfloat16:
+                np_b = b.to(torch.float).cpu().numpy()
+            else:
+                np_b = b.cpu().numpy()
+            expected = torch.from_numpy(np.copysign(np_a, np_b))
 
             # To handle inconsistencies of type promotion between PyTorch and Numpy
-            # Applied for both arguments are not floating precision
-            if not a.dtype.is_floating_point or not (isinstance(b, float) or b.dtype.is_floating_point):
+            # Applied for both arguments having integral precision and bfloat16
+            types = [torch.bool, torch.bfloat16] + torch.testing.get_all_int_dtypes()
+            if a.dtype in types or b.dtype in types:
                 promoted_type = torch.promote_types(torch_result.dtype, expected.dtype)
                 torch_result = torch_result.to(promoted_type)
                 expected = expected.to(promoted_type)
-            self.assertEqual(torch.copysign(torch.tensor(1.0), torch_result),
-                             torch.copysign(torch.tensor(1.0), expected))
 
-        # Use double copysign to verify the correctnes of 0.0 and -0.0,
-        # since self.assertEqual(0.0 == -0.0)
-        def _test_copysign(a, b, expected):
-            self.assertEqual(torch.copysign(torch.tensor(1.0), torch.copysign(a, b)),
+            # Use double copysign to verify the correctnes of 0.0 and -0.0,
+            # since self.assertEqual(0.0 == -0.0)
+            self.assertEqual(torch.copysign(torch.tensor(1.0), torch_result),
                              torch.copysign(torch.tensor(1.0), expected))
 
         # Compare with NumPy
         # Type promotion
         type_list = [torch.bool] + torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()
         for dtype2 in type_list:
-            a = _make_tensor((10, 10), device=device, dtype=dtype)
-            b = _make_tensor((10, 10), device=device, dtype=dtype2)
+            a = make_tensor((10, 10), device=device, dtype=dtype, low=-9, high=9)
+            b = make_tensor((10, 10), device=device, dtype=dtype2, low=-9, high=9)
             _test_copysign_numpy(a, b)
 
             # Broadcast
-            a = _make_tensor((10, 1, 10), device=device, dtype=dtype)
-            b = _make_tensor((10, 10), device=device, dtype=dtype2)
+            a = make_tensor((10, 1, 10), device=device, dtype=dtype, low=-9, high=9)
+            b = make_tensor((10, 10), device=device, dtype=dtype2, low=-9, high=9)
             _test_copysign_numpy(a, b)
 
-            a = _make_tensor((10, 10), device=device, dtype=dtype)
-            b = _make_tensor((10, 1, 10), device=device, dtype=dtype2)
+            a = make_tensor((10, 10), device=device, dtype=dtype, low=-9, high=9)
+            b = make_tensor((10, 1, 10), device=device, dtype=dtype2, low=-9, high=9)
             _test_copysign_numpy(a, b)
 
         # 0.0/-0.0/inf/-inf/nan
-        a = _make_tensor((10, 10), device=device, dtype=dtype)
+        a = make_tensor((10, 10), device=device, dtype=dtype, low=-9, high=9)
         b_s = [0.0, -0.0, float('inf'), float('-inf'), float('nan')]
-        for b in b_s:
-            _test_copysign_numpy(a, b)
-
-        if dtype in [torch.bool, torch.uint8]:
-            return
-        if dtype in torch.testing.get_all_int_dtypes():
-            # integer -0 doesn't exist
-            # Result is promoted to float
-            a = torch.tensor([-1, 0, 1], device=device, dtype=dtype)
-            inputs = [
-                (torch.tensor(-1, dtype=dtype),
-                 torch.tensor([-1.0, -0.0, -1.0], device=device, dtype=torch.float)),
-                (torch.tensor(1, dtype=dtype),
-                 torch.tensor([1.0, 0.0, 1.0], device=device, dtype=torch.float)),
-            ]
-        elif dtype in torch.testing.get_all_fp_dtypes():
-            a = torch.tensor([-1.0, 0.0, -0.0, 1.0,
-                              float('inf'), float('-inf'), float('nan')],
-                             device=device, dtype=dtype)
-            inputs = [
-                # Scalar 0.0/-0.0
-                (torch.tensor(0.0, device=device, dtype=dtype),
-                 torch.tensor([1.0, 0.0, 0.0, 1.0,
-                               float('inf'), float('inf'), float('nan')], device=device, dtype=dtype)),
-                (torch.tensor(-0.0, device=device, dtype=dtype),
-                 torch.tensor([-1.0, -0.0, -0.0, -1.0,
-                               float('-inf'), float('-inf'), float('-nan')], device=device, dtype=dtype)),
-                # Constant 0.0/-0.0
-                (0.0, torch.tensor([1.0, 0.0, 0.0, 1.0,
-                                    float('inf'), float('inf'), float('nan')], device=device, dtype=dtype)),
-                (-0.0, torch.tensor([-1.0, -0.0, -0.0, -1.0,
-                                     float('-inf'), float('-inf'), float('-nan')], device=device, dtype=dtype)),
-                # inf, -inf, nan
-                (torch.tensor(float('inf'), device=device, dtype=dtype),
-                 torch.tensor([1.0, 0.0, 0.0, 1.0,
-                               float('inf'), float('inf'), float('nan')], device=device, dtype=dtype)),
-                (torch.tensor(float('-inf'), device=device, dtype=dtype),
-                 torch.tensor([-1.0, -0.0, -0.0, -1.0,
-                               float('-inf'), float('-inf'), float('-nan')], device=device, dtype=dtype)),
-                (torch.tensor(float('nan'), device=device, dtype=dtype),
-                 torch.tensor([1.0, 0.0, 0.0, 1.0,
-                               float('inf'), float('inf'), float('nan')], device=device, dtype=dtype)),
-            ]
-
-        for b, expected in inputs:
-            _test_copysign(a, b, expected)
+        for dtype2 in torch.testing.get_all_fp_dtypes():
+            for b in b_s:
+                _test_copysign_numpy(a, torch.tensor(b, dtype=dtype2))
 
     @dtypes(torch.bfloat16, torch.float)
     def test_div(self, device, dtype):
