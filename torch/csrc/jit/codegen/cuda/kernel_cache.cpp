@@ -46,11 +46,11 @@ void debugPrint(const TensorTypePtr& type) {
     int rank = static_cast<int>(sizes->size());
     for (int i = 0; i < rank; i++) {
       const auto& shape_symbol = sizes.value()[i];
-      //int64_t format
       if (shape_symbol.is_static()) {
-        printf("%lld, ", shape_symbol.static_size());
+        //int64_t format: here should further check-up for byte, as different for mac & linux for int64_t definition
+        printf(sizeof(long long) ==  sizeof(int64_t)? "%lld, ": "%ld, ", shape_symbol.static_size());
       } else {
-        printf("s(%lld), ", *reinterpret_cast<const int64_t*>(&shape_symbol));
+        printf(sizeof(long long) ==  sizeof(int64_t)? "s(%lld), ": "s(%ld), ", *reinterpret_cast<const int64_t*>(&shape_symbol));
       }
     }
   } else {
