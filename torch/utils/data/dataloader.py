@@ -468,7 +468,7 @@ class DataLoader(Generic[T_co]):
                 cpuset_checked))
             return
 
-        if  self.num_workers > max_num_worker_suggest:
+        if self.num_workers > max_num_worker_suggest:
             warnings.warn(_create_warning_msg(
                 max_num_worker_suggest,
                 self.num_workers,
