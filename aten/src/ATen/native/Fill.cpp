@@ -19,7 +19,7 @@ Tensor& fill_out(Tensor& self, Scalar value) {
     return self;
   }
   if (self.device() == at::kCPU && self.numel() == 1 && !self.is_complex() && !value.isComplex()) {
-    return at::scalar_fill(self, value);
+    return at::detail::scalar_fill(self, value);
   }
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(false)  // Fill is idempotent, so overlap is okay
