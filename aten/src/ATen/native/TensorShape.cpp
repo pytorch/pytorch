@@ -1634,7 +1634,7 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::option
   TORCH_CHECK(sizes.size() > 0, "unflatten: sizes must be non-empty");
   TORCH_INTERNAL_ASSERT(!names || names->size() == sizes.size());
 
-  int64_t numel = std::accumulate(sizes.begin(), sizes.end(), decltype(numel){1}, std::multiplies<int64_t>());
+  int64_t numel = prod_intlist(sizes);
   if (self.has_names()) {
     TORCH_CHECK(numel == self.size(dim),
       "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",

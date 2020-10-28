@@ -22,11 +22,7 @@ VkDeviceSize bytes(
     size *= extents.width * extents.height * (4u * extents.depth);
   }
   else {
-    size = std::accumulate(
-        sizes.cbegin(),
-        sizes.cend(),
-        decltype(size){size},
-        std::multiplies<int64_t>());
+    size = prod_intlist(sizes);
   }
 
   return size;

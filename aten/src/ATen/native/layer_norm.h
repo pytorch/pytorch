@@ -52,16 +52,10 @@ std::tuple<Tensor, Tensor, Tensor, int64_t, int64_t> _prepare_layer_norm_inputs(
   }
 
   const int axis = input_ndim - normalized_ndim;
-  const int64_t M = std::accumulate(
-      input_shape.cbegin(),
-      input_shape.cbegin() + axis,
-      decltype(M){1},
-      std::multiplies<int64_t>());
-  const int64_t N = std::accumulate(
-      input_shape.cbegin() + axis,
-      input_shape.cend(),
-      decltype(N){1},
-      std::multiplies<int64_t>());
+  const int64_t M =
+      accumulate_prod(input_shape.cbegin(), input_shape.cbegin() + axis);
+  const int64_t N =
+      accumulate_prod(input_shape.cbegin() + axis, input_shape.cend());
 
   const auto& X = input.is_contiguous() ? input : input.contiguous();
   const auto& gamma = weight.is_contiguous() ? weight : weight.contiguous();

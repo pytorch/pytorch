@@ -553,8 +553,7 @@ void add(
 void add(VulkanTensor& output, const VulkanTensor& input, const float s) {
   const auto sizes = input.sizes();
 
-  const auto C = std::accumulate(
-      sizes.cbegin(), sizes.cend() - 2, (int64_t)1, std::multiplies<int64_t>());
+  const auto C = accumulate_prod(sizes.cbegin(), sizes.cend() - 2);
   const auto C_4 = UP_DIV(C, 4);
   const auto H = sizes[2];
   const auto W = sizes[3];
@@ -606,8 +605,7 @@ void add(VulkanTensor& output, const VulkanTensor& input, const float s) {
 void mul(VulkanTensor& output, const VulkanTensor& input, const float s) {
   const auto sizes = input.sizes();
 
-  const auto C = std::accumulate(
-      sizes.cbegin(), sizes.cend() - 2, (int64_t)1, std::multiplies<int64_t>());
+  const auto C = accumulate_prod(sizes.cbegin(), sizes.cend() - 2);
   const auto C_4 = UP_DIV(C, 4);
   const auto H = sizes[2];
   const auto W = sizes[3];

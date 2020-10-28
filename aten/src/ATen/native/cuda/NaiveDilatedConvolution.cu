@@ -188,10 +188,8 @@ void slow_conv_dilated_all_cuda_template(
   int64_t nInputPlane = weight.size(1);
   int64_t nOutputPlane = weight.size(0);
   // Temporary buffers:
-  int64_t m = std::accumulate(
-      kernel_size.begin(), kernel_size.end(), decltype(m){1}, std::multiplies<int64_t>());
-  int64_t output_vsize = std::accumulate(
-      output_size.begin(), output_size.end(), decltype(output_vsize){1}, std::multiplies<int64_t>());
+  int64_t m = prod_intlist(kernel_size);
+  int64_t output_vsize = prod_intlist(output_size);
   Tensor columns = at::empty({0}, options);
   if (output.defined() || grad_weight.defined() || grad_input.defined()) {
     columns.resize_({nInputPlane * m, output_vsize});

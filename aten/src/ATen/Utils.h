@@ -93,10 +93,21 @@ inline int64_t sum_intlist(ArrayRef<int64_t> list) {
   return std::accumulate(list.begin(), list.end(), 0ll);
 }
 
-inline int64_t prod_intlist(ArrayRef<int64_t> list) {
-  return std::accumulate(list.begin(), list.end(), 1ll, std::multiplies<int64_t>());
+// inline int64_t prod_intlist(ArrayRef<int64_t> list) {
+//   return std::accumulate(list.begin(), list.end(), 1ll, std::multiplies<int64_t>());
+// }
+
+template<typename C>
+inline typename C::value_type prod_intlist(const C &container){
+    typedef typename C::value_type element_type;
+    return std::accumulate(container.begin(), container.end(), static_cast<element_type>(1), std::multiplies<element_type>());
 }
 
+template<typename Iter>
+inline typename std::iterator_traits<Iter>::value_type accumulate_prod(Iter begin, Iter end){
+    typedef typename std::iterator_traits<Iter>::value_type element_type;
+    return std::accumulate(begin, end, static_cast<element_type>(1), std::multiplies<element_type>());
+}
 /**
  * Utility function to static cast input Generator* to
  * the backend generator type (CPU/CUDAGeneratorImpl etc.)
