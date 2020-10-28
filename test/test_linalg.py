@@ -986,7 +986,8 @@ class TestLinalg(TestCase):
         A = torch.randn(2, device=device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, r'must have at least 2 dimensions'):
             torch.linalg.cholesky(A)
-        with self.assertRaisesRegex(np.linalg.LinAlgError, r'1-dimensional array given\. Array must be at least two-dimensional'):
+        with self.assertRaisesRegex(np.linalg.LinAlgError,
+                                    r'1-dimensional array given\. Array must be at least two-dimensional'):
             np.linalg.cholesky(A.cpu().numpy())
 
         # if the input matrix is singular, an error should be raised
@@ -1099,8 +1100,10 @@ class TestLinalg(TestCase):
             # This is a workaround while there is no support for batched complex random_symmetric_pd_matrix
             if dtype.is_complex:
                 real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
-                A_real = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, dtype=real_dtype, device=device)
-                A_imag = random_fullrank_matrix_distinct_singular_value(n, *batch_dims, dtype=real_dtype, device=device)
+                A_real = random_fullrank_matrix_distinct_singular_value(n, *batch_dims,
+                                                                        dtype=real_dtype, device=device)
+                A_imag = random_fullrank_matrix_distinct_singular_value(n, *batch_dims,
+                                                                        dtype=real_dtype, device=device)
                 A = A_real + 1j * A_imag
                 # There is no support for complex batched matmul yet
                 matmul_list = []
