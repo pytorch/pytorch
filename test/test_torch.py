@@ -5300,7 +5300,10 @@ class TestTorchDeviceType(TestCase):
                 self.assertRaises(RuntimeError,
                                   lambda: zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor))
 
-            self.assertRaises(RuntimeError, lambda: torch.sign(torch.tensor([4j], device=device, dtype=dtype)))
+            with self.assertRaisesRegex(RuntimeError,
+                                        (r'Unlike NumPy, torch.sign is not intended to support complex numbers\. '
+                                         r'Please use torch.sgn instead\.')):
+                torch.sign(torch.tensor([4j], device=device, dtype=dtype))
 
             a = torch.rand((2, 2), dtype=dtype, device=device)
             b = torch.rand((2, 2), dtype=dtype, device=device)
@@ -6326,6 +6329,25 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'heaviside is not yet implemented for tensors with different dtypes.'):
                 input.heaviside_(values)
 
+    @onlyCUDA
+    def test_heaviside_cross_device(self, device):
+        x = torch.tensor([-9, 5, 0, 6, -2, 2], device='cuda')
+        y = torch.tensor(0)
+        result = torch.heaviside(x, y)
+        expect = torch.tensor([0, 1, 0, 1, 0, 1], device='cuda')
+        self.assertEqual(result, expect)
+
+        result = torch.heaviside(y, x)
+        expect = torch.tensor([-9, 5, 0, 6, -2, 2], device='cuda')
+        self.assertEqual(result, expect)
+
+        x = torch.tensor([-9, 5, 0, 6, -2, 2])
+        y = torch.tensor(0, device='cuda')
+        with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
+            torch.heaviside(x, y)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
+            torch.heaviside(y, x)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @dtypes(*list(product(torch.testing.get_all_complex_dtypes(),
@@ -8096,21 +8118,26 @@ class TestTorchDeviceType(TestCase):
             self.compare_with_numpy(torch_fn, np_fn, data)
 
     @onlyOnCPUAndCUDA
+    @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    def test_signal_window_functions(self, device):
+    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
+    @dtypesIfCPU(torch.float, torch.double, torch.long)
+    def test_signal_window_functions(self, device, dtype):
 
         def test(name, kwargs):
             torch_method = getattr(torch, name + '_window')
+            if not dtype.is_floating_point:
+                with self.assertRaisesRegex(RuntimeError, r'floating point'):
+                    torch_method(3, dtype=dtype)
+                return
             for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
                 for periodic in [True, False]:
-                    res = torch_method(size, periodic=periodic, **kwargs, device=device)
-                    # NB: scipy always returns a float32 result
+                    res = torch_method(size, periodic=periodic, **kwargs, device=device, dtype=dtype)
+                    # NB: scipy always returns a float64 result
                     ref = torch.from_numpy(signal.get_window((name, *(kwargs.values())), size, fftbins=periodic))
                     self.assertEqual(res, ref, exact_dtype=False)
             with self.assertRaisesRegex(RuntimeError, r'not implemented for sparse types'):
                 torch_method(3, layout=torch.sparse_coo)
-            with self.assertRaisesRegex(RuntimeError, r'floating point'):
-                torch_method(3, dtype=torch.long)
             self.assertTrue(torch_method(3, requires_grad=True).requires_grad)
             self.assertFalse(torch_method(3).requires_grad)
 
@@ -17013,6 +17040,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         b = torch.exp(torch.ones(1, dtype=dtype, device=device))
         self.assertEqual(a, b.expand(2 ** 31))
 
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float: 0.0002, torch.double: 0.0002})
+    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
     @dtypes(torch.float, torch.double)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_hardswish(self, device, dtype):
@@ -17020,7 +17049,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         expectedOutput = np.multiply(
             inputValues,
             np.minimum(np.maximum((np.add(inputValues, 3)), 0), 6) / 6.0)
-        precision_4dps = 0.0002
 
         inputTensor = torch.tensor(inputValues, dtype=dtype, device=device)
         expectedOutputTensor = \
@@ -17028,14 +17056,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         # normal
         self.assertEqual(torch.nn.functional.hardswish(inputTensor),
-                         expectedOutputTensor,
-                         atol=precision_4dps, rtol=0)
+                         expectedOutputTensor)
 
         # inplace
         inputTensorCpy = inputTensor.clone().detach()
         torch.nn.functional.hardswish(inputTensorCpy, inplace=True)
-        self.assertEqual(inputTensorCpy, expectedOutputTensor,
-                         atol=precision_4dps, rtol=0)
+        self.assertEqual(inputTensorCpy, expectedOutputTensor)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -17049,6 +17075,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                          torch.tensor(expectedOutput, dtype=dtype, device=device),
                          atol=precision_4dps, rtol=0)
 
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float: 0.0002, torch.double: 0.0002})
+    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
     @dtypes(torch.float, torch.double)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_hardsigmoid(self, device, dtype):
@@ -17056,18 +17084,15 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         expectedOutput = np.minimum(np.maximum((np.add(inputValues, 3)), 0), 6) / 6.0
 
         inputTensor = torch.tensor(inputValues, dtype=dtype, device=device)
-        precision_4dps = 0.0002
 
         # normal
         self.assertEqual(torch.nn.functional.hardsigmoid(inputTensor),
-                         torch.tensor(expectedOutput, dtype=dtype, device=device),
-                         atol=precision_4dps, rtol=0)
+                         torch.tensor(expectedOutput, dtype=dtype, device=device))
 
         # inplace
         inputTensorCpy = inputTensor.clone().detach()
         self.assertEqual(torch.nn.functional.hardsigmoid(inputTensorCpy, inplace=True),
-                         torch.tensor(expectedOutput, dtype=dtype, device=device),
-                         atol=precision_4dps, rtol=0)
+                         torch.tensor(expectedOutput, dtype=dtype, device=device))
 
     @skipIfNoSciPy
     @dtypes(torch.float, torch.double)
