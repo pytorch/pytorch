@@ -5,8 +5,6 @@
 #define __STDC_FORMAT_MACROS
 #endif
 
-#include <ATen/${Type}.h>
-
 // ${generated_comment}
 
 #include <c10/core/TensorImpl.h>
