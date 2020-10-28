@@ -12,6 +12,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 
 namespace c10d {
@@ -299,6 +300,11 @@ class ProcessGroupNCCL : public ProcessGroup {
       auto fut = c10::make_intrusive<FutureNCCL>(
           deviceIndex_, thenFutCudaEvents, futureNCCLCallbackStream_);
 
+      // Do not free the underlying data storage of value_ before its
+      // usage on futureNCCLCallbackStream_ finish.
+      TORCH_INTERNAL_ASSERT(record_stream_cb_);
+      record_stream_cb_(value_, futureNCCLCallbackStream_->unwrap());
+
       // Use the dedicated callback stream to run callback.
       // Cannot move capture std::function in lambda, because it cannot deduce
       // the template type for std::function. Hence use std::bind to explicitly
@@ -333,11 +339,19 @@ class ProcessGroupNCCL : public ProcessGroup {
       return !value_.isNone();
     }
 
+    void setRecordStreamCallback(
+        std::function<void(const at::IValue&, const c10::Stream&)>
+            record_stream_cb) override {
+      record_stream_cb_ = std::move(record_stream_cb);
+    }
+
    private:
     at::IValue value_;
     c10::DeviceIndex deviceIndex_;
     std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
     std::shared_ptr<at::cuda::CUDAStream> futureNCCLCallbackStream_;
+    std::function<void(const at::IValue&, const c10::Stream&)>
+        record_stream_cb_;
     c10::optional<FutureError> error_;
   };
 
@@ -584,10 +598,10 @@ class ProcessGroupNCCL : public ProcessGroup {
   //
   // For point-to-point operations:
   // The key is a string of my current rank and the peer process rank.
-  // e.g. If process 1 and process 2 are involved in a point-to-point communication,
-  // the key will be "1:2" on both processes.
-  // Note: this is for the scenario where there is only 1 GPU per process.
-  // When it comes to multiple GPUs per process, this part may need to redesigned.
+  // e.g. If process 1 and process 2 are involved in a point-to-point
+  // communication, the key will be "1:2" on both processes. Note: this is for
+  // the scenario where there is only 1 GPU per process. When it comes to
+  // multiple GPUs per process, this part may need to redesigned.
   std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
       devNCCLCommMap_;
 
