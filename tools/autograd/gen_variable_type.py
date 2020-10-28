@@ -445,6 +445,7 @@ def find_factory_functions(declarations):
             FACTORY_FUNCTION_NAMES.add(declaration['api_name'])
 
 
+# TODO: consolidate with 'gen_python_functions.should_trace()'
 def should_trace(declaration):
     # Operations involving Storage or Type are not traceable at the moment
     if any(arg['simple_type'] in {'Storage', 'Type', 'ConstQuantizerPtr'} for arg in declaration['arguments']):
