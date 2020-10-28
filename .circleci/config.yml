@@ -7391,6 +7391,24 @@ workflows:
           vc_version: ""
           vc_year: "2019"
       - pytorch_windows_test:
+          build_environment: pytorch-win-vs2019-cpu-py3
+          cuda_version: cpu
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          name: pytorch_windows_vs2019_py36_cpu_test3
+          python_version: "3.6"
+          requires:
+            - pytorch_windows_vs2019_py36_cpu_build
+          test_name: pytorch-windows-test3
+          use_cuda: "0"
+          vc_product: Community
+          vc_version: ""
+          vc_year: "2019"
+      - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
           cuda_version: "10"
           filters:
@@ -7404,18 +7422,6 @@ workflows:
           requires:
             - pytorch_windows_vs2019_py36_cuda10.1_build
           test_name: pytorch-windows-test1
-          use_cuda: "0"
-          vc_product: Community
-          vc_version: ""
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cpu-py3
-          cuda_version: cpu
-          name: pytorch_windows_vs2019_py36_cpu_test3
-          python_version: "3.6"
-          requires:
-            - pytorch_windows_vs2019_py36_cpu_build
-          test_name: pytorch-windows-test3
           use_cuda: "0"
           vc_product: Community
           vc_version: ""
