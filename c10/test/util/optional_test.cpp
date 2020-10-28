@@ -63,7 +63,7 @@ TYPED_TEST(OptionalTest, Initialized) {
   typename TestFixture::optional moveAssign;
   moveAssign = std::move(moveFrom2);
 
-  std::array<typename TestFixture::optional *, 5> opts = { &opt, &copy, &copyAssign, &move, &moveAssign };
+  std::array<typename TestFixture::optional *, 5> opts = {{ &opt, &copy, &copyAssign, &move, &moveAssign }};
   for (auto* popt : opts) {
     auto& opt = *popt;
     EXPECT_TRUE((bool)opt);
