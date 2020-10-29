@@ -502,9 +502,6 @@ std::tuple<Tensor,Tensor> _histogram_cuda_uniform_bins(
     TORCH_CHECK(
         weights.sizes() == self.sizes(),
         "histogram only supports input and weights of the same shape");
-  if (self.scalar_type() == ScalarType::Half) {
-    AT_ERROR("HalfTensor is not supported");
-  }
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_histogram_cuda");
   return AT_DISPATCH_ALL_TYPES(
