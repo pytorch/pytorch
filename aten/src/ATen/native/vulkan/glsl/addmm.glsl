@@ -2,24 +2,26 @@
 #define PRECISION $precision
 layout(std430) buffer;
 layout(std430) uniform;
-layout(set = 0, rgba16f, binding = 0) writeonly PRECISION uniform image3D uOutput;
-layout(set = 0, binding = 1) uniform PRECISION sampler3D uM1;
-layout(set = 0, binding = 2) uniform PRECISION sampler3D uM2;
-layout(set = 0, binding = 3) uniform constBlock {
-  ivec4 outputSize;
+
+/* Qualifiers: layout - storage - precision - memory */
+
+layout(set = 0, binding = 0, rgba16f) uniform PRECISION writeonly image3D   uOutput;
+layout(set = 0, binding = 1)          uniform PRECISION           sampler3D uM1;
+layout(set = 0, binding = 2)          uniform PRECISION           sampler3D uM2;
+layout(set = 0, binding = 3)          uniform           restrict  Block {
+  ivec3 WHC;
   float beta;
   float alpha;
   int K;
-}
-uConstBlock;
-layout(set = 0, binding = 4) uniform PRECISION sampler3D uT;
+} uBlock;
+layout(set = 0, binding = 4)          uniform PRECISION           sampler3D uT;
 
 layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
-  ivec3 pos = ivec3(gl_GlobalInvocationID);
-  if (all(lessThan(pos, uConstBlock.outputSize.xyz))) {
-    int K = uConstBlock.K;
+  const ivec3 pos = ivec3(gl_GlobalInvocationID);
+  if (all(lessThan(pos, uBlock.WHC))) {
+    const int K = uBlock.K;
     vec4 mmv = vec4(0);
     int ki = 0;
     for (; ki < K; ++ki) {
@@ -28,6 +30,6 @@ void main() {
       mmv += m1ki * m2ki;
     }
     vec4 tv = texelFetch(uT, pos, 0);
-    imageStore(uOutput, pos, uConstBlock.beta * tv + uConstBlock.alpha * mmv);
+    imageStore(uOutput, pos, uBlock.beta * tv + uBlock.alpha * mmv);
   }
 }
