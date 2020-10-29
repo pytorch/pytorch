@@ -17750,21 +17750,24 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         torch_fn = lambda x: torch.mm(x, x)  # noqa: E731
         self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
-    @onlyCPU
-    @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
+    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)))
+    @dtypesIfCPU(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
+    @tf32_on_and_off(0.01)
     def test_bmm(self, device, dtype):
         num_batches = 10
         M, N, O = 23, 8, 12
+        for perm1, perm2, perm3 in product(permutations((0, 1, 2)), repeat=3):
+            print(perm1, perm2, perm3)
         b1 = torch.randn(num_batches, M, N, dtype=dtype, device=device)
         b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
         res = torch.bmm(b1, b2)
         for i in range(num_batches):
             r = torch.mm(b1[i], b2[i])
             self.assertEqual(r, res[i])
-        if torch.cuda.is_available():
+        if self.device_type == 'cuda':
             # check that mixed arguments are rejected
-            self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2.cuda()))
-            self.assertRaises(RuntimeError, lambda: torch.bmm(b1.cuda(), b2))
+            self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2.cpu()))
+            self.assertRaises(RuntimeError, lambda: torch.bmm(b1.cpu(), b2))
 
     @onlyCUDA
     @wrapDeterministicFlagAPITest
