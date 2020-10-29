@@ -52,12 +52,12 @@ if(ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NAM
     set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
   endif()
   # Orlando: check if avx bytecode has been generated or not
-  # also include amd.py, mmxsse.py, fma.py, amd.py, mask.py, crypto.py, generic.py
-  if(NOT EXISTS "${PYTHON_PEACHPY_SOURCE_DIR}/peachpy/x86_64/avx.py")
-    message(STATUS "Install python-peachpy for generation of x86-64 instruction classes, including amd.py, mmxsse.py, fma.py, amd.py, mask.py, crypto.py, generic.py, in ${PYTHON_PEACHPY_SOURCE_DIR}")
-    execute_process(COMMAND python "${PYTHON_PEACHPY_SOURCE_DIR}/setup.py" develop
+  # clean up egg-link
+  execute_process(COMMAND python "${PYTHON_PEACHPY_SOURCE_DIR}/setup.py" develop --uninstall
       WORKING_DIRECTORY "${PYTHON_PEACHPY_SOURCE_DIR}")
-  endif()
+  # reinstall and overwrite if instructions are generated
+  execute_process(COMMAND python "${PYTHON_PEACHPY_SOURCE_DIR}/setup.py" develop
+          WORKING_DIRECTORY "${PYTHON_PEACHPY_SOURCE_DIR}")
   set(NNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/NNPACK" CACHE STRING "NNPACK source directory")
   set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FP16" CACHE STRING "FP16 source directory")
   set(FXDIV_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FXdiv" CACHE STRING "FXdiv source directory")

@@ -47,21 +47,11 @@ void debugPrint(const TensorTypePtr& type) {
     for (int i = 0; i < rank; i++) {
       const auto& shape_symbol = sizes.value()[i];
       if (shape_symbol.is_static()) {
-#if defined(__APPLE__)
-        // int64_t format: mac int64_t=long long, %lld
-        printf("%lld, ", shape_symbol.static_size());
-#else
-        // int64_t format: linux int64_t=long int, %ld
-        printf("%ld, ", shape_symbol.static_size());
-#endif
+        // int64_t format: convert upward to long long int, so formatter to lld
+        printf("%lld, ", (long long int)shape_symbol.static_size());
       } else {
-#if defined(__APPLE__)
-        // int64_t format: mac int64_t=long long, %lld
-        printf("s(%lld), ", *reinterpret_cast<const int64_t*>(&shape_symbol));
-#else
-        // int64_t format: linux int64_t=long int, %ld
-        printf("s(%ld), ", *reinterpret_cast<const int64_t*>(&shape_symbol));
-#endif
+        // int64_t format: convert upward to long long int, so formatter to lld
+        printf("s(%lld), ", (long long int)*reinterpret_cast<const int64_t*>(&shape_symbol));
       }
     }
   } else {
