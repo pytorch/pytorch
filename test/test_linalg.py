@@ -920,9 +920,6 @@ class TestLinalg(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_svd(self, device, dtype):
-        if dtype is torch.cdouble:
-            # this test segfaults
-            self.skipTest('Issue XXX')
         t = torch.randn((10, 11), device=device, dtype=dtype)
         np_t = t.cpu().numpy()
 
