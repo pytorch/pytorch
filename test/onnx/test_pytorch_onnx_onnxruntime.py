@@ -3564,17 +3564,10 @@ class TestONNXRuntime(unittest.TestCase):
     def test_scalar_type(self):
         class ArithmeticModel(torch.nn.Module):
             def forward(self, x):
-                return x.size(0) * 2 * x,
+                return x.size(0) * 2 * x, 2 - x
 
         x = torch.ones(2, 3, dtype=torch.float32)
         self.run_test(ArithmeticModel(), x)
-
-        class ArithmeticModel2(torch.nn.Module):
-            def forward(self, x):
-                return 2 - x
-
-        x = torch.randn(2, 3, dtype=torch.float32)
-        self.run_test(ArithmeticModel2(), x)
 
         class ReciprocalModel(torch.nn.Module):
             def forward(self, x):

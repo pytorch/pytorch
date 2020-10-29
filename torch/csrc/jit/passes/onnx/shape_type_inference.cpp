@@ -92,17 +92,27 @@ TensorTypePtr TorchTensorTypeFromONNX(
       if (dim.has_dim_value()) {
         sizes.emplace_back(c10::ShapeSymbol::fromStaticSize(dim.dim_value()));
       } else {
-        GRAPH_UPDATE("Got dim_param:", dim.dim_param());
         c10::optional<c10::ShapeSymbol> sym = c10::nullopt;
-        for (auto pair : symbol_map) {
-          if (pair.second == dim.dim_param()) {
-            sym = pair.first;
-            break;
+        if (dim.has_dim_param()) {
+          // A specific dim param is produced.
+          // Search if this is already known,
+          // and assign the same Symbol.
+          GRAPH_UPDATE("Got dim_param:", dim.dim_param());
+          for (auto pair : symbol_map) {
+            if (pair.second == dim.dim_param()) {
+              sym = pair.first;
+              break;
+            }
           }
-        }
-        if (!sym) {
+          if (!sym) {
+            sym = c10::ShapeSymbol::newSymbol();
+            symbol_map[sym.value()] = dim.dim_param();
+          }
+        } else {
+          // A None dim param is produced.
+          // Assign a new Symbol, no need to keep track
+          // of it because there won't be duplicates.
           sym = c10::ShapeSymbol::newSymbol();
-          symbol_map[sym.value()] = dim.dim_param();
         }
         sizes.emplace_back(sym.value());
       }
@@ -404,7 +414,6 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
 
     // infer shape
     try {
-      GRAPH_DEBUG("Run shape inference under try catch.");
       onnx::shape_inference::InferShapes(*model_proto);
       UpdateOutputTypeByONNXProto(n, clone_node, *model_proto, symbol_map);
     } catch (onnx::InferenceError& ex) {

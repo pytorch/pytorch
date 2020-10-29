@@ -494,7 +494,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
                              google_printer=False, opset_version=None, _retain_param_name=False,
                              do_constant_folding=True, keep_initializers_as_inputs=None,
-                             fixed_batch_size=False, custom_opsets=None, add_node_names=True):
+                             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
+                             onnx_shape_inference=True):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
@@ -503,6 +504,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         custom_opsets = {}
     _set_opset_version(opset_version)
     _set_operator_export_type(operator_export_type)
+    from torch.onnx.symbolic_helper import _set_onnx_shape_inference
+    _set_onnx_shape_inference(onnx_shape_inference)
     with select_model_mode_for_export(model, training):
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                          operator_export_type,
