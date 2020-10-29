@@ -42,6 +42,8 @@ from .quantization_patterns import *
 from .utils import (
     _parent_name,
     quantize_node,
+    get_custom_module_class_keys,
+    get_swapped_custom_module_class,
     activation_is_statically_quantized,
 )
 
@@ -310,7 +312,7 @@ class Quantizer:
                 self.modules[node.target].qconfig = module_qconfig
                 self.qconfig_map[node.name] = module_qconfig
 
-    def _prepare(self, model, qconfig_dict, inplace, prepare_custom_config_dict, is_standalone_module):
+    def _prepare(self, model, qconfig_dict, prepare_custom_config_dict, is_standalone_module):
         """ standalone_module means it a submodule that is not inlined in parent module,
         and will be quantized separately as one unit.
 
@@ -326,8 +328,6 @@ class Quantizer:
         """
         if prepare_custom_config_dict is None:
             prepare_custom_config_dict = {}
-        if not inplace:
-            model = copy.deepcopy(model)
         additional_quant_patterns = prepare_custom_config_dict.get("additional_quant_pattern", {})
         self.patterns = get_default_quant_patterns().copy()
         for k, v in additional_quant_patterns.items():
@@ -348,9 +348,9 @@ class Quantizer:
 
         # match the patterns that will get quantized
         standalone_module_names = prepare_custom_config_dict.get("standalone_module_name", None)
-        custom_module_class_mapping = prepare_custom_config_dict.get("float_to_observed_custom_module_class", None)
+        custom_module_classes = get_custom_module_class_keys(prepare_custom_config_dict, "float_to_observed_custom_module_class")
         matches = self._find_matches(
-            model.graph, self.modules, self.patterns, standalone_module_names, custom_module_class_mapping)
+            model.graph, self.modules, self.patterns, standalone_module_names, custom_module_classes)
 
         # find _inputs_ to matched nodes that are not quantized, these
         # have to be quantized, which requires measuring stats,
@@ -404,8 +404,9 @@ class Quantizer:
 
                 if isinstance(obj, CustomModuleQuantizeHandler):
                     custom_module = self.modules[node.target]
+                    custom_module_class_mapping = prepare_custom_config_dict.get("float_to_observed_custom_module_class", {})
                     observed_custom_module_class = \
-                        custom_module_class_mapping[type(custom_module)]
+                        get_swapped_custom_module_class(custom_module, custom_module_class_mapping, qconfig)
                     observed_custom_module = \
                         observed_custom_module_class.from_float(custom_module)
                     parent_name, name = _parent_name(node.target)
@@ -539,8 +540,8 @@ class Quantizer:
         self.patterns = observed._patterns
         self.qconfig_map = observed._qconfig_map
 
-    def prepare(self, model, qconfig_dict, inplace=False, prepare_custom_config_dict=None, is_standalone_module=False):
-        return self._prepare(model, qconfig_dict, inplace, prepare_custom_config_dict, is_standalone_module)
+    def prepare(self, model, qconfig_dict, prepare_custom_config_dict=None, is_standalone_module=False):
+        return self._prepare(model, qconfig_dict, prepare_custom_config_dict, is_standalone_module)
 
     def _run_weight_observers(self, observed):
         r''' Extract the subgraph that produces the weight for dynamic quant
@@ -584,10 +585,11 @@ class Quantizer:
         model.eval().cpu()
         self.modules = dict(model.named_modules())
 
-        custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", None)
+        custom_module_classes = get_custom_module_class_keys(
+            convert_custom_config_dict, "observed_to_quantized_custom_module_class")
         matches = self._find_matches(
             model.graph, self.modules, self.patterns,
-            custom_module_class_mapping=custom_module_class_mapping)
+            custom_module_classes=custom_module_classes)
 
         quants = self._find_quants(model.graph, matches)
 
@@ -830,7 +832,7 @@ class Quantizer:
 
     def _find_matches(
             self, graph, modules, patterns,
-            standalone_module_names=None, custom_module_class_mapping=None):
+            standalone_module_names=None, custom_module_classes=None):
         """
         Matches the nodes in the input graph to quantization patterns, and
         outputs the information needed to quantize them in future steps.
@@ -851,8 +853,8 @@ class Quantizer:
           ...
         }
         """
-        if custom_module_class_mapping is None:
-            custom_module_class_mapping = {}
+        if custom_module_classes is None:
+            custom_module_classes = []
 
         match_map = {}
         all_matched = set()
@@ -882,7 +884,7 @@ class Quantizer:
         # add custom module instances to the match result
         for node in graph.nodes:
             if node.op == 'call_module' and \
-               type(self.modules[node.target]) in custom_module_class_mapping:
+               type(self.modules[node.target]) in custom_module_classes:
                 custom_module_qconfig = self.qconfig_map[node.name]
                 match_map[node.name] = (
                     node, [node], None, CustomModuleQuantizeHandler(self, node), custom_module_qconfig)

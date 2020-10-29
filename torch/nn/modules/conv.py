@@ -69,7 +69,7 @@ class _ConvNd(Module):
                  transposed: bool,
                  output_padding: _size_1_t,
                  groups: int,
-                 bias: Optional[Tensor],
+                 bias: bool,
                  padding_mode: str) -> None:
         super(_ConvNd, self).__init__()
         if in_channels % groups != 0:
