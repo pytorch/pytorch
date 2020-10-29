@@ -289,7 +289,7 @@
   use_c10_dispatcher: full
   variants: function
   dispatch:
-    DefaultBackend: view_as_complex
+    CPU, CUDA: view_as_complex
 
 - func: sgn(Tensor self) -> Tensor
   use_c10_dispatcher: full
