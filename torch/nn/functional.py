@@ -3535,7 +3535,9 @@ def _pad(input, pad, mode='constant', value=0):
                 raise NotImplementedError
 
         elif input.dim() == 4:
-            assert len(pad) == 4, '4D tensors expect 4 values for padding'
+            if len(pad) == 2:
+                pad = list(pad) + [0, 0]
+            assert len(pad) == 4, '4D tensors expect 2 or 4 values for padding'
             if mode == 'reflect':
                 return torch._C._nn.reflection_pad2d(input, pad)
             elif mode == 'replicate':
@@ -3546,7 +3548,11 @@ def _pad(input, pad, mode='constant', value=0):
                 raise NotImplementedError
 
         elif input.dim() == 5:
-            assert len(pad) == 6, '5D tensors expect 6 values for padding'
+            if len(pad) == 2:
+                pad = list(pad) + [0, 0, 0, 0]
+            elif len(pad) == 4:
+                pad = list(pad) + [0, 0]
+            assert len(pad) == 6, '5D tensors expect 2, 4, or 6 values for padding'
             if mode == 'reflect':
                 raise NotImplementedError
             elif mode == 'replicate':
