@@ -100,7 +100,7 @@ static void multilabel_margin_loss_shape_check(
     const Tensor& input,
     const Tensor& target) {
   const auto ndims = input.dim();  
-  bool valid_inputs = (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0);
+  bool valid_inputs = (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0;
   TORCH_CHECK(
        valid_inputs,
       "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
