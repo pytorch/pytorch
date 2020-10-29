@@ -4,7 +4,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Utils.h>
 #include <c10/core/TensorOptions.h>
-#include <c10/core/Scalar.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/SparseTensorUtils.h>
