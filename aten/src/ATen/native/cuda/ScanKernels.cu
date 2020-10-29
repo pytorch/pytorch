@@ -170,6 +170,8 @@ __host__ void scan_outer_dim_with_indices(const Tensor& self, Tensor& values, Te
 
   // Treat all inner dimensions (i.e. dim > dimension) as one.
   const int64_t num_irows = prod_intlist(sizes.begin() + dim + 1, sizes.end());
+  //for performance reasons, cuda kernels use uint32_t for loops over irows, orows and row,
+  //make sure that input is not bigger than supported by uint32_t
   check_fits_in_unsigned(num_irows, "num_irows");
   check_fits_in_unsigned(num_orows, "num_orows");
   check_fits_in_unsigned(row_size, "row_size");

@@ -368,7 +368,7 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
     // The dimension in each tensor's values object that corresponds to the overall dimension along which we're catting.
     int64_t values_dim = wrapped - sparse_dim + 1;
     // The final size along the catted dimension.
-    const int64_t total_size = std::accumulate(tensors.begin(), tensors.end(), decltype(total_size){0}, [values_dim](int64_t l, Tensor const &r) {
+    const int64_t total_size = std::accumulate(tensors.begin(), tensors.end(), static_cast<int64_t>(0), [values_dim](int64_t l, Tensor const &r) {
       return l + r._values().size(values_dim);
     });
     auto zeros_sizes = tensors[0]._values().sizes().vec();

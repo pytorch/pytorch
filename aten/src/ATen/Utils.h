@@ -93,6 +93,8 @@ inline int64_t sum_intlist(ArrayRef<int64_t> list) {
   return std::accumulate(list.begin(), list.end(), 0ll);
 }
 
+//std::accumulate infers return type from `init` type, so if `init` type is not enough to hold the result, computation can overflow
+//the next 2 functions set `init` type to int64_t to avoid overflow.
 template<typename C, typename std::enable_if<std::is_integral<typename C::value_type>::value, int>::type = 0>
 inline int64_t prod_intlist(const C &container){
     return std::accumulate(container.begin(), container.end(), static_cast<int64_t>(1), std::multiplies<int64_t>());
