@@ -42,6 +42,7 @@ install_ubuntu() {
     libsndfile-dev \
     python \
     python-dev \
+    python-pip \
     python-setuptools \
     python-wheel \
     software-properties-common \

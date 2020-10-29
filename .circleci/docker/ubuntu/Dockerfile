@@ -49,7 +49,7 @@ ADD ./common/install_lcov.sh install_lcov.sh
 RUN  bash ./install_lcov.sh && rm install_lcov.sh
 
 # Install below to collect Python test results
-RUN python -mpip install unittest-xml-reporting coverage pytest
+RUN pip install unittest-xml-reporting coverage pytest
 
 # Install non-standard Python versions (via Travis binaries)
 ARG TRAVIS_PYTHON_VERSION
