@@ -55,13 +55,15 @@ TYPED_TEST(OptionalTest, Empty) {
 }
 
 TYPED_TEST(OptionalTest, Initialized) {
+  using optional = typename TestFixture::optional;
+
   const auto val = getSampleValue<TypeParam>();
-  typename TestFixture::optional opt((val));
+  optional opt((val));
   auto copy(opt), moveFrom1(opt), moveFrom2(opt);
-  typename TestFixture::optional move((moveFrom1));
-  typename TestFixture::optional copyAssign;
+  optional move(std::move(moveFrom1));
+  optional copyAssign;
   copyAssign = opt;
-  typename TestFixture::optional moveAssign;
+  optional moveAssign;
   moveAssign = std::move(moveFrom2);
 
   std::array<typename TestFixture::optional *, 5> opts = {&opt, &copy, &copyAssign, &move, &moveAssign};
