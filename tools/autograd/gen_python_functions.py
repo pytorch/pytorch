@@ -703,8 +703,7 @@ def group_overloads(declarations, is_python_method):
         if 'base' not in dictionary:
             raise RuntimeError(
                 "_out variant function {} can not find matched non-out 'base' function "
-                "{} in dictionary.".format(
-                    dictionary['signature'], x))
+                "{} in dictionary.".format(dictionary['signature'], x))
         result.append(dictionary)
     return sort_declarations(result)
 
