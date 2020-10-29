@@ -103,7 +103,6 @@ def _prepare_standalone_module_fx(model, qconfig_dict, inplace=False, prepare_cu
                                    custom module is observed or not
 
     """
-    torch._C._log_api_usage_once("quantization_api.quantize_fx._prepare_standalone_module_fx")
     return _prepare_fx(model, qconfig_dict, inplace, prepare_custom_config_dict, is_standalone_module=True)
 
 
@@ -340,5 +339,4 @@ def _convert_standalone_module_fx(graph_module, inplace=False, debug=False, conv
       A quantized standalone module which accepts quantized input(if needed)
       and produces quantized output (if needed).
     """
-    torch._C._log_api_usage_once("quantization_api.quantize_fx._convert_standalone_module_fx")
     return _convert_fx(graph_module, inplace, debug, convert_custom_config_dict, is_standalone_module=True)
