@@ -179,7 +179,6 @@ class Tracer(TracerBase):
 
         def module_getattr_wrapper(mod, attr):
             attr_val = orig_getattr(mod, attr)
-            cache[attr] = 1
             if isinstance(attr_val, torch.nn.Parameter):
                 for n, p in self.root.named_parameters():
                     if attr_val is p:
