@@ -869,37 +869,38 @@ class TestAutograd(TestCase):
     def test_backward_with_inputs(self):
         x = torch.randn(2, 2, requires_grad=True)
         y = torch.randn(2, 2, requires_grad=True)
-        z = x ** 2 + y * x + y ** 2
+
+        def fn():
+            return x ** 2 + y * x + y ** 2
+
         gradient = torch.ones(2, 2)
         x_grad_expected = 2 * x + y
         y_grad_expected = x + 2 * y
 
+        @torch.no_grad()
         def reset_grad():
-            x.grad.data.zero_()
-            y.grad.data.zero_()
+            x.grad.zero_()
+            y.grad.zero_()
 
-        z.backward(gradient, create_graph=True, inputs=[x,y])
+        torch.autograd.backward(fn(), gradient, inputs=[x,y])
         self.assertEqual(x.grad, x_grad_expected)
         self.assertEqual(y.grad, y_grad_expected)
 
         reset_grad()
-        z.backward(gradient, create_graph=True, inputs=[x])
+        torch.autograd.backward(fn(), gradient, inputs=[x])
         self.assertEqual(x.grad, x_grad_expected)
         self.assertEqual(y.grad, torch.zeros(2, 2))
 
         reset_grad()
-        z.backward(gradient, create_graph=True, inputs=[y])
+        torch.autograd.backward(fn(), gradient, inputs=[y])
         self.assertEqual(y.grad, y_grad_expected)
         self.assertEqual(x.grad, torch.zeros(2, 2))
 
-        # Mirror the behavior from autograd.grad api for empty inputs
-        # populate all grads when inputs is empty
         reset_grad()
-        z.backward(gradient, create_graph=True, inputs=[])
-        self.assertEqual(y.grad, y_grad_expected)
-        self.assertEqual(x.grad, x_grad_expected)
+        self.assertRaisesRegex(RuntimeError, 'cannot be empty',
+                               lambda: torch.autograd.backward(fn(), gradient, inputs=[]))
 
-    def test_backward_nonleaf(self):
+    def test_backward_with_nonleaf_inputs(self):
         x = torch.randn(2, 2, requires_grad=True)
         x_nonleaf = x * 1
         y = torch.randn(2, 2, requires_grad=True)
@@ -914,7 +915,7 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad, y_grad_expected)
         self.assertEqual(x.grad, x_grad_expected)
 
-        self.assertRaisesRegex(RuntimeError, 'One of the differentiated Tensors from inputs is not a leaf Tensor',
+        self.assertRaisesRegex(RuntimeError, 'not a leaf Tensor',
                                lambda: out.backward(torch.ones(2, 2), create_graph=True, inputs=[x, y, x_nonleaf]))
 
         # backward doesn't have an allow_unused flag, so the behavior of backward

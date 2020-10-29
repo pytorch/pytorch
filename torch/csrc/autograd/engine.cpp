@@ -1142,7 +1142,7 @@ void GraphTask::init_to_execute(Node& graph_root, const edge_list& outputs, bool
               auto it = exec_info_.find(edge.function.get());
               return it != exec_info_.end() && it->second.should_execute();
             });
-        exec_info_[frame.fn_].needed_ = exec_info_[frame.fn_].needed_ || needed;
+        exec_info_[frame.fn_].needed_ |= needed;
         stack.pop_back();
       }
     }

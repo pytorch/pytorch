@@ -214,7 +214,10 @@ class Tensor(torch._C._TensorBase):
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
             inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
-                accumulated into ``.grad``. All other Tensors will be ignored.
+                accumulated into ``.grad``. All other Tensors will be ignored. If not
+                provided, the gradient is accumulated into all the leaf Tensors that were
+                used to compute the attr::tensors. All the provided inputs must be leaf
+                Tensors.
         """
         relevant_args = (self,)
         from torch.overrides import has_torch_function, handle_torch_function
@@ -227,7 +230,7 @@ class Tensor(torch._C._TensorBase):
                 retain_graph=retain_graph,
                 create_graph=create_graph,
                 inputs=inputs)
-        torch.autograd.backward(self, gradient, retain_graph, create_graph, None, inputs)
+        torch.autograd.backward(self, gradient, retain_graph, create_graph, inputs=inputs)
 
     def register_hook(self, hook):
         r"""Registers a backward hook.
