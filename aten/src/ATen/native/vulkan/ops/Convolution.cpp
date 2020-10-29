@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/ops/Persistent.h>
 #include <torch/custom_class.h>
@@ -105,8 +106,55 @@ Context::Context(
     output_max_(output_max) {
 }
 
-Tensor Context::run(const Tensor& input) {
-  return Tensor{};
+Tensor Context::run(const Tensor& input_arg) {
+  api::Context* const context = api::context();
+
+  const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
+  const vTensor& v_input = convert(input);
+
+  vTensor v_output{
+    context,
+    conv_output_size(
+        input.sizes(),
+        IntArrayRef{},  // TODO
+        packed_.stride,
+        packed_.padding,
+        packed_.dilation),
+    input.options(),
+  };
+
+  api::Command::Buffer command_buffer = context->command().pool.allocate();
+  command_buffer.begin();
+  {
+    if (v_output.has_image() && v_input.has_image()) {
+      const struct {
+      } block {
+      };
+
+      // context->dispatch(
+      //     command_buffer,
+      //     {
+      //     },
+      //     VK_KERNEL(),
+      //     v_output.extents(),
+      //     // Write-only access bypasses synchronization but inserts appropriate
+      //     // barriers if necessary.
+      //     v_output.image(command_buffer, vTensor::Access::Write),
+      //     // Read-only access is implied on const tensors and triggers an async
+      //     // synchronization if necessary.
+      //     v_self.image(command_buffer),
+      //     // Object lifetime is managed by the resource pool.
+      //     // It is OK not to keep track of the handle.
+      //     context->resource().pool.uniform(block).object);
+    }
+    else {
+      TORCH_CHECK(false, "Not implemented!");
+    }
+  }
+  command_buffer.end();
+  command_buffer.submit(context->gpu().queue);
+
+  return convert(v_output);
 }
 
 Context::State Context::unpack() const {

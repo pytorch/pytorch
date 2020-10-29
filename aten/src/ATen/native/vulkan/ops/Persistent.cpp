@@ -7,6 +7,7 @@ namespace ops {
 namespace {
 
 void release_buffer(
+    // std::bind passes its arguments by value, hence the use of std::ref.
     std::reference_wrapper<api::Resource::Pool> pool,
     const api::Resource::Buffer& buffer) {
   pool.get().release(buffer);
