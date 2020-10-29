@@ -17,8 +17,7 @@ if not errorlevel 0 exit /b 1
 cd %TMP_DIR_WIN%\build\torch\test
 for /r "." %%a in (*.exe) do (
     call :libtorch_check "%%~na" "%%~fa"
-    echo "%%~na"
-    echo "%%~fa"
+    echo "call errorlevel"
     echo %errorlevel%
     if errorlevel 1 exit /b 1
 )
@@ -47,12 +46,13 @@ if "%~1" == "c10_intrusive_ptr_benchmark" (
   goto :eof
 )
 call "%~2" --gtest_output=xml:%TEST_OUT_DIR%\%~1.xml
+echo "%~2"
 if errorlevel 1 (
   echo %1 failed with exit code %errorlevel%
   exit /b 1
 )
 if not errorlevel 0 (
-  echo %1 failed with exit code %errorlevel%
+  echo %1 failed with exit1 code %errorlevel%
   exit /b 1
 )
 
