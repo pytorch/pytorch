@@ -176,6 +176,7 @@ class Tracer(TracerBase):
         orig_getattr = torch.nn.Module.__getattr__
 
         cache = {}
+
         def module_getattr_wrapper(mod, attr):
             attr_val = orig_getattr(mod, attr)
             cache[attr] = 1
