@@ -3140,6 +3140,13 @@ class DistributedTest:
         @require_backend({"nccl", "gloo"})
         @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
         def test_allgather_object(self):
+            # Only set device for NCCL backend since it must use GPUs.
+            backend = os.environ["BACKEND"]
+            if backend == "nccl":
+                # Case where rank != GPU device.
+                next_rank = (self.rank + 1) % int(self.world_size)
+                torch.cuda.set_device(next_rank)
+
             gather_objects = collectives_object_test_list
             output_gathered = [None for _ in range(dist.get_world_size())]
             dist.all_gather_object(
@@ -3194,7 +3201,10 @@ class DistributedTest:
         def test_nccl_gather_object_err(self):
             output_gathered = [None for _ in range(dist.get_world_size())]
             gather_on_rank = 0
+            # Case where rank != GPU device.
             my_rank = dist.get_rank()
+            next_rank = (my_rank + 1) % dist.get_world_size()
+            torch.cuda.set_device(next_rank)
             with self.assertRaisesRegex(
                 RuntimeError, "ProcessGroupNCCL does not support gather"
             ):
@@ -3665,6 +3675,13 @@ class DistributedTest:
         @require_backend({"nccl", "gloo"})
         @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
         def test_broadcast_object_list(self):
+            # Only set device for NCCL backend since it must use GPUs.
+            backend = os.environ["BACKEND"]
+            if backend == "nccl":
+                # Case where rank != GPU device.
+                next_rank = (self.rank + 1) % int(self.world_size)
+                torch.cuda.set_device(next_rank)
+
             src_rank = 0
             objects = collectives_object_test_list if self.rank == src_rank else [None for _ in collectives_object_test_list]
 
