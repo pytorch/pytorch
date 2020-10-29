@@ -1,5 +1,6 @@
 #include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Adapter.h>
+#include <ATen/native/vulkan/api/Utils.h>
 
 namespace at {
 namespace native {
@@ -69,6 +70,10 @@ VkCommandBuffer allocate_command_buffer(
 
 } // namespace
 
+Command::Buffer::Buffer()
+  : command_buffer_(VK_NULL_HANDLE) {
+}
+
 Command::Buffer::Buffer(
     const VkDevice device,
     const VkCommandPool command_pool)
@@ -113,19 +118,28 @@ void Command::Buffer::barrier(
       "Potential reason: This command buffer is moved from.");
 
   c10::SmallVector<VkMemoryBarrier, 1u> global_memory_barriers;
-  c10::SmallVector<VkImageMemoryBarrier, 1u> image_memory_barriers;
+  c10::SmallVector<VkImageMemoryBarrier, 4u> image_memory_barriers;
 
-  for (const Resource::Buffer::Barrier& barrier : barrier.buffers) {
+  if (!barrier.buffers.empty()) {
     // Using global memory barriers instead of buffer memory barriers for
     // buffers.  The consensus seems to be that there is no advantage in
-    // using the latter.
+    // using the latter in favor of the former.
 
-    global_memory_barriers.push_back({
-          VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-          nullptr,
-          barrier.memory.src,
-          barrier.memory.dst,
-        });
+    VkMemoryBarrier global_memory_barrier{
+      VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+      nullptr,
+      0u,
+      0u,
+    };
+
+    // Coalesce all buffer memory barriers into one global memory barrier.
+
+    for (const Resource::Buffer::Barrier& barrier : barrier.buffers) {
+      global_memory_barrier.srcAccessMask |= barrier.memory.src;
+      global_memory_barrier.dstAccessMask |= barrier.memory.dst;
+    }
+
+    global_memory_barriers.push_back(global_memory_barrier);
   }
 
   for (const Resource::Image::Barrier& barrier : barrier.images) {
@@ -248,15 +262,17 @@ void Command::Buffer::dispatch(
       "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
-  static const auto div_round_up = [](const uint32_t n, const uint32_t d) {
-    return (n + d - 1u) / d;
-  };
-
   vkCmdDispatch(
       command_buffer_,
-      div_round_up(global_work_group.x, bound_.pipeline.local_work_group.x),
-      div_round_up(global_work_group.y, bound_.pipeline.local_work_group.y),
-      div_round_up(global_work_group.z, bound_.pipeline.local_work_group.z));
+      div_up(
+          global_work_group.width,
+          bound_.pipeline.local_work_group.width),
+      div_up(
+          global_work_group.height,
+          bound_.pipeline.local_work_group.height),
+      div_up(
+          global_work_group.depth,
+          bound_.pipeline.local_work_group.depth));
 }
 
 void Command::Buffer::submit(

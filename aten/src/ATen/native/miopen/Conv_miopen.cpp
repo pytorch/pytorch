@@ -468,7 +468,6 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
 
   if (args.params.deterministic && !benchmark) {
     *algo = search::DEFAULT_ALGO;
-    return;
   }
 
   if (cache.find(args.params, algo)) {
