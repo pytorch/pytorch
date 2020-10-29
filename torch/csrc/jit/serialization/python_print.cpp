@@ -1343,12 +1343,13 @@ struct PythonPrintImpl {
 #endif
       }
 
-      std::unordered_map<std::string, std::string> annotations;
+      std::unordered_map<std::string, std::string> contained_type_hints;
+      std::vector<std::pair<std::string, std::string>> invalid_identifier_attrs;
 
       if (auto hint = classType->getContainedTypeHint()) {
         auto dict_hint = hint->expect<DictType>();
         registerClassDependencies(dict_hint->getValueType());
-        annotations["self"] = dict_hint->annotation_str(type_printer_);
+        contained_type_hints["self"] = dict_hint->annotation_str(type_printer_);
       }
 
       for (size_t i = 0; i < numAttrs; i++) {
@@ -1359,27 +1360,29 @@ struct PythonPrintImpl {
         // Handling for when the attribute name is not a valid Python
         // identifier. This happens for, e.g. ModuleList.
         if (!isValidIdentifier(name)) {
-          annotations[name] = type->annotation_str(type_printer_);
+          invalid_identifier_attrs.emplace_back(
+              std::make_pair(name, type->annotation_str(type_printer_)));
         } else {
-          // Otherwise: just emit a python 3 attribute annotation, like:
-          //   foo : SomeType
           auto attr_class_type = type->cast<ClassType>();
           if (attr_class_type && attr_class_type->getContainedTypeHint()) {
             auto hint = attr_class_type->getContainedTypeHint();
             auto dict_hint = hint->expect<DictType>();
             registerClassDependencies(dict_hint->getValueType());
-            annotations[name] = hint->annotation_str(type_printer_);
+            contained_type_hints[name] = hint->annotation_str(type_printer_);
           }
 
+          // Otherwise: just emit a python 3 attribute annotation, like:
+          //   foo : SomeType
           indent();
           body_ << name << " : " << type->annotation_str(type_printer_) << "\n";
         }
       }
 
-      // Print annotations dict.
-      if (!annotations.empty()) {
+      // Print annotations.
+      // Print contained type hints.
+      if (!contained_type_hints.empty()) {
         indent();
-        auto i = annotations.begin(), e = annotations.end();
+        auto i = contained_type_hints.begin(), e = contained_type_hints.end();
 
         body_ << "__annotations__ = {";
         body_ << "\"" << i->first << "\": " << i->second;
@@ -1389,6 +1392,23 @@ struct PythonPrintImpl {
         }
 
         body_ << "}\n";
+      }
+
+      // Print types for attributes with invalid names.
+      if (!invalid_identifier_attrs.empty()) {
+        // Initialize the annotations dict if necessary.
+        if (contained_type_hints.empty()) {
+          indent();
+          body_ << "__annotations__ = {}\n";
+        }
+
+        // Print out a direct manipulation of the annotations dict, like:
+        //   __annotations__["0"] = SomeType
+        for (const auto& attr : invalid_identifier_attrs) {
+          indent();
+          body_ << "__annotations__["
+                << "\"" << attr.first << "\"] = " << attr.second << "\n";
+        }
       }
 
       size_t numConstants = classType->numConstants();

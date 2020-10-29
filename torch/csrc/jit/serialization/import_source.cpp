@@ -503,8 +503,8 @@ struct SourceImporterImpl : public Resolver,
         continue;
       }
 
-      auto attr_ty = class_type->getAttribute(annotation.first);
-      if (attr_ty->is_module()) {
+      auto attr_ty = class_type->findAttribute(annotation.first);
+      if (attr_ty && attr_ty->is_module()) {
         auto attr_class_ty = attr_ty->expect<ClassType>();
         attr_class_ty->setContainedTypeHint(hint);
       }
