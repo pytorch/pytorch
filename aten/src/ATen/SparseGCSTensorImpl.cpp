@@ -43,7 +43,7 @@ void SparseGCSTensorImpl::resize_(IntArrayRef size) {
     
 }
 
-void SparseGCSTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, ArrayRef<int64_t> size) {
+void SparseGCSTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, IntArrayRef size) {
   // TODO: perform error checking.
 
   // call pointers().options() here since the struct contructor calls the tensor constructor
@@ -71,13 +71,18 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
   TORCH_CHECK(!values.is_sparse(), "expected values to be a dense tensor, but got values of layout ", values.layout());
   TORCH_CHECK(!reduction.is_sparse(), "expected reduction to be a dense tensor, but got reduction of layout ", reduction.layout());
 
-  TORCH_CHECK(values.device().type() == device().type(), "device type of values (", values.device().type(), ") must match device type of device().type()", device().type(), ")");
-  TORCH_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(), ") must match device of values (", values.get_device(), ")");
-  TORCH_CHECK(!pointers.is_cuda() || pointers.get_device() == values.get_device(), "device of pointers (", pointers.get_device(), ") must match device of values (", values.get_device(), ")");
+  TORCH_CHECK(values.device().type() == device().type(), "device type of values (", values.device().type(),
+              ") must match device type of device().type()", device().type(), ")");
+  TORCH_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(),
+              ") must match device of values (", values.get_device(), ")");
+  TORCH_CHECK(!pointers.is_cuda() || pointers.get_device() == values.get_device(), "device of pointers (", pointers.get_device(),
+              ") must match device of values (", values.get_device(), ")");
 
-  TORCH_CHECK(indices.size(0) == values.size(0), "indices and values must have same nnz, but got nnz from indices: ", indices.size(0), ", nnz from values: ", values.size(0));
+  TORCH_CHECK(indices.size(0) == values.size(0), "indices and values must have same nnz, but got nnz from indices: ",
+              indices.size(0), ", nnz from values: ", values.size(0));
 
-  TORCH_CHECK(indices.dim() == pointers.dim() == values.dim() == reduction.dim() == 1, "indices, pointers, values and reduction must have dim=1 but got indices.dim()=",
+  TORCH_CHECK((((indices.dim() == pointers.dim()) == values.dim()) == reduction.dim()) == 1,
+              "indices, pointers, values and reduction must have dim=1 but got indices.dim()=",
               indices.dim(), " pointers.dim()=", pointers.dim(), " values.dim()=", values.dim(), " reduction.dim()=", reduction.dim());
   
   pointers_ = pointers;
@@ -107,7 +112,7 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
   make_strides(rsplit_dim_, strides1_, dims1_);
 }
 
-void SparseGCSTensorImpl::make_strides(int shape_start, std::vector<int64_t>& strides, std::vector<int64_t>& dims) {
+void SparseGCSTensorImpl::make_strides(int shape_start, std::vector<int>& strides, std::vector<int>& dims) {
   int ndims = dims.size();
   strides[0] = 1;
   for (int i = 0; i < ndims-1; ++i) {

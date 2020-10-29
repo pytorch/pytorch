@@ -20,37 +20,37 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
   // Data for making index conversion operations faster.
 
   // strides of the first half of the split dimensions.
-  std::vector<int64_t> strides0_;
+  std::vector<int> strides0_;
   // strides of the second half of the split dimensions.
-  std::vector<int64_t> strides1_;
+  std::vector<int> strides1_;
   // dims of the first half of the split dimensions.
-  std::vector<int64_t> dims0_;
+  std::vector<int> dims0_;
   // dims of the second half of the split dimensions.
-  std::vector<int64_t> dims1_;
+  std::vector<int> dims1_;
   // Dimension at which we split the tensor dimensions into two groups for reduction to
   // a 2D GCS tensor.
-  int64_t rsplit_dim_;           
+  int rsplit_dim_;           
  public:
   explicit SparseGCSTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
 
   void resize_(IntArrayRef size);
-  void resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, ArrayRef<int64_t> size);
+  void resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, IntArrayRef size);
 
   void set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices,
                                  const Tensor& values, const Tensor& reduction,
                                  const Scalar& fill_value);
 
-  std::vector<int64_t> strides0() const { return strides0_; }
-  std::vector<int64_t> strides1() const { return strides1_; }
-  std::vector<int64_t> dims0() const { return dims0_; }
-  std::vector<int64_t> dims1() const { return dims1_; }
-  int64_t rsplit_dim() const { return rsplit_dim_; }
+  std::vector<int> strides0() const { return strides0_; }
+  std::vector<int> strides1() const { return strides1_; }
+  std::vector<int> dims0() const { return dims0_; }
+  std::vector<int> dims1() const { return dims1_; }
+  int rsplit_dim() const { return rsplit_dim_; }
   
   Tensor pointers() const { return pointers_; }
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
   Tensor reduction() const { return reduction_; }
-  int64_t nnz() const { return values_.size(0); } // TODO: methods like these also exist in COO tensor. Deduplicate?
+  int nnz() const { return values_.size(0); } // TODO: methods like these also exist in COO tensor. Deduplicate?
 
  private :
   
@@ -58,6 +58,6 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
                                at::Tensor pointers, at::Tensor indices, at::Tensor values, at::Tensor reduction,
                                Scalar fill_value);
 
-  void make_strides(int shape_begin, std::vector<int64_t>& strides, std::vector<int64_t>& dims);
+  void make_strides(int shape_begin, std::vector<int>& strides, std::vector<int>& dims);
 };
 }

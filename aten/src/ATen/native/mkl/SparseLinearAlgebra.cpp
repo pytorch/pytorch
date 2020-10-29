@@ -46,8 +46,8 @@ namespace at { namespace native {
     
     static inline void sparse_mm_mkl_impl(float * res, int * indices, int * pointers, float * values,
                                           float * dense, float * t, float alpha, float beta,
-                                          int64_t nrows, int64_t ncols, int64_t dense_ncols) {
-      sparse_matrix_t A;
+                                          int nrows, int ncols, int dense_ncols) {
+      sparse_matrix_t A = 0;
       matrix_descr desc;
       desc.type = SPARSE_MATRIX_TYPE_GENERAL;
       mkl_sparse_s_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, pointers,
@@ -61,9 +61,9 @@ namespace at { namespace native {
     // to using IntTensor for the indices and pointers?
     static inline void sparse_mm_mkl_impl(double * res, int * indices, int * pointers,
                                           double * values, double * dense, double * t,
-                                          double alpha, double beta, int64_t nrows,
-                                          int64_t ncols, int64_t dense_ncols) {
-      sparse_matrix_t A;
+                                          double alpha, double beta, int nrows,
+                                          int ncols, int dense_ncols) {
+      sparse_matrix_t A = 0;
       matrix_descr desc;
       desc.type = SPARSE_MATRIX_TYPE_GENERAL;
       mkl_sparse_d_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, pointers, pointers+1,
@@ -87,7 +87,9 @@ namespace at { namespace native {
                          dense.data_ptr<scalar_t>(),
                          t.data_ptr<scalar_t>(),
                          alpha.to<scalar_t>(),
-                         beta.to<scalar_t>(), size[0], size[1], dense_size[1]);
+                         beta.to<scalar_t>(),
+                         static_cast<int>(size[0]), static_cast<int>(size[1]),
+                         static_cast<int>(dense_size[1]));
     }
 
   Tensor& sparse_mm_mkl(Tensor& res, const SparseTensor& sparse_, const Tensor& dense,
