@@ -17750,24 +17750,35 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         torch_fn = lambda x: torch.mm(x, x)  # noqa: E731
         self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
+    @onlyOnCPUAndCUDA
     @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)))
     @dtypesIfCPU(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
     @tf32_on_and_off(0.01)
     def test_bmm(self, device, dtype):
         num_batches = 10
         M, N, O = 23, 8, 12
+
+        def invert_perm(p):
+            d = {x: i for i, x in enumerate(p)}
+            return (d[0], d[1], d[2])
+
         for perm1, perm2, perm3 in product(permutations((0, 1, 2)), repeat=3):
             print(perm1, perm2, perm3)
-        b1 = torch.randn(num_batches, M, N, dtype=dtype, device=device)
-        b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
-        res = torch.bmm(b1, b2)
-        for i in range(num_batches):
-            r = torch.mm(b1[i], b2[i])
-            self.assertEqual(r, res[i])
-        if self.device_type == 'cuda':
-            # check that mixed arguments are rejected
-            self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2.cpu()))
-            self.assertRaises(RuntimeError, lambda: torch.bmm(b1.cpu(), b2))
+            b1 = torch.randn(num_batches, M, N, dtype=dtype, device=device)
+            b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
+            b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
+            b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
+            res1 = torch.bmm(b1, b2)
+            res2 = torch.full_like(res1, math.nan).permute(perm3).contiguous().permute(invert_perm(perm3))
+            torch.bmm(b1, b2, out=res2)
+            for i in range(num_batches):
+                r = torch.mm(b1[i], b2[i])
+                self.assertEqual(r, res1[i])
+                self.assertEqual(r, res2[i])
+            if self.device_type == 'cuda':
+                # check that mixed arguments are rejected
+                self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2.cpu()))
+                self.assertRaises(RuntimeError, lambda: torch.bmm(b1.cpu(), b2))
 
     @onlyCUDA
     @wrapDeterministicFlagAPITest
