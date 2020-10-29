@@ -300,7 +300,6 @@ class Partitioner:
                         if abs(p1.bfs_level - p2.bfs_level) <= 1:
                             # Combining p1 and p2 into p0
                             p0 = self.combine_two_partitions(p1, p2)
-                            self.set_parents_and_children()
                             p0.logical_device_ids = p2.logical_device_ids
                             # Remove p2 from non_single_node_partitions
                             non_single_node_partitions.remove(p2)
@@ -430,6 +429,7 @@ class Partitioner:
         """
         partition = self.create_partition()
         partition.nodes = partition_0.nodes.union(partition_1.nodes)
+        partition.recalculate_mem_size()
         self.partitions.remove(partition_0)
         self.partitions.remove(partition_1)
         # reset parents and children for all partitions
