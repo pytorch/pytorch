@@ -42,6 +42,10 @@ jobs:
         run: |
           sudo apt-get install -y doxygen && pip install -r requirements.txt
           cd docs/cpp/source && ./check-doxygen.sh
+      - name: CUDA kernel launch check
+        run: |
+          set -eux
+          python torch/testing/check_kernel_launches.py |& tee ${GITHUB_WORKSPACE}/cuda_kernel_launch_checks.txt
 
   flake8-py3:
     runs-on: ubuntu-latest
