@@ -84,7 +84,11 @@ CONFIG_TREE_DATA = [
         ("gcc", [
             ("9", [
                 ("3.8", [
-                    ("coverage", [XImportant(True)]),
+                    ("coverage", [
+                        (True, [
+                            ("shard_test", [XImportant(True)]),
+                        ]),
+                    ]),
                 ]),
             ]),
         ]),
