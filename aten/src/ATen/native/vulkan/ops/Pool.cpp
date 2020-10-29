@@ -30,8 +30,8 @@ Tensor adaptive_avg_pool2d(const at::Tensor& input_arg, IntArrayRef output_size)
       } block {
         input_arg.sizes()[3],
         input_arg.sizes()[2],
-        output_size[0],
         output_size[1],
+        output_size[0],
       };
 
       context->dispatch(
