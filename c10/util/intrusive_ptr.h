@@ -197,7 +197,8 @@ class intrusive_ptr final {
   // it uses intrusive_ptr(TTarget*) to initialize and take ownership of the object.
   // For details, see
   // https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#custom-smart-pointers
-  friend class pybind11::class_<TTarget, intrusive_ptr<TTarget>>;
+  template <typename, typename...>
+  friend class pybind11::class_;
 
   void retain_() {
     if (target_ != NullType::singleton()) {
@@ -241,11 +242,13 @@ class intrusive_ptr final {
   // (pybind11 requires raw pointer constructor to incref by default).
   explicit intrusive_ptr(TTarget* target)
       : intrusive_ptr(target, raw::DontIncreaseRefcount{}) {
-    // We can't use retain_(), because we also have to increase weakcount
-    // and because we allow raising these values from 0, which retain_()
-    // has an assertion against.
-    ++target_->refcount_;
-    ++target_->weakcount_;
+    if (target_ != NullType::singleton()) {
+      // We can't use retain_(), because we also have to increase weakcount
+      // and because we allow raising these values from 0, which retain_()
+      // has an assertion against.
+      ++target_->refcount_;
+      ++target_->weakcount_;
+    }
   }
 
  public:
@@ -624,14 +627,14 @@ class weak_intrusive_ptr final {
 
   intrusive_ptr<TTarget, NullType> lock() const noexcept {
     if (expired()) {
-      return intrusive_ptr<TTarget, NullType>(NullType::singleton());
+      return intrusive_ptr<TTarget, NullType>();
     } else {
       auto refcount = target_->refcount_.load();
       do {
         if (refcount == 0) {
           // Object already destructed, no strong references left anymore.
           // Return nullptr.
-          return intrusive_ptr<TTarget, NullType>(NullType::singleton());
+          return intrusive_ptr<TTarget, NullType>();
         }
       } while (!target_->refcount_.compare_exchange_weak(refcount, refcount + 1));
       return intrusive_ptr<TTarget, NullType>(
