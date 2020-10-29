@@ -15539,7 +15539,8 @@ class TestTorchDeviceType(TestCase):
             ((10,), (2,), r"'input' should be 2 dimensional"),
             ((10, 6), (20,), r"input.size\(1\) must be greater than or equal to input2.size\(0\)"),
             ((6, 10), (5,), r"input.size\(0\) must be greater than or equal to input.size\(1\)"),
-            ((0, 0), (0,), r"'input' should not be empty")
+            ((0, 0), (0,), r"'input' should not be empty"),
+            ((2, 2), (2, 0,), r"'tau' should not be empty")
         ]
         for a_size, tau_size, error_regex in test_cases:
             a = torch.rand(*a_size, device=device)
