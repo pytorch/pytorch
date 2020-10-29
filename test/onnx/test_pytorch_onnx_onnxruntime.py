@@ -3268,6 +3268,49 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(Zero_(), x)
 
+    def test_eq(self):
+        class EqModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y):
+                if x.shape != y.shape:
+                    return x
+                return y
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 3, 4)
+        self.run_test(EqModel(), (x, y))
+
+        class EqModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y):
+                if x is not None:
+                    b = torch.randn(2, 3, 4)
+                else:
+                    b = torch.randn(2, 3, 4)
+                if b.shape[1] != y.shape[1]:
+                    return x
+                return y
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 3, 4)
+        self.run_test(EqModel(), (x, y))
+
+
+    def test_unchecked_cast(self):
+        class List(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                if input.dim() == 2:
+                   b = None
+                else:
+                   b = input[1:]
+                if b is not None:
+                    b[0]=5
+                return input.int()
+        
+        x = torch.randn(2, 3)
+        self.run_test(List(), (x,))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_list_pass(self):
         class Slice(torch.nn.Module):
