@@ -516,9 +516,9 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
     if (item.a.isPtrType()) {
       // uncomment to debug type matching errors
       // std::cout << "MATCHING " << /*item.a <<*/ "(" << *item.a.type() << ") "
-      //          << item.a.internalToPointer() << " " << /*item.b <<*/ " ("
-      //          << *item.b.type() << ") " << item.b.internalToPointer() <<
-      //          "\n";
+      //           << item.a.internalToPointer() << " " << /*item.b <<*/ " ("
+      //           << *item.b.type() << ") " << item.b.internalToPointer() <<
+      //           "\n";
 
       if (visited.count(item.a.internalToPointer())) {
         continue;
@@ -1187,9 +1187,13 @@ void initJitScriptBindings(PyObject* module) {
           "name",
           [](const StrongFunctionPtr& self) { return self.function_->name(); })
       .def_property_readonly(
-          "qualified_name", [](const StrongFunctionPtr& self) {
+          "qualified_name",
+          [](const StrongFunctionPtr& self) {
             return self.function_->qualname().qualifiedName();
-          });
+          })
+      .def_property_readonly("__doc__", [](const StrongFunctionPtr& self) {
+        return self.function_->doc_string();
+      });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(

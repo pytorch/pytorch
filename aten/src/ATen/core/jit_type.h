@@ -239,7 +239,7 @@ inline bool operator!=(const Type& lhs, const Type& rhs) {
 }
 
 // common base for all types that have a single sub element
-// e.g. Future[T], Option[T], List[T]
+// e.g. Future[T], Optional[T], List[T]
 template <TypeKind K, typename T>
 struct SingleElementType : public Type {
   static const TypeKind Kind = K;
@@ -1989,7 +1989,8 @@ struct CAFFE2_API ClassType : public NamedType {
   static ClassTypePtr create(
       c10::optional<QualifiedName> qualifiedName,
       std::weak_ptr<CompilationUnit> cu,
-      bool is_module = false);
+      bool is_module = false,
+      std::string doc_string = "");
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
@@ -2175,6 +2176,9 @@ struct CAFFE2_API ClassType : public NamedType {
     return constantNames_[slot];
   }
 
+  const std::string& doc_string() const {
+    return doc_string_;
+  }
 
   IValue getConstant(const std::string& name) const;
 
@@ -2267,11 +2271,16 @@ struct CAFFE2_API ClassType : public NamedType {
 
   static const TypeKind Kind = TypeKind::ClassType;
 
+  void setContainedTypeHint(TypePtr type) { containedTypeHint_ = type; }
+
+  TypePtr getContainedTypeHint() const { return containedTypeHint_; }
+
  private:
   ClassType(
       c10::optional<QualifiedName> name,
       std::weak_ptr<CompilationUnit> cu,
-      bool is_module);
+      bool is_module,
+      std::string doc_string);
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     const auto& n = name().value();
@@ -2305,7 +2314,17 @@ struct CAFFE2_API ClassType : public NamedType {
   // List of properties exposed by this class.
   std::vector<Property> properties_;
 
+  // A type hint on this Module indicating the type of what it contains.
+  // This only makes sense on ModuleDict (where it must be Dict[str,
+  // ModuleInterfaceType]) or ModuleList (where it must be
+  // List[ModuleInterfaceType]). This can be used to unlock additional
+  // operations like indexing without a static key.
+  TypePtr containedTypeHint_;
+
   bool isModule_ = false;
+
+  // Doc string of class.
+  std::string doc_string_ = "";
 };
 
 struct InterfaceType;

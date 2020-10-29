@@ -1043,6 +1043,11 @@ struct PythonPrintImpl {
           stmt << field_stream.str() << ")";
         }
       } break;
+      case prim::ModuleDictIndex: {
+        const auto dict = node->inputs().at(0);
+        const auto key = node->inputs().at(1);
+        stmt << useOf(dict) << "[" << useOf(key) << "]";
+      } break;
       case prim::CallFunction: {
         stmt << useOf(node->inputs().at(0)) << "(";
         for (size_t i = 1; i < node->inputs().size(); i++) {
@@ -1338,31 +1343,52 @@ struct PythonPrintImpl {
 #endif
       }
 
+      std::unordered_map<std::string, std::string> annotations;
+
+      if (auto hint = classType->getContainedTypeHint()) {
+        auto dict_hint = hint->expect<DictType>();
+        registerClassDependencies(dict_hint->getValueType());
+        annotations["self"] = dict_hint->annotation_str(type_printer_);
+      }
+
       for (size_t i = 0; i < numAttrs; i++) {
         const auto& name = classType->getAttributeName(i);
         const auto& type = classType->getAttribute(i);
         registerClassDependencies(type);
 
-        indent();
-
         // Handling for when the attribute name is not a valid Python
         // identifier. This happens for, e.g. ModuleList.
         if (!isValidIdentifier(name)) {
-          if (i == 0) {
-            // Initialize the annotations dict if necessary.
-            body_ << "__annotations__ = []\n";
-            indent();
-          }
-          // Print out a direct manipulation of the annotations dict, like:
-          //   __annotations__["0"] = SomeType
-          body_ << "__annotations__["
-                << "\"" << name
-                << "\"] = " << type->annotation_str(type_printer_) << "\n";
+          annotations[name] = type->annotation_str(type_printer_);
         } else {
           // Otherwise: just emit a python 3 attribute annotation, like:
           //   foo : SomeType
+          auto attr_class_type = type->cast<ClassType>();
+          if (attr_class_type && attr_class_type->getContainedTypeHint()) {
+            auto hint = attr_class_type->getContainedTypeHint();
+            auto dict_hint = hint->expect<DictType>();
+            registerClassDependencies(dict_hint->getValueType());
+            annotations[name] = hint->annotation_str(type_printer_);
+          }
+
+          indent();
           body_ << name << " : " << type->annotation_str(type_printer_) << "\n";
         }
+      }
+
+      // Print annotations dict.
+      if (!annotations.empty()) {
+        indent();
+        auto i = annotations.begin(), e = annotations.end();
+
+        body_ << "__annotations__ = {";
+        body_ << "\"" << i->first << "\": " << i->second;
+        while (i != e) {
+          body_ << ", \"" << i->first << "\": " << i->second;
+          ++i;
+        }
+
+        body_ << "}\n";
       }
 
       size_t numConstants = classType->numConstants();

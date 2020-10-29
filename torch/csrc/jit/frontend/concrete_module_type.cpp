@@ -39,6 +39,8 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
         /*is_parameter=*/false);
   }
 
+  cls->setContainedTypeHint(containedTypeHint_);
+
   return cls;
 }
 
@@ -74,6 +76,8 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::fromJitType(
       builder.addConstant(
           classType->getConstantName(i), classType->getConstant(i));
     }
+
+    builder.setContainedTypeHint(classType->getContainedTypeHint());
   }
 
   // Not make_shared because the constructor is private.

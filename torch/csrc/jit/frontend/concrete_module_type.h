@@ -174,8 +174,8 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   py::object pyClass_;
 
   // A type hint on this Module indicating the type of what it contains.
-  // This only makes sense on ModuleDict (where it might be Dict[str,
-  // ModuleInterfaceType]) or ModuleList (where it might be
+  // This only makes sense on ModuleDict (where it must be Dict[str,
+  // ModuleInterfaceType]) or ModuleList (where it must be
   // List[ModuleInterfaceType]). This can be used to unlock additional
   // operations like indexing without a static key.
   TypePtr containedTypeHint_{nullptr};

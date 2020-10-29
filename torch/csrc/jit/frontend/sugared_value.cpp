@@ -393,6 +393,17 @@ SugaredValuePtr SimpleValue::getitem(
     return std::make_shared<SimpleValue>(
         g.insert(aten::select, {val, 0, idx}, {}, loc));
   } else if (auto class_type = val_type->cast<ClassType>()) {
+    // Check if this is an indexing operation enabled by a contained type hint.
+    if (class_type->is_module() && class_type->getContainedTypeHint()) {
+      auto hint = class_type->getContainedTypeHint()->cast<DictType>();
+      if (hint) {
+        auto res = g.insert(prim::ModuleDictIndex, {val, idx}, {}, loc);
+        res->setType(hint->getValueType());
+        return std::make_shared<SimpleValue>(res);
+      }
+    }
+
+    // Defer to the __getitem__ attr on the class.
     return attr(loc, m, "__getitem__")->call(loc, m, {idx}, {}, 1);
   } else {
     throw ErrorReport(loc) << "'" << val_type->repr_str() << "'"
