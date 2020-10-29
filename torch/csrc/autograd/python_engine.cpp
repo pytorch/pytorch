@@ -234,7 +234,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
     outputs = engine.execute(roots, grads, keep_graph, create_graph, accumulate_grad, output_edges);
   }
 
-  if (!backward_api_called && inputs != null) {
+  if (!backward_api_called && inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     THPObjectPtr py_outputs {PyTuple_New(num_inputs)};
     if (!py_outputs) return nullptr;
