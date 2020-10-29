@@ -6496,6 +6496,21 @@
   dispatch:
     DefaultBackend: hypot_
 
+- func: igamma.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: igamma_out
+
+- func: igamma(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+  dispatch:
+    CPU, CUDA: igamma
+
+- func: igamma_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU, CUDA: igamma_
+
 - func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: nextafter_out
@@ -8874,6 +8889,18 @@
 - func: linalg_norm.ord_str_out(Tensor self, str ord, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
+
+- func: linalg_tensorsolve(Tensor self, Tensor other, int[]? dims=None) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_tensorsolve
+
+- func: linalg_tensorsolve.out(Tensor self, Tensor other, int[]? dims=None, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_tensorsolve_out
 
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
