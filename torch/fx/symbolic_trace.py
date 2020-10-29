@@ -175,12 +175,16 @@ class Tracer(TracerBase):
         orig_call = torch.nn.Module.__call__
         orig_getattr = torch.nn.Module.__getattr__
 
+        cache = {}
         def module_getattr_wrapper(mod, attr):
             attr_val = orig_getattr(mod, attr)
+            cache[attr] = 1
             if isinstance(attr_val, torch.nn.Parameter):
                 for n, p in self.root.named_parameters():
                     if attr_val is p:
-                        return self.create_proxy('get_attr', n, (), {})
+                        if n not in cache:
+                            cache[n] = self.create_proxy('get_attr', n, (), {})
+                        return cache[n]
             return attr_val
 
         def module_call_wrapper(mod, *args, **kwargs):
