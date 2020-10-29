@@ -46,9 +46,6 @@ from torch.testing._internal.common_distributed import skip_if_not_multigpu
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
-from torch.testing._internal.common_quantization import (
-    test_only_eval_fn,
-)
 from torch.testing import FileCheck
 
 import copy
@@ -267,30 +264,6 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(len(model_devices), 1)
         model_device = next(iter(model_devices))
         self.assertEqual(model_device, device)
-
-    @skipIfNoFBGEMM
-    def test_inplace_option(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-
-            def forward(self, x):
-                return self.conv(x)
-
-        model = M().eval()
-        qconfig_dict = {'': default_qconfig}
-        prepared = prepare_fx(model, qconfig_dict)
-        test_only_eval_fn(model, self.img_data_2d)
-        non_inplace_model = convert_fx(prepared, inplace=True)
-
-        prepared = prepare_fx(model, qconfig_dict)
-        test_only_eval_fn(model, self.img_data_2d)
-        inplace_model = convert_fx(prepared, inplace=True)
-
-        non_inplace_res = non_inplace_model(self.img_data_2d[0][0])
-        inplace_res = inplace_model(self.img_data_2d[0][0])
-        self.assertEqual(non_inplace_res, inplace_res)
 
     @skipIfNoFBGEMM
     def test_dict_output(self):
