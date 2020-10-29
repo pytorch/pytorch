@@ -43,22 +43,16 @@ TEST(VulkanAPITest, add) {
 }
 
 TEST(VulkanAPITest, add_) {
-  auto a_cpu = at::rand({1, 3, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
 
-  const auto b_cpu = at::rand({1, 3, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto b_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
   const auto b_vulkan = b_cpu.vulkan();
 
   a_cpu.add_(b_cpu, 2.1f);
   a_vulkan.add_(b_vulkan, 2.1f);
-  auto a_cpu_test = a_vulkan.cpu();
 
-  const auto check = almostEqual(a_cpu_test, a_cpu);
-  if (!check) {
-    std::cout << "expected:\n" << a_cpu << std::endl;
-    std::cout << "got:\n" << a_cpu_test << std::endl;
-  }
-  ASSERT_TRUE(check);
+  ASSERT_TRUE(almostEqual(a_cpu, a_vulkan.cpu()));
 }
 
 TEST(VulkanAPITest, add_scalar) {
