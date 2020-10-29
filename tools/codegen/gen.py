@@ -158,11 +158,10 @@ Target = Enum('Target', ('DEFINITION', 'DECLARATION', 'REGISTRATION'))
 # Dispatch keywords in native_functions.yaml that support all backends.
 KEYWORD_ALL_BACKENDS = ('DefaultBackend', 'Math')
 
-# Generates {dispatch}Type.cpp and {dispatch}Type.h (e.g., CPUType.cpp
-# and CPUType.h).  This function is also reused to implement per-operator
-# registration.  It also generates TypeDefault.cpp and TypeDefault.h when
-# dispatch target is for all backends (dispatch is None or dispatch in
-# KEYWORD_ALL_BACKENDS).
+# Generates {dispatch}Type.cpp (e.g., CPUType.cpp).  This function is also
+# reused to implement per-operator registration.  It also generates
+# TypeDefault.cpp when dispatch target is for all backends (dispatch is None or
+# dispatch in KEYWORD_ALL_BACKENDS).
 #
 # {dispatch}Type.cpp
 #   - The primary function of this file is to register all of the
@@ -179,16 +178,13 @@ KEYWORD_ALL_BACKENDS = ('DefaultBackend', 'Math')
 #     (as would be the case if you directly registered native::
 #     functions).
 #
-# {dispatch}Type.h
-#   - In principle, this file shouldn't exist at all; historically,
-#     it existed so that we could directly access these functions
-#     outside of the registration API for the implementation of
-#     static dispatch.  Should be deleted now!
-#
 # This function is also used for a secondary purpose: the registration
 # logic is also reused to implement per-operator registration.
 def compute_type_method(
     dispatch: Optional[str], *,
+    # TODO: Give more precise type Union[Literal[Target.DEFINITION,
+    # Target.REGISTRATION]]; requires Literal from typing_extensions
+    # which we don't have a dep for yet.
     target: Target,
     # Selector object to determine which operators to generate
     # registration code for.
@@ -196,10 +192,13 @@ def compute_type_method(
 ) -> Callable[[NativeFunction], Optional[str]]:
 
     if dispatch is None:
-        assert target == Target.REGISTRATION
+        assert target is Target.REGISTRATION
 
     @with_native_function
     def func(f: NativeFunction) -> Optional[str]:
+        # Has to be here as mypy won't transfer asserts into closures
+        assert target is not Target.DECLARATION
+
         if dispatch is not None:
             if dispatch not in f.dispatch:
                 return None
@@ -214,10 +213,7 @@ def compute_type_method(
         args_str = ', '.join(map(str, args))
         dispatch_to_all_backends = dispatch is not None and dispatch in KEYWORD_ALL_BACKENDS
 
-        if target is Target.DECLARATION:
-            assert dispatch is not None
-            return f"{returns_type} {name}({args_str});"
-        elif target is Target.DEFINITION:
+        if target is Target.DEFINITION:
             assert dispatch is not None
             impl_name = f"at::native::{f.dispatch[dispatch]}"
 
@@ -1010,13 +1006,6 @@ def main() -> None:
 
         fm = cuda_fm if 'CUDA' in dispatch else cpu_fm
 
-        fm.write_with_template(f'{dispatch}Type.h', h_template, lambda: {
-            'Type': f'{dispatch}Type',
-            'type_derived_method_declarations': list(mapMaybe(
-                compute_type_method(dispatch, target=Target.DECLARATION, selector=selector),
-                native_functions
-            )),
-        })
         fm.write_with_template(f'{dispatch}Type.cpp', cpp_template, lambda: {
             'Type': f'{dispatch}Type',
             'extra_cuda_headers': extra_cuda_headers if 'CUDA' in dispatch else '',
@@ -1036,16 +1025,6 @@ def main() -> None:
             )),
         })
         del fm
-
-    cpu_fm.write('TypeDefault.h', lambda: {
-        'type_method_declarations':
-        list(mapMaybe(
-            compute_type_method('Math', target=Target.DECLARATION, selector=selector),
-            native_functions)) +
-        list(mapMaybe(
-            compute_type_method('DefaultBackend', target=Target.DECLARATION, selector=selector),
-            native_functions)),
-    })
 
     schema_selector = selector
     if options.force_schema_registration:
