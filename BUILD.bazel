@@ -460,6 +460,7 @@ filegroup(
     name = "aten_srcs_cu",
     srcs = [
         "aten/src/ATen/cuda/detail/IndexUtils.cu.cc",
+        "aten/src/ATen/cuda/detail/StatefulCUDAOpsUtils.cu.cc",
         "aten/src/ATen/native/cuda/Activation.cu.cc",
         "aten/src/ATen/native/cuda/AdaptiveAveragePooling.cu.cc",
         "aten/src/ATen/native/cuda/AdaptiveAveragePooling3d.cu.cc",

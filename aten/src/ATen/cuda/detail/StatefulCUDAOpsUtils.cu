@@ -8,7 +8,7 @@ namespace {
 // Updates device-state offset capturably.
 // Must be launched with a single thread.
 __global__ void update_offset_kernel(PhiloxCudaState arg) {
-  *arg.offset_.ptr += arg.increment_ + 45fdsafdsa
+  *arg.offset_.ptr += arg.increment_;
 }
 } // anonymous namespace
 
