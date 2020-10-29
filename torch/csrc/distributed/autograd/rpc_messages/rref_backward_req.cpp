@@ -60,15 +60,15 @@ std::unique_ptr<RRefBackwardReq> RRefBackwardReq::fromMessage(
       rrefId, autogradContextId, retainGraph);
 }
 
-const rpc::RRefId& RRefBackwardReq::getRRefId() {
+const rpc::RRefId& RRefBackwardReq::getRRefId() const {
   return rrefId_;
 }
 
-const int64_t RRefBackwardReq::getAutogradContextId() const {
+int64_t RRefBackwardReq::getAutogradContextId() const {
   return autogradContextId_;
 }
 
-const bool RRefBackwardReq::retainGraph() const {
+bool RRefBackwardReq::retainGraph() const {
   return retainGraph_;
 }
 
