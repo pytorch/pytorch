@@ -2,13 +2,24 @@
 
 import argparse
 import os
+import sys
 
 try:
     from junitparser import JUnitXml, TestSuite
 except ImportError:
     raise ImportError(
-        "junitparser not found, please install with 'pip install junitparser'"
+        "junitparser not found, please install with 'pip install junitparser'",
+        file=sys.stderr
     )
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    print(
+        "Warning: Module tqdm not found, no progress bars will be displayed",
+        file=sys.stderr,
+    )
+    tqdm = iter
 
 
 class ThresholdExceeded(Exception):
@@ -43,10 +54,8 @@ def parse_junit_reports(path_to_reports):
     elif os.path.isdir(path_to_reports):
         ret_xml = JUnitXml()
         for root, _, files in os.walk(path_to_reports):
-            for file in files:
-                full_path = os.path.join(root, file)
-                if full_path.endswith("xml"):
-                    ret_xml += JUnitXml.fromfile(full_path)
+            for file in tqdm([f for f in files if f.endswith("xml")]):
+                ret_xml += JUnitXml.fromfile(os.path.join(root, file))
     return convert_junit_to_dict(ret_xml)
 
 
@@ -87,16 +96,15 @@ def main():
         )
 
     additive = set(compare_to.keys()).difference(base.keys())
-    subtractive = set(base.keys()).difference(compare_to.keys())
-    total_time_base = sum([val for val in base.values()])
-    total_time_compare = sum([val for val in compare_to.values()])
+    total_time_base = sum(base.values())
+    total_time_compare = sum(compare_to.values())
     total_percentage_changed = (
         (total_time_compare - total_time_base) / total_time_base * 100
     )
     if total_percentage_changed > options.threshold:
         added_time = {k: compare_to[k] for k in additive}
         raise ThresholdExceeded(
-            "Total test time increase threshold exceeded, added tests:\n",
+            "Total test time increase threshold exceeded, added tests (in seconds):\n",
             f"{added_time}",
         )
 
