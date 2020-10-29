@@ -409,8 +409,13 @@ TensorView* TensorView::cache_before() {
   // Set domain of consumer
   TensorView* consumer = this;
 
+  // Avoid replaying cache redundantly. Just for efficiency; not
+  // required for correctness.
+  bool cache_replayed = false;
+
   // this TV is an output and its origin is a reduction
   // remove reduction axis from this tv
+  bool consumer_replay_needed = false;
   if (origin_expr->getExprType() == ExprType::ReductionOp) {
     size_t i = 0;
     auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
@@ -418,8 +423,18 @@ TensorView* TensorView::cache_before() {
     for (auto dom : no_reduction_root_domain) {
       new_root_domain[i++] = dom->clone();
     }
+    // Transform producer like consumer. Note replayPasC not possible yet as
+    // there is no producer-consumer relationship.
+    producer->setDomain(TransformReplay::fullSelfReplay(
+        producer->domain(), consumer->domain()));
+    cache_replayed = true;
     consumer->setDomain(new TensorDomain(
         new_root_domain, std::vector<bool>(new_root_domain.size(), true)));
+    // The consumer domain should be transformed like the producer,
+    // but replayCasP can't be used yet as there is no
+    // producer-consumer relationship established yet. Just track
+    // it here and replay later after the expression is set.
+    consumer_replay_needed = true;
   }
 
   // Insert producer - Cache_Before (CB) - before this TV.
@@ -435,27 +450,82 @@ TensorView* TensorView::cache_before() {
   // Expr* producer_uses =
   new UnaryOp(UnaryOpType::Set, consumer, producer);
 
+  // origin_expr is no longer valid
+  origin_expr = nullptr;
+
+  if (consumer_replay_needed) {
+    TransformReplay::replayCasP(consumer, producer, -1);
+  }
+
+  // Make the cache tensor computed at the consumer if the
+  // consumer is computed at another tensor. The position is
+  // the same as this position of the consumer. Note that since
+  // the consumer is computed at another tensor at this position,
+  // there must not be reduction domains in domains until this
+  // position, so the removal of reduction domains should not affect
+  // position indices.
+  // First, make the cache tensor needs look like the consumer. The
+  // minimum number of axes to share is getThisComputeAtAxis(), but
+  // it's safe to fully replay.
+
   // Before: This TV -> Next TV
   // After:  New TV (CB) -> This TV -> Next TV
   if (hasComputeAt()) {
-    TransformReplay::replayPasC(producer, consumer, -1);
-    auto this_ca_pos = getThisComputeAtAxis();
-    producer->computeAt(consumer, this_ca_pos);
-  } else {
-    // Before: Prev TV -> This TV
-    // After:  Prev TV -> New TV (CB) -> This TV
-    // Iterate over origin expression inputs for cache_before on outputs
-    for (TensorView* origin_input :
-         ir_utils::filterByType<TensorView>(expr_inputs)) {
-      if (origin_input->hasComputeAt() &&
-          origin_input->getComputeAtView() == this) {
-        TransformReplay::replayPasC(producer, consumer, -1);
+    if (!cache_replayed) {
+      TransformReplay::replayPasC(producer, consumer, -1);
+      cache_replayed = true;
+    }
+    producer->setComputeAt(
+        consumer, (int)getThisComputeAtAxis(), (int)getThisComputeAtAxis());
+  }
 
-        auto origin_ca_pos = origin_input->getThisComputeAtAxis();
-        auto origin_rel_ca_pos = origin_input->getRelativeComputeAtAxis();
-        origin_input->computeAt(producer, origin_ca_pos);
-        producer->setComputeAt(consumer, origin_rel_ca_pos);
+  // If the consumer was the target of computeAt by producer's inputs,
+  // change the computeAt target to the cache tensor.
+
+  // Before: Prev TV -> This TV
+  // After:  Prev TV -> New TV (CB) -> This TV
+  // Iterate over origin expression inputs for cache_before on outputs
+  auto producer_this_pos = producer->getThisComputeAtAxis();
+  for (TensorView* origin_input :
+       ir_utils::filterByType<TensorView>(expr_inputs)) {
+    if (origin_input->hasComputeAt() &&
+        origin_input->getComputeAtView() == this) {
+      if (!cache_replayed) {
+        TransformReplay::replayPasC(producer, consumer, -1);
+        cache_replayed = true;
       }
+      auto origin_rel_ca_pos = origin_input->getRelativeComputeAtAxis();
+      origin_input->setComputeAt(
+          producer,
+          (int)origin_input->getThisComputeAtAxis(),
+          origin_rel_ca_pos);
+      producer_this_pos = std::max(producer_this_pos, origin_rel_ca_pos);
+    }
+  }
+
+  // Finally, make the cache tensor computed at the consumer. The
+  // position is set at the deepest position among the position where
+  // its inputs are computed at. If that position is equial or smaller
+  // than the position already set by the case where the consumer has
+  // computeAt, nothing needs to be done.
+  // Note that this step isn't strictly necessary in terms of the
+  // Fusion IR semantics, but it's likely what users would want to do
+  // anyway.
+  if (producer_this_pos > producer->getThisComputeAtAxis()) {
+    // The relative position at the consumer must not include the
+    // reduction domains.
+    auto rel_pos = producer_this_pos;
+    for (size_t i = 0; i < producer_this_pos; ++i) {
+      if (i < producer->getThisComputeAtAxis()) {
+        // No CA axes can be reduction.
+        TORCH_INTERNAL_ASSERT(!producer->axis(i)->isReduction());
+      } else if (producer->axis(i)->isReduction()) {
+        rel_pos = i;
+        break;
+      }
+    }
+    if (rel_pos > producer->getRelativeComputeAtAxis()) {
+      producer->setComputeAt(consumer, rel_pos, rel_pos);
     }
   }
 

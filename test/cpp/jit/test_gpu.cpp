@@ -8565,6 +8565,76 @@ TEST(NVFuserTest, FusionSmemIndexing_CUDA) {
 #endif
 }
 
+// Reproducer of issue 408
+TEST(NVFuserTest, FusionCacheBeforeReduction_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Float(1));
+  auto tv2 = sum(tv1, {1});
+  fusion.addOutput(tv2);
+
+  tv2->split(0, 4);
+  tv0->computeAt(tv2, -1);
+
+  tv2->cache_before();
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int numel_x = 100;
+  const int numel_y = 200;
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor input = at::rand({numel_x, numel_y}, options);
+  at::Tensor output = at::empty({numel_x}, options);
+  fe.runFusion({input}, {output});
+
+  auto t2 = (input + 1).sum({1});
+  TORCH_CHECK(t2.allclose(output));
+}
+
+TEST(NVFuserTest, FusionCacheBeforeReduction2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(3);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Float(1));
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = add(tv2, new Float(1));
+  fusion.addOutput(tv2);
+  fusion.addOutput(tv3);
+
+  tv2->computeAt(tv3, 1);
+  tv0->computeAt(tv2, -1);
+
+  auto tv4 = tv2->cache_before();
+
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int numel_x = 10;
+  const int numel_y = 20;
+  const int numel_z = 30;
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor aten_tv0 = at::rand({numel_x, numel_y, numel_z}, options);
+  auto outputs = fe.runFusion({aten_tv0});
+
+  auto aten_tv2 = (aten_tv0 + 1).sum({1});
+  auto aten_tv3 = aten_tv2 + 1;
+  TORCH_CHECK(aten_tv2.allclose(outputs[0]));
+  TORCH_CHECK(aten_tv3.allclose(outputs[1]));
+}
 } // namespace jit
 } // namespace torch
 
