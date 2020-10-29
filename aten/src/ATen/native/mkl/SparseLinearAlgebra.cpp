@@ -21,6 +21,7 @@
 #include <vector>
 #include <numeric>
 #include <cmath>
+#include <iostream>
 
 #if !AT_MKL_ENABLED()
 
@@ -77,7 +78,8 @@ namespace at { namespace native {
                                               const IntTensor& pointers, const Tensor& values,
                                               const Tensor& dense, const Tensor& t, Scalar alpha,
                                               Scalar beta, IntArrayRef size, IntArrayRef dense_size) {
-      
+
+      std::cout << "res shape: " << res.sizes() << " t.shape= " << t.sizes() << std::endl;
       sparse_mm_mkl_impl(res.data_ptr<scalar_t>(),
                          indices.data_ptr<int>(),
                          pointers.data_ptr<int>(),

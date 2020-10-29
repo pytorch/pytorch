@@ -79,11 +79,23 @@ class TestSparseGCS(TestCase):
 
         self.assertEqual(res, expected)
 
+    def test_gcs_segfault(self):
+        side1 = 100
+        side2 = 120
+        nnz = 100
+        k = 50
+        
+        gcs = self.gen_sparse_gcs((side1, k), nnz)
+        mat = torch.randn((k, side2), dtype=torch.double)
+        res = gcs.matmul(mat)
+        
+        gcs.to_dense().matmul(mat)
+        
     def test_gcs_matmul(self):
-        side1 = 1000
-        side2 = 1200
-        nnz = 1000
-        for k in [50, 500, 1000, 2000]:
+        side1 = 100
+        side2 = 120
+        nnz = 100
+        for k in [5, 50, 100, 200]:
             gcs = self.gen_sparse_gcs((side1, k), nnz)
             mat = torch.randn((k, side2), dtype=torch.double)
 
