@@ -367,7 +367,7 @@ class BuildExtension(build_ext, object):
             # See note [Pybind11 ABI constants]
             for name in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
                 val = getattr(torch._C, f"_PYBIND11_{name}")
-                if val is not None:
+                if val is not None and not IS_WINDOWS:
                     self._add_compile_flag(extension, f'-DPYBIND11_{name}="{val}"')
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
@@ -1610,7 +1610,7 @@ def _write_ninja_file_to_build_library(path,
 
     for pname in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
         pval = getattr(torch._C, f"_PYBIND11_{pname}")
-        if pval is not None:
+        if pval is not None and not IS_WINDOWS:
             common_cflags.append(f'-DPYBIND11_{pname}=\\"{pval}\\"')
 
     common_cflags += [f'-I{include}' for include in user_includes]
