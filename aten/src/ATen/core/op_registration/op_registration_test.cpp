@@ -394,7 +394,7 @@ TEST(OperatorRegistrationTest, whenRegisteringMismatchingKernelsInSameOpCall_the
     auto registrar1 = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel<DummyKernelWithIntParam>(c10::DispatchKey::CPU)
       .kernel<MockKernel>(c10::DispatchKey::CUDA, &called_kernel));
-  }, "mismatched with a previous kernel that had the signature");
+  }, "mismatched with a previous kernel");
 }
 
 void backend_fallback_kernel(const c10::OperatorHandle& op, c10::Stack* stack) {
@@ -639,7 +639,7 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringWithMismatchingC
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel(DispatchKey::CPU, [] (const int64_t&) {})
       .kernel(DispatchKey::CUDA, [] (int64_t&) {}));
-  }, "mismatched with a previous kernel that had the signature");
+  }, "mismatched with a previous kernel");
 }
 
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringCatchAllAndBackendWithMismatchingCppSignatures_thenFails) {
@@ -647,7 +647,7 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringCatchAllAndBacke
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .kernel(DispatchKey::CPU, [] (const int64_t&) {})
       .catchAllKernel([] (int64_t) {}));
-  }, "mismatched with a previous kernel that had the signature");
+  }, "mismatched with a previous kernel");
 }
 
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringBackendAndCatchAllWithMismatchingCppSignatures_thenFails) {
@@ -655,7 +655,7 @@ TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringBackendAndCatchA
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
       .catchAllKernel([] (const int64_t&) {})
       .kernel(DispatchKey::CPU, [] (int64_t) {}));
-  }, "mismatched with a previous kernel that had the signature");
+  }, "mismatched with a previous kernel");
 }
 
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenAccessingWithMismatchingCppSignatures_thenFails) {
@@ -682,7 +682,7 @@ TEST(OperatorRegistrationTest, givenTorchLibrary_whenRegisteringWithMismatchingC
   m.impl("dummy", DispatchKey::CPU, [] (int64_t) {});
   expectThrows<c10::Error>([&] {
     m.impl("dummy", DispatchKey::CUDA, [] (const int64_t&) {});
-  }, "mismatched with a previous kernel that had the signature");
+  }, "mismatched with a previous kernel");
 }
 
 TEST(OperatorRegistrationTest, givenTorchLibrary_whenAccessingWithMismatchingCppSignatures_thenFails) {
