@@ -653,18 +653,10 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
     grad = grad.sum(0, false);
   }
 
-  const auto & grad_sizes = grad.sizes();
-  at::DimVector grad_sizes_(input_dims), sum_dims;
-  std::copy(grad_sizes.begin(), grad_sizes.end(), grad_sizes_.begin());
-  auto grad_iter_ = grad_sizes_.begin();
-  int64_t offset = 0;
-  for (size_t j = num_unsqueezed; j < repeats.size(); ++j, ++grad_iter_) {
-    int64_t repeat = repeats[j];
-    if (repeat == 1) {
-      continue;
-    }
-    int64_t dim = j - num_unsqueezed;
-    // Reshape gradient
+  at::DimVector grad_size, sum_dims;
+  for (size_t dim = 0; dim < input_dims; ++dim) {
+    int64_t repeat = repeats[dim + num_unsqueezed];
+    // Reshape gradient (repeat > 1)
     // Index:      [..., dim    , ...]    [..., dim   ,  dim+1        , ...]
     // Shape: From [..., dimsize, ...] to [..., repeat, dimsize/repeat, ...]
     // The gradient tensor at 'dim' is reshaped to 'repeat' times of input tensor.
@@ -699,13 +691,26 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
     //  [g2_2+g2_4, g2_3+g2_5]]                                     [g2_2, g2_3],
     //                                   [[g2_2, g2_3],             [g2_4, g2_5]]
     //                                    [g2_4, g2_5]]]
-    sum_dims.push_back(dim + offset);
-    ++offset;
-    grad_iter_ = grad_sizes_.insert(grad_iter_, repeat);
-    *(++grad_iter_) /= repeat;
+    if (repeat != 1) {
+      grad_size.push_back(repeat);
+      sum_dims.push_back(grad_size.size() - 1);
+    }
+    // Don't need to reshape gradient (repeat == 1)
+    grad_size.push_back(input_shape[dim]);
   }
-  grad = grad.reshape(grad_sizes_);
-  grad = grad.sum(sum_dims, false);
+  // One-time Reshape & Sum
+  // Reshape gradient to grad_size:
+  //   1. If repeat equals to 1, append input size at that dimension,
+  //   2. If repeat is larger than 1, append both repeat and input size at that dimension.
+  // Sum over all "repeat" dimensions from sum_dims:
+  // Example:
+  // Input Size         (2,    3,    4,    5)
+  // repeat             [4,    1,    9,    3]
+  // output/grad Size   (8,    3,    36,   15)
+  // grad_size          [4, 2,    3, 9, 4, 3, 5]
+  // sum_dims           [0,          3,    5]
+  grad = grad.reshape(grad_size);
+  grad = grad.sum(sum_dims);
   return grad;
 }
 
