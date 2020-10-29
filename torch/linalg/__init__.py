@@ -143,7 +143,7 @@ Using the :attr:`dim` argument to compute matrix norms::
 
 _add_docstr(_linalg.linalg_svd, "See ``linalg.svd``")
 
-def svd(a, full_matrices=True, compute_uv=True):
+def svd(a, full_matrices=True, compute_uv=True, out=None):
     r"""
 linalg.svd(input, full_matrices=True, compute_uv=True, out=None) -> (Tensor, Tensor, Tensor)
 
@@ -245,12 +245,21 @@ Example::
     >>> torch.dist(a_big, u @ torch.diag_embed(s) @ vh)
     tensor(3.0957e-06)
     """
-    USV = _linalg.linalg_svd(a, full_matrices, compute_uv)
-    if not compute_uv:
-        # we want to return a value of type torch.return_types.linalg_svd
-        # (which is a PyStructSequence). However, this type is not directly
-        # exposed by pytorch, so we get a reference to it by calling type() on
-        # USV.
-        USV_TYPE = type(USV)
-        return USV_TYPE((None, USV.S, None))
-    return USV
+    if compute_uv:
+        # easy case, same semantics as the C++ version of linalg_svd
+        return _linalg.linalg_svd(a, full_matrices, compute_uv, out=out)
+
+    # harder case: C++ returns (0-tensor, S, 0-tensor) but we want to return
+    # (None, S, None) instead
+    if out is not None:
+        if type(out) != torch.Tensor:
+            raise TypeError("linalg.svd: argument 'out' must be a Tensor when "
+                            "compute_uv==False, not %s" % type(out).__name__)
+        out = (torch.Tensor(), out, torch.Tensor())
+    USV = _linalg.linalg_svd(a, full_matrices, compute_uv, out=out)
+    # we want to return a value of type torch.return_types.linalg_svd
+    # (which is a PyStructSequence). However, this type is not directly
+    # exposed by pytorch, so we get a reference to it by calling type() on
+    # USV.
+    USV_TYPE = type(USV)
+    return USV_TYPE((None, USV.S, None))

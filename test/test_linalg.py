@@ -927,16 +927,33 @@ class TestLinalg(TestCase):
         np_t = t.cpu().numpy()
 
         for full_matrices in (True, False):
+            # check linalg.svd agains numpy
             expected = np.linalg.svd(np_t, full_matrices, compute_uv=True)
             actual = torch.linalg.svd(t, full_matrices, compute_uv=True)
             self.assertEqual(actual, expected)
+            # check linalg.svd agains linalg.svd(out=...)
+            out = (torch.empty_like(actual[0]),
+                   torch.empty_like(actual[1]),
+                   torch.empty_like(actual[2]))
+            out2 = torch.linalg.svd(t, full_matrices, compute_uv=True, out=out)
+            self.assertEqual(actual, out)
+            self.assertEqual(actual, out2)
 
         for full_matrices in (True, False):
+            # check linalg.svd agains numpy
             np_s = np.linalg.svd(np_t, full_matrices, compute_uv=False)
             USV = torch.linalg.svd(t, full_matrices, compute_uv=False)
             assert USV.U is None
             self.assertEqual(USV.S, np_s)
             assert USV.V is None
+            # check linalg.svd agains linalg.svd(out=...)
+            out_S = torch.empty_like(USV.S)
+            USV = torch.linalg.svd(t, full_matrices, compute_uv=False, out=out_S)
+            assert USV.U is None
+            assert USV.S is out_S
+            self.assertEqual(USV.S, np_s)
+            assert USV.V is None
+
 
 
 instantiate_device_type_tests(TestLinalg, globals())

@@ -1113,21 +1113,14 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matr
     }
 }
 
-// Question for reviewers: should this function even exist? Do we want to
-// support out versions of torch.linalg.*?
-std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tensor& V,
+std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tensor& VT,
                                                      const Tensor& self, bool full_matrices, bool compute_uv) {
-  TORCH_CHECK(self.dim() >= 2,
-              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-
-  bool some = !full_matrices;
-  bool apply_conj = false;
-  Tensor U_tmp, S_tmp, V_tmp;
-  std::tie(U_tmp, S_tmp, V_tmp) = at::_svd_helper(self, full_matrices, compute_uv, apply_conj);
+  Tensor U_tmp, S_tmp, VT_tmp;
+  std::tie(U_tmp, S_tmp, VT_tmp) = at::linalg_svd(self, full_matrices, compute_uv);
   U.resize_as_(U_tmp).copy_(U_tmp);
   S.resize_as_(S_tmp).copy_(S_tmp);
-  V.resize_as_(V_tmp).copy_(V_tmp);
-  return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, V);
+  VT.resize_as_(VT_tmp).copy_(VT_tmp);
+  return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, VT);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
