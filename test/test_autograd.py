@@ -882,7 +882,7 @@ class TestAutograd(TestCase):
             x.grad.zero_()
             y.grad.zero_()
 
-        torch.autograd.backward(fn(), gradient, inputs=[x,y])
+        torch.autograd.backward(fn(), gradient, inputs=[x, y])
         self.assertEqual(x.grad, x_grad_expected)
         self.assertEqual(y.grad, y_grad_expected)
 
