@@ -2989,7 +2989,7 @@ struct to_ir {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs) {
     if (FunctionValue* fnValue = dynamic_cast<FunctionValue*>(forked.get())) {
-      return fnValue->callAsync(loc, method, args, kwargs, /*n_binders-*/1);
+      return fnValue->callAsync(loc, method, args, kwargs, /*n_binders-*/ 1);
     }
 
     auto g = method.graph();
