@@ -557,7 +557,9 @@ def largeTensorTest(size, device=None):
 
     size may be a number of bytes, a string of the form "N GB", or a callable
 
-    If your test is not a DeviceTypeTest, e.g. test_something(self, device), you need to specifiy `device=`.
+    If the test is a device generic test, available memory on the primary device will be checked.
+    It can also be overriden by the optional `device=` argument.
+    In other tests, the `device=` argument needs to be specified.
     """
     if isinstance(size, str):
         assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
