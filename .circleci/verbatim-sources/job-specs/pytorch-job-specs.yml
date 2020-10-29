@@ -220,10 +220,6 @@ jobs:
               echo "Retrieving Python coverage report"
               docker cp $id:/var/lib/jenkins/workspace/test/.coverage ./test
               docker cp $id:/var/lib/jenkins/workspace/test/coverage.xml ./test
-              python3 -mpip install codecov
-              python3 -mcodecov
-          fi
-          if [[ ${BUILD_ENVIRONMENT} == *"profile"* ]]; then
               echo "Retrieving C++ coverage report"
               docker cp $id:/var/lib/jenkins/workspace/build/coverage.info ./test
               python3 -mpip install codecov

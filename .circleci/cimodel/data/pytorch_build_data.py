@@ -84,7 +84,6 @@ CONFIG_TREE_DATA = [
         ("gcc", [
             ("9", [
                 ("3.8", [
-                    ("profile", [XImportant(True)]),
                     ("coverage", [XImportant(True)]),
                 ]),
             ]),
@@ -163,7 +162,6 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
 
         next_nodes = {
             "asan": AsanConfigNode,
-            "profile": ProfileConfigNode,
             "xla": XlaConfigNode,
             "vulkan": VulkanConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
@@ -208,17 +206,6 @@ class AsanConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_asan"] = node_name
-
-    def child_constructor(self):
-        return ExperimentalFeatureConfigNode
-
-
-class ProfileConfigNode(TreeConfigNode):
-    def modify_label(self, label):
-        return "Profile=" + str(label)
-
-    def init2(self, node_name):
-        self.props["profile"] = node_name
 
     def child_constructor(self):
         return ExperimentalFeatureConfigNode
