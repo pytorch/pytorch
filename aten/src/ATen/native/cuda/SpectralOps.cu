@@ -4,7 +4,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Utils.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/WrapDimUtils.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/CUDAHooksInterface.h>
