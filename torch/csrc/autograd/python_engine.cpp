@@ -130,7 +130,7 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
   PyObject *inputs = nullptr;
   unsigned char allow_unreachable = 0;
   unsigned char accumulate_grad = 0;
-  const char *accepted_kwargs[] = {
+  const char *accepted_kwargs[] = { // NOLINT
       "tensors", "grad_tensors", "keep_graph", "create_graph", "inputs",
       "allow_unreachable", "accumulate_grad", nullptr
   };
