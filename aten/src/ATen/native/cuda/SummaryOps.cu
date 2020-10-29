@@ -523,7 +523,8 @@ std::tuple<Tensor,Tensor> _histogram_cuda_uniform_bins(
             return _histogram_cuda_template_uniform_bins<scalar_t, int64_t>(
                 self, nbins, weights, range, density);
           default:
-            AT_ERROR("Scalar type ", scalar, " not supported for weights");
+            TORCH_CHECK(
+                false, "Scalar type ", scalar, " not supported for weights");
             return std::make_tuple(Tensor(), Tensor());
         }
     });
