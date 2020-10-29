@@ -1,5 +1,6 @@
 #include <ATen/Utils.h>
 #include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/StatefulCUDAOpsUtils.cuh>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
@@ -7,7 +8,7 @@
 
 namespace at {
 
-// forward-declares full
+// forward-declares
 namespace native {
   Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions& options);
 }
@@ -60,6 +61,7 @@ void initCUDAGenVector(){
   default_gens_host_state.resize(num_gpus);
   default_gens_dev_state.resize(num_gpus);
 }
+
 } // anonymous namespace
 
 /**
@@ -286,9 +288,9 @@ uint64_t CUDAGeneratorImplDevState::current_seed() const {
     // Returns init_seed_ instead of lazy-initing state, because this function is const.
     return init_seed_;
   } else {
-    const auto& seed_tensor = std::get<0>((*state_iter).second.second);
+    const auto& seed = std::get<0>((*state_iter).second.second);
     // .item() syncs on the current stream.
-    return static_cast<uint64_t>(seed_tensor.item().to<int64_t>());
+    return static_cast<uint64_t>(seed.item().to<int64_t>());
   }
 }
 
@@ -306,25 +308,22 @@ uint64_t CUDAGeneratorImplDevState::philox_offset_per_thread() const {
     // Returns init_offset_ instead of lazy-initing state, because this function is const.
     return init_offset_;
   } else {
-    const auto& offset_tensor = std::get<1>((*state_iter).second.second);
+    const auto& offset = std::get<1>((*state_iter).second.second);
     // .item() syncs on the current stream.
-    return static_cast<uint64_t>(offset_tensor.item().to<int64_t>());
+    return static_cast<uint64_t>(offset.item().to<int64_t>());
   }
 }
 
 CUDAGeneratorImplDevState::StateWithRefs&
 CUDAGeneratorImplDevState::add_stream_state(Tensor seed,
                                             Tensor offset,
-                                            Tensor next_offset,
                                             c10::Stream stream) {
   TORCH_CHECK(seeded_, "CUDAGeneratorImplDevState instance not yet seeded");
   LiveRefs new_refs{seed,
                     offset,
-                    next_offset,
                     stream};
   PhiloxCudaState new_raw{seed.data_ptr<int64_t>(),
                           offset.data_ptr<int64_t>(),
-                          next_offset.data_ptr<int64_t>(),
                           stream.id()};
   // emplace state or assign if it already exists
   auto outcome = stream_states_.emplace(std::make_pair(stream.id(), std::make_pair(new_raw, new_refs)));
@@ -346,10 +345,8 @@ CUDAGeneratorImplDevState::get_state_lazy_init() {
     auto options = TensorOptions().device(at::kCUDA).dtype(at::kLong);
     auto seed = at::native::full({1}, static_cast<int64_t>(init_seed_), options);
     auto offset = at::native::full({1}, static_cast<int64_t>(init_offset_), options);
-    auto next_offset = at::native::full({1}, static_cast<int64_t>(init_offset_), options);
     auto& new_state = add_stream_state(seed,
                                        offset,
-                                       next_offset,
                                        stream);
     return new_state;
   } else {
@@ -368,12 +365,12 @@ PhiloxCudaState CUDAGeneratorImplDevState::philox_cuda_state(uint64_t increment)
   PhiloxCudaState for_kernel = state;
   for_kernel.set_increment(increment);
 
-  // *next_offset_ptr_ will be updated by at::cuda::philox::unpack in the caller's kernel.
-  // After freezing for_kernel, swaps current and next so "next" becomes "current" for
-  // the kernel after the caller's kernel.
-  std::swap(state.offset_.ptr, state.next_offset_ptr_);
-  TORCH_INTERNAL_ASSERT((state.offset_.ptr == for_kernel.next_offset_ptr_) &&
-                        (state.next_offset_ptr_ == for_kernel.offset_.ptr));
+  // for_kernel holds pointers to persistently stored states, so update_offset
+  // increments the offset tensor in place.  We do it here so the caller isn't obligated
+  // to request an update after their consumer kernel. The update here is "premature"
+  // because it happens before the consumer kernel. The in-kernel "unpack" call
+  // compensates by subtracting the current increment (see StatefulCUDAOpsUtils.cuh).
+  at::cuda::philox::update_offset(for_kernel);
 
   return for_kernel;
 }
@@ -416,12 +413,11 @@ void CUDAGeneratorImplDevState::accept_clone_impl(const uint64_t& init_seed,
   stream_states_.clear();
   for (const auto& source_state : stream_states) {
     auto& source_refs = source_state.second.second;
-    auto& source_stream = std::get<3>(source_refs);
+    auto& source_stream = std::get<2>(source_refs);
     // Clones per-stream state tensors on their streams.
     c10::OptionalStreamGuard guard(source_stream);
     add_stream_state(std::get<0>(source_refs).clone(),
                      std::get<1>(source_refs).clone(),
-                     std::get<2>(source_refs).clone(),
                      source_stream);
   }
 }

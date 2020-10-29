@@ -20,20 +20,16 @@ unpack(at::PhiloxCudaState arg) {
   uint64_t seq_pool_start = (arg.is_on_device_and_seq_pool_id_ & 0x7fffffff) * max_kernel_threads;
 
   if (arg.is_on_device_and_seq_pool_id_ & 0x80000000) {
-    uint64_t seed = *(arg.seed_.ptr);
-    uint64_t offset = *(arg.offset_.ptr);
-
-    // thread 0 updates next offset for the next kernel
-    if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 &&
-        blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0) {
-      *arg.next_offset_ptr_ = offset + arg.increment_;
-    }
-
+    uint64_t seed = *arg.seed_.ptr;
+    // offset was already updated in the philox_cuda_state() call
+    uint64_t offset = *arg.offset_.ptr - arg.increment_;
     return std::make_tuple(seed, seq_pool_start, offset);
   } else {
     return std::make_tuple(arg.seed_.val, seq_pool_start, arg.offset_.val);
   }
 }
+
+void update_offset(at::PhiloxCudaState arg);
 
 } // namespace philox
 } // namespace cuda

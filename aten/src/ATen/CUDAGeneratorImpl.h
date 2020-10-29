@@ -55,8 +55,8 @@ namespace at {
 
 
 // Stores state values.  See Note [Non-divergent use...] above.
-// Unions and some bitshifting help reduce size,
-// to (hopefully) reduce register use in kernels.
+// Uses unions and some bitshifting to reduce size,
+// which (hopefully) reduces register use in kernels.
 struct PhiloxCudaState {
   PhiloxCudaState() = default;
   PhiloxCudaState(const PhiloxCudaState&) = default;
@@ -73,9 +73,7 @@ struct PhiloxCudaState {
   // Pointers are int64_t*, not uint64_t* (there's no such thing as uint64_t Tensors)
   PhiloxCudaState(int64_t* seed,
                   int64_t* offset,
-                  int64_t* next_offset,
-                  StreamId stream_id)
-    : next_offset_ptr_{next_offset} {
+                  StreamId stream_id) {
     seed_.ptr = seed;
     offset_.ptr = offset;
     TORCH_INTERNAL_ASSERT(stream_id <= std::numeric_limits<int>::max());
@@ -94,9 +92,7 @@ struct PhiloxCudaState {
 
   Payload seed_;
   Payload offset_;
-  int64_t* next_offset_ptr_;
 
-  // Added to this launch's offset to compute next launch's offset
   int increment_;
 
   void set_increment(uint64_t increment) {
@@ -190,13 +186,12 @@ struct TORCH_CUDA_API CUDAGeneratorImplDevState final : public CUDAGeneratorImpl
   std::shared_ptr<CUDAGeneratorImplDevState> clone() const;
 
   private:
-  using LiveRefs = std::tuple<Tensor, Tensor, Tensor, c10::Stream>;
+  using LiveRefs = std::tuple<Tensor, Tensor, c10::Stream>;
   using StateWithRefs = std::pair<PhiloxCudaState, LiveRefs>;
   using StreamStatesWithRefs = std::unordered_map<StreamId, StateWithRefs>;
 
   StateWithRefs& get_state_lazy_init();
   StateWithRefs& add_stream_state(Tensor,
-                                  Tensor,
                                   Tensor,
                                   c10::Stream);
   CUDAGeneratorImplDevState* clone_impl() const override;
