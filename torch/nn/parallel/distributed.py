@@ -1066,11 +1066,12 @@ class DistributedDataParallel(Module):
         r"""
         Registers a built-in communication hook that specifies how DDP
         aggregates gradients across multiple workers.
+        The built-in hooks aim to provide efficient C++ implementations for certain hooks,
+        which might not be as efficient if implemented in Python using a Python communication hook.
 
         Arguments:
-            comm_hook_type (dist.BuiltinCommHookType): enum that corresponds
-                to a C++ comm hook implementation predefined in
-                torch/csrc/distributed/c10d/default_comm_hooks.h.
+            comm_hook_type (dist.BuiltinCommHookType): type of communication hook, such as
+            ALLREDUCE, FP16_COMPRESS, etc.
 
         .. warning ::
             DDP communication hook can only be registered once and should be registered

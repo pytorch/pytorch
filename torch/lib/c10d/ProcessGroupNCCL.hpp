@@ -727,6 +727,6 @@ class ProcessGroupNCCL : public ProcessGroup {
   // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()
   // is called.
   static thread_local uint64_t ncclActiveGroupCounter_;
-}; // namespace c10d
+};
 
 } // namespace c10d

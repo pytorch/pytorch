@@ -45,17 +45,3 @@ def register_ddp_comm_hook(
             >>> register_ddp_comm_hook(DDPCommHookType.FP16_COMPRESS, model, state)
     """
     comm_hook_type.value(model=model, state=state)
-
-
-def register_builtin_ddp_comm_hook(comm_hook_type: dist.BuiltinCommHookType, model: DistributedDataParallel):
-    """
-        Registers the hooks of ``torch/csrc/distributed/c10d/default_comm_hooks.h``
-        to the DDP model. User can specify the type of hook as an enum
-        ``dist.BuiltinCommHookType`` type using ``comm_hook_type`` input.
-        Uses C++ comm hook implementations.
-
-        Example::
-            >>> register_builtin_ddp_comm_hook(dist.BuiltinCommHookType.FP16_COMPRESS, model)
-    """
-
-    model.reducer._register_builtin_comm_hook(comm_hook_type)

@@ -3489,20 +3489,21 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # check whether the grads are equal to what DDP without hook would return.
         self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
-    def _test_builtin_ddp_comm_hook_allreduce_hook_nccl(self, gradient_as_bucket_view=False):
+    def _test_builtin_ddp_comm_hooks_nccl(self, gradient_as_bucket_view=False):
         """
-        This unit test verifies whether a built-in DDP communication hook that just calls
-        allreduce gives the same result result with the case of no hook registered.
+        This unit test verifies whether built-in DDP communication hooks ALLREDUCE and FP16_COMPRESS
+        can give the same result result with the case of no hook registered.
         """
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        # Get GPU model with the built-in allreduce communication hook.
-        gpu_model = self._gpu_model_with_builtin_ddp_comm_hook(
-            process_group, dist.BuiltinCommHookType.ALLREDUCE, gradient_as_bucket_view)
+        for comm_hook_type in [dist.BuiltinCommHookType.ALLREDUCE, dist.BuiltinCommHookType.FP16_COMPRESS]:
+            # Get GPU model with the built-in allreduce communication hook.
+            gpu_model = self._gpu_model_with_builtin_ddp_comm_hook(
+                process_group, comm_hook_type, gradient_as_bucket_view)
 
-        # check whether the grads are equal to what DDP without hook would return.
-        self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+            # check whether the grads are equal to what DDP without hook would return.
+            self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -3513,8 +3514,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm
-    def test_builtin_ddp_comm_hook_allreduce_hook_nccl(self):
-        self._test_builtin_ddp_comm_hook_allreduce_hook_nccl()
+    def test_builtin_ddp_comm_hooks_nccl(self):
+        self._test_builtin_ddp_comm_hooks_nccl()
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -3525,8 +3526,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm
-    def test_builtin_ddp_comm_hook_allreduce_hook_nccl_grad_is_view(self):
-        self._test_builtin_ddp_comm_hook_allreduce_hook_nccl(gradient_as_bucket_view=True)
+    def test_builtin_ddp_comm_hooks_nccl_grad_is_view(self):
+        self._test_builtin_ddp_comm_hooks_nccl(gradient_as_bucket_view=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
