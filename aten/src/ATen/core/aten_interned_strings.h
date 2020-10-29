@@ -371,6 +371,8 @@ _(aten, hstack) \
 _(aten, hypot) \
 _(aten, i0) \
 _(aten, i0_) \
+_(aten, igamma) \
+_(aten, igamma_) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \
