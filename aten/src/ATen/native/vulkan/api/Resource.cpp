@@ -482,24 +482,6 @@ void Resource::Pool::purge() {
   buffer_.pool.clear();
 }
 
-void Resource::Pool::release(const Buffer& buffer) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_ && allocator_,
-      "This resource pool is in an invalid state! ",
-      "Potential reason: This resource pool is moved from.");
-
-  release_buffer(buffer);
-}
-
-void Resource::Pool::release(const Image& image) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_ && allocator_,
-      "This resource pool is in an invalid state! ",
-      "Potential reason: This resource pool is moved from.");
-
-  release_image(image);
-}
-
 } // namespace api
 } // namespace vulkan
 } // namespace native

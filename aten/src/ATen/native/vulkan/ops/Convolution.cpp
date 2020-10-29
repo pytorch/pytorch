@@ -37,13 +37,13 @@ class Context final : public torch::jit::CustomClassHolder {
       c10::optional<Scalar>,
       c10::optional<Scalar>>;
 
-  Tensor run(const Tensor& input);
+  Tensor run(const Tensor& input) const;
   State unpack() const;
 
  private:
   struct {
-    Persistent::Image weight;
-    Persistent::Buffer bias;
+    vTensor v_weight;
+    vTensor v_bias;
     std::vector<int64_t> stride;
     std::vector<int64_t> padding;
     std::vector<int64_t> dilation;
@@ -62,20 +62,14 @@ class Context final : public torch::jit::CustomClassHolder {
   c10::optional<Scalar> output_max_;
 };
 
-Persistent::Image prepack_weights(const Tensor& weight) {
-  Persistent::Image image = persistent()->image(
-      VkExtent3D{},
-      weight.options());
-
-  return image;
+vTensor prepack_weights(const Tensor& weight_arg) {
+  const Tensor weight = weight_arg.is_vulkan() ? weight_arg : weight_arg.vulkan();
+  return convert(weight);
 }
 
-Persistent::Buffer prepack_biases(const Tensor& bias) {
-  Persistent::Buffer buffer = persistent()->buffer(
-      bias.sizes(),
-      bias.options());
-
-  return buffer;
+vTensor prepack_biases(const Tensor& bias_arg) {
+  const Tensor bias = bias_arg.is_vulkan() ? bias_arg : bias_arg.vulkan();
+  return convert(bias);
 }
 
 Context::Context(
@@ -106,46 +100,105 @@ Context::Context(
     output_max_(output_max) {
 }
 
-Tensor Context::run(const Tensor& input_arg) {
+Tensor Context::run(const Tensor& input_arg) const {
   api::Context* const context = api::context();
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
 
+  const IntArrayRef input_sizes = v_input.sizes();
+  const IntArrayRef weight_sizes = packed_.v_weight.sizes();
+
   vTensor v_output{
     context,
     conv_output_size(
-        input.sizes(),
-        IntArrayRef{},  // TODO
+        input_sizes,
+        weight_sizes,
         packed_.stride,
         packed_.padding,
         packed_.dilation),
     input.options(),
   };
 
+  const IntArrayRef output_sizes = v_output.sizes();
+
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (v_output.has_image() && v_input.has_image()) {
+    if (v_output.has_image() && v_input.has_image() && packed_.v_weight.has_image()) {
       const struct {
+        struct {
+          uint32_t width, height;
+        } padding, kernel, stride, dilation;
+
+        struct {
+          uint32_t N, C, H, W;
+        } output, input;
+
+        struct {
+          float min, max;
+        } clamp;
       } block {
+        {
+          packed_.padding[0],
+          packed_.padding[1],
+        },
+        {
+          weight_sizes[2],
+          weight_sizes[3],
+        },
+        {
+          packed_.stride[0],
+          packed_.stride[1],
+        },
+        {
+          packed_.dilation[0],
+          packed_.dilation[1],
+        },
+        {
+          output_sizes[0],
+          output_sizes[1],
+          output_sizes[2],
+          output_sizes[3],
+        },
+        {
+          input_sizes[0],
+          input_sizes[1],
+          input_sizes[2],
+          input_sizes[3],
+        },
+        {
+          output_min_->to<float>(),  // TODO
+          output_max_->to<float>(),  // TODO
+        },
       };
 
-      // context->dispatch(
-      //     command_buffer,
-      //     {
-      //     },
-      //     VK_KERNEL(),
-      //     v_output.extents(),
-      //     // Write-only access bypasses synchronization but inserts appropriate
-      //     // barriers if necessary.
-      //     v_output.image(command_buffer, vTensor::Access::Write),
-      //     // Read-only access is implied on const tensors and triggers an async
-      //     // synchronization if necessary.
-      //     v_self.image(command_buffer),
-      //     // Object lifetime is managed by the resource pool.
-      //     // It is OK not to keep track of the handle.
-      //     context->resource().pool.uniform(block).object);
+      context->dispatch(
+          command_buffer,
+          {
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          },
+          VK_KERNEL(conv2d_dw_clamp),
+          v_output.extents(),
+          // Write-only access bypasses synchronization but inserts appropriate
+          // barriers if necessary.
+          v_output.image(command_buffer, vTensor::Access::Write),
+          // Read-only access is implied on const tensors and triggers an async
+          // synchronization if necessary.
+          v_input.image(command_buffer),
+          // Read-only access is implied on const tensors and triggers an async
+          // synchronization if necessary.
+          packed_.v_weight.image(command_buffer),
+          // Read-only access is implied on const tensors and triggers an async
+          // synchronization if necessary.
+          packed_.v_bias.buffer(command_buffer),
+          // Object lifetime is managed by the resource pool.
+          // It is OK not to keep track of the handle.
+          context->resource().pool.uniform(block).object);
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -196,6 +249,19 @@ Tensor conv2d_clamp_run(
   return context->run(input);
 }
 
+Tensor convolution(
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias,
+    const IntArrayRef stride,
+    const IntArrayRef padding,
+    const IntArrayRef dilation,
+    const bool transposed,
+    const IntArrayRef,
+    const int64_t groups) {
+  return Tensor{};
+}
+
 typedef Context Conv2dOpContext;
 
 TORCH_LIBRARY(vulkan, m) {
@@ -236,6 +302,10 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
   m.impl("conv2d_clamp_run", conv2d_clamp_run);
+}
+
+TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
+  m.impl_UNBOXED("convolution_overrideable", convolution);
 }
 
 } // namespace
