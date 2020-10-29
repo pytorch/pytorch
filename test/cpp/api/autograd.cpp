@@ -186,6 +186,7 @@ TEST(AutogradAPITests, AnomalyMode) {
             "Traceback of forward call that induced the previous calculation") !=
         std::string::npos);
   }
+  torch::autograd::AnomalyMode::set_enabled(false);
 }
 
 TEST(CustomAutogradTest, CustomFunction) {
