@@ -3301,13 +3301,13 @@ class TestONNXRuntime(unittest.TestCase):
             @torch.jit.script_method
             def forward(self, input):
                 if input.dim() == 2:
-                   b = None
+                    b = None
                 else:
-                   b = input[1:]
+                    b = input[1:]
                 if b is not None:
-                    b[0]=5
+                    b[0] = 5
                 return input.int()
-        
+
         x = torch.randn(2, 3)
         self.run_test(List(), (x,))
 
