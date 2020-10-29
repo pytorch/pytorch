@@ -194,13 +194,14 @@ class Tracer(TracerBase):
             return self.call_module(mod, forward, args, kwargs)
 
         try:
-            torch.nn.Module.__getattr__ = module_getattr_wrapper
+            # Seems to be a mypy limitation: https://github.com/python/mypy/issues/2427
+            torch.nn.Module.__getattr__ = module_getattr_wrapper  # type: ignore
             torch.nn.Module.__call__ = module_call_wrapper
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
         finally:
             torch.nn.Module.__call__ = orig_call
-            torch.nn.Module.__getattr__ = orig_getattr
+            torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
         return self.graph
 
 # Symbolic tracing API
