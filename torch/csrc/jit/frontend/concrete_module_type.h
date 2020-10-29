@@ -83,7 +83,6 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   void addFailedAttribute(std::string name, std::string failureReason);
   void addIgnoredAttribute(std::string name);
   void setIterableModuleKind(IterableModuleKind kind);
-  void setContainedTypeHint(TypePtr containedTypeHint);
 
   // If a ConcreteModuleType is poisoned, it will never compare equal to any
   // other concrete type
@@ -173,13 +172,6 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // The original `nn.Module` class that we derived this ScriptModule from.
   py::object pyClass_;
 
-  // A type hint on this Module indicating the type of what it contains.
-  // This only makes sense on ModuleDict (where it must be Dict[str,
-  // ModuleInterfaceType]) or ModuleList (where it must be
-  // List[ModuleInterfaceType]). This can be used to unlock additional
-  // operations like indexing without a static key.
-  TypePtr containedTypeHint_{nullptr};
-
   // NOTE: If you ever add any more state to this struct, you need to make sure
   // operator== still makes sense!
   friend ConcreteModuleType;
@@ -193,7 +185,6 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
 
   static std::shared_ptr<ConcreteModuleType> fromJitType(TypePtr type);
 
-  TypePtr getContainedTypeHint() const;
   TypePtr getJitType() const;
   c10::optional<py::object> getPyClass() const;
   IterableModuleKind getIterableModuleKind() const;

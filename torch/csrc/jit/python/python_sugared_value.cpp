@@ -234,9 +234,11 @@ SugaredValuePtr ModuleValue::asTupleValue(const SourceRange& loc, Function& m) {
 SugaredValuePtr ModuleValue::getitem(
     const SourceRange& loc,
     Function& m,
-    Value* idx) {
+    Value* idx,
+    TypePtr type_hint) {
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
-    return getSugaredDict(loc, m)->getModules()->getitem(loc, m, idx);
+    return getSugaredDict(loc, m)->getModules()->getitem(
+        loc, m, idx, type_hint);
   } else if (
       concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
     if (auto ivalue = toIValue(idx)) {
@@ -252,35 +254,27 @@ SugaredValuePtr ModuleValue::getitem(
         }
       }
       throw ErrorReport(loc) << "Key Error, " << idx_str;
-    } else if (auto containedTypeHint = concreteType_->getContainedTypeHint()) {
-      if (containedTypeHint) {
-        // For now, only dict type containedTypeHints are supported.
-        DictTypePtr dict_type = containedTypeHint->expect<DictType>();
-        auto graph = m.graph();
-
-        // Check that all submodules comply with the contained type hint.
-
-        const auto& self_type =
-            concreteType_->getJitType()->expect<ClassType>();
-        for (size_t i = 0; i < self_type->numAttributes(); ++i) {
-          const auto& attr_type = self_type->getAttribute(i);
-          if (attr_type->is_module()) {
-            if (!attr_type->isSubtypeOf(dict_type->getValueType())) {
-              auto loc = self_->node()->sourceRange();
-              throw ErrorReport(loc)
-                  << "Attribute " << self_type->getAttributeName(i)
-                  << " is not of annotated type "
-                  << dict_type->getValueType()->annotation_str();
-            }
+    } else if (type_hint) {
+      // Check that all submodules comply with the type hint.
+      const auto& self_type = concreteType_->getJitType()->expect<ClassType>();
+      for (size_t i = 0; i < self_type->numAttributes(); ++i) {
+        const auto& attr_type = self_type->getAttribute(i);
+        if (attr_type->is_module()) {
+          if (!attr_type->isSubtypeOf(type_hint)) {
+            auto loc = self_->node()->sourceRange();
+            throw ErrorReport(loc)
+                << "Attribute " << self_type->getAttributeName(i)
+                << " is not of annotated type " << type_hint->annotation_str();
           }
         }
-
-        // Emit a prim::ModuleDictIndex operator.
-        auto* getitem_node = graph->insertNode(
-            graph->create(prim::ModuleDictIndex, {self_, idx}));
-        getitem_node->output(0)->setType(dict_type->getValueType());
-        return std::make_shared<SimpleValue>(getitem_node->output(0));
       }
+
+      // Emit a prim::ModuleDictIndex operator.
+      auto graph = m.graph();
+      auto* getitem_node =
+          graph->insertNode(graph->create(prim::ModuleDictIndex, {self_, idx}));
+      getitem_node->output(0)->setType(type_hint);
+      return std::make_shared<SimpleValue>(getitem_node->output(0));
     }
     throw ErrorReport(loc)
         << "Unable to extract string literal index. "

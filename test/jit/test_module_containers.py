@@ -453,27 +453,25 @@ class TestModuleContainers(JitTestCase):
         # Test annotation of submodule.
 
         class Mod(torch.nn.Module):
-            __annotations__ = {"d": Dict[str, ModuleInterface]}
-
             def __init__(self):
                 super().__init__()
                 self.d = torch.nn.ModuleDict({"module": ImplementsInterface()})
 
             def forward(self, x: torch.Tensor, key: str) -> Any:
-                return self.d[key].forward(x)
+                value: ModuleInterface = self.d[key]
+                return value.forward(x)
 
         m = Mod()
         self.checkModule(m, (torch.randn(2, 2), "module"))
 
         # Test annotation of self.
         class ModDict(torch.nn.ModuleDict):
-            __annotations__ = {"self": Dict[str, ModuleInterface]}
-
             def __init__(self):
                 super().__init__({"module": ImplementsInterface()})
 
             def forward(self, x: torch.Tensor, key: str) -> Any:
-                return self[key].forward(x)
+                submodule: ModuleInterface = self[key]
+                return submodule.forward(x)
 
         m = ModDict()
         self.checkModule(m, (torch.randn(2, 2), "module"))
@@ -481,14 +479,13 @@ class TestModuleContainers(JitTestCase):
         # Test error message thrown when annotated attribute does not comply with the
         # annotation.
         class ModWithWrongAnnotation(torch.nn.ModuleDict):
-            __annotations__ = {"d": Dict[str, ModuleInterface]}
-
             def __init__(self):
                 super().__init__()
                 self.d = torch.nn.ModuleDict({"module": DoesNotImplementInterface()})
 
             def forward(self, x: torch.Tensor, key: str) -> Any:
-                return self.d[key].forward(x)
+                submodule: ModuleInterface = self.d[key]
+                return submodule.forward(x)
 
         with self.assertRaisesRegex(RuntimeError, r"Attribute module is not of annotated type"):
             torch.jit.script(ModWithWrongAnnotation())

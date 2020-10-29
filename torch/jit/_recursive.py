@@ -107,14 +107,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
     if isinstance(nn_module, (torch.quantization.QuantWrapper)):
         class_annotations = {}
 
-    if "self" in class_annotations:
-        self_type = torch.jit.annotations.ann_to_type(class_annotations["self"], _jit_internal.fake_range())
-        concrete_type_builder.set_contained_type_hint(self_type)
-    elif hasattr(nn_module, "_contained_type_hint"):
-        # In this case, the parent module has an annotation for its attribute that corresponds to nn_module.
-        # Set that annotation as the contained type hint for the concrete type of nn_module.
-        concrete_type_builder.set_contained_type_hint(nn_module._contained_type_hint)
-
     # Get user-annotated ignored attributes.
     user_annotated_ignored_attributes = getattr(nn_module, "__jit_ignored_attributes__", list())
     concrete_type_builder.add_ignored_attributes(user_annotated_ignored_attributes)
@@ -170,19 +162,13 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             concrete_type_builder.add_attribute(name, attr_type, False, False)
             continue
         if attr_type is not None:
-            if attr_type.is_interface_type():
-                sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(attr_type)
-                concrete_type_builder.add_module(name, sub_concrete_type)
-            else:
-                # Record the contained type hint on the module itself so that
-                # get_module_concrete_type can add it to the sub_concrete_type.
-                item._contained_type_hint = attr_type
-                sub_concrete_type = get_module_concrete_type(item, share_types)
-                concrete_type_builder.add_module(name, sub_concrete_type)
+            assert attr_type.is_interface_type()
+            # if the type can be inferred, it should be a module interface type
+            sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(attr_type)
         else:
             # otherwise we get the concrete module type for item and add it to concrete_type
             sub_concrete_type = get_module_concrete_type(item, share_types)
-            concrete_type_builder.add_module(name, sub_concrete_type)
+        concrete_type_builder.add_module(name, sub_concrete_type)
 
         added_names.add(name)
 

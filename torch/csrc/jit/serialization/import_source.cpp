@@ -374,9 +374,6 @@ struct SourceImporterImpl : public Resolver,
     // Module-specific: which attrs are parameters?
     std::unordered_set<std::string> parameter_names;
     std::unordered_set<std::string> buffer_names;
-
-    std::unordered_map<std::string, Expr> annotations;
-
     // Process statements, splitting things into attribute and method
     // definitions.
     for (const auto& statement : class_def.body()) {
@@ -401,14 +398,8 @@ struct SourceImporterImpl : public Resolver,
                   parameter_names.insert(StringLiteral(param).text());
                 }
               } else if (name == "__annotations__") {
-                const auto annotation_dict = DictLiteral(assign.rhs().get());
-                auto key_inputs = annotation_dict.key_inputs();
-                auto value_inputs = annotation_dict.value_inputs();
-
-                for (size_t i = 0, e = key_inputs.size(); i < e; ++i) {
-                  auto key_str = StringLiteral(key_inputs[i]).text();
-                  annotations.insert(std::make_pair(key_str, value_inputs[i]));
-                }
+                // This is to initialize the annotations dict, just ignore.
+                continue;
               } else if (name == "__buffers__") {
                 TORCH_INTERNAL_ASSERT(
                     is_module, "Buffers only exist on modules at the moment");
@@ -492,22 +483,6 @@ struct SourceImporterImpl : public Resolver,
       auto const_val = type_parser.parseClassConstant(assign);
       const auto name = Var(assign.lhs()).name().name();
       class_type->addConstant(name, const_val);
-    }
-
-    // Process __annotations__.
-    for (const auto& annotation : annotations) {
-      auto hint = type_parser.parseTypeFromExpr(annotation.second);
-
-      if (annotation.first == "self" && class_type->is_module()) {
-        class_type->setContainedTypeHint(hint);
-        continue;
-      }
-
-      auto attr_ty = class_type->findAttribute(annotation.first);
-      if (attr_ty && attr_ty->is_module()) {
-        auto attr_class_ty = attr_ty->expect<ClassType>();
-        attr_class_ty->setContainedTypeHint(hint);
-      }
     }
 
     cu_->register_type(class_type);

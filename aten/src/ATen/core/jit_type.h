@@ -2271,10 +2271,6 @@ struct CAFFE2_API ClassType : public NamedType {
 
   static const TypeKind Kind = TypeKind::ClassType;
 
-  void setContainedTypeHint(TypePtr type) { containedTypeHint_ = type; }
-
-  TypePtr getContainedTypeHint() const { return containedTypeHint_; }
-
  private:
   ClassType(
       c10::optional<QualifiedName> name,
@@ -2313,13 +2309,6 @@ struct CAFFE2_API ClassType : public NamedType {
 
   // List of properties exposed by this class.
   std::vector<Property> properties_;
-
-  // A type hint on this Module indicating the type of what it contains.
-  // This only makes sense on ModuleDict (where it must be Dict[str,
-  // ModuleInterfaceType]) or ModuleList (where it must be
-  // List[ModuleInterfaceType]). This can be used to unlock additional
-  // operations like indexing without a static key.
-  TypePtr containedTypeHint_;
 
   bool isModule_ = false;
 

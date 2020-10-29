@@ -516,9 +516,9 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
     if (item.a.isPtrType()) {
       // uncomment to debug type matching errors
       // std::cout << "MATCHING " << /*item.a <<*/ "(" << *item.a.type() << ") "
-      //         << item.a.internalToPointer() << " " << /*item.b <<*/ " ("
-      //         << *item.b.type() << ") " << item.b.internalToPointer() <<
-      //         "\n";
+      //          << item.a.internalToPointer() << " " << /*item.b <<*/ " ("
+      //          << *item.b.type() << ") " << item.b.internalToPointer() <<
+      //          "\n";
 
       if (visited.count(item.a.internalToPointer())) {
         continue;
@@ -1594,9 +1594,6 @@ void initJitScriptBindings(PyObject* module) {
           [](ConcreteModuleTypeBuilder& self) {
             self.setIterableModuleKind(IterableModuleKind::DICT);
           })
-      .def(
-          "set_contained_type_hint",
-          &ConcreteModuleTypeBuilder::setContainedTypeHint)
       .def("build", &ConcreteModuleTypeBuilder::build)
       .def(
           "equals",
