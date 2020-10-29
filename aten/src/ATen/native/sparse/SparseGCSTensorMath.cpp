@@ -102,7 +102,6 @@ Tensor add_sparse_gcs(const Tensor& self, const Tensor& other, Scalar alpha) {
   auto commonDtype = at::result_type(self, other);
   alpha_check(commonDtype, alpha);
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
-  std::cout << "calling add_sparse_gcs\n";
   return at::add_out(result, self, other, alpha);  // redispatch!
 }
 
@@ -208,8 +207,6 @@ SparseTensor& add_out_sparse_gcs_cpu(SparseTensor& out, const SparseTensor& self
   TORCH_CHECK(canCast(commonDtype, out.scalar_type()), "Can't convert result type ", commonDtype,
               " to output ", out.scalar_type(), " in add operation");
 
-  std::cout << "calling add_out sparse: \n" ;
-
 
   int64_t self_nnz = self._nnz(), src_nnz = src._nnz(), max_nnz = self_nnz + src_nnz;
 
@@ -223,8 +220,6 @@ SparseTensor& add_out_sparse_gcs_cpu(SparseTensor& out, const SparseTensor& self
   // auto out_indices_accessor = out_indices.accessor<int64_t, 1>();
   // auto src_indices_accessor = src_indices.accessor<int64_t, 1>();
 
-    std::cout << "calling add_out sparse 9: \n" ;
-    
   AT_DISPATCH_ALL_TYPES(
     commonDtype, "cadd_sparse_gcs", [&] {
                                       
@@ -234,9 +229,7 @@ SparseTensor& add_out_sparse_gcs_cpu(SparseTensor& out, const SparseTensor& self
   if (out.scalar_type() != commonDtype) {
     out_values = out_values.to(out.scalar_type());
   }
-
-  std::cout << "calling add_out sparse 1: \n" ;
-
+  
   return out;
 }
 

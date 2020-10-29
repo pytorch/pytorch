@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ATen/Tensor.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/SparseTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
@@ -10,7 +12,6 @@ namespace at {
 // we probably should have some superclass between TensorImpl and GCSTensorImpl that is
 // shared between COO and GCS tensors.
 struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
-
   Tensor pointers_;
   Tensor indices_;
   Tensor values_;
@@ -35,6 +36,8 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
 
   void resize_(IntArrayRef size);
   void resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, IntArrayRef size);
+  void resize_as_(const Tensor& src);
+  
 
   void set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices,
                                  const Tensor& values, const Tensor& reduction,

@@ -1,10 +1,11 @@
 #include <ATen/ATen.h>
+#include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseGCSTensorImpl.h>
+#include <ATen/SparseTensorUtils.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
 namespace at {
-
 namespace {
   DeviceType sparseGCSTensorSetToDeviceType(DispatchKeySet key_set) {
     if (key_set.has(DispatchKey::SparseGCS_CPU)) {
@@ -16,7 +17,6 @@ namespace {
     }
   }
 }
-
 
 SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set,
                                          const caffe2::TypeMeta& data_type)
@@ -59,6 +59,14 @@ void SparseGCSTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t ptr_size, 
   values_ = empty_values;
   reduction_ = empty_reduction;
   sizes_ = size.vec();
+}
+
+void SparseGCSTensorImpl::resize_as_(const Tensor& src) {
+  pointers_ = at::empty_like(src.pointers(), src.pointers().options(), src.pointers().suggest_memory_format());
+  indices_ = at::empty_like(src.indices(), src.indices().options(), src.indices().suggest_memory_format());
+  values_ = at::empty_like(src.values(), src.values().options(), src.values().suggest_memory_format());
+  reduction_ = at::empty_like(src.reduction(), src.reduction().options(), src.reduction().suggest_memory_format());
+  sizes_ = src.sizes();
 }
   
 void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices,
