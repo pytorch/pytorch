@@ -1050,6 +1050,13 @@ struct PythonPrintImpl {
         }
         stmt << ")";
       } break;
+      case prim::CallFunctionAsync: {
+        stmt << "fork(" << useOf(node->inputs().at(0)) << ", ";
+        for (size_t i = 1; i < node->inputs().size(); i++) {
+          stmt << useOf(node->inputs()[i]) << ", ";
+        }
+        stmt << ")";
+      } break;
       case prim::CallMethod: {
         const auto& self = node->inputs().at(0);
         const auto& methodName = node->s(attr::name);

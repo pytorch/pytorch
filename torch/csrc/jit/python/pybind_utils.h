@@ -1214,14 +1214,15 @@ inline py::object runAndInsertCall(
 inline py::object invokeScriptFunctionFromPython(
     Function& callee,
     tuple_slice args,
-    py::kwargs kwargs) {
+    py::kwargs kwargs,
+    bool isAsync = false) {
   return runAndInsertCall(
       callee,
       args,
       kwargs,
       /*self=*/c10::nullopt,
       [&](Graph& graph, const MatchedSchema& match) {
-        return graph.insertFunctionCall(&callee, match);
+        return graph.insertFunctionCall(&callee, match, isAsync);
       });
 }
 

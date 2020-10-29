@@ -149,6 +149,7 @@ namespace c10 {
   _(prim, rpc_sync)                  \
   _(prim, rpc_remote)                \
   _(prim, is_cuda)                   \
+  _(prim, CallFunctionAsync)         \
   _(aten, abs_)                      \
   _(aten, absolute)                  \
   _(aten, absolute_)                 \

@@ -1770,7 +1770,8 @@ Value* Graph::insertToList(Value* v, TypePtr type) {
 
 Value* Graph::insertFunctionCall(
     Function* callee,
-    const MatchedSchema& matched) {
+    const MatchedSchema& matched,
+    bool isAsync) {
   std::string func_name = callee->name();
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->s_(attr::name, func_name)
@@ -1778,9 +1779,14 @@ Value* Graph::insertFunctionCall(
                            ->setType(FunctionType::create(callee));
   std::vector<Value*> inputs = {fn_constant};
   inputs.insert(inputs.end(), matched.inputs.begin(), matched.inputs.end());
-  Value* result = insertNode(create(prim::CallFunction, inputs))
-                      ->output()
-                      ->setType(matched.return_types.at(0));
+
+  Symbol nodeKind = isAsync ? prim::CallFunctionAsync : prim::CallFunction;
+  Value* result = insertNode(create(nodeKind, inputs))->output();
+  if (isAsync) {
+    result->setType(FutureType::create(matched.return_types.at(0)));
+  } else {
+    result->setType(matched.return_types.at(0));
+  }
   return result;
 }
 

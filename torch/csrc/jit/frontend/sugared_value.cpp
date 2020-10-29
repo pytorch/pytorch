@@ -699,5 +699,50 @@ SugaredValuePtr SugaredEnumClass::iter(const SourceRange& loc, Function& m) {
   return enum_values_list_constant;
 }
 
+static std::shared_ptr<SugaredValue> insertFunctionCall(
+    const std::vector<Function*>& callees,
+    bool isAsync,
+    const SourceRange& loc,
+    Function& f,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    size_t n_binders) {
+  std::vector<const FunctionSchema*> schemas;
+  for (Function* callee : callees) {
+    try {
+      callee->ensure_defined();
+    } catch (const RecursiveMethodCallError&) {
+      throw ErrorReport(loc)
+          << " function '" << callee->name() << "' is called recursively. "
+          << "Recursive calls are not supported";
+    }
+    schemas.push_back(&callee->getSchema());
+  }
+  auto match = matchSchemas(schemas, loc, *f.graph(), args, kwargs);
+  Value* output =
+      f.graph()->insertFunctionCall(callees[match.first], match.second);
+  output->node()->setSourceRange(loc);
+  return std::make_shared<SimpleValue>(output);
+}
+
+std::shared_ptr<SugaredValue> FunctionValue::callAsync(
+    const SourceRange& loc,
+    Function& f,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    size_t n_binders) {
+  return insertFunctionCall(
+      callees_, /*isAsync=*/true, loc, f, args, kwargs, n_binders);
+}
+
+std::shared_ptr<SugaredValue> FunctionValue::call(
+    const SourceRange& loc,
+    Function& f,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    size_t n_binders) {
+  return insertFunctionCall(
+      callees_, /*isAsync=*/false, loc, f, args, kwargs, n_binders);
+}
 } // namespace jit
 } // namespace torch

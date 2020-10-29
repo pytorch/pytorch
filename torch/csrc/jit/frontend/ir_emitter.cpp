@@ -2988,6 +2988,10 @@ struct to_ir {
       const std::shared_ptr<SugaredValue>& forked,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs) {
+    if (FunctionValue* fnValue = dynamic_cast<FunctionValue*>(forked.get())) {
+      return fnValue->callAsync(loc, method, args, kwargs, /*n_binders-*/1);
+    }
+
     auto g = method.graph();
     Node* fork_node;
     TypePtr out_type;

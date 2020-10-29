@@ -475,6 +475,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::FallbackGraph:
       return analyzeSubgraph(node);
     case prim::fork:
+    case prim::CallFunctionAsync:
       return analyzeFork(node);
     case aten::wait:
       return analyzeWait(node);

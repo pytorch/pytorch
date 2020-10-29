@@ -365,7 +365,7 @@ struct TORCH_API NamedTupleConstructor : public SugaredValue {
   TupleTypePtr type_;
 };
 
-struct FunctionValue : public SugaredValue {
+struct TORCH_API FunctionValue : public SugaredValue {
   FunctionValue(Function* callee) : callees_({std::move(callee)}) {}
   FunctionValue(const StrongFunctionPtr& p)
       : callees_({p.function_}), cu_(p.cu_) {}
@@ -386,24 +386,14 @@ struct FunctionValue : public SugaredValue {
       Function& f,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
-      size_t n_binders) override {
-    std::vector<const FunctionSchema*> schemas;
-    for (Function* callee : callees_) {
-      try {
-        callee->ensure_defined();
-      } catch (const RecursiveMethodCallError&) {
-        throw ErrorReport(loc)
-            << " function '" << callee->name() << "' is called recursively. "
-            << "Recursive calls are not supported";
-      }
-      schemas.push_back(&callee->getSchema());
-    }
-    auto match = matchSchemas(schemas, loc, *f.graph(), args, kwargs);
-    Value* output =
-        f.graph()->insertFunctionCall(callees_[match.first], match.second);
-    output->node()->setSourceRange(loc);
-    return std::make_shared<SimpleValue>(output);
-  }
+      size_t n_binders) override;
+
+  std::shared_ptr<SugaredValue> callAsync(
+      const SourceRange& loc,
+      Function& f,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs,
+      size_t n_binders);
 
   const std::vector<Function*>& callees() {
     return callees_;

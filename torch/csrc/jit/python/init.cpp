@@ -1179,15 +1179,30 @@ void initJITBindings(PyObject* module) {
 
     if (jit::tracer::isTracing()) {
       auto graph = jit::tracer::getTracingState()->graph;
-      auto fork_node = graph->insertNode(graph->create(prim::TracedFork, 1));
-      auto body_block = fork_node->addBlock();
-
       Value* node_output;
       py::object py_func_output;
-      // Insert new trace ops into the fork op's sub-block
-      WithInsertPoint guard(body_block);
       IValue output_ivalue;
-      {
+      if (py::isinstance<StrongFunctionPtr>(f)) {
+        // If the function we are forking is a ScriptFunction, just insert a
+        // prim::AsyncFunctionCall node here and use the result.
+        auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
+        Function& callee = *strongPtr.function_;
+        py_func_output = invokeScriptFunctionFromPython(
+            callee,
+            tuple_slice(std::move(args), 1),
+            std::move(kwargs),
+            /*isAsync=*/true);
+        output_ivalue = toTypeInferredIValue(py_func_output);
+        node_output = jit::tracer::getValueTrace(output_ivalue);
+      } else {
+        // Otherwise, we need to trace the execution of this function under a
+        // special `prim::TracedFork` block. This block will later be turned
+        // into a proper `prim::fork` by `FixupTraceScopeBlocks`.
+        auto fork_node = graph->insertNode(graph->create(prim::TracedFork, 1));
+        auto body_block = fork_node->addBlock();
+
+        // Insert new trace ops into the fork op's sub-block
+        WithInsertPoint guard(body_block);
         tracer::WithNestedTracingFrame env_guard;
 
         // Run the user-supplied function

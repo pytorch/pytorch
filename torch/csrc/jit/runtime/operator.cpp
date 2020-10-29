@@ -296,6 +296,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::ConstantChunk,
       prim::BroadcastingChunk,
       prim::fork,
+      prim::CallFunctionAsync,
       prim::CreateObject,
       prim::AutogradAdd,
       prim::GetAttr,

@@ -877,6 +877,12 @@ struct CodeImpl {
     insertInstruction(TUPLE_SLICE, beg_ind, end_ind - beg_ind);
   }
 
+  void emitCallAsync(Function* func, at::ArrayRef<Value*> inputs) {
+    emitLoadInputs(inputs);
+    insertInstruction(FORK, function_table_.size(), inputs.size());
+    function_table_.emplace_back(std::move(func));
+  }
+
   void emitFork(Node* node) {
     emitLoadInputs(node->inputs());
     std::unique_ptr<GraphFunction> forked_fn(new GraphFunction(
@@ -929,6 +935,11 @@ struct CodeImpl {
         break;
       case prim::CallFunction:
         emitCall(
+            node->inputs().at(0)->type()->expect<FunctionType>()->function(),
+            node->inputs().slice(1));
+        break;
+      case prim::CallFunctionAsync:
+        emitCallAsync(
             node->inputs().at(0)->type()->expect<FunctionType>()->function(),
             node->inputs().slice(1));
         break;
