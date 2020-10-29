@@ -380,6 +380,7 @@ def set_deterministic(d):
         * :func:`torch.index_select` when called on a CUDA tensor that requires grad
         * :func:`torch.repeat_interleave` when called on a CUDA tensor that requires grad
         * :func:`torch.histc` when called on a CUDA tensor
+        * :func:`torch.histogram` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
