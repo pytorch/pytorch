@@ -140,8 +140,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
 // 1. Parse equation to extract the labels for each input operand and output
 // 2. Unsqueeze missing dimensions from input operands and permute to align them
 // 3. Compute result by multiplying input operands and summing contraction
-//    dimensions We do the last part by reducing to bmm, there is room for
-//    optimization here.
+//    dimensions We do the last part by reducing to bmm.
 Tensor einsum(std::string equation, TensorList operands) {
   TORCH_CHECK(!operands.empty(), "einsum() must provide at least one operand");
   checkDeviceType("einsum()", operands, operands[0].device().type());
@@ -150,15 +149,15 @@ Tensor einsum(std::string equation, TensorList operands) {
   constexpr int ELLIPSIS = '.';
 
   // Find arrow (->) to split equation into lhs and rhs
-  std::size_t arrow_pos = equation.find("->");
+  const auto arrow_pos = equation.find("->");
 
   // Parse lhs of equation to store ASCII value for each valid label and
   // ELLIPSIS for every operand into op_labels
   std::string lhs = equation.substr(0, arrow_pos);
   std::vector<std::vector<int>> op_labels(operands.size());
   bool found_ell = false;
-  std::size_t curr_op = 0;
-  for (std::size_t i = 0; i < lhs.length(); ++i) {
+  std::string::size_type curr_op = 0;
+  for (auto i = decltype(lhs.length()){0}; i < lhs.length(); ++i) {
     switch (lhs[i]) {
       case ' ':
         // Ignore spaces
@@ -183,8 +182,9 @@ Tensor einsum(std::string equation, TensorList operands) {
 
       case ',':
         // Move onto next operand
+        ++curr_op;
         TORCH_CHECK(
-            ++curr_op < operands.size(),
+            curr_op < operands.size(),
             "einsum() fewer operands were provided than specified in the equation");
         found_ell = false;
         break;
@@ -405,7 +405,7 @@ Tensor einsum(std::string equation, TensorList operands) {
     for (int i = 0; i < out_size; ++i) {
       out_shape[i] = permuted_operands[dim_last_op[i]].size(i);
     }
-    return at::zeros(out_shape, permuted_operands[0].options());
+    return at::zeros(out_shape, result.options());
   }
 
   // Sum out or squeeze dimensions that are size 1 for all later operands
@@ -428,11 +428,13 @@ Tensor einsum(std::string equation, TensorList operands) {
     dim = out_size;
     for (int j = dim; j < out_index; ++j, ++dim) {
       if (dim_last_op[j] < i) {
-        operand = operand.squeeze(dim--);
+        operand = operand.squeeze(dim);
+        --dim;
       } else if (dim_last_op[j] == i) {
         if (result.size(dim) == 1) {
           operand = operand.sum(dim);
-          result = result.squeeze(dim--);
+          result = result.squeeze(dim);
+          --dim;
         } else {
           sum_dims.push_back(dim);
         }

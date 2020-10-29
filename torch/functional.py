@@ -9,6 +9,7 @@ from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
+from torch._autograd_functions import _LU
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -261,8 +262,29 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
 def einsum(equation, *operands):
     r"""einsum(equation, *operands) -> Tensor
 
-This function provides a way of computing multilinear expressions (i.e. sums of products) using the
-Einstein summation convention.
+Computes multilinear expressions (i.e. sums of products) specified using the Einstein summation convention.
+
+The Einstein summation convention provides a succint way of specifying many linear algebra operations by labeling
+each dimension of the input operands and specifying which dimensions are to be summed over. Einsum provides two
+modes: implicit mode computes the classical Einstein summation while explicit mode provides more flexibility by
+manually enabling/disabling summation. The following section describes the formatting and rules for the equation.
+
+.. equation::
+
+    The :attr:`equation` string specifies the subscripts (lower case letters `['a', 'z']`) for the Eintein summation.
+
+    In implicit mode, :attr:`equation` specifies the subscripts for each dimension of the input :attr:`operands` in
+    order, separating subcripts for each operand by a comma (','), e.g. 'ij,jk' specify subscripts for two 2D operands.
+    The dimensions labeled with the same subscript must be broadcastable, that is, their size must either match or be 1.
+    The exception is if a subscript is repeated for the same input operand, in which case the dimensions under the subscript
+    for the operand must match in size and the diagonal of the corresponding dimensions is taken. The dimensions that appear
+    exactly once in the :attr:`equation` will be part of the output Tensor, sorted in increasing alphabetical order. The
+    dimensions that are not part of the output (appear more than once) will be summed over.
+
+    In explicit mode, the same rules for the input operands apply as in implicit mode but the output dimensions can be
+    specified by adding an arrow ("->") at the end of the equation followed by the subscripts for the output.
+
+    TODO ....
 
 Args:
     equation (string): The subscripts for the Einstein summation specified as comma separated list of
@@ -1431,6 +1453,10 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     .. note::
        ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
 
+    .. warning::
+        The LU factorization does have backward support,
+        but only for square inputs of full rank.
+
     Arguments:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`
         pivot (bool, optional): controls whether pivoting is done. Default: ``True``
@@ -1446,7 +1472,12 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 
             - **factorization** (*Tensor*): the factorization of size :math:`(*, m, n)`
 
-            - **pivots** (*IntTensor*): the pivots of size :math:`(*, m)`
+            - **pivots** (*IntTensor*): the pivots of size :math:`(*, \text{min}(m, n))`.
+              ``pivots`` stores all the intermediate transpositions of rows.
+              The final permutation ``perm`` could be reconstructed by
+              applying ``swap(perm[i], perm[pivots[i] - 1])`` for ``i = 0, ..., pivots.size(-1) - 1``,
+              where ``perm`` is initially the identity permutation of :math:`m` elements
+              (essentially this is what :func:`torch.lu_unpack` is doing).
 
             - **infos** (*IntTensor*, *optional*): if :attr:`get_infos` is ``True``, this is a tensor of
               size :math:`(*)` where non-zero values indicate whether factorization for the matrix or
@@ -1472,9 +1503,25 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         ...   print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
+    if not torch._jit_internal.is_scripting():
+        if A.requires_grad:
+            if not (A.size(-2) == A.size(-1) and A.dtype.is_floating_point):
+                raise ValueError(
+                    'lu.backward works only with batches of squared full-rank matrices'
+                    ' of floating types.'
+                )
+
+            return _LU.apply(A, pivot, get_infos)
+    else:
+        if A.requires_grad:
+            raise RuntimeError(
+                'Script and require gradients is not supported at the moment.'
+                'If you just want to do the forward, use .detach()'
+                'on the input before calling the function.'
+            )
+
     # If get_infos is True, then we don't need to check for errors and vice versa
     return torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
-
 
 if TYPE_CHECKING:
     _ListOrSeq = Sequence[Tensor]
