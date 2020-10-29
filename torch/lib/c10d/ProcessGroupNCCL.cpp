@@ -1311,13 +1311,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
         // Copy the flattened output tensors to the outputs.
         for (size_t i = 0; i < outputTensors.size(); ++i) {
           at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
+          std::vector<at::Tensor> outputFlattenedList(outputTensors[0].size());
           for (size_t j = 0; j < outputTensors[0].size(); ++j) {
             // See [Sync Streams].
             c10::cuda::CUDACachingAllocator::recordStream(
                 outputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
-
-            outputTensors[i][j].copy_(outputFlattened[i][j], true);
+            outputFlattenedList[j] = outputFlattened[i][j];
           }
+          _foreach_copy_(outputTensors[i], outputFlattenedList);
         }
       },
       OpType::ALLGATHER);
@@ -1363,13 +1364,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
         // Copy the input tensors to the flattened inputs.
         for (size_t i = 0; i < inputTensors.size(); ++i) {
           at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
+          std::vector<at::Tensor> inputFlattenedList(inputTensors[0].size());
           for (size_t j = 0; j < inputTensors[0].size(); ++j) {
             // See [Sync Streams].
             c10::cuda::CUDACachingAllocator::recordStream(
                 inputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
-
-            inputFlattened[i][j].copy_(inputTensors[i][j], true);
+            inputFlattenedList[j] = inputFlattened[i][j];
           }
+          _foreach_copy_(inputFlattenedList, inputTensors[i]);
         }
       },
       [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {},
