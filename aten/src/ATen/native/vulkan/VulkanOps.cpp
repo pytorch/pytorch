@@ -613,7 +613,7 @@ void mul(VulkanTensor& output, const VulkanTensor& input, const float s) {
 
   auto device = context().device();
   struct ConstBlock {
-    int32_t inputSize[4];
+    int32_t inputSize[3];
     float s;
   };
   ConstBlock cb{{safe_downcast<int32_t>(W),
