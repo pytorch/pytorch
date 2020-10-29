@@ -10233,7 +10233,7 @@ class TestNNDeviceType(NNTestCase):
             mod(x, y)
 
         with self.assertRaisesRegex(RuntimeError, 'Expected'):
-            x = torch.randn(10, 0,requires_grad=True)
+            x = torch.randn(10, 0, requires_grad=True)
             y = torch.ones(10, 0).type(torch.long)
             mod(x, y)
 
