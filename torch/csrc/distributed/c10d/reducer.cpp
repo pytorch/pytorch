@@ -1383,10 +1383,12 @@ void Reducer::register_builtin_comm_hook(
     case c10d::BuiltinCommHookType::ALLREDUCE:
       comm_hook_ =
           std::make_unique<c10d::AllReduceCommHook>(process_group_.get());
+      LOG(INFO) << "Built-in communication hook ALLREDUCE is registered.";
       break;
     case c10d::BuiltinCommHookType::FP16_COMPRESS:
       comm_hook_ =
           std::make_unique<c10d::FP16CompressCommHook>(process_group_.get());
+      LOG(INFO) << "Built-in communication hook FP16_COMPRESS is registered.";
       break;
     default:
       TORCH_WARN_ONCE(
