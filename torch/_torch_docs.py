@@ -1818,6 +1818,40 @@ clip(input, min, max, *, out=None) -> Tensor
 Alias for :func:`torch.clamp`.
 """.format(**common_args))
 
+add_docstr(torch.column_stack,
+           r"""
+column_stack(tensors, *, out=None) -> Tensor
+
+Creates a new tensor by horizontally stacking the tensors in :attr:`tensors`.
+
+Equivalent to ``torch.hstack(tensors)``, except each zero or one dimensional tensor ``t``
+in :attr:`tensors` is first reshaped into a ``(t.numel(), 1)`` column before being stacked horizontally.
+
+Args:
+    tensors (sequence of Tensors): sequence of tensors to concatenate
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([1, 2, 3])
+    >>> b = torch.tensor([4, 5, 6])
+    >>> torch.column_stack((a, b))
+    tensor([[1, 4],
+        [2, 5],
+        [3, 6]])
+    >>> a = torch.arange(5)
+    >>> b = torch.arange(10).reshape(5, 2)
+    >>> torch.column_stack((a, b, b))
+    tensor([[0, 0, 1, 0, 1],
+            [1, 2, 3, 2, 3],
+            [2, 4, 5, 4, 5],
+            [3, 6, 7, 6, 7],
+            [4, 8, 9, 8, 9]])
+
+""".format(**common_args))
+
 add_docstr(torch.complex,
            r"""
 complex(real, imag, *, out=None) -> Tensor
@@ -6720,6 +6754,12 @@ Example::
     torch.uint8
 """)
 
+add_docstr(torch.row_stack,
+           r"""
+row_stack(tensors, *, out=None) -> Tensor
+
+Alias of :func:`torch.vstack`.
+""".format(**common_args))
 
 add_docstr(torch.round,
            r"""

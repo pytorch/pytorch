@@ -19261,8 +19261,12 @@ else:
 
     def _test_special_stacks(self, dim, at_least_dim, torch_fn, np_fn, device, dtype):
         # Test error for non-tuple argument
+        t = torch.randn(10)
         with self.assertRaisesRegex(TypeError, "must be tuple of Tensors, not Tensor"):
-            torch_fn(torch.randn(10))
+            torch_fn(t)
+        # Test error for a single array
+        with self.assertRaisesRegex(TypeError, "must be tuple of Tensors, not Tensor"):
+            torch_fn((t))
 
         # Test 0-D
         num_tensors = random.randint(1, 5)
@@ -19312,25 +19316,41 @@ else:
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
               torch.testing.get_all_complex_dtypes()))
-    def test_hstack(self, device, dtype):
-        self._test_special_stacks(1, 1, torch.hstack, np.hstack, device, dtype)
+    def test_hstack_column_stack(self, device, dtype):
+        ops = ((torch.hstack, np.hstack), (torch.column_stack, np.column_stack))
+        for torch_op, np_op in ops:
+            self._test_special_stacks(1, 1, torch_op, np_op, device, dtype)
+
+        # Test torch.column_stack with combinations of 1D and 2D tensors input
+        one_dim_tensor = torch.arange(0, 10).to(dtype=dtype, device=device)
+        two_dim_tensor = torch.arange(0, 100).to(dtype=dtype, device=device).reshape(10, 10)
+        inputs = two_dim_tensor, one_dim_tensor, two_dim_tensor, one_dim_tensor
+        torch_result = torch.column_stack(inputs)
+
+        np_inputs = [input.cpu().numpy() for input in inputs]
+        np_result = np.column_stack(np_inputs)
+
+        self.assertEqual(np_result,
+                         torch_result)
 
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
               torch.testing.get_all_complex_dtypes()))
-    def test_vstack(self, device, dtype):
-        self._test_special_stacks(0, 2, torch.vstack, np.vstack, device, dtype)
-        for i in range(5):
-            # Test dimension change for 1D tensor of size (N) and 2D tensor of size (1, N)
-            n = random.randint(1, 10)
-            input_a = self._generate_input((n,), dtype, device, with_extremal=False)
-            input_b = self._generate_input((1, n), dtype, device, with_extremal=False)
-            torch_input = [input_a, input_b]
-            np_input = [input.cpu().numpy() for input in torch_input]
-            actual = torch.vstack(torch_input)
-            expected = np.vstack(np_input)
-            self.assertEqual(actual, expected)
+    def test_vstack_row_stack(self, device, dtype):
+        ops = ((torch.vstack, np.vstack), (torch.row_stack, np.row_stack))
+        for torch_op, np_op in ops:
+            self._test_special_stacks(0, 2, torch_op, np_op, device, dtype)
+            for i in range(5):
+                # Test dimension change for 1D tensor of size (N) and 2D tensor of size (1, N)
+                n = random.randint(1, 10)
+                input_a = self._generate_input((n,), dtype, device, with_extremal=False)
+                input_b = self._generate_input((1, n), dtype, device, with_extremal=False)
+                torch_input = [input_a, input_b]
+                np_input = [input.cpu().numpy() for input in torch_input]
+                actual = torch_op(torch_input)
+                expected = np_op(np_input)
+                self.assertEqual(actual, expected)
 
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
