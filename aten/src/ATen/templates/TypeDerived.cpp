@@ -9,8 +9,7 @@
 
 // ${generated_comment}
 
-$storage_tensor_headers
-#include <ATen/${Generator}.h>
+#include <c10/core/TensorImpl.h>
 #include <c10/core/Allocator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/NativeFunctions.h>
