@@ -1602,6 +1602,55 @@ Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, opt
   return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
 }
 
+Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
+  /*
+  The idea is to reduce the problem to 2D matrix solve.
+  Step 1. (optional) `self` is permuted with `dims` such that dimensions from `dims` are moved to the right.
+  For example, if we have 4D input with the shape (1, 2, 3, 4) and dims=(0, 2),
+  then the result of permutation would have the shape (2, 4, 1, 3).
+  Step 2. reshape `self` to 2D matrix.
+  Step 3. solve the matrix equation self.to_2D() @ result = other.to_1D()
+  Step 4. reshape the result.
+  */
+  int64_t ndim = self.dim();
+  Tensor self_ = self;
+
+  // move dimensions of `self_` from `dims` to the end
+  if (dims.has_value()) {
+    DimVector dest_axes(dims.value().size());
+    std::iota(dest_axes.begin(), dest_axes.end(), ndim - dest_axes.size());
+    self_ = at::movedim(self_, dims.value(), dest_axes);
+  }
+
+  // result_shape is self_.sizes[-(an-other.dim):]
+  std::vector<int64_t> result_shape = self_.sizes().slice(other.dim(), ndim - other.dim()).vec();
+
+  int64_t result_product = std::accumulate(result_shape.begin(), result_shape.end(), int64_t{1}, std::multiplies<int64_t>());
+  int64_t other_product = std::accumulate(other.sizes().begin(), other.sizes().end(), int64_t{1}, std::multiplies<int64_t>());
+
+  // Check whether the self tensor can be reshaped to the 2D square matrix
+  TORCH_CHECK(result_product == other_product,
+    "Expected self to satisfy the requirement prod(self.shape[other.ndim:]) == prod(self.shape[:other.ndim]), but got ",
+    result_product, " != ", other_product);
+
+  self_ = self_.reshape({result_product, result_product});
+
+  // 0th output of at::solve is the solution
+  // normally `other` would be flattened by at::solve expects 2D input
+  Tensor result = std::get<0>(at::solve(other.reshape({other.numel(), 1}), self_));
+  return result.reshape(result_shape);
+}
+
+Tensor& linalg_tensorsolve_out(Tensor& result, const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+
+  Tensor result_tmp = at::linalg_tensorsolve(self, other, dims);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
+  return result;
+}
+
 static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {
   if (i == j)
     return matrices[i];

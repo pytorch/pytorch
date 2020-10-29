@@ -430,6 +430,16 @@ class TestONNXRuntime(unittest.TestCase):
         m1 = torch.randn(3, 4, 5, 6, 7)
         self.run_test(MyModel(), m1)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @disableScriptTest()  # Need type inference
+    def test_index_mask_nd(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, input):
+                return input[input > 0]
+
+        m1 = torch.randn(3, 4, 5, 6, 7)
+        self.run_test(MyModel(), m1)
+
     @disableScriptTest()
     def test_dict(self):
         class MyModel(torch.nn.Module):
