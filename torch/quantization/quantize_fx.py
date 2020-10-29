@@ -50,10 +50,10 @@ class CustomTracer(Tracer):
             type(m) in self.skipped_module_classes
 
 
-def _prepare_fx(model, qconfig_dict, inplace, prepare_custom_config_dict=None, is_standalone_module=False):
+def _prepare_fx(model, qconfig_dict, prepare_custom_config_dict=None, is_standalone_module=False):
     r""" Internal helper function for prepare_fx
     Args:
-      `model`, `qconfig_dict`, `inplace` `prepare_custom_config_dict`: see docs for :func:`~torch.quantization.prepare_fx`
+      `model`, `qconfig_dict`, `prepare_custom_config_dict`: see docs for :func:`~torch.quantization.prepare_fx`
       `is_standalone_module`: a boolean flag indicates whether we are
       quantizing a standalone module or not, a standalone module
       is a submodule of the parent module that is not inlined in the
@@ -85,11 +85,10 @@ forward graph of the parent module,
     return quantizer.prepare(
         graph_module,
         qconfig_dict,
-        inplace=True,
         prepare_custom_config_dict=prepare_custom_config_dict,
         is_standalone_module=is_standalone_module)
 
-def _prepare_standalone_module_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=None):
+def _prepare_standalone_module_fx(model, qconfig_dict, prepare_custom_config_dict=None):
     r""" [Internal use only] Prepare a standalone module, so that it can be used when quantizing the
     parent module.
     standalone_module means it a submodule that is not inlined in parent module,
@@ -105,7 +104,7 @@ def _prepare_standalone_module_fx(model, qconfig_dict, inplace=False, prepare_cu
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx._prepare_standalone_module_fx")
-    return _prepare_fx(model, qconfig_dict, inplace, prepare_custom_config_dict, is_standalone_module=True)
+    return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict, is_standalone_module=True)
 
 
 def fuse_fx(model, fuse_custom_config_dict=None):
@@ -132,7 +131,7 @@ def fuse_fx(model, fuse_custom_config_dict=None):
     graph_module = torch.fx.symbolic_trace(model)
     return _fuse_fx(graph_module, fuse_custom_config_dict)
 
-def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=None):
+def prepare_fx(model, qconfig_dict, prepare_custom_config_dict=None):
     r""" Prepare a model for post training static quantization
 
     Args:
@@ -165,8 +164,6 @@ def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=No
       # qconfig == None means fusion and quantization should be skipped for anything
       # matching the rule
       }
-      `inplace`: flag for carry out model transformations in-place,
-      the original module is mutated
       `prepare_custom_config_dict`: customization configuration dictionary for
       quantization tool:
       prepare_custom_config_dict = {
@@ -246,15 +243,13 @@ def prepare_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=No
     torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_fx")
     assert not model.training, 'prepare_fx only works for models in' + \
         'eval mode'
-    return _prepare_fx(model, qconfig_dict, inplace, prepare_custom_config_dict)
+    return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict)
 
-def prepare_qat_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dict=None):
+def prepare_qat_fx(model, qconfig_dict, prepare_custom_config_dict=None):
     r""" Prepare a model for quantization aware training
     Args:
       `model`: torch.nn.Module model, must be in train mode
       `qconfig_dict`: see :func:`~torch.quantization.prepare_fx`
-      `inplace`: flag for carry out model transformations in-place,
-       the original module is mutated
       `prepare_custom_config_dict`: see :func:`~torch.quantization.prepare_fx`
 
     Return:
@@ -283,7 +278,7 @@ def prepare_qat_fx(model, qconfig_dict, inplace=False, prepare_custom_config_dic
     torch._C._log_api_usage_once("quantization_api.quantize_fx.prepare_qat_fx")
     assert model.training, 'prepare_qat_fx only works for models in ' + \
         'train mode'
-    return _prepare_fx(model, qconfig_dict, inplace, prepare_custom_config_dict)
+    return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict)
 
 def _convert_fx(graph_module, inplace, debug, convert_custom_config_dict=None, is_standalone_module=False):
     """ `is_standalone_module`: see docs in :func:`~torch.quantization.prepare_standalone_module_fx`

@@ -271,11 +271,12 @@ class Graph:
             sanitized_name = node.name
             if '_' in node.name:
                 base, maybe_idx = node.name.rsplit('_', 1)
-                try:
-                    int(maybe_idx)
-                    sanitized_name = base
-                except ValueError:
-                    pass
+                if base != '':
+                    try:
+                        int(maybe_idx)
+                        sanitized_name = base
+                    except ValueError:
+                        pass
             name = self._name(sanitized_name)
         return self.create_node(node.op, node.target, args, kwargs, name, node.type)
 
