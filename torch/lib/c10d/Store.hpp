@@ -6,9 +6,11 @@
 #include <string>
 #include <vector>
 
+#include <ATen/ATen.h>
+
 namespace c10d {
 
-class Store {
+class Store : public torch::CustomClassHolder {
  public:
   static constexpr std::chrono::milliseconds kDefaultTimeout =
       std::chrono::seconds(300);
