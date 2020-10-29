@@ -262,99 +262,100 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
 def einsum(equation, *operands):
     r"""einsum(equation, *operands) -> Tensor
 
-Computes multilinear expressions (i.e. sums of products) specified using the Einstein summation convention.
+    Computes multilinear expressions (i.e. sums of products) specified using the Einstein summation convention.
 
-The Einstein summation convention provides a succint way of specifying many linear algebra operations by labeling
-each dimension of the input operands and specifying which dimensions are to be summed over. Einsum provides two
-modes: implicit mode computes the classical Einstein summation while explicit mode provides more flexibility by
-manually enabling/disabling summation. The following section describes the formatting and rules for the equation.
+    The Einstein summation convention provides a succint way of specifying many linear algebra operations by
+    labeling each dimension of the input operands and specifying which dimensions are to be summed over.
+    Einsum provides two modes: implicit mode computes the classical Einstein summation while explicit mode
+    provides more flexibility by manually enabling/disabling summation. The following section describes the
+    formatting and rules for the equation.
 
-.. equation::
+    .. equation::
 
-    The :attr:`equation` string specifies the subscripts (lower case letters `['a', 'z']`) for the Eintein summation.
+        The :attr:`equation` string specifies the subscripts (lower case letters `['a', 'z']`) for the Eintein summation.
 
-    In implicit mode, :attr:`equation` specifies the subscripts for each dimension of the input :attr:`operands` in
-    order, separating subcripts for each operand by a comma (','), e.g. 'ij,jk' specify subscripts for two 2D operands.
-    The dimensions labeled with the same subscript must be broadcastable, that is, their size must either match or be 1.
-    The exception is if a subscript is repeated for the same input operand, in which case the dimensions under the subscript
-    for the operand must match in size and the diagonal of the corresponding dimensions is taken. The dimensions that appear
-    exactly once in the :attr:`equation` will be part of the output Tensor, sorted in increasing alphabetical order. The
-    dimensions that are not part of the output (appear more than once) will be summed over.
+        In implicit mode, :attr:`equation` specifies the subscripts for each dimension of the input :attr:`operands` in
+        order, separating subcripts for each operand by a comma (','), e.g. `'ij,jk'` specify subscripts for two 2D
+        operands. The dimensions labeled with the same subscript must be broadcastable, that is, their size must either
+        match or be `1`. The exception is if a subscript is repeated for the same input operand, in which case the
+        dimensions under the subscript for the operand must match in size and the diagonal of the corresponding dimensions
+        will be taken. The dimensions that appear exactly once in the :attr:`equation` will be part of the output Tensor,
+        sorted in increasing alphabetical order. The dimensions that are not part of the output (appear more than once)
+        will be summed over.
 
-    In explicit mode, the same rules for the input operands apply as in implicit mode but the output dimensions can be
-    specified by adding an arrow ("->") at the end of the equation followed by the subscripts for the output.
+        In explicit mode, the same rules for the input operands in implicit mode apply but the output dimensions can be
+        specified by adding an arrow ('->') at the end of the equation followed by the subscripts for the output. For
+        instance, the following equation computes the transpose of a matrix multiplication: 'ij,jk->ki'. The output
+        subscripts must appear at least once for some input operand and at most once for the output.
 
-    TODO ....
+        Ellipsis ('...') can be used in place of subscripts to broadcast the dimensions covered by the ellipsis.
+        Each input operand may contain at most one ellipsis which will cover the dimensions not covered by subscripts,
+        e.g. for an input operand with 5 dimensions, the ellipsis in the equation `'ab...c'` cover the third and fourth
+        dimensions. The ellipsis does not need to cover the same number of dimensions across the :attr:`operands` but the
+        'shape' of the ellipsis (the size of the dimensions covered by them) must be broadcastable. In implicit mode,
+        the ellipsis will come first in the output. In explicit mode, if an ellipses covers at least one dimension then
+        it must appear in the output since the dimensions under the ellipsis cannot be summed over. e.g. the following
+        equation implements batch matrix multiplication `'...ij,...jk->...ik'`.
 
-Args:
-    equation (string): The subscripts for the Einstein summation specified as comma separated list of
-            subscript labels (lower case letters [a, z]). The left-hand-side must specify the subscripts for each
-            dimension of the input operands, separating operands by comma (,). The right-hand-side follows after an
-            arrow (->) and specifies the subscript labels for the output. These must appear in at least one operand.
-            If the arrow (->) and right-hand-side are ommited, the output is implicitly defined as the alphabetically
-            sorted list of all subscript labels appearing exactly once in the left-hand-side. The subscript labels
-            ommited in the output will be summed over after multiplying the input operands. If a subscript label is
-            repeated for a input operand, a diagonal is taken for the dimensions corresponding to the label. An
-            ellipsis (...) may be given for each input operand for broadcasting dimensions. In this case, the ellipsis
-            will cover a contiguous range of dimensions not covered by any subscript label and the dimensions under
-            the ellipsis will be broadcasted across the input operands. If the output is inferred (arrow -> is ommited)
-            the ellipsis dimensions will be the left-most dimensions of the output. The dimensions under the ellipsis
-            are not summed over so if they cover at least one dimension they must be specified in the output.
-    operands (Tensor): The operands to compute the Einstein sum of.
+        A few final notes: the equation may contain whitespaces between the different elements (subscripts, ellipsis,
+        arrow and comma) but something like `'. . .'` is not valid. An empty string `''` is valid for scalar operands.
 
-.. note::
+    .. note::
 
-    This function does not optimize the given expression, so a different formula for the same computation may
-    run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
-    can optimize the formula for you.
+        This function does not optimize the given expression, so a different formula for the same computation may
+        run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
+        can optimize the formula for you.
 
-Examples::
+    Args:
+        equation (string): The subscripts for the Einstein summation.
+        operands (Tensor): The operands to compute the Einstein sum of.
 
-    >>> x = torch.randn(5)
-    >>> y = torch.randn(4)
-    >>> torch.einsum('i,j->ij', x, y)  # outer product
-    tensor([[-0.0570, -0.0286, -0.0231,  0.0197],
-            [ 1.2616,  0.6335,  0.5113, -0.4351],
-            [ 1.4452,  0.7257,  0.5857, -0.4984],
-            [-0.4647, -0.2333, -0.1883,  0.1603],
-            [-1.1130, -0.5588, -0.4510,  0.3838]])
+    Examples::
 
+        # trace
+        >>> torch.einsum('ii', torch.randn(4, 4))
+        tensor(-1.2104)
 
-    >>> A = torch.randn(3,5,4)
-    >>> l = torch.randn(2,5)
-    >>> r = torch.randn(2,4)
-    >>> torch.einsum('bn,anm,bm->ba', l, A, r) # compare torch.nn.functional.bilinear
-    tensor([[-0.3430, -5.2405,  0.4494],
-            [ 0.3311,  5.5201, -3.0356]])
+        # diagonal
+        >>> torch.einsum('ii->i', torch.randn(4, 4))
+        tensor([-0.1034,  0.7952, -0.2433,  0.4545])
 
+        # outer product
+        >>> x = torch.randn(5)
+        >>> y = torch.randn(4)
+        >>> torch.einsum('i,j->ij', x, y)
+        tensor([[ 0.1156, -0.2897, -0.3918,  0.4963],
+                [-0.3744,  0.9381,  1.2685, -1.6070],
+                [ 0.7208, -1.8058, -2.4419,  3.0936],
+                [ 0.1713, -0.4291, -0.5802,  0.7350],
+                [ 0.5704, -1.4290, -1.9323,  2.4480]])
 
-    >>> As = torch.randn(3,2,5)
-    >>> Bs = torch.randn(3,5,4)
-    >>> torch.einsum('bij,bjk->bik', As, Bs) # batch matrix multiplication
-    tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
-             [-1.6706, -0.8097, -0.8025, -2.1183]],
+        # batch matrix multiplication
+        >>> As = torch.randn(3,2,5)
+        >>> Bs = torch.randn(3,5,4)
+        >>> torch.einsum('bij,bjk->bik', As, Bs)
+        tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
+                [-1.6706, -0.8097, -0.8025, -2.1183]],
 
-            [[ 4.2239,  0.3107, -0.5756, -0.2354],
-             [-1.4558, -0.3460,  1.5087, -0.8530]],
+                [[ 4.2239,  0.3107, -0.5756, -0.2354],
+                [-1.4558, -0.3460,  1.5087, -0.8530]],
 
-            [[ 2.8153,  1.8787, -4.3839, -1.2112],
-             [ 0.3728, -2.1131,  0.0921,  0.8305]]])
+                [[ 2.8153,  1.8787, -4.3839, -1.2112],
+                [ 0.3728, -2.1131,  0.0921,  0.8305]]])
 
-    >>> A = torch.randn(3, 3)
-    >>> torch.einsum('ii->i', A) # diagonal
-    tensor([-0.7825,  0.8291, -0.1936])
+        # batch permute
+        >>> A = torch.randn(2, 3, 4, 5)
+        >>> torch.einsum('...ij->...ji', A).shape 
+        torch.Size([2, 3, 5, 4])
 
-    >>> A = torch.randn(4, 3, 3)
-    >>> torch.einsum('...ii->...i', A) # batch diagonal
-    tensor([[-1.0864,  0.7292,  0.0569],
-            [-0.9725, -1.0270,  0.6493],
-            [ 0.5832, -1.1716, -1.5084],
-            [ 0.4041, -1.1690,  0.8570]])
-
-    >>> A = torch.randn(2, 3, 4, 5)
-    >>> torch.einsum('...ij->...ji', A).shape # batch permute
-    torch.Size([2, 3, 5, 4])
-"""
+        # compare torch.nn.functional.bilinear
+        >>> A = torch.randn(3,5,4)
+        >>> l = torch.randn(2,5)
+        >>> r = torch.randn(2,4)
+        >>> torch.einsum('bn,anm,bm->ba', l, A, r)
+        tensor([[-0.3430, -5.2405,  0.4494],
+                [ 0.3311,  5.5201, -3.0356]])
+    """
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in operands) and has_torch_function(operands):
             return handle_torch_function(einsum, operands, equation, *operands)
