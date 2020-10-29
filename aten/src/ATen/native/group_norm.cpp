@@ -107,7 +107,7 @@ Tensor group_norm(
 
   const auto input_shape = input.sizes();
   const int64_t HxW =
-      accumulate_prod(input_shape.cbegin() + 2, input_shape.cend());
+      prod_intlist(input_shape.cbegin() + 2, input_shape.cend());
 
   const Tensor kEmpty;
   const auto& X = input.is_contiguous() ? input : input.contiguous();

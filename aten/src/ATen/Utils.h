@@ -100,7 +100,7 @@ inline int64_t prod_intlist(const C &container){
 
 template<typename Iter,
 typename std::enable_if<std::is_integral<typename std::iterator_traits<Iter>::value_type>::value, int>::type = 0>
-inline int64_t accumulate_prod(Iter begin, Iter end){
+inline int64_t prod_intlist(Iter begin, Iter end){
     return std::accumulate(begin, end, static_cast<int64_t>(1), std::multiplies<int64_t>());
 }
 /**

@@ -166,10 +166,10 @@ __host__ void scan_outer_dim_with_indices(const Tensor& self, Tensor& values, Te
   auto sizes = self.sizes();
 
   // Treat all outer dimensions (i.e. dim_ < dim) as one.
-  const int64_t num_orows = accumulate_prod(sizes.begin(), sizes.begin() + dim);
+  const int64_t num_orows = prod_intlist(sizes.begin(), sizes.begin() + dim);
 
   // Treat all inner dimensions (i.e. dim > dimension) as one.
-  const int64_t num_irows = accumulate_prod(sizes.begin() + dim + 1, sizes.end());
+  const int64_t num_irows = prod_intlist(sizes.begin() + dim + 1, sizes.end());
   check_fits_in_unsigned(num_irows, "num_irows");
   check_fits_in_unsigned(num_orows, "num_orows");
   check_fits_in_unsigned(row_size, "row_size");
@@ -418,10 +418,10 @@ __host__ void scan_outer_dim(const Tensor& self, Tensor& result,
   auto sizes = self.sizes();
 
   // Treat all outer dimensions (i.e. dim_ < dim) as one.
-  const int64_t num_orows = accumulate_prod(sizes.begin(), sizes.begin() + dim);
+  const int64_t num_orows = prod_intlist(sizes.begin(), sizes.begin() + dim);
 
   // Treat all inner dimensions (i.e. dim > dimension) as one.
-  const int64_t num_irows = accumulate_prod(sizes.begin() + dim + 1, sizes.end());
+  const int64_t num_irows = prod_intlist(sizes.begin() + dim + 1, sizes.end());
 
   dim3 threads(std::min(512, int(num_irows)));
   int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
