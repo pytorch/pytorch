@@ -96,4 +96,20 @@ FOREACH_BINARY_OP_LIST_ALPHA(sub, std::minus);
 FOREACH_BINARY_OP_LIST(mul, std::multiplies);
 FOREACH_BINARY_OP_LIST(div, std::divides);
 
+void foreach_tensor_copy_list_kernel_cuda_(TensorList dst_tensors, TensorList src_tensors) {
+    check_foreach_api_restrictions(dst_tensors, src_tensors);
+
+    if (!can_use_fast_route(dst_tensors, src_tensors)) {
+        at::native::foreach_tensor_copy_list_kernel_slow_(dst_tensors, src_tensors);
+    }
+
+    std::vector<std::vector<at::Tensor>> tensor_lists;
+    tensor_lists.emplace_back(dst_tensors.vec());
+    tensor_lists.emplace_back(src_tensors.vec());
+
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, src_tensors[0].scalar_type(), "foreach_copy_list_cuda_", [&]() {
+        multi_tensor_apply<2>(tensor_lists, CopyFunctor<scalar_t>());
+    });
+}
+
 }} // namespace at::native

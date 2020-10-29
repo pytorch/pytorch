@@ -6935,6 +6935,14 @@
     CPU: foreach_tensor_mul_list_kernel_slow_
     CUDA: foreach_tensor_mul_list_kernel_cuda_
 
+- func: _foreach_copy_.List(Tensor(a!)[] self, Tensor[] other) -> ()
+  use_c10_dispatcher: full
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_copy_list_kernel_slow_
+    CUDA: foreach_tensor_copy_list_kernel_cuda_
+
 - func: _foreach_div.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
   use_c10_dispatcher: full
   device_guard: False

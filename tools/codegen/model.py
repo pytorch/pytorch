@@ -373,6 +373,7 @@ class FunctionSchema:
                     '_foreach_sub_.List',
                     '_foreach_mul_.List',
                     '_foreach_div_.List',
+                    '_foreach_copy_.List',
                     '_foreach_exp_',
                     '_foreach_sqrt_',
                     '_foreach_addcmul_.Scalar',

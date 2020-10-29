@@ -56,6 +56,21 @@ class TestForeach(TestCase):
             else:
                 self.assertEqual(tensors1, expected)
 
+    def _test_bin_copy_list(self, device, dtype):
+        for N in N_values:
+            tensors_dst = self._get_test_data(device, dtype, N)
+            tensors_dst_tmp = self._get_test_data(device, dtype, N)
+            tensors_src = self._get_test_data(device, dtype, N)
+
+            # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
+            control_dtype = torch.float32 if (self.device_type == 'cuda' and
+                                              (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
+            expected = [(tensors_dst_tmp[i].to(dtype=control_dtype).copy_(
+                         tensors_src[i].to(dtype=control_dtype)).to(dtype=dtype)) for i in range(N)]
+            torch._foreach_copy_(tensors_dst, tensors_src)
+            self.assertEqual(tensors_dst, tensors_src)
+            self.assertEqual(tensors_dst, expected)
+
     def _test_unary_op(self, device, dtype, foreach_op, foreach_op_, torch_op):
         for N in N_values:
             tensors1 = self._get_test_data(device, dtype, N)
@@ -798,6 +813,11 @@ class TestForeach(TestCase):
             torch._foreach_div_(tensors1, tensors2)
             self.assertEqual(res, tensors1)
             self.assertEqual(tensors1, res)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_copy_list(self, device, dtype):
+        self._test_bin_copy_list(device, dtype)
+
 
     def test_bin_op_list_error_cases(self, device):
         tensors1 = []
