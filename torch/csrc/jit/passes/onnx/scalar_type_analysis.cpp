@@ -174,10 +174,10 @@ static void UpdateScalarTypeForInputs(
 
   for (auto input : n->inputs()) {
     auto input_tensor_type = input->type()->cast<TensorType>();
-    auto input_scalar_type = input_tensor_type->scalarType();
 
     if ((input->node()->kind() == onnx::Constant) ||
-        (input_scalar_type && (*input_scalar_type != scalar_type))) {
+        (input_tensor_type && input_tensor_type->scalarType() && 
+        (*input_tensor_type->scalarType() != scalar_type))) {
       if (input->node()->kind() == onnx::Constant) {
         // Fix up the scalar directly instead of inserting a cast operator.
         // NOTE: Keep only the else branch once constant_folding is enabled by
