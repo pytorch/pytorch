@@ -192,23 +192,16 @@ def compute_type_method(
     target: Target,
     # Selector object to determine which operators to generate
     # registration code for.
-    selector: SelectiveBuilder,
-    # Only valid for generating registrations.  If True, only generate
-    # def() invocations (for schema registration); do not generate
-    # any impl() invocations for, e.g., catch-all kernels
-    def_only: bool = False
+    selector: SelectiveBuilder
 ) -> Callable[[NativeFunction], Optional[str]]:
 
-    if def_only:
-        assert target is Target.REGISTRATION and dispatch is None
+    if dispatch is None:
+        assert target == Target.REGISTRATION
 
     @with_native_function
     def func(f: NativeFunction) -> Optional[str]:
         if dispatch is not None:
             if dispatch not in f.dispatch:
-                return None
-        else:
-            if target is not Target.REGISTRATION:
                 return None
 
         op_name = f"aten::{f.func.name}"
@@ -219,10 +212,10 @@ def compute_type_method(
         returns_type = native.returns_type(f.func.returns)
         args = native.arguments(f.func)
         args_str = ', '.join(map(str, args))
-        # TODO: don't need dispatch is None shortly
-        dispatch_to_all_backends = dispatch is None or dispatch in KEYWORD_ALL_BACKENDS
+        dispatch_to_all_backends = dispatch is not None and dispatch in KEYWORD_ALL_BACKENDS
 
         if target is Target.DECLARATION:
+            assert dispatch is not None
             return f"{returns_type} {name}({args_str});"
         elif target is Target.DEFINITION:
             assert dispatch is not None
@@ -283,7 +276,7 @@ def compute_type_method(
         elif target is Target.REGISTRATION:
             if dispatch is None:
                 return f'm.def({cpp_string(str(f.func))});\n'
-            elif def_only or f.manual_kernel_registration:
+            elif f.manual_kernel_registration:
                 return None
             else:
                 if dispatch_to_all_backends:
@@ -1047,15 +1040,18 @@ def main() -> None:
     cpu_fm.write('TypeDefault.h', lambda: {
         'type_method_declarations':
         list(mapMaybe(
-            compute_type_method(None, target=Target.DECLARATION, selector=selector),
-            native_functions)) +
-        list(mapMaybe(
             compute_type_method('Math', target=Target.DECLARATION, selector=selector),
             native_functions)) +
         list(mapMaybe(
             compute_type_method('DefaultBackend', target=Target.DECLARATION, selector=selector),
             native_functions)),
     })
+
+    schema_selector = selector
+    if options.force_schema_registration:
+        schema_selector = SelectiveBuilder.get_nop_selector()
+
+    # TODO: split this file into separate files
     cpu_fm.write('TypeDefault.cpp', lambda: {
         'type_method_definitions':
         list(mapMaybe(
@@ -1066,7 +1062,7 @@ def main() -> None:
             native_functions)),
 
         'function_registrations': list(mapMaybe(
-            compute_type_method(None, target=Target.REGISTRATION, selector=selector),
+            compute_type_method(None, target=Target.REGISTRATION, selector=schema_selector),
             native_functions)),
 
         'math_function_registrations': list(mapMaybe(
@@ -1101,16 +1097,6 @@ def main() -> None:
         'backend_select_function_registrations':
             list(mapMaybe(compute_backend_select(target=Target.REGISTRATION), native_functions)),
     })
-
-    if options.force_schema_registration:
-        def computeSchemaRegister() -> Dict[str, object]:
-            schema_registrations = list(mapMaybe(
-                compute_type_method(None, target=Target.REGISTRATION, selector=SelectiveBuilder.get_nop_selector(), def_only=True),
-                native_functions))
-            return {
-                'schema_registrations': schema_registrations,
-            }
-        cpu_fm.write('SchemaRegister.cpp', computeSchemaRegister)
 
     cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]))
     cpu_fm.write('RegistrationDeclarations.h', lambda: {
