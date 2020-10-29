@@ -25,14 +25,14 @@ Tensor addmm(
 
   vTensor v_output{
     context,
-    self.sizes(),
+    {mat1.sizes()[0], mat2.sizes()[1]},
     self.options()
   };
 
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (v_output.has_image() && v_self.has_image()) {
+    if (v_self.has_image()) {
       const struct {
         uint32_t width, height, channels;
         float beta, alpha;
@@ -89,9 +89,9 @@ Tensor mm(const Tensor& self_arg, const Tensor& mat2_arg) {
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    if (v_output.has_image() && v_mat1.has_image() && v_mat2.has_image()) {
+    if (v_mat1.has_image() && v_mat2.has_image()) {
       const struct {
-        uint32_t width, height, channels_4, k;
+        uint32_t width, height, channels, k;
       } block {
         mat2.sizes()[1],
         mat1.sizes()[0],
