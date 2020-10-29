@@ -13,15 +13,4 @@ Scalar Scalar::operator-() const {
   }
 }
 
-template<typename T>
-bool Scalar::equal(T num) const {
-  if (isComplex()) {
-    return v.z == num;
-  } else if (isFloatingPoint()) {
-    return v.d == num;
-  } else {
-    return v.i == num;
-  }
-}
-
 }  // namespace c10
