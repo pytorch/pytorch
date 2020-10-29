@@ -427,7 +427,8 @@ class Embedding(QuantizeHandler):
         emb_node = node
         emb = quantizer.modules[emb_node.target]
         qconfig = quantizer.qconfig_map[node.name]
-        assert not activation_is_statically_quantized(qconfig)
+        assert not activation_is_statically_quantized(qconfig), "embedding ops does " \
+            "not support statically quantizing activations right now"
         qemb = get_static_quant_module_class(type(emb))
         quantized = qemb.from_float(emb)
         parent_name, name = _parent_name(emb_node.target)
