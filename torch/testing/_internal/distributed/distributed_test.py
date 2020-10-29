@@ -2459,7 +2459,7 @@ class DistributedTest:
             l = loss(output, target) * scale_factor
             l.backward()
             if check_memory_format is not None:
-                self.assertTrue(input_var.is_contiguous(memory_format=check_memory_format))
+                self.assertTrue(output.is_contiguous(memory_format=check_memory_format))
 
         def _assert_equal_param(self, param_gpu, param_DDP):
             self.assertEqual(len(param_gpu), len(param_DDP))
