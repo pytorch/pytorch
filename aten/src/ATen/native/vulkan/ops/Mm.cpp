@@ -34,15 +34,16 @@ Tensor addmm(
   {
     if (v_output.has_image() && v_self.has_image()) {
       const struct {
-        uint32_t width, height, channels_4, k;
+        uint32_t width, height, channels;
         float beta, alpha;
+        uint32_t k;
       } block {
         mat2_arg.sizes()[1],
         mat1_arg.sizes()[0],
         1u,
-        mat1_arg.sizes()[1],
         beta.to<float>(),
-        alpha.to<float>()
+        alpha.to<float>(),
+        mat1_arg.sizes()[1],
       };
 
       context->dispatch(
