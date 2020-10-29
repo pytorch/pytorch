@@ -7,7 +7,6 @@ from .node import Argument
 from .graph import Graph
 from .graph_module import GraphModule
 from .proxy import Proxy, TracerBase
-from .experimental.rewriter import AST_Rewriter
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -37,21 +36,6 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     # we need to insert placeholder nodes for *args and **kwargs
     # we can't call this function normally, otherwise it would try to unpack them
     # instead, let's make python think that args and kwargs are normal variables
-
-def _rewrite(fn : Union[torch.nn.Module, Callable]) -> Union[torch.nn.Module, Callable]:
-    if isinstance(fn, torch.nn.Module):
-        # Rewrite this module's forward() and all of its recursive children's
-        # forward. Return the new rewritten module hierarchy.
-        def rewrite_module(m : torch.nn.Module):
-            new_m = copy.copy(m)
-            for name, child in new_m.named_children():
-                new_m[name] = rewrite_module(child)
-            new_m.forward = AST_Rewriter().rewrite(new_m.forward)
-            return new_m
-        return rewrite_module(fn)
-    else:
-        # Rewrite this single free function
-        return AST_Rewriter().rewrite(fn)
 
 class Tracer(TracerBase):
     def __init__(self):
@@ -147,7 +131,6 @@ class Tracer(TracerBase):
         # will likely not contain the actual parameters we care about, so unwrap
         # the function to get to the innermost callable.
         fn_for_analysis = inspect.unwrap(root_fn)
-        fn_for_analysis = _rewrite(fn_for_analysis)
         co = fn_for_analysis.__code__
         total_args = co.co_argcount + co.co_kwonlyargcount
         names_iter = iter(co.co_varnames)
@@ -207,11 +190,6 @@ class Tracer(TracerBase):
 
     def _proxy_placeholder(self, name: str, type_expr: Optional[Any] = None) -> Proxy:
         return Proxy(self.create_node('placeholder', name, (), {}, type_expr=type_expr), self)
-
-
-#    class RewritingTracer(torch.fx.Tracer):
-#        def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
-#        return super().trace(torch.fx.experimental.rewriter.rewrite(root))
 
 
 # Symbolic tracing API

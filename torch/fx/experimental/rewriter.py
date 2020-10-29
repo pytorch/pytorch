@@ -3,10 +3,14 @@ import inspect
 import textwrap
 import copy
 from types import FunctionType
+from typing import Union, Callable
+from torch.fx.symbolic_trace import Tracer
+from torch.fx.graph import Graph
 from torch.jit.frontend import normalize_source_lines
+import torch
 
 class AST_Rewriter(ast.NodeTransformer):
-    '''
+    """
     Take a FunctionType object representing a `forward` method, then
     perform an AST rewrite to swap out nodes that are not symbolically
     traceable with a callsite to the FX alternative.
@@ -14,7 +18,7 @@ class AST_Rewriter(ast.NodeTransformer):
     To support swapping out an AST node, define a new `visit` method on
     that node. For more details, see:
     https://docs.python.org/3/library/ast.html#ast.NodeTransformer
-    '''
+    """
 
     def rewrite(self, fn: FunctionType):
 
@@ -41,6 +45,10 @@ class AST_Rewriter(ast.NodeTransformer):
         return fn_compiled
 
     def visit_Assert(self, node):
+        """
+        Swap out the Assert node (Python's `assert`) with a callsite to the
+        symbolically-traceable torch.Assert function
+        """
         # Create the Call node
         call_node = ast.parse('torch.Assert()', mode='eval').body
         msg = node.msg if node.msg else ast.Constant(value="", kind=None)
@@ -52,3 +60,28 @@ class AST_Rewriter(ast.NodeTransformer):
         # Return the new Call node to signify that we want to use it as
         # a replacement for the original Assert node
         return ast.copy_location(expr_wrapper, node)
+
+
+class RewritingTracer(Tracer):
+    def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
+        return super().trace(_rewrite(root))
+
+
+def _rewrite(fn : Union[torch.nn.Module, Callable]) -> Union[torch.nn.Module, Callable]:
+    if isinstance(fn, torch.nn.Module):
+        # Rewrite this module's forward() and all of its recursive children's
+        # forward. Return the new rewritten module hierarchy.
+        def rewrite_module(m : torch.nn.Module):
+            class RewrittenModule(torch.nn.Module):
+                def __init__(self, orig):
+                    super().__init__()
+                    self.__dict__ = copy.copy(orig.__dict__)
+            RewrittenModule.forward = AST_Rewriter().rewrite(m.forward)
+            new_m = RewrittenModule(m)
+            for name, child in new_m.named_children():
+                new_m[name] = rewrite_module(child)
+            return new_m
+        return rewrite_module(fn)
+    else:
+        # Rewrite this single free function
+        return AST_Rewriter().rewrite(fn)
