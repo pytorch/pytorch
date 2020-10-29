@@ -47,7 +47,7 @@ run_tests() {
     else
         if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
             $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM" && \
-            $SCRIPT_HELPERS_DIR/test_libtorch.bat
+            $SCRIPT_HELPERS_DIR/test_libtorch.bat && \
             if [[ "${USE_CUDA}" == "1" ]]; then
               $SCRIPT_HELPERS_DIR/test_python_jit_legacy.bat "$DETERMINE_FROM"
             fi
