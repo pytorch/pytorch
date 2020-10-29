@@ -4,6 +4,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <torch/library.h>
 
 #include <ATen/core/LegacyTypeDispatch.h>
 
@@ -52,42 +53,46 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenOutOfLineKernel_whenRegist
   expectCallsIncrement(DispatchKey::CPU);
 }
 
-//TEST(OperatorRegistrationTest_LambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
-  //auto registrar = RegisterOperators()
-      //.op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor, int64_t i) {return i+1;}))
-      //.op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(DispatchKey::CUDA, [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}))
-      //.op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}))
-      //.op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(DispatchKey::CUDA, [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}));
-  //expectCallsIncrement(DispatchKey::CPU);
-//}
+TEST(OperatorRegistrationTest_LambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
+  auto registrar = RegisterOperators()
+      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor, int64_t i) {return i+1;})
+                                                                                      .kernel(DispatchKey::CUDA, [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}))
+      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;})
+                                                                                      .kernel(DispatchKey::CUDA, [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}));
+  expectCallsIncrement(DispatchKey::CPU);
+}
 
-//TEST(OperatorRegistrationTest_LambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
-  //auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor, int64_t i) {return i+1;}));
-  //auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(DispatchKey::CUDA, [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}));
-  //auto registrar3 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}));
-  //auto registrar4 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(DispatchKey::CUDA, [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}));
-  //expectCallsIncrement(DispatchKey::CPU);
-//}
+TEST(OperatorRegistrationTest_LambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
+  auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor, int64_t i) {return i+1;})
+                                                                                                                       .kernel(DispatchKey::CUDA, [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}));
+  auto registrar3 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;})
+                                                                                                                       .kernel(DispatchKey::CUDA, [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}));
+  expectCallsIncrement(DispatchKey::CPU);
+}
 
-//TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
-  //{
-    //auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor, int64_t i) {return i+1;}));
-    //{
-      //auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(DispatchKey::CUDA, [] (Tensor, int64_t i) {return i-1;}));
+TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
+  {
+    auto m = MAKE_TORCH_LIBRARY(_test);
+    m.def("_test::my_op(Tensor dummy, int input) -> int");
+    auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+    m_cpu.impl("my_op", DispatchKey::CPU, [] (Tensor, int64_t i) {return i+1;});
+    {
+      auto m_cuda = MAKE_TORCH_LIBRARY_IMPL(_test, CUDA);
+      m_cuda.impl("my_op", DispatchKey::CUDA, [] (Tensor, int64_t i) {return i-1;});
 
-      //// assert that schema and cpu kernel are present
-      //expectCallsIncrement(DispatchKey::CPU);
-      //expectCallsDecrement(DispatchKey::CUDA);
-    //}
+      // assert that schema and cpu kernel are present
+      expectCallsIncrement(DispatchKey::CPU);
+      expectCallsDecrement(DispatchKey::CUDA);
+    }
 
-    //// now registrar2 is destructed. Assert that schema is still present but cpu kernel is not
-    //expectCallsIncrement(DispatchKey::CPU);
-    //expectDoesntFindKernel("_test::my_op", DispatchKey::CUDA);
-  //}
+    // now registrar2 is destructed. Assert that schema is still present but cpu kernel is not
+    expectCallsIncrement(DispatchKey::CPU);
+    expectDoesntFindKernel("_test::my_op", DispatchKey::CUDA);
+  }
 
-  //// now both registrars are destructed. Assert that the whole schema is gone
-  //expectDoesntFindOperator("_test::my_op");
-//}
+  // now both registrars are destructed. Assert that the whole schema is gone
+  expectDoesntFindOperator("_test::my_op");
+}
 
 bool was_called = false;
 
@@ -129,24 +134,23 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntOutput_whenRe
   EXPECT_EQ(9, result[0].toInt());
 }
 
-//TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorOutput_whenRegistered_thenCanBeCalled) {
-  //auto registrar = RegisterOperators()
-      //.op("_test::returning_tensor(Tensor input) -> Tensor",
-        //RegisterOperators::options().kernel(DispatchKey::CPU, [] (const Tensor& a) {return a;}))
-      //.op("_test::returning_tensor(Tensor input) -> Tensor",
-        //RegisterOperators::options().kernel(DispatchKey::CUDA, [] (const Tensor& a) {return a;}));
+TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::returning_tensor(Tensor input) -> Tensor",
+        RegisterOperators::options().kernel(DispatchKey::CPU, [] (const Tensor& a) {return a;})
+                                    .kernel(DispatchKey::CUDA, [] (const Tensor& a) {return a;}));
 
-  //auto op = c10::Dispatcher::singleton().findSchema({"_test::returning_tensor", ""});
-  //ASSERT_TRUE(op.has_value());
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::returning_tensor", ""});
+  ASSERT_TRUE(op.has_value());
 
-  //auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
-  //EXPECT_EQ(1, result.size());
-  //EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensor()));
+  auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
+  EXPECT_EQ(1, result.size());
+  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensor()));
 
-  //result = callOp(*op, dummyTensor(DispatchKey::CUDA));
-  //EXPECT_EQ(1, result.size());
-  //EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
-//}
+  result = callOp(*op, dummyTensor(DispatchKey::CUDA));
+  EXPECT_EQ(1, result.size());
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
+}
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
@@ -213,83 +217,79 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithMultipleOutputs_
   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result_dict.at("second")));
 }
 
-//TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorInputByReference_withOutput_whenRegistered_thenCanBeCalled) {
-  //auto registrar = RegisterOperators()
-      //.op("_test::tensor_input(Tensor input) -> Tensor",
-        //RegisterOperators::options().kernel(DispatchKey::CPU, [] (const Tensor& a) {return a;}))
-      //.op("_test::tensor_input(Tensor input) -> Tensor",
-        //RegisterOperators::options().kernel(DispatchKey::CUDA, [] (const Tensor& a) {return a;}));
+TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorInputByReference_withOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::tensor_input(Tensor input) -> Tensor",
+        RegisterOperators::options().kernel(DispatchKey::CPU, [] (const Tensor& a) {return a;})
+                                    .kernel(DispatchKey::CUDA, [] (const Tensor& a) {return a;}));
 
-  //auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
-  //ASSERT_TRUE(op.has_value());
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
+  ASSERT_TRUE(op.has_value());
 
-  //auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
-  //EXPECT_EQ(1, result.size());
-  //EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensor()));
+  auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
+  EXPECT_EQ(1, result.size());
+  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensor()));
 
-  //result = callOp(*op, dummyTensor(DispatchKey::CUDA));
-  //EXPECT_EQ(1, result.size());
-  //EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
-//}
+  result = callOp(*op, dummyTensor(DispatchKey::CUDA));
+  EXPECT_EQ(1, result.size());
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
+}
 
-//TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorInputByValue_withOutput_whenRegistered_thenCanBeCalled) {
-  //auto registrar = RegisterOperators()
-      //.op("_test::tensor_input(Tensor input) -> Tensor",
-        //RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor a) {return a;}))
-      //.op("_test::tensor_input(Tensor input) -> Tensor",
-        //RegisterOperators::options().kernel(DispatchKey::CUDA, [] (Tensor a) {return a;}));
+TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorInputByValue_withOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::tensor_input(Tensor input) -> Tensor",
+        RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor a) {return a;})
+                                    .kernel(DispatchKey::CUDA, [] (Tensor a) {return a;}));
 
-  //auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
-  //ASSERT_TRUE(op.has_value());
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
+  ASSERT_TRUE(op.has_value());
 
-  //auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
-  //EXPECT_EQ(1, result.size());
-  //EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensor()));
+  auto result = callOp(*op, dummyTensor(DispatchKey::CPU));
+  EXPECT_EQ(1, result.size());
+  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(result[0].toTensor()));
 
-  //result = callOp(*op, dummyTensor(DispatchKey::CUDA));
-  //EXPECT_EQ(1, result.size());
-  //EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
-//}
+  result = callOp(*op, dummyTensor(DispatchKey::CUDA));
+  EXPECT_EQ(1, result.size());
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(result[0].toTensor()));
+}
 
-//Tensor captured_input;
+Tensor captured_input;
 
-//TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorInputByReference_withoutOutput_whenRegistered_thenCanBeCalled) {
-  //auto registrar = RegisterOperators()
-      //.op("_test::tensor_input(Tensor input) -> ()",
-        //RegisterOperators::options().kernel(DispatchKey::CPU, [] (const Tensor& a) -> void {captured_input = a;}))
-      //.op("_test::tensor_input(Tensor input) -> ()",
-        //RegisterOperators::options().kernel(DispatchKey::CUDA, [] (const Tensor& a) -> void {captured_input = a;}));
+TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorInputByReference_withoutOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::tensor_input(Tensor input) -> ()",
+        RegisterOperators::options().kernel(DispatchKey::CPU, [] (const Tensor& a) -> void {captured_input = a;})
+                                    .kernel(DispatchKey::CUDA, [] (const Tensor& a) -> void {captured_input = a;}));
 
-  //auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
-  //ASSERT_TRUE(op.has_value());
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
+  ASSERT_TRUE(op.has_value());
 
-  //auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU));
-  //EXPECT_EQ(0, outputs.size());
-  //EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(captured_input));
+  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU));
+  EXPECT_EQ(0, outputs.size());
+  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(captured_input));
 
-  //outputs = callOp(*op, dummyTensor(DispatchKey::CUDA));
-  //EXPECT_EQ(0, outputs.size());
-  //EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(captured_input));
-//}
+  outputs = callOp(*op, dummyTensor(DispatchKey::CUDA));
+  EXPECT_EQ(0, outputs.size());
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(captured_input));
+}
 
-//TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorInputByValue_withoutOutput_whenRegistered_thenCanBeCalled) {
-  //auto registrar = RegisterOperators()
-      //.op("_test::tensor_input(Tensor input) -> ()",
-        //RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor a) -> void {captured_input = a;}))
-      //.op("_test::tensor_input(Tensor input) -> ()",
-        //RegisterOperators::options().kernel(DispatchKey::CUDA, [] (Tensor a) -> void {captured_input = a;}));
+TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorInputByValue_withoutOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::tensor_input(Tensor input) -> ()",
+        RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor a) -> void {captured_input = a;})
+                                    .kernel(DispatchKey::CUDA, [] (Tensor a) -> void {captured_input = a;}));
 
-  //auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
-  //ASSERT_TRUE(op.has_value());
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
+  ASSERT_TRUE(op.has_value());
 
-  //auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU));
-  //EXPECT_EQ(0, outputs.size());
-  //EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(captured_input));
+  auto outputs = callOp(*op, dummyTensor(DispatchKey::CPU));
+  EXPECT_EQ(0, outputs.size());
+  EXPECT_EQ(DispatchKey::CPU, extractDispatchKey(captured_input));
 
-  //outputs = callOp(*op, dummyTensor(DispatchKey::CUDA));
-  //EXPECT_EQ(0, outputs.size());
-  //EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(captured_input));
-//}
+  outputs = callOp(*op, dummyTensor(DispatchKey::CUDA));
+  EXPECT_EQ(0, outputs.size());
+  EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(captured_input));
+}
 
 int64_t captured_int_input = 0;
 

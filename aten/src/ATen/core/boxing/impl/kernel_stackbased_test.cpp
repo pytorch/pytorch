@@ -66,14 +66,14 @@ void expectCallsDecrement(DispatchKey dispatch_key) {
   EXPECT_EQ(4, result[0].toInt());
 }
 
-TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
+TEST(NewOperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
   auto m = MAKE_TORCH_LIBRARY(_test);
   m.def("_test::my_op(Tensor dummy, int input) -> int");
   m.impl("my_op", DispatchKey::CPU, torch::CppFunction::makeFromBoxedFunction<incrementKernel>());
   expectCallsIncrement(DispatchKey::CPU);
 }
 
-TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneLibrary_thenCallsRightKernel) {
+TEST(NewOperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneLibrary_thenCallsRightKernel) {
   auto m = MAKE_TORCH_LIBRARY(_test);
   m.def("_test::my_op(Tensor dummy, int input) -> int");
   m.impl("my_op", DispatchKey::CPU, torch::CppFunction::makeFromBoxedFunction<incrementKernel>());
@@ -84,7 +84,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels
   expectCallsIncrement(DispatchKey::CPU);
 }
 
-TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
+TEST(NewOperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
   {
     auto m = MAKE_TORCH_LIBRARY_FRAGMENT(_test);
     m.def("_test::my_op(Tensor dummy, int input) -> int");
@@ -114,7 +114,7 @@ void kernelWithoutInputs(const OperatorHandle&, Stack*) {
   called = true;
 }
 
-TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutAnyArguments_whenRegistered_thenCanBeCalled) {
+TEST(NewOperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutAnyArguments_whenRegistered_thenCanBeCalled) {
   // note: non-fallback kernels without tensor arguments don't work because there
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
@@ -133,7 +133,7 @@ void kernelWithoutTensorInputs(const OperatorHandle&, Stack* stack) {
   stack->back() = stack->back().toInt() + 1;
 }
 
-TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutTensorArguments_whenRegistered_thenCanBeCalled) {
+TEST(NewOperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutTensorArguments_whenRegistered_thenCanBeCalled) {
   // note: non-fallback kernels without tensor arguments don't work because there
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
@@ -151,15 +151,17 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutTensor
 void kernelForSchemaInference(const OperatorHandle&, Stack* stack) {
 }
 
-TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenFailsBecauseItCannotInferFromStackBasedKernel) {
+TEST(NewOperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenFailsBecauseItCannotInferFromStackBasedKernel) {
   expectThrows<c10::Error>([] {
       auto m = MAKE_TORCH_LIBRARY_FRAGMENT(_test);
       m.def("_test::no_schema_specified", torch::CppFunction::makeFromBoxedFunction<kernelForSchemaInference>());
   }, "Full schema string was not specified, and we couldn't infer schema either.  Please explicitly provide a schema string.");
 }
 
-TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCanAlsoBeCalledUnboxed) {
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<&incrementKernel>(DispatchKey::CPU));
+TEST(NewOperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCanAlsoBeCalledUnboxed) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("_test::my_op(Tensor dummy, int input) -> int");
+  m.impl("my_op", DispatchKey::CPU, torch::CppFunction::makeFromBoxedFunction<incrementKernel>());
   expectCallsIncrementUnboxed(DispatchKey::CPU);
 }
 
