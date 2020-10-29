@@ -1074,6 +1074,26 @@ class TestFX(JitTestCase):
         x, y = torch.randn(3, 4), torch.randn(3, 4)
         self.checkGraphModule(foo, (x, y))
 
+    def test_direct_param_use(self):
+        class TransposeTest(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.b = torch.nn.Parameter(torch.rand(4, 3))
+
+            def forward(self, x):
+                return self.b
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = TransposeTest()
+
+            def forward(self, x):
+                return self.a.b, self.a.b.t(), self.a.b.view(12)
+
+        traced = torch.fx.symbolic_trace(Foo())
+        assert(all('constant' not in node.name for node in traced.graph.nodes))
+
 
 if __name__ == '__main__':
     run_tests()
