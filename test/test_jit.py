@@ -13297,7 +13297,7 @@ dedent """
         ''')
         cu = torch.jit.CompilationUnit(code)
         g = cu.tanh.graph
-        FileCheck().check_count("prim::Function_0", 2).check("None = prim::Constant") \
+        FileCheck().check_count("prim::Closure_0", 2).check("None = prim::Constant") \
                    .check_next("return").run(g)
 
         code = dedent('''
@@ -13314,7 +13314,7 @@ dedent """
         ''')
         cu = torch.jit.CompilationUnit(code)
         g = cu.tanh.graph
-        FileCheck().check_count("prim::Function_0", 2).check("int = prim::If") \
+        FileCheck().check_count("prim::Closure_0", 2).check("int = prim::If") \
                    .run(g)
 
         code = dedent('''
@@ -13328,9 +13328,9 @@ dedent """
         ''')
         cu = torch.jit.CompilationUnit(code)
         fc = FileCheck()
-        fc.check("prim::Function").check("(Tensor, None) = prim::TupleConstruct")
+        fc.check("prim::Closure").check("(Tensor, None) = prim::TupleConstruct")
         # Loop then two if's added in exit transform
-        fc.check("prim::Function").check("prim::Loop").check_count("prim::If", 2)
+        fc.check("prim::Closure").check("prim::Loop").check_count("prim::If", 2)
         fc.run(cu.loop_in_closure.graph)
 
         code = dedent('''

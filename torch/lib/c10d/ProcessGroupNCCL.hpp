@@ -15,6 +15,8 @@
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 
+#include <torch/custom_class.h>
+
 namespace c10d {
 
 // Environment variable which controls whether or not wait() is blocking or
@@ -161,7 +163,7 @@ class ProcessGroupNCCL : public ProcessGroup {
 
     // Reference to the store so that we can write aborted communicators
     // to the store.
-    std::shared_ptr<Store> store_;
+    c10::intrusive_ptr<Store> store_;
 
     // Store a reference to NCCL collective's outputs to be used by getFuture.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
@@ -173,7 +175,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     friend class ProcessGroupNCCL;
   };
 
-  struct Options {
+  struct Options : torch::CustomClassHolder {
     explicit Options();
 
     std::chrono::milliseconds opTimeout;
@@ -370,20 +372,20 @@ class ProcessGroupNCCL : public ProcessGroup {
   // communicator. These NCCL communicators are cached and reused if possible.
   //
   ProcessGroupNCCL(
-      const std::shared_ptr<Store>& store,
+      const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
-      Options options = Options());
+      const c10::intrusive_ptr<Options>& options = {});
 
   // This constructor includes the deprecated `groupName` argument.
   // If you have existing code that uses the `groupName`, you can replace
   // it by specifying a `c10d::PrefixStore(groupName, store)` for store.
   C10_DEPRECATED ProcessGroupNCCL(
-      const std::shared_ptr<Store>& store,
+      const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
       const std::string& groupName,
-      Options options = Options())
+      const c10::intrusive_ptr<Options>& options = {})
       : ProcessGroupNCCL(store, rank, size, options) {}
 
   virtual ~ProcessGroupNCCL();
@@ -567,7 +569,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   static const int64_t kWorkCleanupThreadSleepMillis;
 
   // The store is used to broadcast the NCCL unique ID of rank 0.
-  std::shared_ptr<Store> store_;
+  c10::intrusive_ptr<Store> store_;
 
   // The number of NCCL communicators that have been created during
   // the lifetime of this process group. This sequence number is

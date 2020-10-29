@@ -120,11 +120,6 @@ class class_ {
     return *this;
   }
 
-  template <typename Func>
-  class_& def_static(std::string name, Func f) {
-    defineMethod(std::move(name), std::move(f));
-    return *this;
-  }
   /// This is an unsafe method registration API added for adding custom JIT backend support via custom
   /// C++ classes. It is not for general purpose use.
   class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema, std::string doc_string = "") {

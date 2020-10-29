@@ -294,7 +294,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout);
 
   auto store =
-      py::class_<::c10d::Store, std::shared_ptr<::c10d::Store>, PythonStore>(
+      py::class_<::c10d::Store, c10::intrusive_ptr<::c10d::Store>, PythonStore>(
           module,
           "Store",
           R"(
@@ -498,7 +498,7 @@ Example::
     >>> store.wait(["bad_key"], timedelta(seconds=10))
 )");
 
-  shared_ptr_class_<::c10d::FileStore>(
+  intrusive_ptr_class_<::c10d::FileStore>(
       module,
       "FileStore",
       store,
@@ -521,7 +521,7 @@ Example::
       .def(py::init<const std::string&, int>());
 
 #ifndef _WIN32
-  shared_ptr_class_<::c10d::HashStore>(
+  intrusive_ptr_class_<::c10d::HashStore>(
       module,
       "HashStore",
       store,
@@ -538,7 +538,7 @@ Example::
       )")
       .def(py::init<>());
 
-  shared_ptr_class_<::c10d::TCPStore>(
+  intrusive_ptr_class_<::c10d::TCPStore>(
       module,
       "TCPStore",
       store,
@@ -578,7 +578,7 @@ Example::
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
 #endif
 
-  shared_ptr_class_<::c10d::PrefixStore>(
+  intrusive_ptr_class_<::c10d::PrefixStore>(
       module,
       "PrefixStore",
       store,
@@ -591,7 +591,7 @@ Arguments:
     prefix (str): The prefix string that is prepended to each key before being inserted into the store.
     store (torch.distributed.store): A store object that forms the underlying key-value store.
       )")
-      .def(py::init<const std::string&, std::shared_ptr<::c10d::Store>>());
+      .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>());
 
   auto processGroup =
       shared_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
@@ -904,13 +904,13 @@ Arguments:
   processGroupGloo
       .def(
           py::init<
-              const std::shared_ptr<::c10d::Store>&,
+              const c10::intrusive_ptr<::c10d::Store>&,
               int,
               int,
               ::c10d::ProcessGroupGloo::Options>(),
           py::call_guard<py::gil_scoped_release>())
       .def(
-          py::init([](const std::shared_ptr<::c10d::Store>& store,
+          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                       int rank,
                       int size,
                       std::chrono::milliseconds timeout) {
@@ -949,13 +949,14 @@ Arguments:
           module, "ProcessGroupNCCL", processGroup)
           .def(
               py::init<
-                  const std::shared_ptr<::c10d::Store>&,
+                  const c10::intrusive_ptr<::c10d::Store>&,
                   int,
                   int,
-                  ::c10d::ProcessGroupNCCL::Options>(),
+                  const c10::intrusive_ptr<
+                      ::c10d::ProcessGroupNCCL::Options>&>(),
               py::call_guard<py::gil_scoped_release>())
           .def(
-              py::init([](const std::shared_ptr<::c10d::Store>& store,
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                           int rank,
                           int size,
                           const std::chrono::milliseconds& timeout) {
@@ -972,7 +973,8 @@ Arguments:
                   ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis),
               py::call_guard<py::gil_scoped_release>());
 
-  py::class_<::c10d::ProcessGroupNCCL::Options>(processGroupNCCL, "Options")
+  intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
+      processGroupNCCL, "Options")
       .def(py::init<>())
       .def_readwrite(
           "is_high_priority",
@@ -1121,7 +1123,7 @@ Arguments:
       // Python side of the world. Calling Python functions on a Python object
       // completely bypasses pybind11. We need to test that the overloaded
       // functions call into Python and behave like we expect.
-      [](std::shared_ptr<::c10d::Store> store) {
+      [](c10::intrusive_ptr<::c10d::Store> store) {
         auto add = [&store](const std::string& key, int64_t value) {
           store->add(key, value);
         };
