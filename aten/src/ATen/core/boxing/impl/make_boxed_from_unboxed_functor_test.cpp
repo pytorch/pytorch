@@ -71,7 +71,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenMultipleOperatorsAndKerne
   auto registrar = RegisterOperators()
       .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<IncrementKernel>(DispatchKey::CPU)
                                                                                       .kernel<ErrorKernel>(DispatchKey::CUDA))
-      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<EerrorKernel>(DispatchKey::CPU)
+      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel<ErrorKernel>(DispatchKey::CPU)
                                                                                       .kernel<ErrorKernel>(DispatchKey::CUDA));
   expectCallsIncrement(DispatchKey::CPU);
 }

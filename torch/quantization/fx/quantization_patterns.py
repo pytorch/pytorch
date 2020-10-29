@@ -20,6 +20,7 @@ from .utils import (
     _parent_name,
     quantize_node,
     get_per_tensor_qparams,
+    get_swapped_custom_module_class,
     activation_is_statically_quantized,
     weight_is_quantized,
     weight_dtype,
@@ -46,7 +47,8 @@ class QuantizeHandler(ABC):
         # this is an indicator of whether all the inputs are Node or not
         # since some op might be quantized differently depending on whether
         # all inputs are tensors or not, e.g. add/mul
-        self.all_nodes = True
+        self.num_node_args = len(node.args)
+        self.all_node_args = True
 
     @abstractmethod
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
@@ -71,18 +73,24 @@ class Add(QuantizeHandler):
             node = node.args[0]
         assert node.op == 'call_function' and node.target in [operator.add, torch.add]
         self.add_node = node
-        self.all_nodes = all([isinstance(a, Node) for a in self.add_node.args[:2]])
+        self.num_node_args = len([a for a in self.add_node.args[:2] if isinstance(a, Node)])
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
-        if not self.all_nodes:
+        if self.num_node_args == 1:
             # add scalar
             if self.relu_node is not None:
                 op = torch.ops.quantized.add_relu
             else:
                 op = torch.ops.quantized.add
+
+            if isinstance(self.add_node.args[0], Node):
+                quantized_index = 0
+            else:
+                quantized_index = 1
+
             return quantizer.quantized_graph.create_node(
                 'call_function', op,
-                load_arg(quantized=[0])(self.add_node.args), self.add_node.kwargs)
+                load_arg(quantized=[quantized_index])(self.add_node.args), self.add_node.kwargs)
         else:
             activation_post_process = quantizer.activation_post_process_map[node.name]
             scale, zero_point = activation_post_process.calculate_qparams()
@@ -96,6 +104,7 @@ class Add(QuantizeHandler):
             return quantizer.quantized_graph.create_node(
                 'call_function', op, load_arg(quantized=True)(self.add_node.args), kwargs)
 
+# TODO: merge with Add
 @register_quant_pattern(operator.mul)
 @register_quant_pattern(torch.mul)
 @register_quant_pattern((torch.nn.ReLU, operator.mul))
@@ -112,17 +121,23 @@ class Mul(QuantizeHandler):
             node = node.args[0]
         assert node.op == 'call_function' and node.target in [operator.mul, torch.mul]
         self.mul_node = node
-        self.all_nodes = all([isinstance(a, Node) for a in self.mul_node.args[:2]])
+        self.num_node_args = len([a for a in self.mul_node.args[:2] if isinstance(a, Node)])
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
-        if not self.all_nodes:
+        if self.num_node_args == 1:
             # mul scalar
             if self.relu_node is not None:
                 op = torch.ops.quantized.mul_relu
             else:
                 op = torch.ops.quantized.mul
+
+            if isinstance(self.mul_node.args[0], Node):
+                quantized_index = 0
+            else:
+                quantized_index = 1
+
             return quantizer.quantized_graph.create_node(
-                'call_function', op, load_arg(quantized=[0])(self.mul_node.args), self.mul_node.kwargs)
+                'call_function', op, load_arg(quantized=[quantized_index])(self.mul_node.args), self.mul_node.kwargs)
         else:
             activation_post_process = quantizer.activation_post_process_map[node.name]
             scale, zero_point = activation_post_process.calculate_qparams()
@@ -138,7 +153,7 @@ class Mul(QuantizeHandler):
 @register_quant_pattern(torch.cat)
 class Cat(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
-        if not self.all_nodes:
+        if not self.all_node_args:
             return NotImplemented
         activation_post_process = quantizer.activation_post_process_map[node.name]
         scale, zero_point = activation_post_process.calculate_qparams()
@@ -180,6 +195,12 @@ class ConvRelu(QuantizeHandler):
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
         # TODO: debug option for conv module
+        qconfig = quantizer.qconfig_map[node.name]
+        activation_statically_quantized = activation_is_statically_quantized(qconfig)
+        # only static qunatization (for both ptq and qat) is supported for conv
+        if not activation_statically_quantized:
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
         if self.conv_node.op == 'call_module':
             # note that relu should already be fused into conv module in the fusion step
             assert self.relu_node is None, 'conv module and relu fusion is not executed, ' \
@@ -438,7 +459,7 @@ class DefaultNode(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
-        if not self.all_nodes:
+        if not self.all_node_args:
             return NotImplemented
         assert node.op in ['call_module', 'call_function'], 'Only call_module and ' + \
             'call_function are handled in DefaultNode'
@@ -580,7 +601,7 @@ class CopyNode(QuantizeHandler):
 # of quantizable objects (e.g. modules and functionals)
 class DefaultQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer, node):
-        assert self.all_nodes
+        assert self.all_node_args
         root_module = quantizer.modules['']
         return quantize_node(
             root_module,
@@ -595,13 +616,14 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         assert convert_custom_config_dict is not None
         custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", None)
         assert custom_module_class_mapping is not None
+        qconfig = quantizer.qconfig_map[node.name]
         observed_custom_module = quantizer.modules[node.target]
-        if node.name in quantizer.activation_post_process_map:
+        if activation_is_statically_quantized(qconfig):
+            assert node.name in quantizer.activation_post_process_map
             observed_custom_module.activation_post_process = \
                 quantizer.activation_post_process_map[node.name]
-        quantized_custom_module_class = custom_module_class_mapping.get(type(observed_custom_module), None)
-        assert quantized_custom_module_class is not None, "did not found quantized custom module for:" + \
-            str(type(observed_custom_module))
+        quantized_custom_module_class = get_swapped_custom_module_class(
+            observed_custom_module, custom_module_class_mapping, qconfig)
         quantized_custom_module = \
             quantized_custom_module_class.from_observed(observed_custom_module)
         parent_name, name = _parent_name(node.target)

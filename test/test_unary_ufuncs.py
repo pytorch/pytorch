@@ -288,7 +288,7 @@ class TestUnaryUfuncs(TestCase):
                     # NOTE: For these dtypes, PyTorch computes in the default scalar type (float)
                     # while NumPy computes in float16
                     self.assertEqualHelper(actual, expected, msg, dtype=dtype,
-                                           exact_dtype=exact_dtype, rtol=1e-4, atol=1e-3)
+                                           exact_dtype=exact_dtype, rtol=1e-3, atol=1e-2)
                     continue
 
             self.assertEqualHelper(actual, expected, msg, dtype=dtype, exact_dtype=exact_dtype)
