@@ -106,10 +106,10 @@ bool Int::sameAs(const Int* const other) const {
   return this == other;
 }
 
-UnaryOp::UnaryOp(UnaryOpType _type, Val* _out, Val* _in)
-    : Expr(ExprType::UnaryOp), unary_op_type_{_type}, out_{_out}, in_{_in} {
-  addOutput(_out);
-  addInput(_in);
+UnaryOp::UnaryOp(UnaryOpType type, Val* out, Val* in)
+    : Expr(ExprType::UnaryOp), unary_op_type_{type}, out_{out}, in_{in} {
+  addOutput(out);
+  addInput(in);
   name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
@@ -125,15 +125,15 @@ bool UnaryOp::sameAs(const UnaryOp* const other) const {
   return as<Expr>()->sameAs(other);
 }
 
-BinaryOp::BinaryOp(BinaryOpType _type, Val* _out, Val* _lhs, Val* _rhs)
+BinaryOp::BinaryOp(BinaryOpType type, Val* out, Val* lhs, Val* rhs)
     : Expr(ExprType::BinaryOp),
-      binary_op_type_{_type},
-      out_{_out},
-      lhs_{_lhs},
-      rhs_{_rhs} {
-  addOutput(_out);
-  addInput(_lhs);
-  addInput(_rhs);
+      binary_op_type_{type},
+      out_{out},
+      lhs_{lhs},
+      rhs_{rhs} {
+  addOutput(out);
+  addInput(lhs);
+  addInput(rhs);
   name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
@@ -152,22 +152,17 @@ bool BinaryOp::sameAs(const BinaryOp* other) const {
   return true;
 }
 
-TernaryOp::TernaryOp(
-    TernaryOpType _type,
-    Val* _out,
-    Val* _in1,
-    Val* _in2,
-    Val* _in3)
+TernaryOp::TernaryOp(TernaryOpType type, Val* out, Val* in1, Val* in2, Val* in3)
     : Expr(ExprType::TernaryOp),
-      ternary_op_type_{_type},
-      out_{_out},
-      in1_{_in1},
-      in2_{_in2},
-      in3_{_in3} {
-  addOutput(_out);
-  addInput(_in1);
-  addInput(_in2);
-  addInput(_in3);
+      ternary_op_type_{type},
+      out_{out},
+      in1_{in1},
+      in2_{in2},
+      in3_{in3} {
+  addOutput(out);
+  addInput(in1);
+  addInput(in2);
+  addInput(in3);
   name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
@@ -188,16 +183,13 @@ bool TernaryOp::sameAs(const TernaryOp* other) const {
   return true;
 }
 
-BroadcastOp::BroadcastOp(
-    Val* _out,
-    Val* _in,
-    std::vector<bool> is_broadcast_dims)
+BroadcastOp::BroadcastOp(Val* out, Val* in, std::vector<bool> is_broadcast_dims)
     : Expr(ExprType::BroadcastOp),
-      out_(_out),
-      in_(_in),
+      out_(out),
+      in_(in),
       is_broadcast_dims_(std::move(is_broadcast_dims)) {
-  auto out_type = _out->getValType().value();
-  auto in_type = _in->getValType().value();
+  auto out_type = out->getValType().value();
+  auto in_type = in->getValType().value();
 
   TORCH_INTERNAL_ASSERT(
       out_type == ValType::TensorView && in_type == ValType::TensorView,
@@ -205,8 +197,8 @@ BroadcastOp::BroadcastOp(
 
   // This is a generic check that root dims of a consumer and producer match.
   // Maybe we shouldn't relegate it to this constructor.
-  const auto c_tv = out()->as<TensorView>();
-  const auto p_tv = in()->as<TensorView>();
+  const auto c_tv = out_->as<TensorView>();
+  const auto p_tv = in_->as<TensorView>();
 
   const auto& c_root = c_tv->getRootDomain();
   const auto& p_root = p_tv->getMaybeRFactorDomain();
@@ -245,8 +237,8 @@ BroadcastOp::BroadcastOp(
       !bad_mismatch,
       "Invalid broadcast op. Non-broadcasted dims don't match from input to output.");
 
-  addOutput(_out);
-  addInput(_in);
+  addOutput(out);
+  addInput(in);
   name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
@@ -261,33 +253,33 @@ bool BroadcastOp::sameAs(const BroadcastOp* const other) const {
 }
 
 ReductionOp::ReductionOp(
-    BinaryOpType _reduction_op_type,
-    Val* _init,
-    Val* _out,
-    Val* _in)
+    BinaryOpType reduction_op_type,
+    Val* init,
+    Val* out,
+    Val* in)
     : Expr(ExprType::ReductionOp),
-      reduction_op_type_(_reduction_op_type),
-      init_(_init),
-      out_(_out),
-      in_(_in) {
-  TORCH_CHECK(_out->getValType().value() == ValType::TensorView);
+      reduction_op_type_(reduction_op_type),
+      init_(init),
+      out_(out),
+      in_(in) {
+  TORCH_CHECK(out->getValType().value() == ValType::TensorView);
 
   TORCH_INTERNAL_ASSERT(
-      _in->getValType() == ValType::TensorView &&
-          _out->getValType() == ValType::TensorView,
+      in->getValType() == ValType::TensorView &&
+          out->getValType() == ValType::TensorView,
       "Reduction operation was created that does not have tensor inputs and outputs.");
 
   TORCH_INTERNAL_ASSERT(
-      TensorDomain::noReductions(_in->as<TensorView>()->getMaybeRFactorDomain())
-              .size() == _out->as<TensorView>()->getRootDomain().size(),
+      TensorDomain::noReductions(in->as<TensorView>()->getMaybeRFactorDomain())
+              .size() == out->as<TensorView>()->getRootDomain().size(),
       "Reduction operation created with mismatched domains.");
 
   TORCH_INTERNAL_ASSERT(
-      _init->isConstScalar(),
+      init->isConstScalar(),
       "Tried to create a reduction operation whith an initial value that isn't a constant.");
 
-  addOutput(_out);
-  addInput(_in);
+  addOutput(out);
+  addInput(in);
   name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
@@ -306,45 +298,45 @@ bool ReductionOp::sameAs(const ReductionOp* other) const {
 }
 
 IterDomain::IterDomain(
-    Val* _start,
-    Val* _extent,
-    ParallelType _parallel_type,
-    IterType _iter_type,
-    bool _is_rfactor_domain)
+    Val* start,
+    Val* extent,
+    ParallelType parallel_type,
+    IterType iter_type,
+    bool is_rfactor_domain)
     : Val(ValType::IterDomain, DataType::Int, false),
-      start_(_start),
-      extent_(_extent),
-      parallel_type_(_parallel_type),
-      iter_type_(_iter_type),
-      is_rfactor_domain_(_is_rfactor_domain) {
+      start_(start),
+      extent_(extent),
+      parallel_type_(parallel_type),
+      iter_type_(iter_type),
+      is_rfactor_domain_(is_rfactor_domain) {
   TORCH_CHECK(
       !(isRFactorProduct() && isBroadcast()),
       "IterDomain cannot be both a broadcast and rfactor domain.");
 
   TORCH_INTERNAL_ASSERT(
-      _extent->isAnInt(),
+      extent->isAnInt(),
       "Cannot create an iter domain over an extent that is not an int but received ",
-      _extent,
+      extent,
       " .");
 
   TORCH_INTERNAL_ASSERT(
-      _start->isAnInt(),
+      start->isAnInt(),
       "Cannot create an iter domain with a start that is not an int but received ",
-      _extent,
+      extent,
       " .");
 
   // Check that all for-loops iterate from zero to some positive integer
   // lower_insert_syncs uses this assumption for correctness.
   TORCH_INTERNAL_ASSERT(
-      _start->isZeroInt(),
+      start->isZeroInt(),
       "Cannot create an iter domain with a start that is non-zero but received ",
-      _extent,
+      extent,
       " .");
 
   TORCH_INTERNAL_ASSERT(
-      !_extent->isZeroInt(),
+      !extent->isZeroInt(),
       "Cannot create an iter domain with a extent that is zero but received ",
-      _extent,
+      extent,
       " .");
 
   name_ = fusion_->registerVal(this);
@@ -473,13 +465,13 @@ Val* IterDomain::extent() const {
 }
 
 TensorDomain::TensorDomain(
-    std::vector<IterDomain*> _domain,
-    std::vector<bool> _contiguity)
+    std::vector<IterDomain*> domain,
+    std::vector<bool> contiguity)
     : Val(ValType::TensorDomain),
-      root_domain_(std::move(_domain)),
+      root_domain_(std::move(domain)),
       contiguity_(
-          _contiguity.empty() ? std::vector<bool>(root_domain_.size(), false)
-                              : std::move(_contiguity)) {
+          contiguity.empty() ? std::vector<bool>(root_domain_.size(), false)
+                             : std::move(contiguity)) {
   TORCH_CHECK(
       contiguity_.size() == root_domain_.size(),
       "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
@@ -492,15 +484,15 @@ TensorDomain::TensorDomain(
 }
 
 TensorDomain::TensorDomain(
-    std::vector<IterDomain*> _root_domain,
-    std::vector<IterDomain*> _domain,
-    std::vector<bool> _contiguity)
+    std::vector<IterDomain*> root_domain,
+    std::vector<IterDomain*> domain,
+    std::vector<bool> contiguity)
     : Val(ValType::TensorDomain, DataType::Null, false),
-      root_domain_(std::move(_root_domain)),
-      domain_(std::move(_domain)),
+      root_domain_(std::move(root_domain)),
+      domain_(std::move(domain)),
       contiguity_(
-          _contiguity.empty() ? std::vector<bool>(root_domain_.size(), false)
-                              : std::move(_contiguity)) {
+          contiguity.empty() ? std::vector<bool>(root_domain_.size(), false)
+                             : std::move(contiguity)) {
   TORCH_CHECK(
       contiguity_.size() == root_domain_.size(),
       "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
@@ -511,7 +503,7 @@ TensorDomain::TensorDomain(
   std::vector<Val*> domain_vals(domain_.begin(), domain_.end());
   auto inps = IterVisitor::getInputsTo(domain_vals);
 
-  // Validate that the root domain consists of all inputs to _domain
+  // Validate that the root domain consists of all inputs to domain
   // Uncertain if this will hold for RFactor
 
   std::unordered_set<Val*> root_vals(root_domain_.begin(), root_domain_.end());
@@ -529,17 +521,17 @@ TensorDomain::TensorDomain(
 }
 
 TensorDomain::TensorDomain(
-    std::vector<IterDomain*> _root_domain,
-    std::vector<IterDomain*> _rfactor_domain,
-    std::vector<IterDomain*> _domain,
-    std::vector<bool> _contiguity)
+    std::vector<IterDomain*> root_domain,
+    std::vector<IterDomain*> rfactor_domain,
+    std::vector<IterDomain*> domain,
+    std::vector<bool> contiguity)
     : Val(ValType::TensorDomain, DataType::Null, false),
-      root_domain_(std::move(_root_domain)),
-      domain_(std::move(_domain)),
-      rfactor_domain_(std::move(_rfactor_domain)),
+      root_domain_(std::move(root_domain)),
+      domain_(std::move(domain)),
+      rfactor_domain_(std::move(rfactor_domain)),
       contiguity_(
-          _contiguity.empty() ? std::vector<bool>(root_domain_.size(), false)
-                              : std::move(_contiguity)) {
+          contiguity.empty() ? std::vector<bool>(root_domain_.size(), false)
+                             : std::move(contiguity)) {
   TORCH_CHECK(
       contiguity_.size() == root_domain_.size(),
       "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
@@ -550,7 +542,7 @@ TensorDomain::TensorDomain(
   auto inps = IterVisitor::getInputsTo(
       std::vector<Val*>(domain_.begin(), domain_.end()));
 
-  // Validate that the root domain consists of all inputs to _domain
+  // Validate that the root domain consists of all inputs to domain
   // Uncertain if this will hold for RFactor
 
   std::unordered_set<Val*> root_vals(root_domain_.begin(), root_domain_.end());
@@ -1141,22 +1133,18 @@ const IterDomain* IterDomain::concretizeDomain(IterDomain* bcast_dom) {
   return ConcretizeDomain::getConcreteDomain(bcast_dom);
 }
 
-Split::Split(
-    IterDomain* _outer,
-    IterDomain* _inner,
-    IterDomain* _in,
-    Val* _factor)
+Split::Split(IterDomain* outer, IterDomain* inner, IterDomain* in, Val* factor)
     : Expr(ExprType::Split),
-      outer_{_outer},
-      inner_{_inner},
-      in_{_in},
-      factor_{_factor} {
+      outer_{outer},
+      inner_{inner},
+      in_{in},
+      factor_{factor} {
   TORCH_INTERNAL_ASSERT(
       factor_->isAnInt(),
       "Attempted to create a Split node with a non-integer factor.");
-  addOutput(_outer);
-  addOutput(_inner);
-  addInput(_in);
+  addOutput(outer);
+  addOutput(inner);
+  addInput(in);
   name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
@@ -1173,11 +1161,11 @@ bool Split::sameAs(const Split* const other) const {
       in()->sameAs(other->in()) && factor()->sameAs(other->factor()));
 }
 
-Merge::Merge(IterDomain* _out, IterDomain* _outer, IterDomain* _inner)
-    : Expr(ExprType::Merge), out_{_out}, outer_{_outer}, inner_{_inner} {
-  addOutput(_out);
-  addInput(_outer);
-  addInput(_inner);
+Merge::Merge(IterDomain* out, IterDomain* outer, IterDomain* inner)
+    : Expr(ExprType::Merge), out_{out}, outer_{outer}, inner_{inner} {
+  addOutput(out);
+  addInput(outer);
+  addInput(inner);
   name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 

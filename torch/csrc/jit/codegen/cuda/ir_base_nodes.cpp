@@ -42,29 +42,25 @@ void Statement::print() const {
 }
 
 // When we create a Val we immediately register them with the active fusion.
-Val::Val(ValType _vtype, DataType _dtype, bool register_val, bool lowered)
+Val::Val(ValType _vtype, DataType _dtype, bool register_val)
     : vtype_(_vtype), dtype_(_dtype) {
   Fusion* fusion = FusionGuard::getCurFusion();
   TORCH_CHECK(
       fusion != nullptr, "No active fusion group found when creating a Val.");
   fusion_ = fusion;
   if (register_val) {
-    if (lowered) {
-      name_ = fusion_->registerLoweredVal(this);
-    } else {
-      name_ = fusion_->registerVal(this);
-    }
+    name_ = fusion_->registerVal(this);
   }
 }
 
 Val::Val(const Val* src, IrCloner* ir_cloner)
     : Statement(src, ir_cloner), vtype_(src->vtype_), dtype_(src->dtype_) {}
 
+namespace {
+
 // Traverse origin of all values involved in constructing the provided val.
 // Check if all values involved are constant values, meaning the provided
 // val is also a constant value.
-namespace {
-
 class ConstCheck : OptOutConstDispatch {
  private:
   bool is_const_ = true;
@@ -150,7 +146,7 @@ Expr* Val::getOrigin() const {
 
 // We don't register with the active fusion in Expr as this needs to be done
 // after inputs and outputs are registered with the Expr
-Expr::Expr(ExprType _type) : type_{_type} {
+Expr::Expr(ExprType type) : type_{type} {
   Fusion* fusion = FusionGuard::getCurFusion();
   if (fusion == nullptr)
     TORCH_CHECK(false, "No active fusion group found when creating an Expr.");

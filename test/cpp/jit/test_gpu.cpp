@@ -490,8 +490,6 @@ TEST(NVFuserTest, FusionClear_CUDA) {
   TORCH_CHECK(fusion.outputs().empty());
 
   TORCH_CHECK(!fusion.hasReduction());
-  TORCH_CHECK(!fusion.hasBlockReduction());
-  TORCH_CHECK(!fusion.hasGridReduction());
 
   // 3. Rebuild the IR
 

@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 // TODO(kir): only needed until we can fix Fusion::origin()
@@ -63,24 +62,6 @@ void swap(Fusion& a, Fusion& b) noexcept {
     val->fusion_ = &b;
   }
   for (auto expr : b.expr_set_) {
-    expr->fusion_ = &b;
-  }
-
-  // Lowered IR nodes
-  swap(a.lowered_val_set_, b.lowered_val_set_);
-  swap(a.lowered_expr_set_, b.lowered_expr_set_);
-  swap(a.lowered_origin_, b.lowered_origin_);
-
-  for (auto val : a.lowered_val_set_) {
-    val->fusion_ = &a;
-  }
-  for (auto expr : a.lowered_expr_set_) {
-    expr->fusion_ = &a;
-  }
-  for (auto val : b.lowered_val_set_) {
-    val->fusion_ = &b;
-  }
-  for (auto expr : b.lowered_expr_set_) {
     expr->fusion_ = &b;
   }
 }
@@ -176,11 +157,6 @@ void Fusion::clear() noexcept {
 
   inputs_.clear();
   outputs_.clear();
-
-  // Lowered IR nodes
-  lowered_val_set_.clear();
-  lowered_expr_set_.clear();
-  lowered_origin_.clear();
 }
 
 void Fusion::removeExpr(Expr* expr) {
@@ -282,31 +258,9 @@ bool Fusion::inFusion(const Statement* stmt) const {
   return in_fusion;
 }
 
-bool Fusion::inKernelIr(const Statement* stmt) const {
-  bool in_fusion = stmt->fusion() == this;
-  Statement* nonconst_stmt = const_cast<Statement*>(stmt); // NOLINT
-
-  if (stmt->isExpr()) {
-    in_fusion &= lowered_expr_set_.find(nonconst_stmt->as<Expr>()) !=
-        lowered_expr_set_.end();
-  }
-  if (stmt->isVal()) {
-    in_fusion &= lowered_val_set_.find(nonconst_stmt->as<Val>()) !=
-        lowered_val_set_.end();
-  }
-
-  return in_fusion;
-}
-
 void Fusion::assertInFusion(const Statement* stmt, const std::string& msg)
     const {
-  if (inFusion(stmt)) {
-    return;
-  }
-  if (inKernelIr(stmt)) {
-    return;
-  }
-  TORCH_CHECK(false, msg, " it was not found in the active fusion.");
+  TORCH_CHECK(inFusion(stmt), msg, " it was not found in the active fusion.");
 }
 
 std::vector<Expr*> Fusion::exprs(bool from_outputs_only) {
@@ -371,8 +325,6 @@ void Fusion::printTransforms() {
 }
 
 StmtNameType Fusion::registerVal(Val* val) {
-  TORCH_CHECK(!inKernelIr(val));
-
   if (val->fusion()) {
     if (val->fusion() != this) {
       TORCH_CHECK(false, val, " was not found in the active fusion.");
@@ -388,8 +340,6 @@ StmtNameType Fusion::registerVal(Val* val) {
 }
 
 StmtNameType Fusion::registerExpr(Expr* expr) {
-  TORCH_CHECK(!inKernelIr(expr));
-
   if (expr->fusion()) {
     if (expr->fusion() != this) {
       TORCH_CHECK(false, expr, " was not found in the active fusion.");
@@ -401,7 +351,6 @@ StmtNameType Fusion::registerExpr(Expr* expr) {
 
   for (Val* input : expr->inputs()) {
     assertInFusion(input, "Input to expr is invalid, ");
-    TORCH_CHECK(!inKernelIr(input));
     if (uses_.find(input) == uses_.end()) {
       uses_[input] = {expr};
     } else {
@@ -411,7 +360,6 @@ StmtNameType Fusion::registerExpr(Expr* expr) {
 
   for (Val* output : expr->outputs()) {
     assertInFusion(output, "Output to expr is invalid, ");
-    TORCH_CHECK(!inKernelIr(output));
     auto it = origin_.find(output);
     if (it != origin_.end()) {
       removeExpr(it->second); // will also remove origin entry
@@ -438,32 +386,6 @@ StmtNameType Fusion::registerStatement(Statement* stmt) {
       false,
       "Could not register statement as Fusion could not recognize its type.");
   return kInvalidStmName;
-}
-
-StmtNameType Fusion::registerLoweredVal(Val* val) {
-  TORCH_INTERNAL_ASSERT(val->fusion() == this);
-  TORCH_INTERNAL_ASSERT(!inFusion(val));
-  TORCH_INTERNAL_ASSERT(!inKernelIr(val));
-  lowered_val_set_.insert(val);
-  return getValName(*val->getValType());
-}
-
-StmtNameType Fusion::registerLoweredExpr(Expr* expr) {
-  TORCH_INTERNAL_ASSERT(expr->fusion() == this);
-  TORCH_INTERNAL_ASSERT(!inFusion(expr));
-  TORCH_INTERNAL_ASSERT(!inKernelIr(expr));
-
-  for (Val* input : expr->inputs()) {
-    TORCH_CHECK(inKernelIr(input));
-  }
-
-  for (Val* output : expr->outputs()) {
-    TORCH_CHECK(inKernelIr(output));
-    TORCH_CHECK(lowered_origin_.insert({output, expr}).second);
-  }
-
-  lowered_expr_set_.insert(expr);
-  return getExprName();
 }
 
 bool Fusion::used(Val* val) const {
@@ -539,53 +461,6 @@ bool Fusion::hasReduction() {
     for (auto out : expr->outputs())
       if (out->getValType() == ValType::TensorView)
         if (out->as<TensorView>()->hasReduction())
-          return true;
-
-  return false;
-}
-
-bool Fusion::hasBlockReduction() {
-  FUSER_PERF_SCOPE("Fusion::hasBlockReduction");
-
-  for (auto expr : exprs(true))
-    for (auto out : expr->outputs())
-      if (out->getValType() == ValType::TensorView)
-        if (out->as<TensorView>()->hasBlockReduction())
-          return true;
-
-  return false;
-}
-
-bool Fusion::hasGridReduction() {
-  FUSER_PERF_SCOPE("Fusion::hasGridReduction");
-
-  for (auto expr : exprs(true))
-    for (auto out : expr->outputs())
-      if (out->getValType() == ValType::TensorView)
-        if (out->as<TensorView>()->hasGridReduction())
-          return true;
-
-  return false;
-}
-
-bool Fusion::hasBlockBroadcast() {
-  for (auto expr : exprs(true)) {
-    for (auto out : expr->outputs()) {
-      if (out->getValType() == ValType::TensorView) {
-        if (out->as<TensorView>()->hasBlockBroadcast()) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-bool Fusion::hasBroadcast() {
-  for (auto expr : exprs(true))
-    for (auto out : expr->outputs())
-      if (out->getValType() == ValType::TensorView)
-        if (out->as<TensorView>()->hasBroadcast())
           return true;
 
   return false;

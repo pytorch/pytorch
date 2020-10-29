@@ -50,17 +50,16 @@ class BinaryOp;
 class IterDomain;
 class IrCloner;
 
-/*
- * Statement is the highest level node representation. Everything that is
- * considered "IR" will be derived from this class at some point. Both Values
- * and Expr's are a Statement. If there will ever be any more fundamental types,
- * they will also derive from Statement.
- *
- * We use Statements to pass around nodes of unknown compile type. Therefore it
- * is also important for the design to have a dispatch system for a Statment.
- * Basically beinng able to succienctly traverse down the inhereitance stack of
- * a Statment at runtime. This is currently implemented in dispatch.h
- */
+//! Statement is the highest level node representation. Everything that is
+//! considered "IR" will be derived from this class at some point. Both Values
+//! and Expr's are a Statement. If there will ever be any more fundamental
+//! types, they will also derive from Statement.
+//!
+//! We use Statements to pass around nodes of unknown compile type. Therefore it
+//! is also important for the design to have a dispatch system for a Statment.
+//! Basically beinng able to succienctly traverse down the inhereitance stack of
+//! a Statment at runtime. This is currently implemented in dispatch.h
+//!
 class TORCH_CUDA_API Statement : public NonCopyable, public PolymorphicBase {
   friend void swap(Fusion&, Fusion&) noexcept;
 
@@ -136,33 +135,35 @@ class TORCH_CUDA_API Statement : public NonCopyable, public PolymorphicBase {
   Fusion* fusion_ = nullptr;
 };
 
-/*
- * A Val represents a "value." These are objects, like tensors, scalars, and
- * memory locations, that are inputs and outputs of computations (represented
- * by Exprs, below). Vals are constant and unique and should always be passed
- * around as a pointer. Val can generally be thought of as representing any type
- * of data. Some examples: a constant size like convolution filter width a
- * runtime constant like batch normalizations momentum a "symbolic" tensor like
- * one passed down from the JIT a memory buffer used in device code
- *
- * Adding a Val:
- * Right now adding a Val is quite involved. Val's can be defined in ir.h or in
- * their own header file. The following is what is currently needed to add a new
- * Val:
- * 1) Definition inheriting from Val
- *     - Members must be private or protected
- *     - Accessor functions for members
- *     - Must call Val constructor, Val constructor registers with fusion
- *     - Implementation of bool sameAs(...)
- *     - Must implement a "cloning" constructor, ex.
- *        Int::Int(const Int* src, IrCloner* ir_cloner)
- * 2) dispatch.h/.cpp must be updated to include dispatch of the new Val
- * 3) Default mutator function should be added to mutator.cpp
- * 4a) Printing functions should be added to ir_iostream.h/.cpp
- * 4b) Graphviz generation must be added to ir_graphviz.h/.cpp
- * 5) An enum value must be added to ValType in type.h
- * 6) A string entry must be added in val_type_string_map
- */
+//! A Val represents a "value." These are objects, like tensors, scalars, and
+//! memory locations, that are inputs and outputs of computations (represented
+//! by Exprs, below)
+//!
+//! Vals are constant and unique and should always be passed
+//! around as a pointer. Val can generally be thought of as representing any
+//! type of data. Some examples: a constant size like convolution filter width a
+//! runtime constant like batch normalizations momentum a "symbolic" tensor like
+//! one passed down from the JIT a memory buffer used in device code
+//!
+//! Adding a Val:
+//! Right now adding a Val is quite involved. Val's can be defined in ir.h or in
+//! their own header file. The following is what is currently needed to add a
+//! new Val:
+//!
+//! 1) Definition inheriting from Val
+//!     - Members must be private or protected
+//!     - Accessor functions for members
+//!     - Must call Val constructor, Val constructor registers with fusion
+//!     - Implementation of bool sameAs(...)
+//!     - Must implement a "cloning" constructor, ex.
+//!        Int::Int(const Int* src, IrCloner* ir_cloner)
+//! 2) dispatch.h/.cpp must be updated to include dispatch of the new Val
+//! 3) Default mutator function should be added to mutator.cpp
+//! 4a) Printing functions should be added to ir_iostream.h/.cpp
+//! 4b) Graphviz generation must be added to ir_graphviz.h/.cpp
+//! 5) An enum value must be added to ValType in type.h
+//! 6) A string entry must be added in val_type_string_map
+//!
 class TORCH_CUDA_API Val : public Statement {
  public:
   // We may not want to register this value during Val's constructor. The reason
@@ -173,20 +174,9 @@ class TORCH_CUDA_API Val : public Statement {
   explicit Val(
       ValType _vtype,
       DataType _dtype = DataType::Null,
-      bool register_val = true,
-      bool lowered = false);
-
-  // Lowers an existing Fusion IR node into a Kernel IR counterpart
-  explicit Val(const Val* fusion_ir_node);
+      bool register_val = true);
 
   Val(const Val* src, IrCloner* ir_cloner);
-
-  // TODO: Values are unique and not copyable
-  Val(const Val& other) = delete;
-  Val& operator=(const Val& other) = delete;
-
-  Val(Val&& other) = delete;
-  Val& operator=(Val&& other) = delete;
 
   // TODO: why is this optional?
   //
@@ -246,57 +236,50 @@ class TORCH_CUDA_API Val : public Statement {
   const DataType dtype_;
 };
 
-//  A Expr represents a "computation." These are functions that takes inputs
-//  and produce outputs, inputs and outputs all being Vals. There are
-//  specializations of BinaryOp which takes 2 inputs and produces 1 output, and
-//  UnaryOp which takes 1 input and produces 1 output. Exprs are unique and
-//  immutable. Conceptually, Exprs could always be manipulated using unique
-//  pointers, and we could add this later. However, for now Exprs can be
-//  replaced in a fusion, but they cannot be modified in place.
-
-//  The IR is static single assignment (SSA). Values can only be defined as an
-//  output of an Expr once. If they are re-defined the original definition is
-//  deleted from the program, as opposed to an ordered redefinition of the value
-//  in the program.
-
-//  Note: Registering an Expr with a Fusion is actually 2 parts, one part is
-//  done in the Expr constructor, so that should be called on anything that
-//  inherits Expr. The issue with having registration in Expr's constructor, is
-//  that the constructor of an Expr will set ouputs and inputs. This information
-//  is important for registration with Fuser, so it can track the dependency
-//  chain.
-
-//  Adding an Expr:
-//  Right now adding an Expr is quite involved. Expr's can be defined in ir.h or
-//  in their own header file. The following is what is currently needed for Expr
-//  definitions:
-//  1) Definition inheriting from Expr.
-//      - Members must be private or protected
-//      - Accessor functions for members
-//      - Constructors need to register with the Fusion after inputs/outputs are
-//         defined
-//      - Implementation of bool sameAs(...)
-//  2) dispatch.h/.cpp must be updated to include dispatch of the new Val
-//  3) Default mutator function should be added to mutator.h/.cpp
-//  4) Printing functions should be added to ir_iostream.h/.cpp
-//  5) Lower case convenience functions should be added to arith.h/.cpp (If user
-//   facing)
-//  6) An enum value must be added to ExprType in type.h
-//  7) A string entry must be added in expr_type_string_map
-//  8) Entry added to ir_graphviz .cpp/.h
-
+//!  A Expr represents a "computation." These are functions that takes inputs
+//!  and produce outputs, inputs and outputs all being Vals. There are
+//!  specializations of BinaryOp which takes 2 inputs and produces 1 output, and
+//!  UnaryOp which takes 1 input and produces 1 output. Exprs are unique and
+//!  immutable. Conceptually, Exprs could always be manipulated using unique
+//!  pointers, and we could add this later. However, for now Exprs can be
+//!  replaced in a fusion, but they cannot be modified in place.
+//!
+//!  The IR is static single assignment (SSA). Values can only be defined as an
+//!  output of an Expr once. If they are re-defined the original definition is
+//!  deleted from the program, as opposed to an ordered redefinition of the
+//!  value in the program.
+//!
+//!  Note: Registering an Expr with a Fusion is actually 2 parts, one part is
+//!  done in the Expr constructor, so that should be called on anything that
+//!  inherits Expr. The issue with having registration in Expr's constructor, is
+//!  that the constructor of an Expr will set ouputs and inputs. This
+//!  information is important for registration with Fuser, so it can track the
+//!  dependency chain.
+//!
+//!  Adding an Expr:
+//!  Right now adding an Expr is quite involved. Expr's can be defined in ir.h
+//!  or in their own header file. The following is what is currently needed for
+//!  Expr definitions:
+//!
+//! 1) Definition inheriting from Expr.
+//!      - Members must be private or protected
+//!      - Accessor functions for members
+//!      - Constructors need to register with the Fusion after inputs/outputs
+//!         are defined
+//!      - Implementation of bool sameAs(...)
+//!  2) dispatch.h/.cpp must be updated to include dispatch of the new Val
+//!  3) Default mutator function should be added to mutator.h/.cpp
+//!  4) Printing functions should be added to ir_iostream.h/.cpp
+//!  5) Lower case convenience functions should be added to arith.h/.cpp (If
+//!     user facing)
+//!  6) An enum value must be added to ExprType in type.h
+//!  7) A string entry must be added in expr_type_string_map
+//!  8) Entry added to ir_graphviz .cpp/.h
+//!
 class TORCH_CUDA_API Expr : public Statement {
  public:
-  Expr() = delete;
-  explicit Expr(ExprType _type);
+  explicit Expr(ExprType type);
   Expr(const Expr* src, IrCloner* ir_cloner);
-  virtual ~Expr() = default;
-
-  Expr(const Expr& other) = delete;
-  Expr& operator=(const Expr& other) = delete;
-
-  Expr(Expr&& other) = delete;
-  Expr& operator=(Expr&& other) = delete;
 
   c10::optional<ExprType> getExprType() const override {
     return type_;

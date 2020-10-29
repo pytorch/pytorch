@@ -8,37 +8,27 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-/*
- * Nodes in here are intended to be "user facing" users in this sense being
- * those that want to be able to generate CUDA code.
- */
+//! Nodes in here are intended to be "user facing" users in this sense being
+//! those that want to be able to generate CUDA code.
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
 
-/*
- * A Bool value.
- * This value can be a symbolic value (defined after the kernel
- * is compiled) or a constant value (inlined into the kernel definition).
- */
+//! A Bool value
+//!
+//! This value can be a symbolic value (defined after the kernel
+//! is compiled) or a constant value (inlined into the kernel definition).
+//!
 class TORCH_CUDA_API Bool : public Val {
  public:
-  ~Bool() = default;
-
   Bool() : Val(ValType::Scalar, DataType::Bool), maybe_value_{c10::nullopt} {}
 
-  explicit Bool(bool _value)
-      : Val(ValType::Scalar, DataType::Bool), maybe_value_{_value} {}
+  explicit Bool(bool value)
+      : Val(ValType::Scalar, DataType::Bool), maybe_value_{value} {}
 
   Bool(const Bool* src, IrCloner* ir_cloner);
-
-  Bool(const Bool& other) = delete;
-  Bool& operator=(const Bool& other) = delete;
-
-  Bool(Bool&& other) = delete;
-  Bool& operator=(Bool&& other) = delete;
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
@@ -56,29 +46,19 @@ class TORCH_CUDA_API Bool : public Val {
   const c10::optional<bool> maybe_value_;
 };
 
-/*
- * A Float32 value. For now we don't have any other type besides
- * Float32. This value can be a symbolic value (defined after the kernel
- * is compiled) or a constant value (inlined into the kernel definition).
- */
+//! A Float32 value. For now we don't have any other type besides
+//! Float32. This value can be a symbolic value (defined after the kernel
+//! is compiled) or a constant value (inlined into the kernel definition).
 class TORCH_CUDA_API Float : public Val {
  public:
   using ScalarType = double;
 
-  ~Float() = default;
-
   Float() : Val(ValType::Scalar, DataType::Float), maybe_value_{c10::nullopt} {}
 
-  explicit Float(ScalarType _value)
-      : Val(ValType::Scalar, DataType::Float), maybe_value_{_value} {}
+  explicit Float(ScalarType value)
+      : Val(ValType::Scalar, DataType::Float), maybe_value_{value} {}
 
   Float(const Float* src, IrCloner* ir_cloner);
-
-  Float(const Float& other) = delete;
-  Float& operator=(const Float& other) = delete;
-
-  Float(Float&& other) = delete;
-  Float& operator=(Float&& other) = delete;
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
@@ -96,27 +76,17 @@ class TORCH_CUDA_API Float : public Val {
   const c10::optional<ScalarType> maybe_value_;
 };
 
-/*
- * An IEEE 754 Float16 value.
- * This value can be a symbolic value (defined after the kernel
- * is compiled) or a constant value (inlined into the kernel definition).
- */
+//! An IEEE 754 Float16 value.
+//! This value can be a symbolic value (defined after the kernel
+//! is compiled) or a constant value (inlined into the kernel definition).
 class TORCH_CUDA_API Half : public Val {
  public:
-  ~Half() = default;
-
   Half() : Val(ValType::Scalar, DataType::Half), maybe_value_{c10::nullopt} {}
 
-  explicit Half(float _value)
-      : Val(ValType::Scalar, DataType::Half), maybe_value_{_value} {}
+  explicit Half(float value)
+      : Val(ValType::Scalar, DataType::Half), maybe_value_{value} {}
 
   Half(const Half* src, IrCloner* ir_cloner);
-
-  Half(const Half& other) = delete;
-  Half& operator=(const Half& other) = delete;
-
-  Half(Half&& other) = delete;
-  Half& operator=(Half&& other) = delete;
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
@@ -134,26 +104,18 @@ class TORCH_CUDA_API Half : public Val {
   const c10::optional<float> maybe_value_;
 };
 
-// An Int64 value. If used for indexing it's set as size_t. Otherwise it's an
-// inlined literal in the kernel.
+//! An Int64 value. If used for indexing it's set as size_t. Otherwise it's an
+//! inlined literal in the kernel.
 class TORCH_CUDA_API Int : public Val {
  public:
   using ScalarType = int64_t;
 
-  ~Int() = default;
-
   Int() : Val(ValType::Scalar, DataType::Int), maybe_value_{c10::nullopt} {}
 
-  explicit Int(ScalarType _value)
-      : Val(ValType::Scalar, DataType::Int), maybe_value_{_value} {}
+  explicit Int(ScalarType value)
+      : Val(ValType::Scalar, DataType::Int), maybe_value_{value} {}
 
   Int(const Int* src, IrCloner* ir_cloner);
-
-  Int(const Int& other) = delete;
-  Int& operator=(const Int& other) = delete;
-
-  Int(Int&& other) = delete;
-  Int& operator=(Int&& other) = delete;
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
@@ -206,22 +168,14 @@ class TVDomainGuard;
 //!
 class TORCH_CUDA_API TensorView : public Val {
  public:
-  ~TensorView() = default;
-
-  TensorView(const TensorView& other) = delete;
-  TensorView& operator=(const TensorView& other) = delete;
-
-  TensorView(TensorView&& other) = delete;
-  TensorView& operator=(TensorView&& other) = delete;
-
   TensorView(
-      TensorDomain* _domain,
+      TensorDomain* domain,
       DataType dtype,
       MemoryType mtype = MemoryType::Local);
 
-  TensorView(const std::shared_ptr<c10::TensorType>& tensor_type);
+  explicit TensorView(const std::shared_ptr<c10::TensorType>& tensor_type);
 
-  TensorView(const std::shared_ptr<Value>& jit_value)
+  explicit TensorView(const std::shared_ptr<Value>& jit_value)
       : TensorView(jit_value->type()->cast<c10::TensorType>()) {}
 
   TensorView(const TensorView* src, IrCloner* ir_cloner);

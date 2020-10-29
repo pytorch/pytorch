@@ -6,47 +6,35 @@
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 
-/*
- * Nodes in here should generally not be used by users. They should be behind
- * the scenes and users shouldn't have to be aware of what they do to use the
- * code generator.
- */
+//! Nodes in here should generally not be used by users. They should be behind
+//! the scenes and users shouldn't have to be aware of what they do to use the
+//! code generator
+//!
+//! \todo improve implementation bool IterDomain::sameAs(const IterDomain*)
+//! \todo Add testing of sameAs functions for these nodes
+//!
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
 
-// Returns true if both v1 and v2 are scalars, are the same type of scalars, and
-// dispatches to the inherited Val type's `->sameAs` call. e.g. if both vals are
-// `Int` will dispatch to v1->as<Int>()->sameAs(v2.as<Int>())
+//! Returns true if both v1 and v2 are scalars, are the same type of scalars,
+//! and dispatches to the inherited Val type's `->sameAs` call. e.g. if both
+//! vals are `Int` will dispatch to v1->as<Int>()->sameAs(v2.as<Int>())
 bool areEqualScalars(Val* v1, Val* v2);
 
-/*
- * TODO: improve implementation bool IterDomain::sameAs(const IterDomain*) const
- * TODO: Add testing of sameAs functions for these nodes
- */
-
-/*
- * A specialization for Unary operations. Unary operations take in a single
- * input and produce a single output. Examples include:
- *   1) Casting operation i.e. float(a_val)
- *   2) Negation i.e. val * -1
- *   3) Reduction across a dimension i.e. val.sum(axis=2)
- *   4) split/merge
- */
+//! A specialization for Unary operations. Unary operations take in a single
+//! input and produce a single output. Examples include:
+//!   1) Casting operation i.e. float(a_val)
+//!   2) Negation i.e. val * -1
+//!   3) Reduction across a dimension i.e. val.sum(axis=2)
+//!   4) split/merge
 class TORCH_CUDA_API UnaryOp : public Expr {
  public:
-  ~UnaryOp() = default;
-  UnaryOp(UnaryOpType _type, Val* _out, Val* _in);
+  UnaryOp(UnaryOpType type, Val* out, Val* in);
 
   UnaryOp(const UnaryOp* src, IrCloner* ir_cloner);
-
-  UnaryOp(const UnaryOp& other) = delete;
-  UnaryOp& operator=(const UnaryOp& other) = delete;
-
-  UnaryOp(UnaryOp&& other) = delete;
-  UnaryOp& operator=(UnaryOp&& other) = delete;
 
   Val* out() const {
     return out_;
@@ -67,24 +55,15 @@ class TORCH_CUDA_API UnaryOp : public Expr {
   Val* const in_ = nullptr;
 };
 
-/*
- * A specialization for Binary operations. Binary operations take in two inputs
- * and produce a single output. Examples include:
- *  1) Add/mul/div/mod/sub (A * B)
- *  2) LT (A < B)
- */
+//! A specialization for Binary operations. Binary operations take in two inputs
+//! and produce a single output. Examples include:
+//!  1) Add/mul/div/mod/sub (A * B)
+//!  2) LT (A < B)
 class TORCH_CUDA_API BinaryOp : public Expr {
  public:
-  ~BinaryOp() = default;
-  BinaryOp(BinaryOpType _type, Val* _out, Val* _lhs, Val* _rhs);
+  BinaryOp(BinaryOpType type, Val* out, Val* lhs, Val* rhs);
 
   BinaryOp(const BinaryOp* src, IrCloner* ir_cloner);
-
-  BinaryOp(const BinaryOp& other) = delete;
-  BinaryOp& operator=(const BinaryOp& other) = delete;
-
-  BinaryOp(BinaryOp&& other) = delete;
-  BinaryOp& operator=(BinaryOp&& other) = delete;
 
   Val* out() const {
     return out_;
@@ -109,24 +88,16 @@ class TORCH_CUDA_API BinaryOp : public Expr {
   Val* const rhs_ = nullptr;
 };
 
-//! Broadcast _in to match _out. is_broadcast_dims are relative to out. Where
-//! is_broadcast_dims.size() == _out->nDims().
+//! Broadcast in to match out. is_broadcast_dims are relative to out. Where
+//! is_broadcast_dims.size() == out->nDims().
 class TORCH_CUDA_API BroadcastOp : public Expr {
  public:
-  ~BroadcastOp() = default;
-
-  //! \param _out The output tensor
-  //! \param _in The input tensor
+  //! \param out The output tensor
+  //! \param in The input tensor
   //! \param is_broadcast_dims True when output dim is a new broadcast domain
-  BroadcastOp(Val* _out, Val* _in, std::vector<bool> is_broadcast_dims);
+  BroadcastOp(Val* out, Val* in, std::vector<bool> is_broadcast_dims);
 
   BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner);
-
-  BroadcastOp(const BroadcastOp& other) = delete;
-  BroadcastOp& operator=(const BroadcastOp& other) = delete;
-
-  BroadcastOp(BroadcastOp&& other) = delete;
-  BroadcastOp& operator=(BroadcastOp&& other) = delete;
 
   Val* out() const {
     return out_;
@@ -148,6 +119,7 @@ class TORCH_CUDA_API BroadcastOp : public Expr {
  private:
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
+
   //! The same list passed to the broadcast arithmetic op. Each
   //! element corresponds to an IterDomain of the output tensor and is
   //! true when the IterDomain is a new broadcast domain. Note
@@ -157,25 +129,16 @@ class TORCH_CUDA_API BroadcastOp : public Expr {
   const std::vector<bool> is_broadcast_dims_;
 };
 
-/*
- * Reduction operation. Out is first initialized to _init. Then
- * _reduction_op_type is used to update out as out = reductionOp(out, in).
- * Output's axes marked as reduction will be reduced to produce an output
- * tensor. The output tensors size will be the size of all
- * non-reduction/non-broadcast dimensions.
- */
+//! Reduction operation. Out is first initialized to _init. Then
+//! reduction_op_type is used to update out as out = reductionOp(out, in).
+//! Output's axes marked as reduction will be reduced to produce an output
+//! tensor. The output tensors size will be the size of all
+//! non-reduction/non-broadcast dimensions.
 class TORCH_CUDA_API ReductionOp : public Expr {
  public:
-  ~ReductionOp() = default;
-  ReductionOp(BinaryOpType _reduction_op_type, Val* _init, Val* _out, Val* _in);
+  ReductionOp(BinaryOpType reduction_op_type, Val* init, Val* out, Val* in);
 
   ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
-
-  ReductionOp(const ReductionOp& other) = delete;
-  ReductionOp& operator=(const ReductionOp& other) = delete;
-
-  ReductionOp(ReductionOp&& other) = delete;
-  ReductionOp& operator=(ReductionOp&& other) = delete;
 
   Val* out() const {
     return out_;
@@ -202,16 +165,9 @@ class TORCH_CUDA_API ReductionOp : public Expr {
 
 class TORCH_CUDA_API TernaryOp : public Expr {
  public:
-  ~TernaryOp() = default;
-  TernaryOp(TernaryOpType _type, Val* _out, Val* _in1, Val* _in2, Val* _in3);
+  TernaryOp(TernaryOpType type, Val* out, Val* in1, Val* in2, Val* in3);
 
   TernaryOp(const TernaryOp* src, IrCloner* ir_cloner);
-
-  TernaryOp(const TernaryOp& other) = delete;
-  TernaryOp& operator=(const TernaryOp& other) = delete;
-
-  TernaryOp(TernaryOp&& other) = delete;
-  TernaryOp& operator=(TernaryOp&& other) = delete;
 
   Val* out() const {
     return out_;
@@ -241,18 +197,18 @@ class TORCH_CUDA_API TernaryOp : public Expr {
   Val* const in3_ = nullptr;
 };
 
-// Simply a representation of an annotated 1D iterable from start to extent.
-// TensorDomains which represent how to iterate over a tensor is made up of
-// IterDomains to form an ND iterable. We directly set parallization strategies
-// on IterDomains.
+//! Simply a representation of an annotated 1D iterable from start to extent.
+//! TensorDomains which represent how to iterate over a tensor is made up of
+//! IterDomains to form an ND iterable. We directly set parallization strategies
+//! on IterDomains.
 class TORCH_CUDA_API IterDomain : public Val {
  public:
   IterDomain(
-      Val* _start,
-      Val* _extent,
-      ParallelType _parallel_type = ParallelType::Serial,
-      IterType _iter_type = IterType::Iteration,
-      bool _is_rfactor_domain = false);
+      Val* start,
+      Val* extent,
+      ParallelType parallel_type = ParallelType::Serial,
+      IterType iter_type = IterType::Iteration,
+      bool is_rfactor_domain = false);
 
   IterDomain(const IterDomain* src, IrCloner* ir_cloner);
 
@@ -275,7 +231,7 @@ class TORCH_CUDA_API IterDomain : public Val {
   // directly, users should not be able to use this call
   static std::pair<IterDomain*, IterDomain*> split(IterDomain* in, Val* factor);
 
-  // Run concretization pass and return the concretized domain of broadcast id
+  //! Run concretization pass and return the concretized domain of broadcast id
   static const IterDomain* concretizeDomain(IterDomain* bcast_dom);
 
   bool isReduction() const {
@@ -295,7 +251,7 @@ class TORCH_CUDA_API IterDomain : public Val {
     return getParallelType() != ParallelType::Serial;
   }
 
-  // Return if this iter domain is mapped to a grid dimension
+  //! Return if this iter domain is mapped to a grid dimension
   bool isBlockDim() const {
     return (
         getParallelType() == ParallelType::BIDz ||
@@ -303,7 +259,7 @@ class TORCH_CUDA_API IterDomain : public Val {
         getParallelType() == ParallelType::BIDx);
   }
 
-  // Return if this iter domain is mapped to a block dimension
+  //! Return if this iter domain is mapped to a block dimension
   bool isThreadDim() const {
     return (
         getParallelType() == ParallelType::TIDz ||
@@ -311,12 +267,12 @@ class TORCH_CUDA_API IterDomain : public Val {
         getParallelType() == ParallelType::TIDx);
   }
 
-  // Return if this iter domain is either mapped to a block or grid dimension
+  //! Return if this iter domain is either mapped to a block or grid dimension
   bool isThread() const {
     return (isBlockDim() || isThreadDim());
   }
 
-  // Convert to strided broadcast, used for supporting broadcast on output
+  //! Convert to strided broadcast, used for supporting broadcast on output
   void toStridedBroadcast() {
     TORCH_INTERNAL_ASSERT(
         isBroadcast(),
@@ -359,12 +315,6 @@ class TORCH_CUDA_API IterDomain : public Val {
     return extent_;
   }
 
-  IterDomain(const IterDomain& other) = delete;
-  IterDomain& operator=(const IterDomain& other) = delete;
-
-  IterDomain(IterDomain&& other) = delete;
-  IterDomain& operator=(IterDomain&& other) = delete;
-
  private:
   Val* const start_ = nullptr;
   Val* const extent_ = nullptr;
@@ -373,44 +323,36 @@ class TORCH_CUDA_API IterDomain : public Val {
   bool is_rfactor_domain_ = false;
 };
 
-/*
- * TensorDomain holds a vector of IterDomains. It holds an IterDomain for every
- * logical axis in its associated tensor. TensorDomain does not directly hold
- * the Tensor it is associated with, and in theory could be associated with
- * multiple tensors. TensorDomain's primary responsibility is to provide a
- * mechanism to access history of transformations that were used to generate it.
- * This is done through the normal interaction of Expr/Val in Fusion. i.e. if we
- * want to know the previous operation generating a particular TensorDomain we
- * can simply call FusionGuard::getCurFusion()->origin(a_tensor_domain) which
- * should give us an operation in the list [split, merge] or similar
- * operations that take in a TensorDomain, applies a transformation and outputs
- * a tensor domain.
- */
+//! TensorDomain holds a vector of IterDomains. It holds an IterDomain for every
+//! logical axis in its associated tensor. TensorDomain does not directly hold
+//! the Tensor it is associated with, and in theory could be associated with
+//! multiple tensors. TensorDomain's primary responsibility is to provide a
+//! mechanism to access history of transformations that were used to generate
+//! it. This is done through the normal interaction of Expr/Val in Fusion. i.e.
+//! if we want to know the previous operation generating a particular
+//! TensorDomain we can simply call:
+//!
+//!     FusionGuard::getCurFusion()->origin(a_tensor_domain)
+//!
+//! which should give us an operation in the list [split, merge] or similar
+//! operations that take in a TensorDomain, applies a transformation and outputs
+//! a tensor domain.
 class TORCH_CUDA_API TensorDomain : public Val {
  public:
-  TensorDomain() = delete;
-  ~TensorDomain() = default;
-
-  TensorDomain(const TensorDomain& other) = delete;
-  TensorDomain& operator=(const TensorDomain& other) = delete;
-
-  TensorDomain(TensorDomain&& other) = delete;
-  TensorDomain& operator=(TensorDomain&& other) = delete;
-
   explicit TensorDomain(
-      std::vector<IterDomain*> _domain,
-      std::vector<bool> _contiguity = std::vector<bool>());
+      std::vector<IterDomain*> domain,
+      std::vector<bool> contiguity = std::vector<bool>());
 
   TensorDomain(
-      std::vector<IterDomain*> _root_domain,
-      std::vector<IterDomain*> _domain,
-      std::vector<bool> _contiguity = std::vector<bool>());
+      std::vector<IterDomain*> root_domain,
+      std::vector<IterDomain*> domain,
+      std::vector<bool> contiguity = std::vector<bool>());
 
   TensorDomain(
-      std::vector<IterDomain*> _root_domain,
-      std::vector<IterDomain*> _rfactor_domain,
-      std::vector<IterDomain*> _domain,
-      std::vector<bool> _contiguity = std::vector<bool>());
+      std::vector<IterDomain*> root_domain,
+      std::vector<IterDomain*> rfactor_domain,
+      std::vector<IterDomain*> domain,
+      std::vector<bool> contiguity = std::vector<bool>());
 
   TensorDomain(const TensorDomain* src, IrCloner* ir_cloner);
 
@@ -575,21 +517,11 @@ class TORCH_CUDA_API TensorDomain : public Val {
   const std::vector<bool> contiguity_;
 };
 
-/*
- * Representation a split on an IterDomain by "factor"
- * TODO: Implement split by nparts
- */
+//! Representation a split on an IterDomain by "factor"
+//! \todo Implement split by nparts
 class TORCH_CUDA_API Split : public Expr {
  public:
-  ~Split() = default;
-
-  Split(const Split& other) = delete;
-  Split& operator=(const Split& other) = delete;
-
-  Split(Split&& other) = delete;
-  Split& operator=(Split&& other) = delete;
-
-  Split(IterDomain* _outer, IterDomain* _inner, IterDomain* _in, Val* _factor);
+  Split(IterDomain* outer, IterDomain* inner, IterDomain* in, Val* factor);
 
   Split(const Split* src, IrCloner* ir_cloner);
 
@@ -605,6 +537,7 @@ class TORCH_CUDA_API Split : public Expr {
   Val* factor() const {
     return factor_;
   }
+
   bool sameAs(const Split* const other) const;
 
  private:
@@ -614,25 +547,18 @@ class TORCH_CUDA_API Split : public Expr {
   Val* const factor_ = nullptr;
 };
 
-/*
- * Merge the IterDomains outer and inner into one domain, outer and inner
- * dictate which will be traversed first (inner). Both IterDomains must be of
- * the same iter or reduction type, as well as the same parallelization strategy
- * if there is one.
- * TODO: Should this be a unary op type?
- */
+//! Merge the IterDomains outer and inner into one domain, outer and inner
+//! dictate which will be traversed first (inner). Both IterDomains must be of
+//! the same iter or reduction type, as well as the same parallelization
+//! strategy if there is one
+//!
+//! \todo Should this be a unary op type?
+//!
 class TORCH_CUDA_API Merge : public Expr {
  public:
-  ~Merge() = default;
-  Merge(IterDomain* _out, IterDomain* _outer, IterDomain* _inner);
+  Merge(IterDomain* out, IterDomain* outer, IterDomain* inner);
 
   Merge(const Merge* src, IrCloner* ir_cloner);
-
-  Merge(const Merge& other) = delete;
-  Merge& operator=(const Merge& other) = delete;
-
-  Merge(Merge&& other) = delete;
-  Merge& operator=(Merge&& other) = delete;
 
   IterDomain* out() const {
     return out_;
@@ -652,28 +578,20 @@ class TORCH_CUDA_API Merge : public Expr {
   IterDomain* const inner_ = nullptr;
 };
 
-/*
- * Integer value which has a special name. These could be:
- * - threadIdx.x
- * - blockIdx.y
- * - blockDim.z
- * - T3.stride[2]
- */
+//! Integer value which has a special name
+//!
+//! These could be:
+//! - threadIdx.x
+//! - blockIdx.y
+//! - blockDim.z
+//! - T3.stride[2]
+//!
 class TORCH_CUDA_API NamedScalar : public Val {
  public:
-  ~NamedScalar() = default;
-  NamedScalar() = delete;
-
-  NamedScalar(std::string _name, DataType dtype)
-      : Val(ValType::NamedScalar, dtype), name_(_name) {}
+  NamedScalar(std::string name, DataType dtype)
+      : Val(ValType::NamedScalar, dtype), name_(name) {}
 
   NamedScalar(const NamedScalar* src, IrCloner* ir_cloner);
-
-  NamedScalar(const NamedScalar& other) = delete;
-  NamedScalar& operator=(const NamedScalar& other) = delete;
-
-  NamedScalar(NamedScalar&& other) = delete;
-  NamedScalar& operator=(NamedScalar&& other) = delete;
 
   const std::string& name() const {
     return name_;
@@ -683,18 +601,18 @@ class TORCH_CUDA_API NamedScalar : public Val {
     return other->name().compare(name()) == 0;
   }
 
-  // Return the named scalar extent of a parallel dimension (e.g. blockDim.x)
+  //! Return the named scalar extent of a parallel dimension (e.g. blockDim.x)
   static NamedScalar* getParallelDim(ParallelType p_type);
 
-  // Return the named scalar index of a parallel dimension (e.g. threadIdx.x)
+  //! Return the named scalar index of a parallel dimension (e.g. threadIdx.x)
   static NamedScalar* getParallelIndex(ParallelType p_type);
 
-  // Return the parallel type of this NamedScalar if it is an extent of a
-  // parallel dimension
+  //! Return the parallel type of this NamedScalar if it is an extent of a
+  //! parallel dimension
   c10::optional<ParallelType> getParallelDim() const;
 
-  // Return the parallel type of this NamedScalar if it is an index of a
-  // parallel dimension
+  //! Return the parallel type of this NamedScalar if it is an index of a
+  //! parallel dimension
   c10::optional<ParallelType> getParallelIndex() const;
 
  private:
