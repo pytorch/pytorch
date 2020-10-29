@@ -512,7 +512,7 @@ Tensor to_dtype_layout_batching_rule(
     const optional<Device>& device,
     const optional<bool>& pin_memory,
     bool non_blocking, bool copy,
-    const optional<MemoryFormat>& memory_format) {
+    optional<MemoryFormat> memory_format) {
   auto options = TensorOptions()
     .dtype(dtype)
     .layout(layout)
