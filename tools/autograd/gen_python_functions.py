@@ -702,8 +702,9 @@ def group_overloads(declarations, is_python_method):
     for x, dictionary in sorted(grouped.items()):
         if 'base' not in dictionary:
             raise RuntimeError(
-                "'base' not in dictionary for {}. keys are {}".format(
-                    x, list(dictionary.keys())))
+                "_out variant function {} can not find matched non-out 'base' function "
+                "{} in dictionary.".format(
+                    dictionary['signature'], x))
         result.append(dictionary)
     return sort_declarations(result)
 
