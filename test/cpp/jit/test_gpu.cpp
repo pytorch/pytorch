@@ -8436,6 +8436,137 @@ TEST(NVFuserTest, FusionIssue459_CUDA) {
   ASSERT_ANY_THROW(fusion.printKernel());
 }
 
+TEST(NVFuserTest, FusionSmemIndexingSimple_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Float(1));
+  auto tv2 = add(tv1, new Float(2));
+  fusion.addOutput(tv2);
+
+  tv0->computeAt(tv2, -1);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+
+  // Lowering the fusion would cause an error due to the SMEM
+  // allocation problem.
+  FusionExecutor fe;
+  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
+}
+
+TEST(NVFuserTest, FusionSmemIndexing_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Symbolic integers we will use for runtime tiling
+  Int* symbolic_m_tile_dim = new Int();
+  Int* symbolic_split_k_tile_dim = new Int();
+  Int* symbolic_block_k_tile_dim = new Int();
+  // Compile-time integer for tiling
+  int n_smem_tile = 32;
+
+  // Symbolic 2D tensors TV0[M, K], TV1[K, N]
+  TensorView* tv0 = makeSymbolicTensor(2);
+  TensorView* tv1 = makeSymbolicTensor(2);
+
+  // Broadcast tv0 to [M, K, *]
+  TensorView* tv2 = broadcast(tv0, {false, false, true});
+  // Broadcast tv1 to [*, K, N]
+  TensorView* tv3 = broadcast(tv1, {true, false, false});
+
+  // Pointwise multiplication resulting in tv3[M, K, N]
+  TensorView* tv4 = mul(tv2, tv3);
+
+  // Sum the K-dim
+  TensorView* tv5 = sum(tv4, {1});
+
+  // Register inputs and outputs
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addOutput(tv5);
+
+  // Register runtime tile dims as inputs
+  fusion.addInput(symbolic_m_tile_dim);
+  fusion.addInput(symbolic_split_k_tile_dim);
+  fusion.addInput(symbolic_block_k_tile_dim);
+
+  // Make a 3D tile, mix of symbolic and constant, do in reverse order because
+  // dims are inserted
+  tv5->split(2, n_smem_tile);
+  tv5->split(1, symbolic_block_k_tile_dim);
+  tv5->split(1, symbolic_split_k_tile_dim);
+  tv5->split(0, symbolic_m_tile_dim);
+
+  // Reorder so all outer tiles are in the leftmost 3 positions
+  tv5->reorder({{1, 5}, {5, 1}});
+
+  // Factor out the outer reduction IterDomain, then run the inter-cta
+  // reduction, and intra-cta reduction
+  auto tv6 = tv5->rFactor({2});
+
+  // Scope computations
+  tv6->computeAt(tv5, 2);
+
+  tv6->reorder({
+      {2, -2},
+      {3, -1},
+      {4, 2},
+      {5, 3},
+      {6, 4},
+  });
+
+  // Setup compute at schedule
+  tv0->computeAt(tv6, 3);
+  tv1->computeAt(tv6, 3);
+  tv4->computeAt(tv6, -1);
+
+  // Cache smem tiles
+  tv2->setMemoryType(MemoryType::Shared);
+  tv3->setMemoryType(MemoryType::Shared);
+  tv4->setMemoryType(MemoryType::Shared); // WORKS WHEN THIS IS LOCAL
+  tv6->setMemoryType(MemoryType::Shared);
+
+  tv5->axis(0)->parallelize(ParallelType::BIDz);
+  tv5->axis(1)->parallelize(ParallelType::BIDy);
+
+  std::vector<TensorView*> tv_list = {tv2, tv3, tv4, tv5, tv6};
+  for (auto tv : tv_list) {
+    tv->axis(-2)->parallelize(ParallelType::TIDz);
+    tv->axis(-1)->parallelize(ParallelType::TIDy);
+  }
+
+  // fusion.printMath();
+  // Lowering should throw an error due to tv4 being allocated on
+  // shared memory.
+  ASSERT_ANY_THROW(fusion.printKernel());
+  // TODO: Enable the rest of the test
+#if 0
+  constexpr int M = 31, K = 65, N = 32;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({M, K}, options);
+  at::Tensor t1 = at::randn({K, N}, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  // A, B, m_tile_dim, split_k, intra_cta_tile
+  auto outputs = fe.runFusion(
+      {t0, t1, 3, 4, 5},
+      torch::jit::fuser::cuda::LaunchParams(-1, -1, -1, -1, -1, -1));
+
+  at::Tensor aten_output = mul(t0.unsqueeze(2), t1.unsqueeze(0)).sum(1);
+
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0], 1e-5, 1e-5),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
+#endif
+}
+
 } // namespace jit
 } // namespace torch
 

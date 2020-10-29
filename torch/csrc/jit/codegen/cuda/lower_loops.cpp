@@ -24,6 +24,27 @@ LoopNestGenerator::LoopNestGenerator(
   generate(exprs);
 }
 
+namespace {
+
+// Currently, allocation of smem tensors and indexing is
+// broken when computeAt axes are thread-parallelized. This check
+// throws an exception if such tensors are detected.
+// TODO: Fix the allocation and indexing of such tensors.
+void failIfUnsupported(TensorView* tv) {
+  for (size_t i = 0; i < tv->getThisComputeAtAxis(); i++) {
+    IterDomain* compute_at_dim = tv->getComputeAtAxis(i).first;
+    const auto memory_type = tv->getMemoryType();
+    if (memory_type == MemoryType::Shared && compute_at_dim->isThreadDim()) {
+      std::stringstream ss;
+      ss << "Unsupported shared memory allocation: " << tv
+         << ". See issue #369 as well. Try MemoryType:Local or MemoryType::Global for now.";
+      TORCH_INTERNAL_ASSERT(false, ss.str());
+    }
+  }
+}
+
+} // namespace
+
 // Create, place, and return the allocation for tv
 kir::Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
   const auto gpu_lower = GpuLower::current();
@@ -36,6 +57,8 @@ kir::Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
   const auto alloc_point = loop_utils::getAllocPoint(tv, for_loops_);
   const auto alloc_loop = alloc_point.first;
   const auto alloc_pos = alloc_point.second;
+
+  failIfUnsupported(tv);
 
   // Grab the dimensions the allocation will be based on to compute a size
   std::vector<Val*> alloc_dims;
