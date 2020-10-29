@@ -58,11 +58,12 @@ struct InlinedCallStack;
 using ClassTypePtr = std::shared_ptr<c10::ClassType>;
 
 /**
- * ModuleInstanceInfo is a structure to include the module type and instance name.
- * It also provide public methods to get the pointer to module type and instance name.
+ * ModuleInstanceInfo is a structure to include the module type and instance
+ * name. It also provide public methods to get the pointer to module type and
+ * instance name.
  *
- * This structure is mainly used as a private member in InlinedCallStack, such that
- * one can follow the callstack to find the relevant module hierarchy.
+ * This structure is mainly used as a private member in InlinedCallStack, such
+ * that one can follow the callstack to find the relevant module hierarchy.
  */
 struct ModuleInstanceInfo {
  private:
@@ -113,7 +114,7 @@ struct ModuleInstanceInfo {
 using InlinedCallStackPtr = c10::intrusive_ptr<InlinedCallStack>;
 using InlinedCallStackEntry = std::pair<Function*, SourceRange>;
 using InlinedCallStackWithModuleInfo =
-std::tuple<Function*, SourceRange, c10::optional<ModuleInstanceInfo>>;
+    std::tuple<Function*, SourceRange, c10::optional<ModuleInstanceInfo>>;
 
 struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
  private:
