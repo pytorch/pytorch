@@ -61,6 +61,7 @@ from quantization.test_quantize_jit import TestQuantizeDynamicJitPasses  # noqa:
 from quantization.test_quantize_jit import TestQuantizeDynamicJitOps  # noqaa: F401
 
 # 3. GraphModule based graph mode quantization
+from quantization.test_quantize_fx import TestFuseFx  # noqa: F401
 from quantization.test_quantize_fx import TestQuantizeFx  # noqa: F401
 from quantization.test_quantize_fx import TestQuantizeFxOps  # noqa: F401
 from quantization.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
