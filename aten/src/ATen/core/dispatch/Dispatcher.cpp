@@ -322,4 +322,16 @@ void Dispatcher::setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunc
   // NB: Do not need to set manually boxed kernel for backend fallbacks
 }
 
+std::vector<OperatorHandle> Dispatcher::findDanglingImpls() const {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorHandle> {
+    std::vector<OperatorHandle> opsWithDanglingImpls;
+    for (const auto& op : operatorLookupTable) {
+      if (!op.second.hasSchema()) {
+        opsWithDanglingImpls.push_back(op.second);
+      }
+    }
+    return opsWithDanglingImpls;
+  });
+}
+
 }

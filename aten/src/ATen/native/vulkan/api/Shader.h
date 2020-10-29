@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Cache.h>
 #include <c10/util/hash.h>
@@ -39,11 +41,17 @@ struct Shader final {
 
   struct Layout final {
     /*
+      Signature
+    */
+
+    typedef c10::SmallVector<VkDescriptorType, 8u> Signature;
+
+    /*
       Descriptor
     */
 
     struct Descriptor final {
-      c10::SmallVector<VkDescriptorSetLayoutBinding, 16u> bindings;
+      Signature signature;
     };
 
     /*
@@ -68,12 +76,32 @@ struct Shader final {
       VkDevice device_;
     };
 
+    struct Object final {
+      VkDescriptorSetLayout handle;
+      Signature signature;
+
+      operator bool() const;
+    };
+
     /*
       Cache
     */
 
-    typedef api::Cache<Factory> Cache;
-    Cache cache;
+    class Cache final {
+     public:
+      explicit Cache(Factory factory);
+      Cache(const Cache&) = delete;
+      Cache& operator=(const Cache&) = delete;
+      Cache(Cache&&) = default;
+      Cache& operator=(Cache&&) = default;
+      ~Cache() = default;
+
+      Object retrieve(const Descriptor& descriptor);
+      void purge();
+
+     private:
+      api::Cache<Factory> cache_;
+    } cache;
 
     explicit Layout(const GPU& gpu)
       : cache(Factory(gpu)) {
@@ -165,25 +193,36 @@ struct Shader final {
 inline bool operator==(
     const Shader::Layout::Descriptor& _1,
     const Shader::Layout::Descriptor& _2) {
-  return _1.bindings == _2.bindings;
+  return _1.signature == _2.signature;
 }
 
 inline size_t Shader::Layout::Factory::Hasher::operator()(
     const Descriptor& descriptor) const {
   size_t hash = 0u;
 
-  for (const VkDescriptorSetLayoutBinding& binding : descriptor.bindings) {
+  for (const VkDescriptorType type : descriptor.signature) {
     hash = c10::hash_combine(
         hash,
-        c10::get_hash(
-            binding.binding,
-            binding.descriptorType,
-            binding.descriptorCount,
-            binding.stageFlags,
-            binding.pImmutableSamplers));
+        c10::get_hash(type));
   }
 
   return hash;
+}
+
+inline Shader::Layout::Object::operator bool() const {
+  return VK_NULL_HANDLE != handle;
+}
+
+inline Shader::Layout::Object Shader::Layout::Cache::retrieve(
+    const Descriptor& descriptor) {
+  return {
+    cache_.retrieve(descriptor),
+    descriptor.signature,
+  };
+}
+
+inline void Shader::Layout::Cache::purge() {
+  cache_.purge();
 }
 
 inline bool operator==(
@@ -256,3 +295,5 @@ inline bool operator==(
          (_1.stageFlags == _2.stageFlags) &&
          (_1.pImmutableSamplers == _2.pImmutableSamplers);
 }
+
+#endif /* USE_VULKAN_API */

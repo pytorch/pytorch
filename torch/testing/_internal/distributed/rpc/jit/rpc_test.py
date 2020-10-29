@@ -359,7 +359,7 @@ class MyScriptModule(torch.jit.ScriptModule):
 
 
 def owner_create_rref_my_script_class(a):
-    return rpc.RRef(MyScriptClass(a))
+    return rpc.RRef(MyScriptClass(a)._c)
 
 
 def owner_create_rref_my_script_module(a):
@@ -899,7 +899,8 @@ class JitRpcTest(
 
         # rpc_sync still accepts script class and run it in
         # the same code path as python call.
-        ret = rpc.rpc_sync(dst_worker_name, MyScriptClass, args=(self.rank,))
+        with self.assertRaisesRegex(RuntimeError, "ScriptClasses cannot be pickled"):
+            ret = rpc.rpc_sync(dst_worker_name, MyScriptClass, args=(self.rank,))
 
         # rpc_sync does not accept script module and script module method.
         with self.assertRaisesRegex(RuntimeError, "ScriptModules cannot be deepcopied"):
