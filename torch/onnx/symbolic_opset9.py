@@ -1195,7 +1195,16 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         bias = g.op("Constant", value_t=bias_value)
-
+    if running_mean is None or sym_help._is_none(running_mean):
+        assert len(input_sizes) > 1
+        mean_value = torch.tensor([0.] * input_sizes[1]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        running_mean = g.op("Constant", value_t=mean_value)
+    if running_var is None or sym_help._is_none(running_var):
+        assert len(input_sizes) > 1
+        var_value = torch.tensor([1.] * input_sizes[1]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        running_var = g.op("Constant", value_t=var_value)
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
                epsilon_f=eps,
                momentum_f=1 - momentum,
