@@ -33,7 +33,7 @@ std::unordered_set<TypePtr> getSharedModuleTypes(Module& mod) {
 // qualified names of submodules of \p mod that should be lowered.
 void toBackendSelectiveImpl(
     Module& mod,
-    py::function to_backend,
+    const py::function& to_backend,
     const std::vector<std::string>& modules_to_lower,
     const std::unordered_set<TypePtr>& duplicate_types) {
   // This map will be used later to remap types in ancestor module graphs for
@@ -69,7 +69,7 @@ void toBackendSelectiveImpl(
     // Check that the parent type is not shared and therefore can be edited.
     if (duplicate_types.count(parent.type()) > 0) {
       throw py::cast_error(c10::str(
-          "Selective lowering is only supported for module hierarchies with unique types for selected modules"));
+          "Selective lowering is only supported for module hierarchies with unique types for selected modules; ", parent.type()->repr_str(), " is shared"));
     }
 
     // Call to_backend on the module that needs to be lowered. It needs to be
@@ -356,7 +356,7 @@ void initJitBackendBindings(PyObject* module) {
   m.def(
       "_jit_to_backend_selective",
       [=](py::handle orig_module,
-          py::function to_backend,
+          const py::function& to_backend,
           const std::vector<std::string>& modules_to_lower) {
         if (auto original_module =
                 as_module(py::cast<py::object>(orig_module))) {
