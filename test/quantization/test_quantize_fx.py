@@ -937,6 +937,26 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 # (FuncLinear(has_relu=True, f_relu=f_relu), ns.call_function(torch.ops.quantized.linear_relu))]:
                 self.checkGraphModeFxOp(model, data, quant_type, quantized_node)
 
+    def test_linear_float_qparams_config(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M().eval()
+        qconfig_dict = {"": float_qparams_dynamic_qconfig}
+        m = prepare_fx(m, qconfig_dict)
+        self.checkGraphModuleNodes(m, expected_node_occurrence={
+            ns.call_module(torch.quantization.MinMaxObserver): 0
+        })
+        m = convert_fx(m)
+        # make sure nn.Linear is not quantized
+        self.checkGraphModuleNodes(m, expected_node=ns.call_module(nn.Linear))
+
+
     @skipIfNoFBGEMM
     def test_quantized_conv(self):
         conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}

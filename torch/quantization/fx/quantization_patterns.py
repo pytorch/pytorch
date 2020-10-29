@@ -26,6 +26,7 @@ from .utils import (
     weight_is_quantized,
     weight_dtype,
     get_linear_prepack_op_for_dtype,
+    get_qconfig_dtypes,
 )
 
 from abc import ABC, abstractmethod
@@ -284,7 +285,20 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             self.linear = quantizer.modules[self.linear_node.target]
 
     def convert(self, quantizer, node, load_arg, debug=False, convert_custom_config_dict=None):
+        # Supported combinations are:
+        # quant_type | activation (compute_type) | weight
+        #  static       quint8                      qint8
+        #  dynamic      float32 (quint8)            qint8
+        #  weight_only  float32                    float16
+        supported_dtypes = [
+            (torch.quint8, torch.qint8, None),
+            (torch.float32, torch.qint8, torch.quint8),
+            (torch.float32, torch.float16, None),
+        ]
         qconfig = quantizer.qconfig_map[node.name]
+        dtypes = get_qconfig_dtypes(qconfig)
+        if dtypes not in supported_dtypes:
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
         activation_statically_quantized = activation_is_statically_quantized(qconfig)
         # TODO: debug option for linear module
         if self.linear_node.op == 'call_module':
