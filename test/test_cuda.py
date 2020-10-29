@@ -492,7 +492,6 @@ class TestCuda(TestCase):
             event = torch.cuda.Event()
             a.copy_(b, non_blocking=True)
             event.record()
-            self.assertFalse(event.query())
             event.synchronize()
             self.assertEqual(a, b)
 
