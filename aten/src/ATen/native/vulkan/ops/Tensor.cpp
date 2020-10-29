@@ -22,7 +22,7 @@ VkDeviceSize bytes(
     size *= extents.width * extents.height * (4u * extents.depth);
   }
   else {
-    size = prod_intlist(sizes);
+    size *= prod_intlist(sizes);
   }
 
   return size;
