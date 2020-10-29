@@ -1,11 +1,15 @@
 #pragma once
 #include <ATen/core/interned_strings.h>
-#include <ATen/core/jit_type.h>
+//#include <ATen/core/jit_type.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <unordered_map>
+
+namespace c10 {
+struct ClassType;
+}
 
 namespace torch {
 namespace jit {
@@ -51,20 +55,26 @@ struct TORCH_API Scope : public c10::intrusive_ptr_target {
 
 struct Function;
 struct InlinedCallStack;
+using ClassTypePtr = std::shared_ptr<c10::ClassType>;
+
+/**
+ * ModuleInstanceInfo is a structure to include the module type and instance name.
+ * It also provide public methods to get the pointer to module type and instance name.
+ *
+ * This structure is mainly used as a private member in InlinedCallStack, such that
+ * one can follow the callstack to find the relevant module hierarchy.
+ */
 struct ModuleInstanceInfo {
  private:
-  c10::ClassTypePtr module_type_{nullptr};
+  ClassTypePtr module_type_{nullptr};
   std::string instance_name_;
 
  public:
-  ModuleInstanceInfo(c10::ClassTypePtr module_type, std::string instance_name);
-  c10::ClassTypePtr class_type() {
+  ModuleInstanceInfo(ClassTypePtr module_type, std::string instance_name);
+  ClassTypePtr class_type() {
     return module_type_;
   }
-  std::string instance_name() {
-    return instance_name_;
-  }
-  c10::ClassTypePtr class_type() const {
+  ClassTypePtr class_type() const {
     return module_type_;
   }
   std::string instance_name() const {
