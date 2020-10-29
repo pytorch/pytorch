@@ -1905,19 +1905,19 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
     // (Extended Version) The derivative for the QR decomposition is adapted
     // from Eq. 42 of the above reference.
 
-    // Compute R (R')^{T}
+    // Compute R conj(R')^{T}
     Tensor R_term;
     if (grad_R.defined()) {
-      R_term = at::matmul(R, grad_R.transpose(-2, -1));
+      R_term = at::matmul(R, grad_R.conj().transpose(-2, -1));
     } else {
       // R is ... x N x N, grad_R is ... x N x N and grad_R.T is ... x N x N
       R_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
 
-    // Compute Q^{T} Q'
+    // Compute conj(Q)^{T} Q'
     Tensor Q_term;
     if (grad_Q.defined()) {
-      Q_term = at::matmul(Q.transpose(-2, -1), grad_Q);
+      Q_term = at::matmul(Q.conj().transpose(-2, -1), grad_Q);
     } else {
       // Q is ... x M x N, Q.T is ... x N x M and grad_Q is ... x M x N
       Q_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -1928,20 +1928,20 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
     // Since R is upper triangular, we can do this using
     // triangular_solve(rhs_solve_1^{T}, R)^{T}
     auto rhs_solve_1 =
-        R_term - R_term.transpose(-2, -1) + Q_term - Q_term.transpose(-2, -1);
+        R_term - R_term.conj().transpose(-2, -1) + Q_term - Q_term.conj().transpose(-2, -1);
     rhs_solve_1 = at::tril(rhs_solve_1, /*k=*/-1);
     Tensor solve_soln_1;
     std::tie(solve_soln_1, std::ignore) = at::triangular_solve(
-        rhs_solve_1.transpose(-2, -1),
+        rhs_solve_1.conj().transpose(-2, -1),
         R,
         /*upper=*/true,
         /*transpose=*/false,
         /*unitriangular=*/false);
     Tensor grad_A;
     if (grad_R.defined()) {
-      grad_A = at::matmul(Q, solve_soln_1.transpose(-2, -1) + grad_R);
+      grad_A = at::matmul(Q, solve_soln_1.conj().transpose(-2, -1) + grad_R);
     } else {
-      grad_A = at::matmul(Q, solve_soln_1.transpose(-2, -1));
+      grad_A = at::matmul(Q, solve_soln_1.conj().transpose(-2, -1));
     }
 
     // Successive computations involve computation of QQ^{T} which is identity when A is square
@@ -1954,11 +1954,54 @@ Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Te
         rhs_solve_2 = -at::matmul(Q, Q_term);
       }
       Tensor solve_soln_2;
-      std::tie(solve_soln_2, std::ignore) = at::triangular_solve(rhs_solve_2.transpose(-2, -1), R,
+      std::tie(solve_soln_2, std::ignore) = at::triangular_solve(rhs_solve_2.conj().transpose(-2, -1), R,
                                                                /*upper=*/true, /*transpose=*/false,
                                                                /*unitriangular=*/false);
-      grad_A.add_(solve_soln_2.transpose(-2, -1));
+      grad_A.add_(solve_soln_2.conj().transpose(-2, -1));
     }
+
+    // Tensor R_term;
+    // if (grad_R.defined()) {
+    //   R_term = at::matmul(R, grad_R.conj().transpose(-2, -1));
+    // } else {
+    //   // R is ... x N x N, grad_R is ... x N x N and grad_R.T is ... x N x N
+    //   R_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    // }
+
+    // Tensor Q_term;
+    // if (grad_Q.defined()) {
+    //   Q_term = at::matmul(grad_Q.conj().transpose(-2, -1), Q);
+    // } else {
+    //   // Q is ... x M x N, Q.T is ... x N x M and grad_Q is ... x M x N
+    //   Q_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    // }
+
+    // Tensor M = R_term - Q_term;
+    // // Tensor M_symmetrized = at::triu(M, /*diagonal=*/0) + at::triu(M, /*diagonal=*/+1).conj().transpose(-2, -1);
+    // Tensor M_symmetrized = (M + M.conj().transpose(-2, -1));
+    // M_symmetrized.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
+    
+    // Tensor rhs_term;
+    // if (grad_Q.defined()) {
+    //   rhs_term = grad_Q + at::matmul(Q, M_symmetrized);
+    // } else {
+    //   rhs_term = at::matmul(Q, M_symmetrized);
+    // }
+
+    // Tensor solve_solution;
+    // std::tie(solve_solution, std::ignore) = at::triangular_solve(
+    //     rhs_term.conj().transpose(-2, -1),
+    //     R,
+    //     /*upper=*/true,
+    //     /*transpose=*/false,
+    //     /*unitriangular=*/false);
+
+    // // std::tie(solve_solution, std::ignore) = at::solve(
+    // //     rhs_term.transpose(-2, -1),
+    // //     R.conj());
+
+    // Tensor grad_A = solve_solution.conj().transpose(-2, -1);
+
     return grad_A;
   };
 
