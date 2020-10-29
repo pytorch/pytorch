@@ -102,7 +102,7 @@ class ProcessContext:
                 self.process_errors[idx] = queue.get()
 
     def _get_deadline(self, timeout):
-        if timeout:
+        if timeout is not None:
             return time.monotonic() + timeout
         else:
             return sys.maxsize
