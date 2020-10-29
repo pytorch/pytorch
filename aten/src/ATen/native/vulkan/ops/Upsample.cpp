@@ -20,7 +20,7 @@ Tensor upsample_nearest2d(
 
   vTensor v_output{
     context,
-    output_sizes,
+    {input_arg.sizes()[0], input_arg.sizes()[1], output_sizes[0], output_sizes[1]},
     input.options(),
   };
 
