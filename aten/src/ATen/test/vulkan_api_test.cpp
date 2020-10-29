@@ -79,33 +79,33 @@ TEST(VulkanAPITest, add_scalar_) {
   ASSERT_TRUE(almostEqual(a_cpu, a_vulkan.cpu()));
 }
 
-TEST(VulkanAPITest, conv2d) {
-  auto OC = 2;
-  auto C = 3;
-  int64_t H = 3;
-  int64_t W = 3;
-  int64_t KH = 2;
-  int64_t KW = 2;
-  auto t_in = at::rand({1, C, H, W}, at::device(at::kCPU).dtype(at::kFloat));
-  auto t_w = at::rand({OC, C, KH, KW}, at::device(at::kCPU).dtype(at::kFloat));
-  auto t_b = at::zeros({OC}, at::device(at::kCPU).dtype(at::kFloat));
-  int64_t groups = 1;
-  std::vector<int64_t> stride{1, 1};
-  std::vector<int64_t> padding{0, 0};
-  std::vector<int64_t> dilation{1, 1};
+// TEST(VulkanAPITest, conv2d) {
+//   auto OC = 2;
+//   auto C = 3;
+//   int64_t H = 3;
+//   int64_t W = 3;
+//   int64_t KH = 2;
+//   int64_t KW = 2;
+//   auto t_in = at::rand({1, C, H, W}, at::device(at::kCPU).dtype(at::kFloat));
+//   auto t_w = at::rand({OC, C, KH, KW}, at::device(at::kCPU).dtype(at::kFloat));
+//   auto t_b = at::zeros({OC}, at::device(at::kCPU).dtype(at::kFloat));
+//   int64_t groups = 1;
+//   std::vector<int64_t> stride{1, 1};
+//   std::vector<int64_t> padding{0, 0};
+//   std::vector<int64_t> dilation{1, 1};
 
-  auto t_out_expected =
-      at::conv2d(t_in, t_w, t_b, stride, padding, dilation, groups);
-  auto tv_in = t_in.vulkan();
-  auto tv_out = at::conv2d(tv_in, t_w, t_b, stride, padding, dilation, groups);
-  auto t_out = tv_out.cpu();
-  bool check = almostEqual(t_out, t_out_expected);
-  if (!check) {
-    std::cout << "expected:\n" << t_out_expected << std::endl;
-    std::cout << "got:\n" << t_out << std::endl;
-  }
-  ASSERT_TRUE(check);
-}
+//   auto t_out_expected =
+//       at::conv2d(t_in, t_w, t_b, stride, padding, dilation, groups);
+//   auto tv_in = t_in.vulkan();
+//   auto tv_out = at::conv2d(tv_in, t_w, t_b, stride, padding, dilation, groups);
+//   auto t_out = tv_out.cpu();
+//   bool check = almostEqual(t_out, t_out_expected);
+//   if (!check) {
+//     std::cout << "expected:\n" << t_out_expected << std::endl;
+//     std::cout << "got:\n" << t_out << std::endl;
+//   }
+//   ASSERT_TRUE(check);
+// }
 
 TEST(VulkanAPITest, copy) {
   const auto cpu = at::rand({13, 17, 37, 19}, at::device(at::kCPU).dtype(at::kFloat));

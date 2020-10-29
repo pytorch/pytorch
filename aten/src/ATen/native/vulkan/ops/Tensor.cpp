@@ -704,28 +704,16 @@ void vTensor::View::CMD::copy_buffer_to_image(
           },
         }));
 
-  const struct {
-    uint32_t width;
-    uint32_t height;
-  } block {
-    view_.extents().width,
-    view_.extents().height,
-  };
-
   view_.context_->dispatch(
       command_buffer(),
       {
         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
       VK_KERNEL(nchw_to_image),
       view_.extents(),
       image,
-      buffer,
-      // Object lifetime is managed by the resource pool.
-      // It is OK not to keep track of the handle.
-      view_.pool_->uniform(block).object);
+      buffer);
 }
 
 void vTensor::View::CMD::copy_image_to_buffer(
@@ -753,28 +741,16 @@ void vTensor::View::CMD::copy_image_to_buffer(
           },
         }));
 
-  const struct {
-    uint32_t width;
-    uint32_t height;
-  } block {
-    view_.extents().width,
-    view_.extents().height,
-  };
-
   view_.context_->dispatch(
       command_buffer(),
       {
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
       VK_KERNEL(image_to_nchw),
       view_.extents(),
       image,
-      buffer,
-      // Object lifetime is managed by the resource pool.
-      // It is OK not to keep track of the handle.
-      view_.pool_->uniform(block).object);
+      buffer);
 }
 
 void vTensor::View::CMD::submit(const api::Resource::Fence fence) {
