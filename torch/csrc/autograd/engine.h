@@ -109,7 +109,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   std::unordered_set<c10::Stream> leaf_streams;
 
-  void init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad=false);
+  void init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad);
 
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
