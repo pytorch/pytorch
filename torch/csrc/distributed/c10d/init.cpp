@@ -182,8 +182,7 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
            )");
 
   py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
-An enum-like class for built-in communication hooks: ``NONE``, ``ALLREDUCE``, and ``FP16_COMPRESS``.)")
-      .value("NONE", ::c10d::BuiltinCommHookType::NONE)
+An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_COMPRESS``.)")
       .value("ALLREDUCE", ::c10d::BuiltinCommHookType::ALLREDUCE)
       .value("FP16_COMPRESS", ::c10d::BuiltinCommHookType::FP16_COMPRESS);
 

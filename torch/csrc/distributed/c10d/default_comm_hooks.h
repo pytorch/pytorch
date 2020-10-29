@@ -6,7 +6,6 @@
 namespace c10d {
 
 enum class BuiltinCommHookType {
-  NONE = 0,
   ALLREDUCE = 1,
   FP16_COMPRESS = 2,
 };

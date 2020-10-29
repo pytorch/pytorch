@@ -3646,7 +3646,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         model._register_comm_hook(None, dummy_hook)
 
         with self.assertRaisesRegex(
-            RuntimeError, "register_comm_hook can only be called once."
+            RuntimeError, "register_comm_hook or register_builtin_comm_hook can only be called once."
         ):
             model._register_comm_hook(None, dummy_hook)
 
