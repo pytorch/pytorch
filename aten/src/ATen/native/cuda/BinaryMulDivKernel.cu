@@ -45,7 +45,7 @@ struct MulFunctor<bool> {
 
 
 void div_kernel_cuda(TensorIterator& iter) {
-  if (!isIntegralType(iter.common_dtype(), /*includeBool*/ true) && iter.is_cpu_scalar(2)) {
+  if (!isIntegralType(iter.common_dtype(), /*includeBool*/ false) && iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
     // precision compared to computing the division.
