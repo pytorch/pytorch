@@ -8,7 +8,7 @@
 
 namespace at {
 
-// forward-declares
+// forward-declares full
 namespace native {
   Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions& options);
 }

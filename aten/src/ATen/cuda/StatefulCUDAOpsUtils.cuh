@@ -21,7 +21,7 @@ unpack(at::PhiloxCudaState arg) {
 
   if (arg.is_on_device_and_seq_pool_id_ & 0x80000000) {
     uint64_t seed = *arg.seed_.ptr;
-    // offset was already updated in the philox_cuda_state() call
+    // offset was already incremented in the philox_cuda_state() call
     uint64_t offset = *arg.offset_.ptr - arg.increment_;
     return std::make_tuple(seed, seq_pool_start, offset);
   } else {
