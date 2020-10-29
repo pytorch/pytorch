@@ -15,6 +15,8 @@
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 
+#include <torch/custom_class.h>
+
 namespace c10d {
 
 // Environment variable which controls whether or not wait() is blocking or
@@ -173,7 +175,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     friend class ProcessGroupNCCL;
   };
 
-  struct Options {
+  struct Options : torch::CustomClassHolder {
     explicit Options();
 
     std::chrono::milliseconds opTimeout;
@@ -373,7 +375,7 @@ class ProcessGroupNCCL : public ProcessGroup {
       const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
-      Options options = Options());
+      const c10::intrusive_ptr<Options>& options = {});
 
   // This constructor includes the deprecated `groupName` argument.
   // If you have existing code that uses the `groupName`, you can replace
@@ -383,7 +385,7 @@ class ProcessGroupNCCL : public ProcessGroup {
       int rank,
       int size,
       const std::string& groupName,
-      Options options = Options())
+      const c10::intrusive_ptr<Options>& options = {})
       : ProcessGroupNCCL(store, rank, size, options) {}
 
   virtual ~ProcessGroupNCCL();

@@ -1,5 +1,6 @@
 #include <c10d/ProcessGroupNCCL.hpp>
 
+#include <chrono>
 #include <map>
 #include <tuple>
 #include <unordered_set>
@@ -437,16 +438,21 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     const c10::intrusive_ptr<Store>& store,
     int rank,
     int size,
-    Options options)
+    const c10::intrusive_ptr<Options>& options)
     : ProcessGroup(rank, size),
       store_(store),
       ncclCommCounter_(0),
       terminateProcessGroup_(false),
-      opTimeout_(options.opTimeout),
-      futureNCCLCallbackStreams_(c10::cuda::device_count()),
-      isHighPriorityStream_(options.isHighPriorityStream) {
+      futureNCCLCallbackStreams_(c10::cuda::device_count()) {
   TORCH_CHECK(at::cuda::getNumGPUs() != 0,
     "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
+  if (options.defined()) {
+    opTimeout_ = options->opTimeout;
+    isHighPriorityStream_ = options->isHighPriorityStream;
+  } else {
+    opTimeout_ = std::chrono::milliseconds();
+    isHighPriorityStream_ = false;
+  }
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
   asyncErrorHandling_ = parseEnvVarFlag(NCCL_ASYNC_ERROR_HANDLING);
 

@@ -952,7 +952,8 @@ Arguments:
                   const c10::intrusive_ptr<::c10d::Store>&,
                   int,
                   int,
-                  ::c10d::ProcessGroupNCCL::Options>(),
+                  const c10::intrusive_ptr<
+                      ::c10d::ProcessGroupNCCL::Options>&>(),
               py::call_guard<py::gil_scoped_release>())
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
@@ -972,7 +973,8 @@ Arguments:
                   ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis),
               py::call_guard<py::gil_scoped_release>());
 
-  py::class_<::c10d::ProcessGroupNCCL::Options>(processGroupNCCL, "Options")
+  intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
+      processGroupNCCL, "Options")
       .def(py::init<>())
       .def_readwrite(
           "is_high_priority",
