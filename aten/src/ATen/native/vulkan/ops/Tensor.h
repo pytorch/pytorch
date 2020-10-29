@@ -75,6 +75,11 @@ class vTensor final {
       api::Context* context,
       IntArrayRef sizes,
       const TensorOptions& options);
+  vTensor(
+      api::Context* context,
+      api::Resource::Pool* pool,
+      IntArrayRef sizes,
+      const TensorOptions& options);
 
   /*
     Types
@@ -233,6 +238,7 @@ class vTensor final {
     View();
     View(
         api::Context* context,
+        api::Resource::Pool* pool,
         IntArrayRef sizes,
         const TensorOptions& options);
     View(const View&) = delete;
@@ -263,7 +269,7 @@ class vTensor final {
     class State final {
      public:
       State();
-      State(api::Context*, IntArrayRef);
+      State(const api::Adapter*, IntArrayRef);
 
       struct Bundle final {
         struct Buffer final {
@@ -338,6 +344,7 @@ class vTensor final {
 
     // Context
     api::Context* context_;
+    api::Resource::Pool* pool_;
 
     // State
     mutable State state_;
