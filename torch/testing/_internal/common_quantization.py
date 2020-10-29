@@ -18,8 +18,6 @@ from torch.quantization.quantization_mappings import (
     get_default_qconfig_propagation_list,
     get_default_qat_module_mappings,
 )
-# symbolic trace
-from torch.fx import symbolic_trace
 
 # graph mode quantization based on fx
 from torch.quantization import (
@@ -604,7 +602,8 @@ class QuantizationTestCase(TestCase):
                            expected_node_occurrence=None,
                            expected_node_list=None,
                            debug=False,
-                           print_debug_info=False):
+                           print_debug_info=False,
+                           custom_qconfig=None):
         """ Quantizes model with graph mode quantization on fx and check if the
         quantized model contains the quantized_node
 
@@ -627,6 +626,7 @@ class QuantizationTestCase(TestCase):
         # TODO: make img_data a single example instead of a list
         if type(inputs) == list:
             inputs = inputs[0]
+
         if quant_type == QuantType.QAT:
             qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
             model.train()
@@ -637,18 +637,22 @@ class QuantizationTestCase(TestCase):
             qconfig = default_dynamic_qconfig
             model.eval()
 
-        original = symbolic_trace(model)
+        # overwrite qconfig with custom_qconfig
+        if custom_qconfig is not None:
+            qconfig = custom_qconfig
+
         if quant_type == QuantType.QAT:
             prepare = prepare_qat_fx
         else:
             prepare = prepare_fx
 
         qconfig_dict = {'': qconfig}
-        prepared = prepare(original, qconfig_dict)
-        prepared(*inputs)
+        prepared = prepare(model, qconfig_dict)
+        if not quant_type == QuantType.DYNAMIC:
+            prepared(*inputs)
+        prepared_copy = copy.deepcopy(prepared)
         qgraph = convert_fx(prepared)
-        qgraph_debug = convert_fx(prepared, debug=True)
-
+        qgraph_debug = convert_fx(prepared_copy, debug=True)
         result = qgraph(*inputs)
         result_debug = qgraph_debug(*inputs)
 
@@ -656,10 +660,9 @@ class QuantizationTestCase(TestCase):
         if print_debug_info:
             print()
             print('quant type:', quant_type)
-            print('origianl graph module:', type(model))
-            self.printGraphModule(original)
+            print('original model:', model)
             print()
-            print('quantized graph module:', type(qgraph_to_check))
+            print('quantized model:', qgraph_to_check)
             self.printGraphModule(qgraph_to_check)
             print()
         self.checkGraphModuleNodes(

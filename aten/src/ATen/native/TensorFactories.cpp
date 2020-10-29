@@ -348,7 +348,7 @@ Tensor empty_like(
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
       result = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
-    } else if (self.layout() == kStrided) {
+    } else if (self.unsafeGetTensorImpl()->support_as_strided() && self.layout() == kStrided) {
       // If input tensor is not dense and non-overlapping but strided, we will infer an output strides
       // which keeps the layout permutation of the input tensor.
       std::vector<int64_t> strides = infer_dense_strides(self.sizes(), self.strides());
@@ -381,7 +381,8 @@ Tensor new_empty(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor eye(int64_t n, const TensorOptions& options) {
-  return native::eye(n, -1, options);
+  // the default value of `m` equals to `n`
+  return native::eye(n, n, options);
 }
 
 Tensor eye(int64_t n, int64_t m, const TensorOptions& options) {
@@ -390,15 +391,13 @@ Tensor eye(int64_t n, int64_t m, const TensorOptions& options) {
 }
 
 Tensor& eye_out_cpu(Tensor& result, int64_t n) {
-  return native::eye_out_cpu(result, n, -1);
+  // the default value of `m` equals to `n`
+  return native::eye_out_cpu(result, n, n);
 }
 
 Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
-
-  if(m < 0) {
-    m = n;
-  }
+  TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
   result.resize_({n, m});
   result.zero_();

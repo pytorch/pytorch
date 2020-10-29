@@ -35,6 +35,7 @@ from jit.test_profiler import TestProfiler  # noqa: F401
 from jit.test_slice import TestSlice  # noqa: F401
 from jit.test_warn import TestWarn  # noqa: F401
 from jit.test_isinstance import TestIsinstance  # noqa: F401
+from jit.test_hash import TestHash  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -584,7 +585,7 @@ class TestJit(JitTestCase):
         m = torch.jit.load(buffer)
         new_res = m(a, b, c)
         FileCheck().check_not("aten::relu(") \
-            .check("aten::add_relu(") \
+            .check("aten::_add_relu(") \
             .run(m.graph)
         torch.testing.assert_allclose(orig_res, new_res)
 
@@ -603,7 +604,7 @@ class TestJit(JitTestCase):
         m = torch.jit.load(buffer)
         new_res = m(a, b, c)
         FileCheck().check_not("aten::relu_(") \
-            .check("aten::add_relu(") \
+            .check("aten::_add_relu(") \
             .run(m.graph)
         torch.testing.assert_allclose(orig_res, new_res)
 
@@ -634,10 +635,10 @@ class TestJit(JitTestCase):
         new_res = m(a_copy, b)
         FileCheck().check_not("aten::add_(") \
             .check_not("aten::relu_(") \
-            .check("aten::add_relu_(") \
+            .check("aten::_add_relu_(") \
             .run(m.graph)
         torch.testing.assert_allclose(orig_res, new_res)
-        # Since add_relu_ does inplace mutation ensure
+        # Since _add_relu_ does inplace mutation ensure
         # a_copy is modified
         torch.testing.assert_allclose(orig_res, a_copy)
 
@@ -672,10 +673,10 @@ class TestJit(JitTestCase):
         new_res = m(a_copy, b)
         FileCheck().check_not("aten::add(") \
             .check_not("aten::relu_(") \
-            .check("aten::add_relu(") \
+            .check("aten::_add_relu(") \
             .run(m.graph)
         torch.testing.assert_allclose(orig_res, new_res)
-        # Since add_relu_ with out=a does inplace mutation ensure
+        # Since _add_relu_ with out=a does inplace mutation ensure
         # a_copy is modified
         torch.testing.assert_allclose(orig_res, a_copy)
 
@@ -13296,7 +13297,7 @@ dedent """
         ''')
         cu = torch.jit.CompilationUnit(code)
         g = cu.tanh.graph
-        FileCheck().check_count("prim::Function_0", 2).check("None = prim::Constant") \
+        FileCheck().check_count("prim::Closure_0", 2).check("None = prim::Constant") \
                    .check_next("return").run(g)
 
         code = dedent('''
@@ -13313,7 +13314,7 @@ dedent """
         ''')
         cu = torch.jit.CompilationUnit(code)
         g = cu.tanh.graph
-        FileCheck().check_count("prim::Function_0", 2).check("int = prim::If") \
+        FileCheck().check_count("prim::Closure_0", 2).check("int = prim::If") \
                    .run(g)
 
         code = dedent('''
@@ -13327,9 +13328,9 @@ dedent """
         ''')
         cu = torch.jit.CompilationUnit(code)
         fc = FileCheck()
-        fc.check("prim::Function").check("(Tensor, None) = prim::TupleConstruct")
+        fc.check("prim::Closure").check("(Tensor, None) = prim::TupleConstruct")
         # Loop then two if's added in exit transform
-        fc.check("prim::Function").check("prim::Loop").check_count("prim::If", 2)
+        fc.check("prim::Closure").check("prim::Loop").check_count("prim::If", 2)
         fc.run(cu.loop_in_closure.graph)
 
         code = dedent('''
@@ -15440,7 +15441,7 @@ EXCLUDE_SCRIPT_AD_CHECK = {
     'test_tensor_indices_sections_dim_neg0',
     'test_tensor_split_sections',
     'test_tensor_split_sections_dim',
-    'test_tensor_split_sections_dim_neg0',
+    'test_tensor_split_sections_dim_neg0'
 }
 
 EXCLUDE_PYTHON_PRINT = {
@@ -15457,6 +15458,10 @@ EXCLUDE_PYTHON_PRINT = {
 EXCLUDE_ALIAS = {
     # aliases, which may appear in method_tests but are tested elsewhere
     'true_divide',
+
+    # Disable tests for lu from common_methods_invocations.py
+    # TODO(@nikitaved) Enable jit tests once autograd.Function does support scripting
+    'lu'
 }
 
 def check_alias_annotation(method_name, args, kwargs):
@@ -15626,7 +15631,7 @@ def add_autograd_test(
 
     # Disable complex tests
     # TODO: Add complex support for jit
-    if 'complex' in variant_name or name in ['view_as_complex', 'complex']:
+    if 'complex' in variant_name or name in ['view_as_complex', 'complex', 'angle']:
         return
 
     # Skips aliases, which are tested in test_op_aliases.py
