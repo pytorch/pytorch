@@ -561,13 +561,12 @@ void add(VulkanTensor& output, const VulkanTensor& input, const float s) {
 
   auto device = context().device();
   struct ConstBlock {
-    int32_t inputSize[4];
+    int32_t inputSize[3];
     float s;
   };
   ConstBlock cb{{safe_downcast<int32_t>(W),
                  safe_downcast<int32_t>(H),
-                 safe_downcast<int32_t>(C_4),
-                 0},
+                 safe_downcast<int32_t>(C_4)},
                 s};
   VBuffer constBuffer = makeUniformConstBuffer((void*)&cb, sizeof(cb));
 
