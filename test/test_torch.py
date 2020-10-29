@@ -17836,49 +17836,68 @@ else:
                         f'Subprocess exception while attempting to run {test_case_info(fn_name, config)}:\n'
                         + e.output.decode("utf-8")))
 
-    @onlyCPU
+    @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
+    @onlyOnCPUAndCUDA
+    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)))
     @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
+    @tf32_on_and_off(0.05)
     def test_addbmm(self, device, dtype):
         # num_batches = 10
         # M, N, O = 12, 8, 5
         num_batches = 2
         M, N, O = 2, 3, 4
-        b1 = torch.randn(num_batches, M, N, dtype=dtype, device=device)
-        b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
-        res = torch.bmm(b1, b2)
-        res2 = torch.tensor((), dtype=dtype, device=device).resize_as_(res[0]).zero_()
-        res3 = torch.tensor((), dtype=dtype, device=device).resize_as_(res[0]).zero_()
 
-        res2.addbmm_(b1, b2)
-        self.assertEqual(res2, res.sum(0, False))
-        res3.copy_(res2)
+        def invert_perm(p):
+            d = {x: i for i, x in enumerate(p)}
+            return (d[0], d[1], d[2])
 
-        with self.maybeWarnsRegex(
-                UserWarning, "This overload of addbmm_ is deprecated"):
-            res2.addbmm_(1, b1, b2)
-        self.assertEqual(res2, res.sum(0, False) * 2),
-        res3.addbmm_(b1, b2, beta=1)
-        self.assertEqual(res2, res3)
+        for perm1, perm2 in product(permutations((0, 1, 2)), repeat=2):
+            for perm3 in permutations((0, 1)):
+                b1 = torch.randn(num_batches, M, N, dtype=dtype, device=device)
+                b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
+                b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
+                b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
+                res = torch.bmm(b1, b2).sum(0, False)
+                res2 = torch.zeros_like(res)
+                res3 = torch.zeros_like(res)
+                res2 = res2.permute(perm3).contiguous().permute(perm3)
+                res3 = res3.permute(perm3).contiguous().permute(perm3)
 
-        with self.maybeWarnsRegex(
-                UserWarning, "This overload of addbmm_ is deprecated"):
-            res2.addbmm_(1., .5, b1, b2)
-        self.assertEqual(res2, res.sum(0, False) * 2.5)
-        res3.addbmm_(b1, b2, beta=1., alpha=.5)
-        self.assertEqual(res2, res3)
+                res2.addbmm_(b1, b2)
+                self.assertEqual(res2, res)
+                res3.copy_(res2)
 
-        with self.maybeWarnsRegex(
-                UserWarning, "This overload of addbmm is deprecated"):
-            self.assertEqual(res2, torch.addbmm(1, res2, 0, b1, b2))
+                with self.maybeWarnsRegex(
+                        UserWarning, "This overload of addbmm_ is deprecated"):
+                    res2.addbmm_(1, b1, b2)
+                self.assertEqual(res2, res * 2),
+                res3.addbmm_(b1, b2, beta=1)
+                self.assertEqual(res2, res3)
 
-        res4 = torch.addbmm(res2, b1, b2, beta=1, alpha=.5)
-        self.assertEqual(res4, res.sum(0, False) * 3),
+                with self.maybeWarnsRegex(
+                        UserWarning, "This overload of addbmm_ is deprecated"):
+                    res2.addbmm_(1., .5, b1, b2)
+                self.assertEqual(res2, res * 2.5)
+                res3.addbmm_(b1, b2, beta=1., alpha=.5)
+                self.assertEqual(res2, res3)
 
-        res5 = torch.addbmm(res2, b1, b2, beta=0, alpha=1)
-        self.assertEqual(res5, res.sum(0, False))
+                with self.maybeWarnsRegex(
+                        UserWarning, "This overload of addbmm is deprecated"):
+                    self.assertEqual(res2, torch.addbmm(1, res2, 0, b1, b2))
 
-        res6 = torch.addbmm(res2, b1, b2, beta=.1, alpha=.5)
-        self.assertEqual(res6, res2 * .1 + .5 * res.sum(0)),
+                res4 = torch.addbmm(res2, b1, b2, beta=1, alpha=.5)
+                self.assertEqual(res4, res * 3),
+
+                nan = torch.full_like(res2, math.nan)
+                res5 = torch.addbmm(nan, b1, b2, beta=0, alpha=1)
+                self.assertEqual(res5, res)
+
+                res6 = torch.addbmm(res2, b1, b2, beta=.1, alpha=.5)
+                self.assertEqual(res6, res2 * .1 + .5 * res),
+
+                res7 = torch.full_like(res2, math.nan)
+                torch.addbmm(nan, b1, b2, beta=0, out=res7)
+                self.assertEqual(res7, res)
 
     @onlyCPU
     @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
