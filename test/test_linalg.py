@@ -7,9 +7,10 @@ from random import randrange
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, IS_MACOS, IS_WINDOWS, slowTest, TEST_WITH_ASAN, make_tensor)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride)
+    (instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCUDA, skipCUDAIfNoMagma, skipCPUIfNoLapack,
+     precisionOverride)
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
-from torch.autograd import gradcheck
+from torch.autograd import gradcheck, gradgradcheck
 
 if TEST_NUMPY:
     import numpy as np
@@ -998,6 +999,42 @@ class TestLinalg(TestCase):
         run_test((2, 1, 3, 4, 4), (4, 6))  # broadcasting b
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float64, torch.complex128)
+    @dtypesIfCUDA(torch.float64)
+    def test_solve_autograd(self, device, dtype):
+        def run_test(a_shape, b_shape):
+            b, A = self.solve_test_helper(a_shape, b_shape, device, dtype)
+            A.requires_grad_()
+            b.requires_grad_()
+
+            gradcheck(torch.solve, [b, A])
+            gradgradcheck(torch.solve, [b, A])
+
+        a_shapes = ((3, ), (3, 2), (3, 2, 4))
+        b_shapes = ((3, 1), (2, 3, 5), (2, 4, 3, 5))
+        for (a_shape, b_shape) in zip(a_shapes, b_shapes):
+            run_test(a_shape, b_shape)
+
+    # TODO(@ivanyashchuk): remove this once batched matmul is avaiable on CUDA for complex dtypes
+    @unittest.expectedFailure
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.complex128)
+    def test_solve_autograd_xfailed(self, device, dtype):
+        def run_test(a_shape, b_shape):
+            b, A = self.solve_test_helper(a_shape, b_shape, device, dtype)
+            A.requires_grad_()
+            b.requires_grad_()
+
+            gradcheck(torch.solve, [b, A])
+            gradgradcheck(torch.solve, [b, A])
+
+        a_shape = (3, 2)
+        b_shape = (3, 1)
+        run_test(a_shape, b_shape)
 
 instantiate_device_type_tests(TestLinalg, globals())
 
