@@ -1,12 +1,9 @@
 #pragma once
 
-// ${generated_comment}
-
 #include <c10/core/TensorOptions.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/QScheme.h>
 #include <c10/core/MemoryFormat.h>
-#include <c10/core/Stream.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -29,9 +26,5 @@ struct Quantizer;
 // we'll remove them when we are actually exposing Quantizer class
 // to frontend
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
-
-namespace ${Type} {
-  ${type_derived_method_declarations}
-}
 
 } // namespace at
