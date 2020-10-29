@@ -3469,6 +3469,25 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 self.assertIs(pinned, pinned.pin_memory())
                 self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
+        def test_new_methods_requires_grad(self):
+            size = (10,)
+            test_cases = [
+                # method name, args
+                ('new_full', [size, 1]),
+                ('new_empty', [size]),
+                ('new_zeros', [size]),
+            ]
+            for method_name, args in test_cases:
+                x = torch.randn(size)
+                for requires_grad in [True, False]:
+                    x_new = x.__getattribute__(method_name)(*args, requires_grad=requires_grad)
+                    self.assertEqual(x_new.requires_grad, requires_grad)
+                x = torch.randint(10, size)
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        r'Only Tensors of floating point and complex dtype can require gradients'):
+                    x_new = x.__getattribute__(method_name)(*args, requires_grad=True)
+
         @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
         def test_numpy_unresizable(self) -> None:
             x = np.zeros((2, 2))
