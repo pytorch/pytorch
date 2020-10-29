@@ -120,4 +120,18 @@ static inline T* get_generator_or_default(const c10::optional<Generator>& gen, c
   return gen.has_value() && gen->defined() ? check_generator<T>(gen) : check_generator<T>(default_gen);
 }
 
+inline void check_size_nonnegative(IntArrayRef size) {
+  for (auto x: size) {
+    TORCH_CHECK(x >= 0, "Trying to create tensor with negative dimension ", x, ": ", size);
+  }
+}
+
+namespace detail {
+CAFFE2_API
+Tensor empty_cpu(
+    IntArrayRef size,
+    const TensorOptions& options = {},
+    c10::optional<MemoryFormat> memory_format = c10::nullopt);
+} // namespace detail
+
 } // at
