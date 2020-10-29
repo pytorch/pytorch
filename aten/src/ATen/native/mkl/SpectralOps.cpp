@@ -61,129 +61,131 @@ namespace at { namespace native {
 
 template <typename scalar_t>
 static void _fft_fill_with_conjugate_symmetry_slice(
-    const scalar_t * data_in, scalar_t * data_out,
-    IntArrayRef signal_half_sizes, IntArrayRef signal_strides,
-    int64_t lastdim) {
-  // This function simply assigns out[:] = conj(in)
-  // in has strides signal_strides and out has the same strides but negated
-  // Thus it does conjugated mirroring in all dimensions
+    Range range, at::ArrayRef<bool> is_mirrored_dim, IntArrayRef signal_half_sizes,
+    IntArrayRef in_strides, const scalar_t * in_ptr,
+    IntArrayRef out_strides, scalar_t * out_ptr) {
+  const int64_t ndim = signal_half_sizes.size();
+  DimVector iter_index(ndim, 0);
 
-  const int64_t signal_ndim = signal_half_sizes.size();
-  TORCH_INTERNAL_ASSERT(signal_ndim == signal_strides.size());
-
-  const int64_t firstsize = signal_half_sizes[0];
-  const int64_t firststride = signal_strides[0];
-
-  const scalar_t * in_ptr = data_in;
-  scalar_t * out_ptr = data_out;
-  DimVector iter_index(signal_ndim - 1);
-  do {
-    if (lastdim == 0) {
-      for (int64_t i = 0; i < firstsize; ++i) {
-        out_ptr[-i * firststride] = std::conj(in_ptr[i * firststride]);
-      }
-    } else {
-      out_ptr[0] = std::conj(in_ptr[0]);
-      for (int64_t i = 1; i < firstsize; ++i) {
-        out_ptr[(firstsize - i) * firststride] = std::conj(in_ptr[i * firststride]);
-      }
-    }
-
-    for (int64_t i = 0; i < iter_index.size(); ++i) {
-      if (iter_index[i] == 0 && i + 1 != lastdim) {
+  auto advance_index = [&] {
+    for (int64_t i = 1; i < iter_index.size(); ++i) {
+      if (iter_index[i] + 1 < signal_half_sizes[i]) {
         ++iter_index[i];
-        in_ptr += signal_strides[i + 1];
-        out_ptr += (signal_half_sizes[i + 1] - 1) * signal_strides[i + 1];
-        break;
-      } else if (iter_index[i] + 1 < signal_half_sizes[i + 1]) {
-        ++iter_index[i];
-        in_ptr += signal_strides[i + 1];
-        out_ptr -= signal_strides[i + 1];
-        break;
-      } else if (i + 1 == iter_index.size()) {
+        in_ptr += in_strides[i];
+        if (is_mirrored_dim[i]) {
+          if (iter_index[i] == 1) {
+            out_ptr += (signal_half_sizes[i] - 1) * out_strides[i];
+          } else {
+            out_ptr -= out_strides[i];
+          }
+        } else {
+          out_ptr += out_strides[i];
+        }
         return;
       }
 
-      in_ptr -= signal_strides[i + 1] * iter_index[i];
-      out_ptr -= signal_strides[i + 1];
+      in_ptr -= in_strides[i] * iter_index[i];
+      if (is_mirrored_dim[i]) {
+        out_ptr -= out_strides[i];
+      } else {
+        out_ptr -= out_strides[i] * iter_index[i];
+      }
       iter_index[i] = 0;
     }
-  } while (!iter_index.empty());
-}
+  };
 
-// input should be a tensor of same size as full (twosided)
-// signals, but only contains half (onesided) of the values.
-// This function modifies inplace.
-void _fft_fill_with_conjugate_symmetry_cpu_(const Tensor& input, IntArrayRef dim_) {
-  const auto input_sizes = input.sizes();
-  const auto input_strides = input.strides();
-  TORCH_CHECK(dim_.size() > 0);
-  DimVector dim(dim_.begin(), dim_.end());
-  at::maybe_wrap_dims(dim, input_strides.size());
+  if (range.begin > 0) {
+    iter_index[0] = range.begin % signal_half_sizes[0];
+    auto linear_idx = range.begin / signal_half_sizes[0];
 
-  if (input_sizes[dim.back()] <= 2) {
-    return;
-  }
+    for (int64_t i = 1; i < ndim && linear_idx > 0; ++i) {
+      iter_index[i] = linear_idx % signal_half_sizes[i];
+      linear_idx = linear_idx / signal_half_sizes[i];
 
-  // Small dimensions may be treated as batch dims since they don't get mirrored
-  dim.erase(
-      std::remove_if(dim.begin(), dim.end(), [&](int64_t dim) {
-        return (input_sizes[dim] <= 2);
-      }),
-      dim.end());
-
-  const int64_t in_data_offset = input_strides[dim.back()];
-  const int64_t out_data_offset = input_strides[dim.back()] * (input_sizes[dim.back()] - 1);
-
-  // Sort dims by data stride to maximize data locality when iterating
-  DimVector dim_permute(dim.size());
-  std::iota(dim_permute.begin(), dim_permute.end(), 0);
-  std::sort(dim_permute.begin(), dim_permute.end(),
-      [&](auto dim1, auto dim2) {
-        return input_strides[dim[dim1]] < input_strides[dim[dim1]];
-      });
-
-  DimVector signal_half_sizes(dim.size());
-  DimVector signal_strides(dim.size());
-  int64_t lastdim = 0;
-  for (int64_t i = 0; i < dim.size(); ++i) {
-    auto idim = dim[dim_permute[i]];
-    signal_strides[i] = input_strides[idim];
-    if (dim_permute[i] < dim.size() - 1) {
-      signal_half_sizes[i] = input_sizes[idim];
-    } else {
-      signal_half_sizes[i] = (input_sizes[idim] - 1) / 2;
-      lastdim = i;
+      if (iter_index[i] > 0) {
+        in_ptr += in_strides[i] * iter_index[i];
+        if (is_mirrored_dim[i]) {
+          out_ptr += out_strides[i] * (signal_half_sizes[i] - iter_index[i]);
+        } else {
+          out_ptr += out_strides[i] * iter_index[i];
+        }
+      }
     }
   }
 
-  const auto numiter = at::prod_intlist(signal_half_sizes);
-  const auto grain_size = std::max(int64_t{1}, at::internal::GRAIN_SIZE / numiter);
-  if (numiter == 0) {
-    return;
+  auto numel_remaining = range.end - range.begin;
+
+  if (is_mirrored_dim[0]) {
+    if (iter_index[0] > 0) {
+      auto end = std::min(signal_half_sizes[0], iter_index[0] + numel_remaining);
+      for (int64_t i = iter_index[0]; i < end; ++i) {
+        out_ptr[(signal_half_sizes[0] - i) * out_strides[0]] = std::conj(in_ptr[i * in_strides[0]]);
+      }
+      iter_index[0] = 0;
+      numel_remaining -= end;
+      advance_index();
+    }
+
+    while (numel_remaining > 0) {
+      auto end = std::min(signal_half_sizes[0], iter_index[0] + numel_remaining);
+      out_ptr[0] = std::conj(in_ptr[0]);
+      for (int64_t i = 1; i < end; ++i) {
+        out_ptr[(signal_half_sizes[0] - i) * out_strides[0]] = std::conj(in_ptr[i * in_strides[0]]);
+      }
+      numel_remaining -= end;
+      advance_index();
+    }
+  } else {
+    while (numel_remaining > 0) {
+      auto end = std::min(signal_half_sizes[0], iter_index[0] + numel_remaining);
+      for (int64_t i = iter_index[0]; i != end; ++i) {
+        out_ptr[i * out_strides[0]] = std::conj(in_ptr[i * in_strides[0]]);
+      }
+      numel_remaining -= end - iter_index[0];
+      iter_index[0] = 0;
+      advance_index();
+    }
+  }
+}
+
+static void _fft_fill_with_conjugate_symmetry_cpu_(
+    ScalarType dtype, IntArrayRef mirror_dims, IntArrayRef signal_half_sizes,
+    IntArrayRef in_strides_bytes, const void * in_data,
+    IntArrayRef out_strides_bytes, void * out_data) {
+
+  // Convert strides from bytes to elements
+  const auto element_size = scalarTypeToTypeMeta(dtype).itemsize();
+  const auto ndim = signal_half_sizes.size();
+  DimVector in_strides(ndim), out_strides(ndim);
+  for (int64_t i = 0; i < ndim; ++i) {
+    TORCH_INTERNAL_ASSERT(in_strides_bytes[i] % element_size == 0);
+    in_strides[i] = in_strides_bytes[i] / element_size;
+    TORCH_INTERNAL_ASSERT(out_strides_bytes[i] % element_size == 0);
+    out_strides[i] = out_strides_bytes[i] / element_size;
   }
 
-  auto iter = TensorIteratorConfig()
-      .add_output(input)
-      .add_input(input)
-      .resize_outputs(false)
-      .declare_static_shape(input_sizes, dim)
-      .build();
+  // Construct boolean mask for mirrored dims
+  c10::SmallVector<bool, at::kDimVectorStaticSize> is_mirrored_dim(ndim, false);
+  for (auto dim : mirror_dims) {
+    is_mirrored_dim[dim] = true;
+  }
 
-  AT_DISPATCH_COMPLEX_TYPES(input.scalar_type(), "_fft_fill_with_conjugate_symmetry", [&] {
-    iter.for_each(
-      [&](char** data, const int64_t* strides, int64_t size){
-        for (int64_t i = 0; i < size; ++i) {
-          scalar_t * data_scalar = reinterpret_cast<scalar_t*>(data[0] + strides[0] * i);
-          const scalar_t * in_data = data_scalar + in_data_offset;
-          scalar_t * out_data = data_scalar + out_data_offset;
-          _fft_fill_with_conjugate_symmetry_slice<scalar_t>(
-              in_data, out_data, signal_half_sizes, signal_strides, lastdim);
-        }
-      }, grain_size);
+  const auto numel = at::prod_intlist(signal_half_sizes);
+  AT_DISPATCH_COMPLEX_TYPES(dtype, "_fft_fill_with_conjugate_symmetry", [&] {
+    at::parallel_for(0, numel, at::internal::GRAIN_SIZE,
+        [&](int64_t begin, int64_t end) {
+          _fft_fill_with_conjugate_symmetry_slice(
+              {begin, end}, is_mirrored_dim, signal_half_sizes,
+              in_strides, static_cast<const scalar_t*>(in_data),
+              out_strides, static_cast<scalar_t*>(out_data));
+        });
   });
-  return;
 }
+
+// Register this one implementation for all cpu types instead of compiling multiple times
+REGISTER_ARCH_DISPATCH(fft_fill_with_conjugate_symmetry_stub, DEFAULT, &_fft_fill_with_conjugate_symmetry_cpu_)
+REGISTER_AVX_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
+REGISTER_AVX2_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 
 // For complex types, strides are in units of 2 * element_size(dtype)
 // sizes are for the full signal, including batch size and always two-sided
@@ -353,7 +355,7 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
     DimVector signal_dims(signal_ndim);
     std::iota(signal_dims.begin(), signal_dims.end(), 1);
     auto out_as_complex = at::view_as_complex(output);
-    _fft_fill_with_conjugate_symmetry_cpu_(out_as_complex, signal_dims);
+    at::native::_fft_fill_with_conjugate_symmetry_(out_as_complex, signal_dims);
   }
   return output;
 }
@@ -453,7 +455,7 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   _exec_fft(self, out_slice, dim, normalization, /*forward=*/true);
 
   if (!onesided) {
-    _fft_fill_with_conjugate_symmetry_cpu_(output, dim);
+    at::native::_fft_fill_with_conjugate_symmetry_(output, dim);
   }
   return output;
 }
