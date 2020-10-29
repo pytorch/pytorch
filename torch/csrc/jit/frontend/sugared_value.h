@@ -419,7 +419,7 @@ struct TORCH_API ClosureValue : public SugaredValue {
 };
 
 // defines how a method obtained from a module/class/interface behaves in script
-struct MethodValue : public SugaredValue {
+struct TORCH_API MethodValue : public SugaredValue {
   MethodValue(Value* self, std::vector<std::string> method_names)
       : self_(std::move(self)), method_names_(std::move(method_names)) {}
   MethodValue(Value* self, std::string method_name)
@@ -434,34 +434,13 @@ struct MethodValue : public SugaredValue {
       Function& f,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
-      size_t n_binders) override {
-    std::vector<NamedValue> argsWithSelf = {self_};
-    argsWithSelf.insert(argsWithSelf.end(), args.begin(), args.end());
-    std::vector<const FunctionSchema*> schemas;
-    for (const std::string& method_name : method_names_) {
-      if (auto class_type = self_->type()->cast<ClassType>()) {
-        Function& method = class_type->getMethod(method_name);
-        try {
-          method.ensure_defined();
-        } catch (const RecursiveMethodCallError&) {
-          throw ErrorReport(loc)
-              << " method '" << method.name() << "' is called recursively. "
-              << "Recursive calls are not supported";
-        }
-        schemas.push_back(&method.getSchema());
-      } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
-        schemas.push_back(interface_type->getMethod(method_name));
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            false, "method constructed that is not a class or interface");
-      }
-    }
-    auto match = matchSchemas(schemas, loc, *f.graph(), argsWithSelf, kwargs);
-    Value* output =
-        f.graph()->insertMethodCall(method_names_[match.first], match.second);
-    output->node()->setSourceRange(loc);
-    return std::make_shared<SimpleValue>(output);
-  }
+      size_t n_binders) override;
+  std::shared_ptr<SugaredValue> callAsync(
+      const SourceRange& loc,
+      Function& f,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs,
+      size_t n_binders);
 
  private:
   Value* self_;

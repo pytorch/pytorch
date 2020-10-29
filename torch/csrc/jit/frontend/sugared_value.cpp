@@ -720,7 +720,7 @@ static std::shared_ptr<SugaredValue> insertFunctionCall(
   }
   auto match = matchSchemas(schemas, loc, *f.graph(), args, kwargs);
   Value* output =
-      f.graph()->insertFunctionCall(callees[match.first], match.second);
+      f.graph()->insertFunctionCall(callees[match.first], match.second, isAsync);
   output->node()->setSourceRange(loc);
   return std::make_shared<SimpleValue>(output);
 }
@@ -743,6 +743,66 @@ std::shared_ptr<SugaredValue> FunctionValue::call(
     size_t n_binders) {
   return insertFunctionCall(
       callees_, /*isAsync=*/false, loc, f, args, kwargs, n_binders);
+}
+
+static std::shared_ptr<SugaredValue> insertMethodCall(
+    Value* self,
+    const std::vector<std::string>& method_names,
+    bool isAsync,
+    const SourceRange& loc,
+    Function& f,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    size_t n_binders) {
+  std::vector<NamedValue> argsWithSelf = {self};
+  argsWithSelf.insert(argsWithSelf.end(), args.begin(), args.end());
+  std::vector<const FunctionSchema*> schemas;
+  for (const std::string& method_name : method_names) {
+    if (auto class_type = self->type()->cast<ClassType>()) {
+      Function& method = class_type->getMethod(method_name);
+      try {
+        method.ensure_defined();
+      } catch (const RecursiveMethodCallError&) {
+        throw ErrorReport(loc)
+            << " method '" << method.name() << "' is called recursively. "
+            << "Recursive calls are not supported";
+      }
+      schemas.push_back(&method.getSchema());
+    } else if (auto interface_type = self->type()->cast<InterfaceType>()) {
+      if (isAsync) {
+        throw ErrorReport(loc) << "cannot fork an interface method";
+      }
+      schemas.push_back(interface_type->getMethod(method_name));
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "method constructed that is not a class or interface");
+    }
+  }
+  auto match = matchSchemas(schemas, loc, *f.graph(), argsWithSelf, kwargs);
+  Value* output = f.graph()->insertMethodCall(
+      method_names[match.first], match.second, isAsync);
+  output->node()->setSourceRange(loc);
+  return std::make_shared<SimpleValue>(output);
+}
+
+std::shared_ptr<SugaredValue> MethodValue::callAsync(
+    const SourceRange& loc,
+    Function& f,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    size_t n_binders) {
+  return insertMethodCall(
+      self_, method_names_, /*isAsync=*/true, loc, f, args, kwargs, n_binders);
+}
+
+std::shared_ptr<SugaredValue> MethodValue::call(
+    const SourceRange& loc,
+    Function& f,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    size_t n_binders) {
+  return insertMethodCall(
+      self_, method_names_, /*isAsync=*/false, loc, f, args, kwargs, n_binders);
 }
 } // namespace jit
 } // namespace torch

@@ -1194,6 +1194,15 @@ void initJITBindings(PyObject* module) {
             /*isAsync=*/true);
         output_ivalue = toTypeInferredIValue(py_func_output);
         node_output = jit::tracer::getValueTrace(output_ivalue);
+      } else if (py::isinstance<Method>(f)) {
+        Method& method = py::cast<Method&>(args[0]);
+        py_func_output = invokeScriptMethodFromPython(
+            method,
+            tuple_slice(std::move(args), 1),
+            std::move(kwargs),
+            /*isAsync=*/true);
+        output_ivalue = toTypeInferredIValue(py_func_output);
+        node_output = jit::tracer::getValueTrace(output_ivalue);
       } else {
         // Otherwise, we need to trace the execution of this function under a
         // special `prim::TracedFork` block. This block will later be turned

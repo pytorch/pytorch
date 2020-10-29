@@ -950,6 +950,11 @@ struct CodeImpl {
           emitInterfaceCall(node->s(attr::name), node->inputs());
         }
         break;
+      case prim::CallMethodAsync: {
+        auto class_type = node->inputs().at(0)->type()->expect<ClassType>();
+        emitCallAsync(
+            &class_type->getMethod(node->s(attr::name)), node->inputs());
+      } break;
       case prim::TypeCheck:
         emitTypeCheck(node);
         break;

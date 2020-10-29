@@ -1229,7 +1229,8 @@ inline py::object invokeScriptFunctionFromPython(
 inline py::object invokeScriptMethodFromPython(
     Method& callee,
     tuple_slice args,
-    py::kwargs kwargs) {
+    py::kwargs kwargs,
+    bool isAsync = false) {
   auto self = callee.owner()._ivalue();
   return runAndInsertCall(
       callee.function(),
@@ -1237,7 +1238,7 @@ inline py::object invokeScriptMethodFromPython(
       kwargs,
       self,
       [&](Graph& graph, const MatchedSchema& match) {
-        return graph.insertMethodCall(callee.name(), match);
+        return graph.insertMethodCall(callee.name(), match, isAsync);
       });
 }
 

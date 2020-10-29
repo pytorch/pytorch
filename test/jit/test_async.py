@@ -527,6 +527,18 @@ class TestAsync(JitTestCase):
                 fut = returns_future_float(x)
                 return fut.wait()
 
+    def test_async_method_call(self):
+        class SM(torch.nn.Module):
+            def foo(self, x):
+                return x + x
+
+            def forward(self, x, y):
+                f1 = self.foo(x)
+                f2 = torch.jit.fork(self.foo, y)
+                f3 = torch.jit.fork(self.foo, y)
+                return f1 + torch.jit.wait(f2) + torch.jit.wait(f3)
+
+        self.checkModule(SM(), (torch.tensor(1), torch.tensor(2)))
 
 
 if __name__ == '__main__':

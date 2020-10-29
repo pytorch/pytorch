@@ -1079,7 +1079,28 @@ struct PythonPrintImpl {
           TORCH_INTERNAL_ASSERT(
               false, "method call to unhandled type in serialization");
         }
-
+      } break;
+      case prim::CallMethodAsync: {
+        const auto& self = node->inputs().at(0);
+        const auto& methodName = node->s(attr::name);
+        stmt << "fork((" << useOf(self) << ")"
+             << "." << methodName << ", ";
+        for (size_t i = 1; i < node->inputs().size(); i++) {
+          stmt << useOf(node->inputs()[i]) << ", ";
+        }
+        stmt << ")";
+        if (auto selfClass = self->type()->cast<ClassType>()) {
+          deps_table_.add(selfClass);
+          const Function& method = selfClass->getMethod(node->s(attr::name));
+          TORCH_INTERNAL_ASSERT(
+              method.qualname() ==
+              QualifiedName(selfClass->name()->qualifiedName(), methodName));
+        } else if (auto selfInterface = self->type()->cast<InterfaceType>()) {
+          deps_table_.add(selfInterface);
+        } else {
+          TORCH_INTERNAL_ASSERT(
+              false, "method call to unhandled type in serialization");
+        }
       } break;
       case aten::_unwrap_optional: {
         printOpName(stmt, node->kind());

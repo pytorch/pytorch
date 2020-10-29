@@ -1792,11 +1792,17 @@ Value* Graph::insertFunctionCall(
 
 Value* Graph::insertMethodCall(
     std::string method_name,
-    const MatchedSchema& matched) {
-  Value* result = insertNode(create(prim::CallMethod, matched.inputs))
+    const MatchedSchema& matched,
+    bool isAsync) {
+  Symbol nodeKind = isAsync ? prim::CallMethodAsync : prim::CallMethod;
+  Value* result = insertNode(create(nodeKind, matched.inputs))
                       ->s_(attr::name, std::move(method_name))
-                      ->output()
-                      ->setType(matched.return_types.at(0));
+                      ->output();
+  if (isAsync) {
+    result->setType(FutureType::create(matched.return_types.at(0)));
+  } else {
+    result->setType(matched.return_types.at(0));
+  }
   return result;
 }
 

@@ -140,6 +140,7 @@ namespace c10 {
   _(prim, TimePoint)                 \
   _(prim, CallFunction)              \
   _(prim, CallMethod)                \
+  _(prim, CallMethodAsync)           \
   _(prim, LoopContinuation)          \
   _(prim, annotate)                  \
   _(prim, TracedModuleForward)       \
