@@ -80,7 +80,7 @@ TEST(VulkanAPITest, add_scalar_) {
 }
 
 TEST(VulkanAPITest, mul_scalar) {
-  const auto a_cpu = at::rand({1, 1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_cpu = at::rand({17, 213, 213, 7}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
 
   const float b_scalar = 3.1415f;
