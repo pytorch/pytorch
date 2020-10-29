@@ -101,104 +101,34 @@ __global__ void _fft_conjugate_copy_kernel(
 // input should be a tensor of same size as full (twosided)
 // signals, but only contains half (onesided) of the values.
 // This function modifies inplace.
-void _fft_fill_with_conjugate_symmetry_cuda_(const Tensor& input, IntArrayRef dim_) {
-  const auto input_sizes = input.sizes();
-  const auto input_strides = input.strides();
-  TORCH_CHECK(dim_.size() > 0);
-  using MaxDimVector = c10::SmallVector<int64_t, MAX_DIMS>;
-  MaxDimVector dim(dim_.begin(), dim_.end());
-  at::maybe_wrap_dims(dim, input_strides.size());
-
-  // Use TensorIterator to coalesce batch dimensions
-  // NOTE: Can't use TensorIterator for everything because we need a custom offset calculator
-  auto iter = TensorIteratorConfig()
-      .add_output(input)
-      .add_input(input)
-      .resize_outputs(false)
-      .declare_static_shape(input_sizes, dim)
-      .build();
-
-  if (iter.numel() == 0) {
-    return;
-  }
-
-  const auto iter_strides = iter.strides(0);
-  const auto iter_sizes = iter.shape();
-  const auto ndim = iter_strides.size() + dim.size();
-  MaxDimVector in_strides(ndim), signal_half_sizes(ndim);
-
-  const auto element_size = iter.element_size(0);
-  auto* data_ptr = static_cast<char*>(input.data_ptr());
-  for (int64_t i = 0; i < iter_strides.size(); ++i) {
-    in_strides[i] = iter_strides[i];
-    signal_half_sizes[i] = iter_sizes[i];
-  }
-  for (int64_t i = 0; i < dim.size(); ++i) {
-    // Convert to byte strides to match TensorIterator
-    in_strides[iter_strides.size() + i] = input_strides[dim[i]] * element_size;
-    signal_half_sizes[iter_strides.size() + i] = input_sizes[dim[i]];
-  }
-  signal_half_sizes.back() = (input_sizes[dim.back()] - 1) / 2;
-  auto out_strides = in_strides;
-  out_strides.back() *= -1;
-
-  const auto* in_data = data_ptr + input_strides[dim.back()] * element_size;
-  auto* out_data = data_ptr + (
-      input_strides[dim.back()] * (input_sizes[dim.back()] - 1) * element_size);
-
-  // Reorder dimensions by stride to maximize data locality
-  MaxDimVector dim_permute(ndim);
-  std::iota(dim_permute.begin(), dim_permute.end(), 0);
-  std::sort(dim_permute.begin(), dim_permute.end(),
-      [&](auto dim1, auto dim2) {
-        return in_strides[dim1] < in_strides[dim2];
-      });
-
-  MaxDimVector temp(ndim);
-  for (int64_t i = 0; i < ndim; ++i) {
-    temp[i] = in_strides[dim_permute[i]];
-  }
-  in_strides = temp;
-  for (int64_t i = 0; i < ndim; ++i) {
-    temp[i] = out_strides[dim_permute[i]];
-  }
-  out_strides = temp;
-  for (int64_t i = 0; i < ndim; ++i) {
-    temp[i] = signal_half_sizes[dim_permute[i]];
-  }
-  signal_half_sizes = temp;
-
-  MaxDimVector mirror_dims;
-  for (int64_t i = 0; i < ndim; ++i) {
-    if (dim_permute[i] >= iter_strides.size() && dim_permute[i] != ndim - 1) {
-      mirror_dims.push_back(i);
-    }
-  }
-  TORCH_INTERNAL_ASSERT(mirror_dims.size() == dim.size() - 1);
-
+void _fft_fill_with_conjugate_symmetry_cuda_(
+    ScalarType dtype, IntArrayRef mirror_dims, IntArrayRef signal_half_sizes,
+    IntArrayRef in_strides, const void * in_data,
+    IntArrayRef out_strides, void * out_data) {
   // Do the actual conjugate mirroring.
   // TODO: consider adding a 32bit indexed kernel for improved performance
   auto* in_strides_ptr = in_strides.data();
+  const int ndim = in_strides.size();
+  const int64_t element_size = scalarTypeToTypeMeta(dtype).itemsize();
   OffsetCalculator<1, int64_t> input_offset_calculator(
       ndim, signal_half_sizes.data(), &in_strides_ptr, &element_size);
   HermitianSymmetryOffsetCalculator<int64_t> output_offset_calculator(
       signal_half_sizes, out_strides, mirror_dims, element_size);
 
   const auto numel = at::prod_intlist(signal_half_sizes);
-  if (numel == 0) {
-    return;
-  }
-  AT_DISPATCH_COMPLEX_TYPES(input.scalar_type(), "_fft_fill_with_conjugate_symmetry", [&] {
+  AT_DISPATCH_COMPLEX_TYPES(dtype, "_fft_fill_with_conjugate_symmetry", [&] {
         using namespace cuda::detail;
         _fft_conjugate_copy_kernel<<<
           GET_BLOCKS(numel), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
               numel,
-              reinterpret_cast<scalar_t*>(out_data),
-              reinterpret_cast<const scalar_t*>(in_data),
+              static_cast<scalar_t*>(out_data),
+              static_cast<const scalar_t*>(in_data),
               input_offset_calculator,
               output_offset_calculator);
       });
 }
+
+REGISTER_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cuda_);
 
 // Execute a pre-planned tranform
 static void exec_cufft_plan(
@@ -341,7 +271,7 @@ static inline Tensor _run_cufft(
     DimVector signal_dims(signal_ndim);
     std::iota(signal_dims.begin(), signal_dims.end(), 1);
     auto out_as_complex = at::view_as_complex(output);
-    _fft_fill_with_conjugate_symmetry_cuda_(out_as_complex, signal_dims);
+    at::native::_fft_fill_with_conjugate_symmetry_(out_as_complex, signal_dims);
   }
   return output;
 }
