@@ -700,7 +700,8 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
     if (comm_hook_ == nullptr) {
       bucket.work = process_group_->allreduce(tensors);
     } else {
-      bucket.future_work = comm_hook_->runHook(GradBucket(tensors));
+      GradBucket grad_bucket(tensors);
+      bucket.future_work = comm_hook_->runHook(grad_bucket);
     }
   }
 }

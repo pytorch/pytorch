@@ -100,7 +100,7 @@ PythonCommHook::~PythonCommHook() {
 }
 
 c10::intrusive_ptr<torch::jit::Future> PythonCommHook::runHook(
-    const GradBucket& bucket) {
+    GradBucket& bucket) {
   py::gil_scoped_acquire acquire;
 
   py::object py_fut = hook_(state_, bucket);
