@@ -113,7 +113,6 @@ TensorTypePtr TorchTensorTypeFromONNX(
           // Assign a new Symbol, no need to keep track
           // of it because there won't be duplicates.
           sym = c10::ShapeSymbol::newSymbol();
-          symbol_map[sym.value()] = dim.dim_param();
         }
         sizes.emplace_back(sym.value());
       }
