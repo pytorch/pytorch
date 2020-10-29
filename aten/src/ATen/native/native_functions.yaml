@@ -8875,6 +8875,18 @@
   python_module: linalg
   variants: function
 
+- func: linalg_tensorsolve(Tensor self, Tensor other, int[]? dims=None) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_tensorsolve
+
+- func: linalg_tensorsolve.out(Tensor self, Tensor other, int[]? dims=None, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_tensorsolve_out
+
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
 - func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
