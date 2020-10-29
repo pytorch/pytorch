@@ -2362,7 +2362,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_logsoftmax_dtype(self):
         class Model(torch.nn.Module):
             def forward(self, x):
-                return torch.nn.functional.log_softmax(x, dim=1, dtype=torch.float32)
+                return torch.nn.functional.log_softmax(x, dim=1, dtype=torch.float64)
 
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(Model(), x)
