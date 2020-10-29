@@ -3468,6 +3468,25 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 self.assertIs(pinned, pinned.pin_memory())
                 self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
+        def test_new_methods_requires_grad(self):
+            size = (10,)
+            test_cases = [
+                # method name, args
+                ('new_full', [size, 1]),
+                ('new_empty', [size]),
+                ('new_zeros', [size]),
+            ]
+            for method_name, args in test_cases:
+                x = torch.randn(size)
+                for requires_grad in [True, False]:
+                    x_new = x.__getattribute__(method_name)(*args, requires_grad=requires_grad)
+                    self.assertEqual(x_new.requires_grad, requires_grad)
+                x = torch.randint(10, size)
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        r'Only Tensors of floating point and complex dtype can require gradients'):
+                    x_new = x.__getattribute__(method_name)(*args, requires_grad=True)
+
         @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
         def test_numpy_unresizable(self) -> None:
             x = np.zeros((2, 2))
@@ -6329,6 +6348,25 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'heaviside is not yet implemented for tensors with different dtypes.'):
                 input.heaviside_(values)
 
+    @onlyCUDA
+    def test_heaviside_cross_device(self, device):
+        x = torch.tensor([-9, 5, 0, 6, -2, 2], device='cuda')
+        y = torch.tensor(0)
+        result = torch.heaviside(x, y)
+        expect = torch.tensor([0, 1, 0, 1, 0, 1], device='cuda')
+        self.assertEqual(result, expect)
+
+        result = torch.heaviside(y, x)
+        expect = torch.tensor([-9, 5, 0, 6, -2, 2], device='cuda')
+        self.assertEqual(result, expect)
+
+        x = torch.tensor([-9, 5, 0, 6, -2, 2])
+        y = torch.tensor(0, device='cuda')
+        with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
+            torch.heaviside(x, y)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
+            torch.heaviside(y, x)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @dtypes(*list(product(torch.testing.get_all_complex_dtypes(),
