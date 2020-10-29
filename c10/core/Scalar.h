@@ -88,6 +88,9 @@ class C10_API Scalar {
 
   Scalar operator-() const;
 
+  template<typename T>
+  bool equal(T num) const;
+
   ScalarType type() const {
     if (isComplex()) {
       return ScalarType::ComplexDouble;
