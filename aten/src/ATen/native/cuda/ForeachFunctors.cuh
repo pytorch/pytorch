@@ -74,6 +74,22 @@ __device__ void store_args(T* dst, T* src, int i_start, int chunk_size, int n) {
     }
 }
 
+template <typename T>
+__device__ void copy_args(
+    T* dst_args,
+    T* src_args,
+    int i_start,
+    int chunk_size,
+    int n) {
+#pragma unroll
+  for (int ii = 0; ii < kILP; ii++) {
+    int i = i_start + threadIdx.x + ii * blockDim.x;
+    if (i < n && i < chunk_size) {
+      dst_args[i] = src_args[i];
+    }
+  }
+}
+
 template<int depth, int res_arg_index, typename Op, typename T, typename opmath_t> 
 __device__ __forceinline__ void binary_op_scalar(
     T r_args[][kILP],
@@ -239,6 +255,38 @@ struct BinaryOpListAlphaFunctor {
                 }
             }
         }
+};
+
+template <typename T>
+struct CopyFunctor {
+  __device__ __forceinline__ void operator()(
+      int chunk_size,
+      TensorListMetadata<2>& tl) {
+    int tensor_loc = tl.block_to_tensor[blockIdx.x];
+    int chunk_idx = tl.block_to_chunk[blockIdx.x];
+    int n = tl.sizes[tensor_loc];
+
+    T* args[2];
+    bool all_aligned =
+        init_args<2>(args, tl, chunk_idx, chunk_size, tensor_loc);
+    T* dst_args = args[0];
+    T* src_args = args[1];
+    n -= chunk_idx * chunk_size;
+
+    // to make things simple, we put aligned case in a different code path
+    if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
+      for (int i_start = threadIdx.x;
+           i_start * kILP < n && i_start * kILP < chunk_size;
+           i_start += blockDim.x) {
+        load_store(dst_args, src_args, i_start, i_start);
+      }
+    } else {
+      for (int i_start = 0; i_start < n && i_start < chunk_size;
+           i_start += blockDim.x * kILP) {
+        copy_args(dst_args, src_args, i_start, chunk_size, n);
+      }
+    }
+  }
 };
 
 //

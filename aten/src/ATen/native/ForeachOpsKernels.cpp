@@ -65,6 +65,15 @@ void foreach_tensor_##OP##_list_kernel_slow_(TensorList tensors1, TensorList ten
   }                                                                                                       \
 }
 
+#define FOREACH_BINARY_OP_LIST_IN_PLACE(OP)                                                               \
+void foreach_tensor_##OP##_list_kernel_slow_(TensorList tensors1, TensorList tensors2) {                  \
+  check_foreach_api_restrictions(tensors1, tensors2);                                                     \
+                                                                                                          \
+  for (int i = 0; i < tensors1.size(); i++) {                                                             \
+    tensors1[i].OP##_(tensors2[i]);                                                                       \
+  }                                                                                                       \
+}
+
 #define FOREACH_BINARY_OP_LIST_ALPHA(OP)                                                                                \
 std::vector<Tensor> foreach_tensor_##OP##_list_kernel_slow(TensorList tensors1, TensorList tensors2, Scalar alpha) {    \
   check_foreach_api_restrictions(tensors1, tensors2);                                                                   \
@@ -159,6 +168,7 @@ FOREACH_BINARY_OP_SCALARLIST(mul);
 FOREACH_BINARY_OP_SCALARLIST(div);
 FOREACH_BINARY_OP_LIST(mul);
 FOREACH_BINARY_OP_LIST(div);
+FOREACH_BINARY_OP_LIST_IN_PLACE(copy);
 FOREACH_UNARY_OP(sqrt);
 FOREACH_UNARY_OP(exp);
 FOREACH_POINTWISE_OP_SCALAR(addcdiv);
