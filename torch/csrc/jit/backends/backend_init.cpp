@@ -69,7 +69,9 @@ void toBackendSelectiveImpl(
     // Check that the parent type is not shared and therefore can be edited.
     if (duplicate_types.count(parent.type()) > 0) {
       throw py::cast_error(c10::str(
-          "Selective lowering is only supported for module hierarchies with unique types for selected modules; ", parent.type()->repr_str(), " is shared"));
+          "Selective lowering is only supported for module hierarchies with unique types for selected modules; ",
+          parent.type()->repr_str(),
+          " is shared"));
     }
 
     // Call to_backend on the module that needs to be lowered. It needs to be
