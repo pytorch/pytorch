@@ -7,7 +7,7 @@
 
 namespace at { namespace native {
 
-REGISTER_NO_CPU_DISPATCH(fft_fill_with_conjugate_symmetry_stub, name, fft_fill_with_conjugate_symmetry_fn);
+REGISTER_NO_CPU_DISPATCH(fft_fill_with_conjugate_symmetry_stub, fft_fill_with_conjugate_symmetry_fn);
 
 Tensor _fft_mkl(const Tensor& input, int64_t signal_ndim,
                 bool complex_input, bool complex_output,
