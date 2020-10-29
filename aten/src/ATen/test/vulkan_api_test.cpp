@@ -85,16 +85,22 @@ TEST(VulkanAPITest, mul_scalar) {
 
   const float b_scalar = 3.1415f;
 
-  std::cout << a_cpu << std::endl;
-
   const auto c_cpu = at::mul(a_cpu, b_scalar);
   const auto c_vulkan = at::mul(a_vulkan, b_scalar);
 
-  std::cout << c_cpu << std::endl;
-  std::cout << c_vulkan.cpu() << std::endl;
-  //std::cout << c_vulkan << std::endl;
-
   ASSERT_TRUE(almostEqual(c_cpu, c_vulkan.cpu()));
+}
+
+TEST(VulkanAPITest, mul_scalar_) {
+  auto a_cpu = at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_vulkan = a_cpu.vulkan();
+
+  const float b_scalar = 3.1415f;
+
+  a_cpu.mul_(b_scalar);
+  a_vulkan.mul_(b_scalar);
+
+  ASSERT_TRUE(almostEqual(a_cpu, a_vulkan.cpu()));
 }
 
 TEST(VulkanAPITest, copy) {

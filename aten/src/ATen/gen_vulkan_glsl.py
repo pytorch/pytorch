@@ -104,6 +104,10 @@ def main(argv):
     if not os.path.exists(options.output_path):
         os.makedirs(options.output_path)
 
+    print("Generating glsls...")
+    print("glsl-path: {}".format(options.glsl_path))
+    print("output-path: {}".format(options.output_path))
+
     glsls = findAllGlsls(options.glsl_path)
     genCppH(
         options.output_path + "/" + H_NAME, options.output_path + "/" + CPP_NAME,
