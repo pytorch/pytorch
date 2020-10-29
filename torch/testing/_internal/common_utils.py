@@ -60,6 +60,7 @@ if sys.platform == 'win32':
 
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
+IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
 
 class ProfilingMode(Enum):
     LEGACY = 1
@@ -1804,13 +1805,36 @@ def check_test_defined_in_running_script(test_case):
             test_case.id(), running_script_path, test_case_class_file)
 
 
+def get_test_device_types():
+    test_device_types = []
+    if IS_SANDCASTLE or IS_FBCODE:
+        if IS_REMOTE_GPU:
+            test_device_types.append("CUDA")
+        else:
+            test_device_types.append("CPU")
+            test_device_types.append("OTHER")
+    else:
+        test_device_types.append("CPU")
+        test_device_types.append("CUDA")
+        test_device_types.append("OTHER")
+    return test_device_types
+
+
 def load_tests(loader, tests, pattern):
     set_running_script_path()
+    test_device_types = get_test_device_types()
     test_suite = unittest.TestSuite()
     for test_group in tests:
         for test in test_group:
             check_test_defined_in_running_script(test)
-            test_suite.addTest(test)
+            if "cuda" in str.lower(test.__class__.__name__):
+                device_type = "CUDA"
+            elif "cpu" in str.lower(test.__class__.__name__):
+                device_type = "CPU"
+            else:
+                device_type = "OTHER"
+            if device_type in test_device_types:
+                test_suite.addTest(test)
     return test_suite
 
 
