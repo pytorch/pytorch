@@ -59,8 +59,9 @@ Tensor _bincount_cpu_template(
 // order to include maxvalue if exists
 template <typename input_t>
 inline int64_t getbin(input_t x, input_t min, input_t max, int64_t nbins) {
-  if (x >= max)
+  if (x >= max) {
     return nbins - 1;
+  }
   return static_cast<int64_t>((x - min) * nbins / (max - min));
 }
 
@@ -120,15 +121,17 @@ std::tuple<Tensor, Tensor> _histogram_cpu_template_uniform_bins(
     // This is single threaded, as other similar operators are single-threaded
     // in PyTorch today, and a multi-threaded one would be tricky to implement.
     for (int64_t i = 0; i < self_size; i++) {
-      if (self_p[i] >= min && self_p[i] <= max)
+      if (self_p[i] >= min && self_p[i] <= max) {
         output_p[getbin(self_p[i], min, max, nbins)] += weights_p[i];
+      }
     }
   } else {
     hist = native::zeros({nbins}, kLong);
     int64_t* output_p = hist.data_ptr<int64_t>();
     for (int64_t i = 0; i < self_size; i++) {
-      if (self_p[i] >= min && self_p[i] <= max)
-        output_p[getbin(self_p[i], min, max, nbins)] += 1L;
+      if (self_p[i] >= min && self_p[i] <= max) {
+        output_p[getbin(self_p[i], min, max, nbins)] += static_cast<int64_t>(1);
+      }
     }
   }
 
