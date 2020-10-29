@@ -102,8 +102,8 @@ class _RemoteModule(nn.Module):
         Arguments:
             remote_device (str): Device on the destination worker where we‘d like to place this module.
                 The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
-                E.g., "trainer0/cpu", "ps0/cuda:0".
-                In addition, the device field can be optional, and the default value is "cpu".
+                E.g., "trainer0/cpu", "trainer0", "ps0/cuda:0".
+                In addition, the device field can be optional and the default value is "cpu".
             module_cls (nn.Module): For example,
                 >>> class MyModule(nn.Module):
                 >>>     def forward(input):
@@ -337,8 +337,8 @@ class RemoteModule(_RemoteModule):
     Arguments:
         remote_device (str): Device on the destination worker where we‘d like to place this module.
             The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
-            E.g., "trainer0/cpu", "ps0/cuda:0".
-            In addition, the device field can be optional, and the default value is "cpu".
+            E.g., "trainer0/cpu", "trainer0", "ps0/cuda:0".
+            In addition, the device field can be optional and the default value is "cpu".
         module_cls (nn.Module): For example,
             >>> class MyModule(nn.Module):
             >>>     def forward(input):
