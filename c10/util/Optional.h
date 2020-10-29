@@ -355,15 +355,10 @@ struct constexpr_optional_base {
 template <class T>
 struct small_scalar_optimization_optional_base {
   bool init_;
-  struct Storage {
-    T value_;
-
-    Storage() = default;
-    explicit Storage(T v) : value_(v) {}
-  } storage_;
+  constexpr_storage_t<T> storage_;
 
   constexpr small_scalar_optimization_optional_base() noexcept
-      : init_(false) {}
+  : init_(false), storage_(trivial_init) {}
 
   explicit constexpr small_scalar_optimization_optional_base(const T& v)
       : init_(true), storage_(v) {}
@@ -390,7 +385,10 @@ struct small_scalar_optimization_optional_base {
 
 template <class T>
 using OptionalBase = typename std::conditional<
-    std::is_scalar<T>::value && sizeof(T) <= 4,
+    std::is_trivially_destructible<T>::value &&
+    std::is_trivially_copyable<T>::value &&
+    std::is_trivially_copy_assignable<T>::value &&
+    std::is_trivially_move_assignable<T>::value,
     small_scalar_optimization_optional_base<T>,
     typename std::conditional<
         std::is_trivially_destructible<T>::value, // if possible
@@ -402,7 +400,10 @@ template <class T>
 class optional : private OptionalBase<T> {
   template <class U> // re-declaration for nvcc on Windows.
   using OptionalBase = typename std::conditional<
-      std::is_scalar<U>::value && sizeof(U) <= 4,
+      std::is_trivially_destructible<U>::value &&
+      std::is_trivially_copyable<U>::value &&
+      std::is_trivially_copy_assignable<U>::value &&
+      std::is_trivially_move_assignable<U>::value,
       small_scalar_optimization_optional_base<U>,
       typename std::conditional<
           std::is_trivially_destructible<U>::value, // if possible
