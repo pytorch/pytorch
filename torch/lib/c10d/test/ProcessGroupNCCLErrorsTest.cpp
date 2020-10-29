@@ -37,10 +37,10 @@ class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
 class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
  public:
   ProcessGroupNCCLSimulateErrors(
-      const std::shared_ptr<c10d::Store>& store,
+      const c10::intrusive_ptr<c10d::Store>& store,
       int rank,
       int size,
-      c10d::ProcessGroupNCCL::Options opts)
+      const c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options>& opts)
       : ProcessGroupNCCL(store, rank, size, opts), simulate_error_(false) {}
 
   std::exception_ptr checkForNCCLErrors(
@@ -105,10 +105,10 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
 class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
  public:
   ProcessGroupNCCLTimedOutErrors(
-      const std::shared_ptr<c10d::Store>& store,
+      const c10::intrusive_ptr<c10d::Store>& store,
       int rank,
       int size,
-      c10d::ProcessGroupNCCL::Options opts)
+      const c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options>& opts)
       : ProcessGroupNCCLSimulateErrors(store, rank, size, opts),
         set_timedout_error_(false) {}
 
@@ -151,7 +151,7 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
   void SetUp() override {
     size_t numDevices = cudaNumDevices();
     TemporaryFile file;
-    store_ = std::make_shared<::c10d::FileStore>(file.path, 1);
+    store_ = c10::make_intrusive<::c10d::FileStore>(file.path, 1);
 
     at::cuda::OptionalCUDAGuard deviceGuard;
     tensors_.resize(numDevices);
@@ -166,7 +166,7 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
   }
 
   std::vector<at::Tensor> tensors_;
-  std::shared_ptr<::c10d::FileStore> store_;
+  c10::intrusive_ptr<::c10d::FileStore> store_;
 };
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {

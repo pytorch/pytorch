@@ -7,9 +7,11 @@
 #include <vector>
 #include "ATen/core/ivalue.h"
 
+#include <ATen/ATen.h>
+
 namespace c10d {
 
-class Store : public torch::CustomClassHolder{
+class Store : public torch::CustomClassHolder {
  public:
   static constexpr std::chrono::milliseconds kDefaultTimeout =
       std::chrono::seconds(300);
