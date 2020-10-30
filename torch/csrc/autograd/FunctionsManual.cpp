@@ -2701,16 +2701,18 @@ Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad) {
   return at::constant_pad_nd(grad, negated_pad, 0);
 }
 
-Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indices) {
-  // since first backward takes care of padding_idx
-  // and scaling by frequency, we don't need to worry
-  // about it here.
+Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indices, int64_t padding_idx) {
+  // since first backward takes care of scaling by frequency, 
+  // we don't need to worry about it here.
   auto gg_weight = grad.index_select(0, indices.reshape(-1));
 
   // reshape gradient as per the shape of indices
   auto size = indices.sizes().vec();
   size.push_back(-1);
 
+  if (padding_idx >= 0) {
+    gg_weight.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
+  }
   return gg_weight.view(size);
 }
 
