@@ -898,7 +898,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
 
       // Interpolate the 4 values in the x direction
       Vec interp_x[4];
-      for (int64_t i = 0; i < 4; i++) {
+      for (int64_t i = 0; i < 4; ++i) {
         interp_x[i] = 
           coeff_x[0] * get_value_bounded(inp_slice_C_ptr, ix - Vec(1), iy + Vec(-1 + i)) +
           coeff_x[1] * get_value_bounded(inp_slice_C_ptr, ix + Vec(0), iy + Vec(-1 + i)) +
@@ -947,8 +947,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
       auto gInp_slice_C_ptr = gInp_slice[c].data();
       auto gOut = Vec::loadu(gOut_slice[c].data() + offset, len);
 
-      for (int64_t i = 0; i < 4; i++) {
-        for (int64_t j = 0; j < 4; j++) {
+      for (int64_t i = 0; i < 4; ++i) {
+        for (int64_t j = 0; j < 4; ++j) {
           auto xx = ix + Vec(-1 + i);
           auto yy = iy + Vec(-1 + j);
 

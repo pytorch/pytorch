@@ -504,7 +504,7 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
               scalar_t coefficients[4];
 
               // Interpolate 4 values in the x directon
-              for (int64_t i = 0; i < 4; i++) {
+              for (int64_t i = 0; i < 4; ++i) {
                 coefficients[i] = cubic_interp1d<scalar_t>(
                   get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
                   get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 0, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
@@ -697,8 +697,8 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
             for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC+= inp_sC) {
               scalar_t gOut = *gOut_ptr_NCHW;
 
-              for (int64_t i = 0; i < 4; i++) {
-                for (int64_t j = 0; j < 4; j++) {
+              for (int64_t i = 0; i < 4; ++i) {
+                for (int64_t j = 0; j < 4; ++j) {
 
                   // set input gradient
                   add_value_bounded<scalar_t>(gInp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
