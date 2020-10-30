@@ -843,6 +843,7 @@ class DistributedTest:
             rank = dist.get_rank()
             tensor = _build_tensor(10, value=rank)
             recv_ranks = set()
+            irecv_ranks = set()
 
             for dst in range(0, dist.get_world_size()):
                 if dst == rank:
@@ -850,19 +851,30 @@ class DistributedTest:
                     for dst in range(0, dist.get_world_size()):
                         if dst == rank:
                             continue
-                        output_tensor = _build_tensor(10, value=-1)
-                        sender = dist.recv(output_tensor)
 
-                        # Assert the scalar value "sender" that should be
-                        # equal to the rank of the sender is equal to all
-                        # values in the received tensor.
-                        self.assertTrue(output_tensor.eq(sender).all())
-                        recv_ranks.add(sender)
+                        for recv in ["recv", "irecv"]:
+                            output_tensor = _build_tensor(10, value=-1)
+
+                            if recv == "recv":
+                                sender = dist.recv(output_tensor)
+                                recv_ranks.add(sender)
+                            elif recv == "irecv":
+                                work = dist.irecv(output_tensor)
+                                work.wait()
+                                sender = work._source_rank()
+                                irecv_ranks.add(sender)
+
+                            # Assert the scalar value "sender" that should be
+                            # equal to the rank of the sender is equal to all
+                            # values in the received tensor.
+                            self.assertTrue(output_tensor.eq(sender).all())
                 else:
                     # Send mode
-                    dist.send(tensor, dst)
+                    dist.send(tensor, dst)  # recv
+                    dist.send(tensor, dst)  # irecv
 
             self.assertEqual(len(recv_ranks), dist.get_world_size() - 1)
+            self.assertEqual(len(irecv_ranks), dist.get_world_size() - 1)
             self._barrier()
 
         # SEND RECV WITH TAG
