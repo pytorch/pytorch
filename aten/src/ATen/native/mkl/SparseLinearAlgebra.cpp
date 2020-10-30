@@ -68,6 +68,18 @@ namespace at { namespace native {
       desc.type = SPARSE_MATRIX_TYPE_GENERAL;
       mkl_sparse_d_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, pointers, pointers+1,
                               indices, values);
+      std::cout << "values: \n";
+      for (int i = 0; i < 100; ++i) {
+        std::cout << values[i] << " ";
+      }
+      std::cout << std::endl;
+
+      std::cout << "indices: \n";
+      for (int i = 0; i < 100; ++i) {
+        std::cout << indices[i] << " ";
+      }
+      std::cout << std::endl;
+
       mkl_sparse_d_mm(SPARSE_OPERATION_NON_TRANSPOSE, alpha, A, desc,
                       SPARSE_LAYOUT_ROW_MAJOR, dense, dense_ncols, dense_ncols,
                       beta, res, dense_ncols);
@@ -78,8 +90,6 @@ namespace at { namespace native {
                                               const IntTensor& pointers, const Tensor& values,
                                               const Tensor& dense, const Tensor& t, Scalar alpha,
                                               Scalar beta, IntArrayRef size, IntArrayRef dense_size) {
-
-      std::cout << "res shape: " << res.sizes() << " t.shape= " << t.sizes() << std::endl;
       sparse_mm_mkl_impl(res.data_ptr<scalar_t>(),
                          indices.data_ptr<int>(),
                          pointers.data_ptr<int>(),
