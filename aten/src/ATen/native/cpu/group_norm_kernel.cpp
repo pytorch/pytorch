@@ -24,9 +24,9 @@ void GroupNormKernelImplInternal(
     int64_t HxW,
     int64_t group,
     T eps,
-    Tensor* Y,
-    Tensor* mean,
-    Tensor* rstd) {
+    Tensor& Y,
+    Tensor& mean,
+    Tensor& rstd) {
   TORCH_CHECK(X.numel() == N * C * HxW);
   TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
   TORCH_CHECK(!beta.defined() || beta.numel() == C);
@@ -35,9 +35,9 @@ void GroupNormKernelImplInternal(
   const T* X_data = X.data_ptr<T>();
   const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
   const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
-  T* Y_data = Y->data_ptr<T>();
-  T* mean_data = mean->data_ptr<T>();
-  T* rstd_data = rstd->data_ptr<T>();
+  T* Y_data = Y.data_ptr<T>();
+  T* mean_data = mean.data_ptr<T>();
+  T* rstd_data = rstd.data_ptr<T>();
   const T s = T(1) / static_cast<T>(D * HxW);
   const bool gamma_null = (gamma_data == nullptr);
   const bool beta_null = beta_data == nullptr;
@@ -94,9 +94,9 @@ void GroupNormKernelImpl(
     int64_t HxW,
     int64_t group,
     double eps,
-    Tensor* Y,
-    Tensor* mean,
-    Tensor* rstd) {
+    Tensor& Y,
+    Tensor& mean,
+    Tensor& rstd) {
   AT_DISPATCH_FLOATING_TYPES(X.scalar_type(), "GroupNormKernelImpl", [&]() {
     GroupNormKernelImplInternal<scalar_t>(
         X,
@@ -268,9 +268,9 @@ void GroupNormBackwardKernelImplInternal(
     int64_t C,
     int64_t HxW,
     int64_t group,
-    Tensor* dX,
-    Tensor* dgamma,
-    Tensor* dbeta) {
+    Tensor& dX,
+    Tensor& dgamma,
+    Tensor& dbeta) {
   TORCH_CHECK(dY.numel() == N * C * HxW);
   TORCH_CHECK(X.numel() == N * C * HxW);
   TORCH_CHECK(mean.numel() == N * group);
@@ -282,9 +282,9 @@ void GroupNormBackwardKernelImplInternal(
   const T* mean_data = mean.data_ptr<T>();
   const T* rstd_data = rstd.data_ptr<T>();
   const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
-  T* dX_data = dX->defined() ? dX->data_ptr<T>() : nullptr;
-  T* dgamma_data = dgamma->defined() ? dgamma->data_ptr<T>() : nullptr;
-  T* dbeta_data = dbeta->defined() ? dbeta->data_ptr<T>() : nullptr;
+  T* dX_data = dX.defined() ? dX.data_ptr<T>() : nullptr;
+  T* dgamma_data = dgamma.defined() ? dgamma.data_ptr<T>() : nullptr;
+  T* dbeta_data = dbeta.defined() ? dbeta.data_ptr<T>() : nullptr;
   Tensor ds = at::empty({N, C}, X.options());
   Tensor db = at::empty({N, C}, X.options());
   T* ds_data = ds.data_ptr<T>();
@@ -326,9 +326,9 @@ void GroupNormBackwardKernelImpl(
     int64_t C,
     int64_t HxW,
     int64_t group,
-    Tensor* dX,
-    Tensor* dgamma,
-    Tensor* dbeta) {
+    Tensor& dX,
+    Tensor& dgamma,
+    Tensor& dbeta) {
   AT_DISPATCH_FLOATING_TYPES(
       X.scalar_type(), "GroupNormBackwardKernelImpl", [&]() {
         GroupNormBackwardKernelImplInternal<scalar_t>(

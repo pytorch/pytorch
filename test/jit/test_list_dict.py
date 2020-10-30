@@ -948,11 +948,11 @@ class TestList(JitTestCase):
             check_list(min_intlist, int_list)
             check_list(max_intlist, int_list)
 
-            bool_li = list(map(lambda x: bool(x), int_list))
+            bool_li = [bool(x) for x in int_list]
             check_list(min_boollist, bool_li)
             check_list(max_boollist, bool_li)
 
-            float_li = list(map(lambda x: float(x), int_list))
+            float_li = [float(x) for x in int_list]
             check_list(min_floatlist, float_li)
             check_list(max_floatlist, float_li)
 
@@ -1324,6 +1324,15 @@ class TestDict(JitTestCase):
 
         self.checkScript(update, (self.dict(), self.dict()))
         self.checkScript(update, (self.dict(), self.dict2()))
+
+    def test_update_existing_key(self):
+        def foo() -> Dict[str, int]:
+            a: Dict[str, int] = {}
+            for i in range(3):
+                a.update({'a': i})
+            return a
+
+        self.checkScript(foo, ())
 
     def test_aug_assign(self):
         def aug_assign_dict_tensor(a):

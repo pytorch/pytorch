@@ -25,7 +25,3 @@ if is_available():
     # this.
 
     from .distributed_c10d import _backend
-
-    # TODO: remove this once CI issue is resolved
-    # https://github.com/pytorch/pytorch/issues/42517
-    from .distributed_c10d import _P2POp, _batch_isend_irecv

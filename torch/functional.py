@@ -9,6 +9,7 @@ from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
+from torch._autograd_functions import _LU
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -510,7 +511,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         signal_dim = input.dim()
         extended_shape = [1] * (3 - signal_dim) + list(input.size())
         pad = int(n_fft // 2)
-        input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
+        input = F.pad(input.view(extended_shape), [pad, pad], pad_mode)
         input = input.view(input.shape[-signal_dim:])
     return _VF.stft(input, n_fft, hop_length, win_length, window,  # type: ignore
                     normalized, onesided, return_complex)
@@ -1229,22 +1230,31 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
             The following norms can be calculated:
 
-            =====  ============================  ==========================
-            ord    matrix norm                   vector norm
-            =====  ============================  ==========================
-            None   Frobenius norm                2-norm
-            'fro'  Frobenius norm                --
-            'nuc'  nuclear norm                  --
-            Other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
-            =====  ============================  ==========================
+            ======  ==============  ==========================
+            ord     matrix norm     vector norm
+            ======  ==============  ==========================
+            'fro'   Frobenius norm  --
+            'nuc'   nuclear norm    --
+            Number  --              sum(abs(x)**ord)**(1./ord)
+            ======  ==============  ==========================
 
-        dim (int, 2-tuple of ints, 2-list of ints, optional): If it is an int,
-            vector norm will be calculated, if it is 2-tuple of ints, matrix norm
-            will be calculated. If the value is None, matrix norm will be calculated
-            when the input tensor only has two dimensions, vector norm will be
-            calculated when the input tensor only has one dimension. If the input
-            tensor has more than two dimensions, the vector norm will be applied to
-            last dimension.
+            The vector norm can be calculated across any number of dimensions.
+            The corresponding dimensions of :attr:`input` are flattened into
+            one dimension, and the norm is calculated on the flattened
+            dimension.
+
+            Frobenius norm produces the same result as ``p=2`` in all cases
+            except when :attr:`dim` is a list of three or more dims, in which
+            case Frobenius norm throws an error.
+
+            Nuclear norm can only be calculated across exactly two dimensions.
+
+        dim (int, tuple of ints, list of ints, optional):
+            Specifies which dimension or dimensions of :attr:`input` to
+            calculate the norm across. If :attr:`dim` is ``None``, the norm will
+            be calculated across all dimensions of :attr:`input`. If the norm
+            type indicated by :attr:`p` does not support the specified number of
+            dimensions, an error will occur.
         keepdim (bool, optional): whether the output tensors have :attr:`dim`
             retained or not. Ignored if :attr:`dim` = ``None`` and
             :attr:`out` = ``None``. Default: ``False``
@@ -1254,6 +1264,12 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             returned tensor. If specified, the input tensor is casted to
             :attr:'dtype' while performing the operation. Default: None.
 
+    .. note::
+        Even though ``p='fro'`` supports any number of dimensions, the true
+        mathematical definition of Frobenius norm only applies to tensors with
+        exactly two dimensions. :func:`torch.linalg.norm` with ``ord='fro'`` aligns
+        with the mathematical definition, since it can only be applied across
+        exactly two dimensions.
 
     Example::
 
@@ -1414,6 +1430,10 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     .. note::
        ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
 
+    .. warning::
+        The LU factorization does have backward support,
+        but only for square inputs of full rank.
+
     Arguments:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`
         pivot (bool, optional): controls whether pivoting is done. Default: ``True``
@@ -1429,7 +1449,12 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 
             - **factorization** (*Tensor*): the factorization of size :math:`(*, m, n)`
 
-            - **pivots** (*IntTensor*): the pivots of size :math:`(*, m)`
+            - **pivots** (*IntTensor*): the pivots of size :math:`(*, \text{min}(m, n))`.
+              ``pivots`` stores all the intermediate transpositions of rows.
+              The final permutation ``perm`` could be reconstructed by
+              applying ``swap(perm[i], perm[pivots[i] - 1])`` for ``i = 0, ..., pivots.size(-1) - 1``,
+              where ``perm`` is initially the identity permutation of :math:`m` elements
+              (essentially this is what :func:`torch.lu_unpack` is doing).
 
             - **infos** (*IntTensor*, *optional*): if :attr:`get_infos` is ``True``, this is a tensor of
               size :math:`(*)` where non-zero values indicate whether factorization for the matrix or
@@ -1455,9 +1480,25 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         ...   print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
+    if not torch._jit_internal.is_scripting():
+        if A.requires_grad:
+            if not (A.size(-2) == A.size(-1) and A.dtype.is_floating_point):
+                raise ValueError(
+                    'lu.backward works only with batches of squared full-rank matrices'
+                    ' of floating types.'
+                )
+
+            return _LU.apply(A, pivot, get_infos)
+    else:
+        if A.requires_grad:
+            raise RuntimeError(
+                'Script and require gradients is not supported at the moment.'
+                'If you just want to do the forward, use .detach()'
+                'on the input before calling the function.'
+            )
+
     # If get_infos is True, then we don't need to check for errors and vice versa
     return torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
-
 
 if TYPE_CHECKING:
     _ListOrSeq = Sequence[Tensor]

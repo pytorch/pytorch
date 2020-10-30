@@ -272,10 +272,14 @@ NvrtcFunction nvrtcCompile(
         at::globalContext().getNVRTC().nvrtcDestroyProgram(&program));
   });
 
+#ifdef __HIP_PLATFORM_HCC__
+  std::vector<const char*> args = {"--std=c++14"};
+#else
   const std::string compute = "--gpu-architecture=compute_" +
       std::to_string(major) + std::to_string(minor);
   std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
+#endif
 
   const char* disable_fma = getenv("PYTORCH_CUDA_FUSER_DISABLE_FMA");
   // int disable_fma_flag = disable_fma ? atoi(disable_fma) : 0;
@@ -346,6 +350,7 @@ NvrtcFunction nvrtcCompile(
   // TODO: We do go through different code path, should investigate whether this
   // has an impact on generated binary.
   const char* prefix_env = getenv("PYTORCH_CUDA_FUSER_CUBIN");
+#ifndef __HIP_PLATFORM_HCC__
   if (prefix_env) {
     FUSER_PERF_SCOPE("load CUBIN");
 
@@ -403,6 +408,12 @@ NvrtcFunction nvrtcCompile(
         options.data(),
         option_vals.data()));
   }
+#else
+  // load ptx directly
+  AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadData(
+      &(compiled_kernel_.module), ptx.data()));
+
+#endif
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleGetFunction(
       &(compiled_kernel_.function),
       compiled_kernel_.module,

@@ -32,12 +32,13 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
+from torch.nn.parameter import UninitializedParameter
 from torch.nn.parallel._functions import Broadcast
 from torch.testing import get_all_fp_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_ROCM, download_file, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
-    ALL_TENSORTYPES2, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
+    ALL_TENSORTYPES2, suppress_warnings, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
@@ -111,7 +112,7 @@ class PackedSequenceTest(TestCase):
     def _padded_sequence(self, tensor_type):
         """Create Tensor of random padded sequences"""
         ordered = self._ordered_sequence(tensor_type)
-        lengths = list(map(len, ordered))
+        lengths = [len(i) for i in ordered]
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
 
@@ -327,7 +328,7 @@ class TestNN(NNTestCase):
     def _backward(self, module, input: _TensorOrTensors, output, grad_output, create_graph=False):
         output.backward(grad_output, retain_graph=True, create_graph=create_graph)
         if isinstance(input, tuple):
-            return tuple(map(lambda i: i.grad.data if i.grad is not None else None, input))
+            return tuple(i.grad.data if i.grad is not None else None for i in input)
         else:
             return input.grad.data if input.grad is not None else None
 
@@ -353,7 +354,7 @@ class TestNN(NNTestCase):
             gradOutput = torch.ones(())
         criterion(*args).backward(gradOutput.to(input_tuple[0]))
         if isinstance(input, tuple):
-            return tuple(map(lambda i: i.grad.data, input))
+            return tuple(i.grad.data for i in input)
         else:
             return input.grad.data
 
@@ -1552,7 +1553,8 @@ class TestNN(NNTestCase):
         m = nn.Linear(20, 10).float()
         mw = m.weight[:]
         m.double()
-        mw[0][0] = 5
+        with torch.no_grad():
+            mw[0][0] = 5
         self.assertTrue(mw[0][0].dtype == torch.float)
         self.assertTrue(mw._base[0][0].dtype == torch.double)
 
@@ -1565,7 +1567,8 @@ class TestNN(NNTestCase):
             m = nn.Linear(20, 10).float()
             mw = m.weight[:]
             m.double()
-            mw[0][0] = 5
+            with torch.no_grad():
+                mw[0][0] = 5
             self.assertTrue(mw[0][0] == mw._base[0][0])
 
             # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
@@ -2954,6 +2957,23 @@ class TestNN(NNTestCase):
         expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])
         self.assertEqual(F.threshold(x, 0, 99), expected)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_embedding_max_norm_unsorted_repeating_indices(self):
+        def create_embedding(device):
+            # Seed RNG so we get the same Embedding each time
+            torch.manual_seed(0)
+            return torch.nn.Embedding(
+                num_embeddings=20,
+                embedding_dim=64,
+                max_norm=1.0).to(device)
+
+        ix = torch.arange(2, device='cpu', dtype=torch.long).repeat(2000)
+        out_cpu = create_embedding('cpu')(ix)
+
+        ix = ix.to('cuda')
+        out = create_embedding('cuda')(ix)
+        self.assertEqual(out.cpu(), out_cpu)
+
     def test_embedding_sparse_basic(self):
         embedding = nn.Embedding(10, 20, sparse=True)
         input = torch.tensor([[0, 2, 4, 5], [4, 3, 0, 9]], dtype=torch.long)
@@ -3033,6 +3053,13 @@ class TestNN(NNTestCase):
         res_old = embed_old(a)
 
         res_F = F.embedding(a, embeddings)
+        self.assertEqual(res_old, res_F)
+
+        embed_old = torch.nn.Embedding(4, 3)
+        embed_old = embed_old.from_pretrained(embeddings, padding_idx=2)
+        res_old = embed_old(a)
+        res_F = F.embedding(a, embeddings, padding_idx=2)
+
         self.assertEqual(res_old, res_F)
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
@@ -3647,7 +3674,7 @@ class TestNN(NNTestCase):
         self.assertIn('bn.running_var', state_dict)
         self.assertIn('bn.running_mean', state_dict)
         self.assertIn('bn.num_batches_tracked', state_dict)
-        self.assertFalse(any(map(lambda k: k.startswith('empty'), state_dict.keys())))
+        self.assertFalse(any(k.startswith('empty') for k in state_dict.keys()))
         for k, v in state_dict.items():
             param = net
             for component in k.split('.'):
@@ -3798,8 +3825,9 @@ class TestNN(NNTestCase):
 
         # use sequential to verify nesting
         m = nn.Sequential(CustomState())
-        m[0].param[0] = 10
-        m[0].sub.weight[0, 0] = 555
+        with torch.no_grad():
+            m[0].param[0] = 10
+            m[0].sub.weight[0, 0] = 555
         state_dict = m.state_dict()
         self.assertEqual(state_dict["0.serialized"].item(), 11)
         self.assertIn("0.sub.weight", state_dict)
@@ -4120,6 +4148,22 @@ class TestNN(NNTestCase):
                 1, 1, 3, stride=2, padding=1, output_padding=1).cuda().half()
             output = deconv(inputs)
             output.mean().backward()
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @repeat_test_for_types([torch.half, torch.float])
+    def test_ConvTranspose2d_large_output_padding(self, dtype=torch.half):
+        net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)\
+            .to(device='cuda', dtype=dtype)
+        net2 = torch.nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1)\
+            .to(device='cuda', dtype=dtype)
+        net3 = torch.nn.ConvTranspose2d(32, 3, kernel_size=3, stride=2, padding=1, output_padding=1)\
+            .to(device='cuda', dtype=dtype)
+        x = torch.rand(1, 128, 6, 6, device='cuda', dtype=dtype, requires_grad=True)
+        x = net1(x)
+        x = net2(x)
+        x = net3(x)
+        x.backward(torch.randn_like(x))
+        torch.cuda.synchronize()
 
     # For https://github.com/pytorch/pytorch/pull/1273
     # Almost identical to the above `test_Conv2d_naive_groups`
@@ -6466,27 +6510,31 @@ class TestNN(NNTestCase):
     @unittest.skipIf(
         not TEST_NUMPY or not TEST_SCIPY, "Numpy or Scipy not found")
     def test_gelu(self):
-        def _test_gelu(n, m, dtype, contiguous):
+        def _test_gelu(n, m, dtype, contiguous, atol=None, rtol=None):
+            numpy_dtype = {
+                torch.bfloat16: torch.float, torch.float: torch.float, torch.double: torch.double
+            }[dtype]
+            devices = ['cpu'] if dtype != torch.bfloat16 else [] + \
+                ['cuda'] if TEST_CUDA else []
+
             def _gelu_ref(X):
                 return X * stats.norm.cdf(X)
 
-            if contiguous:
-                X = torch.rand(n, m, dtype=dtype, requires_grad=True)
-            else:
-                X = torch.rand(n, m, dtype=dtype, requires_grad=True)[:, ::2]
-            res = F.gelu(X)
-            ref = _gelu_ref(X.detach().numpy())
-            self.assertEqual(res, ref)
-            gradcheck(F.gelu, [X], eps=1e-4)
-
-            if TEST_CUDA:
-                X_cuda = X.cuda()
-                res_cuda = F.gelu(X_cuda)
-                self.assertEqual(res_cuda.cpu(), ref)
-                gradcheck(F.gelu, [X_cuda], eps=1e-4)
+            for d in devices:
+                if contiguous:
+                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)
+                else:
+                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
+                res = F.gelu(X)
+                ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
+                self.assertEqual(res, ref, rtol=rtol, atol=atol)
+                if dtype != torch.bfloat16:
+                    gradcheck(F.gelu, [X], eps=1e-4)
 
         for n in range(1, 10):
             for m in range(1, 10):
+                _test_gelu(n, m, torch.bfloat16, True, 1e-2, 0)
+                _test_gelu(n, m, torch.bfloat16, False, 1e-2, 0)
                 _test_gelu(n, m, torch.float32, True)
                 _test_gelu(n, m, torch.float32, False)
                 _test_gelu(n, m, torch.float64, True)
@@ -9173,7 +9221,7 @@ class TestAddRelu(TestCase):
         a = a + 5
         add_res = a + b
         relu_res = torch.relu(add_res)
-        add_relu_res = torch.add_relu(a, b)
+        add_relu_res = torch._VF._add_relu(a, b)
 
         self.assertTrue(torch.allclose(add_relu_res, relu_res))
 
@@ -10131,6 +10179,34 @@ class TestNNDeviceType(NNTestCase):
                 self._test_module_empty_input(mod, inp)
 
     @onlyOnCPUAndCUDA
+    def test_ReplicationPad_empty(self, device):
+        for mod, inp in [
+                (torch.nn.ReplicationPad1d(3), torch.randn(0, 3, 10, device=device)),
+                (torch.nn.ReplicationPad2d(3), torch.randn(0, 3, 10, 10, device=device)),
+                (torch.nn.ReplicationPad3d(3), torch.randn(0, 3, 10, 10, 10, device=device))]:
+            self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(NotImplementedError, 'Only 3D'):
+            mod = torch.nn.ReplicationPad1d(2)
+            inp = torch.randn(3, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected 2D or 3D'):
+            mod = torch.nn.ReplicationPad1d(2)
+            inp = torch.randn(3, 0, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected 3D or 4D'):
+            mod = torch.nn.ReplicationPad2d((2, 2, 2, 2))
+            inp = torch.randn(43, 0, 10, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected 4D or 5D'):
+            mod = torch.nn.ReplicationPad3d((2, 2, 2, 2, 2, 2))
+            inp = torch.randn(3, 0, 10, 10, 10, device=device)
+            mod(inp)
+
+    @onlyOnCPUAndCUDA
     def test_ReflectionPad_empty(self, device):
         for mod, inp in [
                 (torch.nn.ReflectionPad1d(2), torch.randn(0, 3, 10, device=device)),
@@ -10146,6 +10222,17 @@ class TestNNDeviceType(NNTestCase):
             mod = torch.nn.ReflectionPad2d(2)
             inp = torch.randn(3, 0, 10, 10, device=device)
             mod(inp)
+
+    @onlyOnCPUAndCUDA
+    def test_Unfold_empty(self, device):
+        inp = torch.randn(0, 3, 3, 4, device=device)
+        unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
+        self._test_module_empty_input(unfold, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected 3D or 4D'):
+            inp = torch.randn(3, 0, 3, 4, device=device)
+            unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
+            unfold(inp)
 
     @onlyCUDA
     @dtypes(torch.float, torch.double)
@@ -10658,6 +10745,15 @@ class TestNNDeviceType(NNTestCase):
         fn = fn_wrapper(device)
         _assertGradAndGradgradChecks(self, fn, (weight, ))
 
+        def fn_wrapper(device):
+            def padding_fn(weight):
+                inp = torch.tensor([[0, 1, 1, 2], [1, 1, 0, 2]], dtype=torch.long).to(device)
+                return torch.nn.functional.embedding(inp, weight, padding_idx=1)
+            return padding_fn
+
+        fn = fn_wrapper(device)
+        _assertGradAndGradgradChecks(self, fn, (weight, ))
+
     def test_embedding_scalar_weight_error(self, device):
         indices = torch.rand(2, 2, device=device).long()
         weight = torch.tensor(1.0, device=device)
@@ -10754,7 +10850,7 @@ class TestNNDeviceType(NNTestCase):
                 embedding.zero_grad()
                 self.assertEqual(after, pre)
 
-    # test is flaky on ROCm CI
+    # Test fails on Vg20
     @skipCUDAIfRocm
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypes(torch.float)
@@ -11286,7 +11382,7 @@ class TestNNDeviceType(NNTestCase):
     def _padded_sequence(self, device, dtype):
         """Create Tensor of random padded sequences"""
         ordered = self._ordered_sequence(device, dtype)
-        lengths = list(map(len, ordered))
+        lengths = [len(i) for i in ordered]
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
 
@@ -11328,7 +11424,8 @@ class TestNNDeviceType(NNTestCase):
             m = nn.Linear(20, 10)
             mw = m.weight[:]
             m.to(device)
-            mw[0][0] = 5
+            with torch.no_grad():
+                mw[0][0] = 5
             self.assertTrue(mw[0][0] == mw._base[0][0])
 
             # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
@@ -11354,9 +11451,9 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(output[1], output[2])
         self.assertTrue(output.data.norm(p=2, dim=1).le(1).all())
 
-    # test is flaky on ROCm CI
-    @onlyCUDA
+    # Test fails on Vg20
     @skipCUDAIfRocm
+    @onlyCUDA
     @dtypes(torch.half, torch.float)
     def test_softmax(self, device, dtype):
         input = torch.rand(32, 100, device=device, dtype=dtype, requires_grad=True)
@@ -11519,6 +11616,47 @@ class TestNNDeviceType(NNTestCase):
                         assert mode == 'max'
                         bags.append(embeddings.narrow(0, offset, length).max(0)[0])
         return torch.stack(bags)
+
+    def test_EmbeddingBag_empty_per_sample_weights_and_offsets(self, device):
+        # Test empty input and per sample weight, and backward pass. There was a CUDA
+        # invalid configuration bug (more context in #46572)
+        def test_per_sample_weights(mode, dtype, trainable_scale):
+            es = nn.EmbeddingBag(5, 2, mode=mode).to(dtype=dtype, device=device)
+            es.weight.data.copy_(
+                torch.arange(1, 11, device=device, dtype=dtype).view_as(es.weight))
+            input = torch.tensor([], device=device, dtype=torch.long)
+            offsets = torch.tensor([0, 0, 0, 0, 0], device=device, dtype=torch.long)
+            per_sample_weights = torch.randn_like(input, dtype=dtype) \
+                                      .requires_grad_(trainable_scale)
+            ref_per_sample_weights = \
+                per_sample_weights.detach().requires_grad_(trainable_scale)
+            reference_weights = es.weight.detach().requires_grad_()
+
+            expected = self._embedding_bag_reference_impl(
+                input, reference_weights, offsets, mode, ref_per_sample_weights)
+            result = es(input, offsets, per_sample_weights)
+            self.assertEqual(result, expected, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+            grad = torch.randn_like(expected)
+            result.backward(grad)
+            # the reference impl doesn't have grad fn for empty input; but the grad should
+            # simply be a zero tensor
+            ref_weights_grad = torch.zeros_like(es.weight)
+            self.assertEqual(es.weight.grad, ref_weights_grad,
+                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+            if trainable_scale:
+                ref_per_sample_weights_grad = torch.empty_like(per_sample_weights)
+                self.assertEqual(per_sample_weights.grad, ref_per_sample_weights_grad,
+                                 atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+        if device == 'cuda':
+            dtypes = (torch.float, torch.double, torch.half)
+        else:
+            dtypes = (torch.float, torch.double)
+        modes = ('sum',)
+        trainable_scale = (True, False)
+        for dtype, mode, trainable in itertools.product(dtypes, modes, trainable_scale):
+            test_per_sample_weights(mode, dtype, trainable)
 
     def test_EmbeddingBag_per_sample_weights_and_offsets(self, device):
         def test_per_sample_weights(mode, dtype, trainable_scale):
@@ -12843,6 +12981,22 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(functional, modular, atol=1e-6, rtol=1e-6)
             self.assertEqual(traced, modular, atol=1e-6, rtol=1e-6)
 
+    def test_to_complex(self, device):
+        m = nn.Linear(3, 5).to(device)
+        self.assertIs(m, m.to(device))
+        m.to(torch.cfloat)
+        self.assertIs(m.weight.dtype, torch.cfloat)
+        m.to(torch.cdouble)
+        self.assertIs(m.weight.dtype, torch.cdouble)
+        m.to(torch.float)
+        self.assertIs(m.weight.dtype, torch.float)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            m.to(torch.cfloat)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("Complex modules are a new feature" in str(w[-1].message))
+
 
 class TestModuleGlobalHooks(TestCase):
 
@@ -13051,6 +13205,199 @@ class TestModuleGlobalHooks(TestCase):
 
         output.backward(torch.ones(5, 5), retain_graph=True)
         self.assertTrue(local_backward_called and global_backward_called)
+
+
+class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
+    pass
+
+
+class TestLazyModules(TestCase):
+
+    @suppress_warnings
+    def test_lazy_module_parameter(self):
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        self.assertTrue(module.has_uninitialized_params())
+        state_dict = module.state_dict()
+        self.assertIsInstance(state_dict['test_param'], UninitializedParameter)
+        new_module = LazyModule()
+        # An error is raised when there is an attempt to replace an existing parameter
+        # with an uninitialized one
+        new_module.register_parameter('test_param', nn.Parameter(torch.ones(5, 5)))
+        with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
+            new_module.load_state_dict(state_dict)
+        # Uninitialized parameters are overriden when the state dict to be loaded contains a valid one
+        new_module = LazyModule()
+        new_module.register_parameter('test_param', nn.Parameter(torch.ones(5, 5)))
+        module.load_state_dict(new_module.state_dict())
+        self.assertEqual(module.test_param, torch.ones((5, 5)))
+
+        # Uninitialized parameters are left unchanged
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        self.assertTrue(module.has_uninitialized_params())
+
+        new_module = LazyModule()
+        new_module.register_parameter('test_param', UninitializedParameter())
+        module.load_state_dict(new_module.state_dict())
+        self.assertTrue(module.has_uninitialized_params())
+
+    @suppress_warnings
+    def test_lazy_module_jit(self):
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        self.assertTrue(module.has_uninitialized_params())
+        with self.assertRaisesRegex(RuntimeError, 'run a forward pass'):
+            torch.jit.script(module)
+
+    @suppress_warnings
+    def test_lazy_share_memory(self):
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        self.assertTrue(module.has_uninitialized_params())
+        with self.assertRaisesRegex(RuntimeError, 'share memory on an uninitialized'):
+            module.share_memory()
+
+    @suppress_warnings
+    def test_linear(self):
+        module = nn.LazyLinear(10)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(5, 5)
+        module(input)
+        self.assertIsInstance(module, nn.Linear)
+        self.assertNotIsInstance(module, nn.LazyLinear)
+        self.assertTrue(module.weight.shape == (10, 5))
+        y = module(input)
+        self.assertTrue(torch.equal(torch.nn.functional.linear(input, module.weight, module.bias), y))
+
+    @suppress_warnings
+    def test_lazy_linear_pickle(self):
+        module = nn.LazyLinear(10)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(module, nn.LazyLinear)
+        self.assertIsInstance(module.weight, UninitializedParameter)
+        input = torch.ones(5, 5)
+        module(input)  # fully materialized
+        new_module = pickle.loads(pickle.dumps(module))
+        self.assertIsInstance(new_module, nn.Linear)
+        self.assertNotIsInstance(new_module, nn.LazyLinear)
+        self.assertTrue(new_module.weight.shape == (10, 5))
+        self.assertNotIsInstance(new_module.weight, UninitializedParameter)
+
+    @suppress_warnings
+    def test_linear_state(self):
+        module = nn.Linear(5, 10)
+        lazy_module = nn.LazyLinear(10)
+        lazy_module.load_state_dict(module.state_dict())
+        # Parameters have been initialized but the module won't become a full
+        # Linear one until the first iteration. This is due to
+        # limitations on the state_dict loading logic
+        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertTrue(lazy_module.weight.shape == (10, 5))
+
+        module = nn.Linear(5, 10)
+        lazy_module = nn.LazyLinear(10)
+        with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
+            module.load_state_dict(lazy_module.state_dict())
+
+    @suppress_warnings
+    def test_materialize_dtype(self):
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        module.test_param.materialize(10)
+        self.assertTrue(module.test_param.dtype == torch.float64)
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        module.half()
+        module.test_param.materialize(10)
+        self.assertTrue(module.test_param.dtype == torch.float16)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @suppress_warnings
+    def test_materialize_device(self):
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        module.test_param.materialize(10)
+        self.assertTrue(module.test_param.device.type == 'cpu')
+        module = LazyModule()
+        module.register_parameter('test_param', UninitializedParameter())
+        module.cuda()
+        module.test_param.materialize(10)
+        self.assertTrue(module.test_param.device.type == 'cuda')
+
+    @suppress_warnings
+    def test_chained_initialization(self):
+        class MyNetwork(torch.nn.Module):
+            def __init__(self):
+                super(MyNetwork, self).__init__()
+                self.linear_1 = torch.nn.LazyLinear(15)
+                self.linear_2 = torch.nn.LazyLinear(10)
+
+            def forward(self, x):
+                y = self.linear_1(x)
+                return self.linear_2(y)
+
+        net = MyNetwork()
+        net(torch.ones(5, 10))
+        self.assertTrue(net.linear_1.weight.shape == (15, 10))
+        self.assertTrue(net.linear_2.weight.shape == (10, 15))
+
+    @suppress_warnings
+    def test_optimizer_pass(self):
+        optimizers = [torch.optim.Adadelta, torch.optim.Adagrad, torch.optim.Adam,
+                      torch.optim.AdamW, torch.optim.Adamax,
+                      torch.optim.ASGD, torch.optim.SGD, torch.optim.Rprop,
+                      torch.optim.RMSprop, torch.optim.LBFGS]
+
+        def run_step(module, optim):
+            self.assertIsInstance(optim.param_groups[0]['params'][0], UninitializedParameter)
+            module.test_param.materialize(10)
+            self.assertIsInstance(optim.param_groups[0]['params'][0], Parameter)
+            self.assertNotIsInstance(optim.param_groups[0]['params'][0], UninitializedParameter)
+            for p in module.parameters():
+                p.grad = torch.rand_like(p)
+            if isinstance(optim, torch.optim.LBFGS):
+                optim.step(lambda: 1.0)
+            else:
+                optim.step()
+
+        for optim_cls in optimizers:
+            module = LazyModule()
+            module.register_parameter('test_param', UninitializedParameter())
+            if optim_cls is torch.optim.SGD:
+                optim = optim_cls(module.parameters(), lr=0.0)
+            elif optim_cls is torch.optim.Adagrad:
+                with self.assertRaisesRegex(ValueError, 'uninitialized parameter'):
+                    optim = optim_cls(module.parameters())
+                continue
+            else:
+                optim = optim_cls(module.parameters())
+            run_step(module, optim)
+
+    @suppress_warnings
+    def test_weight_norm(self):
+        m = nn.LazyLinear(7)
+        with self.assertRaisesRegex(ValueError, 'have uninitialized parameters.'):
+            m = torch.nn.utils.weight_norm(m)
+
+    @suppress_warnings
+    def test_spectral_norm(self):
+        m = nn.LazyLinear(7)
+        with self.assertRaisesRegex(ValueError, 'have uninitialized parameters.'):
+            m = torch.nn.utils.spectral_norm(m)
+
+    @suppress_warnings
+    def test_invalid_functions(self):
+        param = torch.nn.parameter.UninitializedParameter()
+        with self.assertRaisesRegex(ValueError, 'uninitialized parameter'):
+            torch.empty_like(param)
+
+        with self.assertRaisesRegex(ValueError, 'uninitialized parameter'):
+            torch.add(param, param)
+
+        with self.assertRaisesRegex(ValueError, 'uninitialized parameter'):
+            param + param
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 

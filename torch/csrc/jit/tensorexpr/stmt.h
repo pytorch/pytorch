@@ -163,6 +163,13 @@ class TORCH_API Block : public StmtNode<Block> {
     return stmts_;
   }
 
+  void clear() {
+    for (auto* s : stmts_) {
+      set_parent(s, nullptr);
+    }
+    stmts_.clear();
+  }
+
   explicit Block(const std::vector<Stmt*>& stmts) {
     for (Stmt* s : stmts) {
       if (s->get_parent()) {
@@ -242,6 +249,14 @@ class TORCH_API Block : public StmtNode<Block> {
     }
 
     return nullptr;
+  }
+
+  // returns the immediate child containing statement s.
+  const Stmt* getEnclosedRoot(const Stmt* s) const {
+    while (s && s->get_parent() != this) {
+      s = s->get_parent();
+    }
+    return s;
   }
 
  private:

@@ -11,9 +11,13 @@ class ProfilerState(Enum):
 
 
 class ProfilerConfig:
-    def __init__(self, state: ProfilerState, report_input_shapes: bool, profile_memory: bool) -> None: ...
+    def __init__(
+        self, state: ProfilerState,
+        report_input_shapes: bool,
+        profile_memory: bool,
+        with_stack: bool
+    ) -> None: ...
     ...
-
 
 class ProfilerEvent:
     def cpu_elapsed_us(self, other: ProfilerEvent) -> float: ...

@@ -10,6 +10,7 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/QScheme.h>
+#include <torch/csrc/Stream.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -29,6 +30,11 @@
 #endif
 
 #include <ATen/core/function_schema.h>
+#include <c10/core/Stream.h>
+#ifdef USE_C10D_NCCL
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAStream.h>
+#endif
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -112,6 +118,34 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
     // Future owns a reference to the py::function in its callback
     // vector, but Future does not acquire GIL on destruction.
     auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
+
+#ifdef USE_C10D_NCCL
+    // This callback is only used by NCCL backend, so skip this code on other
+    // backends and avoid importing cuda dependency.
+    // By default, assume that the input value is or can be casted into a tensor
+    // vector that has exactly one tensor.
+    auto record_stream_cb = [](const at::IValue& value,
+                               const c10::Stream& stream) {
+      if (value.isTensorList() || value.isPyObject()) {
+        std::vector<at::Tensor> tensors;
+        if (value.isTensorList()) {
+          tensors = value.toTensorVector();
+        } else {
+          pybind11::gil_scoped_acquire gil;
+          py::object obj = torch::jit::toPyObject(value);
+          tensors = torch::jit::toIValue(
+                        obj, c10::ListType::create(c10::TensorType::get()))
+                        .toTensorVector();
+        }
+        TORCH_INTERNAL_ASSERT(tensors.size() == 1, "expected exactly 1 tensor");
+        at::cuda::CUDAStream cuda_stream(stream);
+        c10::cuda::CUDACachingAllocator::recordStream(
+            tensors[0].storage().data_ptr(), cuda_stream);
+      }
+    };
+    fut->setRecordStreamCallback(record_stream_cb);
+#endif
+
     return std::make_shared<jit::PythonFutureWrapper>(fut->then(
         // Capture a copy of the ivalue::Future instead of the `this` pointer
         // because the PythonFutureWrapper object could have been deleted
@@ -142,6 +176,36 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
           }
         },
         PyObjectType::get()));
+  }
+
+  void add_done_callback(py::function cb) {
+    auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
+    fut->addCallback(std::bind(
+        [pyFut(this->getPtr())](std::shared_ptr<PythonFunctionGuard> pf) {
+          try {
+            pybind11::gil_scoped_acquire ag;
+            pf->func_(pyFut);
+          } catch (py::error_already_set& e) {
+            {
+              pybind11::gil_scoped_acquire ag;
+              // Release ownership on py::objects and also restore Python
+              // Error Indicator.
+              e.restore();
+              // Clear the Python Error Indicator as we has recorded the
+              // exception in the response message.
+              PyErr_Clear();
+            }
+            // Log and ignore exceptions raised through the callback
+            VLOG(1) << "Got the following error when running the callback: "
+                    << e.what();
+
+          } catch (std::exception& e) {
+            // Log and ignore exceptions raised through the callback
+            VLOG(1) << "Got the following error when running the callback: "
+                    << e.what();
+          }
+        },
+        std::move(pf)));
   }
 
   void markCompleted(const py::object& pyValue) {
@@ -282,6 +346,8 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (THPDevice_Check(input.ptr())) {
     return InferredType(DeviceObjType::get());
+  } else if (THPStream_Check(input.ptr())) {
+    return InferredType(StreamObjType::get());
   } else if (THPDtype_Check(input.ptr())) {
     return InferredType(IntType::get());
   } else if (THPQScheme_Check(input.ptr())) {
@@ -303,12 +369,47 @@ inline InferredType tryToInferType(py::handle input) {
   py::bool_ isClass =
       py::module::import("inspect").attr("isclass")(input.get_type());
   if (py::cast<bool>(isClass)) {
-    // try_ann_to_type will compile the class if it's not already compiled.
-    auto jit_type = py::cast<TypePtr>(
-        py::module::import("torch.jit.annotations")
-            .attr("try_ann_to_type")(input.get_type(), SourceRange()));
-    if (jit_type && !jit_type->is_module()) {
-      return InferredType(jit_type);
+    // Assume that the class is compiled already or will compile. Invalidate
+    // this later if needed.
+    bool class_compiled = true;
+
+    // Check if the type is already compiled.
+    py::str qualified_name = py::module::import("torch._jit_internal")
+                                 .attr("_qualified_name")(input.get_type());
+    py::object existing_ty = py::module::import("torch.jit._state")
+                                 .attr("_get_script_class")(qualified_name);
+
+    if (existing_ty.is_none()) {
+      // If not, try to compile it.
+      py::bool_ can_compile = py::module::import("torch._jit_internal")
+                                  .attr("can_compile_class")(input.get_type());
+
+      if (py::cast<bool>(can_compile)) {
+        // Try to compile the class. This is wrapped in a try-catch because
+        // compilation of class types can raise an Exception and in that case,
+        // we want to defer to other attempts at type inference below rather
+        // than fail compilation altogether.
+        try {
+          py::module::import("torch.jit._script")
+              .attr("_recursive_compile_class")(
+                  input.get_type(), SourceRange());
+        } catch (...) {
+          // Invalidate the assumption that the class compiled so that we don't
+          // look up and return its JIT type as the type for the input.
+          class_compiled = false;
+        }
+      }
+    }
+
+    // If the class compiled successfully, look up the existing JIT type by
+    // qualified name and return it.
+    if (class_compiled) {
+      auto cu = get_python_cu();
+      auto class_type = cu->get_class(c10::QualifiedName(qualified_name));
+
+      if (class_type && !class_type->is_module()) {
+        return InferredType(class_type);
+      }
     }
   }
 
@@ -571,6 +672,10 @@ inline IValue toIValue(
     case TypeKind::DeviceObjType: {
       auto device = reinterpret_cast<THPDevice*>(obj.ptr());
       return device->device;
+    }
+    case TypeKind::StreamObjType: {
+      auto stream = reinterpret_cast<THPStream*>(obj.ptr());
+      return static_cast<int64_t>(stream->cdata);
     }
     case TypeKind::ListType: {
       const auto& elem_type = type->expect<ListType>()->getElementType();

@@ -3,6 +3,8 @@ import torch
 import torch.utils.bundled_inputs
 
 import io
+from typing import NamedTuple
+from collections import namedtuple
 
 from torch.jit.mobile import _load_for_lite_interpreter
 
@@ -138,7 +140,81 @@ class TestLiteScriptModule(unittest.TestCase):
                                     r"define a pytorch class \(class Foo\(torch\.nn\.Module\)\)\.$"):
             script_module._save_to_buffer_for_lite_interpreter()
 
+    def test_unsupported_return_typing_namedtuple(self):
+        myNamedTuple = NamedTuple('myNamedTuple', [('a', torch.Tensor)])
 
+        class MyTestModule(torch.nn.Module):
+            def forward(self):
+                return myNamedTuple(torch.randn(1))
+
+        script_module = torch.jit.script(MyTestModule())
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"A named tuple type is not supported in mobile module. "
+                                    r"Workaround: instead of using a named tuple type\'s fields, "
+                                    r"use a dictionary type\'s key-value pair itmes or "
+                                    r"a pytorch class \(class Foo\(torch\.nn\.Module\)\)\'s attributes."):
+            script_module._save_to_buffer_for_lite_interpreter()
+
+    def test_unsupported_return_collections_namedtuple(self):
+        myNamedTuple = namedtuple('myNamedTuple', [('a')])
+
+        class MyTestModule(torch.nn.Module):
+            def forward(self):
+                return myNamedTuple(torch.randn(1))
+
+        script_module = torch.jit.script(MyTestModule())
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"A named tuple type is not supported in mobile module. "
+                                    r"Workaround: instead of using a named tuple type\'s fields, "
+                                    r"use a dictionary type\'s key-value pair itmes or "
+                                    r"a pytorch class \(class Foo\(torch\.nn\.Module\)\)\'s attributes."):
+            script_module._save_to_buffer_for_lite_interpreter()
+
+    def test_unsupported_return_list_with_module_class(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+
+        class MyTestModuleForListWithModuleClass(torch.nn.Module):
+            def __init__(self):
+                super(MyTestModuleForListWithModuleClass, self).__init__()
+                self.foo = Foo()
+
+            def forward(self):
+                my_list: List[Foo] = [self.foo]
+                return my_list
+
+        script_module = torch.jit.script(MyTestModuleForListWithModuleClass())
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"^Returining a list or dictionary with pytorch class type "
+                                    r"is not supported in mobile module "
+                                    r"\(List\[Foo\] or Dict\[int\, Foo\] for class Foo\(torch\.nn\.Module\)\)\. "
+                                    r"Workaround\: instead of using pytorch class as their element type\, "
+                                    r"use a combination of list\, dictionary\, and single types\.$"):
+            script_module._save_to_buffer_for_lite_interpreter()
+
+    def test_unsupported_return_dict_with_module_class(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+
+        class MyTestModuleForDictWithModuleClass(torch.nn.Module):
+            def __init__(self):
+                super(MyTestModuleForDictWithModuleClass, self).__init__()
+                self.foo = Foo()
+
+            def forward(self):
+                my_dict: Dict[int, Foo] = {1: self.foo}
+                return my_dict
+
+        script_module = torch.jit.script(MyTestModuleForDictWithModuleClass())
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"^Returining a list or dictionary with pytorch class type "
+                                    r"is not supported in mobile module "
+                                    r"\(List\[Foo\] or Dict\[int\, Foo\] for class Foo\(torch\.nn\.Module\)\)\. "
+                                    r"Workaround\: instead of using pytorch class as their element type\, "
+                                    r"use a combination of list\, dictionary\, and single types\.$"):
+            script_module._save_to_buffer_for_lite_interpreter()
 
 if __name__ == '__main__':
     unittest.main()

@@ -13,7 +13,7 @@ from distutils.sysconfig import get_python_lib
 from pathlib import Path
 import linecache
 import sys
-from tempfile import NamedTemporaryFile
+from urllib.parse import quote
 
 class PackageExporter:
     """ Exporters allow you to write packages of code, pickled python data, and
@@ -168,83 +168,19 @@ class PackageExporter:
         except Exception:
             return False
 
-    def _write_dep_graph(self, failing_module=None, output_file=None):
-        depended_on : Dict[str, List[str]] = {}
-        for f, t in self.debug_deps:
-            if t not in depended_on:
-                depended_on[t] = []
-            if f not in depended_on:
-                depended_on[f] = []
-            depended_on[t].append(f)
-
-        level : Dict[str, int] = {}
-
-        def visit(x: str):
-            if x in level:
-                return level[x]
-            level[x] = 0
-            for e in depended_on[x]:
-                level[x] = max(level[x], visit(e) + 1)
-            return level[x]
-
-        for x in depended_on.keys():
-            visit(x)
-
-        nodes = []
-        node_to_id = {}
-        n = 0
-        for ft in self.debug_deps:
-            for e in ft:
-                if e not in node_to_id:
-                    node_to_id[e] = n
-                    extra = ''
-                    if e == failing_module:
-                        extra = ", color: 'red'"
-                    nodes.append(f"        {{id: {n}, label: '{e}', level: {level[e]}, shape: 'box'{extra}}},\n")
-                    n += 1
-        edges = []
-        for f, t in self.debug_deps:
-            fn, tn = node_to_id[f], node_to_id[t]
-            edges.append(f"            {{from: {fn}, to: {tn}, arrows: 'to'}},\n")
-        nodes_s, edges_s = ''.join(nodes), ''.join(edges)
+    def _write_dep_graph(self, failing_module=None):
+        edges = '\n'.join(f'"{f}" -> "{t}";' for f, t in self.debug_deps)
+        failing = '' if failing_module is None else f'{failing_module} [color=red];'
         template = f"""\
-<html>
-<head>
-    <script type="text/javascript" src="https://almende.github.io/vis/dist/vis.js"></script>
-    <link href="https://almende.github.io/vis/dist/vis.css" rel="stylesheet" type="text/css" />
-</head>
-<body>
-<div id="mynetwork"></div>
-
-<script type="text/javascript">
-    var nodes = new vis.DataSet([
-{nodes_s}
-    ]);
-    var edges = new vis.DataSet([
-{edges_s}
-    ]);
-    var options = {{
-        layout: {{
-            hierarchical: {{
-                direction: "LR",
-                levelSeparation: 400,
-            }},
-        }},
-    }};
-    // create a network
-    var container = document.getElementById('mynetwork');
-    var network = new vis.Network(container, {{nodes: nodes, edges: edges}}, options);
-</script>
-</body>
-</html>
+digraph G {{
+rankdir = LR;
+node [shape=box];
+{failing}
+{edges}
+}}
 """
-        if output_file:
-            output_file.write(template)
-            return None
-
-        with NamedTemporaryFile(mode='w', suffix='.html', delete=False) as tf:
-            tf.write(template)
-            return tf.name
+        arg = quote(template, safe='')
+        return f'https://dreampuf.github.io/GraphvizOnline/#{arg}'
 
     def _get_source_of_module(self, module: types.ModuleType) -> str:
         filename = getattr(module, '__file__', None)

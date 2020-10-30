@@ -61,11 +61,7 @@ inline void check_args(
   }
 }
 
-inline void check_size_nonnegative(IntArrayRef size) {
-  for (auto x: size) {
-    TORCH_CHECK(x >= 0, "Trying to create tensor with negative dimension ", x, ": ", size);
-  }
-}
+using at::check_size_nonnegative;
 
 inline void check_supported_max_int_with_precision(int64_t n, const Tensor& tensor) {
   TORCH_CHECK(at::scalar_tensor(n, tensor.options()).defined(),

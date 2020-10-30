@@ -6,6 +6,7 @@ import unittest
 import torch
 import torch.nn as nn
 from torch.testing import FileCheck
+from typing import Any
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -444,6 +445,39 @@ class TestClassType(JitTestCase):
             class Derived(Base):
                 def two(self, x):
                     return x + self.b + 2
+
+
+    def test_class_inheritance_implicit(self):
+        """
+        Test that inheritance is detected in
+        implicit scripting codepaths (e.g. try_ann_to_type).
+        """
+        class A:
+            def __init__(self, t):
+                self.t = t
+
+            @staticmethod
+            def f(a: torch.Tensor):
+                return A(a + 1)
+
+        class B(A):
+            def __init__(self, t):
+                self.t = t + 10
+
+            @staticmethod
+            def f(a: torch.Tensor):
+                return A(a + 1)
+
+        x = A(torch.tensor([3]))
+
+        def fun(x: Any):
+            if isinstance(x, A):
+                return A.f(x.t)
+            else:
+                return B.f(x.t)
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to access nonexistent attribute or method"):
+            sc = torch.jit.script(fun)
 
     @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
     def test_imported_classes(self):
@@ -1296,3 +1330,45 @@ class TestClassType(JitTestCase):
                 return self.obj.get_a()
 
         self.checkModule(M(Class(4)), ())
+
+    def test_recursive_scripting_failed(self):
+        """
+        Test that class types module attributes that fail to script
+        are added as failed attributes and do not cause compilation itself
+        to fail unless they are used in scripted code.
+        """
+        class UnscriptableClass(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            def get_a(self) -> int:
+                return sum([self.a])
+
+        # This Module has an attribute of type UnscriptableClass
+        # and tries to use it in scripted code. This should fail.
+        class ShouldNotCompile(torch.nn.Module):
+            def __init__(self, obj):
+                super().__init__()
+                self.obj = obj
+
+            def forward(self) -> int:
+                return self.obj.get_a()
+
+        with self.assertRaisesRegex(RuntimeError, "failed to convert Python type"):
+            torch.jit.script(ShouldNotCompile(UnscriptableClass(4)))
+
+        # This Module has an attribute of type UnscriptableClass
+        # and does not try to use it in scripted code. This should not fail.
+        class ShouldCompile(torch.nn.Module):
+            def __init__(self, obj):
+                super().__init__()
+                self.obj = obj
+
+            @torch.jit.ignore
+            def ignored_method(self) -> int:
+                return self.obj.get_a()
+
+            def forward(self, x: int) -> int:
+                return x + x
+
+        self.checkModule(ShouldCompile(UnscriptableClass(4)), (4,))
