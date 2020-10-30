@@ -27,8 +27,8 @@ Tensor upsample_nearest2d(
   api::Command::Buffer command_buffer = context->command().pool.allocate();
   command_buffer.begin();
   {
-    const float scale_x = compute_scales_value<float>(scales_w, input_arg.sizes()[3], output_sizes[2]);
-    const float scale_y = compute_scales_value<float>(scales_h, input_arg.sizes()[3], output_sizes[2]);
+    const float scale_x = compute_scales_value<float>(scales_w, input_arg.sizes()[3], output_sizes[1]);
+    const float scale_y = compute_scales_value<float>(scales_h, input_arg.sizes()[2], output_sizes[0]);
     if (v_input.has_image()) {
       const struct {
         uint32_t input_width, input_height, output_width, output_height;
@@ -36,8 +36,8 @@ Tensor upsample_nearest2d(
       } block {
         input_arg.sizes()[3],
         input_arg.sizes()[2],
-        output_sizes[3],
-        output_sizes[2],
+        output_sizes[1],
+        output_sizes[0],
         scale_x,
         scale_y
       };
