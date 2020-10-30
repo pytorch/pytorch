@@ -399,10 +399,8 @@ list(APPEND CUDA_NVCC_FLAGS "-Xfatbin" "-compress-all")
 list(APPEND CUDA_NVCC_FLAGS_DEBUG "-Xfatbin" "-compress-all")
 list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-Xfatbin" "-compress-all")
 
-if(NOT MSVC)
-  list(APPEND CUDA_NVCC_FLAGS_DEBUG "-g" "-lineinfo" "--source-in-ptx")
-  list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-g" "-lineinfo" "--source-in-ptx")
-endif(NOT MSVC)
+list(APPEND CUDA_NVCC_FLAGS_DEBUG "-g" "-lineinfo" "--source-in-ptx")
+list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-g" "-lineinfo" "--source-in-ptx")
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
 # applicable to mobile are disabled by this variable.
