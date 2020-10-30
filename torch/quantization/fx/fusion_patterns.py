@@ -81,7 +81,7 @@ class ConvBNReLUFusion():
 
 @register_fusion_pattern((torch.nn.functional.relu, torch.nn.Linear))
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Linear))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm1d))
+@register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm2d))
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.BatchNorm2d))
 @register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm3d))
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.BatchNorm3d))
