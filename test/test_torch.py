@@ -18011,13 +18011,15 @@ else:
             return (d[0], d[1], d[2])
 
         def generate_tensor():
+            numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
             # transposed tensors
             for perm1, perm2, perm3 in product(permutations((0, 1, 2)), repeat=3):
                 b1 = torch.randn(num_batches, M, N, dtype=dtype, device=device)
                 b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
                 b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                 b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
-                res = torch.bmm(b1, b2)
+                res = torch.from_numpy(
+                    b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
                 res2 = torch.zeros_like(res)
                 res3 = torch.zeros_like(res)
                 res2 = res2.permute(perm3).contiguous().permute(invert_perm(perm3))
@@ -18029,7 +18031,8 @@ else:
                 shape2 = (num_batches if s4 else 1, N if s5 else 1, O if s6 else 1)
                 b1 = torch.randn(shape1, dtype=dtype, device=device).expand(num_batches, M, N)
                 b2 = torch.randn(shape2, dtype=dtype, device=device).expand(num_batches, N, O)
-                res = torch.bmm(b1, b2)
+                res = torch.from_numpy(
+                    b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
                 res2 = torch.zeros_like(res)
                 res3 = torch.zeros_like(res)
                 yield b1, b2, res, res2, res3
