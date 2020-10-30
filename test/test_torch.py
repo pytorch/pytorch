@@ -5998,7 +5998,7 @@ class TestTorchDeviceType(TestCase):
             tensor = make_tensor(shape, device, dtype, low=-9, high=9)
             diag = tensor.diag()
             if legacy:
-                # NB: trace on cpu doesn't do type promotion...
+                # NB: trace on cpu doesn't do type promotion... #47127
                 expected = tensor.diag().sum().to(dtype)
             else:
                 expected = tensor.diag().sum()
