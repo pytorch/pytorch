@@ -383,8 +383,7 @@ class Graph:
 
         # repr() for inf and nan floating point values aren't parseable by
         # python as literals. Explicitly import the names from the `math` module.
-        import_strs = ['from math import inf, nan']
-        import_strs.extend(f'import {name}' for name in sorted(modules_used))
+        import_strs = [f'import {name}' for name in sorted(modules_used)]
         import_block = '\n'.join(import_strs)
 
         code = ''.join(body)
