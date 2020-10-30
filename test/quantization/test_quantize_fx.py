@@ -7,12 +7,15 @@ import torch.nn.intrinsic.quantized as nniq
 import torch.multiprocessing as mp
 
 # graph mode quantization based on fx
-from torch.quantization import (
-    QuantType,
-    quant_type_to_str,
+from torch.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
     prepare_qat_fx,
+)
+
+from torch.quantization import (
+    QuantType,
+    quant_type_to_str,
     default_qconfig,
     default_dynamic_qconfig,
     default_dynamic_quant_observer,
@@ -831,13 +834,13 @@ class TestQuantizeFx(QuantizationTestCase):
         print(m.__dict__.keys())
         m.eval()
         qconfig_dict = {'': torch.quantization.default_qconfig}
-        prepared = torch.quantization.prepare_fx(m, qconfig_dict)
+        prepared = prepare_fx(m, qconfig_dict)
         # calibrate
         prepared(torch.randn(4, 1, 4, 4))
         # copy
         prepared_copy = copy.deepcopy(prepared)
         # quantize, should run with no errors
-        quantized = torch.quantization.convert_fx(prepared_copy)
+        quantized = convert_fx(prepared_copy)
 
 
 @skipIfNoFBGEMM
