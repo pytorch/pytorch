@@ -184,7 +184,6 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
   }                                                         \
   }
 
-// TODO: use TORCH_SELECTIVE_SCHEMA here?
 #define C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(OperatorName, OperatorSchema) \
   /* Register the op schema with the c10 dispatcher */                        \
   namespace caffe2 {                                                          \
