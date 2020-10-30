@@ -313,6 +313,11 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
     if extra_unittest_args:
         assert isinstance(extra_unittest_args, list)
         unittest_args.extend(extra_unittest_args)
+
+    # If using pytest, replace -f with equivalent -x
+    if options.pytest:
+        unittest_args = [arg if arg != '-f' else '-x' for arg in unittest_args]
+
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + '.py'] + unittest_args
