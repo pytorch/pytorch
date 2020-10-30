@@ -46,6 +46,12 @@ class TestLinalg(TestCase):
         check([1, 2], [3, 2])       # 2D x 2D
         check([1, 2], [3, 4, 2])    # 2D x 3D
 
+        # Test discontiguous input
+        a = torch.randn(3, 2, device=device, dtype=dtype).transpose_(0, 1)
+        b = torch.randn(4, 3, device=device, dtype=dtype)[::2, :]
+        self.assertEqual(a.inner(b).cpu().numpy(), np.inner(a.cpu().numpy(), b.cpu().numpy()))
+
+        # Test error message
         with self.assertRaisesRegex(RuntimeError,
                                     r"inner\(\) the last dimension must match on both "
                                     r"input tensors but got shapes \[2, 3\] and \[2, 2\]"):
