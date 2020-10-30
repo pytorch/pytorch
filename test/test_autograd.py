@@ -2635,6 +2635,82 @@ class TestAutograd(TestCase):
         for upper, dims in product([True, False], [(3, 3), (5, 3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
 
+    @skipIfNoLapack
+    def test_svd_complex_grad_u(self):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+        dtype = torch.complex128
+        device = 'cpu'
+        for dims in ((3, 3), (6, 3), (3, 6)):
+            # A = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
+            A = random_fullrank_matrix_distinct_singular_value(3, dtype=dtype, device=device)
+            A.requires_grad_()
+
+            m, n = dims[-2:]
+            H = torch.randn(m, m, dtype=dtype)
+            H += H.conj().transpose(-2, -1)
+            def func(A):
+                u, s, v = torch.svd(A)
+                return u.conj().transpose(-2, -1) @ u
+
+            gradcheck(func, A)
+            # gradgradcheck(func, A)
+
+    @skipIfNoLapack
+    def test_svd_complex_grad_v(self):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+        dtype = torch.complex128
+        device = 'cpu'
+        for dims in ((3, 3), (6, 3), (3, 6)):
+            A = random_fullrank_matrix_distinct_singular_value(3, dtype=dtype, device=device)
+            A.requires_grad_()
+
+            m, n = dims[-2:]
+            H = torch.randn(n, n, dtype=dtype)
+            H += H.conj().transpose(-2, -1)
+            def func(A):
+                u, s, v = torch.svd(A)
+                # psi = v[:, 0]
+                return v[0, 0].conj() * v[0, 0]
+
+            gradcheck(func, A)
+            # gradgradcheck(func, A)
+
+    @skipIfNoLapack
+    def test_svd_complex_grad_uv(self):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+        dtype = torch.complex128
+        device = 'cpu'
+        for dims in ((3, 3), (6, 3), (3, 6)):
+            A = random_fullrank_matrix_distinct_singular_value(3, dtype=dtype, device=device)
+            A.requires_grad_()
+
+            m, n = dims[-2:]
+            H = torch.randn(n, n, dtype=dtype)
+            H += H.conj().transpose(-2, -1)
+            def func(A):
+                u, s, v = torch.svd(A)
+                # psi = v[:, 0]
+                return v[0, 0].conj() * u[0, 0]
+
+            gradcheck(func, A)
+            # gradgradcheck(func, A)
+
+    @skipIfNoLapack
+    def test_svd_complex_grad_s(self):
+        from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+        dtype = torch.complex128
+        device = 'cpu'
+        for dims in ((3, 3), (6, 3), (3, 6)):
+            A = random_fullrank_matrix_distinct_singular_value(3, dtype=dtype, device=device)
+            A.requires_grad_()
+
+            def func(A):
+                u, s, v = torch.svd(A)
+                return torch.sum(s)
+
+            gradcheck(func, A)
+            # gradgradcheck(func, A)
+
     @slowTest
     @skipIfNoLapack
     def test_lobpcg(self):
