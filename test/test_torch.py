@@ -17846,7 +17846,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return (d[0], d[1], d[2])
 
         for perm1, perm2, perm3 in product(permutations((0, 1, 2)), repeat=3):
-            print(perm1, perm2, perm3)
             b1 = torch.randn(num_batches, M, N, dtype=dtype, device=device)
             b2 = torch.randn(num_batches, N, O, dtype=dtype, device=device)
             b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
