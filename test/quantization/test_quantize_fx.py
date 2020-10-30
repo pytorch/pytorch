@@ -46,9 +46,6 @@ from torch.testing._internal.common_distributed import skip_if_not_multigpu
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
-from torch.testing._internal.common_quantization import (
-    test_only_eval_fn,
-)
 from torch.testing import FileCheck
 
 import copy
@@ -267,30 +264,6 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(len(model_devices), 1)
         model_device = next(iter(model_devices))
         self.assertEqual(model_device, device)
-
-    @skipIfNoFBGEMM
-    def test_inplace_option(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-
-            def forward(self, x):
-                return self.conv(x)
-
-        model = M().eval()
-        qconfig_dict = {'': default_qconfig}
-        prepared = prepare_fx(model, qconfig_dict)
-        test_only_eval_fn(model, self.img_data_2d)
-        non_inplace_model = convert_fx(prepared, inplace=True)
-
-        prepared = prepare_fx(model, qconfig_dict)
-        test_only_eval_fn(model, self.img_data_2d)
-        inplace_model = convert_fx(prepared, inplace=True)
-
-        non_inplace_res = non_inplace_model(self.img_data_2d[0][0])
-        inplace_res = inplace_model(self.img_data_2d[0][0])
-        self.assertEqual(non_inplace_res, inplace_res)
 
     @skipIfNoFBGEMM
     def test_dict_output(self):
@@ -1703,7 +1676,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             ref_m = convert(ref_m)
             self.assertEqual(m(data), ref_m(data))
 
-    def test_embedding(self):
+    def test_qembedding_module(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1715,23 +1688,15 @@ class TestQuantizeFxOps(QuantizationTestCase):
         model = M().eval()
         indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
         quantized_node = ns.call_module(nnq.Embedding)
-        configs = [
-            (float_qparams_dynamic_qconfig, ns.call_module(nnq.Embedding)),
-            (default_qconfig, ns.call_module(nn.Embedding))
-        ]
+        self.checkGraphModeFxOp(
+            model,
+            [[indices]],
+            QuantType.DYNAMIC,
+            quantized_node,
+            custom_qconfig=float_qparams_dynamic_qconfig
+        )
 
-        for qconfig, node in configs:
-            qconfig_dict = {"": qconfig}
-            m = prepare_fx(model, qconfig_dict)
-            self.checkGraphModuleNodes(m, expected_node_occurrence={
-                ns.call_module(torch.quantization.MinMaxObserver): 0
-            })
-            m = convert_fx(m)
-            self.checkGraphModuleNodes(m, expected_node=node)
-            # make sure it runs
-            m(indices)
-
-    def test_embedding_bag(self):
+    def test_qembedding_bag_module(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1740,13 +1705,13 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def forward(self, indices, offsets):
                 return self.emb(indices, offsets)
 
+        model = M().eval()
         indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
         offsets = torch.tensor([0, 19, 20, 28, 28, 32])
         quantized_node = ns.call_module(nnq.EmbeddingBag)
         inputs = (indices, offsets)
 
         for dtype in [torch.quint8, torch.quint4x2]:
-            model = M().eval()
             float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=dtype,
                                                                         qscheme=torch.per_channel_affine_float_qparams,
                                                                         ch_axis=0)
@@ -1759,19 +1724,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 quantized_node,
                 custom_qconfig=float_qparams_qconfig
             )
-
-        # check it works in static quantization
-        qconfig_dict = {"": default_qconfig}
-        m = M().eval()
-        m = prepare_fx(model, qconfig_dict)
-        self.checkGraphModuleNodes(m, expected_node_occurrence={
-            ns.call_module(torch.quantization.MinMaxObserver): 0
-        })
-        m = convert_fx(m)
-        self.checkGraphModuleNodes(m, expected_node=ns.call_module(nn.EmbeddingBag))
-        # make sure it runs
-        m(*inputs)
-
 
 
 class TestQuantizeFxModels(QuantizationTestCase):

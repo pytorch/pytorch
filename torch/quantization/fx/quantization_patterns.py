@@ -15,7 +15,6 @@ from ..quantization_mappings import (
 )
 from .pattern_utils import (
     register_quant_pattern,
-    mark_input_output_not_observed,
 )
 from .utils import (
     _parent_name,
@@ -297,8 +296,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         ]
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
-        if dtypes not in supported_dtypes:
-            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+        assert dtypes in supported_dtypes, "qconfig dtype pair not supported:" \
+            " {}, supported dtypes are: {}".format(dtypes, supported_dtypes)
         activation_statically_quantized = activation_is_statically_quantized(qconfig)
         # TODO: debug option for linear module
         if self.linear_node.op == 'call_module':
@@ -433,7 +432,6 @@ class BatchNorm(QuantizeHandler):
 
 @register_quant_pattern(torch.nn.Embedding)
 @register_quant_pattern(torch.nn.EmbeddingBag)
-@mark_input_output_not_observed()
 class Embedding(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
@@ -443,10 +441,7 @@ class Embedding(QuantizeHandler):
         emb_node = node
         emb = quantizer.modules[emb_node.target]
         qconfig = quantizer.qconfig_map[node.name]
-        # embedding only supports weight only quantization
-        if activation_is_statically_quantized(qconfig):
-            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
-
+        assert not activation_is_statically_quantized(qconfig)
         qemb = get_static_quant_module_class(type(emb))
         quantized = qemb.from_float(emb)
         parent_name, name = _parent_name(emb_node.target)
