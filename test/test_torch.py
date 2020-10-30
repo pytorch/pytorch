@@ -17919,6 +17919,43 @@ else:
                         f'Subprocess exception while attempting to run {test_case_info(fn_name, config)}:\n'
                         + e.output.decode("utf-8")))
 
+    def _test_addbmm_baddbmm(self, func, b1, b2, res, res2, res3):
+        getattr(res2, func + "_")(b1, b2)
+        self.assertEqual(res2, res)
+        res3.copy_(res2)
+
+        with self.maybeWarnsRegex(
+                UserWarning, "This overload of addbmm_ is deprecated"):
+            getattr(res2, func + "_")(1, b1, b2)
+        self.assertEqual(res2, res * 2),
+        getattr(res3, func + "_")(b1, b2, beta=1)
+        self.assertEqual(res2, res3)
+
+        with self.maybeWarnsRegex(
+                UserWarning, "This overload of addbmm_ is deprecated"):
+            getattr(res2, func + "_")(1., .5, b1, b2)
+        self.assertEqual(res2, res * 2.5)
+        getattr(res3, func + "_")(b1, b2, beta=1., alpha=.5)
+        self.assertEqual(res2, res3)
+
+        with self.maybeWarnsRegex(
+                UserWarning, "This overload of addbmm is deprecated"):
+            self.assertEqual(res2, getattr(torch, func)(1, res2, 0, b1, b2))
+
+        res4 = getattr(torch, func)(res2, b1, b2, beta=1, alpha=.5)
+        self.assertEqual(res4, res * 3),
+
+        nan = torch.full_like(res2, math.nan)
+        res5 = getattr(torch, func)(nan, b1, b2, beta=0, alpha=1)
+        self.assertEqual(res5, res)
+
+        res6 = getattr(torch, func)(res2, b1, b2, beta=.1, alpha=.5)
+        self.assertEqual(res6, res2 * .1 + .5 * res),
+
+        res7 = torch.full_like(res2, math.nan)
+        getattr(torch, func)(nan, b1, b2, beta=0, out=res7)
+        self.assertEqual(res7, res)
+
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
     @onlyOnCPUAndCUDA
     @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)))
@@ -17958,41 +17995,7 @@ else:
                 yield b1, b2, res, res2, res3
 
         for b1, b2, res, res2, res3 in generate_tensor():
-            res2.addbmm_(b1, b2)
-            self.assertEqual(res2, res)
-            res3.copy_(res2)
-
-            with self.maybeWarnsRegex(
-                    UserWarning, "This overload of addbmm_ is deprecated"):
-                res2.addbmm_(1, b1, b2)
-            self.assertEqual(res2, res * 2),
-            res3.addbmm_(b1, b2, beta=1)
-            self.assertEqual(res2, res3)
-
-            with self.maybeWarnsRegex(
-                    UserWarning, "This overload of addbmm_ is deprecated"):
-                res2.addbmm_(1., .5, b1, b2)
-            self.assertEqual(res2, res * 2.5)
-            res3.addbmm_(b1, b2, beta=1., alpha=.5)
-            self.assertEqual(res2, res3)
-
-            with self.maybeWarnsRegex(
-                    UserWarning, "This overload of addbmm is deprecated"):
-                self.assertEqual(res2, torch.addbmm(1, res2, 0, b1, b2))
-
-            res4 = torch.addbmm(res2, b1, b2, beta=1, alpha=.5)
-            self.assertEqual(res4, res * 3),
-
-            nan = torch.full_like(res2, math.nan)
-            res5 = torch.addbmm(nan, b1, b2, beta=0, alpha=1)
-            self.assertEqual(res5, res)
-
-            res6 = torch.addbmm(res2, b1, b2, beta=.1, alpha=.5)
-            self.assertEqual(res6, res2 * .1 + .5 * res),
-
-            res7 = torch.full_like(res2, math.nan)
-            torch.addbmm(nan, b1, b2, beta=0, out=res7)
-            self.assertEqual(res7, res)
+            self._test_addbmm_baddbmm("addbmm", b1, b2, res, res2, res3)
 
     @onlyCPU
     @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
