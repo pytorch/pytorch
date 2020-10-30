@@ -21,7 +21,7 @@ from .. import device as _device
 import torch._C
 
 try:
-    from torch._C import _cudart
+    from torch._C import _cudart  # type: ignore
 except ImportError:
     _cudart = None
 
@@ -30,18 +30,18 @@ _tls = threading.local()
 _initialization_lock = threading.Lock()
 _queued_calls = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
-_device_t = Union[_device, str, int]
+_device_t = Union[_device, str, int, None]
 
 # Define dummy _CudaDeviceProperties type if PyTorch was compiled without CUDA
 if hasattr(torch._C, '_CudaDeviceProperties'):
     _CudaDeviceProperties = torch._C._CudaDeviceProperties
 else:
-    _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')
+    _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')  # type: ignore
 
 # Global variables dynamically populated by native code
 has_magma: bool = False
 has_half: bool = False
-default_generators: Tuple[torch._C.Generator] = ()
+default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 def is_available() -> bool:
     r"""Returns a bool indicating if CUDA is currently available."""
@@ -297,7 +297,7 @@ def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
     device = _get_device_index(device, optional=True)
     if device < 0 or device >= device_count():
         raise AssertionError("Invalid device id")
-    return _get_device_properties(device)
+    return _get_device_properties(device)  # type: ignore[name-defined]
 
 
 @contextlib.contextmanager
@@ -356,8 +356,8 @@ def get_gencode_flags() -> str:
     arch_list = get_arch_list()
     if len(arch_list) == 0:
         return ""
-    arch_list = [arch.split("_") for arch in arch_list]
-    return " ".join([f"-gencode compute=compute_{arch},code={kind}_{arch}" for (kind, arch) in arch_list])
+    arch_list_ = [arch.split("_") for arch in arch_list]
+    return " ".join([f"-gencode compute=compute_{arch},code={kind}_{arch}" for (kind, arch) in arch_list_])  # type: ignore
 
 
 
@@ -454,7 +454,7 @@ if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     torch._C.__dict__['_CudaEventBase'] = _dummy_type('CudaEventBase')
 
 
-@staticmethod
+@staticmethod  # type: ignore[misc]
 def _lazy_new(cls, *args, **kwargs):
     _lazy_init()
     # We may need to call lazy init again if we are a forked child
@@ -466,9 +466,11 @@ class _CudaBase(object):
     is_cuda = True
     is_sparse = False
 
+    def get_device(self) -> int: ...  # noqa: E704
+
     def type(self, *args, **kwargs):
         with device(self.get_device()):
-            return super(_CudaBase, self).type(*args, **kwargs)
+            return super(_CudaBase, self).type(*args, **kwargs)  # type: ignore[misc]
 
     __new__ = _lazy_new
 
