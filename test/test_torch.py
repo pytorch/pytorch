@@ -10536,6 +10536,23 @@ class TestTorchDeviceType(TestCase):
         check(torch.median, [[nan, nan], [1, 2]], [1], [[nan, 1]])
         check(torch.nanmedian, [[nan, nan], [1, 2]], [1], [[nan, 1.]])
 
+        # Discontiguous and strided tensors
+        a = torch.arange(12, device=device)
+        self.assertEqual(a[::2].median(), torch.tensor(4, device=device))
+        self.assertEqual(a[::2].nanmedian(), torch.tensor(4, device=device))
+
+        a.resize_(3, 4)
+        self.assertEqual(a.T.median(), torch.tensor(5, device=device))
+        self.assertEqual(a.T.nanmedian(), torch.tensor(5, device=device))
+        self.assertEqual(a[::2, ::2].median(-1)[0], torch.tensor([0, 8], device=device))
+        self.assertEqual(a[::2, ::2].nanmedian(-1)[0], torch.tensor([0, 8], device=device))
+
+        a.resize_(2, 3, 2)
+        self.assertEqual(a.T.median(), torch.tensor(5, device=device))
+        self.assertEqual(a.T.nanmedian(), torch.tensor(5, device=device))
+        self.assertEqual(a[:, ::2, :].median(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
+        self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
+
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double)
