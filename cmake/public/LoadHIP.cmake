@@ -147,7 +147,7 @@ endmacro()
 # Find the HIP Package
 find_package_and_print_version(HIP 1.0)
 
-if (HIP_VERSION VERSION_LESS "3.7")
+if(HIP_VERSION VERSION_LESS "3.7")
   # Disable Asserts In Code (Can't use asserts on HIP stack.)
   add_definitions(-DNDEBUG)
   message("HIP VERSION < 3.7; disablng asserts")
