@@ -1092,7 +1092,7 @@ class TestFX(JitTestCase):
                 return self.a.b, self.a.b.t(), self.a.b.view(12)
 
         traced = torch.fx.symbolic_trace(Foo())
-        assert(all('constant' not in node.name for node in traced.graph.nodes))
+        assert(all('constant' not in node.target for node in traced.graph.nodes))
 
 
 if __name__ == '__main__':

@@ -175,16 +175,18 @@ class Tracer(TracerBase):
         orig_call = torch.nn.Module.__call__
         orig_getattr = torch.nn.Module.__getattr__
 
-        cache = {}
+        parameter_proxy_cache = {}  # Reduce number of get_attr calls
 
+        # Method dispatch on parameters is not recorded unless it's directly used.
+        # Thus, we need to insert a proxy when __getattr__ requests a parameter.
         def module_getattr_wrapper(mod, attr):
             attr_val = orig_getattr(mod, attr)
             if isinstance(attr_val, torch.nn.Parameter):
                 for n, p in self.root.named_parameters():
                     if attr_val is p:
-                        if n not in cache:
-                            cache[n] = self.create_proxy('get_attr', n, (), {})
-                        return cache[n]
+                        if n not in parameter_proxy_cache:
+                            parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {})
+                        return parameter_proxy_cache[n]
             return attr_val
 
         def module_call_wrapper(mod, *args, **kwargs):
