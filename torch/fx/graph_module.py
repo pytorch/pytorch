@@ -167,7 +167,6 @@ class GraphModule(torch.nn.Module):
     #
     # Shouldn't be an issue since these methods shouldn't be used in TorchScript anyway
     __jit_unused_properties__ = ['graph']
-    __jit_ignored_attributes__ = ['_graph']
 
     @property
     def graph(self):
