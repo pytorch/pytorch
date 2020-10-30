@@ -425,11 +425,11 @@ class DataLoader(Generic[T_co]):
         #        We don't take threading into account since each worker process is single threaded
         #        at this time.
         #
-        #        we don't set any threading flags (eg. OMP_NUM_THREADS, MKL_NUM_THREADS, etc)
+        #        We don't set any threading flags (eg. OMP_NUM_THREADS, MKL_NUM_THREADS, etc)
         #        other than `torch.set_num_threads` to 1 in the worker process, if the passing
-        #        in function uses module that rely on those threading flags to determine how many
-        #        thread to use (eg. numpy, etc), it is caller's responsibility to set these flags
-        #        correctly.
+        #        in functions use 3rd party modules that rely on those threading flags to determine
+        #        how many thread to create (eg. numpy, etc), then it is caller's responsibility to
+        #        set those flags correctly.
         def _create_warning_msg(num_worker_suggest, num_worker_created, cpuset_checked):
 
             suggested_max_worker_msg = ((
