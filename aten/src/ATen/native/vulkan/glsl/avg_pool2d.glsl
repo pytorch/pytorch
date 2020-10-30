@@ -25,12 +25,7 @@ layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
   ivec3 pos = ivec3(gl_GlobalInvocationID);
-  //ivec3 inputSize = ivec3(uBlock.input_x, uBlock.input_y, uBlock.input_z);
   ivec3 outputSize = ivec3(uBlock.output_x, uBlock.output_y, uBlock.output_z);
-  //ivec2 kernelSize = ivec2(uBlock.kernelSize_x, uBlock.kernelSize_y);
-  //ivec2 stride = ivec2(uBlock.stride_x, uBlock.stride_y);
-  //ivec2 padding = ivec2(uBlock.padding_x, uBlock.padding_y);
-  //ivec2 dilate = ivec2(uBlock.dilate_x, uBlock.dilate_y);
   if (all(lessThan(pos, outputSize))) {
     ivec2 s0 = pos.xy * uBlock.stride - uBlock.padding;
     ivec2 sfxy = max(ivec2(0), (UP_DIV(-s0, uBlock.dilate)));
