@@ -388,9 +388,9 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
       }
       if (guard.needs_inputs) {
         torch::jit::Stack stack = impl::BoxedKernelWrapper<Return(Args...)>::boxArgs(args...);
-        guard.before(op.schema().name(), stack, seq_num);
+        guard.before(op, stack, seq_num);
       } else {
-        guard.before(op.schema().name(), seq_num);
+        guard.before(op, seq_num);
       }
     }
   }
@@ -438,9 +438,9 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
         seq_num = at::sequence_number::peek();
       }
       if (guard.needs_inputs) {
-        guard.before(op.schema().name(), *stack, seq_num);
+        guard.before(op, *stack, seq_num);
       } else {
-        guard.before(op.schema().name(), seq_num);
+        guard.before(op, seq_num);
       }
     }
   }
