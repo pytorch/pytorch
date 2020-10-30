@@ -114,7 +114,6 @@ TEST(TestAtomicOps, TestAtomicAdd) {
 }
 
 TEST(TestAtomicOps, TestAtomicMul) {
-  ASSERT_EQ(2, 1);
   test_atomic_mul<at::BFloat16>();
   test_atomic_mul<at::Half>();
   test_atomic_mul<float>();
