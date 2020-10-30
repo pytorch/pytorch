@@ -1274,6 +1274,10 @@ if(BUILD_TENSOREXPR_BENCHMARK)
   add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/tensorexpr ${CMAKE_BINARY_DIR}/tensorexpr_bench)
 endif()
 
+if(BUILD_NVFUSER_BENCHMARK)
+  add_subdirectory(${TORCH_ROOT}/benchmarks/cpp/nvfuser ${CMAKE_BINARY_DIR}/nvfuser_bench)
+endif()
+
 if(BUILD_MOBILE_BENCHMARK)
   foreach(benchmark_src ${ATen_MOBILE_BENCHMARK_SRCS})
     get_filename_component(benchmark_name ${benchmark_src} NAME_WE)
