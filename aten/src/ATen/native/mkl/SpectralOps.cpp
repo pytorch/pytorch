@@ -50,7 +50,8 @@ namespace at { namespace native {
 // See NOTE [ Fourier Transform Conjugate Symmetry ] in native/SpectralOpsUtils.h.
 
 template <typename scalar_t>
-static void _fft_fill_with_conjugate_symmetry_slice(
+static __ubsan_ignore_undefined__  // UBSAN gives false positives on negative pointer indexing
+void _fft_fill_with_conjugate_symmetry_slice(
     Range range, at::ArrayRef<bool> is_mirrored_dim, IntArrayRef signal_half_sizes,
     IntArrayRef in_strides, const scalar_t * in_ptr,
     IntArrayRef out_strides, scalar_t * out_ptr) {
@@ -129,11 +130,7 @@ static void _fft_fill_with_conjugate_symmetry_slice(
     while (numel_remaining > 0) {
       auto end = std::min(signal_half_sizes[0], iter_index[0] + numel_remaining);
       for (int64_t i = iter_index[0]; i != end; ++i) {
-        auto in_offset = i * in_strides[0];
-        auto out_offset = i * out_strides[0];
-        static_assert(std::is_signed<decltype(in_offset)>::value &&
-                      std::is_signed<decltype(out_offset)>::value, "");
-        out_ptr[out_offset] = std::conj(in_ptr[in_offset]);
+        out_ptr[i * out_strides[0]] = std::conj(in_ptr[i * in_strides[0]]);
       }
       numel_remaining -= (end - iter_index[0]);
       iter_index[0] = 0;
