@@ -240,7 +240,7 @@ Tensor empty_like(
   TensorOptions options =
       self.options()
           .merge_in(options_)
-          .merge_in(TensorOptions().memory_format(optional_memory_format));
+          .merge_memory_format(optional_memory_format);
 
   TORCH_CHECK(
       !(options.layout() != kStrided &&
