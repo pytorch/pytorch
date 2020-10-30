@@ -129,9 +129,13 @@ static void _fft_fill_with_conjugate_symmetry_slice(
     while (numel_remaining > 0) {
       auto end = std::min(signal_half_sizes[0], iter_index[0] + numel_remaining);
       for (int64_t i = iter_index[0]; i != end; ++i) {
-        out_ptr[i * out_strides[0]] = std::conj(in_ptr[i * in_strides[0]]);
+        auto in_offset = i * in_strides[0];
+        auto out_offset = i * out_strides[0];
+        static_assert(std::is_signed<decltype(in_offset)>::value &&
+                      std::is_signed<decltype(out_offset)>::value, "");
+        out_ptr[out_offset] = std::conj(in_ptr[in_offset]);
       }
-      numel_remaining -= end - iter_index[0];
+      numel_remaining -= (end - iter_index[0]);
       iter_index[0] = 0;
       advance_index();
     }
