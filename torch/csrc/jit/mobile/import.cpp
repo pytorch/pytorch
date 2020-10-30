@@ -122,6 +122,7 @@ void parseMethods(
         "The numbers of bytecode values and debug info values do not match.");
   }
 
+  std::set<std::string> op_set;
   for (size_t i = method_i_start; i < vals.size(); ++i) {
     const auto& element = vals[i];
     const auto& m_tuple = element.toTuple()->elements();
@@ -199,6 +200,8 @@ void parseMethods(
           op_item[0].toString()->string(),
           op_item[1].toString()->string(),
           model_version);
+      op_set.emplace(operator_str(
+          op_item[0].toString()->string(), op_item[1].toString()->string()));
       if (!op_found) {
         unsupported_op_names.emplace(operator_str(
             op_item[0].toString()->string(), op_item[1].toString()->string()));
@@ -219,6 +222,9 @@ void parseMethods(
     function->set_register_size(register_size);
 
     mcu.register_function(std::move(function));
+  }
+  for (const auto& op : op_set) {
+    std::cout << "\"" << op << "\"," << std::endl;
   }
 }
 
