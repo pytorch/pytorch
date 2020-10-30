@@ -4262,7 +4262,11 @@ class TestTorchDeviceType(TestCase):
                                                   + 'but got a tensor with dimension 2'):
             torch.histogram(torch.tensor([1], dtype=torch.float, device=device),
                             bins=torch.tensor([[1, 2], [3, 4]], dtype=torch.float, device=device))
-
+        # specified both bins as tensor and range
+        with self.assertRaisesRegex(TypeError, 'invalid combination of arguments'):
+            torch.histogram(torch.tensor([1], dtype=torch.float, device=device),
+                            bins=torch.tensor([1, 2, 3, 4], dtype=torch.float, device=device),
+                            range=(1, 4))
         # empty tensor
         actual = torch.histogram(torch.tensor([], device=device), range=(0, 3))[0]
         expected = torch.zeros(10, dtype=torch.long, device=device)
