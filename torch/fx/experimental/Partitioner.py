@@ -64,6 +64,17 @@ class Partition:
         for node in self.nodes:
             self.used_mem_bytes += get_extra_size_of(node, self.nodes)
 
+    def add_node(self, node):
+        input_nodes: Dict[Node, None] = {}
+        map_arg(node.args, lambda n: input_nodes.setdefault(n))
+        map_arg(node.kwargs, lambda n: input_nodes.setdefault(n))
+        # Add current node's input nodes if they are placeholder or constants
+        for n in input_nodes:
+            if n.op in {'placeholder', 'get_attr'}:
+                self.nodes.add(n)
+        self.nodes.add(node)
+
+
 class PartitionResult(NamedTuple):
     """NameTuple used for returning DAG and a new graph module
     """
@@ -224,7 +235,7 @@ class Partitioner:
             """
             partition = self.create_partition()
             total_size_needed = get_extra_size_of(node, set())
-            partition.nodes.add(node)
+            partition.add_node(node)
             partition.used_mem_bytes = total_size_needed
             single_node_partitions.append(partition)
 
@@ -268,7 +279,7 @@ class Partitioner:
                             total_size_of_input_nodes = get_extra_size_of(node, partition.nodes)
                             partition_to_left_mem_bytes[partition] = device.available_mem_bytes
                             partition.logical_device_ids.append(device.logical_id)
-                    partition.nodes.add(node)
+                    partition.add_node(node)
                     partition_to_left_mem_bytes[partition] -= total_size_of_input_nodes
                     partition.used_mem_bytes += total_size_of_input_nodes
                 # No device left, create single node partitions
@@ -300,7 +311,6 @@ class Partitioner:
                         if abs(p1.bfs_level - p2.bfs_level) <= 1:
                             # Combining p1 and p2 into p0
                             p0 = self.combine_two_partitions(p1, p2)
-                            self.set_parents_and_children()
                             p0.logical_device_ids = p2.logical_device_ids
                             # Remove p2 from non_single_node_partitions
                             non_single_node_partitions.remove(p2)
@@ -430,6 +440,7 @@ class Partitioner:
         """
         partition = self.create_partition()
         partition.nodes = partition_0.nodes.union(partition_1.nodes)
+        partition.recalculate_mem_size()
         self.partitions.remove(partition_0)
         self.partitions.remove(partition_1)
         # reset parents and children for all partitions
@@ -551,7 +562,7 @@ class Partitioner:
                     total_size_of_input_nodes = get_extra_size_of(node, partition.nodes)
                     if total_size_of_input_nodes > available_mem_bytes:
                         raise RuntimeError(node.target + 'is too large to fit into a device')
-                partition.nodes.add(node)
+                partition.add_node(node)
                 partition.used_mem_bytes += total_size_of_input_nodes
         reset_partition_in_sparse_nn(partition, new_partition=False)
         # Set parents and children for each partition
