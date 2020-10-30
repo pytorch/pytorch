@@ -53,7 +53,7 @@ void debugPrint(const TensorTypePtr& type) {
         // int64_t format: convert upward to long long int, so formatter to lld
         printf(
             "s(%lld), ",
-            (long long int)*reinterpret_cast<const int64_t*>(&shape_symbol));
+            *reinterpret_cast<const long long int*>(&shape_symbol));
       }
     }
   } else {
