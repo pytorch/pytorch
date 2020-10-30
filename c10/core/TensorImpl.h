@@ -1040,8 +1040,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return;
     }
     auto newCapacity = sizes_;
-    newCapacity[0] = std::max<size_t>(
-        newDims[0], std::ceil(sizes_[0] * (growthPct + 100) / 100));
+    newCapacity[0] = std::max(
+        newDims[0], static_cast<int64_t>(std::ceil(sizes_[0] * (1 + growthPct / 100))));
     auto oldData = std::move(storage_.data_ptr());
     auto oldSize = numel_;
     auto oldDims = sizes_;
@@ -1389,10 +1389,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
         // dim_ is a virtual call, don't repeat it
-        auto dim_ = dim();
+        const auto dim_ = dim();
         strides_.resize(dim_);
         if (dim_ > 0) {
-          int last_idx = dim_ - 1;
+          const auto last_idx = dim_ - 1;
           strides_[last_idx] = 1;
           for (auto i = last_idx - 1; i >= 0; --i) {
             strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
@@ -1781,13 +1781,13 @@ protected:
 //    strides SmallVector (pre-allocated 4)
 //    storage offset
 //    numel
-//    data type pointer
+//    data type
 //    (optional) device
 //    tensor type id
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 31,
+              sizeof(TensorImpl) == sizeof(int64_t) * 30,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10
