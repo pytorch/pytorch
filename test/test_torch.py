@@ -17925,21 +17925,21 @@ else:
         res3.copy_(res2)
 
         with self.maybeWarnsRegex(
-                UserWarning, "This overload of addbmm_ is deprecated"):
+                UserWarning, f"This overload of {func}_ is deprecated"):
             getattr(res2, func + "_")(1, b1, b2)
         self.assertEqual(res2, res * 2),
         getattr(res3, func + "_")(b1, b2, beta=1)
         self.assertEqual(res2, res3)
 
         with self.maybeWarnsRegex(
-                UserWarning, "This overload of addbmm_ is deprecated"):
+                UserWarning, f"This overload of {func}_ is deprecated"):
             getattr(res2, func + "_")(1., .5, b1, b2)
         self.assertEqual(res2, res * 2.5)
         getattr(res3, func + "_")(b1, b2, beta=1., alpha=.5)
         self.assertEqual(res2, res3)
 
         with self.maybeWarnsRegex(
-                UserWarning, "This overload of addbmm is deprecated"):
+                UserWarning, f"This overload of {func} is deprecated"):
             self.assertEqual(res2, getattr(torch, func)(1, res2, 0, b1, b2))
 
         res4 = getattr(torch, func)(res2, b1, b2, beta=1, alpha=.5)
@@ -18021,42 +18021,7 @@ else:
             res2 = res2.permute(perm3).contiguous().permute(invert_perm(perm3))
             res3 = res3.permute(perm3).contiguous().permute(invert_perm(perm3))
 
-            res2.baddbmm_(b1, b2)
-            self.assertEqual(res2, res)
-            res3.copy_(res2)
-
-            with self.maybeWarnsRegex(
-                    UserWarning, "This overload of baddbmm_ is deprecated"):
-                res2.baddbmm_(1, b1, b2)
-            self.assertEqual(res2, res * 2)
-            res3.baddbmm_(b1, b2, beta=1)
-            self.assertEqual(res3, res2)
-
-            with self.maybeWarnsRegex(
-                    UserWarning, "This overload of baddbmm_ is deprecated"):
-                res2.baddbmm_(1, .5, b1, b2)
-            self.assertEqual(res2, res * 2.5)
-            res3.baddbmm_(b1, b2, beta=1, alpha=.5)
-            self.assertEqual(res3, res2)
-
-
-            with self.maybeWarnsRegex(
-                    UserWarning, "This overload of baddbmm is deprecated"):
-                self.assertEqual(torch.baddbmm(1, res2, 0, b1, b2), res2)
-
-            res4 = torch.baddbmm(res2, b1, b2, beta=1, alpha=.5)
-            self.assertEqual(res4, res * 3, atol=2e-5, rtol=0)
-
-            nan = torch.full_like(res2, math.nan)
-            res5 = torch.baddbmm(nan, b1, b2, beta=0, alpha=1)
-            self.assertEqual(res5, res)
-
-            res6 = torch.baddbmm(res2, b1, b2, beta=.1, alpha=.5)
-            self.assertEqual(res6, res2 * .1 + res * .5)
-
-            res7 = torch.full_like(res2, math.nan)
-            torch.baddbmm(nan, b1, b2, beta=0, out=res7)
-            self.assertEqual(res7, res)
+            self._test_addbmm_baddbmm("baddbmm", b1, b2, res, res2, res3)
 
     def _test_cop(self, torchfn, mathfn, dtype, device):
         def reference_implementation(res2):
