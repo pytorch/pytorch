@@ -184,7 +184,19 @@ class GraphModule(torch.nn.Module):
         """
         self.code = self._graph.python_code(root_module='self')
         cls = type(self)
-        cls.forward = _forward_from_src(self.code)
+
+        src_forward = _forward_from_src(self.code)
+
+        def debug_forward(self, *args, **kwargs):
+            try:
+                return src_forward(self, *args, **kwargs)
+            except Exception as e:
+                import traceback
+                last_tb = traceback.format_tb(e.__traceback__)[-1]
+                e.args = (last_tb + e.args[0],)
+                raise e
+
+        cls.forward = debug_forward
 
     def __reduce__(self):
         dict_without_graph = self.__dict__.copy()
