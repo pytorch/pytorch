@@ -3477,10 +3477,11 @@ def _pad(input, pad, mode='constant', value=0):
         See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and
         :class:`torch.nn.ReplicationPad2d` for concrete examples on how each of the
         padding modes works. Constant padding is implemented for arbitrary dimensions.
-        Replicate padding is implemented for padding the last 3 dimensions of 5D input
-        tensor, or the last 2 dimensions of 4D input tensor, or the last dimension of
-        3D input tensor. Reflect padding is only implemented for padding the last 2
-        dimensions of 4D input tensor, or the last dimension of 3D input tensor.
+        Replicate padding is implemented for padding any or all of the last 3 dimensions
+        of 5D input tensor, or one or both of the last 2 dimensions of 4D input tensor,
+        or the last dimension of 3D input tensor. Reflect padding is only implemented
+        for padding one or both of the last 2 dimensions of 4D input tensor, or the last
+        dimension of 3D input tensor.
 
     Note:
         When using the CUDA backend, this operation may induce nondeterministic
