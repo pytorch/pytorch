@@ -3466,20 +3466,25 @@ Computes the histogram of a tensor.
 
 Args:
     {input}
-    bins (int or 1D Tensor): If int, defines the number of bins. If Tensor,
-        defines a monotonically increasing sequence of bin edges, allowing
-        for non-uniform bins. Default: 10.
+    bins (int or 1D Tensor): If int, defines the number of ewually sized bins.
+        If Tensor, defines a monotonically increasing sequence of bin edges,
+        allowing for non-uniform bins. Default: 10.
     range (tuple of floats, optional): Defines the lower and upper ends of the
-        range if bins is an integer.
+        range. Default: use the min and max values of the Tensor.
     weights (Tensor, optional): Weight for each value in the input tensor.
-        Should be of same size as input tensor.
+        Must have the shape as :attr:`input.
     density (bool): If ``False``, the result will contain the (weighted) number
-        of samples in each bin. If ``True``, the result is normalized to
-        `bin_count / (bin_volume * total)` such that the integral of the interpolated
-        function over the range is 1.
+        of samples in each bin. If ``True``, the (weighted) number of samples is
+        divided by the sum of all (weighted) samples and the volume of the bin.
+        Conceptually, this defines a piecewise-constant function whose integral
+        over the bin is equal to the fraction of (weighted) samples inside that
+        bin, and whose integral over the whole range is equal to 1. For example,
+        in an unweighted histogram with 10 elements, if a bin contains 5 elements
+        and has edges (1, 3), then if attr:`density` is True, it is normalized
+        to math:`5 / (10 * (3 - 1)) = .25`.
 
 Returns:
-    A (Tensor, Tensor) tuple of the histogram represented as a Tensor and the bin edges
+    A (Tensor, Tensor) tuple of the histogram represented as a Tensor and the bin edges.
 
 Example::
 
