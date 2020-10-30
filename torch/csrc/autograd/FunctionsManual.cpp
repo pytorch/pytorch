@@ -1808,6 +1808,16 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     v_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
+  // for complex-valued input there is an additional term
+  // https://giggleliu.github.io/2019/04/02/einsumbp.html
+  // https://arxiv.org/abs/1909.02659
+  if (self.is_complex() && gu.defined()) {
+    Tensor L = in.mul(at::matmul(uh, gu));
+    L = L - L.conj().transpose(-2, -1);
+    Tensor imag_term = 0.5 * at::chain_matmul({u, L, sigma_mat_inv, vh});
+    return u_term + sigma_term + v_term + imag_term;
+  }
+
   return u_term + sigma_term + v_term;
 }
 
