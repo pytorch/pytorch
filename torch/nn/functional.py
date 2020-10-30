@@ -3295,10 +3295,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
                        or :math:`(N, D_\text{out}, H_\text{out}, W_\text{out}, 3)` (5-D case)
         mode (str): interpolation mode to calculate output values
             ``'bilinear'`` | ``'nearest'`` | ``'bicubic'``. Default: ``'bilinear'``
-            Note: When ``mode='bilinear'`` and the input is 5-D, the interpolation mode
+            Note: ``mode=''bicubic`` supports only 4-D input. When ``mode='bilinear'`` and the input is 5-D, the interpolation mode
             used internally will actually be trilinear. However, when the input is 4-D,
-            the interpolation mode will legitimately be bilinear. 
-            Besides, ``mode=''bicubic`` supports only 4-D input.
+            the interpolation mode will legitimately be bilinear.
         padding_mode (str): padding mode for outside grid values
             ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
@@ -3328,12 +3327,14 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         in order to bring it in line with the default for :func:`interpolate`.
 
     .. note::
-        ``mode='bicubic'`` is implemented by
-        [cubic covolution algorithm](https://en.wikipedia.org/wiki/Bicubic_interpolation) 
-        with `\alpha=-0.75`. It's possible to cause overshoot, in other words it can produce
-        negative values or values greater than 255 for images.
-        Explicitly call ``result.clamp(min=0, max=255)`` if you want to reduce the overshoot
-        when displaying the image.
+        ``mode='bicubic'`` is implemented using the
+        [cubic covolution algorithm](https://en.wikipedia.org/wiki/Bicubic_interpolation). 
+        The constant `\alpha` is chosen to be -0.75. This value might be different from packages to packages, For example, 
+        [PIL](https://github.com/python-pillow/Pillow/blob/4634eafe3c695a014267eefdce830b4a825beed7/src/libImaging/Resample.c#L51) use \alpha=-0.5 
+        and [opencv](https://github.com/opencv/opencv/blob/f345ed564a06178670750bad59526cfa4033be55/modules/imgproc/src/resize.cpp#L908) use `alpha=-0.75`. 
+        This algorithm may "overshoot" the range of values it's interpolating. 
+        For example, it may produce negative values or values greater than 255 when interpolating input in [0, 255]. 
+        Clamp the results with :func: torch.clamp to ensure they are within the valid range.
     """
     if not torch.jit.is_scripting():
         tens_ops = (input, grid)
