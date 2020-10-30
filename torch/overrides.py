@@ -743,7 +743,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.take: lambda input, index: -1,
         torch.tan: lambda input, out=None: -1,
         torch.tanh: lambda input, out=None: -1,
-        torch.tensordot: lambda a, b, dims=2: -1,
+        torch.tensordot: lambda a, b, dims=2, out=None: -1,
         torch.tensor_split: lambda input, indices_or_sections, dim=0: -1,
         torch.threshold: lambda input, threshold, value, inplace=False: -1,
         torch.topk: lambda input, k, dim=-1, descending=False, out=None: -1,

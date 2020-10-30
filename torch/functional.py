@@ -876,7 +876,7 @@ unique_consecutive = boolean_dispatch(
 unique_consecutive.__doc__ = _unique_consecutive_impl.__doc__
 
 
-def tensordot(a, b, dims=2):
+def tensordot(a, b, dims=2, out=None):
     r"""Returns a contraction of a and b over multiple dimensions.
 
     :attr:`tensordot` implements a generalized matrix product.
