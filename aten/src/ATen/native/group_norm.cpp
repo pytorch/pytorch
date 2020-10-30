@@ -106,11 +106,8 @@ Tensor group_norm(
       input.sizes());
 
   const auto input_shape = input.sizes();
-  const int64_t HxW = std::accumulate(
-      input_shape.cbegin() + 2,
-      input_shape.cend(),
-      1LL,
-      std::multiplies<int64_t>());
+  const int64_t HxW =
+      prod_intlist(input_shape.cbegin() + 2, input_shape.cend());
 
   const Tensor kEmpty;
   const auto& X = input.is_contiguous() ? input : input.contiguous();
