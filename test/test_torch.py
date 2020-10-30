@@ -17922,7 +17922,7 @@ else:
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
     @onlyOnCPUAndCUDA
     @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)))
-    @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
+    @dtypes(*torch.testing.floating_and_complex_types())
     @tf32_on_and_off(0.05)
     def test_addbmm(self, device, dtype):
         # num_batches = 10
