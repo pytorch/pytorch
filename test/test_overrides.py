@@ -826,8 +826,10 @@ class TestPickle(TestCase):
     "Regression test for gh-47051"
     def test_pickle(self):
         t = torch.tensor([1]).as_subclass(SubTensor2)
+        t.abcd = "e"
         t2 = pickle.loads(pickle.dumps(t))
-        self.assertEqual(type(t2), SubTensor2)
+        self.assertIs(type(t2), SubTensor2)
+        self.assertEqual(t2.abcd, "e")
 
 if __name__ == '__main__':
     unittest.main()

@@ -29,11 +29,13 @@ def _wrap_type_error_to_not_implemented(f):
             return NotImplemented
     return wrapped
 
-def _rebuild_from_type(func, type, args):
+def _rebuild_from_type(func, type, args, dict):
     if type is Tensor:
         return func(*args)
 
-    return func(*args).as_subclass(type)
+    ret = func(*args).as_subclass(type)
+    ret.__dict__ = dict
+    return ret
 
 
 # NB: If you subclass Tensor, and want to share the subclassed class
@@ -92,7 +94,7 @@ class Tensor(torch._C._TensorBase):
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.__reduce_ex__, relevant_args, self, proto)
         func, args = self._reduce_ex_internal(proto)
-        return (_rebuild_from_type, (func, type(self), args))
+        return (_rebuild_from_type, (func, type(self), args, self.__dict__))
 
     def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
