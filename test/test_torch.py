@@ -17833,6 +17833,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         torch_fn = lambda x: torch.mm(x, x)  # noqa: E731
         self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @onlyOnCPUAndCUDA
     @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)))
     @dtypesIfCPU(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
@@ -17840,6 +17841,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_bmm(self, device, dtype):
         num_batches = 10
         M, N, O = 23, 8, 12
+        numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
 
         def invert_perm(p):
             d = {x: i for i, x in enumerate(p)}
@@ -17853,10 +17855,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             res1 = torch.bmm(b1, b2)
             res2 = torch.full_like(res1, math.nan).permute(perm3).contiguous().permute(invert_perm(perm3))
             torch.bmm(b1, b2, out=res2)
-            for i in range(num_batches):
-                r = torch.mm(b1[i], b2[i])
-                self.assertEqual(r, res1[i])
-                self.assertEqual(r, res2[i])
+            expect = torch.from_numpy(
+                b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device).to(dtype)
+            self.assertEqual(expect, res1)
+            self.assertEqual(expect, res2)
+
             if self.device_type == 'cuda':
                 # check that mixed arguments are rejected
                 self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2.cpu()))
