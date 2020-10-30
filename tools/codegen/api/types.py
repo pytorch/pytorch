@@ -309,7 +309,7 @@ class DispatcherSignature:
 
     # Return the C++ function type, e.g., something like int(bool)
     def type(self) -> str:
-        dispatcher_args_types_str = ', '.join(map(lambda a: a.type, self._arguments))
+        dispatcher_args_types_str = ', '.join(a.type for a in self._arguments)
         return f'{self._returns_type} ({dispatcher_args_types_str})'
 
     @staticmethod

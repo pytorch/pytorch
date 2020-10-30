@@ -632,11 +632,11 @@ BINARY_OP_NAMES = [
 
 # PyMethodDef entry for binary op, throws not implemented error
 PY_VARIABLE_METHOD_BINOP_DEF = CodeTemplate("""\
-{"${name}", (PyCFunction)${pycfunc_voidcast}TypeError_to_NotImplemented_<${pycname}>, ${flags}, NULL},""")
+{"${name}", ${pyfunc_cast}(TypeError_to_NotImplemented_<${pycname}>), ${flags}, NULL},""")
 
 # PyMethodDef entry
 PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
-{"${name}", (PyCFunction)${pycfunc_voidcast}${pycname}, ${flags}, NULL},""")
+{"${name}", ${pyfunc_cast}(${pycname}), ${flags}, NULL},""")
 
 
 def method_def(name, declarations, is_python_method, module):
@@ -646,10 +646,10 @@ def method_def(name, declarations, is_python_method, module):
     pycname = get_pycname(name)
 
     if is_noarg_binding(declarations):
-        pycfunc_voidcast = ''
+        pyfunc_cast = ''
         flags = 'METH_NOARGS' if is_python_method else 'METH_VARARGS | METH_KEYWORDS'
     else:
-        pycfunc_voidcast = '(void(*)(void))'
+        pyfunc_cast = 'castPyCFunctionWithKeywords'
         flags = 'METH_VARARGS | METH_KEYWORDS'
 
     if module == "torch":
@@ -663,7 +663,7 @@ def method_def(name, declarations, is_python_method, module):
     return def_template.substitute(
         name=name,
         pycname=pycname,
-        pycfunc_voidcast=pycfunc_voidcast,
+        pyfunc_cast=pyfunc_cast,
         flags=flags,
     )
 
@@ -871,7 +871,6 @@ def decl_to_python_signature(decl: Dict[str, Any], *, method: bool) -> PythonSig
         src_args: Dict[str, PythonArgument] = {a.name: PythonArgument(
             name=a.name,
             type=a.type,
-            cpp_type_str=a.cpp_type_str,
             default=None,
             default_init=None,
         ) for a in itertools.chain(python_sig.input_args, python_sig.input_kwargs)}
@@ -922,8 +921,15 @@ def emit_single_dispatch(ps: PythonSignature, decl: Dict[str, Any], method: bool
         lambda_args = ', '.join(lambda_arg_exprs.exprs)
 
         # scatter fields
+        # TODO: Checking `ps.method and ('requires_grad' in parser_outputs)` is a hacky
+        #       solution for enabling the 'requires_grad' argument for tensor methods
+        #       new_full, new_empty, and new_zeros. A much better but more difficult to
+        #       implement solution involves refactoring according to Ed's description here:
+        #       https://github.com/pytorch/pytorch/issues/36455#issuecomment-614767589
+        need_set_requires_grad = ps.tensor_options_args and (not has_tensor_options(f) or (
+            ps.method and ('requires_grad' in parser_outputs)))
         set_requires_grad = f'.set_requires_grad({parser_outputs["requires_grad"].expr})' \
-            if ps.tensor_options_args and not has_tensor_options(f) else ''
+            if need_set_requires_grad else ''
 
         auto_no_gil = '' if decl['with_gil'] else 'pybind11::gil_scoped_release no_gil;'
 
