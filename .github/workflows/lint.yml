@@ -31,6 +31,10 @@ jobs:
       - name: Ensure canonical include
         run: |
           (! git grep -I -l $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above files have include with quotes; please convert them to #include <xxxx>"; false))
+      # note that this next step depends on a clean shallow checkout;
+      # if you run it locally in a deep checkout then it will complain
+      # about android/libs/fbjni/gradlew (in a submodule),
+      # as well as all the generated files in torch/test
       - name: Ensure C++ source files are not executable
         run: |
           (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit|git-clang-format)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
@@ -38,6 +42,10 @@ jobs:
         run: |
           sudo apt-get install -y doxygen && pip install -r requirements.txt
           cd docs/cpp/source && ./check-doxygen.sh
+      - name: CUDA kernel launch check
+        run: |
+          set -eux
+          python torch/testing/check_kernel_launches.py |& tee ${GITHUB_WORKSPACE}/cuda_kernel_launch_checks.txt
 
   flake8-py3:
     runs-on: ubuntu-latest
@@ -61,11 +69,10 @@ jobs:
         id: get_pr_tip
       - name: Run flake8
         run: |
-          set -eux
-          pip install flake8==3.8.2 flake8-mypy flake8-bugbear flake8-comprehensions flake8-executable flake8-pyi==20.5.0 mccabe pycodestyle==2.6.0 pyflakes==2.2.0
+          set -eux -o pipefail
+          pip install flake8==3.8.2 flake8-bugbear flake8-comprehensions flake8-executable flake8-pyi==20.5.0 mccabe pycodestyle==2.6.0 pyflakes==2.2.0
           flake8 --version
-          flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8-output.txt
-          cat ${GITHUB_WORKSPACE}/flake8-output.txt
+          flake8 | tee ${GITHUB_WORKSPACE}/flake8-output.txt
       - name: Add annotations
         uses: pytorch/add-annotations-github-action@master
         with:
@@ -138,6 +145,7 @@ jobs:
             # Generate PyTorch files.
             time python tools/setup_helpers/generate_code.py            \
               --declarations-path build/aten/src/ATen/Declarations.yaml \
+              --native-functions-path aten/src/ATen/native/native_functions.yaml \
               --nn-path aten/src
           fi
 

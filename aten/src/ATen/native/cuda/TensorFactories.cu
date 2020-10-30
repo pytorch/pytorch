@@ -22,15 +22,13 @@ namespace at {
 namespace native {
 
 Tensor& eye_out_cuda(Tensor& result, int64_t n) {
-  return at::native::eye_out_cuda(result, n, /*m=*/-1);
+  // the default value of `m` equals to `n`
+  return at::native::eye_out_cuda(result, n, n);
 }
 
 Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
-
-  if(m < 0) {
-    m = n;
-  }
+  TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
   result.resize_({n, m});
   result.zero_();
@@ -45,7 +43,6 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
 
 Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<MemoryFormat> optional_memory_format) {
   AT_ASSERT(options.device().type() == at::DeviceType::CUDA);
-  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
   check_size_nonnegative(size);
 

@@ -492,6 +492,33 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   }
 }
 
+void ProcessGroupNCCL::abortTimedOutCollectives(std::unordered_set<std::string>& abortedCommIds) {
+  std::unique_lock<std::mutex> lock(workMetaListMutex_);
+  for (auto& work : workMetaList_) {
+    work.checkAndSetException();
+    // Aborting NCCL Communicators due to errors is already handled above.
+    if (work.exception()) {
+      continue;
+    }
+
+    // Check for Timeouts in the WorkNCCL Operations, and abort all
+    // communicators accordingly.
+    if (work.timedOut()) {
+      LOG(INFO)
+          << "[Rank " << rank_
+          << "] Watchdog caught collective operation timeout for work: "
+          << work;
+      std::exception_ptr exception_ptr = std::make_exception_ptr(
+          std::runtime_error("NCCL Operation Timed Out"));
+      work.setException(exception_ptr);
+      for (const auto& ncclComm : work.ncclComms_) {
+        ncclComm->ncclCommAbort();
+        abortedCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
+      }
+    }
+  }
+}
+
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
     LOG(INFO) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
@@ -556,30 +583,7 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
     }
 
     if (asyncErrorHandling_) {
-      std::unique_lock<std::mutex> lock(workMetaListMutex_);
-      for (auto& work : workMetaList_) {
-        work.checkAndSetException();
-        // Aborting NCCL Communicators due to errors is already handled above.
-        if (work.exception()) {
-          continue;
-        }
-
-        // Check for Timeouts in the WorkNCCL Operations, and abort all
-        // communicators accordingly.
-        if (work.timedOut()) {
-          LOG(INFO)
-              << "[Rank " << rank_
-              << "] Watchdog caught collective operation timeout for work: "
-              << work;
-          std::exception_ptr exception_ptr = std::make_exception_ptr(
-              std::runtime_error("NCCL Operation Timed Out"));
-          work.setException(exception_ptr);
-          for (const auto& ncclComm : work.ncclComms_) {
-            ncclComm->ncclCommAbort();
-            abortedCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
-          }
-        }
-      }
+      abortTimedOutCollectives(abortedCommIds);
     }
 
     if (blockingWait_) {
@@ -1431,6 +1435,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
+        // See [Sync Streams].
+        c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
         torch::cuda::nccl::all2all(
               input,
               output,
@@ -1460,6 +1467,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
               inputSplitSizes, input, &send_lengths, &send_offsets);
           c10d::computeLengthsAndOffsets(
               outputSplitSizes, output, &recv_lengths, &recv_offsets);
+          // See [Sync Streams].
+          c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
           return ncclAlltoallv(
               input.data_ptr(),
               send_lengths.data(),
