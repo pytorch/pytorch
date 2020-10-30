@@ -270,7 +270,7 @@ def einsum(equation, *operands):
     provides more flexibility by manually enabling/disabling summation. The following section describes the
     formatting and rules for the equation.
 
-    .. equation::
+    Equation:
 
         The :attr:`equation` string specifies the subscripts (lower case letters `['a', 'z']`) for the Eintein summation.
 
