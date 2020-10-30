@@ -3113,6 +3113,49 @@ Keyword args:
 
 """)
 
+add_docstr(torch.inner, r"""
+inner(input, other, *, out=None) -> Tensor
+
+This functions computes the inner product of :attr:`input` and :attr:`other`
+if they are 1-D Tensors, otherwise computes a sum-product over the last dimensions.
+
+.. note:: 
+
+    If either input is a scalar, then a elemnt-wise multiplication is performed.
+    If both input tensors are non-scalar, their last dimensions must match.
+
+Args:
+    input (Tensor): First input tensor
+    other (Tensor): Second input tensor
+
+Keyword args:
+    out (Tensor, optional): Optional output tensor to write result into. The output
+                            shape is :math:`input.shape[:-1] + other.shape[:-1]`.
+
+Example::
+
+    # Vector inner product
+    >>> torch.inner(torch.tensor([1, 2, 3]), torch.tensor([0, 2, 1]))
+    tensor(7)
+
+    # Multidimensional input tensors
+    >>> torch.inner(torch.randn(2, 3), torch.randn(2, 4, 3))
+    tensor([[[ 1.7520,  0.1591,  2.3142,  0.0494],
+         [-1.0180,  1.6137,  1.7597, -0.4789]],
+
+        [[-0.0667, -0.9676,  1.5111, -1.9444],
+         [-2.9197, -0.2519, -0.2990, -0.7924]]])
+    
+    # Scalar input
+    >>> a = torch.randn(2, 3)
+    >>> a
+    tensor([[-0.1931,  1.2435,  0.3856],
+            [-0.7399,  0.0622, -0.5785]])
+    >>> torch.inner(a, torch.tensor(2))
+    tensor([[-0.3863,  2.4870,  0.7713],
+            [-1.4798,  0.1244, -1.1571]])
+""")
+
 add_docstr(torch.outer, r"""
 outer(input, vec2, *, out=None) -> Tensor
 
