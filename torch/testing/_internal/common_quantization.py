@@ -19,14 +19,7 @@ from torch.quantization.quantization_mappings import (
     get_default_qat_module_mappings,
 )
 
-from torch.quantization import (
-    QuantType,
-)
-
 try:
-    # symbolic trace
-    from torch.fx import symbolic_trace
-
     # graph mode quantization based on fx
     from torch.quantization.quantize_fx import (
         prepare_fx,
@@ -609,30 +602,30 @@ class QuantizationTestCase(TestCase):
 
     if HAS_FX:
         def checkGraphModeFxOp(self, model, inputs, quant_type,
-                            expected_node=None,
-                            expected_node_occurrence=None,
-                            expected_node_list=None,
-                            debug=False,
-                            print_debug_info=False,
-                            custom_qconfig=None):
+                               expected_node=None,
+                               expected_node_occurrence=None,
+                               expected_node_list=None,
+                               debug=False,
+                               print_debug_info=False,
+                               custom_qconfig=None):
             """ Quantizes model with graph mode quantization on fx and check if the
-            quantized model contains the quantized_node
+                quantized model contains the quantized_node
 
-            Args:
-                model: floating point torch.nn.Module
-                inputs: one positional sample input arguments for model
-                expected_node: NodeSpec
-                    e.g. NodeSpec.call_function(torch.quantize_per_tensor)
-                expected_node_occurrence: a dict from NodeSpec to
-                    expected number of occurences (int)
-                    e.g. {NodeSpec.call_function(torch.quantize_per_tensor) : 1,
-                            NodeSpec.call_method('dequantize'): 1}
-                expected_node_list: a list of NodeSpec, used to check the order
-                    of the occurrence of Node
-                    e.g. [NodeSpec.call_function(torch.quantize_per_tensor),
-                            NodeSpec.call_module(nnq.Conv2d),
-                            NodeSpec.call_function(F.hardtanh_),
-                            NodeSpec.call_method('dequantize')]
+                Args:
+                    model: floating point torch.nn.Module
+                    inputs: one positional sample input arguments for model
+                    expected_node: NodeSpec
+                        e.g. NodeSpec.call_function(torch.quantize_per_tensor)
+                    expected_node_occurrence: a dict from NodeSpec to
+                        expected number of occurences (int)
+                        e.g. {NodeSpec.call_function(torch.quantize_per_tensor) : 1,
+                                NodeSpec.call_method('dequantize'): 1}
+                    expected_node_list: a list of NodeSpec, used to check the order
+                        of the occurrence of Node
+                        e.g. [NodeSpec.call_function(torch.quantize_per_tensor),
+                                NodeSpec.call_module(nnq.Conv2d),
+                                NodeSpec.call_function(F.hardtanh_),
+                                NodeSpec.call_method('dequantize')]
             """
             # TODO: make img_data a single example instead of a list
             if type(inputs) == list:
