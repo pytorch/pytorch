@@ -89,6 +89,7 @@ Context::Context(
       expand_param_if_needed(dilation, "dilation", 2),
     },
     original_ {
+      // Be careful not to move these variables twice.
       std::move(weight),
       std::move(bias),
       std::move(stride),
