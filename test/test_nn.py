@@ -10206,6 +10206,14 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 10, 10, 10, device=device)
             mod(inp)
 
+    def test_Bilinear_empty(self, device):
+        mod = torch.nn.Bilinear(20, 30, 40)
+        inp1 = torch.randn(0, 10, 20)
+        inp2 = torch.randn(0, 10, 30)
+        output = mod(inp1, inp2)
+
+        self.assertEqual(output, torch.zeros(0, 10, 40))
+        
     @onlyOnCPUAndCUDA
     def test_ReflectionPad_empty(self, device):
         for mod, inp in [

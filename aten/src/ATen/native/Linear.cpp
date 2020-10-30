@@ -424,6 +424,10 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   int64_t slicemul3 = (expand3[unroll_dim] ? 0 : 1);
 
   auto output = at::zeros(output_size, i1.options());
+  if (output_size[0] == 0 && output.numel() == 0) {
+    return output;
+  }
+  
   if (! sumdim[unroll_dim]) {
     for (int64_t k = 0; k < unroll_size; k++) {
       Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
