@@ -237,7 +237,12 @@ void hip_parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
            batchCounter < CAT_ARRAY_BATCH_SIZE &&
              (i+batchCounter) < inputs.size();
            ++batchCounter) {
-        int64_t dimSize = at::native::size(inputs[i+batchCounter], dimension);
+        int64_t dimSize = 0;
+        // There is a legacy case where a 1-D empty tensor can be concat with
+        // high-dimensional tensor
+        if (inputs[i+batchCounter].numel() > 0) {
+          dimSize = at::native::size(inputs[i+batchCounter], dimension);
+        }
 
         stackInputs[batchCounter].input =
           inputs[i+batchCounter].data_ptr<scalar_t>();
@@ -338,7 +343,12 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
           batchCounter < CAT_ARRAY_BATCH_SIZE &&
             (i+batchCounter) < inputs.size();
           ++batchCounter) {
-      int64_t dimSize = at::native::size(inputs[i+batchCounter], dimension);
+      int64_t dimSize = 0;
+      // There is a legacy case where a 1-D empty tensor can be concat with
+      // high-dimensional tensor
+      if (inputs[i+batchCounter].numel() > 0) {
+        dimSize = at::native::size(inputs[i+batchCounter], dimension);
+      }
       catMetaData.input[batchCounter] = inputs[i+batchCounter].data_ptr<scalar_t>();
       catMetaData.offset[batchCounter] = offset;
       catMetaData.dimSize[batchCounter] = dimSize;
@@ -431,7 +441,6 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   auto should_skip = [](const Tensor &t) {
     return t.dim() == 1 && at::native::size(t, 0) == 0;
   };
-  bool hasSkippedInput = false;
 
   const Tensor *notSkippedTensor = NULL;  // non-owning reference
   int nDims = 0;
@@ -452,10 +461,8 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   }
   at::assert_no_internal_overlap(out);
 
-  for (int i = 0; i < inputs.size(); i++)
-  {
+  for (int i = 0; i < inputs.size(); i++) {
     if (should_skip(inputs[i])) {
-      hasSkippedInput = true;
       continue;
     }
     nDims = inputs[i].dim();
@@ -501,11 +508,10 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   // We parallelize the copy if all 6 conditions pass:
   //
   // 1. There is more than one input tensor
-  // 2. No empty inputs
-  // 3. The out tensor is 32-bit indexable
-  // 4. The number of dimensions is <= 4
-  // 5. All input tensors are contiguous (output tensor may be non-contig)
-  // 6. All input tensors can use 32-bit indexing
+  // 2. The out tensor is 32-bit indexable
+  // 3. The number of dimensions is <= 4
+  // 4. All input tensors are contiguous (output tensor may be non-contig)
+  // 5. All input tensors can use 32-bit indexing
 
   const bool all32BitIndexable = std::all_of(inputs.begin(), inputs.end(),
     [] (const Tensor& t) {
@@ -522,7 +528,6 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     });
   allSameType = allSameType && (out.scalar_type() == firstType);
   if (inputs.size() > 1 &&
-      !hasSkippedInput &&
       out.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
       at::cuda::detail::canUse32BitIndexMath(out) &&
       allContiguous &&
