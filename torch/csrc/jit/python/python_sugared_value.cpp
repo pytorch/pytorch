@@ -269,7 +269,10 @@ SugaredValuePtr ModuleValue::getitem(
         }
       }
 
-      // Emit a prim::ModuleDictIndex operator.
+      // Emit a prim::ModuleDictIndex operator. This is needed because it's
+      // difficult to construct a dict in the graph representing the ModuleDict
+      // and use aten::__getitem__ ops to index into it because any call to
+      // ModuleDict.setAttr would invalidate that emitted dict.
       auto graph = m.graph();
       auto* getitem_node =
           graph->insertNode(graph->create(prim::ModuleDictIndex, {self_, idx}));

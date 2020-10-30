@@ -655,6 +655,9 @@ RegisterOperators reg(
            handler(ss.str());
          },
          aliasAnalysisSpecialCase()),
+     // This operator is generated inside the compiler for indexing into
+     // ModuleDict without a statically determinable key. Accordingly,
+     // self must be a ModuleType and the output must be an InterfaceType.
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "prim::ModuleDictIndex(Any self, str ind) -> Any"),

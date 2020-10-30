@@ -395,6 +395,9 @@ SugaredValuePtr SimpleValue::getitem(
         g.insert(aten::select, {val, 0, idx}, {}, loc));
   } else if (auto class_type = val_type->cast<ClassType>()) {
     // Check if this is an indexing operation enabled by a type hint.
+    // The ModuleDict has already been checked during IR generation to make
+    // sure its contents implement the module interface referred to by
+    // type_hint.
     if (class_type->is_module() && type_hint) {
       auto res = g.insert(prim::ModuleDictIndex, {val, idx}, {}, loc);
       res->setType(type_hint);

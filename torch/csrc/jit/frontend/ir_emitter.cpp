@@ -3877,7 +3877,7 @@ struct to_ir {
         return std::make_shared<SimpleValue>(
             emitMultidimSlicing(range, sliceable, subscript_exprs));
       } else {
-        return sv->getitem(range, method, idx, type_hint);
+        return sv->getitem(range, method, idx, std::move(type_hint));
       }
     }
   }
