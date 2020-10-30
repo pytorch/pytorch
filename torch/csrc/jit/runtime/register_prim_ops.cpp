@@ -1,8 +1,6 @@
-#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
-
 #include <torch/library.h>
 
 #include <algorithm>
@@ -655,18 +653,6 @@ RegisterOperators reg(
            handler(ss.str());
          },
          aliasAnalysisSpecialCase()),
-     // This operator is generated inside the compiler for indexing into
-     // ModuleDict without a statically determinable key. Accordingly,
-     // self must be a ModuleType and the output must be an InterfaceType.
-     OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA(
-             "prim::ModuleDictIndex(Any self, str ind) -> Any"),
-         [](Stack* stack) {
-           IValue ind = pop(stack);
-           IValue module_dict = pop(stack);
-           push(stack, module_dict.toModule().attr(ind.toStringRef()));
-         },
-         aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::eq.enum(AnyEnumType a, AnyEnumType b) -> bool"),
