@@ -401,10 +401,15 @@ else
   test_distributed
   test_benchmarks
   test_rpc
-  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
-    pushd test
-    echo "Generating XML coverage report"
-    time python -mcoverage xml
-    popd
-  fi
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+  pushd test
+  echo "Generating XML coverage report"
+  time python -mcoverage xml
+  popd
+  pushd build
+  echo "Generating lcov coverage report for C++ sources"
+  time lcov --capture --directory . --output-file coverage.info
+  popd
 fi
