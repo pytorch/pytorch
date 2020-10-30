@@ -7,12 +7,18 @@ static auto default_dtype_as_scalartype = default_dtype.toScalarType();
 static auto default_complex_dtype = caffe2::TypeMeta::Make<c10::complex<float>>();
 
 void set_default_dtype(caffe2::TypeMeta dtype) {
-  default_dtype = std::move(dtype);
+  default_dtype = dtype;
   default_dtype_as_scalartype = default_dtype.toScalarType();
-  if(default_dtype_as_scalartype == ScalarType::Double) {
-    default_complex_dtype = std::move(caffe2::TypeMeta::Make<c10::complex<double>>());
-  } else {
-    default_complex_dtype = std::move(caffe2::TypeMeta::Make<c10::complex<float>>());
+  switch (default_dtype_as_scalartype) {
+    case ScalarType::Half:
+      default_complex_dtype = ScalarType::ComplexHalf;
+      break;
+    case ScalarType::Double:
+      default_complex_dtype = ScalarType::ComplexDouble;
+      break;
+    default:
+      default_complex_dtype = ScalarType::ComplexFloat;
+      break;
   }
 }
 
