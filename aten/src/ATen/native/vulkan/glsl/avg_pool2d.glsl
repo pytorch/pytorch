@@ -9,20 +9,14 @@ layout(std430) uniform;
 layout(set = 0, binding = 0, rgba16f) uniform PRECISION restrict writeonly image3D   uOutput;
 layout(set = 0, binding = 1)          uniform PRECISION                    sampler3D uInput;
 layout(set = 0, binding = 2)          uniform           restrict           Block {
-  int input_x;
-  int input_y;
-  int input_z;
+  ivec3 inputSize;
   int output_x;
   int output_y;
   int output_z;
-  int kernelSize_x;
-  int kernelSize_y;
-  int stride_x;
-  int stride_y;
-  int padding_x;
-  int padding_y;
-  int dilate_x;
-  int dilate_y;
+  ivec2 kernelSize;
+  ivec2 stride;
+  ivec2 padding;
+  ivec2 dilate;
 } uBlock;
 
 #define UP_DIV(x, y) (((x) + (y)-1) / (y))
@@ -31,16 +25,16 @@ layout(local_size_x_id = 1, local_size_y_id = 2, local_size_z_id = 3) in;
 
 void main() {
   ivec3 pos = ivec3(gl_GlobalInvocationID);
-  ivec3 inputSize = ivec3(uBlock.input_x, uBlock.input_y, uBlock.input_z);
+  //ivec3 inputSize = ivec3(uBlock.input_x, uBlock.input_y, uBlock.input_z);
   ivec3 outputSize = ivec3(uBlock.output_x, uBlock.output_y, uBlock.output_z);
-  ivec2 kernelSize = ivec2(uBlock.kernelSize_x, uBlock.kernelSize_y);
-  ivec2 stride = ivec2(uBlock.stride_x, uBlock.stride_y);
-  ivec2 padding = ivec2(uBlock.padding_x, uBlock.padding_y);
-  ivec2 dilate = ivec2(uBlock.dilate_x, uBlock.dilate_y);
+  //ivec2 kernelSize = ivec2(uBlock.kernelSize_x, uBlock.kernelSize_y);
+  //ivec2 stride = ivec2(uBlock.stride_x, uBlock.stride_y);
+  //ivec2 padding = ivec2(uBlock.padding_x, uBlock.padding_y);
+  //ivec2 dilate = ivec2(uBlock.dilate_x, uBlock.dilate_y);
   if (all(lessThan(pos, outputSize))) {
-    ivec2 s0 = pos.xy * stride - padding;
-    ivec2 sfxy = max(ivec2(0), (UP_DIV(-s0, dilate)));
-    ivec2 efxy = min(kernelSize, UP_DIV(inputSize.xy - s0, dilate));
+    ivec2 s0 = pos.xy * uBlock.stride - uBlock.padding;
+    ivec2 sfxy = max(ivec2(0), (UP_DIV(-s0, uBlock.dilate)));
+    ivec2 efxy = min(uBlock.kernelSize, UP_DIV(uBlock.inputSize.xy - s0, uBlock.dilate));
 
     vec4 r = vec4(1.0) / float(efxy.x - sfxy.x) / float(efxy.x - sfxy.x);
     vec4 acc = vec4(0);
