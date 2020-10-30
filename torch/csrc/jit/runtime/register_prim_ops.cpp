@@ -821,8 +821,15 @@ RegisterOperators reg(
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::len.str(str s) -> int"),
          [](Stack& stack) {
-           auto string = pop(stack).toStringRef();
-           push(stack, static_cast<int64_t>(string.size()));
+           auto s = pop(stack).toStringRef();
+           // Get the correct length for any valid UTF-8 sequence
+           // (std::string::length counts the number of bytes, not the number
+           // of characters)
+           int64_t len = 0;
+           for (auto c : s) {
+             len += (c & 0xc0) != 0x80;
+           }
+           push(stack, len);
            return 0;
          },
          aliasAnalysisFromSchema()),

@@ -6735,6 +6735,14 @@ a")
 
         self.checkScript(complicated_arithmetic_operation, ())
 
+    def test_string_length_with_unicode_chars(self):
+        def fn(s: str):
+            return len(s)
+
+        s = "Normanðy"
+        scripted = torch.jit.script(fn)
+        self.assertEqual(scripted(s), len(s))
+
     def test_bitwise_ops(self):
 
         def int_test():
