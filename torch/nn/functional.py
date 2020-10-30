@@ -3329,11 +3329,8 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
     .. note::
         ``mode='bicubic'`` is implemented using the
         [cubic covolution algorithm](https://en.wikipedia.org/wiki/Bicubic_interpolation). 
-        The constant `\alpha` is chosen to be -0.75. This value might be different from packages to packages, For example, 
-        [PIL](https://github.com/python-pillow/Pillow/blob/4634eafe3c695a014267eefdce830b4a825beed7/src/libImaging/Resample.c#L51) 
-        use \alpha=-0.5 and 
-        [opencv](https://github.com/opencv/opencv/blob/f345ed564a06178670750bad59526cfa4033be55/modules/imgproc/src/resize.cpp#L908) 
-        use `alpha=-0.75`. 
+        The constant `\alpha` is chosen to be -0.75. This value might be different from packages to packages. 
+        For example, PIL use \alpha=-0.5 and opencv use `alpha=-0.75`. 
         This algorithm may "overshoot" the range of values it's interpolating. 
         For example, it may produce negative values or values greater than 255 when interpolating input in [0, 255]. 
         Clamp the results with :func: torch.clamp to ensure they are within the valid range.
