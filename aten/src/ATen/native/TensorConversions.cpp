@@ -29,10 +29,15 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
     return self;
   }
 
+  bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
+                  (options.layout() == c10::kStrided));
+
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
       // Copy all strides
-      auto r = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
+      auto r = at::empty_strided(self.sizes(),
+                                 self.strides(),
+                                 options.memory_format(c10::nullopt).pinned_memory(pin_out));
       r.copy_(self, non_blocking);
       return r;
     } else {
@@ -40,7 +45,9 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
     }
   }
   // See Note [Explicit nullopt MemoryFormat argument]
-  auto r = at::empty(self.sizes(), options.memory_format(memory_format), c10::nullopt);
+  auto r = at::empty(self.sizes(),
+                     options.memory_format(memory_format).pinned_memory(pin_out),
+                     c10::nullopt);
   r.copy_(self, non_blocking);
   return r;
 }

@@ -271,11 +271,12 @@ class Graph:
             sanitized_name = node.name
             if '_' in node.name:
                 base, maybe_idx = node.name.rsplit('_', 1)
-                try:
-                    int(maybe_idx)
-                    sanitized_name = base
-                except ValueError:
-                    pass
+                if base != '':
+                    try:
+                        int(maybe_idx)
+                        sanitized_name = base
+                    except ValueError:
+                        pass
             name = self._name(sanitized_name)
         return self.create_node(node.op, node.target, args, kwargs, name, node.type)
 
@@ -382,8 +383,7 @@ class Graph:
 
         # repr() for inf and nan floating point values aren't parseable by
         # python as literals. Explicitly import the names from the `math` module.
-        import_strs = ['from math import inf, nan']
-        import_strs.extend(f'import {name}' for name in sorted(modules_used))
+        import_strs = [f'import {name}' for name in sorted(modules_used)]
         import_block = '\n'.join(import_strs)
 
         code = ''.join(body)
